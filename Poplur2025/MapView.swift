@@ -10,12 +10,30 @@ struct MapView: View {
     )
     @State private var posts: [Post] = [] // Holds the user's posts
     @State private var annotations: [PostAnnotation] = [] // Holds map annotations
+    // Tune this as needed for your product
+    private let maxRadiusForBar: Int = 10_000
     
     var body: some View {
         VStack {
             // Map view that will show posts as annotations
             Map(coordinateRegion: $region, interactionModes: .all, showsUserLocation: true, annotationItems: annotations) { annotation in
-                MapPin(coordinate: annotation.coordinate, tint: .blue)
+                MapAnnotation(coordinate: annotation.coordinate) {
+                    VStack(spacing: 4) {
+                        VerticalRadiusBar(
+                            radius: annotation.post.radius,
+                            maxRadius: maxRadiusForBar,
+                            width: 6,
+                            maxHeight: 60,
+                            color: .blue,
+                            showsLabel: false
+                        )
+                        Circle()
+                            .fill(Color.blue)
+                            .frame(width: 8, height: 8)
+                            .overlay(Circle().stroke(Color.white, lineWidth: 1))
+                            .shadow(radius: 1)
+                    }
+                }
             }
             .edgesIgnoringSafeArea(.all)
             

@@ -4,16 +4,35 @@ import FirebaseFirestore
 import FirebaseStorage
 
 struct ProfileView: View {
-    @State private var user: UserProfile? // Holds user data from Firestore
+    @State private var user: UserProfile? // Holds user data from Firestore (or fallback from Auth)
     @State private var posts: [Post] = [] // Holds the user's posts
     @State private var isEditingProfile = false // To toggle profile editing mode
     
+    // Loading/error states to avoid infinite spinner
+    @State private var isLoadingUser = true
+    @State private var userLoadError: String?
+
+    // Configuration for the accumulated radius visualization
+    private let accumulatedMaxRadius: Int = 50_000 // 50 km default cap for scaling
+    
+    // Sum of all post radii (accumulated)
+    private var totalRadius: Int {
+        posts.reduce(0) { $0 + $1.radius }
+    }
+    
     var body: some View {
         VStack {
-            if let user = user {
+            if isLoadingUser {
+                ProgressView() // Loading user data
+                    .progressViewStyle(CircularProgressViewStyle())
+                    .padding()
+            } else {
+                // Show header even if user couldn't be fully loaded; fall back to placeholders
+                let headerUser = user ?? fallbackUserFromAuth()
+                
                 // Profile Section
                 HStack {
-                    if let imageUrl = user.profilePictureURL {
+                    if let imageUrl = headerUser.profilePictureURL {
                         AsyncImage(url: imageUrl) { image in
                             image.resizable()
                                  .scaledToFill()
@@ -29,13 +48,20 @@ struct ProfileView: View {
                     }
                     
                     VStack(alignment: .leading) {
-                        Text(user.username)
+                        Text(headerUser.username)
                             .font(.title)
                             .fontWeight(.bold)
                         
-                        Text(user.email)
+                        Text(headerUser.email)
                             .font(.subheadline)
                             .foregroundColor(.gray)
+                        
+                        if let userLoadError = userLoadError {
+                            Text(userLoadError)
+                                .font(.caption)
+                                .foregroundColor(.red)
+                                .padding(.top, 2)
+                        }
                     }
                 }
                 .padding()
@@ -50,14 +76,57 @@ struct ProfileView: View {
                 }
                 .padding()
                 
+                // Accumulated Radius Section
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Accumulated Radius")
+                        .font(.headline)
+                    HStack(alignment: .center, spacing: 12) {
+                        VerticalRadiusBar(
+                            radius: totalRadius,
+                            maxRadius: accumulatedMaxRadius,
+                            width: 10,
+                            maxHeight: 120,
+                            color: .green,
+                            showsLabel: true,
+                            labelFormat: { r in
+                                if r >= 1000 {
+                                    return "Total: \(r / 1000) km"
+                                } else {
+                                    return "Total: \(r) m"
+                                }
+                            }
+                        )
+                        
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Total across \(posts.count) post(s)")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                            Text("Max scale: \(accumulatedMaxRadius / 1000) km")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.top, 8)
+                
                 // Posts Section
                 Text("Your Posts")
                     .font(.headline)
                     .padding(.top)
                 
                 if posts.isEmpty {
-                    Text("No posts yet.")
-                        .foregroundColor(.gray)
+                    VStack(spacing: 8) {
+                        Text("No Posts Yet")
+                            .font(.title3)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.secondary)
+                        Text("Upload your first post to see it here.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .padding(.top, 16)
                 } else {
                     List(posts) { post in
                         VStack(alignment: .leading) {
@@ -80,10 +149,6 @@ struct ProfileView: View {
                         .padding(.bottom)
                     }
                 }
-            } else {
-                ProgressView() // Loading user data
-                    .progressViewStyle(CircularProgressViewStyle())
-                    .padding()
             }
             
             // Log out button
@@ -106,53 +171,96 @@ struct ProfileView: View {
         }
     }
     
+    // Fallback user built from FirebaseAuth if Firestore user document is missing/unavailable
+    private func fallbackUserFromAuth() -> UserProfile {
+        let authUser = Auth.auth().currentUser
+        let email = authUser?.email ?? "No email"
+        // Use the part before '@' as a simple username if available
+        let defaultUsername: String
+        if let email = authUser?.email, let name = email.split(separator: "@").first {
+            defaultUsername = String(name)
+        } else {
+            defaultUsername = "Unknown"
+        }
+        return UserProfile(username: user?.username ?? defaultUsername,
+                           email: user?.email ?? email,
+                           profilePictureURL: user?.profilePictureURL)
+    }
+    
     func fetchUserData() {
-        // Fetch user data from Firestore using Firebase Authentication
-        if let userId = Auth.auth().currentUser?.uid {
-            let db = Firestore.firestore()
-            db.collection("users").document(userId).getDocument { document, error in
-                if let document = document, document.exists {
-                    let data = document.data()
-                    self.user = UserProfile(
-                        username: data?["username"] as? String ?? "Unknown",
-                        email: data?["email"] as? String ?? "No email",
-                        profilePictureURL: URL(string: data?["profilePictureURL"] as? String ?? "")
-                    )
-                } else {
-                    print("User data not found or error: \(error?.localizedDescription ?? "Unknown error")")
-                }
+        isLoadingUser = true
+        userLoadError = nil
+        
+        guard let userId = Auth.auth().currentUser?.uid else {
+            // No authenticated user; show fallback and stop loading
+            self.user = nil
+            self.userLoadError = "Not signed in."
+            self.isLoadingUser = false
+            return
+        }
+        
+        let db = Firestore.firestore()
+        db.collection("users").document(userId).getDocument { document, error in
+            defer { self.isLoadingUser = false }
+            
+            if let error = error {
+                // Fall back to Auth data and report error
+                self.user = self.fallbackUserFromAuth()
+                self.userLoadError = "Failed to load profile: \(error.localizedDescription)"
+                return
             }
+            
+            guard let document = document, document.exists else {
+                // No Firestore doc; still allow UI with fallback
+                self.user = self.fallbackUserFromAuth()
+                self.userLoadError = "Profile not found. Using account info."
+                return
+            }
+            
+            let data = document.data()
+            self.user = UserProfile(
+                username: data?["username"] as? String ?? self.fallbackUserFromAuth().username,
+                email: data?["email"] as? String ?? self.fallbackUserFromAuth().email,
+                profilePictureURL: URL(string: data?["profilePictureURL"] as? String ?? "")
+            )
         }
     }
     
     func fetchUserPosts() {
         // Fetch posts of the user from Firestore
-        if let userId = Auth.auth().currentUser?.uid {
-            let db = Firestore.firestore()
-            db.collection("posts").whereField("userID", isEqualTo: userId).getDocuments { snapshot, error in
-                if let error = error {
-                    print("Error fetching posts: \(error.localizedDescription)")
-                    return
-                }
-                
-                self.posts = snapshot?.documents.compactMap { document -> Post? in
-                    let data = document.data()
-                    return Post(
-                        id: document.documentID,
-                        latitude: data["latitude"] as? Double ?? 0.0,
-                        longitude: data["longitude"] as? Double ?? 0.0,
-                        mediaURL: data["mediaURL"] as? String ?? "",
-                        radius: data["radius"] as? Int ?? 0,
-                        viewCount: data["viewCount"] as? Int ?? 0
-                    )
-                } ?? []
+        guard let userId = Auth.auth().currentUser?.uid else {
+            self.posts = []
+            return
+        }
+        let db = Firestore.firestore()
+        db.collection("posts").whereField("userID", isEqualTo: userId).getDocuments { snapshot, error in
+            if let error = error {
+                print("Error fetching posts: \(error.localizedDescription)")
+                self.posts = []
+                return
             }
+            
+            self.posts = snapshot?.documents.compactMap { document -> Post? in
+                let data = document.data()
+                return Post(
+                    id: document.documentID,
+                    latitude: data["latitude"] as? Double ?? 0.0,
+                    longitude: data["longitude"] as? Double ?? 0.0,
+                    mediaURL: data["mediaURL"] as? String ?? "",
+                    radius: data["radius"] as? Int ?? 0,
+                    viewCount: data["viewCount"] as? Int ?? 0
+                )
+            } ?? []
         }
     }
     
     func logOut() {
         do {
             try Auth.auth().signOut()
+            // After sign out, reset state
+            self.user = nil
+            self.posts = []
+            self.userLoadError = "Not signed in."
         } catch {
             print("Error signing out: \(error.localizedDescription)")
         }
