@@ -68,7 +68,7 @@ struct SignUpView: View {
                     print("Sign up failed with error: \(error.localizedDescription)")
                     self.isSignUpFailed = true
                 } else {
-                    self.isSignedUp = true  // Trigger navigation to HomeView
+                    self.isSignedUp = true
                 }
             }
         } else {
