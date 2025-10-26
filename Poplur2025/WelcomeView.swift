@@ -27,8 +27,8 @@ private final class WelcomeScene: SKScene {
     private var firstUpdateTime: TimeInterval?
     private let warmUpMinElapsed: TimeInterval = 0.28 // and at least ~280ms
 
-    // Added: hard delay before any animation begins
-    private let delayBeforeStart: TimeInterval = 10.0
+    // Removed long stall: set hard delay to zero so intro begins after brief warm-up
+    private let delayBeforeStart: TimeInterval = 0.0
 
     // Whether your background art is fully opaque. If true, we can skip blending during the move.
     // Set true if backgrounds are JPEG/opaque; keep false if they need transparency.
@@ -93,6 +93,13 @@ private final class WelcomeScene: SKScene {
         buildScallopedBottom()
         buildBouncingSignIn()
         layoutAll()
+
+        // Warm up the pop sound once to avoid first-play hitch later
+        let warmUp = SKAction.sequence([
+            .wait(forDuration: 0.05),
+            .playSoundFileNamed("pop", waitForCompletion: false)
+        ])
+        run(warmUp, withKey: "warmUpPopSound")
     }
 
     private func setupPhysics() {
@@ -648,7 +655,7 @@ private final class WelcomeScene: SKScene {
         if !didWarmUp {
             let elapsed = (firstUpdateTime.map { currentTime - $0 } ?? 0)
 
-            // Wait for both: a minimal warm-up AND the explicit delay
+            // Wait for both: a minimal warm-up AND the explicit delay (now zero)
             if warmUpFramesRemaining > 0 || elapsed < warmUpMinElapsed || elapsed < delayBeforeStart {
                 if warmUpFramesRemaining > 0 { warmUpFramesRemaining -= 1 }
                 return
@@ -679,20 +686,53 @@ private final class WelcomeScene: SKScene {
         let image = UIGraphicsGetImageFromCurrentImageContext() ?? UIImage()
         return SKTexture(image: image)
     }
+
+    // MARK: - Public: confetti replay on demand
+    func startConfettiNow() {
+        // Play the pop sound (optional) and spawn a new confetti emitter immediately.
+        let playPop = SKAction.playSoundFileNamed("pop", waitForCompletion: false)
+        self.run(playPop)
+
+        let emitter = self.makeConfettiEmitter(size: self.size)
+        emitter.zPosition = 200
+        emitter.position = CGPoint(x: self.size.width / 2, y: self.size.height + 40)
+        self.addChild(emitter)
+
+        // Same lifecycle as before: run for ~5.5s, then stop birth and remove after particles dissipate.
+        let birthWindow: TimeInterval = 5.5
+        let cleanup = SKAction.sequence([
+            .wait(forDuration: birthWindow),
+            .run { emitter.particleBirthRate = 0 },
+            .wait(forDuration: 3.0),
+            .removeFromParent()
+        ])
+        emitter.run(cleanup)
+    }
 }
 
 struct WelcomeView: View {
+    @EnvironmentObject private var auth: AuthViewModel
     @StateObject private var coordinator = WelcomeScene.Coordinator()
-    @State private var goToLogin = false
 
     // Persist the scene to avoid rebuilds during early layout changes
     @State private var scene: WelcomeScene?
+
+    // Present Login modally to avoid navigation races
+    @State private var showLoginSheet = false
 
     private func ensureScene(size: CGSize) -> WelcomeScene {
         if let s = scene { return s }
         let s = WelcomeScene(size: size, coordinator: coordinator)
         scene = s
         return s
+    }
+
+    private func teardownScene() {
+        // Pause and release the SpriteKit scene to avoid any CAMetalLayer churn
+        scene?.isPaused = true
+        scene?.removeAllActions()
+        scene?.removeAllChildren()
+        scene = nil
     }
 
     var body: some View {
@@ -707,17 +747,32 @@ struct WelcomeView: View {
                         s.resize(to: newSize)
                     }
             }
-
-            NavigationLink(destination: LoginView(), isActive: $goToLogin) {
-                EmptyView()
-            }
-            .hidden()
+        }
+        .sheet(isPresented: $showLoginSheet) {
+            // Keep using the SpriteKit ticket version from LoginView.swift
+            LoginView()
         }
         .onReceive(coordinator.$didTapSignIn) { tapped in
             if tapped {
-                goToLogin = true
+                showLoginSheet = true
                 coordinator.didTapSignIn = false
             }
+        }
+        .onAppear {
+            // Only replay confetti when WelcomeView appears again. Do not replay the intro.
+            scene?.startConfettiNow()
+        }
+        .onChange(of: auth.isAuthenticated) { authed in
+            if authed {
+                // In case the sheet is still up, dismiss it.
+                if showLoginSheet { showLoginSheet = false }
+                // Proactively tear down the SpriteKit scene before the root swaps to HomeView.
+                teardownScene()
+            }
+        }
+        .onDisappear {
+            // Defensive: if WelcomeView disappears for any reason, release the scene.
+            teardownScene()
         }
         .navigationBarHidden(true)
     }

@@ -5,6 +5,9 @@
       location = "self:">
    </FileRef>
    <FileRef
-      location = "group:WelcomeView.swift">
+      location = "group:CameraSession.swift">
+   </FileRef>
+   <FileRef
+      location = "group:CameraView.swift">
    </FileRef>
 </Workspace>

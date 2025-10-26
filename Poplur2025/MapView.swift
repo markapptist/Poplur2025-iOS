@@ -5,7 +5,7 @@ import FirebaseFirestore
 import CoreLocation
 
 struct MapView: View {
-    // Region will continuously follow user when coordinates update.
+    // Region will continuously follow user when coordinates update, unless a post is selected.
     @State private var region = MKCoordinateRegion(
         center: CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194),
         span: MKCoordinateSpan(latitudeDelta: 0.05, longitudeDelta: 0.05)
@@ -23,30 +23,121 @@ struct MapView: View {
     @State private var showLocationAlert = false
     @State private var locationAlertMessage = ""
 
+    // Deterministic preload readiness
+    @State private var didFetchPosts = false
+    @State private var didGetFirstLocationOrAuth = false
+
+    private var isReady: Bool {
+        didFetchPosts && didGetFirstLocationOrAuth
+    }
+
+    // MARK: - Post navigation helpers
+
+    private var selectedIndex: Int? {
+        guard let sel = selectedPost else { return nil }
+        return posts.firstIndex(where: { $0.id == sel.id })
+    }
+
+    private func selectPost(at index: Int) {
+        guard posts.indices.contains(index) else { return }
+        let post = posts[index]
+        selectedPost = post
+        let coord = CLLocationCoordinate2D(latitude: post.latitude, longitude: post.longitude)
+        withAnimation(.easeInOut(duration: 0.25)) {
+            region.center = coord
+            // Keep same zoom level
+        }
+    }
+
+    private func selectPreviousPost() {
+        guard !posts.isEmpty else { return }
+        let current = selectedIndex ?? 0
+        let prev = (current - 1 + posts.count) % posts.count
+        selectPost(at: prev)
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+
+    private func selectNextPost() {
+        guard !posts.isEmpty else { return }
+        let current = selectedIndex ?? -1
+        let next = (current + 1) % posts.count
+        selectPost(at: next)
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+
+    // MARK: - Recenter to user
+
+    private func recenterToUser() {
+        guard let coord = locationManager.coordinate else { return }
+        // Clear selection so auto-follow can resume if desired
+        selectedPost = nil
+        withAnimation(.easeInOut(duration: 0.25)) {
+            region.center = coord
+            // Maintain same zoom span
+        }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+
     var body: some View {
         ZStack {
             VStack(spacing: 0) {
-                Map(
-                    coordinateRegion: $region,
-                    interactionModes: .all,
-                    showsUserLocation: true,
-                    annotationItems: annotations
-                ) { annotation in
-                    MapAnnotation(coordinate: annotation.coordinate) {
-                        Button {
-                            // Select this post to update the side bar
-                            selectedPost = annotation.post
-                        } label: {
-                            Circle()
-                                .fill(Color.blue)
-                                .frame(width: 12, height: 12)
-                                .overlay(Circle().stroke(Color.white, lineWidth: 1))
-                                .shadow(radius: 1)
+                ZStack {
+                    Map(
+                        coordinateRegion: $region,
+                        interactionModes: .all,
+                        showsUserLocation: true,
+                        annotationItems: annotations
+                    ) { annotation in
+                        MapAnnotation(coordinate: annotation.coordinate) {
+                            Button {
+                                // Select this post to update the side bar and stop auto-follow
+                                selectedPost = annotation.post
+                            } label: {
+                                Circle()
+                                    .fill(Color.blue)
+                                    .frame(width: 12, height: 12)
+                                    .overlay(Circle().stroke(Color.white, lineWidth: 1))
+                                    .shadow(radius: 1)
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
                     }
+                    .edgesIgnoringSafeArea(.all)
+
+                    // Left/right transparent tap zones overlay
+                    GeometryReader { geo in
+                        HStack(spacing: 0) {
+                            Color.clear
+                                .contentShape(Rectangle())
+                                .onTapGesture { selectPreviousPost() }
+                            Color.clear
+                                .contentShape(Rectangle())
+                                .onTapGesture { selectNextPost() }
+                        }
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        .allowsHitTesting(true)
+                    }
+
+                    // Recenter button (top-left)
+                    VStack {
+                        HStack {
+                            Button {
+                                recenterToUser()
+                            } label: {
+                                Image(systemName: "location.fill")
+                                    .font(.system(size: 16, weight: .bold))
+                                    .foregroundColor(.white)
+                                    .padding(10)
+                                    .background(.ultraThinMaterial, in: Circle())
+                            }
+                            .padding(.leading, 16)
+                            .padding(.top, 16)
+                            Spacer()
+                        }
+                        Spacer()
+                    }
+                    .allowsHitTesting(true)
                 }
-                .edgesIgnoringSafeArea(.all)
 
                 if posts.isEmpty {
                     Text("No posts available.")
@@ -59,7 +150,6 @@ struct MapView: View {
             if let selected = selectedPost {
                 VStack {
                     Spacer()
-                    // You can tweak maxHeight/width/color as desired
                     VerticalRadiusBar(
                         radius: selected.radius,
                         maxRadius: maxRadiusForBar,
@@ -87,12 +177,20 @@ struct MapView: View {
             locationManager.requestWhenInUse()
             // Load posts for the current user
             fetchPosts()
+            // If authorization is already determined (even if denied), we can consider that part of readiness
+            updateLocationReadinessFromAuthStatus(locationManager.authorizationStatus)
         }
-        // Recenter on every coordinate update (always follow the user)
+        // Recenter on coordinate updates only if no post is selected (so navigation isn't overridden)
         .onReceive(locationManager.$coordinate.compactMap { $0 }) { coord in
-            withAnimation(.easeInOut(duration: 0.2)) {
-                region.center = coord
-                region.span = MKCoordinateSpan(latitudeDelta: 0.05, longitudeDelta: 0.05)
+            if selectedPost == nil {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    region.center = coord
+                    region.span = MKCoordinateSpan(latitudeDelta: 0.05, longitudeDelta: 0.05)
+                }
+            }
+            // First coordinate received -> mark location readiness
+            if !didGetFirstLocationOrAuth {
+                didGetFirstLocationOrAuth = true
             }
         }
         .onReceive(locationManager.$authorizationStatus) { status in
@@ -103,6 +201,8 @@ struct MapView: View {
             default:
                 break
             }
+            // If auth moved from notDetermined to any decided state but no location yet, we can still mark readiness
+            updateLocationReadinessFromAuthStatus(status)
         }
         .alert("Location Access", isPresented: $showLocationAlert) {
             Button("OK", role: .cancel) { }
@@ -114,6 +214,16 @@ struct MapView: View {
         } message: {
             Text(locationAlertMessage)
         }
+        // Publish readiness to HomeView’s preloader
+        .preference(key: MapReadyPreferenceKey.self, value: isReady)
+    }
+
+    private func updateLocationReadinessFromAuthStatus(_ status: CLAuthorizationStatus) {
+        // Consider location portion "ready" once auth is decided (not .notDetermined),
+        // even if denied/restricted, to avoid blocking preload forever.
+        if status != .notDetermined && !didGetFirstLocationOrAuth {
+            didGetFirstLocationOrAuth = true
+        }
     }
 
     func fetchPosts() {
@@ -123,6 +233,8 @@ struct MapView: View {
             db.collection("posts").whereField("userID", isEqualTo: userId).getDocuments { snapshot, error in
                 if let error = error {
                     print("Error fetching posts: \(error.localizedDescription)")
+                    // Mark fetch as done even on error to avoid blocking preload forever
+                    if !didFetchPosts { didFetchPosts = true }
                     return
                 }
 
@@ -148,7 +260,15 @@ struct MapView: View {
                 if selectedPost == nil, let first = self.posts.first {
                     selectedPost = first
                 }
+
+                // Mark fetch portion as ready after first completion
+                if !didFetchPosts { didFetchPosts = true }
             }
+        } else {
+            // No user -> treat as empty state but still mark fetch as complete
+            self.posts = []
+            self.annotations = []
+            if !didFetchPosts { didFetchPosts = true }
         }
     }
 }

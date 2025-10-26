@@ -1,59 +1,110 @@
-//
-//  FeedView.swift
-//  Poplur2025
-//
-//  Created by Apptist Inc. on 2025-08-03.
-//
-
-
 import SwiftUI
-import MapKit
+import AVKit
 import FirebaseFirestore
 
 struct FeedView: View {
     @State private var posts: [Post] = []
-    
+    @State private var selection: Int = 0
+    // Readiness for HomeView’s preloader
+    @State private var feedReady = false
+
     var body: some View {
-        VStack {
-            Text("Nearby Posts")
-                .font(.title)
-                .padding()
-            
-            List(posts) { post in
-                HStack(alignment: .center, spacing: 12) {
-                    VerticalRadiusBar(
-                        radius: post.radius,
-                        maxRadius: 10_000,
-                        width: 8,
-                        maxHeight: 80,
-                        color: .blue,
-                        showsLabel: true
-                    )
-                    
-                    VStack(alignment: .leading) {
-                        Text("Location: \(post.latitude), \(post.longitude)")
-                        AsyncImage(url: URL(string: post.mediaURL)) { image in
-                            image.resizable()
-                                 .scaledToFit()
-                                 .frame(width: 100, height: 100)
-                        } placeholder: {
-                            ProgressView()
-                        }
+        ZStack {
+            if posts.isEmpty {
+                ProgressView()
+                    .progressViewStyle(.circular)
+                    .tint(.white)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.black.ignoresSafeArea())
+            } else {
+                // Vertical paging using rotation trick (works back to iOS 16)
+                TabView(selection: $selection) {
+                    ForEach(posts.indices, id: \.self) { idx in
+                        FullScreenPostView(post: posts[idx], isActive: selection == idx)
+                            .tag(idx)
+                            .rotationEffect(.degrees(90))  // rotate content
+                            .frame(width: UIScreen.main.bounds.height, height: UIScreen.main.bounds.width)
                     }
                 }
-                .onTapGesture {
-                    incrementViewCount(postID: post.id)
+                .tabViewStyle(.page(indexDisplayMode: .never))
+                .rotationEffect(.degrees(-90)) // rotate the TabView to make it vertical
+                .frame(width: UIScreen.main.bounds.width, height: UIScreen.main.bounds.height)
+                .background(Color.black)
+                .ignoresSafeArea()
+
+                // Floating Up/Down buttons
+                VStack(spacing: 18) {
+                    Button {
+                        pageUp()
+                    } label: {
+                        Image(systemName: "chevron.up")
+                            .font(.system(size: 20, weight: .bold))
+                            .foregroundColor(.white)
+                            .frame(width: 64, height: 64)
+                            .background(Color.green, in: Circle())
+                            .shadow(color: .black.opacity(0.25), radius: 8, x: 0, y: 6)
+                    }
+                    .disabled(posts.isEmpty)
+
+                    Button {
+                        pageDown()
+                    } label: {
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 20, weight: .bold))
+                            .foregroundColor(.white)
+                            .frame(width: 64, height: 64)
+                            .background(Color.blue, in: Circle())
+                            .shadow(color: .black.opacity(0.25), radius: 8, x: 0, y: 6)
+                    }
+                    .disabled(posts.isEmpty)
                 }
-            }
-            .onAppear {
-                loadPosts()
+                .padding(.leading, 24)
+                .padding(.bottom, 48)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                .allowsHitTesting(true)
             }
         }
+        .onAppear {
+            loadPosts()
+        }
+        .background(Color.black)                // keep the whole tab dark/transparent-friendly
+        .toolbarBackground(.hidden, for: .tabBar)
+        .toolbar(.visible, for: .tabBar)
+        // Publish readiness once loading has completed (success or failure)
+        .preference(key: FeedReadyPreferenceKey.self, value: feedReady)
     }
-    
+
+    private func pageUp() {
+        guard !posts.isEmpty else { return }
+        let newIndex = max(0, selection - 1)
+        if newIndex != selection { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
+        selection = newIndex
+        incrementViewCountIfNeeded(for: selection)
+    }
+
+    private func pageDown() {
+        guard !posts.isEmpty else { return }
+        let newIndex = min(posts.count - 1, selection + 1)
+        if newIndex != selection { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
+        selection = newIndex
+        incrementViewCountIfNeeded(for: selection)
+    }
+
+    private func incrementViewCountIfNeeded(for index: Int) {
+        guard posts.indices.contains(index) else { return }
+        let post = posts[index]
+        incrementViewCount(postID: post.id)
+    }
+
+    // Existing Firestore loading
     func loadPosts() {
         let db = Firestore.firestore()
         db.collection("posts").getDocuments { snapshot, error in
+            defer {
+                // Signal readiness regardless of success/failure to avoid blocking
+                feedReady = true
+            }
+
             if let error = error {
                 print("Error loading posts: \(error.localizedDescription)")
                 return
@@ -62,28 +113,22 @@ struct FeedView: View {
                 self.posts = []
                 return
             }
-            
-            // Safely parse documents
+
             let newPosts: [Post] = snapshot.documents.compactMap { document in
                 let data = document.data()
-                
-                // latitude/longitude can be Double or NSNumber
+
                 let latitude = (data["latitude"] as? Double)
                     ?? (data["latitude"] as? NSNumber)?.doubleValue
                 let longitude = (data["longitude"] as? Double)
                     ?? (data["longitude"] as? NSNumber)?.doubleValue
-                
-                // radius and viewCount can be Int or NSNumber
                 let radius = (data["radius"] as? Int)
                     ?? (data["radius"] as? NSNumber)?.intValue
                 let viewCount = (data["viewCount"] as? Int)
                     ?? (data["viewCount"] as? NSNumber)?.intValue
-                
                 let mediaURL = data["mediaURL"] as? String ?? ""
-                
-                // If lat/long are missing, skip this post
+
                 guard let lat = latitude, let lon = longitude else { return nil }
-                
+
                 return Post(
                     id: document.documentID,
                     latitude: lat,
@@ -93,16 +138,17 @@ struct FeedView: View {
                     viewCount: viewCount ?? 0
                 )
             }
-            
-            // Assign once to avoid duplicates on repeated onAppear
             self.posts = newPosts
+            // Reset to first when reloading
+            self.selection = 0
+            incrementViewCountIfNeeded(for: 0)
         }
     }
-    
+
     func incrementViewCount(postID: String) {
         let db = Firestore.firestore()
         let postRef = db.collection("posts").document(postID)
-        
+
         postRef.updateData([
             "viewCount": FieldValue.increment(Int64(1))
         ]) { error in
@@ -113,7 +159,7 @@ struct FeedView: View {
             checkAndIncreaseRadius(postRef: postRef)
         }
     }
-    
+
     func checkAndIncreaseRadius(postRef: DocumentReference) {
         postRef.getDocument { document, error in
             if let error = error {
@@ -121,22 +167,21 @@ struct FeedView: View {
                 return
             }
             guard let document = document, document.exists, let data = document.data() else { return }
-            
+
             let viewCount = (data["viewCount"] as? Int)
                 ?? (data["viewCount"] as? NSNumber)?.intValue
                 ?? 0
             var radius = (data["radius"] as? Int)
                 ?? (data["radius"] as? NSNumber)?.intValue
                 ?? 0
-            
-            if viewCount % 10 == 0 { // Increase radius after 10 views
+
+            if viewCount % 10 == 0 {
                 radius += 1000
                 postRef.updateData(["radius": radius]) { error in
                     if let error = error {
                         print("Failed to update radius: \(error.localizedDescription)")
                     } else {
-                        // Optionally refresh local list to reflect new radius
-                        loadPosts()
+                        // optional: you could update local state if you need to reflect radius changes in UI
                     }
                 }
             }
@@ -144,6 +189,89 @@ struct FeedView: View {
     }
 }
 
-#Preview {
-    FeedView()
+private struct FullScreenPostView: View {
+    let post: Post
+    let isActive: Bool
+
+    var body: some View {
+        ZStack {
+            if isVideo(urlString: post.mediaURL) {
+                VideoPage(urlString: post.mediaURL, play: isActive)
+            } else {
+                ImagePage(urlString: post.mediaURL)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.black)
+        .ignoresSafeArea()
+    }
+
+    private func isVideo(urlString: String) -> Bool {
+        let lower = urlString.lowercased()
+        return lower.hasSuffix(".mp4") || lower.hasSuffix(".mov") || lower.contains("video")
+    }
+}
+
+private struct ImagePage: View {
+    let urlString: String
+
+    var body: some View {
+        GeometryReader { geo in
+            if let url = URL(string: urlString) {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .empty:
+                        Color.black
+                            .overlay(ProgressView().tint(.white))
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: geo.size.width, height: geo.size.height)
+                            .clipped()
+                    case .failure:
+                        Color.black
+                            .overlay(
+                                Image(systemName: "photo")
+                                    .font(.system(size: 36, weight: .bold))
+                                    .foregroundColor(.white.opacity(0.6))
+                            )
+                    @unknown default:
+                        Color.black
+                    }
+                }
+            } else {
+                Color.black
+            }
+        }
+        .ignoresSafeArea()
+    }
+}
+
+private struct VideoPage: View {
+    let urlString: String
+    let play: Bool
+    @State private var player: AVPlayer?
+
+    var body: some View {
+        GeometryReader { geo in
+            VideoPlayer(player: player)
+                .onAppear {
+                    if player == nil, let url = URL(string: urlString) {
+                        player = AVPlayer(url: url)
+                    }
+                    if play { player?.play() } else { player?.pause() }
+                }
+                .onChange(of: play) { newValue in
+                    if newValue { player?.play() } else { player?.pause() }
+                }
+                .onDisappear {
+                    player?.pause()
+                }
+                .frame(width: geo.size.width, height: geo.size.height)
+                .clipped()
+                .ignoresSafeArea()
+        }
+        .ignoresSafeArea()
+    }
 }

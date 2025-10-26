@@ -12,6 +12,11 @@ struct ProfileView: View {
     @State private var isLoadingUser = true
     @State private var userLoadError: String?
 
+    // Deterministic readiness
+    @State private var profileReady = false
+    @State private var didLoadUserOnce = false
+    @State private var didLoadPostsOnce = false
+
     // Configuration for the accumulated radius visualization
     private let accumulatedMaxRadius: Int = 50_000 // 50 km default cap for scaling
     
@@ -23,14 +28,12 @@ struct ProfileView: View {
     var body: some View {
         VStack {
             if isLoadingUser {
-                ProgressView() // Loading user data
+                ProgressView()
                     .progressViewStyle(CircularProgressViewStyle())
                     .padding()
             } else {
-                // Show header even if user couldn't be fully loaded; fall back to placeholders
                 let headerUser = user ?? fallbackUserFromAuth()
                 
-                // Profile Section
                 HStack {
                     if let imageUrl = headerUser.profilePictureURL {
                         AsyncImage(url: imageUrl) { image in
@@ -66,17 +69,13 @@ struct ProfileView: View {
                 }
                 .padding()
                 
-                // Edit Profile Button
-                Button(action: {
-                    isEditingProfile.toggle()
-                }) {
+                Button(action: { isEditingProfile.toggle() }) {
                     Text("Edit Profile")
                         .font(.subheadline)
                         .foregroundColor(.blue)
                 }
                 .padding()
                 
-                // Accumulated Radius Section
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Accumulated Radius")
                         .font(.headline)
@@ -110,7 +109,6 @@ struct ProfileView: View {
                 .padding(.horizontal)
                 .padding(.top, 8)
                 
-                // Posts Section
                 Text("Your Posts")
                     .font(.headline)
                     .padding(.top)
@@ -130,7 +128,6 @@ struct ProfileView: View {
                 } else {
                     List(posts) { post in
                         VStack(alignment: .leading) {
-                            // Check if the mediaURL is not empty and valid
                             if !post.mediaURL.isEmpty, let url = URL(string: post.mediaURL) {
                                 AsyncImage(url: url) { image in
                                     image.resizable()
@@ -148,13 +145,14 @@ struct ProfileView: View {
                         }
                         .padding(.bottom)
                     }
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden) // hide List’s default white background
+                    .listRowBackground(Color.clear)    // make each row transparent
+                    .background(Color.clear)           // keep the List transparent
                 }
             }
             
-            // Log out button
-            Button(action: {
-                logOut()
-            }) {
+            Button(action: { logOut() }) {
                 Text("Log Out")
                     .font(.subheadline)
                     .foregroundColor(.red)
@@ -166,16 +164,19 @@ struct ProfileView: View {
             fetchUserPosts()
         }
         .sheet(isPresented: $isEditingProfile) {
-            // Profile editing UI can go here
             EditProfileView(user: $user)
         }
+        .background(Color.clear)                  // make the whole tab transparent
+        .toolbarBackground(.clear, for: .tabBar)  // keep tab bar area clear on this screen
+        .toolbar(.visible, for: .tabBar)
+        // Publish readiness once both user and posts have attempted to load
+        .preference(key: ProfileReadyPreferenceKey.self, value: profileReady)
     }
     
     // Fallback user built from FirebaseAuth if Firestore user document is missing/unavailable
     private func fallbackUserFromAuth() -> UserProfile {
         let authUser = Auth.auth().currentUser
         let email = authUser?.email ?? "No email"
-        // Use the part before '@' as a simple username if available
         let defaultUsername: String
         if let email = authUser?.email, let name = email.split(separator: "@").first {
             defaultUsername = String(name)
@@ -187,31 +188,40 @@ struct ProfileView: View {
                            profilePictureURL: user?.profilePictureURL)
     }
     
+    private func finishIfBothLoaded() {
+        if didLoadUserOnce && didLoadPostsOnce && !profileReady {
+            profileReady = true
+        }
+    }
+
     func fetchUserData() {
         isLoadingUser = true
         userLoadError = nil
         
         guard let userId = Auth.auth().currentUser?.uid else {
-            // No authenticated user; show fallback and stop loading
             self.user = nil
             self.userLoadError = "Not signed in."
             self.isLoadingUser = false
+            self.didLoadUserOnce = true
+            finishIfBothLoaded()
             return
         }
         
         let db = Firestore.firestore()
         db.collection("users").document(userId).getDocument { document, error in
-            defer { self.isLoadingUser = false }
+            defer {
+                self.isLoadingUser = false
+                self.didLoadUserOnce = true
+                self.finishIfBothLoaded()
+            }
             
             if let error = error {
-                // Fall back to Auth data and report error
                 self.user = self.fallbackUserFromAuth()
                 self.userLoadError = "Failed to load profile: \(error.localizedDescription)"
                 return
             }
             
             guard let document = document, document.exists else {
-                // No Firestore doc; still allow UI with fallback
                 self.user = self.fallbackUserFromAuth()
                 self.userLoadError = "Profile not found. Using account info."
                 return
@@ -227,13 +237,18 @@ struct ProfileView: View {
     }
     
     func fetchUserPosts() {
-        // Fetch posts of the user from Firestore
         guard let userId = Auth.auth().currentUser?.uid else {
             self.posts = []
+            self.didLoadPostsOnce = true
+            self.finishIfBothLoaded()
             return
         }
         let db = Firestore.firestore()
         db.collection("posts").whereField("userID", isEqualTo: userId).getDocuments { snapshot, error in
+            defer {
+                self.didLoadPostsOnce = true
+                self.finishIfBothLoaded()
+            }
             if let error = error {
                 print("Error fetching posts: \(error.localizedDescription)")
                 self.posts = []
@@ -257,7 +272,6 @@ struct ProfileView: View {
     func logOut() {
         do {
             try Auth.auth().signOut()
-            // After sign out, reset state
             self.user = nil
             self.posts = []
             self.userLoadError = "Not signed in."
