@@ -1,7 +1,7 @@
 import SwiftUI
-import FirebaseAuth
 import SpriteKit
 import UIKit
+import FirebaseAuth
 
 // MARK: - SpriteKit Scene for Login visuals (pink ticket, dots, scallop, logo)
 
@@ -19,6 +19,9 @@ private final class LoginScene: SKScene {
     private let scallopHeight: CGFloat = 18
     private let scallopDiameter: CGFloat = 18
     private let scallopSpacing: CGFloat = 8
+
+    // Brand color (sRGB) #FF2D96
+    private let brandPink = UIColor(red: 1.0, green: 45.0/255.0, blue: 150.0/255.0, alpha: 1.0)
 
     override func didMove(to view: SKView) {
         backgroundColor = .clear
@@ -47,16 +50,13 @@ private final class LoginScene: SKScene {
         let path = UIBezierPath(roundedRect: rect, cornerRadius: cornerRadius).cgPath
 
         let shape = SKShapeNode(path: path)
-        shape.fillColor = UIColor(red: 1.0, green: 0.24, blue: 0.56, alpha: 1.0)
+        shape.fillColor = brandPink
         shape.strokeColor = .clear
 
-        // Add a subtle gradient-like overlay using an SKSpriteNode texture
+        // Flat look matching mock: gradient overlay uses same color for both stops
         let gradient = gradientTexture(
             size: size,
-            colors: [
-                UIColor(red: 1.0, green: 0.24, blue: 0.56, alpha: 1.0),
-                UIColor(red: 0.98, green: 0.20, blue: 0.51, alpha: 1.0)
-            ],
+            colors: [brandPink, brandPink],
             startPoint: CGPoint(x: 0, y: 1),
             endPoint: CGPoint(x: 1, y: 0)
         )
@@ -64,7 +64,7 @@ private final class LoginScene: SKScene {
         gradientNode.size = size
         gradientNode.anchorPoint = CGPoint(x: 0, y: 0)
         gradientNode.position = .zero
-        gradientNode.alpha = 0.999 // ensure it composites over the base shape
+        gradientNode.alpha = 0.999
 
         // Create a container so we can add shadow-like effect easily
         let container = SKNode()
@@ -399,3 +399,4 @@ struct LoginView_Previews: PreviewProvider {
         .preferredColorScheme(.light)
     }
 }
+

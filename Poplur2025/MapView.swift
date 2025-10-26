@@ -31,6 +31,9 @@ struct MapView: View {
         didFetchPosts && didGetFirstLocationOrAuth
     }
 
+    // Brand color (sRGB) #FF2D96 for the side bar
+    private let brandPink = Color(red: 1.0, green: 45.0/255.0, blue: 150.0/255.0)
+
     // MARK: - Post navigation helpers
 
     private var selectedIndex: Int? {
@@ -155,7 +158,7 @@ struct MapView: View {
                         maxRadius: maxRadiusForBar,
                         width: 10,
                         maxHeight: 160,
-                        color: .pink,
+                        color: brandPink, // brand pink
                         showsLabel: true,
                         labelFormat: { r in
                             if r >= 1000 {
@@ -344,5 +347,14 @@ struct Post: Identifiable {
 struct MapView_Previews: PreviewProvider {
     static var previews: some View {
         MapView()
+    }
+}
+
+// MARK: - Readiness PreferenceKey for MapView
+
+struct MapReadyPreferenceKey: PreferenceKey {
+    static var defaultValue: Bool = false
+    static func reduce(value: inout Bool, nextValue: () -> Bool) {
+        value = value || nextValue()
     }
 }

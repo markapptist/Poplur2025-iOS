@@ -8,21 +8,28 @@ private enum AppTab: Hashable {
 }
 
 struct HomeView: View {
+    @EnvironmentObject private var auth: AuthViewModel
+
     @State private var selectedTab: AppTab = .record
-    @StateObject private var locationProvider = LocationProvider()
 
-    // Single shared camera session
-    @StateObject private var cameraSession = CameraSession()
-
+    // Lazy camera session (created on first Record visit)
+    @State private var cameraSession: CameraSession?
     @State private var cameraAuthStatus: AVAuthorizationStatus = AVCaptureDevice.authorizationStatus(for: .video)
 
-    // Preload flags
-    @State private var shouldPreloadMap = true
-    @State private var shouldPreloadFeed = true
-    @State private var shouldPreloadProfile = true
+    // Location only when needed
+    @StateObject private var locationProvider = LocationProvider()
+
+    // Per-tab readiness reported by child views via PreferenceKeys
+    @State private var mapReady = false
+    @State private var feedReady = false
+    @State private var profileReady = false
+
+    // Tabs that don’t need Firebase preload
+    private let recordReady = true
+    private let settingsReady = true
 
     init() {
-        // Transparent tab bar (we will override at runtime until ready)
+        // Transparent tab bar look (you can keep or change)
         let appearance = UITabBarAppearance()
         appearance.configureWithTransparentBackground()
         appearance.backgroundEffect = nil
@@ -34,239 +41,190 @@ struct HomeView: View {
         UITabBar.appearance().isTranslucent = true
     }
 
-    // When all preloaders are done, UI is "ready"
-    private var uiReady: Bool {
-        !shouldPreloadMap && !shouldPreloadFeed && !shouldPreloadProfile
-    }
-
     var body: some View {
-        ZStack {
-            // 1) Background camera for non-record tabs
-            if selectedTab != .record && cameraAuthStatus == .authorized {
-                CameraView(session: cameraSession, coordinate: locationProvider.coordinate)
-                    .ignoresSafeArea()
-                    .background(Color.black)
-                    .zIndex(0)
-                    .accessibilityHidden(true)
+        TabView(selection: $selectedTab) {
+            // Only insert Map tab once it's ready
+            if mapReady {
+                MapView()
+                    .tag(AppTab.map)
+                    .tabItem {
+                        Image(systemName: "map")
+                        Text("Map")
+                    }
             }
 
-            // 1.5) Deterministic preloaders (invisible)
-            if shouldPreloadMap {
-                PreloadMapView(onReady: { shouldPreloadMap = false })
-                    .opacity(0.0)
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
-            }
-            if shouldPreloadFeed {
-                PreloadFeedView(onReady: { shouldPreloadFeed = false })
-                    .opacity(0.0)
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
-            }
-            if shouldPreloadProfile {
-                PreloadProfileView(onReady: { shouldPreloadProfile = false })
-                    .opacity(0.0)
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
-            }
-
-            // 2) Foreground tabs
-            TabView(selection: $selectedTab) {
-                // Map tab appears when ready
-                if !shouldPreloadMap {
-                    MapView()
-                        .tag(AppTab.map)
-                        .tabItem {
-                            Image(systemName: "map")
-                            Text("Map")
-                        }
-                }
-
-                // Record tab
-                ZStack {
-                    if cameraAuthStatus == .authorized {
-                        PreviewOnlyCamera(session: cameraSession.session)
-                            .id(cameraSession.isRunning) // ensure preview layer rebuilds after start/stop
+            // Record is always available and the initial tab
+            ZStack {
+                if cameraAuthStatus == .authorized {
+                    if let session = cameraSession {
+                        PreviewOnlyCamera(session: session.session)
                             .ignoresSafeArea()
                             .background(Color.black)
-                        ControlsOverlay(camera: cameraSession)
+                        ControlsOverlay(camera: session)
                             .ignoresSafeArea()
                             .transition(.opacity)
-                    } else if cameraAuthStatus == .denied || cameraAuthStatus == .restricted {
-                        PermissionOverlay {
-                            if let url = URL(string: UIApplication.openSettingsURLString) {
-                                UIApplication.shared.open(url, options: [:], completionHandler: nil)
-                            }
-                        }.transition(.opacity)
                     } else {
                         Color.black.ignoresSafeArea()
+                            .task { await ensureCameraSession() }
                     }
-                }
-                .tag(AppTab.record)
-                .tabItem {
-                    Image(systemName: "plus.circle.fill")
-                    Text("Record")
-                }
-
-                // Feed tab appears when ready
-                if !shouldPreloadFeed {
-                    FeedView()
-                        .tag(AppTab.feed)
-                        .tabItem {
-                            Image(systemName: "list.dash")
-                            Text("Feed")
+                } else if cameraAuthStatus == .denied || cameraAuthStatus == .restricted {
+                    PermissionOverlay {
+                        if let url = URL(string: UIApplication.openSettingsURLString) {
+                            UIApplication.shared.open(url, options: [:], completionHandler: nil)
                         }
+                    }
+                    .transition(.opacity)
+                } else {
+                    Color.black.ignoresSafeArea()
+                        .task { await refreshCameraAuthorizationAndStartIfNeeded() }
                 }
+            }
+            .tag(AppTab.record)
+            .tabItem {
+                Image(systemName: "plus.circle.fill")
+                Text("Record")
+            }
+            .onAppear {
+                Task { await ensureCameraSession() }
+            }
 
-                // Profile tab appears when ready
-                if !shouldPreloadProfile {
-                    ProfileView()
-                        .tag(AppTab.profile)
-                        .tabItem {
-                            Image(systemName: "person.circle")
-                            Text("Profile")
-                        }
-                }
+            // Only insert Feed tab once it's ready
+            if feedReady {
+                FeedView()
+                    .tag(AppTab.feed)
+                    .tabItem {
+                        Image(systemName: "list.dash")
+                        Text("Feed")
+                    }
+            }
 
-                // Settings is always available
-                SettingsView()
+            // Only insert Profile tab once it's ready
+            if profileReady {
+                ProfileView()
+                    .tag(AppTab.profile)
+                    .tabItem {
+                        Image(systemName: "person.circle")
+                        Text("Profile")
+                    }
+            }
+
+            // Settings is always available
+            if settingsReady {
+                AppSettingsView()
                     .tag(AppTab.settings)
                     .tabItem {
                         Image(systemName: "gearshape")
                         Text("Settings")
                     }
             }
-            // While not ready, use a non-clear background so the tab bar doesn’t look “glassy”
-            .background(uiReady ? Color.clear : Color(white: 0.05))
-            // Switch the tab bar background style depending on readiness:
-            // first parameter is a ShapeStyle (Color), second is visibility (.visible/.hidden)
-            .toolbarBackground(uiReady ? Color.clear : Color(white: 0.05), for: .tabBar)
-            .toolbar(.visible, for: .tabBar)
-            .zIndex(1)
         }
+        .background(Color.clear)
+        .toolbarBackground(Color.clear, for: .tabBar)
+        .toolbar(.visible, for: .tabBar)
         .onAppear {
+            // Force Record tab on entry to HomeView
+            selectedTab = .record
             locationProvider.request()
-            Task { await refreshCameraAuthorizationAndStartIfNeeded() }
-            AVCaptureDevice.requestAccess(for: .audio) { _ in }
+        }
+        .onChange(of: auth.isAuthenticated) { authed in
+            if authed { selectedTab = .record }
         }
         .onChange(of: selectedTab) { newValue in
-            // Ensure session is running when returning to Record tab
-            if newValue == .record && cameraAuthStatus == .authorized {
-                Task { await cameraSession.start() }
-            } else {
-                Task { await refreshCameraAuthorizationAndStartIfNeeded() }
+            if newValue == .record, cameraAuthStatus == .authorized {
+                Task { await cameraSession?.start() }
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
-            Task { await refreshCameraAuthorizationAndStartIfNeeded() }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            if cameraAuthStatus == .authorized && selectedTab == .record {
+                Task { await cameraSession?.start() }
+            }
+        }
+        // Readiness plumbing from child tabs
+        .onPreferenceChange(MapReadyPreferenceKey.self) { ready in
+            mapReady = ready
+        }
+        .onPreferenceChange(FeedReadyPreferenceKey.self) { ready in
+            feedReady = ready
+        }
+        .onPreferenceChange(ProfileReadyPreferenceKey.self) { ready in
+            profileReady = ready
+        }
+        // If camera becomes authorized while on Record, (re)start
+        .onChange(of: cameraAuthStatus) { status in
+            if status == .authorized, selectedTab == .record {
+                Task { await cameraSession?.start() }
+            }
         }
     }
 
-    // Estimate a reasonable tab bar height. You can tweak this constant if needed.
-    private var tabBarHeight: CGFloat { 88 }
+    // MARK: - Camera helpers
 
-    // MARK: - Permission + session lifecycle
+    private func ensureCameraSession() async {
+        if cameraSession == nil {
+            let session = CameraSession()
+            cameraSession = session
+        }
+        await refreshCameraAuthorizationAndStartIfNeeded()
+    }
 
     private func refreshCameraAuthorizationAndStartIfNeeded() async {
         let status = AVCaptureDevice.authorizationStatus(for: .video)
         cameraAuthStatus = status
-        print("HomeView: cameraAuthStatus =", status.rawValue)
-
         switch status {
         case .authorized:
-            await cameraSession.start()
-            print("HomeView: ensured cameraSession started, isRunning =", cameraSession.isRunning)
+            await cameraSession?.start()
         case .notDetermined:
             AVCaptureDevice.requestAccess(for: .video) { granted in
                 Task { @MainActor in
                     cameraAuthStatus = AVCaptureDevice.authorizationStatus(for: .video)
-                    print("HomeView: requestAccess result =", granted, "status =", cameraAuthStatus.rawValue)
-                    if granted {
-                        await cameraSession.start()
-                        print("HomeView: post-permission ensured start, isRunning =", cameraSession.isRunning)
+                    if granted, selectedTab == .record {
+                        await cameraSession?.start()
                     }
                 }
             }
         case .denied, .restricted:
-            if cameraSession.isRunning {
-                cameraSession.stop()
-                print("HomeView: permission not allowed, stopped session.")
-            }
+            cameraSession?.stop()
         @unknown default:
-            if cameraSession.isRunning {
-                cameraSession.stop()
-                print("HomeView: unknown status, stopped session.")
+            cameraSession?.stop()
+        }
+    }
+
+    // MARK: - Location provider
+
+    private final class LocationProvider: NSObject, ObservableObject, CLLocationManagerDelegate {
+        @Published var coordinate: CLLocationCoordinate2D?
+        private let manager = CLLocationManager()
+
+        override init() {
+            super.init()
+            manager.delegate = self
+        }
+
+        func request() {
+            switch manager.authorizationStatus {
+            case .notDetermined:
+                manager.requestWhenInUseAuthorization()
+            case .authorizedWhenInUse, .authorizedAlways:
+                manager.startUpdatingLocation()
+            default:
+                break
             }
+        }
+
+        func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+            if manager.authorizationStatus == .authorizedWhenInUse || manager.authorizationStatus == .authorizedAlways {
+                manager.startUpdatingLocation()
+            }
+        }
+
+        func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+            coordinate = locations.last?.coordinate
+            manager.stopUpdatingLocation()
         }
     }
 }
 
-// MARK: - Preference keys
-
-struct MapReadyPreferenceKey: PreferenceKey {
-    static var defaultValue: Bool = false
-    static func reduce(value: inout Bool, nextValue: () -> Bool) {
-        value = value || nextValue()
-    }
-}
-
-struct FeedReadyPreferenceKey: PreferenceKey {
-    static var defaultValue: Bool = false
-    static func reduce(value: inout Bool, nextValue: () -> Bool) {
-        value = value || nextValue()
-    }
-}
-
-struct ProfileReadyPreferenceKey: PreferenceKey {
-    static var defaultValue: Bool = false
-    static func reduce(value: inout Bool, nextValue: () -> Bool) {
-        value = value || nextValue()
-    }
-}
-
-// MARK: - Invisible preload wrappers
-
-private struct PreloadMapView: View {
-    let onReady: () -> Void
-    @State private var didSignal = false
-
-    var body: some View {
-        MapView()
-            .onPreferenceChange(MapReadyPreferenceKey.self) { ready in
-                guard ready, !didSignal else { return }
-                didSignal = true
-                onReady()
-            }
-    }
-}
-
-private struct PreloadFeedView: View {
-    let onReady: () -> Void
-    @State private var didSignal = false
-
-    var body: some View {
-        FeedView()
-            .onPreferenceChange(FeedReadyPreferenceKey.self) { ready in
-                guard ready, !didSignal else { return }
-                didSignal = true
-                onReady()
-            }
-    }
-}
-
-private struct PreloadProfileView: View {
-    let onReady: () -> Void
-    @State private var didSignal = false
-
-    var body: some View {
-        ProfileView()
-            .onPreferenceChange(ProfileReadyPreferenceKey.self) { ready in
-                guard ready, !didSignal else { return }
-                didSignal = true
-                onReady()
-            }
-    }
-}
+// MARK: - Helper Views
 
 // Preview-only camera layer using the shared AVCaptureSession
 private struct PreviewOnlyCamera: UIViewRepresentable {
@@ -274,22 +232,24 @@ private struct PreviewOnlyCamera: UIViewRepresentable {
 
     func makeUIView(context: Context) -> UIView {
         let view = PreviewContainer()
-        view.backgroundColor = .clear
+        view.backgroundColor = .black
 
         let layer = AVCaptureVideoPreviewLayer(session: session)
         layer.videoGravity = .resizeAspectFill
         layer.needsDisplayOnBoundsChange = true
         view.previewLayer = layer
-        view.layer.addSublayer(layer
-
-        )
+        view.layer.addSublayer(layer)
         return view
     }
 
     func updateUIView(_ uiView: UIView, context: Context) {
-        guard let view = uiView as? PreviewContainer,
-              let layer = view.previewLayer else { return }
+        guard let view = uiView as? PreviewContainer, let layer = view.previewLayer else { return }
+
         layer.frame = uiView.bounds
+
+        if layer.session !== session {
+            layer.session = session
+        }
 
         if let connection = layer.connection, connection.isVideoOrientationSupported {
             let orientation = uiView.window?.windowScene?.interfaceOrientation
@@ -312,39 +272,6 @@ private struct PreviewOnlyCamera: UIViewRepresentable {
             super.layoutSubviews()
             previewLayer?.frame = bounds
         }
-    }
-}
-
-// Simple location provider for background camera
-private final class LocationProvider: NSObject, ObservableObject, CLLocationManagerDelegate {
-    @Published var coordinate: CLLocationCoordinate2D?
-    private let manager = CLLocationManager()
-
-    override init() {
-        super.init()
-        manager.delegate = self
-    }
-
-    func request() {
-        switch manager.authorizationStatus {
-        case .notDetermined:
-            manager.requestWhenInUseAuthorization()
-        case .authorizedWhenInUse, .authorizedAlways:
-            manager.startUpdatingLocation()
-        default:
-            break
-        }
-    }
-
-    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
-        if manager.authorizationStatus == .authorizedWhenInUse || manager.authorizationStatus == .authorizedAlways {
-            manager.startUpdatingLocation()
-        }
-    }
-
-    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        coordinate = locations.last?.coordinate
-        manager.stopUpdatingLocation()
     }
 }
 
@@ -386,7 +313,6 @@ private struct ControlsOverlay: View {
     @State private var capturedImage: UIImage?
     @State private var capturedVideoURL: URL?
 
-    // Mirror HomeView’s estimate so controls clear the tab bar
     private let tabBarHeight: CGFloat = 88
 
     var body: some View {
@@ -394,7 +320,6 @@ private struct ControlsOverlay: View {
             Color.clear
                 .allowsHitTesting(false)
                 .onAppear {
-                    // Defensive: ensure session is running when overlay appears
                     Task { await camera.start() }
                 }
 
@@ -408,19 +333,17 @@ private struct ControlsOverlay: View {
                             .font(.system(size: 16, weight: .bold))
                             .foregroundColor(.white)
                             .padding(10)
-                            .background(.ultraThinMaterial, in: Circle())
+                            .background(Color.black.opacity(0.35), in: Circle())
                     }
-                    .disabled(!isTorchOrFlashAvailable)
                     .padding(.leading, 16)
                     .padding(.top, 56)
-
                     Spacer()
                 }
                 Spacer()
             }
             .allowsHitTesting(true)
 
-            // Inline preview overlay (appears above camera when a capture exists)
+            // Inline preview overlay
             if showPreview {
                 ZStack {
                     Color.black.opacity(0.85).ignoresSafeArea()
@@ -440,7 +363,6 @@ private struct ControlsOverlay: View {
                             .foregroundColor(.white)
                     }
 
-                    // Close button top-left
                     VStack {
                         HStack {
                             Button {
@@ -452,7 +374,7 @@ private struct ControlsOverlay: View {
                                     .font(.system(size: 14, weight: .bold))
                                     .foregroundColor(.white)
                                     .padding(10)
-                                    .background(.ultraThinMaterial, in: Circle())
+                                    .background(Color.black.opacity(0.35), in: Circle())
                             }
                             .padding(.leading, 16)
                             .padding(.top, 36)
@@ -466,12 +388,11 @@ private struct ControlsOverlay: View {
                 .zIndex(10)
             }
 
-            // Bottom capture controls (hidden when preview is showing)
+            // Bottom capture controls
             if !showPreview {
                 VStack {
                     Spacer()
 
-                    // Buttons row (slightly above the mode labels)
                     HStack(spacing: 60) {
                         Button {
                             if let img = camera.lastPhoto {
@@ -547,13 +468,11 @@ private struct ControlsOverlay: View {
                                 .font(.system(size: 22, weight: .semibold))
                                 .foregroundColor(.white)
                                 .padding(18)
-                                .background(.ultraThinMaterial, in: Circle())
+                                .background(Color.black.opacity(0.35), in: Circle())
                         }
                     }
-                    // Place this row slightly above the mode labels by using a larger bottom padding
                     .padding(.bottom, tabBarHeight)
 
-                    // Mode labels row at the bottom
                     HStack(spacing: 24) {
                         modeLabel("VIDEO", isActive: camera.mode == .video)
                             .onTapGesture { camera.mode = .video }
@@ -565,15 +484,6 @@ private struct ControlsOverlay: View {
                 .padding(.horizontal)
             }
         }
-    }
-
-    private var isTorchOrFlashAvailable: Bool {
-        guard let device = cameraValueDevice else { return false }
-        return device.hasTorch || device.isFlashAvailable
-    }
-
-    private var cameraValueDevice: AVCaptureDevice? {
-        AVCaptureDevice.default(for: .video)
     }
 
     private func modeLabel(_ text: String, isActive: Bool) -> some View {

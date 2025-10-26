@@ -2,13 +2,19 @@ import SwiftUI
 import FirebaseAuth
 import FirebaseFirestore
 import FirebaseStorage
+import CoreLocation
+
+private enum ProfileLayout: Hashable {
+    case list
+    case grid
+}
 
 struct ProfileView: View {
-    @State private var user: UserProfile? // Holds user data from Firestore (or fallback from Auth)
-    @State private var posts: [Post] = [] // Holds the user's posts
-    @State private var isEditingProfile = false // To toggle profile editing mode
-    
-    // Loading/error states to avoid infinite spinner
+    @State private var user: UserProfile?
+    @State private var posts: [Post] = []
+    @State private var isEditingProfile = false
+
+    // Loading/error states
     @State private var isLoadingUser = true
     @State private var userLoadError: String?
 
@@ -17,65 +23,54 @@ struct ProfileView: View {
     @State private var didLoadUserOnce = false
     @State private var didLoadPostsOnce = false
 
-    // Configuration for the accumulated radius visualization
-    private let accumulatedMaxRadius: Int = 50_000 // 50 km default cap for scaling
-    
-    // Sum of all post radii (accumulated)
+    // UI state
+    @State private var layout: ProfileLayout = .list
+
+    // Config
+    private let accumulatedMaxRadius: Int = 50_000
+
     private var totalRadius: Int {
         posts.reduce(0) { $0 + $1.radius }
     }
-    
+
     var body: some View {
-        VStack {
-            if isLoadingUser {
-                ProgressView()
-                    .progressViewStyle(CircularProgressViewStyle())
-                    .padding()
-            } else {
-                let headerUser = user ?? fallbackUserFromAuth()
-                
-                HStack {
-                    if let imageUrl = headerUser.profilePictureURL {
-                        AsyncImage(url: imageUrl) { image in
-                            image.resizable()
-                                 .scaledToFill()
-                                 .frame(width: 100, height: 100)
-                                 .clipShape(Circle())
-                        } placeholder: {
-                            ProgressView()
-                        }
-                    } else {
-                        Circle()
-                            .frame(width: 100, height: 100)
-                            .foregroundColor(.gray)
+        ScrollView {
+            VStack(spacing: 20) {
+                header
+
+                toggleBar
+
+                if isLoadingUser {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle())
+                        .padding(.top, 16)
+                } else if let userLoadError {
+                    Text(userLoadError)
+                        .font(.footnote)
+                        .foregroundColor(.red)
+                }
+
+                if posts.isEmpty {
+                    VStack(spacing: 8) {
+                        Text("No Posts Yet")
+                            .font(.title3.weight(.semibold))
+                            .foregroundColor(.secondary)
+                        Text("Upload your first post to see it here.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
                     }
-                    
-                    VStack(alignment: .leading) {
-                        Text(headerUser.username)
-                            .font(.title)
-                            .fontWeight(.bold)
-                        
-                        Text(headerUser.email)
-                            .font(.subheadline)
-                            .foregroundColor(.gray)
-                        
-                        if let userLoadError = userLoadError {
-                            Text(userLoadError)
-                                .font(.caption)
-                                .foregroundColor(.red)
-                                .padding(.top, 2)
-                        }
+                    .padding(.top, 16)
+                    .frame(maxWidth: .infinity)
+                } else {
+                    switch layout {
+                    case .list:
+                        listContent
+                    case .grid:
+                        gridContent
                     }
                 }
-                .padding()
-                
-                Button(action: { isEditingProfile.toggle() }) {
-                    Text("Edit Profile")
-                        .font(.subheadline)
-                        .foregroundColor(.blue)
-                }
-                .padding()
-                
+
+                // Accumulated radius section
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Accumulated Radius")
                         .font(.headline)
@@ -95,7 +90,6 @@ struct ProfileView: View {
                                 }
                             }
                         )
-                        
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Total across \(posts.count) post(s)")
                                 .font(.subheadline)
@@ -108,72 +102,230 @@ struct ProfileView: View {
                 }
                 .padding(.horizontal)
                 .padding(.top, 8)
-                
-                Text("Your Posts")
-                    .font(.headline)
-                    .padding(.top)
-                
-                if posts.isEmpty {
-                    VStack(spacing: 8) {
-                        Text("No Posts Yet")
-                            .font(.title3)
-                            .fontWeight(.semibold)
-                            .foregroundColor(.secondary)
-                        Text("Upload your first post to see it here.")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                    .padding(.top, 16)
-                } else {
-                    List(posts) { post in
-                        VStack(alignment: .leading) {
-                            if !post.mediaURL.isEmpty, let url = URL(string: post.mediaURL) {
-                                AsyncImage(url: url) { image in
-                                    image.resizable()
-                                         .scaledToFit()
-                                         .frame(height: 200)
-                                         .cornerRadius(10)
-                                } placeholder: {
-                                    ProgressView()
-                                }
-                            }
-                            
-                            Text("Latitude: \(post.latitude), Longitude: \(post.longitude)")
-                                .font(.caption)
-                                .foregroundColor(.gray)
-                        }
-                        .padding(.bottom)
-                    }
-                    .listStyle(.plain)
-                    .scrollContentBackground(.hidden) // hide List’s default white background
-                    .listRowBackground(Color.clear)    // make each row transparent
-                    .background(Color.clear)           // keep the List transparent
+
+                Button(action: { isEditingProfile.toggle() }) {
+                    Text("Edit Profile")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(.blue)
                 }
+                .padding(.top, 8)
+
+                Button(action: { logOut() }) {
+                    Text("Log Out")
+                        .font(.subheadline)
+                        .foregroundColor(.red)
+                }
+                .padding(.top, 4)
             }
-            
-            Button(action: { logOut() }) {
-                Text("Log Out")
-                    .font(.subheadline)
-                    .foregroundColor(.red)
-            }
-            .padding(.top)
+            .padding(.vertical, 16)
+        }
+        .sheet(isPresented: $isEditingProfile) {
+            EditProfileView(user: $user)
         }
         .onAppear {
             fetchUserData()
             fetchUserPosts()
         }
-        .sheet(isPresented: $isEditingProfile) {
-            EditProfileView(user: $user)
-        }
-        .background(Color.clear)                  // make the whole tab transparent
-        .toolbarBackground(.clear, for: .tabBar)  // keep tab bar area clear on this screen
+        .background(Color.clear)
+        .toolbarBackground(.clear, for: .tabBar)
         .toolbar(.visible, for: .tabBar)
-        // Publish readiness once both user and posts have attempted to load
         .preference(key: ProfileReadyPreferenceKey.self, value: profileReady)
     }
-    
-    // Fallback user built from FirebaseAuth if Firestore user document is missing/unavailable
+
+    // MARK: - Header
+
+    private var header: some View {
+        let headerUser = user ?? fallbackUserFromAuth()
+        return VStack(spacing: 10) {
+            // Avatar
+            if let url = headerUser.profilePictureURL {
+                AsyncImage(url: url) { image in
+                    image.resizable()
+                        .scaledToFill()
+                        .frame(width: 96, height: 96)
+                        .clipShape(Circle())
+                } placeholder: {
+                    Circle().fill(Color.gray.opacity(0.3))
+                        .frame(width: 96, height: 96)
+                }
+            } else {
+                Circle()
+                    .fill(Color.gray.opacity(0.3))
+                    .frame(width: 96, height: 96)
+            }
+
+            // Username
+            Text(headerUser.username.uppercased())
+                .font(.system(size: 22, weight: .heavy, design: .rounded))
+                .kerning(0.8)
+                .foregroundColor(.primary)
+        }
+    }
+
+    // MARK: - Toggle
+
+    private var toggleBar: some View {
+        HStack(spacing: 28) {
+            toggleItem(system: "list.bullet", isActive: layout == .list) {
+                layout = .list
+            }
+            toggleItem(system: "square.grid.2x2", isActive: layout == .grid) {
+                layout = .grid
+            }
+        }
+        .padding(.top, 8)
+    }
+
+    private func toggleItem(system: String, isActive: Bool, action: @escaping () -> Void) -> some View {
+        VStack(spacing: 6) {
+            Button(action: action) {
+                Image(systemName: system)
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundColor(.primary.opacity(isActive ? 1.0 : 0.5))
+            }
+            Rectangle()
+                .fill(isActive ? Color.accentColor : Color.clear)
+                .frame(width: 28, height: 3)
+                .cornerRadius(1.5)
+        }
+    }
+
+    // MARK: - Grid
+
+    private var gridContent: some View {
+        let columns = Array(repeating: GridItem(.flexible(), spacing: 12), count: 3)
+        return LazyVGrid(columns: columns, spacing: 12) {
+            ForEach(posts) { post in
+                GridCell(mediaURL: post.mediaURL)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+    }
+
+    private struct GridCell: View {
+        let mediaURL: String
+        var body: some View {
+            ZStack {
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color.gray.opacity(0.15))
+                if let url = URL(string: mediaURL) {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .empty:
+                            ProgressView()
+                                .progressViewStyle(.circular)
+                                .tint(.gray)
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .scaledToFill()
+                        case .failure:
+                            Image(systemName: "photo")
+                                .font(.system(size: 24, weight: .bold))
+                                .foregroundColor(.secondary)
+                        @unknown default:
+                            Color.clear
+                        }
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                } else {
+                    Image(systemName: "photo")
+                        .font(.system(size: 24, weight: .bold))
+                        .foregroundColor(.secondary)
+                }
+            }
+            .aspectRatio(1, contentMode: .fit)
+        }
+    }
+
+    // MARK: - List
+
+    private var listContent: some View {
+        LazyVStack(spacing: 20) {
+            ForEach(posts) { post in
+                ListCard(post: post)
+                    .padding(.horizontal, 16)
+            }
+        }
+        .padding(.top, 8)
+    }
+
+    private struct ListCard: View {
+        let post: Post
+
+        private var radiusText: String {
+            if post.radius >= 1000 {
+                return "\(post.radius / 1000) KM"
+            } else {
+                return "\(post.radius) M"
+            }
+        }
+
+        var body: some View {
+            ZStack(alignment: .bottomLeading) {
+                RoundedRectangle(cornerRadius: 24)
+                    .fill(Color.gray.opacity(0.15))
+
+                if let url = URL(string: post.mediaURL) {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .empty:
+                            ProgressView()
+                                .progressViewStyle(.circular)
+                                .tint(.white)
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .scaledToFill()
+                        case .failure:
+                            Color.black.opacity(0.2)
+                        @unknown default:
+                            Color.black.opacity(0.2)
+                        }
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                } else {
+                    Color.black.opacity(0.2)
+                        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                }
+
+                // Gradient overlay for legible text
+                LinearGradient(
+                    colors: [Color.black.opacity(0.55), Color.black.opacity(0.15), .clear],
+                    startPoint: .bottom, endPoint: .top
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(radiusText)
+                        .font(.system(size: 18, weight: .heavy, design: .rounded))
+                        .foregroundColor(.white)
+                        .shadow(radius: 3, y: 2)
+
+                    // Placeholder for location/city line (requires reverse geocoding to be accurate)
+                    // For now, show coordinates or "WORLDWIDE"
+                    if post.latitude != 0 || post.longitude != 0 {
+                        Text("\(String(format: "%.4f", post.latitude)), \(String(format: "%.4f", post.longitude))")
+                            .font(.system(size: 16, weight: .heavy, design: .rounded))
+                            .foregroundColor(.white)
+                            .shadow(radius: 3, y: 2)
+                    } else {
+                        Text("WORLDWIDE")
+                            .font(.system(size: 16, weight: .heavy, design: .rounded))
+                            .foregroundColor(.white)
+                            .shadow(radius: 3, y: 2)
+                    }
+                }
+                .padding(16)
+            }
+            .frame(height: 220)
+            .shadow(color: Color.black.opacity(0.18), radius: 12, x: 0, y: 8)
+        }
+    }
+
+    // MARK: - Data + readiness
+
     private func fallbackUserFromAuth() -> UserProfile {
         let authUser = Auth.auth().currentUser
         let email = authUser?.email ?? "No email"
@@ -187,7 +339,7 @@ struct ProfileView: View {
                            email: user?.email ?? email,
                            profilePictureURL: user?.profilePictureURL)
     }
-    
+
     private func finishIfBothLoaded() {
         if didLoadUserOnce && didLoadPostsOnce && !profileReady {
             profileReady = true
@@ -197,7 +349,7 @@ struct ProfileView: View {
     func fetchUserData() {
         isLoadingUser = true
         userLoadError = nil
-        
+
         guard let userId = Auth.auth().currentUser?.uid else {
             self.user = nil
             self.userLoadError = "Not signed in."
@@ -206,7 +358,7 @@ struct ProfileView: View {
             finishIfBothLoaded()
             return
         }
-        
+
         let db = Firestore.firestore()
         db.collection("users").document(userId).getDocument { document, error in
             defer {
@@ -214,19 +366,19 @@ struct ProfileView: View {
                 self.didLoadUserOnce = true
                 self.finishIfBothLoaded()
             }
-            
+
             if let error = error {
                 self.user = self.fallbackUserFromAuth()
                 self.userLoadError = "Failed to load profile: \(error.localizedDescription)"
                 return
             }
-            
+
             guard let document = document, document.exists else {
                 self.user = self.fallbackUserFromAuth()
                 self.userLoadError = "Profile not found. Using account info."
                 return
             }
-            
+
             let data = document.data()
             self.user = UserProfile(
                 username: data?["username"] as? String ?? self.fallbackUserFromAuth().username,
@@ -235,7 +387,7 @@ struct ProfileView: View {
             )
         }
     }
-    
+
     func fetchUserPosts() {
         guard let userId = Auth.auth().currentUser?.uid else {
             self.posts = []
@@ -254,7 +406,7 @@ struct ProfileView: View {
                 self.posts = []
                 return
             }
-            
+
             self.posts = snapshot?.documents.compactMap { document -> Post? in
                 let data = document.data()
                 return Post(
@@ -268,7 +420,7 @@ struct ProfileView: View {
             } ?? []
         }
     }
-    
+
     func logOut() {
         do {
             try Auth.auth().signOut()
@@ -290,5 +442,14 @@ struct UserProfile {
 struct ProfileView_Previews: PreviewProvider {
     static var previews: some View {
         ProfileView()
+    }
+}
+
+// MARK: - Readiness PreferenceKey for ProfileView
+
+struct ProfileReadyPreferenceKey: PreferenceKey {
+    static var defaultValue: Bool = false
+    static func reduce(value: inout Bool, nextValue: () -> Bool) {
+        value = value || nextValue()
     }
 }

@@ -11,47 +11,50 @@ import FirebaseAuth
 
 class AppDelegate: NSObject, UIApplicationDelegate {
 
-  // Keep a weak reference to the window to set clear background after scene connects (optional)
+  // Keep a weak reference to the window (optional)
   weak var mainWindow: UIWindow?
 
   func application(_ application: UIApplication,
                    didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
     FirebaseApp.configure()
 
-    // Force transparent Tab Bar at UIKit level
+    // SOLID, NON-TRANSLUCENT TAB BAR
     let tabAppearance = UITabBarAppearance()
-    tabAppearance.configureWithTransparentBackground()
+    tabAppearance.configureWithOpaqueBackground()
     tabAppearance.backgroundEffect = nil
-    tabAppearance.backgroundColor = .clear
+    tabAppearance.backgroundColor = .systemBackground
+    tabAppearance.shadowColor = UIColor.separator
 
     UITabBar.appearance().standardAppearance = tabAppearance
     if #available(iOS 15.0, *) {
         UITabBar.appearance().scrollEdgeAppearance = tabAppearance
     }
-    UITabBar.appearance().isTranslucent = true
-    UITabBar.appearance().barTintColor = .clear
-    UITabBar.appearance().backgroundImage = UIImage()
-    UITabBar.appearance().shadowImage = UIImage()
+    UITabBar.appearance().isTranslucent = false
+    UITabBar.appearance().barTintColor = .systemBackground
 
-    // Force transparent Navigation Bar at UIKit level
+    // SOLID, NON-TRANSLUCENT NAV BAR
     let navAppearance = UINavigationBarAppearance()
-    navAppearance.configureWithTransparentBackground()
+    navAppearance.configureWithOpaqueBackground()
     navAppearance.backgroundEffect = nil
-    navAppearance.backgroundColor = .clear
-    navAppearance.shadowColor = .clear
+    navAppearance.backgroundColor = .systemBackground
+    navAppearance.shadowColor = UIColor.separator
+    navAppearance.titleTextAttributes = [
+        .foregroundColor: UIColor.label
+    ]
+    navAppearance.largeTitleTextAttributes = [
+        .foregroundColor: UIColor.label
+    ]
 
     UINavigationBar.appearance().standardAppearance = navAppearance
     UINavigationBar.appearance().scrollEdgeAppearance = navAppearance
     UINavigationBar.appearance().compactAppearance = navAppearance
-    UINavigationBar.appearance().isTranslucent = true
-    UINavigationBar.appearance().setBackgroundImage(UIImage(), for: .default)
-    UINavigationBar.appearance().shadowImage = UIImage()
-    UINavigationBar.appearance().barTintColor = .clear
+    UINavigationBar.appearance().isTranslucent = false
+    UINavigationBar.appearance().barTintColor = .systemBackground
 
     return true
   }
 
-  // Ensure the window is fully transparent by using a SceneDelegate to set backgroundColor = .clear
+  // Use SceneDelegate to set a sane, solid background on the window
   func application(_ application: UIApplication,
                    configurationForConnecting connectingSceneSession: UISceneSession,
                    options: UIScene.ConnectionOptions) -> UISceneConfiguration {
@@ -61,16 +64,14 @@ class AppDelegate: NSObject, UIApplicationDelegate {
   }
 }
 
-// Scene delegate to capture the window and set it transparent
+// Scene delegate: set window background to systemBackground (not clear)
 class SceneDelegate: NSObject, UIWindowSceneDelegate {
     var window: UIWindow?
 
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
         guard let windowScene = scene as? UIWindowScene else { return }
-        // Create a window and set global background to clear.
-        // SwiftUI will still manage the root content.
         let window = UIWindow(windowScene: windowScene)
-        window.backgroundColor = .clear
+        window.backgroundColor = .systemBackground
         self.window = window
 
         // Keep a reference in AppDelegate (optional)
@@ -80,8 +81,7 @@ class SceneDelegate: NSObject, UIWindowSceneDelegate {
     }
 
     func sceneDidBecomeActive(_ scene: UIScene) {
-        // Re-assert clear background on re-activation
-        window?.backgroundColor = .clear
+        window?.backgroundColor = .systemBackground
     }
 }
 
@@ -116,7 +116,9 @@ struct MediaApp: App {
     var body: some Scene {
         WindowGroup {
             ZStack {
-                Color.clear
+                // Solid app background
+                Color(.systemBackground).ignoresSafeArea()
+
                 NavigationStack {
                     if auth.isAuthenticated {
                         HomeView()
@@ -124,14 +126,14 @@ struct MediaApp: App {
                         WelcomeView()
                     }
                 }
-                // Transparent navigation bar area at SwiftUI level
-                .toolbarBackground(.clear, for: .navigationBar)
+                // Use solid nav bar background from appearance
+                .toolbarBackground(Color(.systemBackground), for: .navigationBar)
                 .toolbar(.visible, for: .navigationBar)
-                .background(Color.clear)
+                .background(Color(.systemBackground))
             }
             .environmentObject(auth)
             .preferredColorScheme(.light)
-            .background(Color.clear)
+            .background(Color(.systemBackground))
         }
     }
 }

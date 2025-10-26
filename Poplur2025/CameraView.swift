@@ -26,10 +26,11 @@ private struct CameraPreview: UIViewRepresentable {
         // Always match the layer to the view’s bounds
         layer.frame = uiView.bounds
 
-        // Use the windowScene from the current view’s window for correct orientation
+        // Guard against transient nil window during transitions
         if let connection = layer.connection, connection.isVideoOrientationSupported {
-            let orientation = uiView.window?.windowScene?.interfaceOrientation
-            connection.videoOrientation = mapInterfaceOrientation(orientation)
+            if let window = uiView.window, let orientation = window.windowScene?.interfaceOrientation {
+                connection.videoOrientation = mapInterfaceOrientation(orientation)
+            }
         }
     }
 
@@ -69,6 +70,9 @@ struct CameraView: View {
     @State private var capturedVideoURL: URL?
     @State private var isPressing = false
 
+    // Match HomeView/ControlsOverlay tab bar clearance
+    private let tabBarHeight: CGFloat = 88
+
     var body: some View {
         ZStack {
             // Live camera (always visible)
@@ -80,6 +84,7 @@ struct CameraView: View {
             VStack {
                 Spacer()
 
+                // Three buttons row
                 HStack(spacing: 60) {
                     // Left thumbnail
                     Button {
@@ -134,16 +139,17 @@ struct CameraView: View {
                             .background(.ultraThinMaterial, in: Circle())
                     }
                 }
-                .padding(.bottom, 20)
+                // Bring the buttons row further down, above the mode labels
+                .padding(.bottom, tabBarHeight)
 
-                // Mode selector
+                // Mode selector at the very bottom
                 HStack(spacing: 24) {
                     modeLabel("VIDEO", isActive: session.mode == .video)
                         .onTapGesture { session.mode = .video }
                     modeLabel("PHOTO", isActive: session.mode == .photo)
                         .onTapGesture { session.mode = .photo }
                 }
-                .padding(.bottom, 28)
+                .padding(.bottom, 28 + tabBarHeight)
             }
             .padding(.horizontal)
         }
