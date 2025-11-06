@@ -1,67 +1,15 @@
 import SwiftUI
 import AVFoundation
+import AVKit
 import CoreLocation
+import SCSDKCameraKit
 
-// UIViewRepresentable for AVCaptureVideoPreviewLayer
-private struct CameraPreview: UIViewRepresentable {
-    let session: AVCaptureSession
+@MainActor
+struct CameraKitView: View {
+    // Injected controller (stateful, owns Camera Kit session)
+    @StateObject private var controller = CameraKitController()
 
-    func makeUIView(context: Context) -> UIView {
-        let view = PreviewContainerView()
-        view.backgroundColor = .clear
-
-        let layer = AVCaptureVideoPreviewLayer(session: session)
-        layer.videoGravity = .resizeAspectFill
-        layer.needsDisplayOnBoundsChange = true
-        view.previewLayer = layer
-        view.layer.addSublayer(layer)
-
-        return view
-    }
-
-    func updateUIView(_ uiView: UIView, context: Context) {
-        guard let view = uiView as? PreviewContainerView,
-              let layer = view.previewLayer else { return }
-
-        // Always match the layer to the view’s bounds
-        layer.frame = uiView.bounds
-
-        // Guard against transient nil window during transitions
-        if let connection = layer.connection, connection.isVideoOrientationSupported {
-            if let window = uiView.window, let orientation = window.windowScene?.interfaceOrientation {
-                connection.videoOrientation = mapInterfaceOrientation(orientation)
-            }
-        }
-    }
-
-    private func mapInterfaceOrientation(_ io: UIInterfaceOrientation?) -> AVCaptureVideoOrientation {
-        switch io {
-        case .landscapeLeft:      return .landscapeLeft
-        case .landscapeRight:     return .landscapeRight
-        case .portraitUpsideDown: return .portraitUpsideDown
-        default:                  return .portrait
-        }
-    }
-
-    // A small UIView subclass to keep a strong reference to the preview layer
-    private final class PreviewContainerView: UIView {
-        var previewLayer: AVCaptureVideoPreviewLayer?
-
-        override func layoutSubviews() {
-            super.layoutSubviews()
-            // Keep the preview layer sized correctly during layout passes
-            previewLayer?.frame = bounds
-        }
-    }
-}
-
-struct CameraView: View {
-    @Environment(\.scenePhase) private var scenePhase
-
-    // Injected single shared CameraSession from HomeView
-    let session: CameraSession
-
-    // Location to tag uploads
+    // Optional location tagging for uploads
     let coordinate: CLLocationCoordinate2D?
 
     // Local UI state for previewing captured media
@@ -70,40 +18,39 @@ struct CameraView: View {
     @State private var capturedVideoURL: URL?
     @State private var isPressing = false
 
-    // Match HomeView/ControlsOverlay tab bar clearance
+    // Match HomeView/controls spacing
     private let tabBarHeight: CGFloat = 88
 
     var body: some View {
         ZStack {
-            // Live camera (always visible)
-            CameraPreview(session: session.session)
+            // Live camera preview via Camera Kit PreviewView
+            CameraKitPreviewContainer(controller: controller)
                 .ignoresSafeArea()
                 .background(Color.clear)
 
-            // Bottom controls (thumbnail, capture, flip)
+            // Bottom controls
             VStack {
                 Spacer()
 
-                // Three buttons row
                 HStack(spacing: 60) {
                     // Left thumbnail
                     Button {
-                        if let img = session.lastPhoto {
+                        if let img = controller.lastPhoto {
                             capturedImage = img
                             capturedVideoURL = nil
                             showPreview = true
-                        } else if let url = session.lastVideoURL {
+                        } else if let url = controller.lastVideoURL {
                             capturedImage = nil
                             capturedVideoURL = url
                             showPreview = true
                         }
                     } label: {
                         ZStack {
-                            if let img = session.lastPhoto {
+                            if let img = controller.lastPhoto {
                                 Image(uiImage: img)
                                     .resizable()
                                     .scaledToFill()
-                            } else if session.lastVideoURL != nil {
+                            } else if controller.lastVideoURL != nil {
                                 Image(systemName: "video.fill")
                                     .resizable()
                                     .scaledToFit()
@@ -130,7 +77,7 @@ struct CameraView: View {
 
                     // Flip camera
                     Button {
-                        session.switchCamera()
+                        controller.switchCamera()
                     } label: {
                         Image(systemName: "arrow.triangle.2.circlepath.camera")
                             .font(.system(size: 22, weight: .semibold))
@@ -139,37 +86,40 @@ struct CameraView: View {
                             .background(.ultraThinMaterial, in: Circle())
                     }
                 }
-                // Bring the buttons row further down, above the mode labels
                 .padding(.bottom, tabBarHeight)
 
-                // Mode selector at the very bottom
+                // Mode selector
                 HStack(spacing: 24) {
-                    modeLabel("VIDEO", isActive: session.mode == .video)
-                        .onTapGesture { session.mode = .video }
-                    modeLabel("PHOTO", isActive: session.mode == .photo)
-                        .onTapGesture { session.mode = .photo }
+                    modeLabel("VIDEO", isActive: controller.mode == .video)
+                        .onTapGesture { controller.mode = .video }
+                    modeLabel("PHOTO", isActive: controller.mode == .photo)
+                        .onTapGesture { controller.mode = .photo }
                 }
                 .padding(.bottom, 28 + tabBarHeight)
             }
             .padding(.horizontal)
         }
         .background(Color.clear)
-        // Do NOT start/stop the session here — HomeView owns the lifecycle
-        .onChange(of: scenePhase) { _ in }
-        .onChange(of: session.lastPhoto) { img in
+        .onAppear {
+            Task { await controller.start() }
+        }
+        .onDisappear {
+            controller.stop()
+        }
+        .onChange(of: controller.lastPhoto) { img in
             guard let img else { return }
             capturedImage = img
             capturedVideoURL = nil
             showPreview = true
         }
-        .onChange(of: session.lastVideoURL) { url in
+        .onChange(of: controller.lastVideoURL) { url in
             guard let url else { return }
             capturedImage = nil
             capturedVideoURL = url
             showPreview = true
         }
         .sheet(isPresented: $showPreview) {
-            CapturePreviewView(
+            CameraKitCapturePreviewView(
                 image: capturedImage,
                 videoURL: capturedVideoURL,
                 coordinate: coordinate
@@ -179,9 +129,9 @@ struct CameraView: View {
 
     private var captureButton: some View {
         Button {
-            switch session.mode {
+            switch controller.mode {
             case .photo:
-                session.takePhoto()
+                controller.takePhoto()
             case .video:
                 break
             }
@@ -190,21 +140,21 @@ struct CameraView: View {
                 Circle().fill(Color.white.opacity(0.95))
                 Circle().stroke(Color.white, lineWidth: 4)
                 Circle()
-                    .fill(session.mode == .video ? Color.red : Color.white)
+                    .fill(controller.mode == .video ? Color.red : Color.white)
                     .padding(10)
-                    .scaleEffect(session.isRecording ? 0.9 : 1.0)
+                    .scaleEffect(controller.isRecording ? 0.9 : 1.0)
             }
         }
         .simultaneousGesture(
             LongPressGesture(minimumDuration: 0.05)
                 .onChanged { _ in
-                    guard session.mode == .video, !session.isRecording else { return }
-                    session.startRecording()
+                    guard controller.mode == .video, !controller.isRecording else { return }
+                    controller.startRecording()
                     isPressing = true
                 }
                 .onEnded { _ in
-                    guard session.mode == .video else { return }
-                    session.stopRecording()
+                    guard controller.mode == .video else { return }
+                    controller.stopRecording()
                     isPressing = false
                 }
         )
@@ -223,9 +173,21 @@ struct CameraView: View {
     }
 }
 
-// Simple preview/confirm uploader
-import AVKit
-private struct CapturePreviewView: View {
+// UIKit wrapper for SCSDKCameraKit.PreviewView inside SwiftUI
+private struct CameraKitPreviewContainer: UIViewRepresentable {
+    let controller: CameraKitController
+
+    func makeUIView(context: Context) -> UIView {
+        let view = controller.makePreviewView()
+        view.backgroundColor = .clear
+        return view
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {}
+}
+
+// Local copy of the capture preview (mirrors CameraView’s behavior)
+private struct CameraKitCapturePreviewView: View {
     let image: UIImage?
     let videoURL: URL?
     let coordinate: CLLocationCoordinate2D?
@@ -245,7 +207,7 @@ private struct CapturePreviewView: View {
                         .scaledToFit()
                         .ignoresSafeArea()
                 } else if let videoURL {
-                    VideoPlayerView(url: videoURL)
+                    VideoPlayer(player: AVPlayer(url: videoURL))
                         .ignoresSafeArea()
                 } else {
                     Text("Nothing captured").foregroundColor(.white)
@@ -293,71 +255,6 @@ private struct CapturePreviewView: View {
             }
         } else {
             isUploading = false
-        }
-    }
-}
-
-private struct VideoPlayerView: View {
-    let url: URL
-    @State private var player: AVPlayer?
-
-    var body: some View {
-        VideoPlayer(player: player)
-            .onAppear { player = AVPlayer(url: url); player?.play() }
-            .onDisappear { player?.pause() }
-    }
-}
-
-import FirebaseStorage
-import FirebaseFirestore
-import FirebaseAuth
-
-enum UploadBridge {
-    static func uploadImage(image: UIImage, coordinate: CLLocationCoordinate2D, completion: @escaping (Bool, String?) -> Void) {
-        let storageRef = Storage.storage().reference()
-        let imageRef = storageRef.child("media/\(UUID().uuidString).jpg")
-        guard let data = image.jpegData(compressionQuality: 0.75) else {
-            completion(false, "Failed to encode image.")
-            return
-        }
-        imageRef.putData(data, metadata: nil) { _, error in
-            if let error = error { completion(false, error.localizedDescription); return }
-            imageRef.downloadURL { url, error in
-                if let error = error { completion(false, error.localizedDescription); return }
-                guard let url else { completion(false, "No URL"); return }
-                savePostToFirestore(mediaURL: url.absoluteString, coordinate: coordinate, completion: completion)
-            }
-        }
-    }
-
-    static func uploadVideo(url: URL, coordinate: CLLocationCoordinate2D, completion: @escaping (Bool, String?) -> Void) {
-        let storageRef = Storage.storage().reference()
-        let videoRef = storageRef.child("media/\(UUID().uuidString).mov")
-        videoRef.putFile(from: url, metadata: nil) { _, error in
-            if let error = error { completion(false, error.localizedDescription); return }
-            videoRef.downloadURL { url, error in
-                if let error = error { completion(false, error.localizedDescription); return }
-                guard let url else { completion(false, "No URL"); return }
-                savePostToFirestore(mediaURL: url.absoluteString, coordinate: coordinate, completion: completion)
-            }
-        }
-    }
-
-    private static func savePostToFirestore(mediaURL: String, coordinate: CLLocationCoordinate2D, completion: @escaping (Bool, String?) -> Void) {
-        let db = Firestore.firestore()
-        var post: [String: Any] = [
-            "latitude": coordinate.latitude,
-            "longitude": coordinate.longitude,
-            "mediaURL": mediaURL,
-            "radius": 5000,
-            "viewCount": 0
-        ]
-        if let uid = Auth.auth().currentUser?.uid {
-            post["userID"] = uid
-        }
-        db.collection("posts").addDocument(data: post) { error in
-            if let error = error { completion(false, error.localizedDescription) }
-            else { completion(true, nil) }
         }
     }
 }

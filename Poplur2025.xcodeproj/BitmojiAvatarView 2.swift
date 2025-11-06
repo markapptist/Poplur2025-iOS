@@ -1,0 +1,55 @@
+import SwiftUI
+
+struct BitmojiAvatarView: View {
+    // Current Firebase user ID (optional; not strictly needed to render)
+    let userID: String?
+    // Fallback profile picture URL if no Bitmoji is set
+    let fallbackURL: URL?
+    // Display size (square; circle clipped)
+    let size: CGFloat
+
+    // The ProfileView is already loading bitmojiAvatarURL from Firestore into user.profilePictureURL.
+    // Here we simply render the passed-in URL (fallbackURL) which may already be a Bitmoji URL.
+    // If you later want this view to fetch Firestore directly, you can extend it.
+
+    var body: some View {
+        Group {
+            if let url = fallbackURL {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .empty:
+                        ZStack {
+                            Circle().fill(Color.gray.opacity(0.2))
+                            ProgressView().progressViewStyle(.circular)
+                        }
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    case .failure:
+                        placeholder
+                    @unknown default:
+                        placeholder
+                    }
+                }
+            } else {
+                placeholder
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
+        .overlay(Circle().stroke(Color.black.opacity(0.06), lineWidth: 1))
+        .shadow(color: Color.black.opacity(0.08), radius: 6, x: 0, y: 3)
+        .accessibilityLabel("User Avatar")
+    }
+
+    private var placeholder: some View {
+        ZStack {
+            Circle().fill(Color.gray.opacity(0.2))
+            Image(systemName: "person.fill")
+                .font(.system(size: size * 0.4, weight: .bold))
+                .foregroundColor(.secondary)
+        }
+    }
+}
+
