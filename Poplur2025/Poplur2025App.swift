@@ -1,139 +1,93 @@
-//
-//  Poplur2025App.swift
-//  Poplur2025
-//
-//  Created by Apptist Inc. on 2025-08-03.
-//
-
 import SwiftUI
 import FirebaseCore
-import FirebaseAuth
+import AVFoundation
 
-class AppDelegate: NSObject, UIApplicationDelegate {
-
-  // Keep a weak reference to the window (optional)
-  weak var mainWindow: UIWindow?
-
-  func application(_ application: UIApplication,
-                   didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
-    FirebaseApp.configure()
-
-    // SOLID, NON-TRANSLUCENT TAB BAR
-    let tabAppearance = UITabBarAppearance()
-    tabAppearance.configureWithOpaqueBackground()
-    tabAppearance.backgroundEffect = nil
-    tabAppearance.backgroundColor = .systemBackground
-    tabAppearance.shadowColor = UIColor.separator
-
-    UITabBar.appearance().standardAppearance = tabAppearance
-    if #available(iOS 15.0, *) {
-        UITabBar.appearance().scrollEdgeAppearance = tabAppearance
-    }
-    UITabBar.appearance().isTranslucent = false
-    UITabBar.appearance().barTintColor = .systemBackground
-
-    // SOLID, NON-TRANSLUCENT NAV BAR
-    let navAppearance = UINavigationBarAppearance()
-    navAppearance.configureWithOpaqueBackground()
-    navAppearance.backgroundEffect = nil
-    navAppearance.backgroundColor = .systemBackground
-    navAppearance.shadowColor = UIColor.separator
-    navAppearance.titleTextAttributes = [
-        .foregroundColor: UIColor.label
-    ]
-    navAppearance.largeTitleTextAttributes = [
-        .foregroundColor: UIColor.label
-    ]
-
-    UINavigationBar.appearance().standardAppearance = navAppearance
-    UINavigationBar.appearance().scrollEdgeAppearance = navAppearance
-    UINavigationBar.appearance().compactAppearance = navAppearance
-    UINavigationBar.appearance().isTranslucent = false
-    UINavigationBar.appearance().barTintColor = .systemBackground
-
-    return true
-  }
-
-  // Use SceneDelegate to set a sane, solid background on the window
-  func application(_ application: UIApplication,
-                   configurationForConnecting connectingSceneSession: UISceneSession,
-                   options: UIScene.ConnectionOptions) -> UISceneConfiguration {
-      let config = UISceneConfiguration(name: "Default Configuration", sessionRole: connectingSceneSession.role)
-      config.delegateClass = SceneDelegate.self
-      return config
-  }
-}
-
-// Scene delegate: set window background to systemBackground (not clear)
-class SceneDelegate: NSObject, UIWindowSceneDelegate {
-    var window: UIWindow?
-
-    func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
-        guard let windowScene = scene as? UIWindowScene else { return }
-        let window = UIWindow(windowScene: windowScene)
-        window.backgroundColor = .systemBackground
-        self.window = window
-
-        // Keep a reference in AppDelegate (optional)
-        if let appDelegate = UIApplication.shared.delegate as? AppDelegate {
-            appDelegate.mainWindow = window
+// AppDelegate: configure SDKs
+final class AppDelegate: NSObject, UIApplicationDelegate {
+    func application(_ application: UIApplication,
+                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        if FirebaseApp.app() == nil {
+            FirebaseApp.configure()
         }
-    }
-
-    func sceneDidBecomeActive(_ scene: UIScene) {
-        window?.backgroundColor = .systemBackground
+        return true
     }
 }
 
-@MainActor
-final class AuthViewModel: ObservableObject {
-    @Published var isAuthenticated: Bool = false
-    private var handle: AuthStateDidChangeListenerHandle?
-
-    init() {
-        isAuthenticated = Auth.auth().currentUser != nil
-        handle = Auth.auth().addStateDidChangeListener { [weak self] _, user in
-            Task { @MainActor in
-                let authed = (user != nil)
-                print("Auth state changed. User:", user?.uid ?? "nil", " -> isAuthenticated:", authed)
-                self?.isAuthenticated = authed
-            }
-        }
-    }
-
-    deinit {
-        if let handle = handle {
-            Auth.auth().removeStateDidChangeListener(handle)
-        }
-    }
+// Optional: only needed if you explicitly configured a SceneDelegate in Info.plist.
+// If you do not reference this class in UIApplicationSceneManifest, you can delete it.
+final class SceneDelegate: NSObject, UIWindowSceneDelegate {
+    // No Snapchat URL handling anymore
 }
 
 @main
-struct MediaApp: App {
-    @UIApplicationDelegateAdaptor(AppDelegate.self) var delegate
+struct Poplur2025App: App {
+    // Attach AppDelegate to SwiftUI lifecycle
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+
     @StateObject private var auth = AuthViewModel()
+
+    // Prewarmed, shared camera controller for fast camera bring-up
+    @StateObject private var cameraController = CameraKitController()
 
     var body: some Scene {
         WindowGroup {
-            ZStack {
-                // Solid app background
-                Color(.systemBackground).ignoresSafeArea()
-
-                NavigationStack {
-                    if auth.isAuthenticated {
-                        HomeView()
-                    } else {
-                        WelcomeView()
-                    }
+            NavigationStack {
+                if auth.isAuthenticated {
+                    // Inject the shared, prewarmed controller into HomeView
+                    HomeView(cameraController: cameraController)
+                        .environmentObject(auth)
+                        // Prewarm the camera as soon as the app is up
+                        .task {
+                            await prewarmCameraIfAllowed()
+                        }
+                } else {
+                    WelcomeView()
+                        .environmentObject(auth)
+                        // Optionally prewarm camera even on welcome to avoid later delay
+                        .task {
+                            await prewarmCameraIfAllowed()
+                        }
                 }
-                // Use solid nav bar background from appearance
-                .toolbarBackground(Color(.systemBackground), for: .navigationBar)
-                .toolbar(.visible, for: .navigationBar)
-                .background(Color(.systemBackground))
             }
-            .environmentObject(auth)
-            .preferredColorScheme(.light)
-            .background(Color(.systemBackground))
+            .onAppear {
+                // Apply tab bar appearance once at app launch (not per-HomeView init)
+                let appearance = UITabBarAppearance()
+                appearance.configureWithTransparentBackground()
+                appearance.backgroundEffect = nil
+                appearance.backgroundColor = .clear
+                UITabBar.appearance().standardAppearance = appearance
+                if #available(iOS 15.0, *) {
+                    UITabBar.appearance().scrollEdgeAppearance = appearance
+                }
+                UITabBar.appearance().isTranslucent = true
+            }
+            // If you present CameraKitView somewhere, inject the prewarmed controller:
+            // CameraKitView(controller: cameraController, coordinate: ...)
+            // Pass `cameraController` down to the presenter as needed (via environment or init).
+        }
+    }
+
+    // MARK: - Camera prewarm
+
+    private func prewarmCameraIfAllowed() async {
+        let status = AVCaptureDevice.authorizationStatus(for: .video)
+        switch status {
+        case .authorized:
+            await cameraController.start()
+        case .notDetermined:
+            let granted = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+                AVCaptureDevice.requestAccess(for: .video) { ok in
+                    cont.resume(returning: ok)
+                }
+            }
+            if granted {
+                await cameraController.start()
+            }
+        case .denied, .restricted:
+            // Respect user choice; you can prompt to open Settings elsewhere.
+            break
+        @unknown default:
+            break
         }
     }
 }

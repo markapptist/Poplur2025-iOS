@@ -10,18 +10,14 @@ import FirebaseAuth
 import FirebaseFirestore
 
 struct AppSettingsView: View {
-    // Pager: 0 = Statistics, 1 = Settings
     @State private var pageIndex: Int = 0
-
-    // Toggles
     @State private var isPrivateAccount = false
     @State private var notificationsEnabled = true
 
-    // Stats
     @State private var posts: [Post] = []
     @State private var isLoadingStats = true
+    @State private var maxDurationDisplay: Double = SettingsStore.shared.maxVideoDurationSeconds
 
-    // Computed stats
     private var totalRadius: Int {
         posts.reduce(0) { $0 + $1.radius }
     }
@@ -35,186 +31,317 @@ struct AppSettingsView: View {
         return max(50_000, rounded) * 1000.0
     }
 
-    // Screen-based sizing
     private var screenSize: CGSize { UIScreen.main.bounds.size }
     private var ticketWidth: CGFloat { min(screenSize.width - 24, 700) }
     private var ticketHeight: CGFloat { screenSize.height * 0.78 }
 
-    // Brand color (sRGB) #FF2D96
     private let brandPink = Color(red: 1.0, green: 45.0/255.0, blue: 150.0/255.0)
 
     var body: some View {
         ZStack {
-            // Light canvas behind the ticket
-            Color(white: 0.96).ignoresSafeArea()
+            brandPink.ignoresSafeArea()
 
-            VStack {
-                Spacer(minLength: 0)
-
-                TicketCard(
-                    pageIndex: $pageIndex,
-                    isPrivateAccount: $isPrivateAccount,
-                    notificationsEnabled: $notificationsEnabled,
-                    isLoadingStats: $isLoadingStats,
-                    statsHeaderTitle: "Statistics",
-                    settingsHeaderTitle: "Settings",
-                    statsPage: { statsPage },
-                    settingsPage: { settingsPage },
-                    brandPink: brandPink
-                )
-                .frame(width: ticketWidth, height: ticketHeight)
-
-                Spacer(minLength: 0)
+            VStack(spacing: 0) {
+                // Start content at the very top – no top Spacer
+                ScrollViewReader { proxy in
+                    TicketCard(
+                        pageIndex: $pageIndex,
+                        isPrivateAccount: $isPrivateAccount,
+                        notificationsEnabled: $notificationsEnabled,
+                        isLoadingStats: $isLoadingStats,
+                        statsHeaderTitle: "Statistics",
+                        settingsHeaderTitle: "Settings",
+                        statsPage: { statsPage.id("top") },
+                        settingsPage: { settingsPage.id("top") },
+                        brandPink: brandPink
+                    )
+                    .frame(width: ticketWidth, height: ticketHeight)
+                    .onReceive(NotificationCenter.default.publisher(for: .ResetTabToTop)) { _ in
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            proxy.scrollTo("top", anchor: .top)
+                        }
+                    }
+                }
             }
         }
-        .onAppear { loadStats() }
+        .task {
+            await loadStats()
+            maxDurationDisplay = SettingsStore.shared.maxVideoDurationSeconds
+        }
+        .onAppear {
+            Task { await loadStats() }
+            maxDurationDisplay = SettingsStore.shared.maxVideoDurationSeconds
+        }
     }
 
     // MARK: - Pages
 
     private var statsPage: some View {
-        VStack(spacing: 28) {
-            Spacer().frame(height: 8)
-
-            Text("Average Radius")
-                .font(.system(size: 22, weight: .heavy, design: .rounded))
-                .foregroundColor(.white)
-
-            if isLoadingStats {
-                ProgressView()
-                    .progressViewStyle(.circular)
-                    .tint(.white)
-            } else {
-                RingStatView(
-                    value: averageRadius,
-                    maxValue: ringMax,
-                    unit: "KM",
-                    accentColor: .black,
-                    trackColor: .white.opacity(0.25),
-                    lineWidthFactor: 0.12
-                )
-                .frame(height: 280)
-                .padding(.top, 4)
-            }
-
-            VStack(spacing: 10) {
-                Text("Accumulated Radius")
+        ScrollView {
+            VStack(alignment: .center, spacing: 20) {
+                // Title
+                Text("Average Radius")
                     .font(.system(size: 22, weight: .heavy, design: .rounded))
                     .foregroundColor(.white)
+                    .padding(.top, 16)
+                    .frame(maxWidth: .infinity, alignment: .center)
 
                 if isLoadingStats {
-                    ProgressView()
-                        .progressViewStyle(.circular)
-                        .tint(.white)
+                    HStack {
+                        Spacer()
+                        ProgressView()
+                            .progressViewStyle(.circular)
+                            .tint(.white)
+                        Spacer()
+                    }
+                    .padding(.vertical, 16)
                 } else {
-                    Text("You’ve reached")
-                        .font(.system(size: 16, weight: .semibold, design: .rounded))
-                        .foregroundColor(.white.opacity(0.95))
-
-                    Text(formattedKM(totalRadius))
-                        .font(.system(size: 48, weight: .heavy, design: .rounded))
-                        .foregroundColor(.white)
-
-                    Text("in total")
-                        .font(.system(size: 16, weight: .semibold, design: .rounded))
-                        .foregroundColor(.white.opacity(0.95))
+                    // Ring centered
+                    HStack {
+                        Spacer()
+                        RingStatView(
+                            value: averageRadius,
+                            maxValue: ringMax,
+                            unit: "KM",
+                            accentColor: .black,
+                            trackColor: .white.opacity(0.25),
+                            lineWidthFactor: 0.12
+                        )
+                        .frame(height: 260)
+                        .padding(.top, 4)
+                        Spacer()
+                    }
                 }
-            }
 
-            Spacer(minLength: 0)
+                VStack(alignment: .center, spacing: 8) {
+                    Text("Accumulated Radius")
+                        .font(.system(size: 22, weight: .heavy, design: .rounded))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity, alignment: .center)
+
+                    if isLoadingStats {
+                        HStack {
+                            Spacer()
+                            ProgressView()
+                                .progressViewStyle(.circular)
+                                .tint(.white)
+                            Spacer()
+                        }
+                        .padding(.vertical, 8)
+                    } else {
+                        Text("You’ve reached")
+                            .font(.system(size: 16, weight: .semibold, design: .rounded))
+                            .foregroundColor(.white.opacity(0.95))
+                            .frame(maxWidth: .infinity, alignment: .center)
+
+                        Text(formattedKM(totalRadius))
+                            .font(.system(size: 44, weight: .heavy, design: .rounded))
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity, alignment: .center)
+
+                        Text("in total")
+                            .font(.system(size: 16, weight: .semibold, design: .rounded))
+                            .foregroundColor(.white.opacity(0.95))
+                            .frame(maxWidth: .infinity, alignment: .center)
+                    }
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 24)
+            .frame(maxWidth: .infinity, alignment: .top)
         }
-        .padding(.horizontal, 24)
+        .scrollIndicators(.never)
     }
 
     private var settingsPage: some View {
-        VStack(spacing: 30) {
-            Spacer().frame(height: 8)
+        ScrollView {
+            VStack(alignment: .center, spacing: 24) {
+                // Title
+                Text("Account Options")
+                    .font(.system(size: 22, weight: .heavy, design: .rounded))
+                    .foregroundColor(.white)
+                    .padding(.top, 16)
+                    .frame(maxWidth: .infinity, alignment: .center)
 
-            Text("Account Options")
-                .font(.system(size: 22, weight: .heavy, design: .rounded))
-                .foregroundColor(.white)
+                // Settings rows group
+                VStack(spacing: 14) {
+                    settingsToggleRow(title: "Private Account", isOn: $isPrivateAccount)
+                    settingsToggleRow(title: "Notifications", isOn: $notificationsEnabled)
+                    settingsNavRow(title: "Email Address") { /* push email editor */ }
+                    settingsNavRow(title: "Password") { /* push password editor */ }
+                }
+                .frame(maxWidth: .infinity)
 
-            VStack(spacing: 28) {
-                toggleRow(title: "Private Account", isOn: $isPrivateAccount)
-                toggleRow(title: "Notifications", isOn: $notificationsEnabled)
-                navRow(title: "Email Address") { /* push email editor */ }
-                navRow(title: "Password") { /* push password editor */ }
+                // Video duration quick action
+                VStack(alignment: .center, spacing: 8) {
+                    Button {
+                        SettingsStore.shared.maxVideoDurationSeconds = 10.0
+                        maxDurationDisplay = 10.0
+                    } label: {
+                        Text("Limit videos to 10 seconds")
+                            .font(.system(size: 16, weight: .heavy, design: .rounded))
+                            .foregroundColor(.black)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .background(Color.white, in: Capsule())
+                    }
+
+                    Text("Current limit: \(Int(maxDurationDisplay))s")
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.9))
+                        .frame(maxWidth: .infinity, alignment: .center)
+                }
+
+                // Dev actions (optional)
+                VStack(spacing: 12) {
+                    Button {
+                        Task { await FakePostService.shared.seedInitialNorthAmerica(total: 1000) }
+                    } label: {
+                        Text("Seed NA (1000)")
+                            .font(.system(size: 16, weight: .heavy, design: .rounded))
+                            .foregroundColor(.black)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .background(Color.white, in: Capsule())
+                    }
+
+                    Button {
+                        FakePostService.shared.startWorldSimulator(devDailySeconds: 120)
+                    } label: {
+                        Text("Start Simulator (dev: 120s/day)")
+                            .font(.system(size: 16, weight: .heavy, design: .rounded))
+                            .foregroundColor(.black)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .background(Color.white, in: Capsule())
+                    }
+
+                    Button(role: .destructive) {
+                        FakePostService.shared.stopWorldSimulator()
+                    } label: {
+                        Text("Stop Simulator")
+                            .font(.system(size: 16, weight: .heavy, design: .rounded))
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .background(Color.red, in: Capsule())
+                    }
+                    .padding(.top, 4)
+                }
+
+                // Sign out
+                Button(action: signOut) {
+                    Text("Sign Out")
+                        .font(.system(size: 18, weight: .heavy, design: .rounded))
+                        .foregroundColor(.black)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 16)
+                        .background(Color.white, in: Capsule())
+                        .shadow(color: Color.black.opacity(0.12), radius: 10, x: 0, y: 6)
+                }
+                .padding(.top, 8)
+
+                Spacer(minLength: 24) // bottom breathing room above scallops
             }
             .padding(.horizontal, 24)
-            .padding(.top, 4)
-
-            Button(action: signOut) {
-                Text("Sign Out")
-                    .font(.system(size: 18, weight: .heavy, design: .rounded))
-                    .foregroundColor(.black)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
-                    .background(Color.white, in: Capsule())
-                    .shadow(color: Color.black.opacity(0.12), radius: 10, x: 0, y: 6)
-            }
-            .padding(.horizontal, 48)
-            .padding(.top, 8)
-
-            Spacer(minLength: 0)
+            .frame(maxWidth: .infinity, alignment: .top)
         }
+        .scrollIndicators(.never)
     }
 
-    // MARK: - Rows + helpers
+    // MARK: - Row components
 
-    private func toggleRow(title: String, isOn: Binding<Bool>) -> some View {
-        HStack {
+    private func settingsToggleRow(title: String, isOn: Binding<Bool>) -> some View {
+        HStack(alignment: .center, spacing: 12) {
             Text(title)
                 .font(.system(size: 18, weight: .heavy, design: .rounded))
                 .foregroundColor(.white)
-            Spacer()
+            Spacer(minLength: 12)
             Toggle("", isOn: isOn)
                 .labelsHidden()
                 .toggleStyle(SwitchToggleStyle(tint: Color(.systemIndigo)))
         }
+        .contentShape(Rectangle())
+        .frame(maxWidth: .infinity, minHeight: 44)
     }
 
-    private func navRow(title: String, action: @escaping () -> Void) -> some View {
+    private func settingsNavRow(title: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            HStack {
+            HStack(alignment: .center, spacing: 12) {
                 Text(title)
                     .font(.system(size: 18, weight: .heavy, design: .rounded))
                     .foregroundColor(.white)
-                Spacer()
+                Spacer(minLength: 12)
                 Image(systemName: "arrow.right")
                     .font(.system(size: 18, weight: .bold))
                     .foregroundColor(Color(.systemIndigo))
             }
+            .frame(minHeight: 44)
         }
         .buttonStyle(.plain)
     }
 
-    private func loadStats() {
+    // MARK: - Data
+
+    private func loadStats() async {
+        await MainActor.run { isLoadingStats = true }
+        defer { Task { @MainActor in isLoadingStats = false } }
+
         guard let userId = Auth.auth().currentUser?.uid else {
-            self.posts = []
-            self.isLoadingStats = false
+            await MainActor.run {
+                self.posts = []
+            }
             return
         }
-        isLoadingStats = true
-        let db = FirebaseFirestore.Firestore.firestore()
-        db.collection("posts").whereField("userID", isEqualTo: userId).getDocuments { snapshot, error in
-            if let error = error {
-                print("Stats fetch error: \(error.localizedDescription)")
-                self.posts = []
-                self.isLoadingStats = false
-                return
+
+        do {
+            let fetched = try await fetchUserPosts(uid: userId)
+            await MainActor.run {
+                self.posts = fetched
             }
-            self.posts = snapshot?.documents.compactMap { doc in
-                let data = doc.data()
-                return Post(
-                    id: doc.documentID,
-                    latitude: data["latitude"] as? Double ?? 0,
-                    longitude: data["longitude"] as? Double ?? 0,
-                    mediaURL: data["mediaURL"] as? String ?? "",
-                    radius: data["radius"] as? Int ?? 0,
-                    viewCount: data["viewCount"] as? Int ?? 0
-                )
-            } ?? []
-            self.isLoadingStats = false
+        } catch {
+            print("Stats fetch error: \(error.localizedDescription)")
+            await MainActor.run {
+                self.posts = []
+            }
+        }
+    }
+
+    private func fetchUserPosts(uid: String) async throws -> [Post] {
+        try await withCheckedThrowingContinuation { cont in
+            let db = FirebaseFirestore.Firestore.firestore()
+            db.collection("posts").whereField("userID", isEqualTo: uid).getDocuments { snapshot, error in
+                if let error {
+                    cont.resume(throwing: error)
+                    return
+                }
+                guard let snapshot else {
+                    cont.resume(returning: [])
+                    return
+                }
+                var out: [Post] = []
+                out.reserveCapacity(snapshot.documents.count)
+                for doc in snapshot.documents {
+                    let data = doc.data()
+                    let lat = (data["latitude"] as? Double) ?? (data["latitude"] as? NSNumber)?.doubleValue ?? 0
+                    let lon = (data["longitude"] as? Double) ?? (data["longitude"] as? NSNumber)?.doubleValue ?? 0
+                    let mediaURL = data["mediaURL"] as? String ?? ""
+                    let radius = (data["radius"] as? Int) ?? (data["radius"] as? NSNumber)?.intValue ?? 0
+                    let viewCount = (data["viewCount"] as? Int) ?? (data["viewCount"] as? NSNumber)?.intValue ?? 0
+                    let userID = data["userID"] as? String ?? uid
+                    out.append(Post(
+                        id: doc.documentID,
+                        latitude: lat,
+                        longitude: lon,
+                        mediaURL: mediaURL,
+                        radius: radius,
+                        viewCount: viewCount,
+                        userID: userID
+                    ))
+                }
+                cont.resume(returning: out)
+            }
         }
     }
 
@@ -233,148 +360,3 @@ struct AppSettingsView: View {
     }
 }
 
-// MARK: - Ticket Card container (pink panel + paging + dots; no close button)
-
-private struct TicketCard<Stats: View, Settings: View>: View {
-    @Binding var pageIndex: Int
-    @Binding var isPrivateAccount: Bool
-    @Binding var notificationsEnabled: Bool
-    @Binding var isLoadingStats: Bool
-
-    let statsHeaderTitle: String
-    let settingsHeaderTitle: String
-
-    @ViewBuilder var statsPage: () -> Stats
-    @ViewBuilder var settingsPage: () -> Settings
-
-    let brandPink: Color
-
-    var body: some View {
-        ZStack {
-            TicketBackground()
-                .fill(brandPink) // brand pink #FF2D96
-                .shadow(color: Color.black.opacity(0.12), radius: 18, x: 0, y: 10)
-
-            VStack(spacing: 18) {
-                // Header
-                HStack {
-                    Image(systemName: pageIndex == 0 ? "waveform.path.ecg" : "gearshape.fill")
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundColor(.white)
-                    Spacer()
-                    Text(pageIndex == 0 ? statsHeaderTitle : settingsHeaderTitle)
-                        .font(.system(size: 24, weight: .heavy, design: .rounded))
-                        .foregroundColor(.white)
-                    Spacer()
-                    Color.clear.frame(width: 18)
-                }
-                .padding(.top, 24)
-                .padding(.horizontal, 24)
-
-                // Pager
-                TabView(selection: $pageIndex) {
-                    statsPage().tag(0)
-                    settingsPage().tag(1)
-                }
-                .tabViewStyle(.page(indexDisplayMode: .never))
-
-                // Dots
-                HStack(spacing: 10) {
-                    Circle()
-                        .fill(pageIndex == 0 ? Color.white : Color.white.opacity(0.6))
-                        .frame(width: 10, height: 10)
-                    Circle()
-                        .fill(pageIndex == 1 ? Color.white : Color.white.opacity(0.6))
-                        .frame(width: 10, height: 10)
-                }
-                .padding(.bottom, 24)
-            }
-        }
-        // Removed the bottom close button overlay
-    }
-}
-
-// MARK: - Ticket background with scalloped bottom (holes)
-
-private struct TicketBackground: Shape {
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-
-        // Rounded rect
-        let corner: CGFloat = 24
-        let rounded = UIBezierPath(roundedRect: rect, cornerRadius: corner).cgPath
-        path.addPath(Path(rounded))
-
-        // Scallops (holes) near the bottom edge
-        let diameter: CGFloat = 18
-        let spacing: CGFloat = 8
-        let total = Int((rect.width + spacing) / (diameter + spacing))
-        let y = rect.maxY - diameter / 2 - 4
-
-        for i in 0..<total {
-            let x = rect.minX + (CGFloat(i) * (diameter + spacing)) + diameter / 2
-            let circle = CGRect(x: x - diameter/2, y: y - diameter/2, width: diameter, height: diameter)
-            path.addEllipse(in: circle)
-        }
-
-        // Even-odd rule to cut the circles out of the card
-        return path.eoFilled()
-    }
-}
-
-private extension Path {
-    func eoFilled() -> Path {
-        var p = self
-        p = p.strokedPath(.init(lineWidth: 0))
-        return p
-    }
-}
-
-// MARK: - Big ring view (center labels like mock)
-
-private struct RingStatView: View {
-    let value: Double        // meters
-    let maxValue: Double     // meters
-    let unit: String         // "KM"
-    let accentColor: Color
-    let trackColor: Color
-    let lineWidthFactor: CGFloat
-
-    var body: some View {
-        GeometryReader { geo in
-            let size = min(geo.size.width, geo.size.height)
-            let lineWidth = size * lineWidthFactor
-            let progress = max(0, min(value / maxValue, 1))
-
-            ZStack {
-                Circle()
-                    .stroke(trackColor, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
-                Circle()
-                    .trim(from: 0, to: CGFloat(progress))
-                    .stroke(accentColor, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
-                    .rotationEffect(.degrees(-90))
-
-                VStack(spacing: 6) {
-                    Text(DateFormatter.shortMonthDay.string(from: Date()).uppercased())
-                        .font(.system(size: 16, weight: .heavy, design: .rounded))
-                        .foregroundColor(.white)
-                    Text(String(format: "%.1f %@", value / 1000.0, unit))
-                        .font(.system(size: 42, weight: .heavy, design: .rounded))
-                        .foregroundColor(.white)
-                    Text("on average")
-                        .font(.system(size: 16, weight: .semibold, design: .rounded))
-                        .foregroundColor(.white.opacity(0.95))
-                }
-            }
-            .frame(width: size, height: size)
-        }
-    }
-}
-
-private extension DateFormatter {
-    static let shortMonthDay: DateFormatter = {
-        let df = DateFormatter()
-        df.setLocalizedDateFormatFromTemplate("MMM d")
-        return df
-    }()
-}

@@ -1,7 +1,6 @@
 import Foundation
 import UIKit
 import SCSDKLoginKit
-import SCSDKBitmojiKit
 
 @MainActor
 final class BitmojiManager: ObservableObject {
@@ -17,11 +16,10 @@ final class BitmojiManager: ObservableObject {
 
     private init() { }
 
-    // Public API: Presents Snapchat login and returns Bitmoji avatar URL if available
+    // Public API: Presents Snapchat login and (formerly) Bitmoji avatar URL.
+    // Since SCSDKBitmojiKit is deprecated/removed, we now just perform login and return nil.
     func signInAndFetchAvatarURL(from presentingVC: UIViewController) async throws -> String? {
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<String?, Error>) in
-            // Ensure login client is ready; some SDK versions require configuration.
-            // SCSDKLoginClient may read configuration from Info.plist / dashboard.
             SCSDKLoginClient.login(from: presentingVC) { success, error in
                 if let error = error {
                     cont.resume(throwing: error)
@@ -31,21 +29,9 @@ final class BitmojiManager: ObservableObject {
                     cont.resume(returning: nil)
                     return
                 }
-                self.fetchBitmojiAvatarURL { urlString, fetchError in
-                    if let fetchError = fetchError {
-                        cont.resume(throwing: fetchError)
-                    } else {
-                        cont.resume(returning: urlString)
-                    }
-                }
+                // No Bitmoji API available. Return nil to indicate no avatar fetched.
+                cont.resume(returning: nil)
             }
-        }
-    }
-
-    // Fetch Bitmoji avatar URL via Bitmoji Kit
-    private func fetchBitmojiAvatarURL(completion: @escaping (String?, Error?) -> Void) {
-        SCSDKBitmojiClient.fetchAvatarURL { urlString, error in
-            completion(urlString, error)
         }
     }
 
@@ -54,4 +40,3 @@ final class BitmojiManager: ObservableObject {
         return SCSDKLoginClient.application(UIApplication.shared, open: url, options: [:])
     }
 }
-

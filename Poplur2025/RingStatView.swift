@@ -24,23 +24,16 @@ struct RingStatView: View {
         GeometryReader { geo in
             let side = min(geo.size.width, geo.size.height)
             let lineWidth = max(2, side * lineWidthFactor)
-            let inset = lineWidth / 2
-            let startAngle: Angle = .degrees(-90)
-            let endAngle: Angle = .degrees(-90 + 360 * clampedProgress)
 
             ZStack {
-                // Track
+                // Track (draws inside the circle’s bounds)
                 Circle()
-                    .inset(by: inset)
-                    .stroke(style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
-                    .foregroundStyle(trackColor)
+                    .stroke(trackColor, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
 
                 // Progress arc
                 Circle()
                     .trim(from: 0, to: clampedProgress)
-                    .inset(by: inset)
-                    .stroke(style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
-                    .foregroundStyle(accentColor)
+                    .stroke(accentColor, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
                     .rotationEffect(.degrees(-90))
                     .animation(.easeInOut(duration: 0.4), value: clampedProgress)
 

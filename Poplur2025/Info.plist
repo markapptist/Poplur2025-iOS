@@ -1,5 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
-<dict/>
+<dict>
+	<key>CameraKitAPIToken</key>
+	<string>eyJhbGciOiJIUzI1NiIsImtpZCI6IkNhbnZhc1MyU0hNQUNQcm9kIiwidHlwIjoiSldUIn0.eyJhdWQiOiJjYW52YXMtY2FudmFzYXBpIiwiaXNzIjoiY2FudmFzLXMyc3Rva2VuIiwibmJmIjoxNzYxODQyNjU3LCJzdWIiOiJhYjZkMzcyYi04MzExLTRkNTYtOGE2Mi1iMDIyMjcxMGQwYzd-U1RBR0lOR342NWFhNWIzZS1iZmRhLTRjNWUtYWY0NC1jYjFkYzNkOTUwMTUifQ.DReaXlVW-ESjBwrFvMYgmqajaNNIDi4RoiM3BJF1z8M</string>
+	<key>CameraKitLensGroupID</key>
+	<string>1c2c1a05-a2f8-4bd4-a547-0e42cafaa43a</string>
+	<key>SCSDKClientId</key>
+	<string>e03c56c8-814b-480b-b910-a99bcd825d04</string>
+</dict>
 </plist>

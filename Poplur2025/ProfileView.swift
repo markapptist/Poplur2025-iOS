@@ -1,455 +1,395 @@
 import SwiftUI
 import FirebaseAuth
 import FirebaseFirestore
-import FirebaseStorage
-import CoreLocation
-
-private enum ProfileLayout: Hashable {
-    case list
-    case grid
-}
 
 struct ProfileView: View {
-    @State private var user: UserProfile?
-    @State private var posts: [Post] = []
-    @State private var isEditingProfile = false
+    @EnvironmentObject private var auth: AuthViewModel
 
-    // Loading/error states
-    @State private var isLoadingUser = true
-    @State private var userLoadError: String?
+    @State private var editing = false
+    @State private var userProfile: UserProfile?
 
-    // Deterministic readiness
-    @State private var profileReady = false
-    @State private var didLoadUserOnce = false
-    @State private var didLoadPostsOnce = false
+    @State private var myPosts: [Post] = []
+    @State private var isLoading = false
 
-    // UI state
-    @State private var layout: ProfileLayout = .list
+    enum DisplayMode: String, CaseIterable, Identifiable {
+        case list
+        case grid
+        var id: String { rawValue }
+    }
+    @State private var mode: DisplayMode = .grid
 
-    // Config
-    private let accumulatedMaxRadius: Int = 50_000
+    private let gridCols = [
+        GridItem(.flexible(), spacing: 12),
+        GridItem(.flexible(), spacing: 12),
+        GridItem(.flexible(), spacing: 12)
+    ]
 
-    private var totalRadius: Int {
-        posts.reduce(0) { $0 + $1.radius }
+    private let tileCorner: CGFloat = 18
+    private let tileSpacing: CGFloat = 12
+    private let headerTopPadding: CGFloat = 12
+
+    let userID: String?
+
+    init(userID: String? = nil) {
+        self.userID = userID
     }
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 20) {
-                header
+        NavigationStack {
+            ZStack {
+                Color.white.ignoresSafeArea()
 
-                toggleBar
+                VStack(spacing: 0) {
+                    headerBar
 
-                if isLoadingUser {
-                    ProgressView()
-                        .progressViewStyle(CircularProgressViewStyle())
-                        .padding(.top, 16)
-                } else if let userLoadError {
-                    Text(userLoadError)
-                        .font(.footnote)
-                        .foregroundColor(.red)
-                }
-
-                if posts.isEmpty {
-                    VStack(spacing: 8) {
-                        Text("No Posts Yet")
-                            .font(.title3.weight(.semibold))
-                            .foregroundColor(.secondary)
-                        Text("Upload your first post to see it here.")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                    VStack(spacing: 10) {
+                        avatarRow
+                        usernameRow
+                        modeSwitcher
                     }
-                    .padding(.top, 16)
-                    .frame(maxWidth: .infinity)
-                } else {
-                    switch layout {
-                    case .list:
-                        listContent
-                    case .grid:
-                        gridContent
-                    }
-                }
+                    .padding(.top, 8)
+                    .padding(.bottom, 8)
 
-                // Accumulated radius section
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Accumulated Radius")
-                        .font(.headline)
-                    HStack(alignment: .center, spacing: 12) {
-                        VerticalRadiusBar(
-                            radius: totalRadius,
-                            maxRadius: accumulatedMaxRadius,
-                            width: 10,
-                            maxHeight: 120,
-                            color: .green,
-                            showsLabel: true,
-                            labelFormat: { r in
-                                if r >= 1000 {
-                                    return "Total: \(r / 1000) km"
-                                } else {
-                                    return "Total: \(r) m"
+                    // Scrollable content with readers for "scroll to top"
+                    ScrollViewReader { proxy in
+                        Group {
+                            if isLoading {
+                                VStack { Spacer(); ProgressView().tint(.gray); Spacer() }
+                                .id("top")
+                            } else if myPosts.isEmpty {
+                                VStack(spacing: 8) {
+                                    Image(systemName: "square.stack.3d.up.slash")
+                                        .font(.system(size: 36, weight: .semibold))
+                                        .foregroundColor(.secondary)
+                                    Text("No posts yet.")
+                                        .foregroundColor(.secondary)
+                                }
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .id("top")
+                            } else {
+                                switch mode {
+                                case .grid:
+                                    ScrollView {
+                                        VStack(spacing: 0) {
+                                            Color.clear.frame(height: 0).id("top")
+                                            LazyVGrid(columns: gridCols, spacing: tileSpacing) {
+                                                ForEach(myPosts) { post in
+                                                    ProfileGridTile(post: post)
+                                                }
+                                            }
+                                            .padding(.horizontal, 16)
+                                            .padding(.top, 8)
+                                            .padding(.bottom, 16)
+                                        }
+                                    }
+                                case .list:
+                                    ScrollView {
+                                        VStack(spacing: 0) {
+                                            Color.clear.frame(height: 0).id("top")
+                                            VStack(spacing: 18) {
+                                                ForEach(myPosts) { post in
+                                                    ProfileListCard(post: post)
+                                                }
+                                            }
+                                            .padding(.horizontal, 16)
+                                            .padding(.top, 8)
+                                            .padding(.bottom, 16)
+                                        }
+                                    }
                                 }
                             }
-                        )
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Total across \(posts.count) post(s)")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                            Text("Max scale: \(accumulatedMaxRadius / 1000) km")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
+                        }
+                        .onReceive(NotificationCenter.default.publisher(for: .ResetTabToTop)) { _ in
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                proxy.scrollTo("top", anchor: .top)
+                            }
                         }
                     }
                 }
-                .padding(.horizontal)
-                .padding(.top, 8)
-
-                Button(action: { isEditingProfile.toggle() }) {
-                    Text("Edit Profile")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundColor(.blue)
-                }
-                .padding(.top, 8)
-
-                Button(action: { logOut() }) {
-                    Text("Log Out")
-                        .font(.subheadline)
-                        .foregroundColor(.red)
-                }
-                .padding(.top, 4)
             }
-            .padding(.vertical, 16)
+            .navigationBarHidden(true)
+            .sheet(isPresented: $editing) {
+                EditProfileView(user: $userProfile)
+            }
+            .task {
+                await loadMyPosts()
+            }
+            .onAppear { Task { await loadMyPosts() } }
+            .onReceive(NotificationCenter.default.publisher(for: .LoadProfileNow)) { _ in
+                Task { await loadMyPosts() }
+            }
         }
-        .sheet(isPresented: $isEditingProfile) {
-            EditProfileView(user: $user)
-        }
-        .onAppear {
-            fetchUserData()
-            fetchUserPosts()
-        }
-        .background(Color.clear)
-        .toolbarBackground(.clear, for: .tabBar)
-        .toolbar(.visible, for: .tabBar)
-        .preference(key: ProfileReadyPreferenceKey.self, value: profileReady)
     }
 
-    // MARK: - Header
-
-    private var header: some View {
-        let headerUser = user ?? fallbackUserFromAuth()
-        return VStack(spacing: 10) {
-            // Avatar
-            if let url = headerUser.profilePictureURL {
-                AsyncImage(url: url) { image in
-                    image.resizable()
-                        .scaledToFill()
-                        .frame(width: 96, height: 96)
-                        .clipShape(Circle())
-                } placeholder: {
-                    Circle().fill(Color.gray.opacity(0.3))
-                        .frame(width: 96, height: 96)
+    private var headerBar: some View {
+        HStack {
+            Button { } label: {
+                VStack(spacing: 4) {
+                    Capsule().fill(Color.black.opacity(0.9)).frame(width: 22, height: 3)
+                    Capsule().fill(Color.black.opacity(0.9)).frame(width: 16, height: 3)
+                    Capsule().fill(Color.black.opacity(0.9)).frame(width: 12, height: 3)
                 }
-            } else {
+                .padding(8)
+            }
+            .buttonStyle(.plain)
+            Spacer()
+            ZStack(alignment: .topTrailing) {
+                Button { } label: {
+                    Image(systemName: "bell.fill")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(.black.opacity(0.9))
+                        .padding(8)
+                }
+                .buttonStyle(.plain)
                 Circle()
-                    .fill(Color.gray.opacity(0.3))
-                    .frame(width: 96, height: 96)
-            }
-
-            // Username
-            Text(headerUser.username.uppercased())
-                .font(.system(size: 22, weight: .heavy, design: .rounded))
-                .kerning(0.8)
-                .foregroundColor(.primary)
-        }
-    }
-
-    // MARK: - Toggle
-
-    private var toggleBar: some View {
-        HStack(spacing: 28) {
-            toggleItem(system: "list.bullet", isActive: layout == .list) {
-                layout = .list
-            }
-            toggleItem(system: "square.grid.2x2", isActive: layout == .grid) {
-                layout = .grid
-            }
-        }
-        .padding(.top, 8)
-    }
-
-    private func toggleItem(system: String, isActive: Bool, action: @escaping () -> Void) -> some View {
-        VStack(spacing: 6) {
-            Button(action: action) {
-                Image(systemName: system)
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundColor(.primary.opacity(isActive ? 1.0 : 0.5))
-            }
-            Rectangle()
-                .fill(isActive ? Color.accentColor : Color.clear)
-                .frame(width: 28, height: 3)
-                .cornerRadius(1.5)
-        }
-    }
-
-    // MARK: - Grid
-
-    private var gridContent: some View {
-        let columns = Array(repeating: GridItem(.flexible(), spacing: 12), count: 3)
-        return LazyVGrid(columns: columns, spacing: 12) {
-            ForEach(posts) { post in
-                GridCell(mediaURL: post.mediaURL)
+                    .fill(Color.pink)
+                    .frame(width: 10, height: 10)
+                    .offset(x: 4, y: -2)
             }
         }
         .padding(.horizontal, 16)
-        .padding(.top, 8)
+        .padding(.top, headerTopPadding)
     }
 
-    private struct GridCell: View {
-        let mediaURL: String
-        var body: some View {
+    private var avatarRow: some View {
+        Button {
+            editing = true
+        } label: {
             ZStack {
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(Color.gray.opacity(0.15))
-                if let url = URL(string: mediaURL) {
+                if let url = userProfile?.profilePictureURL {
                     AsyncImage(url: url) { phase in
                         switch phase {
                         case .empty:
-                            ProgressView()
-                                .progressViewStyle(.circular)
-                                .tint(.gray)
-                        case .success(let image):
-                            image
-                                .resizable()
-                                .scaledToFill()
+                            Circle().fill(Color.gray.opacity(0.2))
+                                .overlay(ProgressView().tint(.gray))
+                        case .success(let img):
+                            img.resizable().scaledToFill()
                         case .failure:
-                            Image(systemName: "photo")
-                                .font(.system(size: 24, weight: .bold))
-                                .foregroundColor(.secondary)
+                            Circle().fill(Color.gray.opacity(0.2))
+                                .overlay(Image(systemName: "person.fill").foregroundColor(.white))
                         @unknown default:
-                            Color.clear
+                            Circle().fill(Color.gray.opacity(0.2))
                         }
                     }
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                } else if let email = auth.currentUser?.email,
+                          let initials = initialsFrom(email: email) {
+                    Circle()
+                        .fill(Color.gray.opacity(0.2))
+                        .overlay(Text(initials).font(.system(size: 24, weight: .bold)))
                 } else {
-                    Image(systemName: "photo")
-                        .font(.system(size: 24, weight: .bold))
-                        .foregroundColor(.secondary)
+                    Circle()
+                        .fill(Color.gray.opacity(0.2))
+                        .overlay(Image(systemName: "person.fill").foregroundColor(.white))
                 }
             }
-            .aspectRatio(1, contentMode: .fit)
+            .frame(width: 96, height: 96)
+            .clipShape(Circle())
+            .shadow(color: Color.black.opacity(0.08), radius: 6, x: 0, y: 4)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var usernameRow: some View {
+        Text(userProfile?.username ?? (auth.currentUser?.email?.components(separatedBy: "@").first?.uppercased() ?? "USERNAME"))
+            .font(.system(size: 22, weight: .heavy, design: .rounded))
+            .foregroundColor(.black.opacity(0.95))
+            .padding(.top, 4)
+    }
+
+    private var modeSwitcher: some View {
+        HStack(spacing: 36) {
+            modeButton(icon: "list.bullet", isSelected: mode == .list) {
+                mode = .list
+            }
+            modeButton(icon: "square.grid.2x2.fill", isSelected: mode == .grid) {
+                mode = .grid
+            }
+        }
+        .padding(.top, 2)
+    }
+
+    private func modeButton(icon: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        VStack(spacing: 6) {
+            Button(action: action) {
+                Image(systemName: icon)
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundColor(.black.opacity(0.85))
+                    .padding(8)
+            }
+            .buttonStyle(.plain)
+
+            Capsule()
+                .fill(isSelected ? Color.indigo : Color.clear)
+                .frame(width: 24, height: 3)
         }
     }
 
-    // MARK: - List
-
-    private var listContent: some View {
-        LazyVStack(spacing: 20) {
-            ForEach(posts) { post in
-                ListCard(post: post)
-                    .padding(.horizontal, 16)
-            }
-        }
-        .padding(.top, 8)
-    }
-
-    private struct ListCard: View {
-        let post: Post
-
-        private var radiusText: String {
-            if post.radius >= 1000 {
-                return "\(post.radius / 1000) KM"
-            } else {
-                return "\(post.radius) M"
-            }
-        }
-
-        var body: some View {
-            ZStack(alignment: .bottomLeading) {
-                RoundedRectangle(cornerRadius: 24)
-                    .fill(Color.gray.opacity(0.15))
-
-                if let url = URL(string: post.mediaURL) {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .empty:
-                            ProgressView()
-                                .progressViewStyle(.circular)
-                                .tint(.white)
-                        case .success(let image):
-                            image
-                                .resizable()
-                                .scaledToFill()
-                        case .failure:
-                            Color.black.opacity(0.2)
-                        @unknown default:
-                            Color.black.opacity(0.2)
-                        }
-                    }
-                    .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-                } else {
-                    Color.black.opacity(0.2)
-                        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-                }
-
-                // Gradient overlay for legible text
-                LinearGradient(
-                    colors: [Color.black.opacity(0.55), Color.black.opacity(0.15), .clear],
-                    startPoint: .bottom, endPoint: .top
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(radiusText)
-                        .font(.system(size: 18, weight: .heavy, design: .rounded))
-                        .foregroundColor(.white)
-                        .shadow(radius: 3, y: 2)
-
-                    // Placeholder for location/city line (requires reverse geocoding to be accurate)
-                    // For now, show coordinates or "WORLDWIDE"
-                    if post.latitude != 0 || post.longitude != 0 {
-                        Text("\(String(format: "%.4f", post.latitude)), \(String(format: "%.4f", post.longitude))")
-                            .font(.system(size: 16, weight: .heavy, design: .rounded))
-                            .foregroundColor(.white)
-                            .shadow(radius: 3, y: 2)
-                    } else {
-                        Text("WORLDWIDE")
-                            .font(.system(size: 16, weight: .heavy, design: .rounded))
-                            .foregroundColor(.white)
-                            .shadow(radius: 3, y: 2)
-                    }
-                }
-                .padding(16)
-            }
-            .frame(height: 220)
-            .shadow(color: Color.black.opacity(0.18), radius: 12, x: 0, y: 8)
-        }
-    }
-
-    // MARK: - Data + readiness
-
-    private func fallbackUserFromAuth() -> UserProfile {
-        let authUser = Auth.auth().currentUser
-        let email = authUser?.email ?? "No email"
-        let defaultUsername: String
-        if let email = authUser?.email, let name = email.split(separator: "@").first {
-            defaultUsername = String(name)
+    private func loadMyPosts() async {
+        let targetUID: String
+        if let provided = userID {
+            targetUID = provided
+        } else if let current = Auth.auth().currentUser?.uid {
+            targetUID = current
         } else {
-            defaultUsername = "Unknown"
-        }
-        return UserProfile(username: user?.username ?? defaultUsername,
-                           email: user?.email ?? email,
-                           profilePictureURL: user?.profilePictureURL)
-    }
-
-    private func finishIfBothLoaded() {
-        if didLoadUserOnce && didLoadPostsOnce && !profileReady {
-            profileReady = true
-        }
-    }
-
-    func fetchUserData() {
-        isLoadingUser = true
-        userLoadError = nil
-
-        guard let userId = Auth.auth().currentUser?.uid else {
-            self.user = nil
-            self.userLoadError = "Not signed in."
-            self.isLoadingUser = false
-            self.didLoadUserOnce = true
-            finishIfBothLoaded()
+            await MainActor.run { myPosts = [] }
             return
         }
 
-        let db = Firestore.firestore()
-        db.collection("users").document(userId).getDocument { document, error in
-            defer {
-                self.isLoadingUser = false
-                self.didLoadUserOnce = true
-                self.finishIfBothLoaded()
-            }
+        await MainActor.run { isLoading = true }
+        defer { Task { @MainActor in isLoading = false } }
 
-            if let error = error {
-                self.user = self.fallbackUserFromAuth()
-                self.userLoadError = "Failed to load profile: \(error.localizedDescription)"
-                return
-            }
-
-            guard let document = document, document.exists else {
-                self.user = self.fallbackUserFromAuth()
-                self.userLoadError = "Profile not found. Using account info."
-                return
-            }
-
-            let data = document.data()
-            self.user = UserProfile(
-                username: data?["username"] as? String ?? self.fallbackUserFromAuth().username,
-                email: data?["email"] as? String ?? self.fallbackUserFromAuth().email,
-                profilePictureURL: URL(string: data?["profilePictureURL"] as? String ?? "")
-            )
-        }
-    }
-
-    func fetchUserPosts() {
-        guard let userId = Auth.auth().currentUser?.uid else {
-            self.posts = []
-            self.didLoadPostsOnce = true
-            self.finishIfBothLoaded()
-            return
-        }
-        let db = Firestore.firestore()
-        db.collection("posts").whereField("userID", isEqualTo: userId).getDocuments { snapshot, error in
-            defer {
-                self.didLoadPostsOnce = true
-                self.finishIfBothLoaded()
-            }
-            if let error = error {
-                print("Error fetching posts: \(error.localizedDescription)")
-                self.posts = []
-                return
-            }
-
-            self.posts = snapshot?.documents.compactMap { document -> Post? in
-                let data = document.data()
-                return Post(
-                    id: document.documentID,
-                    latitude: data["latitude"] as? Double ?? 0.0,
-                    longitude: data["longitude"] as? Double ?? 0.0,
-                    mediaURL: data["mediaURL"] as? String ?? "",
-                    radius: data["radius"] as? Int ?? 0,
-                    viewCount: data["viewCount"] as? Int ?? 0
-                )
-            } ?? []
-        }
-    }
-
-    func logOut() {
         do {
-            try Auth.auth().signOut()
-            self.user = nil
-            self.posts = []
-            self.userLoadError = "Not signed in."
+            let posts = try await fetchPosts(for: targetUID)
+            await MainActor.run {
+                self.myPosts = posts
+            }
         } catch {
-            print("Error signing out: \(error.localizedDescription)")
+            print("Profile: failed to load posts -> \(error.localizedDescription)")
+            await MainActor.run { self.myPosts = [] }
+        }
+    }
+
+    private func fetchPosts(for uid: String) async throws -> [Post] {
+        try await withCheckedThrowingContinuation { cont in
+            let db = Firestore.firestore()
+            let base = db.collection("posts").whereField("userID", isEqualTo: uid)
+
+            base.order(by: "createdAt", descending: true).getDocuments { snap, err in
+                if let err = err {
+                    base.getDocuments { snap2, err2 in
+                        if let err2 = err2 {
+                            cont.resume(throwing: err2)
+                            return
+                        }
+                        cont.resume(returning: Self.mapPosts(from: snap2))
+                    }
+                    return
+                }
+                cont.resume(returning: Self.mapPosts(from: snap))
+            }
+        }
+    }
+
+    private static func mapPosts(from snapshot: QuerySnapshot?) -> [Post] {
+        guard let snapshot else { return [] }
+        return snapshot.documents.compactMap { doc in
+            let data = doc.data()
+            guard let lat = (data["latitude"] as? Double) ?? (data["latitude"] as? NSNumber)?.doubleValue,
+                  let lon = (data["longitude"] as? Double) ?? (data["longitude"] as? NSNumber)?.doubleValue,
+                  let mediaURL = data["mediaURL"] as? String
+            else { return nil }
+            let radius = (data["radius"] as? Int) ?? (data["radius"] as? NSNumber)?.intValue ?? 5000
+            let viewCount = (data["viewCount"] as? Int) ?? (data["viewCount"] as? NSNumber)?.intValue ?? 0
+            let userID = data["userID"] as? String ?? "unknown"
+            return Post(id: doc.documentID, latitude: lat, longitude: lon, mediaURL: mediaURL, radius: radius, viewCount: viewCount, userID: userID)
+        }
+    }
+
+    private func initialsFrom(email: String) -> String? {
+        let base = email.components(separatedBy: "@").first ?? ""
+        guard let first = base.first else { return nil }
+        return String(first).uppercased()
+    }
+}
+
+// Grid and list tiles unchanged…
+private struct ProfileGridTile: View {
+    let post: Post
+    private let corner: CGFloat = 18
+    @State private var image: UIImage?
+    @State private var isLoading = false
+
+    var body: some View {
+        ZStack {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                ZStack {
+                    RoundedRectangle(cornerRadius: corner, style: .continuous)
+                        .fill(Color.gray.opacity(0.15))
+                    if isLoading {
+                        ProgressView().tint(.gray)
+                    } else {
+                        Image(systemName: "photo")
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .task {
+                    await loadIfNeeded()
+                }
+            }
+        }
+        .frame(height: 120)
+        .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
+    }
+
+    private func loadIfNeeded() async {
+        guard image == nil, let url = URL(string: post.mediaURL) else { return }
+        await MainActor.run { isLoading = true }
+        let img = await CachedImageLoader.shared.load(url)
+        await MainActor.run {
+            self.image = img
+            self.isLoading = false
         }
     }
 }
 
-struct UserProfile {
-    var username: String
-    var email: String
-    var profilePictureURL: URL?
-}
+private struct ProfileListCard: View {
+    let post: Post
+    private let corner: CGFloat = 22
+    @State private var image: UIImage?
+    @State private var isLoading = false
 
-struct ProfileView_Previews: PreviewProvider {
-    static var previews: some View {
-        ProfileView()
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                ZStack {
+                    RoundedRectangle(cornerRadius: corner, style: .continuous)
+                        .fill(Color.gray.opacity(0.15))
+                    if isLoading {
+                        ProgressView().tint(.gray)
+                    } else {
+                        Image(systemName: "photo")
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .task {
+                    await loadIfNeeded()
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("\(max(1, post.radius / 1000)) KM")
+                    .font(.system(size: 18, weight: .heavy, design: .rounded))
+                Text("Lat \(String(format: "%.2f", post.latitude)), Lon \(String(format: "%.2f", post.longitude))")
+                    .font(.system(size: 14, weight: .heavy, design: .rounded))
+            }
+            .foregroundColor(.white)
+            .padding(14)
+            .shadow(color: .black.opacity(0.35), radius: 8, x: 0, y: 4)
+        }
+        .frame(height: 200)
+        .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
+        .shadow(color: Color.black.opacity(0.12), radius: 12, x: 0, y: 8)
+    }
+
+    private func loadIfNeeded() async {
+        guard image == nil, let url = URL(string: post.mediaURL) else { return }
+        await MainActor.run { isLoading = true }
+        let img = await CachedImageLoader.shared.load(url)
+        await MainActor.run {
+            self.image = img
+            self.isLoading = false
+        }
     }
 }
 
-// MARK: - Readiness PreferenceKey for ProfileView
-
-struct ProfileReadyPreferenceKey: PreferenceKey {
-    static var defaultValue: Bool = false
-    static func reduce(value: inout Bool, nextValue: () -> Bool) {
-        value = value || nextValue()
-    }
+extension Notification.Name {
+    static let LoadProfileNow = Notification.Name("LoadProfileNow")
 }

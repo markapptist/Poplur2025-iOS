@@ -1,450 +1,468 @@
 import SwiftUI
-import AVKit
-import AVFoundation
 import FirebaseFirestore
+import AVKit
+import CoreLocation
 
 struct FeedView: View {
     @State private var posts: [Post] = []
-    @State private var selection: Int = 0
-    // Readiness for HomeView’s preloader
-    @State private var feedReady = false
+    @State private var isLoading = false
+    @State private var didSeedIfEmpty = false
 
-    // New readiness gates
-    @State private var didFinishFirestore = false
-    @State private var didPrepareFirstMedia = false
-    @State private var wiredFirstPageCallbackForLoad = false
+    // Pagination
+    private let pageSize = 10
+    @State private var lastDocument: DocumentSnapshot?
+    @State private var isLoadingMore = false
+    @State private var reachedEnd = false
 
-    // Fixed page size to avoid rotation/safe-area rounding mismatches
-    private var screenSize: CGSize {
-        UIScreen.main.bounds.size
+    // Current page
+    @State private var currentIndex: Int = 0
+
+    // Navigation to profile
+    @State private var selectedUserID: String? = nil
+    @State private var navigateToProfile = false
+
+    // Username resolution cache (per-view state that consults the global actor)
+    @State private var usernames: [String: String] = [:] // uid -> username
+    @State private var usernameLoadsInProgress: Set<String> = []
+
+    // Fallback demo video to ensure we always have something to play
+    private let fallbackFastVideoURL = URL(string: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4")
+
+    // Computed: current post
+    private var currentPost: Post? {
+        posts[safe: currentIndex]
     }
-    private var pageWidth: CGFloat { screenSize.width }
-    private var pageHeight: CGFloat { screenSize.height }
 
     var body: some View {
-        ZStack {
-            if posts.isEmpty && !didFinishFirestore {
-                ProgressView()
-                    .progressViewStyle(.circular)
-                    .tint(.white)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(
-                        Color.black
-                            .ignoresSafeArea()
-                            .allowsHitTesting(false)
-                    )
-                    .allowsHitTesting(false)
+        GeometryReader { geo in
+            ZStack {
+                if posts.isEmpty {
+                    VerticalPager(currentIndex: .constant(0), pageCount: 1) {
+                        ZStack {
+                            if let url = fallbackFastVideoURL {
+                                FullscreenVideoView(url: url, isActive: .constant(true), isMuted: true, shouldLoop: true)
+                                    .id(url)
+                            } else {
+                                Color.black
+                            }
+                        }
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        .background(Color.black)
+                    }
+                    .ignoresSafeArea(edges: [.top, .horizontal])
+                } else {
+                    VerticalPager(currentIndex: $currentIndex, pageCount: posts.count) {
+                        ZStack {
+                            ForEach(pagesToDisplay, id: \.self) { idx in
+                                if let post = posts[safe: idx] {
+                                    let resolvedName = displayName(for: post)
+                                    FeedFullscreenPage(
+                                        post: post,
+                                        isActive: Binding(
+                                            get: { currentIndex == idx },
+                                            set: { _ in }
+                                        ),
+                                        displayName: resolvedName,
+                                        onUserTapped: { userId in
+                                            selectedUserID = userId
+                                            navigateToProfile = true
+                                        }
+                                    )
+                                    .frame(width: geo.size.width, height: geo.size.height)
+                                    .position(
+                                        x: geo.size.width / 2,
+                                        y: (CGFloat(idx) + 0.5) * geo.size.height
+                                    )
+                                    .animation(.none, value: currentIndex)
+                                    .onAppear {
+                                        maybeLoadMoreIfNeeded(appearingIndex: idx)
+                                        maybeResolveUsername(for: post.userID)
+                                    }
+                                }
+                            }
+                        }
+                        .frame(width: geo.size.width, height: geo.size.height * CGFloat(max(posts.count, 1)))
+                        .background(Color.black)
+                    }
+                    .ignoresSafeArea(edges: [.top, .horizontal])
+                }
+
+                overlayChrome
+                    .zIndex(10)
+
+                NavigationLink(
+                    isActive: $navigateToProfile,
+                    destination: {
+                        if let userId = selectedUserID {
+                            AnyView(ProfileView(userID: userId))
+                        } else {
+                            AnyView(Text("No user selected"))
+                        }
+                    },
+                    label: {
+                        EmptyView()
+                    }
+                )
+                .hidden()
+            }
+            .background(Color.black)
+        }
+        .task {
+            await reload()
+            if posts.isEmpty, !didSeedIfEmpty {
+                didSeedIfEmpty = true
+                await seedAndReload()
             } else {
-                // Vertical paging using rotation trick (pages are locked to full-screen size)
-                TabView(selection: $selection) {
-                    ForEach(Array(posts.indices), id: \.self) { (idx: Int) in
-                        FullScreenPostView(
-                            post: posts[idx],
-                            isActive: selection == idx,
-                            didPrepareMedia: (idx == 0 ? firstMediaPrepared : nil),
-                            pageSize: CGSize(width: pageHeight, height: pageWidth) // rotated content size
-                        )
-                        .tag(idx)
-                        .rotationEffect(.degrees(90))
-                        .frame(width: pageHeight, height: pageWidth) // match rotated page exactly
-                        .background(
-                            Color.black
-                                .allowsHitTesting(false)
-                        )
-                        .ignoresSafeArea()
-                    }
-                }
-                .tabViewStyle(.page(indexDisplayMode: .never))
-                .rotationEffect(.degrees(-90))
-                .frame(width: pageWidth, height: pageHeight) // match device screen exactly
-                .background(
-                    Color.black
-                        .ignoresSafeArea()
-                        .allowsHitTesting(false)
-                )
-                .ignoresSafeArea()
-
-                // Floating Up/Down buttons
-                VStack(spacing: 18) {
-                    Button { pageUp() } label: {
-                        Image(systemName: "chevron.up")
-                            .font(.system(size: 20, weight: .bold))
-                            .foregroundColor(.white)
-                            .frame(width: 64, height: 64)
-                            .background(Color.green, in: Circle())
-                            .shadow(color: .black.opacity(0.25), radius: 8, x: 0, y: 6)
-                    }
-                    .disabled(posts.isEmpty)
-
-                    Button { pageDown() } label: {
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 20, weight: .bold))
-                            .foregroundColor(.white)
-                            .frame(width: 64, height: 64)
-                            .background(Color.blue, in: Circle())
-                            .shadow(color: .black.opacity(0.25), radius: 8, x: 0, y: 6)
-                    }
-                    .disabled(posts.isEmpty)
-                }
-                .padding(.leading, 24)
-                .padding(.bottom, 112) // keep above tab bar comfortably
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-                .allowsHitTesting(true) // buttons stay interactive
-                .ignoresSafeArea(edges: [.top])
+                prefetchVisibleUsernames()
             }
         }
-        .onAppear {
-            if !wiredFirstPageCallbackForLoad {
-                wiredFirstPageCallbackForLoad = true
-                loadPosts()
+        .onReceive(NotificationCenter.default.publisher(for: .LoadFeedNow)) { _ in
+            Task { await reload() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .ResetTabToTop)) { _ in
+            // Jump back to the beginning of the feed
+            currentIndex = 0
+        }
+        .onChange(of: currentIndex) { _ in
+            if let uid = currentPost?.userID {
+                maybeResolveUsername(for: uid)
             }
         }
-        .background(
-            Color.black
-                .ignoresSafeArea()
-                .allowsHitTesting(false)
-        )
-        .ignoresSafeArea()
-        .navigationBarHidden(true)
-        .preference(key: FeedReadyPreferenceKey.self, value: feedReady)
     }
 
-    private func pageUp() {
-        guard !posts.isEmpty else { return }
-        let newIndex = max(0, selection - 1)
-        if newIndex != selection { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
-        selection = newIndex
-        incrementViewCountIfNeeded(for: selection)
+    private var pagesToDisplay: [Int] {
+        guard !posts.isEmpty else { return [] }
+        return Array(Set([
+            currentIndex - 1,
+            currentIndex,
+            currentIndex + 1
+        ].filter { $0 >= 0 && $0 < posts.count }))
+        .sorted()
     }
 
-    private func pageDown() {
-        guard !posts.isEmpty else { return }
-        let newIndex = min(posts.count - 1, selection + 1)
-        if newIndex != selection { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
-        selection = newIndex
-        incrementViewCountIfNeeded(for: selection)
+    private var overlayChrome: some View {
+        ZStack {
+            VStack {
+                HStack {
+                    if isLoading || isLoadingMore {
+                        ProgressView().tint(.white)
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, 12)
+                .padding(.top, 8)
+                Spacer()
+            }
+
+            VStack {
+                Spacer()
+                VStack(spacing: 14) {
+                    Button {
+                        if !posts.isEmpty {
+                            currentIndex = max(0, currentIndex - 1)
+                        }
+                    } label: {
+                        Circle().fill(Color.green).frame(width: 56, height: 56)
+                            .overlay(Image(systemName: "arrow.up").foregroundColor(.white))
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        print("Heart tapped for post: \(currentPost?.id ?? "nil")")
+                    } label: {
+                        Circle().fill(Color.pink).frame(width: 44, height: 44)
+                            .overlay(Image(systemName: "heart.fill").foregroundColor(.white))
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        if !posts.isEmpty {
+                            currentIndex = min(posts.count - 1, currentIndex + 1)
+                        }
+                    } label: {
+                        Circle().fill(Color.blue).frame(width: 56, height: 56)
+                            .overlay(Image(systemName: "arrow.down").foregroundColor(.white))
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.leading, 16)
+                .padding(.bottom, 120)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+        }
+        .ignoresSafeArea(edges: [.top, .horizontal])
     }
 
-    private func incrementViewCountIfNeeded(for index: Int) {
-        guard posts.indices.contains(index) else { return }
-        let post = posts[index]
-        incrementViewCount(postID: post.id)
+    private func displayName(for post: Post) -> String {
+        if let name = usernames[post.userID], !name.isEmpty {
+            return name
+        }
+        if post.userID.hasPrefix("fake_") || post.userID.hasPrefix("na_user_") || post.userID.hasPrefix("world_user_") {
+            return post.userID
+        }
+        if !post.userID.isEmpty {
+            return "@" + String(post.userID.prefix(6))
+        }
+        return "User"
     }
 
-    // MARK: - Readiness plumbing
-
-    private func firstMediaPrepared() {
-        if !didPrepareFirstMedia {
-            didPrepareFirstMedia = true
-            evaluateFeedReady()
+    private func maybeResolveUsername(for uid: String) {
+        guard !uid.isEmpty else { return }
+        if usernames[uid] != nil { return }
+        if usernameLoadsInProgress.contains(uid) { return }
+        usernameLoadsInProgress.insert(uid)
+        Task {
+            let name = await UsernameCache.shared.username(for: uid)
+            await MainActor.run {
+                if let name, !name.isEmpty {
+                    usernames[uid] = name
+                }
+                usernameLoadsInProgress.remove(uid)
+            }
         }
     }
 
-    private func evaluateFeedReady() {
-        // If no posts came back, consider ready once Firestore finished (avoid blocking)
-        if didFinishFirestore && (didPrepareFirstMedia || posts.isEmpty) && !feedReady {
-            feedReady = true
+    private func prefetchVisibleUsernames() {
+        for idx in pagesToDisplay {
+            if let uid = posts[safe: idx]?.userID {
+                maybeResolveUsername(for: uid)
+            }
+        }
+        if let uid = currentPost?.userID {
+            maybeResolveUsername(for: uid)
         }
     }
 
-    // Existing Firestore loading
-    func loadPosts() {
+    @MainActor
+    private func reload() async {
+        guard !isLoading else { return }
+        isLoading = true
+        reachedEnd = false
+        lastDocument = nil
+        defer { isLoading = false }
+
         let db = Firestore.firestore()
-        db.collection("posts").getDocuments { snapshot, error in
-            if let error = error {
-                print("Error loading posts: \(error.localizedDescription)")
-                self.posts = []
-                self.didFinishFirestore = true
-                self.evaluateFeedReady()
-                return
-            }
-            guard let snapshot = snapshot else {
-                self.posts = []
-                self.didFinishFirestore = true
-                self.evaluateFeedReady()
-                return
-            }
+        let baseQuery = db.collection("posts")
+            .order(by: "createdAt", descending: true)
+            .limit(to: pageSize)
 
-            let newPosts: [Post] = snapshot.documents.compactMap { document in
-                let data = document.data()
+        if let cacheSnap = try? await baseQuery.getDocuments(source: .cache), !cacheSnap.documents.isEmpty {
+            let cached = Self.parsePosts(from: cacheSnap)
+            posts = sortForFastestPlayback(cached)
+            lastDocument = cacheSnap.documents.last
+            currentIndex = 0
+        }
 
-                let latitude = (data["latitude"] as? Double)
-                    ?? (data["latitude"] as? NSNumber)?.doubleValue
-                let longitude = (data["longitude"] as? Double)
-                    ?? (data["longitude"] as? NSNumber)?.doubleValue
-                let radius = (data["radius"] as? Int)
-                    ?? (data["radius"] as? NSNumber)?.intValue
-                let viewCount = (data["viewCount"] as? Int)
-                    ?? (data["viewCount"] as? NSNumber)?.intValue
-                let mediaURL = data["mediaURL"] as? String ?? ""
+        if let serverSnap = try? await baseQuery.getDocuments(source: .server) {
+            let fresh = Self.parsePosts(from: serverSnap)
+            posts = sortForFastestPlayback(fresh)
+            lastDocument = serverSnap.documents.last
+            currentIndex = 0
+            reachedEnd = serverSnap.documents.count < pageSize
+        } else if posts.isEmpty {
+            reachedEnd = true
+        }
 
-                guard let lat = latitude, let lon = longitude else { return nil }
+        prefetchVisibleUsernames()
+    }
 
-                return Post(
-                    id: document.documentID,
-                    latitude: lat,
-                    longitude: lon,
-                    mediaURL: mediaURL,
-                    radius: radius ?? 0,
-                    viewCount: viewCount ?? 0
-                )
-            }
-            self.posts = newPosts
-            // Reset to first when reloading
-            self.selection = 0
-            incrementViewCountIfNeeded(for: 0)
+    @MainActor
+    private func loadMore() async {
+        guard !isLoadingMore, !reachedEnd else { return }
+        guard let last = lastDocument else { return }
+        isLoadingMore = true
+        defer { isLoadingMore = false }
 
-            // Firestore finished
-            self.didFinishFirestore = true
-            // If there are no posts, we can mark ready immediately
-            // If there are posts, we will wait for the first media to prepare
-            self.evaluateFeedReady()
+        let db = Firestore.firestore()
+        let query = db.collection("posts")
+            .order(by: "createdAt", descending: true)
+            .start(afterDocument: last)
+            .limit(to: pageSize)
+
+        var appended = false
+
+        if let snap = try? await query.getDocuments(source: .server) {
+            let newPosts = sortForFastestPlayback(Self.parsePosts(from: snap))
+            appended = appendDedup(newPosts)
+            lastDocument = snap.documents.last
+            reachedEnd = snap.documents.count < pageSize
+        } else if let cacheSnap = try? await query.getDocuments(source: .cache), !cacheSnap.documents.isEmpty {
+            let newPosts = sortForFastestPlayback(Self.parsePosts(from: cacheSnap))
+            appended = appendDedup(newPosts)
+            lastDocument = cacheSnap.documents.last
+            reachedEnd = cacheSnap.documents.count < pageSize
+        }
+
+        if appended {
+            prefetchVisibleUsernames()
         }
     }
 
-    func incrementViewCount(postID: String) {
-        let db = FirebaseFirestore.Firestore.firestore()
-        let postRef = db.collection("posts").document(postID)
+    @MainActor
+    private func appendDedup(_ newPosts: [Post]) -> Bool {
+        guard !newPosts.isEmpty else { return false }
+        let existingIDs = Set(posts.map { $0.id })
+        let filtered = newPosts.filter { !existingIDs.contains($0.id) }
+        guard !filtered.isEmpty else { return false }
+        posts.append(contentsOf: filtered)
+        return true
+    }
 
-        postRef.updateData([
-            "viewCount": FieldValue.increment(Int64(1))
-        ]) { error in
-            if let error = error {
-                print("Failed to increment view count: \(error.localizedDescription)")
-                return
-            }
-            checkAndIncreaseRadius(postRef: postRef)
+    private func maybeLoadMoreIfNeeded(appearingIndex idx: Int) {
+        let threshold = max(0, posts.count - 3)
+        if idx >= threshold {
+            Task { await loadMore() }
         }
     }
 
-    func checkAndIncreaseRadius(postRef: DocumentReference) {
-        postRef.getDocument { document, error in
-            if let error = error {
-                print("Failed to fetch post for radius check: \(error.localizedDescription)")
-                return
-            }
-            guard let document = document, document.exists, let data = document.data() else { return }
+    private func sortForFastestPlayback(_ items: [Post]) -> [Post] {
+        return items.sorted { a, b in
+            let aURL = a.mediaURL.lowercased()
+            let bURL = b.mediaURL.lowercased()
 
-            let viewCount = (data["viewCount"] as? Int)
-                ?? (data["viewCount"] as? NSNumber)?.intValue
-                ?? 0
-            var radius = (data["radius"] as? Int)
-                ?? (data["radius"] as? NSNumber)?.intValue
-                ?? 0
+            let aIsVideo = aURL.hasSuffix(".mp4") || aURL.hasSuffix(".mov")
+            let bIsVideo = bURL.hasSuffix(".mp4") || bURL.hasSuffix(".mov")
+            if aIsVideo != bIsVideo { return aIsVideo && !bIsVideo }
 
-            if viewCount % 10 == 0 {
-                radius += 1000
-                postRef.updateData(["radius": radius]) { error in
-                    if let error = error {
-                        print("Failed to update radius: \(error.localizedDescription)")
-                    } else {
-                        // optional: update local state if you want to reflect radius changes
-                    }
-                }
-            }
+            if aURL.count != bURL.count { return aURL.count < bURL.count }
+
+            return false
         }
+    }
+
+    private static func parsePosts(from snap: QuerySnapshot) -> [Post] {
+        var fetched: [Post] = []
+        for doc in snap.documents {
+            let data = doc.data()
+            guard let lat = (data["latitude"] as? Double) ?? (data["latitude"] as? NSNumber)?.doubleValue,
+                  let lon = (data["longitude"] as? Double) ?? (data["longitude"] as? NSNumber)?.doubleValue,
+                  let mediaURL = data["mediaURL"] as? String else { continue }
+
+            let radius = (data["radius"] as? Int) ?? (data["radius"] as? NSNumber)?.intValue ?? 5000
+            let viewCount = (data["viewCount"] as? Int) ?? (data["viewCount"] as? NSNumber)?.intValue ?? 0
+            let userID = (data["userID"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "User"
+            fetched.append(Post(id: doc.documentID, latitude: lat, longitude: lon, mediaURL: mediaURL, radius: radius, viewCount: viewCount, userID: userID))
+        }
+        return fetched
+    }
+
+    @MainActor
+    private func seedAndReload() async {
+        await FakePostService.shared.seedCityDemoIfNeeded(countPerCity: 2)
+        await FakePostService.shared.seedInitialNorthAmerica(total: 60)
+        await reload()
     }
 }
 
-private struct FullScreenPostView: View {
+private struct FeedFullscreenPage: View {
     let post: Post
-    let isActive: Bool
-    // Optional readiness callback (only provided for the first page)
-    var didPrepareMedia: (() -> Void)?
-    // The size this rotated page should occupy (already swapped w/h by caller)
-    let pageSize: CGSize
+    @Binding var isActive: Bool
+    let displayName: String
+    var onUserTapped: (String) -> Void
 
-    var body: some View {
-        ZStack {
-            if isVideo(urlString: post.mediaURL) {
-                VideoPage(urlString: post.mediaURL, play: isActive, onReady: didPrepareMedia)
-                    .frame(width: pageSize.width, height: pageSize.height)
-                    .clipped()
-            } else {
-                ImagePage(urlString: post.mediaURL, onReady: didPrepareMedia)
-                    .frame(width: pageSize.width, height: pageSize.height)
-                    .clipped()
-            }
-        }
-        .frame(width: pageSize.width, height: pageSize.height)
-        .background(Color.black.allowsHitTesting(false))
-        .contentShape(Rectangle())
-        .ignoresSafeArea()
-        .allowsHitTesting(false) // page content isn't interactive; avoids stealing tab bar taps
-    }
-
-    private func isVideo(urlString: String) -> Bool {
-        let lower = urlString.lowercased()
+    private var isVideo: Bool {
+        let lower = post.mediaURL.lowercased()
         return lower.hasSuffix(".mp4") || lower.hasSuffix(".mov") || lower.contains("video")
     }
-}
 
-private struct ImagePage: View {
-    let urlString: String
-    var onReady: (() -> Void)?
+    private var coordinateText: String {
+        String(format: "%.4f, %.4f", post.latitude, post.longitude)
+    }
 
     var body: some View {
-        ZStack {
-            if let url = URL(string: urlString) {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .empty:
-                        Color.black
-                            .overlay(ProgressView().tint(.white))
-                            .ignoresSafeArea()
+        GeometryReader { geo in
+            ZStack {
+                Group {
+                    if isVideo, let url = URL(string: post.mediaURL) {
+                        FullscreenVideoView(url: url, isActive: $isActive, isMuted: true, shouldLoop: true)
                             .allowsHitTesting(false)
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .scaledToFill()
-                            .ignoresSafeArea()
-                            .onAppear { onReady?() }
-                            .allowsHitTesting(false)
-                    case .failure:
+                            .id(url)
+                    } else if let url = URL(string: post.mediaURL) {
+                        AsyncImage(url: url, transaction: Transaction(animation: .none)) { phase in
+                            switch phase {
+                            case .empty:
+                                ZStack { Color.black; ProgressView().tint(.white) }
+                            case .success(let img):
+                                img
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: geo.size.width, height: geo.size.height)
+                                    .clipped()
+                            case .failure:
+                                ZStack {
+                                    Color.black
+                                    Image(systemName: "photo")
+                                        .font(.system(size: 40, weight: .bold))
+                                        .foregroundColor(.white.opacity(0.6))
+                                }
+                            @unknown default:
+                                Color.black
+                            }
+                        }
+                        .allowsHitTesting(false)
+                        .id(url)
+                    } else {
                         Color.black
-                            .overlay(
-                                Image(systemName: "photo")
-                                    .font(.system(size: 36, weight: .bold))
-                                    .foregroundColor(.white.opacity(0.6))
-                            )
-                            .ignoresSafeArea()
-                            .onAppear { onReady?() }
-                            .allowsHitTesting(false)
-                    @unknown default:
-                        Color.black
-                            .ignoresSafeArea()
-                            .onAppear { onReady?() }
                             .allowsHitTesting(false)
                     }
                 }
-                .allowsHitTesting(false)
-            } else {
-                Color.black
-                    .ignoresSafeArea()
-                    .onAppear { onReady?() }
-                    .allowsHitTesting(false)
+                .frame(width: geo.size.width, height: geo.size.height)
+                .ignoresSafeArea()
+                .zIndex(0)
+
+                VStack(alignment: .trailing, spacing: 6) {
+                    Button(action: { onUserTapped(post.userID) }) {
+                        Text(displayName.isEmpty ? "User" : displayName)
+                            .font(.system(size: 16, weight: .bold, design: .rounded))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(Color.black.opacity(0.65), in: Capsule())
+                            .overlay(Capsule().stroke(Color.white.opacity(0.35), lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+
+                    Text(coordinateText)
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.95))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(Color.black.opacity(0.55), in: Capsule())
+                }
+                .padding(.trailing, 16)
+                .padding(.top, geo.safeAreaInsets.top + 40)
+                .frame(width: geo.size.width, height: geo.size.height, alignment: .topTrailing)
+                .zIndex(10)
+
+                VStack {
+                    Spacer()
+                    VerticalRadiusBar(
+                        radius: post.radius,
+                        maxRadius: 10_000,
+                        width: 10,
+                        maxHeight: 220,
+                        color: .pink,
+                        showsLabel: true,
+                        labelFormat: { r in
+                            r >= 1000 ? "\(r / 1000) km" : "\(r) m"
+                        }
+                    )
+                    .frame(width: 10, height: 220, alignment: .bottom)
+                    .padding(.trailing, 12)
+                }
+                .padding(.bottom, 45)
+                .frame(width: geo.size.width, height: geo.size.height, alignment: .trailing)
+                .zIndex(10)
             }
+            .frame(width: geo.size.width, height: geo.size.height)
+            .contentShape(Rectangle())
         }
-        .allowsHitTesting(false)
+        .ignoresSafeArea()
     }
 }
 
-// MARK: - AVPlayerLayer-backed video view that fills (no letterboxing)
-
-private struct ResizingVideoPlayer: UIViewRepresentable {
-    final class PlayerView: UIView {
-        override static var layerClass: AnyClass { AVPlayerLayer.self }
-        var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
-        var player: AVPlayer? {
-            get { playerLayer.player }
-            set { playerLayer.player = newValue }
-        }
-        override func layoutSubviews() {
-            super.layoutSubviews()
-            playerLayer.frame = bounds
-            playerLayer.videoGravity = .resizeAspectFill // critical: fill without letterboxing
-        }
-    }
-
-    let player: AVPlayer
-
-    func makeUIView(context: Context) -> PlayerView {
-        let v = PlayerView()
-        v.backgroundColor = .black
-        v.playerLayer.videoGravity = .resizeAspectFill
-        v.player = player
-        return v
-    }
-
-    func updateUIView(_ uiView: PlayerView, context: Context) {
-        if uiView.player !== player {
-            uiView.player = player
-        }
-        uiView.playerLayer.videoGravity = .resizeAspectFill
-    }
-}
-
-private struct VideoPage: View {
-    let urlString: String
-    let play: Bool
-    var onReady: (() -> Void)?
-
-    @State private var player: AVPlayer?
-    @State private var statusObserver: NSKeyValueObservation?
-
-    var body: some View {
-        ZStack {
-            if let player {
-                ResizingVideoPlayer(player: player)
-                    .background(Color.black)
-                    .ignoresSafeArea()
-                    .allowsHitTesting(false)
-            } else {
-                Color.black
-                    .ignoresSafeArea()
-                    .allowsHitTesting(false)
-            }
-        }
-        .onAppear {
-            // Do not prepare here; we defer to when play becomes true
-            updatePlayback()
-        }
-        .onChange(of: play) { newValue in
-            // Prepare player only when this page becomes active
-            if newValue {
-                preparePlayerIfNeeded()
-            }
-            updatePlayback()
-        }
-        .onDisappear {
-            player?.pause()
-            statusObserver?.invalidate()
-            statusObserver = nil
-        }
-        .allowsHitTesting(false)
-    }
-
-    private func preparePlayerIfNeeded() {
-        guard player == nil else { return }
-        guard let url = URL(string: urlString) else {
-            onReady?()
-            return
-        }
-        let item = AVPlayerItem(url: url)
-        let newPlayer = AVPlayer(playerItem: item)
-        player = newPlayer
-
-        statusObserver = item.observe(\.status, options: [.initial, .new]) { _, _ in
-            if item.status == .readyToPlay {
-                onReady?()
-                statusObserver?.invalidate()
-                statusObserver = nil
-            } else if item.status == .failed {
-                onReady?()
-                statusObserver?.invalidate()
-                statusObserver = nil
-            }
-        }
-    }
-
-    private func updatePlayback() {
-        if play {
-            if player == nil {
-                // Prepare JIT if needed
-                preparePlayerIfNeeded()
-            }
-            player?.play()
-        } else {
-            player?.pause()
-        }
-    }
-}
-
-// MARK: - Readiness PreferenceKey for FeedView
-
-struct FeedReadyPreferenceKey: PreferenceKey {
-    static var defaultValue: Bool = false
-    static func reduce(value: inout Bool, nextValue: () -> Bool) {
-        value = value || nextValue()
+private extension Array {
+    subscript(safe index: Int) -> Element? {
+        indices.contains(index) ? self[index] : nil
     }
 }

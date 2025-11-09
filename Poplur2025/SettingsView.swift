@@ -6,34 +6,93 @@ struct SettingsView: View {
 
     var body: some View {
         GeometryReader { geo in
-            VStack {
-                Spacer(minLength: 0)
-                ZStack {
-                    TicketBackground()
-                        .fill(brandPink)
-                        .shadow(color: Color.black.opacity(0.12), radius: 18, x: 0, y: 10)
+            ZStack {
+                // Full-bleed ticket background
+                TicketBackground()
+                    .fill(brandPink)
+                    .ignoresSafeArea() // extend under status/home areas
+                    .shadow(color: Color.black.opacity(0.12), radius: 18, x: 0, y: 10)
 
-                    VStack(spacing: 16) {
-                        Text("Settings Ticket Loaded")
-                            .font(.system(size: 24, weight: .heavy, design: .rounded))
+                // Replace with your real settings content
+                ScrollView {
+                    VStack(spacing: 24) {
+                        Text("Settings")
+                            .font(.system(size: 28, weight: .heavy, design: .rounded))
                             .foregroundColor(.white)
-                        Text("If you can read this, the tab is using the correct SettingsView.swift")
-                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .padding(.top, 24)
+
+                        Text("Account Options")
+                            .font(.system(size: 18, weight: .heavy, design: .rounded))
                             .foregroundColor(.white.opacity(0.95))
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 24)
+                            .padding(.top, 8)
+
+                        // Demo rows (swap for real toggles/links)
+                        settingsRowLeft("Private Account") {
+                            Toggle("", isOn: .constant(true))
+                                .labelsHidden()
+                                .tint(.indigo)
+                        }
+                        settingsRowLeft("Notifications") {
+                            Toggle("", isOn: .constant(true))
+                                .labelsHidden()
+                                .tint(.indigo)
+                        }
+                        settingsRowRight("Email Address")
+                        settingsRowRight("Password")
+
+                        Button {
+                            // sign out
+                        } label: {
+                            Text("Sign Out")
+                                .font(.system(size: 20, weight: .heavy, design: .rounded))
+                                .foregroundColor(.black)
+                                .padding(.vertical, 16)
+                                .frame(maxWidth: .infinity)
+                                .background(Color.white, in: Capsule())
+                                .shadow(color: .black.opacity(0.12), radius: 8, x: 0, y: 4)
+                        }
+                        .padding(.top, 24)
+
+                        Spacer(minLength: 80) // leave room above scallops
                     }
+                    .padding(.horizontal, 24) // internal padding only
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
                 }
-                .frame(width: min(geo.size.width - 24, 700), height: geo.size.height * 0.78)
-                Spacer(minLength: 0)
+                .frame(width: geo.size.width, height: geo.size.height)
+                .ignoresSafeArea() // scroll content goes edge-to-edge
             }
             .frame(width: geo.size.width, height: geo.size.height)
         }
         .background(Color.clear)
     }
+
+    // MARK: - Row helpers
+
+    private func settingsRowLeft<Accessory: View>(_ title: String,
+                                                  @ViewBuilder accessory: () -> Accessory) -> some View {
+        HStack {
+            Text(title)
+                .font(.system(size: 20, weight: .heavy, design: .rounded))
+                .foregroundColor(.white)
+            Spacer()
+            accessory()
+        }
+    }
+
+    private func settingsRowRight(_ title: String) -> some View {
+        HStack {
+            Text(title)
+                .font(.system(size: 20, weight: .heavy, design: .rounded))
+                .foregroundColor(.white)
+            Spacer()
+            Image(systemName: "arrow.right")
+                .font(.system(size: 18, weight: .bold))
+                .foregroundColor(.indigo.opacity(0.95))
+        }
+    }
 }
 
-// Same ticket shape used before
+// Same ticket shape used before, now drawn full-bleed
 private struct TicketBackground: Shape {
     func path(in rect: CGRect) -> Path {
         var path = Path()
@@ -41,6 +100,7 @@ private struct TicketBackground: Shape {
         let rounded = UIBezierPath(roundedRect: rect, cornerRadius: corner).cgPath
         path.addPath(Path(rounded))
 
+        // Scallops along the bottom edge
         let diameter: CGFloat = 18
         let spacing: CGFloat = 8
         let total = Int((rect.width + spacing) / (diameter + spacing))
@@ -62,4 +122,3 @@ private extension Path {
         return p
     }
 }
-

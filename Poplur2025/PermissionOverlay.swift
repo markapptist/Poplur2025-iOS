@@ -2,50 +2,34 @@ import SwiftUI
 import UIKit
 
 struct PermissionOverlay: View {
-    var title: String = "Camera Access Needed"
-    var message: String = "Please enable camera access in Settings to record photos and videos."
-    var buttonTitle: String = "Open Settings"
-    var onPrimaryAction: (() -> Void)?
+    var openSettings: () -> Void
 
     var body: some View {
-        ZStack {
-            Color.black.opacity(0.85).ignoresSafeArea()
-            VStack(spacing: 16) {
-                Image(systemName: "camera.fill")
-                    .font(.system(size: 48, weight: .bold))
-                    .foregroundColor(.white)
+        VStack(spacing: 16) {
+            Image(systemName: "camera.fill")
+                .font(.system(size: 40, weight: .bold))
+                .foregroundColor(.white)
 
-                Text(title)
-                    .font(.title2.weight(.semibold))
-                    .foregroundColor(.white)
+            Text("Camera Permission Needed")
+                .font(.system(size: 22, weight: .heavy, design: .rounded))
+                .foregroundColor(.white)
 
-                Text(message)
-                    .multilineTextAlignment(.center)
-                    .foregroundColor(.white.opacity(0.85))
-                    .padding(.horizontal, 24)
+            Text("Enable camera access in Settings to record.")
+                .font(.system(size: 16, weight: .semibold, design: .rounded))
+                .foregroundColor(.white.opacity(0.9))
 
-                Button {
-                    if let onPrimaryAction {
-                        onPrimaryAction()
-                    } else if let url = URL(string: UIApplication.openSettingsURLString) {
-                        UIApplication.shared.open(url, options: [:], completionHandler: nil)
-                    }
-                } label: {
-                    Text(buttonTitle)
-                        .font(.headline)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 12)
-                        .background(Color.white)
-                        .foregroundColor(.black)
-                        .clipShape(Capsule())
-                }
-                .padding(.top, 6)
+            Button(action: openSettings) {
+                Text("Open Settings")
+                    .font(.system(.headline, design: .rounded).weight(.bold))
+                    .foregroundColor(.black)
+                    .padding(.vertical, 12)
+                    .padding(.horizontal, 20)
+                    .background(Capsule().fill(Color.white))
             }
-            .padding(24)
+            .padding(.top, 8)
         }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.black.opacity(0.9))
     }
-}
-
-#Preview {
-    PermissionOverlay()
 }

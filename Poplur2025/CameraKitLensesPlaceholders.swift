@@ -2,7 +2,7 @@ import Foundation
 
 // Temporary placeholder representing a Lens.
 // Replace this with the real SCSDKCameraKit lens type when integrating lenses.
-public struct Lens: Identifiable, Equatable, CustomStringConvertible {
+public struct Lens: Identifiable, Equatable, CustomStringConvertible, Codable {
     public let id: String
     public let name: String
 

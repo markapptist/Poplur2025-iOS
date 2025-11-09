@@ -2,6 +2,8 @@ import SwiftUI
 import FirebaseAuth
 
 struct SignUpView: View {
+    @ObservedObject var cameraController: CameraKitController
+
     @State private var email = ""
     @State private var password = ""
     @State private var confirmPassword = ""
@@ -46,7 +48,7 @@ struct SignUpView: View {
                 }
                 .padding()
 
-                NavigationLink(destination: HomeView(), isActive: $isSignedUp) {
+                NavigationLink(destination: HomeView(cameraController: cameraController), isActive: $isSignedUp) {
                     EmptyView()  // Empty view that triggers when isSignedUp becomes true
                 }
                 .hidden()
@@ -68,7 +70,10 @@ struct SignUpView: View {
                     print("Sign up failed with error: \(error.localizedDescription)")
                     self.isSignUpFailed = true
                 } else {
+                    // Root switches to HomeView via AuthViewModel in MediaApp
                     self.isSignedUp = true
+                    // If this view was presented modally, you could dismiss it:
+                    // dismiss()
                 }
             }
         } else {
@@ -79,6 +84,7 @@ struct SignUpView: View {
 
 struct SignUpView_Previews: PreviewProvider {
     static var previews: some View {
-        SignUpView()
+        // For preview, create a temporary controller
+        SignUpView(cameraController: CameraKitController())
     }
 }

@@ -8,6 +8,7 @@ struct Post: Identifiable, Codable, Hashable {
     let mediaURL: String
     var radius: Int
     var viewCount: Int
+    let userID: String
 
     // Convenience computed property if you ever need CLLocationCoordinate2D
     var coordinate: CLLocationCoordinate2D {
@@ -22,5 +23,6 @@ struct Post: Identifiable, Codable, Hashable {
         case mediaURL
         case radius
         case viewCount
+        case userID
     }
 }

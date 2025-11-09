@@ -15,6 +15,12 @@
 		391605F72E3F4A0B000ACB3E /* FirebaseFirestoreCombine-Community in Frameworks */ = {isa = PBXBuildFile; productRef = 391605F62E3F4A0B000ACB3E /* FirebaseFirestoreCombine-Community */; };
 		391605F92E3F4A0B000ACB3E /* FirebaseStorage in Frameworks */ = {isa = PBXBuildFile; productRef = 391605F82E3F4A0B000ACB3E /* FirebaseStorage */; };
 		391605FB2E3F4A0B000ACB3E /* FirebaseStorageCombine-Community in Frameworks */ = {isa = PBXBuildFile; productRef = 391605FA2E3F4A0B000ACB3E /* FirebaseStorageCombine-Community */; };
+		3936CD892EB649E8006502D5 /* SCSDKCameraKit in Frameworks */ = {isa = PBXBuildFile; productRef = 3936CD882EB649E8006502D5 /* SCSDKCameraKit */; };
+		3936CD8B2EB649E8006502D5 /* SCSDKCameraKitLoginKitAuth in Frameworks */ = {isa = PBXBuildFile; productRef = 3936CD8A2EB649E8006502D5 /* SCSDKCameraKitLoginKitAuth */; };
+		3936CD8D2EB649E8006502D5 /* SCSDKCameraKitPushToDeviceExtension in Frameworks */ = {isa = PBXBuildFile; productRef = 3936CD8C2EB649E8006502D5 /* SCSDKCameraKitPushToDeviceExtension */; };
+		3936CD8F2EB649E8006502D5 /* SCSDKCameraKitReferenceSwiftUI in Frameworks */ = {isa = PBXBuildFile; productRef = 3936CD8E2EB649E8006502D5 /* SCSDKCameraKitReferenceSwiftUI */; };
+		3937AF562EB3C67300A8F548 /* SnapSDK in Frameworks */ = {isa = PBXBuildFile; productRef = 3937AF552EB3C67300A8F548 /* SnapSDK */; };
+		3970144F2EBA4B04001FBC4C /* SCSDKCameraKitReferenceUI in Frameworks */ = {isa = PBXBuildFile; productRef = 3936CD902EB649E8006502D5 /* SCSDKCameraKitReferenceUI */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -76,12 +82,18 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				3970144F2EBA4B04001FBC4C /* SCSDKCameraKitReferenceUI in Frameworks */,
+				3937AF562EB3C67300A8F548 /* SnapSDK in Frameworks */,
+				3936CD8B2EB649E8006502D5 /* SCSDKCameraKitLoginKitAuth in Frameworks */,
 				391605ED2E3F4A0B000ACB3E /* FirebaseAppCheck in Frameworks */,
 				391605F12E3F4A0B000ACB3E /* FirebaseCore in Frameworks */,
+				3936CD892EB649E8006502D5 /* SCSDKCameraKit in Frameworks */,
 				391605FB2E3F4A0B000ACB3E /* FirebaseStorageCombine-Community in Frameworks */,
 				391605F32E3F4A0B000ACB3E /* FirebaseDatabase in Frameworks */,
 				391605F72E3F4A0B000ACB3E /* FirebaseFirestoreCombine-Community in Frameworks */,
+				3936CD8D2EB649E8006502D5 /* SCSDKCameraKitPushToDeviceExtension in Frameworks */,
 				391605F92E3F4A0B000ACB3E /* FirebaseStorage in Frameworks */,
+				3936CD8F2EB649E8006502D5 /* SCSDKCameraKitReferenceSwiftUI in Frameworks */,
 				391605F52E3F4A0B000ACB3E /* FirebaseFirestore in Frameworks */,
 				391605EF2E3F4A0B000ACB3E /* FirebaseAuth in Frameworks */,
 			);
@@ -152,6 +164,12 @@
 				391605F62E3F4A0B000ACB3E /* FirebaseFirestoreCombine-Community */,
 				391605F82E3F4A0B000ACB3E /* FirebaseStorage */,
 				391605FA2E3F4A0B000ACB3E /* FirebaseStorageCombine-Community */,
+				3937AF552EB3C67300A8F548 /* SnapSDK */,
+				3936CD882EB649E8006502D5 /* SCSDKCameraKit */,
+				3936CD8A2EB649E8006502D5 /* SCSDKCameraKitLoginKitAuth */,
+				3936CD8C2EB649E8006502D5 /* SCSDKCameraKitPushToDeviceExtension */,
+				3936CD8E2EB649E8006502D5 /* SCSDKCameraKitReferenceSwiftUI */,
+				3936CD902EB649E8006502D5 /* SCSDKCameraKitReferenceUI */,
 			);
 			productName = Poplur2025;
 			productReference = 391605C12E3F48FF000ACB3E /* Poplur2025.app */;
@@ -237,6 +255,8 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				391605EB2E3F4A0B000ACB3E /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+				3937AF542EB3C67300A8F548 /* XCRemoteSwiftPackageReference "snap-kit-spm" */,
+				3936CD872EB649E8006502D5 /* XCRemoteSwiftPackageReference "camera-kit-ios-sdk" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 391605C22E3F48FF000ACB3E /* Products */;
@@ -625,6 +645,22 @@
 				minimumVersion = 12.0.0;
 			};
 		};
+		3936CD872EB649E8006502D5 /* XCRemoteSwiftPackageReference "camera-kit-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/Snapchat/camera-kit-ios-sdk.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.44.0;
+			};
+		};
+		3937AF542EB3C67300A8F548 /* XCRemoteSwiftPackageReference "snap-kit-spm" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/Snapchat/snap-kit-spm";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.6.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -667,6 +703,36 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 391605EB2E3F4A0B000ACB3E /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
 			productName = "FirebaseStorageCombine-Community";
+		};
+		3936CD882EB649E8006502D5 /* SCSDKCameraKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 3936CD872EB649E8006502D5 /* XCRemoteSwiftPackageReference "camera-kit-ios-sdk" */;
+			productName = SCSDKCameraKit;
+		};
+		3936CD8A2EB649E8006502D5 /* SCSDKCameraKitLoginKitAuth */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 3936CD872EB649E8006502D5 /* XCRemoteSwiftPackageReference "camera-kit-ios-sdk" */;
+			productName = SCSDKCameraKitLoginKitAuth;
+		};
+		3936CD8C2EB649E8006502D5 /* SCSDKCameraKitPushToDeviceExtension */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 3936CD872EB649E8006502D5 /* XCRemoteSwiftPackageReference "camera-kit-ios-sdk" */;
+			productName = SCSDKCameraKitPushToDeviceExtension;
+		};
+		3936CD8E2EB649E8006502D5 /* SCSDKCameraKitReferenceSwiftUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 3936CD872EB649E8006502D5 /* XCRemoteSwiftPackageReference "camera-kit-ios-sdk" */;
+			productName = SCSDKCameraKitReferenceSwiftUI;
+		};
+		3936CD902EB649E8006502D5 /* SCSDKCameraKitReferenceUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 3936CD872EB649E8006502D5 /* XCRemoteSwiftPackageReference "camera-kit-ios-sdk" */;
+			productName = SCSDKCameraKitReferenceUI;
+		};
+		3937AF552EB3C67300A8F548 /* SnapSDK */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 3937AF542EB3C67300A8F548 /* XCRemoteSwiftPackageReference "snap-kit-spm" */;
+			productName = SnapSDK;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

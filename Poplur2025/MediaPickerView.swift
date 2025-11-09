@@ -198,7 +198,9 @@ struct MediaPickerView: View {
             "longitude": location.longitude,
             "mediaURL": mediaURL,
             "radius": 5000, // Initial 5km radius
-            "viewCount": 0
+            "viewCount": 0,
+            // Add createdAt so ProfileView/MapView order queries work
+            "createdAt": FieldValue.serverTimestamp()
         ]
         if let uid = Auth.auth().currentUser?.uid {
             post["userID"] = uid
