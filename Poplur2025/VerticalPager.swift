@@ -23,7 +23,7 @@ struct VerticalPager<Content: View>: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ vc: PagerViewController, context: Context) {
-        vc.update(pages: UIHostingController(rootView: content()), currentIndex: currentIndex)
+        vc.update(pages: UIHostingController(rootView: content()), currentIndex: currentIndex, pageCount: pageCount)
     }
 }
 
@@ -46,6 +46,9 @@ final class PagerViewController: UIViewController, UIScrollViewDelegate {
         scrollView.alwaysBounceHorizontal = false
         scrollView.delegate = self
         scrollView.backgroundColor = .black
+        scrollView.clipsToBounds = true
+
+        // Make sure we use the full bounds behind safe areas to match SwiftUI’s .ignoresSafeArea
         view.backgroundColor = .black
         view.addSubview(scrollView)
     }
@@ -53,10 +56,10 @@ final class PagerViewController: UIViewController, UIScrollViewDelegate {
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         scrollView.frame = view.bounds
-        layoutPages()
+        layoutPagesIfPossible()
     }
 
-    func update(pages: UIViewController, currentIndex: Int) {
+    func update(pages: UIViewController, currentIndex: Int, pageCount: Int) {
         // Replace hosting controller if needed
         if hostingVC !== pages {
             hostingVC?.willMove(toParent: nil)
@@ -68,9 +71,10 @@ final class PagerViewController: UIViewController, UIScrollViewDelegate {
             pages.didMove(toParent: self)
             hostingVC = pages
         }
-        // Derive pageCount from hosted SwiftUI’s arranged content height once laid out
-        // but we also require FeedView to size each page to screen height so we can compute count by content size / page height.
-        layoutPages()
+
+        self.pageCount = pageCount
+        layoutPagesIfPossible()
+
         let pageHeight = scrollView.bounds.height
         guard pageHeight > 0 else { return }
         let targetOffset = CGPoint(x: 0, y: CGFloat(currentIndex) * pageHeight)
@@ -79,26 +83,19 @@ final class PagerViewController: UIViewController, UIScrollViewDelegate {
         }
     }
 
-    private func layoutPages() {
+    private func layoutPagesIfPossible() {
         guard let hostedView = hostingVC?.view else { return }
-        hostedView.frame = CGRect(origin: .zero, size: scrollView.bounds.size)
-        hostedView.translatesAutoresizingMaskIntoConstraints = true
-
-        // Ensure the hosted stack expands vertically via its intrinsic content.
-        hostedView.setNeedsLayout()
-        hostedView.layoutIfNeeded()
-
-        // The hosted SwiftUI view is a vertical VStack of screen-sized pages; compute content size:
         let pageHeight = scrollView.bounds.height
-        guard pageHeight > 0 else { return }
+        let pageWidth = scrollView.bounds.width
+        guard pageHeight > 0, pageWidth > 0, pageCount > 0 else { return }
 
-        // Ask SwiftUI view for its size; fallback to bounds height * estimated count.
-        let contentHeight = hostedView.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).height
-        let computedCount = max(1, Int(round(contentHeight / pageHeight)))
-        pageCount = computedCount
+        // Content size is exactly pageCount * pageHeight
+        let contentSize = CGSize(width: pageWidth, height: CGFloat(pageCount) * pageHeight)
+        scrollView.contentSize = contentSize
 
-        scrollView.contentSize = CGSize(width: scrollView.bounds.width, height: CGFloat(pageCount) * pageHeight)
-        hostedView.frame.size = scrollView.contentSize
+        hostedView.frame = CGRect(origin: .zero, size: contentSize)
+        hostedView.translatesAutoresizingMaskIntoConstraints = true
+        hostedView.clipsToBounds = true
     }
 
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {

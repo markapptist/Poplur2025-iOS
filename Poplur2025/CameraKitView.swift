@@ -181,6 +181,7 @@ struct CameraKitView: View {
 
     private var debugOverlay: some View {
         let auth = AVCaptureDevice.authorizationStatus(for: .video)
+        let mic = AVCaptureDevice.authorizationStatus(for: .audio)
         let authText: String
         switch auth {
         case .authorized: authText = "authorized"
@@ -189,12 +190,20 @@ struct CameraKitView: View {
         case .restricted: authText = "restricted"
         @unknown default: authText = "unknown"
         }
+        let micText: String
+        switch mic {
+        case .authorized: micText = "authorized"
+        case .notDetermined: micText = "notDetermined"
+        case .denied: micText = "denied"
+        case .restricted: micText = "restricted"
+        @unknown default: micText = "unknown"
+        }
 
         return HStack(spacing: 8) {
             Circle()
                 .fill(controller.isReady ? Color.green : Color.orange)
                 .frame(width: 8, height: 8)
-            Text("Auth: \(authText) | Ready: \(controller.isReady ? "yes" : "no") | Session: \(controller.captureSessionRunning ? "running" : "stopped")")
+            Text("Cam: \(authText) | Mic: \(micText) | Ready: \(controller.isReady ? "yes" : "no") | Session: \(controller.captureSessionRunning ? "running" : "stopped")")
                 .font(.system(size: 11, weight: .semibold, design: .rounded))
                 .foregroundColor(.white.opacity(0.95))
                 .padding(.horizontal, 8)
@@ -331,33 +340,32 @@ struct CameraKitView: View {
     }
 
     private func ensurePermissionAndStart() async {
-        let status = AVCaptureDevice.authorizationStatus(for: .video)
-        switch status {
-        case .authorized:
-            permissionDenied = false
-            permissionNotDetermined = false
-            await controller.start()
-        case .notDetermined:
+        // Camera permission
+        let camStatus = AVCaptureDevice.authorizationStatus(for: .video)
+        var camGranted = (camStatus == .authorized)
+        if camStatus == .notDetermined {
             permissionNotDetermined = true
-            let granted = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+            camGranted = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
                 AVCaptureDevice.requestAccess(for: .video) { ok in
                     cont.resume(returning: ok)
                 }
             }
-            await MainActor.run {
-                permissionNotDetermined = false
-                permissionDenied = !granted
-            }
-            if granted {
-                await controller.start()
-            }
-        case .denied, .restricted:
-            permissionDenied = true
-            permissionNotDetermined = false
-        @unknown default:
-            permissionDenied = true
             permissionNotDetermined = false
         }
+        permissionDenied = !camGranted
+        guard camGranted else { return }
+
+        // Microphone permission (for recording with audio)
+        let micStatus = AVCaptureDevice.authorizationStatus(for: .audio)
+        if micStatus == .notDetermined {
+            _ = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+                AVCaptureDevice.requestAccess(for: .audio) { ok in
+                    cont.resume(returning: ok)
+                }
+            }
+        }
+        // Even if mic denied, we can still start the camera.
+        await controller.start()
     }
 }
 

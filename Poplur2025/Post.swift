@@ -9,13 +9,13 @@ struct Post: Identifiable, Codable, Hashable {
     var radius: Int
     var viewCount: Int
     let userID: String
+    var posterURL: String? // optional thumbnail for videos
 
     // Convenience computed property if you ever need CLLocationCoordinate2D
     var coordinate: CLLocationCoordinate2D {
         CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
     }
 
-    // Custom CodingKeys in case you ever encode/decode with different keys
     enum CodingKeys: String, CodingKey {
         case id
         case latitude
@@ -24,5 +24,6 @@ struct Post: Identifiable, Codable, Hashable {
         case radius
         case viewCount
         case userID
+        case posterURL
     }
 }

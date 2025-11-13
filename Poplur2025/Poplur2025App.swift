@@ -33,24 +33,20 @@ struct Poplur2025App: App {
         WindowGroup {
             NavigationStack {
                 if auth.isAuthenticated {
-                    // Inject the shared, prewarmed controller into HomeView
                     HomeView(cameraController: cameraController)
                         .environmentObject(auth)
-                        // Prewarm the camera as soon as the app is up
                         .task {
                             await prewarmCameraIfAllowed()
                         }
                 } else {
                     WelcomeView()
                         .environmentObject(auth)
-                        // Optionally prewarm camera even on welcome to avoid later delay
                         .task {
                             await prewarmCameraIfAllowed()
                         }
                 }
             }
             .onAppear {
-                // Apply tab bar appearance once at app launch (not per-HomeView init)
                 let appearance = UITabBarAppearance()
                 appearance.configureWithTransparentBackground()
                 appearance.backgroundEffect = nil
@@ -61,33 +57,38 @@ struct Poplur2025App: App {
                 }
                 UITabBar.appearance().isTranslucent = true
             }
-            // If you present CameraKitView somewhere, inject the prewarmed controller:
-            // CameraKitView(controller: cameraController, coordinate: ...)
-            // Pass `cameraController` down to the presenter as needed (via environment or init).
         }
     }
 
-    // MARK: - Camera prewarm
+    // MARK: - Camera + Microphone prewarm
 
     private func prewarmCameraIfAllowed() async {
-        let status = AVCaptureDevice.authorizationStatus(for: .video)
-        switch status {
-        case .authorized:
-            await cameraController.start()
-        case .notDetermined:
-            let granted = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+        // Request camera first
+        let camStatus = AVCaptureDevice.authorizationStatus(for: .video)
+        var cameraGranted = (camStatus == .authorized)
+
+        if camStatus == .notDetermined {
+            cameraGranted = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
                 AVCaptureDevice.requestAccess(for: .video) { ok in
                     cont.resume(returning: ok)
                 }
             }
-            if granted {
-                await cameraController.start()
-            }
-        case .denied, .restricted:
-            // Respect user choice; you can prompt to open Settings elsewhere.
-            break
-        @unknown default:
-            break
         }
+
+        guard cameraGranted else { return }
+
+        // Request microphone for video recording with audio
+        let micStatus = AVCaptureDevice.authorizationStatus(for: .audio)
+        var micGranted = (micStatus == .authorized)
+        if micStatus == .notDetermined {
+            micGranted = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+                AVCaptureDevice.requestAccess(for: .audio) { ok in
+                    cont.resume(returning: ok)
+                }
+            }
+        }
+        // Even if mic is denied, we can still start the camera; recording may be silent.
+
+        await cameraController.start()
     }
 }

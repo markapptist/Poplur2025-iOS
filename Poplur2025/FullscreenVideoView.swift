@@ -4,7 +4,8 @@ import AVKit
 
 struct FullscreenVideoView: View {
     let url: URL
-    @Binding var isActive: Bool
+    // New: explicit playback control binding
+    @Binding var shouldPlay: Bool
     let isMuted: Bool
     let shouldLoop: Bool
 
@@ -17,9 +18,23 @@ struct FullscreenVideoView: View {
     // Prevent overlapping configure tasks from racing
     @State private var configID: Int = 0
 
+    // Segment control
+    private let maxPlaybackDuration: Double = 10.0
+    @State private var boundaryObserver: Any?
+
+    // Backward-compat initializer (keeps older call sites working)
     init(url: URL, isActive: Binding<Bool>, isMuted: Bool = true, shouldLoop: Bool = true) {
         self.url = url
-        self._isActive = isActive
+        // Map legacy isActive to shouldPlay
+        self._shouldPlay = Binding(get: { isActive.wrappedValue }, set: { isActive.wrappedValue = $0 })
+        self.isMuted = isMuted
+        self.shouldLoop = shouldLoop
+    }
+
+    // New designated initializer
+    init(url: URL, shouldPlay: Binding<Bool>, isMuted: Bool = true, shouldLoop: Bool = true) {
+        self.url = url
+        self._shouldPlay = shouldPlay
         self.isMuted = isMuted
         self.shouldLoop = shouldLoop
     }
@@ -32,23 +47,26 @@ struct FullscreenVideoView: View {
             .onChange(of: url) { newURL in
                 configureForURL(newURL)
             }
-            .onChange(of: isActive) { _ in
+            .onChange(of: shouldPlay) { _ in
                 updatePlayback()
+            }
+            .onChange(of: isMuted) { _ in
+                player.isMuted = isMuted
+                if shouldPlay { updatePlayback() }
             }
             .onDisappear {
                 teardown()
             }
             .ignoresSafeArea()
-            // Make sure the video layer never blocks taps from overlays
             .allowsHitTesting(false)
     }
 
     private func configureForURL(_ url: URL) {
         // Bump generation; any in-flight task will become stale
         configID &+= 1
-        let myID = configID
 
         // Teardown previous item/looper synchronously on main
+        removeBoundaryObserver()
         looper = nil
         if let old = item {
             removeItemObservers(old)
@@ -57,7 +75,7 @@ struct FullscreenVideoView: View {
         player.removeAllItems()
         item = nil
 
-        // Build asset with streaming-friendly options
+        // Build asset quickly without pre-awaiting keys
         let options: [String: Any] = [
             AVURLAssetPreferPreciseDurationAndTimingKey: false,
             "AVURLAssetHTTPHeaderFieldsKey": [
@@ -66,70 +84,84 @@ struct FullscreenVideoView: View {
         ]
         let asset = AVURLAsset(url: url, options: options)
 
-        // Use modern async loading API
-        Task {
-            // Load properties asynchronously (off-main)
+        // We need duration to set a 0..min(10s, duration) loop
+        Task { @MainActor in
+            let myID = configID
+            var durationSeconds: Double = maxPlaybackDuration
             do {
-                let playable = try await asset.load(.isPlayable)
-                let protected = try await asset.load(.hasProtectedContent)
-
-                if !playable || protected {
-                    print("[Video] Asset not playable or protected. URL=\(asset.url.absoluteString)")
+                let duration = try await asset.load(.duration)
+                let total = CMTimeGetSeconds(duration)
+                if total.isFinite && total > 0 {
+                    durationSeconds = min(maxPlaybackDuration, total)
+                } else {
+                    durationSeconds = maxPlaybackDuration
                 }
             } catch {
-                print("[Video] Asset key load failed: \(error.localizedDescription)")
+                durationSeconds = maxPlaybackDuration
+            }
+            // If config changed while awaiting, abort
+            guard myID == configID else { return }
+
+            let newItem = AVPlayerItem(asset: asset)
+            self.item = newItem
+            self.addItemObservers(newItem)
+
+            // Configure player/looper with time range
+            let start = CMTime(seconds: 0, preferredTimescale: 600)
+            let end = CMTime(seconds: durationSeconds, preferredTimescale: 600)
+            let timeRange = CMTimeRange(start: start, end: end)
+
+            if self.shouldLoop {
+                if !(self.player is AVQueuePlayer) {
+                    self.player = AVQueuePlayer()
+                }
+                let queue = self.player
+                queue.automaticallyWaitsToMinimizeStalling = true
+                queue.isMuted = self.isMuted
+                queue.actionAtItemEnd = .none
+                queue.removeAllItems()
+
+                self.looper = AVPlayerLooper(player: queue, templateItem: newItem, timeRange: timeRange)
+            } else {
+                self.looper = nil
+                self.player.replaceCurrentItem(with: newItem)
+                addBoundaryObserver(at: end)
             }
 
-            // Construct a fresh item per configuration
-            let newItem = AVPlayerItem(asset: asset)
+            self.player.isMuted = self.isMuted
+            self.player.automaticallyWaitsToMinimizeStalling = true
+            self.player.currentItem?.preferredPeakBitRate = 1_500_000 // lower for faster start
 
-            await MainActor.run {
-                // If a newer configuration started, ignore this one
-                guard myID == self.configID else { return }
-
-                // Attach observers to this item for status/error logging
-                self.item = newItem
-                self.addItemObservers(newItem)
-
-                // Configure player
-                if self.shouldLoop {
-                    // Ensure we are using a queue player
-                    if !(self.player is AVQueuePlayer) {
-                        self.player = AVQueuePlayer()
-                    }
-                    let queue = self.player
-                    queue.automaticallyWaitsToMinimizeStalling = true
-                    queue.isMuted = self.isMuted
-                    queue.actionAtItemEnd = .none
-                    queue.removeAllItems() // just in case
-                    // IMPORTANT: Do NOT also call replaceCurrentItem(with:) with newItem
-                    self.looper = AVPlayerLooper(player: queue, templateItem: newItem)
-                } else {
-                    // Non-looping: directly replace the current item
-                    self.looper = nil
-                    self.player.replaceCurrentItem(with: newItem)
-                }
-
-                self.player.isMuted = self.isMuted
-                self.player.automaticallyWaitsToMinimizeStalling = true
-                // Reasonable default; helps start faster on slow networks
-                self.player.currentItem?.preferredPeakBitRate = 4_000_000
-
+            // Ensure we start from segment start; do not auto-play here
+            self.player.seek(to: start, toleranceBefore: .zero, toleranceAfter: .zero) { _ in
                 self.updatePlayback()
             }
         }
     }
 
     private func updatePlayback() {
-        if isActive {
+        if shouldPlay {
+            if !isMuted {
+                activatePlaybackAudioSession()
+            }
             player.play()
         } else {
             player.pause()
         }
     }
 
+    private func activatePlaybackAudioSession() {
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playback, mode: .moviePlayback, options: [])
+            try session.setActive(true, options: [])
+        } catch {
+            print("[AudioSession] Failed to activate playback session: \(error.localizedDescription)")
+        }
+    }
+
     private func teardown() {
-        // Ensure everything is detached before view goes away
+        removeBoundaryObserver()
         player.pause()
         player.removeAllItems()
         looper = nil
@@ -141,7 +173,6 @@ struct FullscreenVideoView: View {
             NotificationCenter.default.removeObserver(obs)
             playerObserver = nil
         }
-        // Invalidate any in-flight configure task
         configID &+= 1
     }
 
@@ -151,7 +182,7 @@ struct FullscreenVideoView: View {
         itemStatusObserver = item.observe(\.status, options: [.new, .initial]) { item, _ in
             switch item.status {
             case .readyToPlay:
-                if self.isActive { self.player.play() }
+                self.updatePlayback()
             case .failed:
                 print("[Video] Item failed: \(item.error?.localizedDescription ?? "unknown")")
             case .unknown:
@@ -177,6 +208,22 @@ struct FullscreenVideoView: View {
         if let obs = playerObserver {
             NotificationCenter.default.removeObserver(obs)
             playerObserver = nil
+        }
+    }
+
+    private func addBoundaryObserver(at endTime: CMTime) {
+        removeBoundaryObserver()
+        let times = [NSValue(time: endTime)]
+        boundaryObserver = player.addBoundaryTimeObserver(forTimes: times, queue: .main) { [weak player] in
+            player?.pause()
+            player?.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
+        }
+    }
+
+    private func removeBoundaryObserver() {
+        if let obs = boundaryObserver {
+            player.removeTimeObserver(obs)
+            boundaryObserver = nil
         }
     }
 }
