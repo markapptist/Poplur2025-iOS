@@ -184,6 +184,9 @@ struct HomeView: View {
             .onChange(of: selectedTab) { _ in
                 // Only reset-to-top on tab changes; no mass loads
                 NotificationCenter.default.post(name: .ResetTabToTop, object: nil)
+                if selectedTab != .feed {
+                    NotificationCenter.default.post(name: .PauseAllVideos, object: nil)
+                }
             }
             .onChange(of: auth.isAuthenticated) { authed in
                 if authed {
@@ -237,3 +240,4 @@ struct HomeView: View {
         player.pause()
     }
 }
+

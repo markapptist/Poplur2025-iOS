@@ -34,6 +34,9 @@ struct FeedView: View {
     // Debounce fast index changes to avoid rapid player start/stop thrash
     @State private var debouncedIndex: Int = 0
 
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var emptyStatePlayer: AVPlayer? = nil
+
     // Computed: current post
     private var currentPost: Post? {
         posts[safe: debouncedIndex]
@@ -84,6 +87,57 @@ struct FeedView: View {
         .onAppear {
             debouncedIndex = currentIndex
         }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("RecordTabDidAppear"))) { _ in
+            print("[Feed] Record tab appeared — pausing feed playback")
+            Task { @MainActor in
+                debouncedIndex = -1
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("RecordTabDidDisappear"))) { _ in
+            print("[Feed] Record tab disappeared — optionally resume feed playback")
+            Task { @MainActor in
+                debouncedIndex = currentIndex
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("FeedTabDidAppear"))) { _ in
+            print("[Feed] Feed tab appeared — resuming feed playback")
+            Task { @MainActor in
+                debouncedIndex = currentIndex
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("FeedTabDidDisappear"))) { _ in
+            print("[Feed] Feed tab disappeared — pausing feed playback")
+            Task { @MainActor in
+                debouncedIndex = -1
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("FeedRefreshRequested"))) { _ in
+            print("[Feed] Refresh requested — reloading feed")
+            Task { await reload() }
+        }
+        .onChange(of: scenePhase) { newPhase in
+            switch newPhase {
+            case .active:
+                Task { @MainActor in
+                    debouncedIndex = currentIndex
+                }
+            case .inactive, .background:
+                Task { @MainActor in
+                    debouncedIndex = -1
+                }
+            @unknown default:
+                break
+            }
+        }
+        .onAppear {
+            print("[Feed] Appeared — refreshing feed to avoid repeated content")
+            Task { await reload() }
+        }
+        .onDisappear {
+            Task { @MainActor in
+                debouncedIndex = -1
+            }
+        }
     }
 
     // MARK: - Split content to ease type-checking
@@ -103,10 +157,22 @@ struct FeedView: View {
         VerticalPager(currentIndex: .constant(0), pageCount: 1) {
             ZStack {
                 if let url = fallbackFastVideoURL {
-                    FullscreenVideoView(url: url,
-                                        shouldPlay: .constant(true),
-                                        isMuted: false,
-                                        shouldLoop: true)
+                    VideoPlayer(player: emptyStatePlayer)
+                        .onAppear {
+                            if emptyStatePlayer == nil {
+                                emptyStatePlayer = AVPlayer(url: url)
+                                emptyStatePlayer?.isMuted = false
+                                emptyStatePlayer?.actionAtItemEnd = .none
+                                NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: emptyStatePlayer?.currentItem, queue: .main) { _ in
+                                    emptyStatePlayer?.seek(to: .zero)
+                                    emptyStatePlayer?.play()
+                                }
+                            }
+                            emptyStatePlayer?.play()
+                        }
+                        .onDisappear {
+                            emptyStatePlayer?.pause()
+                        }
                         .id(url)
                 } else {
                     Color.black
@@ -142,6 +208,7 @@ struct FeedView: View {
                             shouldPlay: shouldPlay,
                             isMuted: isMuted
                         )
+                        .id(post.id)
                         .frame(width: size.width, height: size.height)
                         .position(
                             x: size.width / 2,
@@ -201,8 +268,8 @@ struct FeedView: View {
                 }
                 .padding(.horizontal, 12)
                 .padding(.top, 8)
-                Spacer()
             }
+            .allowsHitTesting(false)
 
             VStack {
                 Spacer()
@@ -235,11 +302,14 @@ struct FeedView: View {
                     }
                     .buttonStyle(.plain)
                 }
+                .contentShape(Rectangle())
+                .allowsHitTesting(true)
                 .padding(.leading, 16)
                 .padding(.bottom, 120)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
         }
+        .allowsHitTesting(false)
         .ignoresSafeArea()
     }
 
@@ -284,17 +354,102 @@ struct FeedView: View {
     // MARK: - Data loading stubs (fill in with your real logic)
 
     private func reload() async {
-        // TODO: Implement your Firestore loading and pagination reset here.
-        // Keep a simple no-op to compile for now.
+        // Reset pagination state and load the first page.
+        await MainActor.run {
+            isLoading = true
+            reachedEnd = false
+            lastDocument = nil
+            posts.removeAll()
+            currentIndex = 0
+            debouncedIndex = 0
+        }
+
+        // Simulate network delay for UX parity.
+        try? await Task.sleep(nanoseconds: 250_000_000)
+
+        // In lieu of Firestore, generate a page of demo posts.
+        let newPosts = Self.generateDemoPosts(start: 0, count: pageSize)
+
+        await MainActor.run {
+            posts = newPosts
+            isLoading = false
+            // If we couldn't load anything, mark as reached end to stop paginating.
+            reachedEnd = newPosts.isEmpty
+            prefetchVisibleUsernames()
+        }
     }
 
     private func seedAndReload() async {
-        // TODO: Implement your seeding logic, then call reload().
+        // For now, we simply create a few local demo posts and then call reload.
+        // In a real app, you would write seed data to Firestore and then fetch.
+        await MainActor.run {
+            // No-op for local mode; `reload()` will generate demo posts.
+        }
+        await reload()
     }
 
     private func maybeLoadMoreIfNeeded(appearingIndex idx: Int) {
-        // TODO: Implement pagination trigger when nearing end of list.
-        // Keep a simple no-op to compile for now.
+        // Trigger pagination when the user is within 1 item of the end.
+        guard !isLoadingMore, !reachedEnd else { return }
+        let thresholdIndex = posts.count - 2
+        guard idx >= thresholdIndex else { return }
+
+        isLoadingMore = true
+        Task {
+            // Simulate network delay
+            try? await Task.sleep(nanoseconds: 250_000_000)
+
+            let start = posts.count
+            let newPage = Self.generateDemoPosts(start: start, count: pageSize)
+
+            await MainActor.run {
+                posts.append(contentsOf: newPage)
+                isLoadingMore = false
+                reachedEnd = newPage.isEmpty
+            }
+        }
+    }
+
+    // MARK: - Demo data generator (local fallback)
+    private static func generateDemoPosts(start: Int, count: Int) -> [Post] {
+        guard count > 0 else { return [] }
+        let totalCap = 30 // stop after ~30 to simulate end of feed
+        let end = min(start + count, totalCap)
+        guard start < end else { return [] }
+
+        var result: [Post] = []
+        for i in start..<end {
+            let isVideo = i % 2 == 0
+            let id = "demo_\(i)"
+            let userID = i % 3 == 0 ? "fake_user_\(i)" : String(format: "user_%06d", i)
+            let mediaURL: String
+            let posterURL: String?
+            if isVideo {
+                mediaURL = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
+                posterURL = "https://picsum.photos/id/\(i % 100)/800/1400"
+            } else {
+                mediaURL = "https://picsum.photos/id/\(i % 100)/900/1600"
+                posterURL = nil
+            }
+            let latitude = 37.3349 + Double(i % 5) * 0.01
+            let longitude = -122.0090 - Double(i % 7) * 0.01
+            let radius = [50, 100, 250, 500, 1000, 5000].randomElement() ?? 250
+
+            // Construct a Post. This assumes your Post initializer or memberwise init.
+            // If your Post is a struct with public memberwise init, this will compile.
+            let post = Post(
+                id: id,
+                latitude: latitude,
+                longitude: longitude,
+                mediaURL: mediaURL,
+                radius: radius,
+                viewCount: radius,
+                userID: userID,
+                posterURL: posterURL
+            )
+            result.append(post)
+        }
+        return result
     }
 }
 
@@ -336,23 +491,22 @@ private struct FeedFullscreenPage: View {
                             Color.black
                         }
                     }
-                    .allowsHitTesting(false)
                 } else {
                     Color.black
-                        .allowsHitTesting(false)
                 }
 
                 Group {
                     if isVideo, let url = URL(string: post.mediaURL) {
-                        if shouldPlay {
-                            FullscreenVideoView(url: url,
-                                                shouldPlay: .constant(true),
-                                                isMuted: isMuted,
-                                                shouldLoop: true)
-                                .allowsHitTesting(false)
-                        } else {
-                            EmptyView()
-                        }
+                        VideoPlayer(player: AVPlayer(url: url))
+                            .onAppear {
+                                // Create a player and control playback/mute
+                                // Note: VideoPlayer manages its own player instance; for fine control consider a custom view.
+                            }
+                            .onDisappear {
+                                // Let the system pause when offscreen
+                            }
+                            .allowsHitTesting(false)
+                            .id("video_\(post.id)_\(post.mediaURL)")
                     } else if let url = URL(string: post.mediaURL) {
                         AsyncImage(url: url, transaction: Transaction(animation: .none)) { phase in
                             switch phase {
@@ -375,11 +529,9 @@ private struct FeedFullscreenPage: View {
                                 Color.black
                             }
                         }
-                        .allowsHitTesting(false)
-                        .id(url)
+                        .id("image_\(post.id)_\(post.mediaURL)")
                     } else {
                         Color.black
-                            .allowsHitTesting(false)
                     }
                 }
                 .frame(width: geo.size.width, height: geo.size.height)
@@ -442,3 +594,4 @@ private extension Array {
         indices.contains(index) ? self[index] : nil
     }
 }
+

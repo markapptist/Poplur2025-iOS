@@ -2,6 +2,10 @@ import SwiftUI
 import AVFoundation
 import AVKit
 
+extension Notification.Name {
+    static let PauseAllVideos = Notification.Name("PauseAllVideos")
+}
+
 struct FullscreenVideoView: View {
     let url: URL
     // New: explicit playback control binding
@@ -21,6 +25,8 @@ struct FullscreenVideoView: View {
     // Segment control
     private let maxPlaybackDuration: Double = 10.0
     @State private var boundaryObserver: Any?
+    
+    @State private var pauseObserver: NSObjectProtocol?
 
     // Backward-compat initializer (keeps older call sites working)
     init(url: URL, isActive: Binding<Bool>, isMuted: Bool = true, shouldLoop: Bool = true) {
@@ -43,6 +49,12 @@ struct FullscreenVideoView: View {
         VideoPlayerContainer(player: player)
             .onAppear {
                 configureForURL(url)
+                print("[Video] onAppear for url: \(url)")
+                pauseObserver = NotificationCenter.default.addObserver(forName: .PauseAllVideos, object: nil, queue: .main) { _ in
+                    print("[Video] PauseAllVideos notification received for url: \(url)")
+                    shouldPlay = false
+                    player.pause()
+                }
             }
             .onChange(of: url) { newURL in
                 configureForURL(newURL)
@@ -55,7 +67,12 @@ struct FullscreenVideoView: View {
                 if shouldPlay { updatePlayback() }
             }
             .onDisappear {
+                print("[Video] onDisappear for url: \(url)")
                 teardown()
+                if let obs = pauseObserver {
+                    NotificationCenter.default.removeObserver(obs)
+                    pauseObserver = nil
+                }
             }
             .ignoresSafeArea()
             .allowsHitTesting(false)
@@ -161,6 +178,7 @@ struct FullscreenVideoView: View {
     }
 
     private func teardown() {
+        print("[Video] teardown() called for url: \(url)")
         removeBoundaryObserver()
         player.pause()
         player.removeAllItems()

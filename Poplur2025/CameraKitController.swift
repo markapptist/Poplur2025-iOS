@@ -414,6 +414,7 @@ final class CameraKitController: NSObject, ObservableObject {
     func startRecording() {
         sessionQueue.async { [weak self] in
             guard let self else { return }
+            print("[CameraKitController] startRecording called. isRecording: \(self.isRecording)")
             guard !self.movieOutput.isRecording else { return }
 
             // Enforce max duration from settings (default 10s)
@@ -432,6 +433,7 @@ final class CameraKitController: NSObject, ObservableObject {
     func stopRecording() {
         sessionQueue.async { [weak self] in
             guard let self else { return }
+            print("[CameraKitController] stopRecording called. isRecording: \(self.isRecording)")
             guard self.movieOutput.isRecording else { return }
             self.movieOutput.stopRecording()
         }
