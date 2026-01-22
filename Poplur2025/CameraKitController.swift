@@ -71,6 +71,15 @@ final class CameraKitController: NSObject, ObservableObject {
     }
 
     var previewHostView: UIView? { previewView }
+    
+    // Torch availability for current active device
+    var isTorchAvailable: Bool {
+        var available = false
+        sessionQueue.sync {
+            available = self.videoDeviceInput?.device.hasTorch ?? false
+        }
+        return available
+    }
 
     // Expose session running state for diagnostics (thread-safe snapshot)
     var captureSessionRunning: Bool {
@@ -138,8 +147,6 @@ final class CameraKitController: NSObject, ObservableObject {
     // MARK: - Public lifecycle
 
     func start() async {
-        print("[CK][Lifecycle] start() called")
-
         // Immediately surface cached lenses to make UI feel instant.
         if await MainActor.run(body: { self.lenses.isEmpty }) {
             let cached = loadCachedLenses()
@@ -155,10 +162,47 @@ final class CameraKitController: NSObject, ObservableObject {
 
         await configureIfNeeded()
 
+        // Ensure captureSession is running before marking ready
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            sessionQueue.async { [weak self] in
+                guard let self else { cont.resume(); return }
+                if !self.captureSession.isRunning {
+                    self.captureSession.startRunning()
+                }
+                cont.resume()
+            }
+        }
+
+        // Update readiness and add diagnostics
+        let runningNow = self.captureSessionRunning
+        print("[CK][Start] captureSession running after start attempt: \(runningNow)")
+        await MainActor.run { self.isReady = runningNow }
+
+        // If not running yet, try one lightweight retry after a short delay
+        if !runningNow {
+            Task {
+                try? await Task.sleep(nanoseconds: 200_000_000)
+                let stillRunning = self.captureSessionRunning
+                if !stillRunning {
+                    print("[CK][Start] Session not running yet; attempting second start")
+                    await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+                        self.sessionQueue.async { [weak self] in
+                            guard let self else { cont.resume(); return }
+                            if !self.captureSession.isRunning {
+                                self.captureSession.startRunning()
+                            }
+                            cont.resume()
+                        }
+                    }
+                    let runningAfterRetry = self.captureSessionRunning
+                    print("[CK][Start] captureSession running after retry: \(runningAfterRetry)")
+                    await MainActor.run { self.isReady = runningAfterRetry }
+                }
+            }
+        }
+
         // Ensure preview exists for UI layout immediately (UIKit path only).
         _ = makePreviewView()
-
-        await MainActor.run { self.isReady = true }
 
         // Defer nonessential work slightly so the camera becomes interactive first.
         Task {
@@ -170,7 +214,6 @@ final class CameraKitController: NSObject, ObservableObject {
     }
 
     func stop() {
-        print("[CK][Lifecycle] stop() called")
         Task { @MainActor in self.isReady = false }
         // We keep the session running; OS throttles in background. Add stop if you prefer.
     }
@@ -214,7 +257,6 @@ final class CameraKitController: NSObject, ObservableObject {
                         completion: nil
                     )
                     self.hasConfigured = true
-                    print("[CK] CameraController.configure() invoked")
                 }
 
                 // If we already configured AVFoundation capture session, skip setup
@@ -232,7 +274,6 @@ final class CameraKitController: NSObject, ObservableObject {
                         ?? AVCaptureDevice.default(for: .video)
 
                     guard let device = defaultDevice else {
-                        print("[CK][Config] No video device available")
                         self.captureSession.commitConfiguration()
                         cont.resume()
                         return
@@ -247,26 +288,22 @@ final class CameraKitController: NSObject, ObservableObject {
                             DispatchQueue.main.async {
                                 self.isUsingFrontCamera = (device.position == .front)
                             }
-                        } else {
-                            print("[CK][Config] Cannot add video input")
                         }
 
                         if self.captureSession.canAddOutput(self.photoOutput) {
                             self.captureSession.addOutput(self.photoOutput)
                             self.photoOutput.isHighResolutionCaptureEnabled = true
-                        } else {
-                            print("[CK][Config] Cannot add photo output")
                         }
 
                         if self.captureSession.canAddOutput(self.movieOutput) {
                             self.captureSession.addOutput(self.movieOutput)
-                        } else {
-                            print("[CK][Config] Cannot add movie output")
+                            if let connection = self.movieOutput.connection(with: .video), connection.isVideoOrientationSupported {
+                                connection.videoOrientation = .portrait
+                            }
                         }
 
                         self.captureSession.commitConfiguration()
                     } catch {
-                        print("[CK][Config] Error setting up AVCaptureSession:", error.localizedDescription)
                         self.captureSession.commitConfiguration()
                     }
                 }
@@ -281,6 +318,8 @@ final class CameraKitController: NSObject, ObservableObject {
                     self.lensesRepository = LensesRepository(groupID: groupID)
                 }
 
+                print("[CK][Config] hasConfigured=\(self.hasConfigured), inputs=\(self.captureSession.inputs.count), outputs=\(self.captureSession.outputs.count), running=\(self.captureSession.isRunning)")
+
                 cont.resume()
             }
         }
@@ -293,7 +332,6 @@ final class CameraKitController: NSObject, ObservableObject {
             self.captureSession.beginConfiguration()
             if self.captureSession.canSetSessionPreset(.high) {
                 self.captureSession.sessionPreset = .high
-                print("[CK][Config] Session preset bumped to .high")
             }
             self.captureSession.commitConfiguration()
         }
@@ -323,9 +361,8 @@ final class CameraKitController: NSObject, ObservableObject {
             guard let self else { return }
             guard let currentInput = self.videoDeviceInput else { return }
 
-        let newPosition: AVCaptureDevice.Position = (currentInput.device.position == .back) ? .front : .back
+            let newPosition: AVCaptureDevice.Position = (currentInput.device.position == .back) ? .front : .back
             guard let newDevice = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: newPosition) else {
-                print("[CK][Switch] No device for position:", newPosition.rawValue)
                 return
             }
 
@@ -343,11 +380,17 @@ final class CameraKitController: NSObject, ObservableObject {
                     if self.captureSession.canAddInput(currentInput) {
                         self.captureSession.addInput(currentInput)
                     }
-                    print("[CK][Switch] Failed to add new input")
                 }
                 self.captureSession.commitConfiguration()
+                
+                if !self.captureSession.isRunning {
+                    self.captureSession.startRunning()
+                    print("[CK][SwitchCamera] captureSession restarted after input swap")
+                }
+                
+                print("[CK][SwitchCamera] Switched to \(newPosition == .front ? "front" : "back") camera")
             } catch {
-                print("[CK][Switch] Error switching camera:", error.localizedDescription)
+                // no print here
             }
         }
     }
@@ -358,12 +401,16 @@ final class CameraKitController: NSObject, ObservableObject {
             guard device.hasTorch else { return }
             do {
                 try device.lockForConfiguration()
-                device.torchMode = on ? .on : .off
-                try device.setTorchModeOn(level: AVCaptureDevice.maxAvailableTorchLevel)
+                if on {
+                    device.torchMode = .on
+                    try device.setTorchModeOn(level: AVCaptureDevice.maxAvailableTorchLevel)
+                } else {
+                    device.torchMode = .off
+                }
                 device.unlockForConfiguration()
                 DispatchQueue.main.async { self.flashOn = on }
             } catch {
-                print("[CK][Torch] Failed to set torch:", error.localizedDescription)
+                // no print here
             }
         }
     }
@@ -377,7 +424,7 @@ final class CameraKitController: NSObject, ObservableObject {
                 device.videoZoomFactor = clamped
                 device.unlockForConfiguration()
             } catch {
-                print("[CK][Zoom] Failed to set zoom:", error.localizedDescription)
+                // no print
             }
         }
     }
@@ -397,7 +444,7 @@ final class CameraKitController: NSObject, ObservableObject {
                 }
                 device.unlockForConfiguration()
             } catch {
-                print("[CK][Focus] Failed to set focus/exposure:", error.localizedDescription)
+                // no print
             }
         }
     }
@@ -405,6 +452,14 @@ final class CameraKitController: NSObject, ObservableObject {
     func takePhoto() {
         sessionQueue.async { [weak self] in
             guard let self else { return }
+            if !self.captureSession.isRunning {
+                print("[CK][Photo] Ignored: captureSession not running")
+                return
+            }
+            if !self.captureSession.outputs.contains(self.photoOutput) {
+                print("[CK][Photo] Ignored: photoOutput not attached")
+                return
+            }
             let settings = AVCapturePhotoSettings()
             settings.isHighResolutionPhotoEnabled = true
             self.photoOutput.capturePhoto(with: settings, delegate: self)
@@ -414,7 +469,14 @@ final class CameraKitController: NSObject, ObservableObject {
     func startRecording() {
         sessionQueue.async { [weak self] in
             guard let self else { return }
-            print("[CameraKitController] startRecording called. isRecording: \(self.isRecording)")
+            if !self.captureSession.isRunning {
+                print("[CK][Video] Cannot start: captureSession not running")
+                return
+            }
+            if !self.captureSession.outputs.contains(self.movieOutput) {
+                print("[CK][Video] Cannot start: movieOutput not attached")
+                return
+            }
             guard !self.movieOutput.isRecording else { return }
 
             // Enforce max duration from settings (default 10s)
@@ -433,8 +495,10 @@ final class CameraKitController: NSObject, ObservableObject {
     func stopRecording() {
         sessionQueue.async { [weak self] in
             guard let self else { return }
-            print("[CameraKitController] stopRecording called. isRecording: \(self.isRecording)")
-            guard self.movieOutput.isRecording else { return }
+            guard self.movieOutput.isRecording else {
+                print("[CK][Video] Stop ignored: not recording")
+                return
+            }
             self.movieOutput.stopRecording()
         }
     }
@@ -473,3 +537,4 @@ extension CameraKitController: AVCapturePhotoCaptureDelegate, AVCaptureFileOutpu
         }
     }
 }
+

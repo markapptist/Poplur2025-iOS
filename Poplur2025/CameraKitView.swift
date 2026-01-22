@@ -35,6 +35,8 @@ struct CameraKitView: View {
     @State private var diagTapPoint: CGPoint = .zero
     @State private var showDiagDot = false
 
+    @State private var isLongPressingRecord = false
+
     private let carouselHeight: CGFloat = 110
     private let captureButtonSize: CGFloat = 84
     private let rightRailSpacing: CGFloat = 14
@@ -53,26 +55,22 @@ struct CameraKitView: View {
                             UIApplication.shared.open(url, options: [:], completionHandler: nil)
                         }
                     }
-                    .zIndex(100)
+                    .zIndex(40)
+                    .allowsHitTesting(false)
                 } else {
                     cameraPreviewWithGestures
                         .zIndex(0)
                 }
 
-                debugOverlay
-                    .padding(.leading, 8)
-                    .padding(.top, 8 + topSafeInset(in: geo))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .zIndex(30)
+                // Removed debugOverlay as per instructions
 
-                /*
                 // TEMP: stripped gestures/rail for tap isolation
                 rightActionRail
-                    .padding(.trailing, 12)
+                    .padding(.trailing, 25)
                     .padding(.top, 28 + topSafeInset(in: geo))
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-                    .zIndex(60)
-                */
+                    .zIndex(101)
+                    .allowsHitTesting(true)
 
                 if controller.mode == .video && controller.isRecording {
                     HStack(spacing: 6) {
@@ -92,22 +90,10 @@ struct CameraKitView: View {
                     .padding(.top, 28 + topSafeInset(in: geo))
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .zIndex(40)
+                    .allowsHitTesting(false)
                 }
 
-                // Live HUD showing mode/isRecording/isReady
-                HStack(spacing: 8) {
-                    Circle().fill(controller.isReady ? Color.green : Color.orange).frame(width: 8, height: 8)
-                    Text("Mode: \(String(describing: controller.mode)) | Rec: \(controller.isRecording ? "yes" : "no") | Ready: \(controller.isReady ? "yes" : "no")")
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Color.black.opacity(0.45), in: Capsule())
-                }
-                .padding(.leading, 12)
-                .padding(.top, 52 + topSafeInset(in: geo))
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .zIndex(35)
+                // Removed live HUD showing mode/isRecording/isReady (debug overlay)
 
                 // Temporary toast for tap confirmation
                 if showTapToast {
@@ -120,7 +106,8 @@ struct CameraKitView: View {
                         .padding(.bottom, dynamicBottomInset(in: geo) + 120)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                         .transition(.opacity)
-                        .zIndex(90)
+                        .zIndex(40)
+                        .allowsHitTesting(false)
                 }
 
                 // Visible recording banner at top center
@@ -138,7 +125,8 @@ struct CameraKitView: View {
                     .padding(.top, 28 + topSafeInset(in: geo))
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     .transition(.opacity)
-                    .zIndex(45)
+                    .zIndex(40)
+                    .allowsHitTesting(false)
                 }
 
                 // Fullscreen white flash for photo capture
@@ -146,7 +134,8 @@ struct CameraKitView: View {
                     .opacity(showPhotoFlash ? 0.85 : 0.0)
                     .ignoresSafeArea()
                     .animation(.easeOut(duration: 0.35), value: showPhotoFlash)
-                    .zIndex(44)
+                    .zIndex(40)
+                    .allowsHitTesting(false)
 
                 // Full-screen tap diagnostic overlay (does not block bottom controls)
                 Color.clear
@@ -163,8 +152,8 @@ struct CameraKitView: View {
                             }
                         }
                     )
-                    .allowsHitTesting(true)
-                    .zIndex(20)
+                    .allowsHitTesting(false)
+                    .zIndex(40)
 
                 // Render diagnostic dot when a tap is detected
                 if showDiagDot {
@@ -173,7 +162,8 @@ struct CameraKitView: View {
                         .frame(width: 18, height: 18)
                         .position(diagTapPoint)
                         .transition(.opacity)
-                        .zIndex(85)
+                        .zIndex(40)
+                        .allowsHitTesting(false)
                 }
 
                 bottomStack
@@ -272,6 +262,15 @@ struct CameraKitView: View {
         if status == .authorized, !controller.isReady {
             await controller.start()
         }
+
+        // Lightweight retry in case initial start races with view lifecycle
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            let status2 = AVCaptureDevice.authorizationStatus(for: .video)
+            if status2 == .authorized, !controller.isReady {
+                await controller.start()
+            }
+        }
     }
 
     private var cameraPreviewWithGestures: some View {
@@ -301,44 +300,26 @@ struct CameraKitView: View {
         }
     }
 
-    private var debugOverlay: some View {
-        let auth = AVCaptureDevice.authorizationStatus(for: .video)
-        let mic = AVCaptureDevice.authorizationStatus(for: .audio)
-        let authText: String
-        switch auth {
-        case .authorized: authText = "authorized"
-        case .notDetermined: authText = "notDetermined"
-        case .denied: authText = "denied"
-        case .restricted: authText = "restricted"
-        @unknown default: authText = "unknown"
-        }
-        let micText: String
-        switch mic {
-        case .authorized: micText = "authorized"
-        case .notDetermined: micText = "notDetermined"
-        case .denied: micText = "denied"
-        case .restricted: micText = "restricted"
-        @unknown default: micText = "unknown"
-        }
-
-        return HStack(spacing: 8) {
-            Circle()
-                .fill(controller.isReady ? Color.green : Color.orange)
-                .frame(width: 8, height: 8)
-            Text("Cam: \(authText) | Mic: \(micText) | Ready: \(controller.isReady ? "yes" : "no") | Session: \(controller.captureSessionRunning ? "running" : "stopped")")
-                .font(.system(size: 11, weight: .semibold, design: .rounded))
-                .foregroundColor(.white.opacity(0.95))
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(Color.black.opacity(0.45), in: Capsule())
-        }
-        .allowsHitTesting(false)
-    }
+    // Removed debugOverlay completely as per instructions
 
     private var rightActionRail: some View {
         VStack(spacing: rightRailSpacing) {
+            /*
+            // Removed debug HStack that showed Ready and Cam permission
+            HStack(spacing: 8) {
+                Text("Ready: \(controller.isReady ? "YES" : "NO")")
+                Text("Cam: \(AVCaptureDevice.authorizationStatus(for: .video).rawValue)")
+            }
+            .font(.system(size: 12, weight: .semibold, design: .rounded))
+            .foregroundColor(.white)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Color.black.opacity(0.6), in: Capsule())
+            */
+
             Button {
-                controller.switchCamera()
+                print("[UI] switchCamera tapped. isReady: \(controller.isReady)")
+                Task { @MainActor in controller.switchCamera() }
             } label: {
                 Circle()
                     .fill(Color.black.opacity(controller.isReady ? 0.45 : 0.25))
@@ -352,21 +333,28 @@ struct CameraKitView: View {
             .disabled(!controller.isReady)
 
             Button {
-                controller.setTorch(on: !controller.flashOn)
+                // Optional: if controller exposes torch availability, log here. Otherwise, this serves as a placeholder for visibility.
+                if !controller.flashOn {
+                    print("[UI] Attempting to enable torch; ensure active device supports torch.")
+                }
+                print("[UI] torch tapped. isReady: \(controller.isReady), flashOn: \(controller.flashOn)")
+                Task { @MainActor in controller.setTorch(on: !controller.flashOn) }
             } label: {
                 Circle()
                     .fill(Color.black.opacity(controller.isReady ? 0.45 : 0.25))
                     .frame(width: 44, height: 44)
                     .overlay(
                         Image(systemName: controller.flashOn ? "bolt.fill" : "bolt.slash.fill")
-                            .foregroundColor(.white.opacity(controller.isReady ? 1.0 : 0.5))
+                            .foregroundColor(
+                                .white.opacity((controller.isReady && controller.isTorchAvailable) ? 1.0 : 0.3)
+                            )
                     )
             }
             .buttonStyle(.plain)
-            .disabled(!controller.isReady)
+            .disabled(!controller.isReady || !controller.isTorchAvailable)
 
             Button {
-                print("[CK][UI] More tapped")
+                // Placeholder for More button action
             } label: {
                 Circle()
                     .fill(Color.black.opacity(0.45))
@@ -377,6 +365,7 @@ struct CameraKitView: View {
                     )
             }
             .buttonStyle(.plain)
+            .disabled(!controller.isReady)
         }
     }
 
@@ -385,104 +374,104 @@ struct CameraKitView: View {
             HStack {
                 Spacer()
 
-                Button {
-                    withAnimation(.easeInOut(duration: 0.15)) {
-                        tapToastMessage = "Record tapped"
-                        showTapToast = true
-                    }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-                        withAnimation(.easeInOut(duration: 0.25)) {
-                            showTapToast = false
-                        }
-                    }
+                // Updated to new gesture logic: simultaneous LongPressGesture + TapGesture
+                ZStack {
+                    Circle()
+                        .strokeBorder(Color.white.opacity(0.8), lineWidth: 6)
+                        .frame(width: captureButtonSize, height: captureButtonSize)
 
-                    let haptic = UIImpactFeedbackGenerator(style: .light)
-                    haptic.impactOccurred()
-                    Task { @MainActor in
-                        print("[CameraKitView] Record button tapped. isRecording: \(controller.isRecording), isReady: \(controller.isReady), mode: \(controller.mode)")
-
-                        if !controller.isReady {
-                            print("[CameraKitView] Controller not ready. Attempting to start...")
-                            if injectedController == nil {
-                                await ensurePermissionAndStart()
-                            } else {
-                                await maybeStartIfAuthorizedAndNotReady()
-                            }
-                            print("[CameraKitView] Start attempt complete. isReady: \(controller.isReady)")
-                        }
-
-                        let wasRecording = controller.isRecording
-
-                        if String(describing: controller.mode) == "unknown" {
-                            print("[CameraKitView] Mode unknown, attempting to set video mode…")
-                        }
-
-                        switch controller.mode {
-                        case .video:
-                            if controller.isRecording {
-                                print("[CameraKitView] Stopping recording…")
-                                controller.stopRecording()
-                                withAnimation(.easeInOut(duration: 0.2)) { showRecordingBanner = false }
-                            } else {
-                                if !controller.isReady {
-                                    print("[CameraKitView] Not ready at record time; retrying start…")
-                                    if injectedController == nil {
-                                        await ensurePermissionAndStart()
-                                    } else {
-                                        await maybeStartIfAuthorizedAndNotReady()
-                                    }
-                                }
-                                print("[CameraKitView] Starting recording…")
-                                withAnimation(.easeInOut(duration: 0.2)) { showRecordingBanner = true }
-                                controller.startRecording()
-                            }
-                        case .photo:
-                            print("[CameraKitView] Taking photo…")
-                            showPhotoFlash = true
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                                showPhotoFlash = false
-                            }
-                            controller.takePhoto()
-                        }
-                    }
-                } label: {
-                    ZStack {
-                        Circle()
-                            .strokeBorder(Color.white.opacity(0.8), lineWidth: 6)
-                            .frame(width: captureButtonSize, height: captureButtonSize)
-
-                        if controller.mode == .video {
-                            if controller.isRecording {
-                                Circle()
-                                    .fill(Color.red)
-                                    .frame(width: captureButtonSize * 0.5, height: captureButtonSize * 0.5)
-                            } else {
-                                Circle()
-                                    .fill(Color.white.opacity(controller.isReady ? 1.0 : 0.5))
-                                    .frame(width: captureButtonSize * 0.7, height: captureButtonSize * 0.7)
-                            }
+                    if controller.mode == .video {
+                        if controller.isRecording {
+                            Circle()
+                                .fill(Color.red)
+                                .frame(width: captureButtonSize * 0.5, height: captureButtonSize * 0.5)
                         } else {
                             Circle()
                                 .fill(Color.white.opacity(controller.isReady ? 1.0 : 0.5))
                                 .frame(width: captureButtonSize * 0.7, height: captureButtonSize * 0.7)
                         }
+                    } else {
+                        Circle()
+                            .fill(Color.white.opacity(controller.isReady ? 1.0 : 0.5))
+                            .frame(width: captureButtonSize * 0.7, height: captureButtonSize * 0.7)
                     }
                 }
                 .contentShape(Rectangle())
                 .frame(minWidth: 140, minHeight: 140)
-                .simultaneousGesture(TapGesture().onEnded {
-                    print("[CameraKitView] onTapGesture fired for record button")
-                })
+                .allowsHitTesting(controller.isReady)
+                .simultaneousGesture(
+                    TapGesture()
+                        .onEnded {
+                            print("[UI] Capture tap. isReady: \(controller.isReady), isRecording: \(controller.isRecording), isLongPressingRecord: \(isLongPressingRecord)")
+                            print("[UI] captureSessionRunning: \(controller.captureSessionRunning)")
+                            guard controller.isReady, !isLongPressingRecord else {
+                                print("[CameraKitView] TapGesture ignored: either not ready or long press active.")
+                                return
+                            }
+                            // Removed guard for cameraKitSession == nil here as per instructions
+
+                            if controller.mode == .video {
+                                print("[CameraKitView] TapGesture in video mode: toggling recording")
+                                if controller.isRecording {
+                                    Task { @MainActor in controller.stopRecording() }
+                                } else {
+                                    Task { @MainActor in controller.startRecording() }
+                                }
+                                return
+                            }
+                            // Tap triggers photo capture; long-press handles video recording.
+                            print("[CameraKitView] TapGesture: taking photo")
+                            showPhotoFlash = true
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                                showPhotoFlash = false
+                            }
+                            Task { @MainActor in
+                                controller.takePhoto()
+                            }
+                        }
+                )
+                .simultaneousGesture(
+                    LongPressGesture(minimumDuration: 0.25)
+                        .onChanged { _ in
+                            print("[UI] LongPress changed. isReady: \(controller.isReady), isRecording: \(controller.isRecording), isLongPressingRecord: \(isLongPressingRecord)")
+                            guard controller.isReady, !controller.isRecording, !isLongPressingRecord else { return }
+                            controller.mode = .video
+                            // Removed guard for cameraKitSession == nil here as per instructions
+                            print("[CameraKitView] LongPressGesture began: starting video recording")
+                            isLongPressingRecord = true
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                showRecordingBanner = true
+                            }
+                            Task { @MainActor in
+                                controller.startRecording()
+                            }
+                        }
+                        .onEnded { _ in
+                            print("[UI] LongPress ended. isReady: \(controller.isReady), isRecording: \(controller.isRecording)")
+                            guard controller.isReady else {
+                                isLongPressingRecord = false
+                                return
+                            }
+                            isLongPressingRecord = false
+                            // Removed guard for cameraKitSession == nil here as per instructions
+                            guard controller.mode == .video, controller.isRecording else { return }
+                            print("[CameraKitView] LongPressGesture ended: stopping video recording")
+                            Task { @MainActor in
+                                controller.stopRecording()
+                            }
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                showRecordingBanner = false
+                            }
+                        }
+                )
                 .buttonStyle(.plain)
-                .contentShape(Rectangle())
-                .highPriorityGesture(TapGesture().onEnded { })
+                .disabled(!controller.isReady)
 
                 Spacer()
             }
             .padding(.bottom, 6)
             .contentShape(Rectangle())
             .allowsHitTesting(true)
-            .highPriorityGesture(TapGesture().onEnded { })
 
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(Color.black.opacity(0.25))
