@@ -31,6 +31,7 @@ final class CameraKitController: NSObject, ObservableObject {
     @MainActor @Published var flashOn: Bool = false
     // New: readiness gate for UI
     @MainActor @Published private(set) var isReady: Bool = false
+    @MainActor @Published private(set) var cameraKitConfigured: Bool = false
 
     // Lenses
     @MainActor @Published var lenses: [Lens] = []
@@ -90,6 +91,9 @@ final class CameraKitController: NSObject, ObservableObject {
         return running
     }
 
+    // Expose AVFoundation session for diagnostics / fallback preview (read-only)
+    var avCaptureSession: AVCaptureSession { captureSession }
+    
     // MARK: - Lenses plumbing placeholders
     private var lensesRepository: LensesRepository?
 
@@ -178,6 +182,11 @@ final class CameraKitController: NSObject, ObservableObject {
         print("[CK][Start] captureSession running after start attempt: \(runningNow)")
         await MainActor.run { self.isReady = runningNow }
 
+        if self.cameraKitSession == nil {
+            print("[CK][Start] cameraKitSession is nil after start; attempting reconfigure")
+            await self.configureIfNeeded()
+        }
+
         // If not running yet, try one lightweight retry after a short delay
         if !runningNow {
             Task {
@@ -210,6 +219,13 @@ final class CameraKitController: NSObject, ObservableObject {
             await loadLensesIfConfigured()
             // After preview is up, bump preset to high for quality.
             bumpPresetToHighIfPossible()
+        }
+
+        Task {
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            let running = self.captureSessionRunning
+            let hasCK = (self.cameraKitSession != nil)
+            print("[CK][Start] Post-start check: running=\(running) cameraKitSession=\(hasCK)")
         }
     }
 
@@ -254,9 +270,20 @@ final class CameraKitController: NSObject, ObservableObject {
                         orientation: orientation,
                         textInputContextProvider: nil,
                         agreementsPresentationContextProvider: nil,
-                        completion: nil
+                        completion: { [weak self] in
+                            guard let self else { return }
+                            print("[CK][Config] CameraController.configure completion called")
+                            Task { @MainActor in
+                                self.cameraKitConfigured = true
+                            }
+                        }
                     )
                     self.hasConfigured = true
+                    if controller.cameraKit == nil {
+                        print("[CK][Config] Warning: cameraKit session is nil right after configure")
+                    } else {
+                        print("[CK][Config] cameraKit session available after configure")
+                    }
                 }
 
                 // If we already configured AVFoundation capture session, skip setup
@@ -288,11 +315,15 @@ final class CameraKitController: NSObject, ObservableObject {
                             DispatchQueue.main.async {
                                 self.isUsingFrontCamera = (device.position == .front)
                             }
+                        } else {
+                            print("[CK][Config] Cannot add video device input")
                         }
 
                         if self.captureSession.canAddOutput(self.photoOutput) {
                             self.captureSession.addOutput(self.photoOutput)
                             self.photoOutput.isHighResolutionCaptureEnabled = true
+                        } else {
+                            print("[CK][Config] Cannot add photo output")
                         }
 
                         if self.captureSession.canAddOutput(self.movieOutput) {
@@ -300,10 +331,13 @@ final class CameraKitController: NSObject, ObservableObject {
                             if let connection = self.movieOutput.connection(with: .video), connection.isVideoOrientationSupported {
                                 connection.videoOrientation = .portrait
                             }
+                        } else {
+                            print("[CK][Config] Cannot add movie output")
                         }
 
                         self.captureSession.commitConfiguration()
                     } catch {
+                        print("[CK][Config] Failed to create device input: \(error.localizedDescription)")
                         self.captureSession.commitConfiguration()
                     }
                 }
@@ -376,6 +410,18 @@ final class CameraKitController: NSObject, ObservableObject {
                     DispatchQueue.main.async {
                         self.isUsingFrontCamera = (newPosition == .front)
                     }
+                    // Turn off torch on camera switch to avoid invalid state when moving to a device without torch
+                    if let oldDevice = currentInput.device as AVCaptureDevice?, oldDevice.hasTorch {
+                        if oldDevice.isTorchActive {
+                            do { try oldDevice.lockForConfiguration(); oldDevice.torchMode = .off; oldDevice.unlockForConfiguration() } catch {}
+                        }
+                    }
+                    // Notify UI by re-publishing flashOn if torch not available on new device
+                    DispatchQueue.main.async {
+                        if !(self.videoDeviceInput?.device.hasTorch ?? false) {
+                            self.flashOn = false
+                        }
+                    }
                 } else {
                     if self.captureSession.canAddInput(currentInput) {
                         self.captureSession.addInput(currentInput)
@@ -398,19 +444,27 @@ final class CameraKitController: NSObject, ObservableObject {
     func setTorch(on: Bool) {
         sessionQueue.async { [weak self] in
             guard let self, let device = self.videoDeviceInput?.device else { return }
-            guard device.hasTorch else { return }
+            guard device.hasTorch, device.isTorchAvailable else {
+                DispatchQueue.main.async { self.flashOn = false }
+                return
+            }
             do {
                 try device.lockForConfiguration()
                 if on {
-                    device.torchMode = .on
-                    try device.setTorchModeOn(level: AVCaptureDevice.maxAvailableTorchLevel)
+                    if device.isTorchModeSupported(.on) {
+                        device.torchMode = .on
+                        try device.setTorchModeOn(level: AVCaptureDevice.maxAvailableTorchLevel)
+                        DispatchQueue.main.async { self.flashOn = true }
+                    } else {
+                        DispatchQueue.main.async { self.flashOn = false }
+                    }
                 } else {
                     device.torchMode = .off
+                    DispatchQueue.main.async { self.flashOn = false }
                 }
                 device.unlockForConfiguration()
-                DispatchQueue.main.async { self.flashOn = on }
             } catch {
-                // no print here
+                DispatchQueue.main.async { self.flashOn = false }
             }
         }
     }
@@ -487,6 +541,10 @@ final class CameraKitController: NSObject, ObservableObject {
                 .appendingPathComponent(UUID().uuidString)
                 .appendingPathExtension("mov")
             self.activeRecordingURL = tmpURL
+            
+            print("[CK][Video] Starting recording to: \(tmpURL)")
+            print("[CK][Video] outputs attached at start: \(self.captureSession.outputs)")
+
             self.movieOutput.startRecording(to: tmpURL, recordingDelegate: self)
             DispatchQueue.main.async { self.isRecording = true }
         }
@@ -499,7 +557,54 @@ final class CameraKitController: NSObject, ObservableObject {
                 print("[CK][Video] Stop ignored: not recording")
                 return
             }
+            print("[CK][Video] stopRecording() called")
             self.movieOutput.stopRecording()
+        }
+    }
+    
+    // Safety net: if delegate failed to publish, try to persist active temp file
+    func flushPendingRecordingIfAny() {
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            guard let tmpURL = self.activeRecordingURL else {
+                print("[CK][Video] flushPendingRecordingIfAny: no activeRecordingURL")
+                return
+            }
+            let fm = FileManager.default
+            guard fm.fileExists(atPath: tmpURL.path) else {
+                print("[CK][Video] flushPendingRecordingIfAny: temp file missing at \(tmpURL.path)")
+                return
+            }
+            do {
+                let caches = try fm.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+                let recordingsDir = caches.appendingPathComponent("Recordings", isDirectory: true)
+                if !fm.fileExists(atPath: recordingsDir.path) {
+                    try fm.createDirectory(at: recordingsDir, withIntermediateDirectories: true)
+                }
+                let dest = recordingsDir.appendingPathComponent(UUID().uuidString).appendingPathExtension("mov")
+                do {
+                    try fm.moveItem(at: tmpURL, to: dest)
+                    print("[CK][Video] flushPending: moved temp to \(dest)")
+                    Task { @MainActor in
+                        self.lastVideoURL = dest
+                        print("[CK][Video] flushPending: published lastVideoURL: \(dest)")
+                    }
+                } catch {
+                    print("[CK][Video] flushPending: move failed (\(error.localizedDescription)); attempting copy")
+                    do {
+                        try fm.copyItem(at: tmpURL, to: dest)
+                        print("[CK][Video] flushPending: copied temp to \(dest)")
+                        Task { @MainActor in
+                            self.lastVideoURL = dest
+                            print("[CK][Video] flushPending: published lastVideoURL (copied): \(dest)")
+                        }
+                    } catch {
+                        print("[CK][Video] flushPending: copy failed: \(error.localizedDescription)")
+                    }
+                }
+            } catch {
+                print("[CK][Video] flushPending: failed to prepare caches dir: \(error.localizedDescription)")
+            }
         }
     }
 }
@@ -523,16 +628,66 @@ extension CameraKitController: AVCapturePhotoCaptureDelegate, AVCaptureFileOutpu
     }
 
     func fileOutput(_ output: AVCaptureFileOutput, didFinishRecordingTo outputFileURL: URL, from connections: [AVCaptureConnection], error: Error?) {
+        print("[CK][Video] didFinishRecording delegate fired")
+        print("[CK][Video] outputFileURL: \(outputFileURL)")
+        if let error = error {
+            print("[CK][Video] Error in delegate: \(error.localizedDescription)")
+        } else {
+            print("[CK][Video] No error in delegate")
+        }
+
         // Reset limit so next recordings can adopt updated settings if changed
         output.maxRecordedDuration = CMTime.invalid
 
+        // Attempt to persist the temp file to Caches/Recordings and publish URL
+        let fm = FileManager.default
+        var finalURL: URL? = nil
+
+        do {
+            // Ensure the file actually exists before proceeding
+            if fm.fileExists(atPath: outputFileURL.path) {
+                let caches = try fm.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+                let recordingsDir = caches.appendingPathComponent("Recordings", isDirectory: true)
+                if !fm.fileExists(atPath: recordingsDir.path) {
+                    try fm.createDirectory(at: recordingsDir, withIntermediateDirectories: true)
+                }
+                let destURL = recordingsDir.appendingPathComponent(UUID().uuidString).appendingPathExtension("mov")
+                do {
+                    try fm.moveItem(at: outputFileURL, to: destURL)
+                    finalURL = destURL
+                    print("[CK][Video] Moved recording to caches: \(destURL)")
+                } catch {
+                    print("[CK][Video] Move failed (\(error.localizedDescription)); attempting copy")
+                    do {
+                        try fm.copyItem(at: outputFileURL, to: destURL)
+                        finalURL = destURL
+                        print("[CK][Video] Copied recording to caches: \(destURL)")
+                    } catch {
+                        print("[CK][Video] Copy also failed: \(error.localizedDescription); will fall back to temp URL if usable")
+                        // As a last resort, use the temp URL if it still exists
+                        if fm.fileExists(atPath: outputFileURL.path) {
+                            finalURL = outputFileURL
+                        }
+                    }
+                }
+            } else {
+                print("[CK][Video] Temp output file does not exist; cannot persist")
+            }
+        } catch {
+            print("[CK][Video] Failed to prepare recordings directory: \(error.localizedDescription)")
+            if fm.fileExists(atPath: outputFileURL.path) {
+                finalURL = outputFileURL
+            }
+        }
+
         Task { @MainActor in
             self.isRecording = false
-            if let error = error {
-                print("[CK][Video] Error:", error.localizedDescription)
-                self.lastVideoURL = nil
+            if let url = finalURL {
+                self.lastVideoURL = url
+                print("[CK][Video] Published lastVideoURL: \(url)")
             } else {
-                self.lastVideoURL = outputFileURL
+                self.lastVideoURL = nil
+                print("[CK][Video] Unable to publish lastVideoURL (nil)")
             }
         }
     }
