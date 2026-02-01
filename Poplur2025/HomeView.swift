@@ -65,7 +65,7 @@ struct HomeView: View {
                     }
 
                 ZStack {
-                    CameraKitView(controller: cameraController, coordinate: locationProvider.coordinate)
+                    CameraPreviewHost(controller: cameraController, coordinate: locationProvider.coordinate)
                         .ignoresSafeArea()
                 }
                 .tag(AppTab.record)

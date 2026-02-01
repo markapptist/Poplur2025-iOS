@@ -5,6 +5,7 @@ import FirebaseFirestore
 import CoreLocation
 import FirebaseAuth
 import AVFoundation
+import AVKit
 
 struct MediaPickerView: View {
     @Environment(\.dismiss) private var dismiss  // To go back to previous view
@@ -20,6 +21,7 @@ struct MediaPickerView: View {
     @State private var preparedImageData: Data?
     @State private var preparedVideoURL: URL?          // MP4 after transcode if video
     @State private var preparedPosterJPEG: Data?       // poster for video
+    @State private var previewPlayer: AVPlayer?
 
     @State private var showImagePicker = false
     @State private var mediaSourceType: UIImagePickerController.SourceType = .photoLibrary
@@ -42,15 +44,37 @@ struct MediaPickerView: View {
     var body: some View {
         VStack(spacing: 16) {
             // Preview area
-            if let previewImage = previewImage {
+            if let player = previewPlayer {
+                ZStack {
+                    if let poster = previewImage {
+                        Image(uiImage: poster)
+                            .resizable()
+                            .interpolation(.low)
+                            .scaledToFit()
+                            .frame(maxWidth: 300, maxHeight: 300)
+                            .cornerRadius(10)
+                            .opacity(0.0)
+                    }
+                    VideoPlayer(player: player)
+                        .frame(maxWidth: 300, maxHeight: 300)
+                        .cornerRadius(10)
+                        .onAppear {
+                            player.seek(to: .zero)
+                            player.play()
+                        }
+                        .onDisappear {
+                            player.pause()
+                        }
+                }
+            } else if let previewImage = previewImage {
                 Image(uiImage: previewImage)
                     .resizable()
-                    .interpolation(.low) // reduce sampling cost during debug/preview
+                    .interpolation(.low)
                     .scaledToFit()
                     .frame(maxWidth: 300, maxHeight: 300)
                     .cornerRadius(10)
             } else if selectedVideoURL != nil {
-                Text("Video selected")
+                Text("Preparing video preview…")
                     .font(.subheadline)
             } else {
                 Text("Pick an image or video")
@@ -132,10 +156,15 @@ struct MediaPickerView: View {
         .onChange(of: selectedVideoURL) { _ in
             startPreparation()
         }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("MediaPickerResetPreviewPlayer"))) { _ in
+            previewPlayer?.pause()
+            previewPlayer = nil
+        }
         .onDisappear {
             // Cancel any ongoing preparation when leaving
             prepTask?.cancel()
             prepTask = nil
+            previewPlayer?.pause()
         }
     }
 
@@ -181,6 +210,7 @@ struct MediaPickerView: View {
         preparedVideoURL = nil
         preparedPosterJPEG = nil
         uploadProgress = 0
+        previewPlayer = nil
     }
 
     private func startPreparation() {
@@ -240,6 +270,14 @@ struct MediaPickerView: View {
                     self.preparedVideoURL = mp4URL
                     self.preparedPosterJPEG = posterData
                     self.selectedImage = nil
+                    // Build inline preview player (looping)
+                    let player = AVPlayer(url: mp4URL)
+                    player.isMuted = true
+                    self.previewPlayer = player
+                    NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: player.currentItem, queue: .main) { _ in
+                        player.seek(to: .zero)
+                        player.play()
+                    }
                 }
             } catch {
                 if Task.isCancelled { return }
@@ -438,6 +476,8 @@ private struct LegacyPickerWrapper: UIViewControllerRepresentable {
         init(parent: LegacyPickerWrapper) { self.parent = parent }
 
         func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any]) {
+            // Reset any existing preview player via Notification
+            NotificationCenter.default.post(name: Notification.Name("MediaPickerResetPreviewPlayer"), object: nil)
             // Reset the other media type to avoid both being set
             if let image = info[.originalImage] as? UIImage {
                 parent.selectedVideoURL = nil
