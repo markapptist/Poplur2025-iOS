@@ -1,7 +1,9 @@
 import SwiftUI
 import FirebaseFirestore
 import AVKit
+import CoreMedia
 import CoreLocation
+import UIKit
 
 struct FeedView: View {
     @State private var posts: [Post] = []
@@ -25,6 +27,10 @@ struct FeedView: View {
     @State private var usernames: [String: String] = [:] // uid -> username
     @State private var usernameLoadsInProgress: Set<String> = []
 
+    // Video preloading cache
+    @State private var preloadedAssets: [String: AVURLAsset] = [:] // mediaURL string -> asset
+    @State private var readyItems: Set<String> = [] // URLs that reached .readyToPlay
+
     // Fallback demo video to ensure we always have something to play
     private let fallbackFastVideoURL = URL(string: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4")
 
@@ -33,6 +39,12 @@ struct FeedView: View {
 
     // Debounce fast index changes to avoid rapid player start/stop thrash
     @State private var debouncedIndex: Int = 0
+
+    @State private var impactHaptics = UIImpactFeedbackGenerator(style: .rigid)
+
+    // Global mute toggle with persistence
+    @AppStorage("FeedGlobalMute") private var isGloballyMuted: Bool = false
+    @State private var lastHapticIndex: Int? = nil
 
     @Environment(\.scenePhase) private var scenePhase
     @State private var emptyStatePlayer: AVPlayer? = nil
@@ -73,7 +85,15 @@ struct FeedView: View {
             Task {
                 try? await Task.sleep(nanoseconds: 80_000_000) // 80ms debounce
                 await MainActor.run {
+                    guard debouncedIndex != target else { return }
                     debouncedIndex = target
+                    if lastHapticIndex != target {
+                        lastHapticIndex = target
+                        let notif = UINotificationFeedbackGenerator()
+                        notif.notificationOccurred(.success)
+                        impactHaptics.prepare()
+                        impactHaptics.impactOccurred(intensity: 1.0)
+                    }
                 }
             }
 
@@ -86,6 +106,7 @@ struct FeedView: View {
         }
         .onAppear {
             debouncedIndex = currentIndex
+            impactHaptics.prepare()
         }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("RecordTabDidAppear"))) { _ in
             print("[Feed] Record tab appeared — pausing feed playback")
@@ -120,6 +141,8 @@ struct FeedView: View {
             case .active:
                 Task { @MainActor in
                     debouncedIndex = currentIndex
+                    impactHaptics.prepare()
+                    impactHaptics.impactOccurred(intensity: 1.0)
                 }
             case .inactive, .background:
                 Task { @MainActor in
@@ -157,23 +180,9 @@ struct FeedView: View {
         VerticalPager(currentIndex: .constant(0), pageCount: 1) {
             ZStack {
                 if let url = fallbackFastVideoURL {
-                    VideoPlayer(player: emptyStatePlayer)
-                        .onAppear {
-                            if emptyStatePlayer == nil {
-                                emptyStatePlayer = AVPlayer(url: url)
-                                emptyStatePlayer?.isMuted = false
-                                emptyStatePlayer?.actionAtItemEnd = .none
-                                NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: emptyStatePlayer?.currentItem, queue: .main) { _ in
-                                    emptyStatePlayer?.seek(to: .zero)
-                                    emptyStatePlayer?.play()
-                                }
-                            }
-                            emptyStatePlayer?.play()
-                        }
-                        .onDisappear {
-                            emptyStatePlayer?.pause()
-                        }
-                        .id(url)
+                    FillVideoPlayer(url: url, play: true, muted: isGloballyMuted)
+                        .frame(width: size.width, height: size.height)
+                        .clipped()
                 } else {
                     Color.black
                 }
@@ -185,45 +194,49 @@ struct FeedView: View {
 
     private func populatedFeedView(in size: CGSize) -> some View {
         VerticalPager(currentIndex: $currentIndex, pageCount: posts.count) {
-            ZStack {
-                let pageIndices: [Int] = pagesToDisplay
-                ForEach(pageIndices, id: \.self) { idx in
-                    if let post = posts[safe: idx] {
-                        let isActive: Bool = (debouncedIndex == idx)
-                        let shouldPlay: Bool = isActive
-                        let isMuted: Bool = !isActive
-                        let resolvedName: String = displayName(for: post)
+            if let idx = pagesToDisplay.first, let post = posts[safe: idx] {
+                let isActive: Bool = (debouncedIndex == idx)
+                let shouldPlay: Bool = isActive
+                let isMuted: Bool = isGloballyMuted || !isActive || debouncedIndex == -1
+                let resolvedName: String = displayName(for: post)
+                let isReady = readyItems.contains(post.mediaURL)
+                let asset = preloadedAssets[post.mediaURL]
 
-                        FeedFullscreenPage(
-                            post: post,
-                            isActive: Binding(
-                                get: { isActive },
-                                set: { _ in }
-                            ),
-                            displayName: resolvedName,
-                            onUserTapped: { userId in
-                                selectedUserID = userId
-                                navigateToProfile = true
-                            },
-                            shouldPlay: shouldPlay,
-                            isMuted: isMuted
-                        )
-                        .id(post.id)
-                        .frame(width: size.width, height: size.height)
-                        .position(
-                            x: size.width / 2,
-                            y: (CGFloat(idx) + 0.5) * size.height
-                        )
-                        .animation(.none, value: debouncedIndex)
-                        .onAppear {
-                            maybeLoadMoreIfNeeded(appearingIndex: idx)
-                            maybeResolveUsername(for: post.userID)
-                        }
+                FeedFullscreenPage(
+                    post: post,
+                    displayName: resolvedName,
+                    onUserTapped: { userId in
+                        selectedUserID = userId
+                        navigateToProfile = true
+                    },
+                    isVideoReady: isReady,
+                    preloadedAsset: asset,
+                    shouldPlay: shouldPlay,
+                    isMuted: isMuted
+                )
+                .id(post.id)
+                .onAppear {
+                    if isVideoURL(post.mediaURL) {
+                        preloadVideoIfNeeded(for: post.mediaURL)
+                    }
+                    if let next = posts[safe: idx + 1], isVideoURL(next.mediaURL) {
+                        preloadVideoIfNeeded(for: next.mediaURL)
+                    }
+                    maybeLoadMoreIfNeeded(appearingIndex: idx)
+                    maybeResolveUsername(for: post.userID)
+
+                    // Strong haptic on page activation (once per index)
+                    if lastHapticIndex != idx {
+                        lastHapticIndex = idx
+                        let notif = UINotificationFeedbackGenerator()
+                        notif.notificationOccurred(.success)
+                        impactHaptics.prepare()
+                        impactHaptics.impactOccurred(intensity: 1.0)
                     }
                 }
+            } else {
+                Color.black
             }
-            .frame(width: size.width, height: size.height * CGFloat(max(posts.count, 1)))
-            .background(Color.black)
         }
     }
 
@@ -246,15 +259,7 @@ struct FeedView: View {
 
     private var pagesToDisplay: [Int] {
         guard !posts.isEmpty else { return [] }
-        if !hasUserScrolledOnce {
-            return [debouncedIndex].filter { $0 >= 0 && $0 < posts.count }
-        }
-        return Array(Set([
-            debouncedIndex - 1,
-            debouncedIndex,
-            debouncedIndex + 1
-        ].filter { $0 >= 0 && $0 < posts.count }))
-        .sorted()
+        return [debouncedIndex].filter { $0 >= 0 && $0 < posts.count }
     }
 
     private var overlayChrome: some View {
@@ -268,6 +273,21 @@ struct FeedView: View {
                 }
                 .padding(.horizontal, 12)
                 .padding(.top, 8)
+            }
+            .allowsHitTesting(false)
+
+            VStack {
+                Spacer()
+                if isLoadingMore {
+                    ProgressView()
+                        .tint(.white)
+                        .padding(10)
+                        .background(Color.black.opacity(0.4), in: Capsule())
+                        .overlay(Capsule().stroke(Color.white.opacity(0.2), lineWidth: 1))
+                        .padding(.trailing, 16)
+                        .padding(.bottom, 24)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                }
             }
             .allowsHitTesting(false)
 
@@ -301,15 +321,35 @@ struct FeedView: View {
                             .overlay(Image(systemName: "arrow.down").foregroundColor(.white))
                     }
                     .buttonStyle(.plain)
+
+                    Button {
+                        isGloballyMuted.toggle()
+                    } label: {
+                        Circle().fill(Color.white.opacity(0.2)).frame(width: 44, height: 44)
+                            .overlay(Image(systemName: isGloballyMuted ? "speaker.slash.fill" : "speaker.wave.2.fill").foregroundColor(.white))
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        print("[Haptics] Test button tapped")
+                        let notif = UINotificationFeedbackGenerator()
+                        notif.prepare()
+                        notif.notificationOccurred(.warning)
+                        impactHaptics.prepare()
+                        impactHaptics.impactOccurred(intensity: 1.0)
+                    } label: {
+                        RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(0.2)).frame(width: 120, height: 36)
+                            .overlay(Text("Haptic Test").foregroundColor(.white).font(.system(size: 14, weight: .semibold)))
+                    }
+                    .buttonStyle(.plain)
                 }
                 .contentShape(Rectangle())
                 .allowsHitTesting(true)
                 .padding(.leading, 16)
-                .padding(.bottom, 120)
+                .padding(.bottom, 160)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
         }
-        .allowsHitTesting(false)
         .ignoresSafeArea()
     }
 
@@ -347,6 +387,35 @@ struct FeedView: View {
         for idx in pagesToDisplay {
             if let uid = posts[safe: idx]?.userID {
                 maybeResolveUsername(for: uid)
+            }
+        }
+    }
+
+    // MARK: - Helpers for video readiness
+
+    private func isVideoURL(_ s: String) -> Bool {
+        let lower = s.lowercased()
+        return lower.hasSuffix(".mp4") || lower.hasSuffix(".mov") || lower.contains("video")
+    }
+
+    private func preloadVideoIfNeeded(for urlString: String) {
+        guard preloadedAssets[urlString] == nil, let url = URL(string: urlString) else { return }
+        let asset = AVURLAsset(url: url)
+
+        Task {
+            do {
+                async let playable: Bool = asset.load(.isPlayable)
+                async let duration: CMTime = asset.load(.duration)
+                let (isPlayable, dur) = try await (playable, duration)
+                // Ensure we have a finite, non-zero duration for better readiness
+                if isPlayable, dur.isNumeric, dur.seconds > 0.1 {
+                    await MainActor.run {
+                        preloadedAssets[urlString] = asset
+                        readyItems.insert(urlString)
+                    }
+                }
+            } catch {
+                return
             }
         }
     }
@@ -391,7 +460,7 @@ struct FeedView: View {
     private func maybeLoadMoreIfNeeded(appearingIndex idx: Int) {
         // Trigger pagination when the user is within 1 item of the end.
         guard !isLoadingMore, !reachedEnd else { return }
-        let thresholdIndex = posts.count - 2
+        let thresholdIndex = max(0, posts.count - 3)
         guard idx >= thresholdIndex else { return }
 
         isLoadingMore = true
@@ -419,16 +488,15 @@ struct FeedView: View {
 
         var result: [Post] = []
         for i in start..<end {
-            let isVideo = i % 2 == 0
             let id = "demo_\(i)"
             let userID = i % 3 == 0 ? "fake_user_\(i)" : String(format: "user_%06d", i)
             let mediaURL: String
             let posterURL: String?
-            if isVideo {
+            if userID.hasPrefix("fake_user_") {
                 mediaURL = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
                 posterURL = "https://picsum.photos/id/\(i % 100)/800/1400"
             } else {
-                mediaURL = "https://picsum.photos/id/\(i % 100)/900/1600"
+                mediaURL = "https://picsum.photos/id/\(i % 100)/1200/2000"
                 posterURL = nil
             }
             let latitude = 37.3349 + Double(i % 5) * 0.01
@@ -451,13 +519,16 @@ struct FeedView: View {
         }
         return result
     }
+
 }
 
 private struct FeedFullscreenPage: View {
     let post: Post
-    @Binding var isActive: Bool
     let displayName: String
     var onUserTapped: (String) -> Void
+
+    let isVideoReady: Bool?
+    let preloadedAsset: AVURLAsset?
 
     let shouldPlay: Bool
     let isMuted: Bool
@@ -483,7 +554,6 @@ private struct FeedFullscreenPage: View {
                             img
                                 .resizable()
                                 .scaledToFill()
-                                .frame(width: geo.size.width, height: geo.size.height)
                                 .clipped()
                         case .failure:
                             Color.black
@@ -496,47 +566,51 @@ private struct FeedFullscreenPage: View {
                 }
 
                 Group {
-                    if isVideo, let url = URL(string: post.mediaURL) {
-                        VideoPlayer(player: AVPlayer(url: url))
-                            .onAppear {
-                                // Create a player and control playback/mute
-                                // Note: VideoPlayer manages its own player instance; for fine control consider a custom view.
-                            }
-                            .onDisappear {
-                                // Let the system pause when offscreen
-                            }
-                            .allowsHitTesting(false)
-                            .id("video_\(post.id)_\(post.mediaURL)")
-                    } else if let url = URL(string: post.mediaURL) {
-                        AsyncImage(url: url, transaction: Transaction(animation: .none)) { phase in
-                            switch phase {
-                            case .empty:
-                                ZStack { Color.black; ProgressView().tint(.white) }
-                            case .success(let img):
-                                img
-                                    .resizable()
-                                    .scaledToFill()
+                    // Render video as full-screen when media is a video; otherwise show image
+                    if let url = URL(string: post.mediaURL) {
+                        if post.mediaURL.lowercased().hasSuffix(".mp4") || post.mediaURL.lowercased().hasSuffix(".mov") || post.mediaURL.lowercased().contains("video") {
+                            if (isVideoReady ?? false), let asset = preloadedAsset {
+                                FillVideoPlayerAsset(asset: asset, play: shouldPlay, muted: isMuted)
                                     .frame(width: geo.size.width, height: geo.size.height)
                                     .clipped()
-                            case .failure:
-                                ZStack {
-                                    Color.black
-                                    Image(systemName: "photo")
-                                        .font(.system(size: 40, weight: .bold))
-                                        .foregroundColor(.white.opacity(0.6))
-                                }
-                            @unknown default:
-                                Color.black
+                                    .allowsHitTesting(false)
+                                    .transition(.opacity)
+                            } else {
+                                FillVideoPlayer(url: url, play: shouldPlay, muted: isMuted)
+                                    .frame(width: geo.size.width, height: geo.size.height)
+                                    .clipped()
+                                    .allowsHitTesting(false)
+                                    .transition(.opacity)
                             }
+                        } else {
+                            AsyncImage(url: url, transaction: Transaction(animation: .none)) { phase in
+                                switch phase {
+                                case .empty:
+                                    ZStack { Color.black; ProgressView().tint(.white) }
+                                case .success(let img):
+                                    img
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: geo.size.width, height: geo.size.height)
+                                        .clipped()
+                                case .failure:
+                                    ZStack {
+                                        Color.black
+                                        Image(systemName: "photo")
+                                            .font(.system(size: 40, weight: .bold))
+                                            .foregroundColor(.white.opacity(0.6))
+                                    }
+                                @unknown default:
+                                    Color.black
+                                }
+                            }
+                            .id("image_\(post.id)_\(post.mediaURL)")
                         }
-                        .id("image_\(post.id)_\(post.mediaURL)")
                     } else {
                         Color.black
                     }
                 }
-                .frame(width: geo.size.width, height: geo.size.height)
-                .ignoresSafeArea()
-                .zIndex(0)
+                .animation(.linear(duration: 0.15), value: isVideoReady ?? false)
 
                 VStack(alignment: .trailing, spacing: 6) {
                     Button(action: { onUserTapped(post.userID) }) {
@@ -582,10 +656,100 @@ private struct FeedFullscreenPage: View {
                 .frame(width: geo.size.width, height: geo.size.height, alignment: .trailing)
                 .zIndex(10)
             }
-            .frame(width: geo.size.width, height: geo.size.height)
             .contentShape(Rectangle())
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            .background(Color.black)
         }
         .ignoresSafeArea()
+        .background(Color.black)
+    }
+}
+
+private struct FillVideoPlayer: UIViewRepresentable {
+    let url: URL
+    var play: Bool
+    var muted: Bool
+
+    func makeUIView(context: Context) -> PlayerView {
+        let v = PlayerView()
+        v.configure(url: url, play: play, muted: muted)
+        return v
+    }
+
+    func updateUIView(_ uiView: PlayerView, context: Context) {
+        uiView.configure(url: url, play: play, muted: muted)
+    }
+}
+
+private struct FillVideoPlayerAsset: UIViewRepresentable {
+    let asset: AVURLAsset
+    var play: Bool
+    var muted: Bool
+
+    func makeUIView(context: Context) -> PlayerView {
+        let v = PlayerView()
+        v.configure(asset: asset, play: play, muted: muted)
+        return v
+    }
+
+    func updateUIView(_ uiView: PlayerView, context: Context) {
+        uiView.configure(asset: asset, play: play, muted: muted)
+    }
+}
+
+private final class PlayerView: UIView {
+    override static var layerClass: AnyClass { AVPlayerLayer.self }
+    var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
+    private var endObserver: Any?
+    private var currentAssetURL: URL?
+
+    deinit {
+        if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
+        player?.pause()
+        player = nil
+    }
+
+    var player: AVPlayer? {
+        get { playerLayer.player }
+        set {
+            playerLayer.player = newValue
+            playerLayer.videoGravity = .resizeAspectFill
+        }
+    }
+
+    func configure(url: URL, play: Bool, muted: Bool) {
+        if (player?.currentItem?.asset as? AVURLAsset)?.url != url {
+            player = AVPlayer(url: url)
+            player?.actionAtItemEnd = .none
+            if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
+            endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: player?.currentItem, queue: .main) { [weak self] _ in
+                self?.player?.seek(to: .zero)
+                if play { self?.player?.play() }
+            }
+        }
+        player?.isMuted = muted
+        if play { player?.play() } else { player?.pause() }
+    }
+
+    func configure(asset: AVURLAsset, play: Bool, muted: Bool) {
+        let url = asset.url
+        if currentAssetURL != url {
+            currentAssetURL = url
+            let newItem = AVPlayerItem(asset: asset)
+            if player == nil {
+                player = AVPlayer(playerItem: newItem)
+                player?.actionAtItemEnd = .none
+            } else {
+                player?.replaceCurrentItem(with: newItem)
+            }
+            if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
+            endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: newItem, queue: .main) { [weak self] _ in
+                self?.player?.seek(to: .zero)
+                if play { self?.player?.play() }
+            }
+        }
+        player?.isMuted = muted
+        if play { player?.play() } else { player?.pause() }
     }
 }
 

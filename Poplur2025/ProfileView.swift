@@ -133,18 +133,28 @@ struct ProfileView: View {
             }
             .buttonStyle(.plain)
             Spacer()
-            ZStack(alignment: .topTrailing) {
-                Button { } label: {
-                    Image(systemName: "bell.fill")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundColor(.black.opacity(0.9))
+            HStack(spacing: 8) {
+                // Center map on current location
+                Button {
+                    NotificationCenter.default.post(name: .CenterMapOnUserLocation, object: nil)
+                } label: {
+                    Image(systemName: "location.circle.fill")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundColor(.blue)
                         .padding(8)
                 }
                 .buttonStyle(.plain)
-                Circle()
-                    .fill(Color.pink)
-                    .frame(width: 10, height: 10)
-                    .offset(x: 4, y: -2)
+
+                // Notifications
+                ZStack(alignment: .topTrailing) {
+                    Button { Task { await loadMyPosts() } } label: {
+                        Image(systemName: "arrow.clockwise.circle.fill")
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundColor(.black.opacity(0.9))
+                            .padding(8)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
         }
         .padding(.horizontal, 16)
@@ -254,23 +264,52 @@ struct ProfileView: View {
             let db = Firestore.firestore()
             let base = db.collection("posts").whereField("userID", isEqualTo: uid)
 
-            base.order(by: "createdAt", descending: true).getDocuments { snap, err in
+            base.getDocuments { snap, err in
                 if let err = err {
-                    base.getDocuments { snap2, err2 in
-                        if let err2 = err2 {
-                            cont.resume(throwing: err2)
-                            return
-                        }
-                        cont.resume(returning: Self.mapPosts(from: snap2))
-                    }
+                    cont.resume(throwing: err)
                     return
                 }
-                cont.resume(returning: Self.mapPosts(from: snap))
+                // Sort client-side by createdAt desc if available
+                if let snap = snap {
+                    let sortedDocs = snap.documents.sorted { a, b in
+                        let ta = a.data()["createdAt"] as? Timestamp
+                        let tb = b.data()["createdAt"] as? Timestamp
+                        switch (ta, tb) {
+                        case let (a?, b?):
+                            return a.dateValue() > b.dateValue()
+                        case (_?, nil):
+                            return true
+                        case (nil, _?):
+                            return false
+                        default:
+                            return a.reference.documentID > b.reference.documentID
+                        }
+                    }
+                    let sortedSnap = QuerySnapshotProxy(documents: sortedDocs)
+                    cont.resume(returning: Self.mapPosts(from: sortedSnap))
+                } else {
+                    cont.resume(returning: [])
+                }
             }
         }
     }
 
     private static func mapPosts(from snapshot: QuerySnapshot?) -> [Post] {
+        guard let snapshot else { return [] }
+        return snapshot.documents.compactMap { doc in
+            let data = doc.data()
+            guard let lat = (data["latitude"] as? Double) ?? (data["latitude"] as? NSNumber)?.doubleValue,
+                  let lon = (data["longitude"] as? Double) ?? (data["longitude"] as? NSNumber)?.doubleValue,
+                  let mediaURL = data["mediaURL"] as? String
+            else { return nil }
+            let radius = (data["radius"] as? Int) ?? (data["radius"] as? NSNumber)?.intValue ?? 5000
+            let viewCount = (data["viewCount"] as? Int) ?? (data["viewCount"] as? NSNumber)?.intValue ?? 0
+            let userID = data["userID"] as? String ?? "unknown"
+            return Post(id: doc.documentID, latitude: lat, longitude: lon, mediaURL: mediaURL, radius: radius, viewCount: viewCount, userID: userID)
+        }
+    }
+
+    private static func mapPosts(from snapshot: QuerySnapshotProxy?) -> [Post] {
         guard let snapshot else { return [] }
         return snapshot.documents.compactMap { doc in
             let data = doc.data()
@@ -390,6 +429,12 @@ private struct ProfileListCard: View {
     }
 }
 
+// A tiny proxy to reuse existing mapPosts(from:) without changing its signature.
+private struct QuerySnapshotProxy {
+    let documents: [QueryDocumentSnapshot]
+}
+
 extension Notification.Name {
     static let LoadProfileNow = Notification.Name("LoadProfileNow")
+    static let CenterMapOnUserLocation = Notification.Name("CenterMapOnUserLocation")
 }

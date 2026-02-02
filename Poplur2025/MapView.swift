@@ -1,6 +1,7 @@
 import SwiftUI
 import MapKit
 import FirebaseFirestore
+import CoreLocation
 
 struct MapView: View {
     @State private var region = MKCoordinateRegion(
@@ -10,6 +11,11 @@ struct MapView: View {
     @State private var posts: [Post] = []
     @State private var isLoading = false
     @State private var loadError: String?
+
+    // Location
+    @State private var locationManager = CLLocationManager()
+    @State private var locationContinuation: CheckedContinuation<CLLocation?, Never>?
+    @State private var locationDelegateProxy: LocationDelegateProxy? = nil
 
     // Selection state for right-side radius bar
     @State private var selectedPostID: String?
@@ -64,6 +70,28 @@ struct MapView: View {
                 .padding(.top, 8)
                 Spacer()
             }
+
+            // Current location button (top-right)
+            VStack {
+                HStack {
+                    Spacer()
+                    Button {
+                        Task { await centerOnUserLocation() }
+                    } label: {
+                        Image(systemName: "location.circle.fill")
+                            .font(.system(size: 22, weight: .semibold))
+                            .foregroundColor(.blue)
+                            .padding(10)
+                            .background(Color.white, in: Circle())
+                            .shadow(color: .black.opacity(0.15), radius: 6, x: 0, y: 3)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.trailing, 12)
+                    .padding(.top, 8)
+                }
+                Spacer()
+            }
+            .allowsHitTesting(true)
 
             VStack {
                 Spacer()
@@ -169,8 +197,63 @@ struct MapView: View {
                 }
         }
     }
+
+    @MainActor
+    private func requestLocationAuthorizationIfNeeded() {
+        let status = CLLocationManager.authorizationStatus()
+        if status == .notDetermined {
+            locationManager.requestWhenInUseAuthorization()
+        }
+    }
+
+    private func currentLocation() async -> CLLocation? {
+        await withCheckedContinuation { cont in
+            DispatchQueue.main.async {
+                // Ensure we keep a strong reference to the proxy
+                if locationDelegateProxy == nil {
+                    locationDelegateProxy = LocationDelegateProxy { loc in
+                        cont.resume(returning: loc)
+                        locationContinuation = nil
+                    }
+                } else {
+                    locationDelegateProxy?.handler = { loc in
+                        cont.resume(returning: loc)
+                        locationContinuation = nil
+                    }
+                }
+
+                locationContinuation = cont
+                locationManager.delegate = locationDelegateProxy
+                locationManager.desiredAccuracy = kCLLocationAccuracyBest
+                locationManager.requestLocation()
+            }
+        }
+    }
+
+    @MainActor
+    private func centerOnUserLocation() async {
+        requestLocationAuthorizationIfNeeded()
+        let loc = await currentLocation()
+        guard let loc else { return }
+        withAnimation(.easeInOut(duration: 0.3)) {
+            region.center = loc.coordinate
+            region.span = MKCoordinateSpan(latitudeDelta: 0.1, longitudeDelta: 0.1)
+        }
+    }
 }
 
 extension Notification.Name {
     static let LoadMapNow = Notification.Name("LoadMapNow")
 }
+private final class LocationDelegateProxy: NSObject, CLLocationManagerDelegate {
+    var handler: (CLLocation?) -> Void
+    init(handler: @escaping (CLLocation?) -> Void) { self.handler = handler }
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        handler(locations.last)
+    }
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        print("[Map] Location error: \(error)")
+        handler(nil)
+    }
+}
+
