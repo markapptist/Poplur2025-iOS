@@ -1,7 +1,6 @@
 import SwiftUI
 import CoreLocation
 import AVFoundation
-import AVKit
 
 extension Notification.Name {
     static let ResetTabToTop = Notification.Name("ResetTabToTop")
@@ -21,7 +20,6 @@ struct HomeView: View {
     @ObservedObject var cameraController: CameraKitController
 
     // One-time flags to avoid doing heavy work repeatedly
-    @State private var didWarmAVPlayer = false
     @State private var didTriggerFeedInitialLoad = false
     @State private var didTriggerMapInitialLoad = false
     @State private var didTriggerProfileInitialLoad = false
@@ -106,16 +104,11 @@ struct HomeView: View {
                         Text("Feed")
                     }
                     .task {
-                        // Lazy: only trigger feed load and AVPlayer warm-up when user visits Feed tab
+                        // Lazy: only trigger feed load when user visits Feed tab
                         if selectedTab == .feed {
                             if !didTriggerFeedInitialLoad {
                                 didTriggerFeedInitialLoad = true
                                 NotificationCenter.default.post(name: .LoadFeedNow, object: nil)
-                            }
-                            if !didWarmAVPlayer {
-                                didWarmAVPlayer = true
-                                await warmAVPlayerPipeline()
-                                await activatePlaybackAudioSession()
                             }
                         }
                     }
@@ -124,13 +117,6 @@ struct HomeView: View {
                             if !didTriggerFeedInitialLoad {
                                 didTriggerFeedInitialLoad = true
                                 NotificationCenter.default.post(name: .LoadFeedNow, object: nil)
-                            }
-                            Task {
-                                if !didWarmAVPlayer {
-                                    didWarmAVPlayer = true
-                                    await warmAVPlayerPipeline()
-                                    await activatePlaybackAudioSession()
-                                }
                             }
                         }
                     }
@@ -184,9 +170,6 @@ struct HomeView: View {
             .onChange(of: selectedTab) { _ in
                 // Only reset-to-top on tab changes; no mass loads
                 NotificationCenter.default.post(name: .ResetTabToTop, object: nil)
-                if selectedTab != .feed {
-                    NotificationCenter.default.post(name: .PauseAllVideos, object: nil)
-                }
             }
             .onChange(of: auth.isAuthenticated) { authed in
                 if authed {
@@ -209,35 +192,6 @@ struct HomeView: View {
                 }
             }
         }
-    }
-
-    // Pre-activate playback audio session so first video with sound starts instantly (when feed is opened).
-    private func activatePlaybackAudioSession() async {
-        do {
-            let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback, mode: .moviePlayback, options: [])
-            try session.setActive(true, options: [])
-        } catch {
-            print("[AudioSession] Early activation failed: \(error.localizedDescription)")
-        }
-    }
-
-    // Optional: warm AVPlayer’s pipeline with a tiny silent item to avoid first-use stall.
-    // Now deferred until Feed tab is opened.
-    private func warmAVPlayerPipeline() async {
-        guard let url = URL(string: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4") else { return }
-        let asset = AVURLAsset(url: url)
-        do {
-            _ = try await asset.load(.isPlayable)
-        } catch {
-            return
-        }
-        let item = AVPlayerItem(asset: asset)
-        let player = AVPlayer(playerItem: item)
-        player.isMuted = true
-        player.play()
-        try? await Task.sleep(nanoseconds: 150_000_000) // 0.15s
-        player.pause()
     }
 }
 

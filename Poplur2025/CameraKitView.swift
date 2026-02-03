@@ -22,6 +22,7 @@ struct CameraKitView: View {
     @ObservedObject var controller: CameraKitController
     let coordinate: CLLocationCoordinate2D?
     @State private var isVisible: Bool = false
+    @State private var isTorchOn: Bool = false
 
     init(controller: CameraKitController, coordinate: CLLocationCoordinate2D?) {
         self.controller = controller
@@ -35,6 +36,47 @@ struct CameraKitView: View {
             } else {
                 Color.black
             }
+
+            // Top-right camera controls
+            VStack {
+                HStack {
+                    Spacer()
+                    HStack(spacing: 10) {
+                        Button {
+                            // Flip front/back camera
+                            if let flip = controllerFlipAction() { flip() }
+                        } label: {
+                            Image(systemName: "arrow.triangle.2.circlepath.camera")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .padding(10)
+                                .background(Color.black.opacity(0.35), in: Circle())
+                                .overlay(Circle().stroke(Color.white.opacity(0.25), lineWidth: 1))
+                        }
+                        .buttonStyle(.plain)
+
+                        Button {
+                            // Toggle torch/flash
+                            if let toggled = controllerToggleTorch() {
+                                isTorchOn = toggled
+                            } else {
+                                isTorchOn.toggle()
+                            }
+                        } label: {
+                            Image(systemName: isTorchOn ? "flashlight.on.fill" : "flashlight.off.fill")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundStyle(isTorchOn ? .yellow : .white)
+                                .padding(10)
+                                .background(Color.black.opacity(0.35), in: Circle())
+                                .overlay(Circle().stroke(Color.white.opacity(0.25), lineWidth: 1))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.trailing, 12)
+                    .padding(.top, 8)
+                }
+                Spacer()
+            }
         }
         .ignoresSafeArea()
         .onAppear {
@@ -45,6 +87,34 @@ struct CameraKitView: View {
         }
     }
     
+    // Attempt to call a flip/toggle method if the controller implements it.
+    private func controllerFlipAction() -> (() -> Void)? {
+        // Common method name
+        if controller.responds(to: Selector(("flipCamera"))) {
+            return { _ = (controller as AnyObject).perform(Selector(("flipCamera"))) }
+        }
+        // Alternate names
+        if controller.responds(to: Selector(("switchCamera"))) {
+            return { _ = (controller as AnyObject).perform(Selector(("switchCamera"))) }
+        }
+        return nil
+    }
+
+    private func controllerToggleTorch() -> Bool? {
+        // Try common method signature returning Bool indicating new state
+        if controller.responds(to: Selector(("toggleTorch"))) {
+            let _ = (controller as AnyObject).perform(Selector(("toggleTorch")))
+            // If your controller publishes torch state, consider reading it here instead
+            return nil
+        }
+        // Try explicit on/off methods
+        if controller.responds(to: Selector(("toggleFlash"))) {
+            let _ = (controller as AnyObject).perform(Selector(("toggleFlash")))
+            return nil
+        }
+        return nil
+    }
+
     private struct LazyCameraPreview: View {
         @ObservedObject var controller: CameraKitController
         let coordinate: CLLocationCoordinate2D?

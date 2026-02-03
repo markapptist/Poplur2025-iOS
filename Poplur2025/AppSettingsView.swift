@@ -35,7 +35,7 @@ struct AppSettingsView: View {
     private var ticketWidth: CGFloat { min(screenSize.width - 24, 700) }
     private var ticketHeight: CGFloat { screenSize.height * 0.78 }
 
-    private let brandPink = Color(red: 1.0, green: 45.0/255.0, blue: 150.0/255.0)
+    private let brandPink = Color(red: 255.0/255.0, green: 255.0/255.0, blue: 255.0/255.0)
 
     var body: some View {
         ZStack {
@@ -82,7 +82,7 @@ struct AppSettingsView: View {
                 // Title
                 Text("Average Radius")
                     .font(.system(size: 22, weight: .heavy, design: .rounded))
-                    .foregroundColor(.white)
+                    .foregroundColor(.black)
                     .padding(.top, 16)
                     .frame(maxWidth: .infinity, alignment: .center)
 
@@ -91,7 +91,7 @@ struct AppSettingsView: View {
                         Spacer()
                         ProgressView()
                             .progressViewStyle(.circular)
-                            .tint(.white)
+                            .tint(.black)
                         Spacer()
                     }
                     .padding(.vertical, 16)
@@ -104,7 +104,7 @@ struct AppSettingsView: View {
                             maxValue: ringMax,
                             unit: "KM",
                             accentColor: .black,
-                            trackColor: .white.opacity(0.25),
+                            trackColor: .black.opacity(0.15),
                             lineWidthFactor: 0.12
                         )
                         .frame(height: 260)
@@ -116,7 +116,7 @@ struct AppSettingsView: View {
                 VStack(alignment: .center, spacing: 8) {
                     Text("Accumulated Radius")
                         .font(.system(size: 22, weight: .heavy, design: .rounded))
-                        .foregroundColor(.white)
+                        .foregroundColor(.black)
                         .frame(maxWidth: .infinity, alignment: .center)
 
                     if isLoadingStats {
@@ -124,24 +124,24 @@ struct AppSettingsView: View {
                             Spacer()
                             ProgressView()
                                 .progressViewStyle(.circular)
-                                .tint(.white)
+                                .tint(.black)
                             Spacer()
                         }
                         .padding(.vertical, 8)
                     } else {
                         Text("You’ve reached")
                             .font(.system(size: 16, weight: .semibold, design: .rounded))
-                            .foregroundColor(.white.opacity(0.95))
+                            .foregroundColor(.black.opacity(0.9))
                             .frame(maxWidth: .infinity, alignment: .center)
 
                         Text(formattedKM(totalRadius))
                             .font(.system(size: 44, weight: .heavy, design: .rounded))
-                            .foregroundColor(.white)
+                            .foregroundColor(.black)
                             .frame(maxWidth: .infinity, alignment: .center)
 
                         Text("in total")
                             .font(.system(size: 16, weight: .semibold, design: .rounded))
-                            .foregroundColor(.white.opacity(0.95))
+                            .foregroundColor(.black.opacity(0.9))
                             .frame(maxWidth: .infinity, alignment: .center)
                     }
                 }
@@ -160,7 +160,7 @@ struct AppSettingsView: View {
                 // Title
                 Text("Account Options")
                     .font(.system(size: 22, weight: .heavy, design: .rounded))
-                    .foregroundColor(.white)
+                    .foregroundColor(.black)
                     .padding(.top, 16)
                     .frame(maxWidth: .infinity, alignment: .center)
 
@@ -189,7 +189,7 @@ struct AppSettingsView: View {
 
                     Text("Current limit: \(Int(maxDurationDisplay))s")
                         .font(.system(size: 14, weight: .semibold, design: .rounded))
-                        .foregroundColor(.white.opacity(0.9))
+                        .foregroundColor(.black.opacity(0.9))
                         .frame(maxWidth: .infinity, alignment: .center)
                 }
 
@@ -256,7 +256,7 @@ struct AppSettingsView: View {
         HStack(alignment: .center, spacing: 12) {
             Text(title)
                 .font(.system(size: 18, weight: .heavy, design: .rounded))
-                .foregroundColor(.white)
+                .foregroundColor(.black)
             Spacer(minLength: 12)
             Toggle("", isOn: isOn)
                 .labelsHidden()
@@ -271,7 +271,7 @@ struct AppSettingsView: View {
             HStack(alignment: .center, spacing: 12) {
                 Text(title)
                     .font(.system(size: 18, weight: .heavy, design: .rounded))
-                    .foregroundColor(.white)
+                    .foregroundColor(.black)
                 Spacer(minLength: 12)
                 Image(systemName: "arrow.right")
                     .font(.system(size: 18, weight: .bold))

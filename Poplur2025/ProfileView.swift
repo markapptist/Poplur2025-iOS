@@ -10,6 +10,7 @@ struct ProfileView: View {
 
     @State private var myPosts: [Post] = []
     @State private var isLoading = false
+    @State private var expandedPost: Post? = nil
 
     enum DisplayMode: String, CaseIterable, Identifiable {
         case list
@@ -55,7 +56,7 @@ struct ProfileView: View {
                         Group {
                             if isLoading {
                                 VStack { Spacer(); ProgressView().tint(.gray); Spacer() }
-                                .id("top")
+                                    .id("top")
                             } else if myPosts.isEmpty {
                                 VStack(spacing: 8) {
                                     Image(systemName: "square.stack.3d.up.slash")
@@ -75,12 +76,20 @@ struct ProfileView: View {
                                             LazyVGrid(columns: gridCols, spacing: tileSpacing) {
                                                 ForEach(myPosts) { post in
                                                     ProfileGridTile(post: post)
+                                                        .onTapGesture {
+                                                            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                                                                expandedPost = post
+                                                            }
+                                                        }
                                                 }
                                             }
                                             .padding(.horizontal, 16)
                                             .padding(.top, 8)
                                             .padding(.bottom, 16)
                                         }
+                                    }
+                                    .refreshable {
+                                        await loadMyPosts()
                                     }
                                 case .list:
                                     ScrollView {
@@ -89,12 +98,20 @@ struct ProfileView: View {
                                             VStack(spacing: 18) {
                                                 ForEach(myPosts) { post in
                                                     ProfileListCard(post: post)
+                                                        .onTapGesture {
+                                                            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                                                                expandedPost = post
+                                                            }
+                                                        }
                                                 }
                                             }
                                             .padding(.horizontal, 16)
                                             .padding(.top, 8)
                                             .padding(.bottom, 16)
                                         }
+                                    }
+                                    .refreshable {
+                                        await loadMyPosts()
                                     }
                                 }
                             }
@@ -105,6 +122,40 @@ struct ProfileView: View {
                             }
                         }
                     }
+                }
+                if let post = expandedPost {
+                    ZStack {
+                        Color.black.opacity(0.6)
+                            .ignoresSafeArea()
+                            .transition(.opacity)
+
+                        FeedFullscreenPage(
+                            post: FeedPost(
+                                id: post.id,
+                                latitude: post.latitude,
+                                longitude: post.longitude,
+                                mediaURL: post.mediaURL,
+                                radius: Double(post.radius),
+                                viewCount: post.viewCount,
+                                userID: post.userID
+                            ),
+                            displayName: "",
+                            onUserTapped: { _ in }
+                        )
+                        .transition(.scale.combined(with: .opacity))
+                        .overlay(alignment: .topTrailing) {
+                            Button {
+                                withAnimation(.easeOut(duration: 0.25)) { expandedPost = nil }
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 28, weight: .bold))
+                                    .foregroundStyle(.white.opacity(0.95))
+                                    .padding(12)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .zIndex(10)
                 }
             }
             .navigationBarHidden(true)
@@ -117,6 +168,11 @@ struct ProfileView: View {
             .onAppear { Task { await loadMyPosts() } }
             .onReceive(NotificationCenter.default.publisher(for: .LoadProfileNow)) { _ in
                 Task { await loadMyPosts() }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ProfileRemovePost"))) { notif in
+                if let id = notif.object as? String {
+                    myPosts.removeAll { $0.id == id }
+                }
             }
         }
     }
@@ -133,28 +189,8 @@ struct ProfileView: View {
             }
             .buttonStyle(.plain)
             Spacer()
-            HStack(spacing: 8) {
-                // Center map on current location
-                Button {
-                    NotificationCenter.default.post(name: .CenterMapOnUserLocation, object: nil)
-                } label: {
-                    Image(systemName: "location.circle.fill")
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundColor(.blue)
-                        .padding(8)
-                }
-                .buttonStyle(.plain)
-
-                // Notifications
-                ZStack(alignment: .topTrailing) {
-                    Button { Task { await loadMyPosts() } } label: {
-                        Image(systemName: "arrow.clockwise.circle.fill")
-                            .font(.system(size: 20, weight: .semibold))
-                            .foregroundColor(.black.opacity(0.9))
-                            .padding(8)
-                    }
-                    .buttonStyle(.plain)
-                }
+            HStack {
+                EmptyView()
             }
         }
         .padding(.horizontal, 16)
@@ -251,7 +287,10 @@ struct ProfileView: View {
         do {
             let posts = try await fetchPosts(for: targetUID)
             await MainActor.run {
-                self.myPosts = posts
+                self.myPosts = posts.filter { post in
+                    guard let url = URL(string: post.mediaURL) else { return false }
+                    return !post.mediaURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && ["http", "https"].contains(url.scheme?.lowercased() ?? "")
+                }
             }
         } catch {
             print("Profile: failed to load posts -> \(error.localizedDescription)")
@@ -298,9 +337,11 @@ struct ProfileView: View {
         guard let snapshot else { return [] }
         return snapshot.documents.compactMap { doc in
             let data = doc.data()
+            let rawURL = data["mediaURL"] as? String
+            let mediaURL = rawURL?.trimmingCharacters(in: .whitespacesAndNewlines)
             guard let lat = (data["latitude"] as? Double) ?? (data["latitude"] as? NSNumber)?.doubleValue,
                   let lon = (data["longitude"] as? Double) ?? (data["longitude"] as? NSNumber)?.doubleValue,
-                  let mediaURL = data["mediaURL"] as? String
+                  let mediaURL = mediaURL, !mediaURL.isEmpty
             else { return nil }
             let radius = (data["radius"] as? Int) ?? (data["radius"] as? NSNumber)?.intValue ?? 5000
             let viewCount = (data["viewCount"] as? Int) ?? (data["viewCount"] as? NSNumber)?.intValue ?? 0
@@ -313,9 +354,11 @@ struct ProfileView: View {
         guard let snapshot else { return [] }
         return snapshot.documents.compactMap { doc in
             let data = doc.data()
+            let rawURL = data["mediaURL"] as? String
+            let mediaURL = rawURL?.trimmingCharacters(in: .whitespacesAndNewlines)
             guard let lat = (data["latitude"] as? Double) ?? (data["latitude"] as? NSNumber)?.doubleValue,
                   let lon = (data["longitude"] as? Double) ?? (data["longitude"] as? NSNumber)?.doubleValue,
-                  let mediaURL = data["mediaURL"] as? String
+                  let mediaURL = mediaURL, !mediaURL.isEmpty
             else { return nil }
             let radius = (data["radius"] as? Int) ?? (data["radius"] as? NSNumber)?.intValue ?? 5000
             let viewCount = (data["viewCount"] as? Int) ?? (data["viewCount"] as? NSNumber)?.intValue ?? 0
@@ -359,6 +402,18 @@ private struct ProfileGridTile: View {
                     await loadIfNeeded()
                 }
             }
+
+            GeometryReader { geo in
+                let maxR: CGFloat = 10_000
+                let normalized = min(1.0, CGFloat(post.radius) / maxR)
+                let diameter = min(geo.size.width, geo.size.height) * (0.35 + 0.65 * normalized)
+                Circle()
+                    .fill(Color.blue.opacity(0.20))
+                    .overlay(Circle().stroke(Color.blue.opacity(0.5), lineWidth: 1.5))
+                    .frame(width: diameter, height: diameter)
+                    .position(x: geo.size.width / 2, y: geo.size.height / 2)
+            }
+            .allowsHitTesting(false)
         }
         .frame(height: 120)
         .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
@@ -371,6 +426,9 @@ private struct ProfileGridTile: View {
         await MainActor.run {
             self.image = img
             self.isLoading = false
+            if img == nil {
+                NotificationCenter.default.post(name: Notification.Name("ProfileRemovePost"), object: post.id)
+            }
         }
     }
 }
@@ -403,6 +461,18 @@ private struct ProfileListCard: View {
                 }
             }
 
+            GeometryReader { geo in
+                let maxR: CGFloat = 10_000
+                let normalized = min(1.0, CGFloat(post.radius) / maxR)
+                let diameter = min(geo.size.width, geo.size.height) * (0.35 + 0.65 * normalized)
+                Circle()
+                    .fill(Color.blue.opacity(0.20))
+                    .overlay(Circle().stroke(Color.blue.opacity(0.5), lineWidth: 1.5))
+                    .frame(width: diameter, height: diameter)
+                    .position(x: geo.size.width / 2, y: geo.size.height / 2)
+            }
+            .allowsHitTesting(false)
+
             VStack(alignment: .leading, spacing: 6) {
                 Text("\(max(1, post.radius / 1000)) KM")
                     .font(.system(size: 18, weight: .heavy, design: .rounded))
@@ -425,6 +495,9 @@ private struct ProfileListCard: View {
         await MainActor.run {
             self.image = img
             self.isLoading = false
+            if img == nil {
+                NotificationCenter.default.post(name: Notification.Name("ProfileRemovePost"), object: post.id)
+            }
         }
     }
 }
@@ -438,3 +511,4 @@ extension Notification.Name {
     static let LoadProfileNow = Notification.Name("LoadProfileNow")
     static let CenterMapOnUserLocation = Notification.Name("CenterMapOnUserLocation")
 }
+

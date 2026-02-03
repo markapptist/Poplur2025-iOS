@@ -9,7 +9,7 @@ struct Post: Identifiable, Codable, Hashable {
     var radius: Int
     var viewCount: Int
     let userID: String
-    var posterURL: String? // optional thumbnail for videos
+    var posterURL: String? // Optional thumbnail URL for videos
 
     // Convenience computed property if you ever need CLLocationCoordinate2D
     var coordinate: CLLocationCoordinate2D {

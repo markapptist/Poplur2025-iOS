@@ -1,12 +1,15 @@
 import SwiftUI
 import FirebaseFirestore
-import AVKit
-import CoreMedia
 import CoreLocation
 import UIKit
+import AVFoundation
 
 struct FeedView: View {
-    @State private var posts: [Post] = []
+    @Environment(\.locationProvider) private var injectedLocationProvider: LocationProvider?
+    @StateObject private var fallbackLocationProvider = LocationProvider()
+    private var locationProvider: LocationProvider { injectedLocationProvider ?? fallbackLocationProvider }
+
+    @State private var posts: [FeedPost] = []
     @State private var isLoading = false
     @State private var didSeedIfEmpty = false
 
@@ -27,37 +30,85 @@ struct FeedView: View {
     @State private var usernames: [String: String] = [:] // uid -> username
     @State private var usernameLoadsInProgress: Set<String> = []
 
-    // Video preloading cache
-    @State private var preloadedAssets: [String: AVURLAsset] = [:] // mediaURL string -> asset
-    @State private var readyItems: Set<String> = [] // URLs that reached .readyToPlay
+    // Drag gesture and haptics
+    @State private var dragTranslation: CGFloat = 0
+    @State private var hapticGenerator = UIImpactFeedbackGenerator(style: .rigid)
+    @State private var notifHaptics = UINotificationFeedbackGenerator()
+    @State private var dragAxis: Axis? = nil
+    private enum Axis { case horizontal, vertical }
+    
+    // TV static overlay state
+    @State private var showStatic: Bool = false
+    @State private var staticPlayer: AVAudioPlayer? = nil
+    @State private var popPlayer: AVAudioPlayer? = nil
 
-    // Fallback demo video to ensure we always have something to play
-    private let fallbackFastVideoURL = URL(string: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4")
+    @State private var showHeart: Bool = false
 
-    // Gate: only render the current page at first, then widen to neighbors after first user scroll
-    @State private var hasUserScrolledOnce = false
+    // Country paging
+    @State private var selectedCountryIndex: Int = 0
+    private let countries: [(code: String, name: String, flag: String)] = [
+        ("US","United States","🇺🇸"), ("CA","Canada","🇨🇦"), ("MX","Mexico","🇲🇽"), ("BR","Brazil","🇧🇷"), ("AR","Argentina","🇦🇷"), ("CL","Chile","🇨🇱"), ("GB","United Kingdom","🇬🇧"), ("IE","Ireland","🇮🇪"), ("FR","France","🇫🇷"), ("DE","Germany","🇩🇪"), ("ES","Spain","🇪🇸"), ("IT","Italy","🇮🇹"), ("PT","Portugal","🇵🇹"), ("NL","Netherlands","🇳🇱"), ("BE","Belgium","🇧🇪"), ("SE","Sweden","🇸🇪"), ("NO","Norway","🇳🇴"), ("FI","Finland","🇫🇮"), ("DK","Denmark","🇩🇰"), ("PL","Poland","🇵🇱"), ("CZ","Czechia","🇨🇿"), ("AT","Austria","🇦🇹"), ("CH","Switzerland","🇨🇭"), ("GR","Greece","🇬🇷"), ("TR","Türkiye","🇹🇷"), ("RU","Russia","🇷🇺"), ("UA","Ukraine","🇺🇦"), ("CN","China","🇨🇳"), ("JP","Japan","🇯🇵"), ("KR","South Korea","🇰🇷"), ("IN","India","🇮🇳"), ("PK","Pakistan","🇵🇰"), ("ID","Indonesia","🇮🇩"), ("AU","Australia","🇦🇺"), ("NZ","New Zealand","🇳🇿"), ("SA","Saudi Arabia","🇸🇦"), ("AE","UAE","🇦🇪"), ("EG","Egypt","🇪🇬"), ("ZA","South Africa","🇿🇦"), ("NG","Nigeria","🇳🇬"), ("KE","Kenya","🇰🇪"), ("MA","Morocco","🇲🇦"), ("TN","Tunisia","🇹🇳"), ("IL","Israel","🇮🇱"), ("IR","Iran","🇮🇷"), ("TH","Thailand","🇹🇭"), ("VN","Vietnam","🇻🇳"), ("PH","Philippines","🇵🇭"), ("MY","Malaysia","🇲🇾"), ("SG","Singapore","🇸🇬"), ("TW","Taiwan","🇹🇼"), ("HK","Hong Kong","🇭🇰")
+    ]
 
-    // Debounce fast index changes to avoid rapid player start/stop thrash
-    @State private var debouncedIndex: Int = 0
+    @State private var showLaunchLogo: Bool = true
+    @State private var launchLogoOpacity: Double = 1.0
+    @State private var launchLogoScale: CGFloat = 0.9
 
-    @State private var impactHaptics = UIImpactFeedbackGenerator(style: .rigid)
+    private func countryIndex(for coordinate: CLLocationCoordinate2D?) -> Int {
+        guard let coordinate else { return 0 }
+        // Very lightweight mapping by rough longitude/latitude bands to pick a nearby country from our list.
+        // This is a placeholder heuristic for demo purposes.
+        let lat = coordinate.latitude
+        let lon = coordinate.longitude
+        // Prefer a few common regions first
+        if lat > 24 && lat < 49 && lon > -125 && lon < -66 { return countries.firstIndex { $0.code == "US" } ?? 0 }
+        if lat > 42 && lat < 84 && lon > -10 && lon < 40 { return countries.firstIndex { $0.code == "FR" } ?? 0 }
+        if lat > 35 && lat < 72 && lon > -10 && lon < 30 { return countries.firstIndex { $0.code == "DE" } ?? 0 }
+        if lat > -44 && lat < -10 && lon > 112 && lon < 154 { return countries.firstIndex { $0.code == "AU" } ?? 0 }
+        if lat > 8 && lat < 37 && lon > 68 && lon < 97 { return countries.firstIndex { $0.code == "IN" } ?? 0 }
+        if lat > 3 && lat < 54 && lon > 73 && lon < 135 { return countries.firstIndex { $0.code == "CN" } ?? 0 }
+        if lat > 24 && lat < 46 && lon > 123 && lon < 146 { return countries.firstIndex { $0.code == "JP" } ?? 0 }
+        if lat > -35 && lat < 6 && lon > -74 && lon < -34 { return countries.firstIndex { $0.code == "BR" } ?? 0 }
+        if lat > 49 && lat < 60 && lon > -141 && lon < -52 { return countries.firstIndex { $0.code == "CA" } ?? 0 }
+        // Fallbacks by hemisphere
+        if lon >= -30 && lon <= 60 { return countries.firstIndex { $0.code == "GB" } ?? 0 }
+        if lon > 60 && lon < 120 { return countries.firstIndex { $0.code == "IN" } ?? 0 }
+        if lon >= 120 { return countries.firstIndex { $0.code == "JP" } ?? 0 }
+        return 0
+    }
 
-    // Global mute toggle with persistence
-    @AppStorage("FeedGlobalMute") private var isGloballyMuted: Bool = false
-    @State private var lastHapticIndex: Int? = nil
-
-    @Environment(\.scenePhase) private var scenePhase
-    @State private var emptyStatePlayer: AVPlayer? = nil
-
-    // Computed: current post
-    private var currentPost: Post? {
-        posts[safe: debouncedIndex]
+    // Equatable proxy for coordinate changes
+    private var coordinateKey: String {
+        if let c = locationProvider.coordinate {
+            return String(format: "%.6f,%.6f", c.latitude, c.longitude)
+        } else {
+            return "nil"
+        }
     }
 
     var body: some View {
         GeometryReader { geo in
             ZStack {
                 feedContent(in: geo.size)
+
+                if showLaunchLogo {
+                    Image("logo") // Ensure this asset exists in the asset catalog
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: min(220, geo.size.width * 0.5))
+                        .opacity(launchLogoOpacity)
+                        .scaleEffect(launchLogoScale)
+                        .transition(.scale.combined(with: .opacity))
+                        .onAppear {
+                            // Subtle pop-in on first appear
+                            withAnimation(.spring(response: 0.5, dampingFraction: 0.85)) {
+                                launchLogoScale = 1.0
+                                launchLogoOpacity = 1.0
+                            }
+                        }
+                        .zIndex(9)
+                }
+
                 overlayChrome
                     .zIndex(10)
                 profileNavigationLink
@@ -65,7 +116,29 @@ struct FeedView: View {
             .background(Color.black)
         }
         .task {
+            if selectedCountryIndex == 0 {
+                // Initialize strictly from current location; if no coordinate yet, wait for onChange to update
+                if let _ = locationProvider.coordinate {
+                    let idx = countryIndex(for: locationProvider.coordinate)
+                    selectedCountryIndex = idx
+                }
+            }
+            showStatic = true
+            playStaticSound()
             await reload()
+            // brief static then fade
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            await MainActor.run { withAnimation { showStatic = false } }
+            stopStaticSound()
+            await MainActor.run {
+                withAnimation(.easeOut(duration: 0.6)) {
+                    launchLogoOpacity = 0
+                    launchLogoScale = 1.05
+                }
+            }
+            // Remove the logo overlay after the fade completes
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            await MainActor.run { showLaunchLogo = false }
             if posts.isEmpty, !didSeedIfEmpty {
                 didSeedIfEmpty = true
                 await seedAndReload()
@@ -79,86 +152,35 @@ struct FeedView: View {
         .onReceive(NotificationCenter.default.publisher(for: .ResetTabToTop)) { _ in
             currentIndex = 0
         }
-        .onChange(of: currentIndex) { newIndex in
-            // Debounce rapid changes to avoid player thrash
-            let target = newIndex
-            Task {
-                try? await Task.sleep(nanoseconds: 80_000_000) // 80ms debounce
-                await MainActor.run {
-                    guard debouncedIndex != target else { return }
-                    debouncedIndex = target
-                    if lastHapticIndex != target {
-                        lastHapticIndex = target
-                        let notif = UINotificationFeedbackGenerator()
-                        notif.notificationOccurred(.success)
-                        impactHaptics.prepare()
-                        impactHaptics.impactOccurred(intensity: 1.0)
-                    }
-                }
-            }
-
-            if let uid = posts[safe: newIndex]?.userID {
-                maybeResolveUsername(for: uid)
-            }
-            if !hasUserScrolledOnce, !posts.isEmpty {
-                hasUserScrolledOnce = true
-            }
-        }
-        .onAppear {
-            debouncedIndex = currentIndex
-            impactHaptics.prepare()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("RecordTabDidAppear"))) { _ in
-            print("[Feed] Record tab appeared — pausing feed playback")
-            Task { @MainActor in
-                debouncedIndex = -1
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("RecordTabDidDisappear"))) { _ in
-            print("[Feed] Record tab disappeared — optionally resume feed playback")
-            Task { @MainActor in
-                debouncedIndex = currentIndex
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("FeedTabDidAppear"))) { _ in
-            print("[Feed] Feed tab appeared — resuming feed playback")
-            Task { @MainActor in
-                debouncedIndex = currentIndex
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("FeedTabDidDisappear"))) { _ in
-            print("[Feed] Feed tab disappeared — pausing feed playback")
-            Task { @MainActor in
-                debouncedIndex = -1
-            }
-        }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("FeedRefreshRequested"))) { _ in
             print("[Feed] Refresh requested — reloading feed")
             Task { await reload() }
         }
-        .onChange(of: scenePhase) { newPhase in
-            switch newPhase {
-            case .active:
-                Task { @MainActor in
-                    debouncedIndex = currentIndex
-                    impactHaptics.prepare()
-                    impactHaptics.impactOccurred(intensity: 1.0)
-                }
-            case .inactive, .background:
-                Task { @MainActor in
-                    debouncedIndex = -1
-                }
-            @unknown default:
-                break
+        .onChange(of: currentIndex) { newIndex in
+            if let uid = posts[safe: newIndex]?.userID {
+                maybeResolveUsername(for: uid)
             }
         }
         .onAppear {
-            print("[Feed] Appeared — refreshing feed to avoid repeated content")
-            Task { await reload() }
+            // Removed duplicate reload here as per instruction
+            hapticGenerator.prepare()
+            notifHaptics.prepare()
+            try? AVAudioSession.sharedInstance().setActive(false)
         }
-        .onDisappear {
-            Task { @MainActor in
-                debouncedIndex = -1
+        .onChange(of: showStatic) { visible in
+            if visible {
+                playStaticSound()
+            } else {
+                stopStaticSound()
+            }
+        }
+        .onChange(of: coordinateKey) { _ in
+            if posts.isEmpty {
+                let idx = countryIndex(for: locationProvider.coordinate)
+                if idx != selectedCountryIndex {
+                    selectedCountryIndex = idx
+                    Task { await reloadForCountry() }
+                }
             }
         }
     }
@@ -167,77 +189,449 @@ struct FeedView: View {
 
     @ViewBuilder
     private func feedContent(in size: CGSize) -> some View {
-        if posts.isEmpty {
-            emptyFeedView(in: size)
-                .ignoresSafeArea()
-        } else {
-            populatedFeedView(in: size)
-                .ignoresSafeArea()
+        ZStack {
+            if posts.isEmpty {
+                emptyFeedView(in: size)
+                    .ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .gesture(
+                        DragGesture(minimumDistance: 20, coordinateSpace: .local)
+                            .onChanged { value in
+                                if dragAxis == nil {
+                                    dragAxis = abs(value.translation.width) > abs(value.translation.height) ? .horizontal : .vertical
+                                    hapticGenerator.prepare()
+                                    notifHaptics.prepare()
+                                }
+                                switch dragAxis {
+                                case .horizontal:
+                                    dragTranslation = value.translation.width
+                                case .vertical:
+                                    dragTranslation = value.translation.height
+                                case .none:
+                                    dragTranslation = 0
+                                }
+                            }
+                            .onEnded { value in
+                                let horizontalThreshold: CGFloat = 60
+                                let verticalThreshold: CGFloat = 60
+                                if let axis = dragAxis {
+                                    switch axis {
+                                    case .horizontal:
+                                        if value.translation.width <= -horizontalThreshold {
+                                            // swipe left -> next country
+                                            selectedCountryIndex = (selectedCountryIndex + 1) % countries.count
+                                            currentIndex = 0
+                                            Task {
+                                                await reloadForCountry()
+                                            }
+                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
+                                                hapticGenerator.impactOccurred(intensity: 1.0)
+                                                UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+                                                notifHaptics.notificationOccurred(.success)
+                                            }
+                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                                                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                                            }
+                                            hapticGenerator.prepare()
+                                            notifHaptics.prepare()
+                                            showStatic = true
+                                            playOneShotPop()
+                                            playStaticSound()
+                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                                                withAnimation { showStatic = false }
+                                                stopStaticSound()
+                                            }
+                                        } else if value.translation.width >= horizontalThreshold {
+                                            // swipe right -> previous country
+                                            selectedCountryIndex = (selectedCountryIndex - 1 + countries.count) % countries.count
+                                            currentIndex = 0
+                                            Task {
+                                                await reloadForCountry()
+                                            }
+                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
+                                                hapticGenerator.impactOccurred(intensity: 1.0)
+                                                UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+                                                notifHaptics.notificationOccurred(.success)
+                                            }
+                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                                                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                                            }
+                                            hapticGenerator.prepare()
+                                            notifHaptics.prepare()
+                                            showStatic = true
+                                            playOneShotPop()
+                                            playStaticSound()
+                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                                                withAnimation { showStatic = false }
+                                                stopStaticSound()
+                                            }
+                                        }
+                                    case .vertical:
+                                        if value.translation.height <= -verticalThreshold {
+                                            // swipe up -> next (wrap to 0 from last)
+                                            if posts.isEmpty == false {
+                                                if currentIndex < max(0, posts.count - 1) {
+                                                    currentIndex += 1
+                                                } else {
+                                                    currentIndex = 0
+                                                }
+                                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
+                                                    hapticGenerator.impactOccurred(intensity: 1.0)
+                                                    UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+                                                    notifHaptics.notificationOccurred(.success)
+                                                }
+                                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                                                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                                                }
+                                                hapticGenerator.prepare()
+                                                notifHaptics.prepare()
+                                                showStatic = true
+                                                playOneShotPop()
+                                                playStaticSound()
+                                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                                                    withAnimation { showStatic = false }
+                                                    stopStaticSound()
+                                                }
+                                            }
+                                        } else if value.translation.height >= verticalThreshold {
+                                            // swipe down -> previous (wrap to last from 0)
+                                            if posts.isEmpty == false {
+                                                if currentIndex > 0 {
+                                                    currentIndex -= 1
+                                                } else {
+                                                    currentIndex = max(0, posts.count - 1)
+                                                }
+                                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
+                                                    hapticGenerator.impactOccurred(intensity: 1.0)
+                                                    UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+                                                    notifHaptics.notificationOccurred(.success)
+                                                }
+                                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                                                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                                                }
+                                                hapticGenerator.prepare()
+                                                notifHaptics.prepare()
+                                                showStatic = true
+                                                playOneShotPop()
+                                                playStaticSound()
+                                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                                                    withAnimation { showStatic = false }
+                                                    stopStaticSound()
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                dragAxis = nil
+                                withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
+                                    dragTranslation = 0
+                                }
+                            }
+                    )
+                    .onTapGesture(count: 2) {
+                        // On empty feed double-tap just fire haptics for consistency
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
+                            hapticGenerator.impactOccurred(intensity: 1.0)
+                            UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+                            notifHaptics.notificationOccurred(.success)
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        }
+                        playOneShotPop()
+                        withAnimation(.spring(response: 0.2, dampingFraction: 0.7)) { showHeart = true }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            withAnimation(.easeOut(duration: 0.15)) { showHeart = false }
+                        }
+                        hapticGenerator.prepare()
+                        notifHaptics.prepare()
+                    }
+            } else {
+                populatedFeedView(in: size)
+                    .ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .gesture(
+                        DragGesture(minimumDistance: 20, coordinateSpace: .local)
+                            .onChanged { value in
+                                if dragAxis == nil {
+                                    dragAxis = abs(value.translation.width) > abs(value.translation.height) ? .horizontal : .vertical
+                                    hapticGenerator.prepare()
+                                    notifHaptics.prepare()
+                                }
+                                switch dragAxis {
+                                case .horizontal:
+                                    dragTranslation = value.translation.width
+                                case .vertical:
+                                    dragTranslation = value.translation.height
+                                case .none:
+                                    dragTranslation = 0
+                                }
+                            }
+                            .onEnded { value in
+                                let horizontalThreshold: CGFloat = 60
+                                let verticalThreshold: CGFloat = 60
+                                if let axis = dragAxis {
+                                    switch axis {
+                                    case .horizontal:
+                                        if value.translation.width <= -horizontalThreshold {
+                                            // swipe left -> next country
+                                            selectedCountryIndex = (selectedCountryIndex + 1) % countries.count
+                                            currentIndex = 0
+                                            Task {
+                                                await reloadForCountry()
+                                            }
+                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
+                                                hapticGenerator.impactOccurred(intensity: 1.0)
+                                                UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+                                                notifHaptics.notificationOccurred(.success)
+                                            }
+                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                                                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                                            }
+                                            hapticGenerator.prepare()
+                                            notifHaptics.prepare()
+                                            showStatic = true
+                                            playOneShotPop()
+                                            playStaticSound()
+                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                                                withAnimation { showStatic = false }
+                                                stopStaticSound()
+                                            }
+                                            maybeLoadMoreIfNeeded(appearingIndex: currentIndex)
+                                        } else if value.translation.width >= horizontalThreshold {
+                                            // swipe right -> previous country
+                                            selectedCountryIndex = (selectedCountryIndex - 1 + countries.count) % countries.count
+                                            currentIndex = 0
+                                            Task {
+                                                await reloadForCountry()
+                                            }
+                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
+                                                hapticGenerator.impactOccurred(intensity: 1.0)
+                                                UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+                                                notifHaptics.notificationOccurred(.success)
+                                            }
+                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                                                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                                            }
+                                            hapticGenerator.prepare()
+                                            notifHaptics.prepare()
+                                            showStatic = true
+                                            playOneShotPop()
+                                            playStaticSound()
+                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                                                withAnimation { showStatic = false }
+                                                stopStaticSound()
+                                            }
+                                        }
+                                    case .vertical:
+                                        if value.translation.height <= -verticalThreshold {
+                                            // swipe up -> next (wrap to 0 from last)
+                                            if posts.isEmpty == false {
+                                                if currentIndex < max(0, posts.count - 1) {
+                                                    currentIndex += 1
+                                                } else {
+                                                    currentIndex = 0
+                                                }
+                                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
+                                                    hapticGenerator.impactOccurred(intensity: 1.0)
+                                                    UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+                                                    notifHaptics.notificationOccurred(.success)
+                                                }
+                                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                                                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                                                }
+                                                hapticGenerator.prepare()
+                                                notifHaptics.prepare()
+                                                showStatic = true
+                                                playOneShotPop()
+                                                playStaticSound()
+                                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                                                    withAnimation { showStatic = false }
+                                                    stopStaticSound()
+                                                }
+                                                maybeLoadMoreIfNeeded(appearingIndex: currentIndex)
+                                            }
+                                        } else if value.translation.height >= verticalThreshold {
+                                            // swipe down -> previous (wrap to last from 0)
+                                            if posts.isEmpty == false {
+                                                if currentIndex > 0 {
+                                                    currentIndex -= 1
+                                                } else {
+                                                    currentIndex = max(0, posts.count - 1)
+                                                }
+                                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
+                                                    hapticGenerator.impactOccurred(intensity: 1.0)
+                                                    UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+                                                    notifHaptics.notificationOccurred(.success)
+                                                }
+                                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                                                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                                                }
+                                                hapticGenerator.prepare()
+                                                notifHaptics.prepare()
+                                                showStatic = true
+                                                playOneShotPop()
+                                                playStaticSound()
+                                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                                                    withAnimation { showStatic = false }
+                                                    stopStaticSound()
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                dragAxis = nil
+                                withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
+                                    dragTranslation = 0
+                                }
+                            }
+                    )
+                    .onTapGesture(count: 2) {
+                        if var post = posts[safe: currentIndex] {
+                            // Like action (log for now)
+                            print("Liked post: \(post.id)")
+                            // Increase radius by 5000 meters, clamp to max 10000
+                            let newRadius = min(10_000, post.radius + 5000)
+                            let updated = FeedPost(
+                                id: post.id,
+                                latitude: post.latitude,
+                                longitude: post.longitude,
+                                mediaURL: post.mediaURL,
+                                radius: newRadius,
+                                viewCount: post.viewCount,
+                                userID: post.userID
+                            )
+                            posts[currentIndex] = updated
+                            // Haptic feedback for like
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
+                                hapticGenerator.impactOccurred(intensity: 1.0)
+                                UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+                                notifHaptics.notificationOccurred(.success)
+                            }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                            }
+                            playOneShotPop()
+                            withAnimation(.spring(response: 0.2, dampingFraction: 0.7)) { showHeart = true }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                                withAnimation(.easeOut(duration: 0.15)) { showHeart = false }
+                            }
+                            hapticGenerator.prepare()
+                            notifHaptics.prepare()
+                        }
+                    }
+            }
+            tvStaticOverlay(in: size)
+            if showHeart {
+                Image(systemName: "heart.fill")
+                    .font(.system(size: 120, weight: .bold))
+                    .foregroundStyle(.red)
+                    .shadow(color: .black.opacity(0.3), radius: 6, x: 0, y: 3)
+                    .transition(.scale.combined(with: .opacity))
+                    .zIndex(20)
+            }
         }
     }
 
     private func emptyFeedView(in size: CGSize) -> some View {
-        VerticalPager(currentIndex: .constant(0), pageCount: 1) {
-            ZStack {
-                if let url = fallbackFastVideoURL {
-                    FillVideoPlayer(url: url, play: true, muted: isGloballyMuted)
+        ZStack {
+            AsyncImage(url: URL(string: "https://picsum.photos/800/1400")) { phase in
+                switch phase {
+                case .empty:
+                    Color.clear
+                case .success(let img):
+                    img
+                        .resizable()
+                        .scaledToFill()
                         .frame(width: size.width, height: size.height)
                         .clipped()
-                } else {
+                case .failure:
+                    Color.black
+                @unknown default:
                     Color.black
                 }
             }
-            .frame(width: size.width, height: size.height)
-            .background(Color.black)
+        }
+        .frame(width: size.width, height: size.height)
+        .background(Color.black)
+        .onTapGesture(count: 2) {
+            // On empty feed double-tap just fire haptics for consistency
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
+                hapticGenerator.impactOccurred(intensity: 1.0)
+                UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+                notifHaptics.notificationOccurred(.success)
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            }
+            playOneShotPop()
+            withAnimation(.spring(response: 0.2, dampingFraction: 0.7)) { showHeart = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                withAnimation(.easeOut(duration: 0.15)) { showHeart = false }
+            }
+            hapticGenerator.prepare()
+            notifHaptics.prepare()
         }
     }
 
     private func populatedFeedView(in size: CGSize) -> some View {
-        VerticalPager(currentIndex: $currentIndex, pageCount: posts.count) {
-            if let idx = pagesToDisplay.first, let post = posts[safe: idx] {
-                let isActive: Bool = (debouncedIndex == idx)
-                let shouldPlay: Bool = isActive
-                let isMuted: Bool = isGloballyMuted || !isActive || debouncedIndex == -1
-                let resolvedName: String = displayName(for: post)
-                let isReady = readyItems.contains(post.mediaURL)
-                let asset = preloadedAssets[post.mediaURL]
-
-                FeedFullscreenPage(
+        ZStack {
+            if let post = posts[safe: currentIndex] {
+                FeedFullscreenPageView(
                     post: post,
-                    displayName: resolvedName,
+                    displayName: displayName(for: post),
                     onUserTapped: { userId in
                         selectedUserID = userId
                         navigateToProfile = true
-                    },
-                    isVideoReady: isReady,
-                    preloadedAsset: asset,
-                    shouldPlay: shouldPlay,
-                    isMuted: isMuted
+                    }
                 )
-                .id(post.id)
-                .onAppear {
-                    if isVideoURL(post.mediaURL) {
-                        preloadVideoIfNeeded(for: post.mediaURL)
-                    }
-                    if let next = posts[safe: idx + 1], isVideoURL(next.mediaURL) {
-                        preloadVideoIfNeeded(for: next.mediaURL)
-                    }
-                    maybeLoadMoreIfNeeded(appearingIndex: idx)
-                    maybeResolveUsername(for: post.userID)
-
-                    // Strong haptic on page activation (once per index)
-                    if lastHapticIndex != idx {
-                        lastHapticIndex = idx
-                        let notif = UINotificationFeedbackGenerator()
-                        notif.notificationOccurred(.success)
-                        impactHaptics.prepare()
-                        impactHaptics.impactOccurred(intensity: 1.0)
+                .offset(x: dragAxis == .horizontal ? dragTranslation * 0.25 : 0)
+                .offset(y: dragAxis == .vertical ? dragTranslation * 0.25 : 0)
+//                .animation(.spring(response: 0.25, dampingFraction: 0.8), value: dragTranslation) // Removed as per instruction
+                .onTapGesture(count: 2) {
+                    if var post = posts[safe: currentIndex] {
+                        // Like action (log for now)
+                        print("Liked post: \(post.id)")
+                        // Increase radius by 5000 meters, clamp to max 10000
+                        let newRadius = min(10_000, post.radius + 5000)
+                        let updated = FeedPost(
+                            id: post.id,
+                            latitude: post.latitude,
+                            longitude: post.longitude,
+                            mediaURL: post.mediaURL,
+                            radius: newRadius,
+                            viewCount: post.viewCount,
+                            userID: post.userID
+                        )
+                        posts[currentIndex] = updated
+                        // Haptic feedback for like
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
+                            hapticGenerator.impactOccurred(intensity: 1.0)
+                            UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+                            notifHaptics.notificationOccurred(.success)
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        }
+                        playOneShotPop()
+                        withAnimation(.spring(response: 0.2, dampingFraction: 0.7)) { showHeart = true }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            withAnimation(.easeOut(duration: 0.15)) { showHeart = false }
+                        }
+                        hapticGenerator.prepare()
+                        notifHaptics.prepare()
                     }
                 }
             } else {
                 Color.black
             }
         }
+    }
+    
+    @ViewBuilder
+    private func tvStaticOverlay(in size: CGSize) -> some View {
+        StaticView(size: size, isVisible: showStatic)
+            .allowsHitTesting(false)
     }
 
     private var profileNavigationLink: some View {
@@ -257,105 +651,35 @@ struct FeedView: View {
         .hidden()
     }
 
-    private var pagesToDisplay: [Int] {
-        guard !posts.isEmpty else { return [] }
-        return [debouncedIndex].filter { $0 >= 0 && $0 < posts.count }
-    }
+    // Removed pagesToDisplay property since no pager is used anymore
 
     private var overlayChrome: some View {
-        ZStack {
-            VStack {
-                HStack {
-                    if isLoading || isLoadingMore {
-                        ProgressView().tint(.white)
+        GeometryReader { geo in
+            ZStack {
+                VStack {
+                    HStack {
+                        Text(countries[selectedCountryIndex].flag)
+                            .font(.system(size: 28))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Color.black.opacity(0.55), in: Capsule())
+                            .overlay(Capsule().stroke(Color.white.opacity(0.25), lineWidth: 1))
+                        Spacer()
                     }
-                    Spacer()
+                    .padding(.leading, 12)
+                    .padding(.top, geo.safeAreaInsets.top + 8)
+                    Spacer(minLength: 0)
                 }
-                .padding(.horizontal, 12)
-                .padding(.top, 8)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .allowsHitTesting(false)
             }
-            .allowsHitTesting(false)
-
-            VStack {
-                Spacer()
-                if isLoadingMore {
-                    ProgressView()
-                        .tint(.white)
-                        .padding(10)
-                        .background(Color.black.opacity(0.4), in: Capsule())
-                        .overlay(Capsule().stroke(Color.white.opacity(0.2), lineWidth: 1))
-                        .padding(.trailing, 16)
-                        .padding(.bottom, 24)
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                }
-            }
-            .allowsHitTesting(false)
-
-            VStack {
-                Spacer()
-                VStack(spacing: 14) {
-                    Button {
-                        if !posts.isEmpty {
-                            currentIndex = max(0, currentIndex - 1)
-                        }
-                    } label: {
-                        Circle().fill(Color.green).frame(width: 56, height: 56)
-                            .overlay(Image(systemName: "arrow.up").foregroundColor(.white))
-                    }
-                    .buttonStyle(.plain)
-
-                    Button {
-                        print("Heart tapped for post: \(currentPost?.id ?? "nil")")
-                    } label: {
-                        Circle().fill(Color.pink).frame(width: 44, height: 44)
-                            .overlay(Image(systemName: "heart.fill").foregroundColor(.white))
-                    }
-                    .buttonStyle(.plain)
-
-                    Button {
-                        if !posts.isEmpty {
-                            currentIndex = min(posts.count - 1, currentIndex + 1)
-                        }
-                    } label: {
-                        Circle().fill(Color.blue).frame(width: 56, height: 56)
-                            .overlay(Image(systemName: "arrow.down").foregroundColor(.white))
-                    }
-                    .buttonStyle(.plain)
-
-                    Button {
-                        isGloballyMuted.toggle()
-                    } label: {
-                        Circle().fill(Color.white.opacity(0.2)).frame(width: 44, height: 44)
-                            .overlay(Image(systemName: isGloballyMuted ? "speaker.slash.fill" : "speaker.wave.2.fill").foregroundColor(.white))
-                    }
-                    .buttonStyle(.plain)
-
-                    Button {
-                        print("[Haptics] Test button tapped")
-                        let notif = UINotificationFeedbackGenerator()
-                        notif.prepare()
-                        notif.notificationOccurred(.warning)
-                        impactHaptics.prepare()
-                        impactHaptics.impactOccurred(intensity: 1.0)
-                    } label: {
-                        RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(0.2)).frame(width: 120, height: 36)
-                            .overlay(Text("Haptic Test").foregroundColor(.white).font(.system(size: 14, weight: .semibold)))
-                    }
-                    .buttonStyle(.plain)
-                }
-                .contentShape(Rectangle())
-                .allowsHitTesting(true)
-                .padding(.leading, 16)
-                .padding(.bottom, 160)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+            .ignoresSafeArea()
         }
-        .ignoresSafeArea()
     }
 
     // MARK: - Username helpers
 
-    private func displayName(for post: Post) -> String {
+    private func displayName(for post: FeedPost) -> String {
         if let name = usernames[post.userID], !name.isEmpty {
             return name
         }
@@ -384,39 +708,74 @@ struct FeedView: View {
     }
 
     private func prefetchVisibleUsernames() {
-        for idx in pagesToDisplay {
-            if let uid = posts[safe: idx]?.userID {
-                maybeResolveUsername(for: uid)
-            }
+        // Prefetch username only for currentIndex since we show one post at a time
+        if let uid = posts[safe: currentIndex]?.userID {
+            maybeResolveUsername(for: uid)
         }
     }
 
-    // MARK: - Helpers for video readiness
-
-    private func isVideoURL(_ s: String) -> Bool {
-        let lower = s.lowercased()
-        return lower.hasSuffix(".mp4") || lower.hasSuffix(".mov") || lower.contains("video")
+    private var currentCoordinate: CLLocationCoordinate2D? { locationProvider.coordinate }
+    
+    private func configureAudioSessionForStatic() {
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playback, mode: .default, options: [])
+            try session.setActive(true, options: [])
+        } catch {
+            print("[StaticSound] Audio session config failed: \(error)")
+        }
     }
 
-    private func preloadVideoIfNeeded(for urlString: String) {
-        guard preloadedAssets[urlString] == nil, let url = URL(string: urlString) else { return }
-        let asset = AVURLAsset(url: url)
+    private func playStaticSound() {
+        configureAudioSessionForStatic()
+        guard staticPlayer == nil || staticPlayer?.isPlaying == false else { return }
+        guard let url = Bundle.main.url(forResource: "pop", withExtension: "mp3") ?? Bundle.main.url(forResource: "pop", withExtension: "wav") else {
+            print("[StaticSound] pop.(mp3|wav) not found in bundle")
+            return
+        }
+        do {
+            let player = try AVAudioPlayer(contentsOf: url)
+            player.numberOfLoops = -1 // loop while visible
+            player.volume = 0.8
+            player.prepareToPlay()
+            player.play()
+            staticPlayer = player
+        } catch {
+            print("[StaticSound] Failed to play: \(error)")
+        }
+    }
 
-        Task {
-            do {
-                async let playable: Bool = asset.load(.isPlayable)
-                async let duration: CMTime = asset.load(.duration)
-                let (isPlayable, dur) = try await (playable, duration)
-                // Ensure we have a finite, non-zero duration for better readiness
-                if isPlayable, dur.isNumeric, dur.seconds > 0.1 {
-                    await MainActor.run {
-                        preloadedAssets[urlString] = asset
-                        readyItems.insert(urlString)
-                    }
-                }
-            } catch {
-                return
+    private func stopStaticSound() {
+        staticPlayer?.stop()
+        staticPlayer = nil
+    }
+    
+    private func playOneShotPop() {
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playback, mode: .default, options: [])
+            try session.setActive(true, options: [])
+        } catch {
+            print("[PopSound] Audio session config failed: \(error)")
+        }
+        guard let url = Bundle.main.url(forResource: "pop", withExtension: "mp3") ?? Bundle.main.url(forResource: "pop", withExtension: "wav") else {
+            print("[PopSound] pop.(mp3|wav) not found in bundle")
+            return
+        }
+        do {
+            let player = try AVAudioPlayer(contentsOf: url)
+            player.numberOfLoops = 0
+            player.volume = 0.9
+            player.prepareToPlay()
+            player.play()
+            popPlayer = player
+            // Auto release after it finishes (~0.5s typical)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak popPlayer] in
+                self.popPlayer?.stop()
+                self.popPlayer = nil
             }
+        } catch {
+            print("[PopSound] Failed to play: \(error)")
         }
     }
 
@@ -430,7 +789,6 @@ struct FeedView: View {
             lastDocument = nil
             posts.removeAll()
             currentIndex = 0
-            debouncedIndex = 0
         }
 
         // Simulate network delay for UX parity.
@@ -443,6 +801,24 @@ struct FeedView: View {
             posts = newPosts
             isLoading = false
             // If we couldn't load anything, mark as reached end to stop paginating.
+            reachedEnd = newPosts.isEmpty
+            prefetchVisibleUsernames()
+        }
+    }
+
+    private func reloadForCountry() async {
+        await MainActor.run {
+            isLoading = true
+            reachedEnd = false
+            lastDocument = nil
+            posts.removeAll()
+            currentIndex = 0
+        }
+        try? await Task.sleep(nanoseconds: 150_000_000)
+        let newPosts = Self.generateDemoPostsForCountry(country: countries[selectedCountryIndex].code, start: 0, count: pageSize)
+        await MainActor.run {
+            posts = newPosts
+            isLoading = false
             reachedEnd = newPosts.isEmpty
             prefetchVisibleUsernames()
         }
@@ -469,7 +845,7 @@ struct FeedView: View {
             try? await Task.sleep(nanoseconds: 250_000_000)
 
             let start = posts.count
-            let newPage = Self.generateDemoPosts(start: start, count: pageSize)
+            let newPage = Self.generateDemoPostsForCountry(country: countries[selectedCountryIndex].code, start: start, count: pageSize)
 
             await MainActor.run {
                 posts.append(contentsOf: newPage)
@@ -480,63 +856,62 @@ struct FeedView: View {
     }
 
     // MARK: - Demo data generator (local fallback)
-    private static func generateDemoPosts(start: Int, count: Int) -> [Post] {
+    private static func generateDemoPosts(start: Int, count: Int) -> [FeedPost] {
         guard count > 0 else { return [] }
         let totalCap = 30 // stop after ~30 to simulate end of feed
         let end = min(start + count, totalCap)
         guard start < end else { return [] }
 
-        var result: [Post] = []
+        var result: [FeedPost] = []
         for i in start..<end {
             let id = "demo_\(i)"
             let userID = i % 3 == 0 ? "fake_user_\(i)" : String(format: "user_%06d", i)
-            let mediaURL: String
-            let posterURL: String?
-            if userID.hasPrefix("fake_user_") {
-                mediaURL = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
-                posterURL = "https://picsum.photos/id/\(i % 100)/800/1400"
-            } else {
-                mediaURL = "https://picsum.photos/id/\(i % 100)/1200/2000"
-                posterURL = nil
-            }
+            // Lower resolution image as per instruction
+            let mediaURL = "https://picsum.photos/id/\(i % 100)/800/1400"
             let latitude = 37.3349 + Double(i % 5) * 0.01
             let longitude = -122.0090 - Double(i % 7) * 0.01
             let radius = [50, 100, 250, 500, 1000, 5000].randomElement() ?? 250
 
-            // Construct a Post. This assumes your Post initializer or memberwise init.
-            // If your Post is a struct with public memberwise init, this will compile.
-            let post = Post(
+            let post = FeedPost(
                 id: id,
                 latitude: latitude,
                 longitude: longitude,
                 mediaURL: mediaURL,
-                radius: radius,
+                radius: Double(radius),
                 viewCount: radius,
-                userID: userID,
-                posterURL: posterURL
+                userID: userID
             )
             result.append(post)
         }
         return result
     }
-
+    
+    private static func generateDemoPostsForCountry(country: String, start: Int, count: Int) -> [FeedPost] {
+        guard count > 0 else { return [] }
+        let totalCap = 30
+        let end = min(start + count, totalCap)
+        guard start < end else { return [] }
+        var result: [FeedPost] = []
+        for i in start..<end {
+            let id = "\(country.lowercased())_demo_\(i)"
+            let userID = i % 3 == 0 ? "fake_user_\(i)" : String(format: "user_%06d", i)
+            let mediaURL = "https://picsum.photos/id/\(i % 100)/800/1400"
+            // Shift coordinates slightly by country index to vary positions
+            let baseLat = 37.3349 + Double(abs(country.hashValue % 20)) * 0.01
+            let baseLon = -122.0090 - Double(abs(country.hashValue % 20)) * 0.01
+            let latitude = baseLat + Double(i % 5) * 0.01
+            let longitude = baseLon - Double(i % 7) * 0.01
+            let radius = [50, 100, 250, 500, 1000, 5000].randomElement() ?? 250
+            result.append(FeedPost(id: id, latitude: latitude, longitude: longitude, mediaURL: mediaURL, radius: Double(radius), viewCount: radius, userID: userID))
+        }
+        return result
+    }
 }
 
-private struct FeedFullscreenPage: View {
-    let post: Post
+private struct FeedFullscreenPageView: View {
+    let post: FeedPost
     let displayName: String
     var onUserTapped: (String) -> Void
-
-    let isVideoReady: Bool?
-    let preloadedAsset: AVURLAsset?
-
-    let shouldPlay: Bool
-    let isMuted: Bool
-
-    private var isVideo: Bool {
-        let lower = post.mediaURL.lowercased()
-        return lower.hasSuffix(".mp4") || lower.hasSuffix(".mov") || lower.contains("video")
-    }
 
     private var coordinateText: String {
         String(format: "%.4f, %.4f", post.latitude, post.longitude)
@@ -544,9 +919,12 @@ private struct FeedFullscreenPage: View {
 
     var body: some View {
         GeometryReader { geo in
+            let size = geo.size
             ZStack {
-                if let poster = post.posterURL, let posterURL = URL(string: poster) {
-                    AsyncImage(url: posterURL, transaction: Transaction(animation: .none)) { phase in
+                // Removed poster background AsyncImage block as per instruction
+
+                if let url = URL(string: post.mediaURL) {
+                    AsyncImage(url: url, transaction: Transaction(animation: .none)) { phase in
                         switch phase {
                         case .empty:
                             Color.black
@@ -554,63 +932,24 @@ private struct FeedFullscreenPage: View {
                             img
                                 .resizable()
                                 .scaledToFill()
+                                .frame(width: size.width, height: size.height)
                                 .clipped()
+                                .background(Color.black)
                         case .failure:
-                            Color.black
+                            ZStack {
+                                Color.black
+                                Image(systemName: "photo")
+                                    .font(.system(size: 40, weight: .bold))
+                                    .foregroundColor(.white.opacity(0.6))
+                            }
                         @unknown default:
                             Color.black
                         }
                     }
+                    .id("image_\(post.id)_\(post.mediaURL)")
                 } else {
                     Color.black
                 }
-
-                Group {
-                    // Render video as full-screen when media is a video; otherwise show image
-                    if let url = URL(string: post.mediaURL) {
-                        if post.mediaURL.lowercased().hasSuffix(".mp4") || post.mediaURL.lowercased().hasSuffix(".mov") || post.mediaURL.lowercased().contains("video") {
-                            if (isVideoReady ?? false), let asset = preloadedAsset {
-                                FillVideoPlayerAsset(asset: asset, play: shouldPlay, muted: isMuted)
-                                    .frame(width: geo.size.width, height: geo.size.height)
-                                    .clipped()
-                                    .allowsHitTesting(false)
-                                    .transition(.opacity)
-                            } else {
-                                FillVideoPlayer(url: url, play: shouldPlay, muted: isMuted)
-                                    .frame(width: geo.size.width, height: geo.size.height)
-                                    .clipped()
-                                    .allowsHitTesting(false)
-                                    .transition(.opacity)
-                            }
-                        } else {
-                            AsyncImage(url: url, transaction: Transaction(animation: .none)) { phase in
-                                switch phase {
-                                case .empty:
-                                    ZStack { Color.black; ProgressView().tint(.white) }
-                                case .success(let img):
-                                    img
-                                        .resizable()
-                                        .scaledToFill()
-                                        .frame(width: geo.size.width, height: geo.size.height)
-                                        .clipped()
-                                case .failure:
-                                    ZStack {
-                                        Color.black
-                                        Image(systemName: "photo")
-                                            .font(.system(size: 40, weight: .bold))
-                                            .foregroundColor(.white.opacity(0.6))
-                                    }
-                                @unknown default:
-                                    Color.black
-                                }
-                            }
-                            .id("image_\(post.id)_\(post.mediaURL)")
-                        }
-                    } else {
-                        Color.black
-                    }
-                }
-                .animation(.linear(duration: 0.15), value: isVideoReady ?? false)
 
                 VStack(alignment: .trailing, spacing: 6) {
                     Button(action: { onUserTapped(post.userID) }) {
@@ -633,13 +972,13 @@ private struct FeedFullscreenPage: View {
                 }
                 .padding(.trailing, 16)
                 .padding(.top, geo.safeAreaInsets.top + 40)
-                .frame(width: geo.size.width, height: geo.size.height, alignment: .topTrailing)
+                .frame(width: size.width, height: size.height, alignment: .topTrailing)
                 .zIndex(10)
 
                 VStack {
                     Spacer()
                     VerticalRadiusBar(
-                        radius: post.radius,
+                        radius: Int(post.radius),
                         maxRadius: 10_000,
                         width: 10,
                         maxHeight: 220,
@@ -653,7 +992,7 @@ private struct FeedFullscreenPage: View {
                     .padding(.trailing, 12)
                 }
                 .padding(.bottom, 45)
-                .frame(width: geo.size.width, height: geo.size.height, alignment: .trailing)
+                .frame(width: size.width, height: size.height, alignment: .trailing)
                 .zIndex(10)
             }
             .contentShape(Rectangle())
@@ -665,91 +1004,126 @@ private struct FeedFullscreenPage: View {
     }
 }
 
-private struct FillVideoPlayer: UIViewRepresentable {
-    let url: URL
-    var play: Bool
-    var muted: Bool
+private struct StaticView: View {
+    let size: CGSize
+    let isVisible: Bool
 
-    func makeUIView(context: Context) -> PlayerView {
-        let v = PlayerView()
-        v.configure(url: url, play: play, muted: muted)
-        return v
+    @State private var jitterX: CGFloat = 0
+    @State private var scanlinePhase: CGFloat = 0
+
+    var body: some View {
+        ZStack {
+            // Color bands (retro vertical stripes)
+            colorBands
+                .offset(x: jitterX)
+                .animation(.linear(duration: 0.12), value: jitterX)
+
+            // Scanlines
+            scanlines
+                .blendMode(.overlay)
+                .opacity(0.35)
+                .offset(y: scanlinePhase)
+                .animation(.linear(duration: 0.06).repeatForever(autoreverses: false), value: scanlinePhase)
+
+            // Grain (simple white/black noise shimmer)
+            Rectangle()
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(0.08),
+                            Color.black.opacity(0.08),
+                            Color.white.opacity(0.08)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .opacity(0.5)
+                .blendMode(.softLight)
+        }
+        .frame(width: size.width, height: size.height)
+        .opacity(isVisible ? 1 : 0)
+        .animation(.easeOut(duration: 0.16), value: isVisible)
+        .onAppear {
+            // Initialize animation phases
+            jitterX = CGFloat.random(in: -6...6)
+            scanlinePhase = .random(in: -4...4)
+            // Kick small jitter updates when visible
+            if isVisible {
+                withAnimation(.linear(duration: 0.12)) {
+                    jitterX = CGFloat.random(in: -6...6)
+                }
+            }
+        }
+        .onChange(of: isVisible) { visible in
+            if visible {
+                jitterX = CGFloat.random(in: -6...6)
+                scanlinePhase = .random(in: -4...4)
+            }
+        }
     }
 
-    func updateUIView(_ uiView: PlayerView, context: Context) {
-        uiView.configure(url: url, play: play, muted: muted)
+    private var colorBands: some View {
+        HStack(spacing: 0) {
+            Color.red
+            Color.green
+            Color.blue
+            Color.cyan
+            Color.pink
+            Color.yellow
+            Color.red
+            Color.green
+        }
+        .frame(width: size.width, height: size.height)
+        .mask(
+            LinearGradient(
+                colors: [
+                    .white.opacity(0.9), .white.opacity(0.7), .white.opacity(0.9)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        )
+        .saturation(1.2)
+        .contrast(1.2)
+        .opacity(0.9)
+    }
+
+    private var scanlines: some View {
+        // Repeating thin dark lines
+        let lineHeight: CGFloat = 2
+        let spacing: CGFloat = 4
+        return Stripes(lineWidth: lineHeight, spacing: spacing)
+            .fill(Color.black.opacity(0.35))
+            .frame(width: size.width, height: size.height)
     }
 }
 
-private struct FillVideoPlayerAsset: UIViewRepresentable {
-    let asset: AVURLAsset
-    var play: Bool
-    var muted: Bool
+// Utility shape for repeating horizontal stripes
+private struct Stripes: Shape {
+    let lineWidth: CGFloat
+    let spacing: CGFloat
 
-    func makeUIView(context: Context) -> PlayerView {
-        let v = PlayerView()
-        v.configure(asset: asset, play: play, muted: muted)
-        return v
-    }
-
-    func updateUIView(_ uiView: PlayerView, context: Context) {
-        uiView.configure(asset: asset, play: play, muted: muted)
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        var y: CGFloat = rect.minY
+        while y < rect.maxY {
+            p.addRect(CGRect(x: rect.minX, y: y, width: rect.width, height: lineWidth))
+            y += lineWidth + spacing
+        }
+        return p
     }
 }
 
-private final class PlayerView: UIView {
-    override static var layerClass: AnyClass { AVPlayerLayer.self }
-    var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
-    private var endObserver: Any?
-    private var currentAssetURL: URL?
+// Optional environment key to allow graceful fallback when not provided by ancestor
+private struct LocationProviderKey: EnvironmentKey {
+    static let defaultValue: LocationProvider? = nil
+}
 
-    deinit {
-        if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
-        player?.pause()
-        player = nil
-    }
-
-    var player: AVPlayer? {
-        get { playerLayer.player }
-        set {
-            playerLayer.player = newValue
-            playerLayer.videoGravity = .resizeAspectFill
-        }
-    }
-
-    func configure(url: URL, play: Bool, muted: Bool) {
-        if (player?.currentItem?.asset as? AVURLAsset)?.url != url {
-            player = AVPlayer(url: url)
-            player?.actionAtItemEnd = .none
-            if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
-            endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: player?.currentItem, queue: .main) { [weak self] _ in
-                self?.player?.seek(to: .zero)
-                if play { self?.player?.play() }
-            }
-        }
-        player?.isMuted = muted
-        if play { player?.play() } else { player?.pause() }
-    }
-
-    func configure(asset: AVURLAsset, play: Bool, muted: Bool) {
-        let url = asset.url
-        if currentAssetURL != url {
-            currentAssetURL = url
-            let newItem = AVPlayerItem(asset: asset)
-            if player == nil {
-                player = AVPlayer(playerItem: newItem)
-                player?.actionAtItemEnd = .none
-            } else {
-                player?.replaceCurrentItem(with: newItem)
-            }
-            if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
-            endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: newItem, queue: .main) { [weak self] _ in
-                self?.player?.seek(to: .zero)
-                if play { self?.player?.play() }
-            }
-        }
-        player?.isMuted = muted
-        if play { player?.play() } else { player?.pause() }
+private extension EnvironmentValues {
+    var locationProvider: LocationProvider? {
+        get { self[LocationProviderKey.self] }
+        set { self[LocationProviderKey.self] = newValue }
     }
 }
 

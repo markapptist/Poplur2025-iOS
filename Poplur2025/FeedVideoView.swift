@@ -24,7 +24,7 @@ public struct FeedVideoView: View {
                     .onDisappear { player.pause() }
                     .modifier(AspectFillModifier(aspectRatio: aspectRatio))
             } else {
-                ProgressView().tint(.white)
+                Color.clear
             }
         }
         .clipped()

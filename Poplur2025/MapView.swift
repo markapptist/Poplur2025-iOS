@@ -4,10 +4,10 @@ import FirebaseFirestore
 import CoreLocation
 
 struct MapView: View {
-    @State private var region = MKCoordinateRegion(
+    @State private var position: MapCameraPosition = .region(MKCoordinateRegion(
         center: CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194),
         span: MKCoordinateSpan(latitudeDelta: 0.2, longitudeDelta: 0.2)
-    )
+    ))
     @State private var posts: [Post] = []
     @State private var isLoading = false
     @State private var loadError: String?
@@ -35,23 +35,31 @@ struct MapView: View {
 
     var body: some View {
         ZStack {
-            Map(coordinateRegion: $region, annotationItems: posts) { post in
-                MapAnnotation(coordinate: post.coordinate) {
-                    Button {
-                        onSelect(post: post)
-                    } label: {
-                        ZStack {
-                            Circle()
-                                .fill(Color.white)
-                                .frame(width: 28, height: 28)
-                                .shadow(color: .black.opacity(0.15), radius: 3, x: 0, y: 2)
-                            Circle()
-                                .fill(sideBarColor.opacity(0.9))
-                                .frame(width: 20, height: 20)
+            Map(position: $position) {
+                ForEach(posts, id: \._id) { post in
+                    // Radius halo in meters around the post
+                    MapCircle(center: post.coordinate, radius: CLLocationDistance(post.radius))
+                        .foregroundStyle(.blue.opacity(0.20))
+                        .stroke(.blue.opacity(0.5), lineWidth: 2)
+
+                    // Pin annotation on top
+                    Annotation("", coordinate: post.coordinate) {
+                        Button {
+                            onSelect(post: post)
+                        } label: {
+                            ZStack {
+                                Circle()
+                                    .fill(Color.white)
+                                    .frame(width: 28, height: 28)
+                                    .shadow(color: .black.opacity(0.15), radius: 3, x: 0, y: 2)
+                                Circle()
+                                    .fill(sideBarColor.opacity(0.9))
+                                    .frame(width: 20, height: 20)
+                            }
                         }
+                        .buttonStyle(.plain)
+                        .contentShape(Circle())
                     }
-                    .buttonStyle(.plain)
-                    .contentShape(Circle())
                 }
             }
             .ignoresSafeArea(edges: .top)
@@ -126,7 +134,7 @@ struct MapView: View {
         .onReceive(NotificationCenter.default.publisher(for: .ResetTabToTop)) { _ in
             // Reset to default region and clear selection
             withAnimation(.easeInOut(duration: 0.25)) {
-                region = defaultRegion
+                position = .region(defaultRegion)
                 selectedPostID = nil
                 selectedRadius = 0
             }
@@ -138,8 +146,8 @@ struct MapView: View {
         selectedPostID = post.id
         selectedRadius = min(max(0, post.radius), sideBarMaxRadius)
         withAnimation(.easeInOut(duration: 0.35)) {
-            region.center = post.coordinate
-            region.span = MKCoordinateSpan(latitudeDelta: 0.25, longitudeDelta: 0.25)
+            position = .region(MKCoordinateRegion(center: post.coordinate,
+                                                  span: MKCoordinateSpan(latitudeDelta: 0.25, longitudeDelta: 0.25)))
         }
     }
 
@@ -160,8 +168,8 @@ struct MapView: View {
                 if let first = fetched.first {
                     selectedPostID = first.id
                     selectedRadius = min(max(0, first.radius), sideBarMaxRadius)
-                    region.center = first.coordinate
-                    region.span = MKCoordinateSpan(latitudeDelta: 0.5, longitudeDelta: 0.5)
+                    position = .region(MKCoordinateRegion(center: first.coordinate,
+                                                          span: MKCoordinateSpan(latitudeDelta: 0.5, longitudeDelta: 0.5)))
                 }
             }
         } catch {
@@ -236,8 +244,8 @@ struct MapView: View {
         let loc = await currentLocation()
         guard let loc else { return }
         withAnimation(.easeInOut(duration: 0.3)) {
-            region.center = loc.coordinate
-            region.span = MKCoordinateSpan(latitudeDelta: 0.1, longitudeDelta: 0.1)
+            position = .region(MKCoordinateRegion(center: loc.coordinate,
+                                                  span: MKCoordinateSpan(latitudeDelta: 0.1, longitudeDelta: 0.1)))
         }
     }
 }
@@ -254,6 +262,14 @@ private final class LocationDelegateProxy: NSObject, CLLocationManagerDelegate {
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         print("[Map] Location error: \(error)")
         handler(nil)
+    }
+}
+
+private extension Post {
+    // Use existing id if available; otherwise synthesize from coordinates and radius
+    var _id: String {
+        if let existing = (self as AnyObject) as? Identifiable { return (existing as! any Identifiable).id as? String ?? id }
+        return id
     }
 }
 
