@@ -11,6 +11,8 @@ struct ProfileView: View {
     @State private var myPosts: [Post] = []
     @State private var isLoading = false
     @State private var expandedPost: Post? = nil
+    @State private var showCamera = false
+    @State private var profileImage: UIImage? = nil
 
     enum DisplayMode: String, CaseIterable, Identifiable {
         case list
@@ -154,11 +156,31 @@ struct ProfileView: View {
                             }
                             .buttonStyle(.plain)
                         }
+                        .overlay(alignment: .bottomLeading) {
+                            Text("\(max(1, Int(post.radius) / 1000)) KM")
+                                .font(.system(size: 16, weight: .heavy, design: .rounded))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(
+                                    Capsule().fill(Color.black.opacity(0.55))
+                                )
+                                .padding(16)
+                        }
                     }
                     .zIndex(10)
                 }
             }
             .navigationBarHidden(true)
+            .sheet(isPresented: $showCamera) {
+                FrontCameraPicker { image in
+                    // Update immediately
+                    self.profileImage = image
+                    // Persist/update model as needed; placeholder Notification for now
+                    NotificationCenter.default.post(name: Notification.Name("ProfilePhotoUpdated"), object: image)
+                }
+                .ignoresSafeArea()
+            }
             .sheet(isPresented: $editing) {
                 EditProfileView(user: $userProfile)
             }
@@ -199,10 +221,14 @@ struct ProfileView: View {
 
     private var avatarRow: some View {
         Button {
-            editing = true
+            showCamera = true
         } label: {
             ZStack {
-                if let url = userProfile?.profilePictureURL {
+                if let localImage = profileImage {
+                    Image(uiImage: localImage)
+                        .resizable()
+                        .scaledToFill()
+                } else if let url = userProfile?.profilePictureURL {
                     AsyncImage(url: url) { phase in
                         switch phase {
                         case .empty:
@@ -402,21 +428,20 @@ private struct ProfileGridTile: View {
                     await loadIfNeeded()
                 }
             }
-
-            GeometryReader { geo in
-                let maxR: CGFloat = 10_000
-                let normalized = min(1.0, CGFloat(post.radius) / maxR)
-                let diameter = min(geo.size.width, geo.size.height) * (0.35 + 0.65 * normalized)
-                Circle()
-                    .fill(Color.blue.opacity(0.20))
-                    .overlay(Circle().stroke(Color.blue.opacity(0.5), lineWidth: 1.5))
-                    .frame(width: diameter, height: diameter)
-                    .position(x: geo.size.width / 2, y: geo.size.height / 2)
-            }
-            .allowsHitTesting(false)
         }
         .frame(height: 120)
         .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
+        .overlay(alignment: .bottomLeading) {
+            Text("\(max(1, post.radius / 1000)) KM")
+                .font(.system(size: 12, weight: .heavy, design: .rounded))
+                .foregroundColor(.white)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(
+                    Capsule().fill(Color.black.opacity(0.55))
+                )
+                .padding(8)
+        }
     }
 
     private func loadIfNeeded() async {
@@ -460,18 +485,6 @@ private struct ProfileListCard: View {
                     await loadIfNeeded()
                 }
             }
-
-            GeometryReader { geo in
-                let maxR: CGFloat = 10_000
-                let normalized = min(1.0, CGFloat(post.radius) / maxR)
-                let diameter = min(geo.size.width, geo.size.height) * (0.35 + 0.65 * normalized)
-                Circle()
-                    .fill(Color.blue.opacity(0.20))
-                    .overlay(Circle().stroke(Color.blue.opacity(0.5), lineWidth: 1.5))
-                    .frame(width: diameter, height: diameter)
-                    .position(x: geo.size.width / 2, y: geo.size.height / 2)
-            }
-            .allowsHitTesting(false)
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("\(max(1, post.radius / 1000)) KM")

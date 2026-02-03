@@ -465,6 +465,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Poplur2025/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Poplur;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.social-networking";
 				INFOPLIST_KEY_NSCameraUsageDescription = "We need camera access to let you capture photos and videos for your posts.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "We use your location to tag posts on the map and show nearby content.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "“We use the microphone to record audio with your videos.”";
@@ -500,6 +501,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Poplur2025/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Poplur;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.social-networking";
 				INFOPLIST_KEY_NSCameraUsageDescription = "We need camera access to let you capture photos and videos for your posts.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "We use your location to tag posts on the map and show nearby content.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "“We use the microphone to record audio with your videos.”";

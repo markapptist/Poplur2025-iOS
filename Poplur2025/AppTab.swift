@@ -1,5 +1,7 @@
 import SwiftUI
 
+// NOTE: Any early initialization (e.g., notifications coordinator) should occur in the App entry point, not via unused global bindings.
+
 enum AppTab: Hashable, CaseIterable {
     case map
     case record

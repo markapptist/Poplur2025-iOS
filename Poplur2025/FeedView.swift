@@ -3,6 +3,7 @@ import FirebaseFirestore
 import CoreLocation
 import UIKit
 import AVFoundation
+import Contacts
 
 struct FeedView: View {
     @Environment(\.locationProvider) private var injectedLocationProvider: LocationProvider?
@@ -60,7 +61,8 @@ struct FeedView: View {
         // This is a placeholder heuristic for demo purposes.
         let lat = coordinate.latitude
         let lon = coordinate.longitude
-        // Prefer a few common regions first
+        // Prefer a few common regions first (check Canada before USA to avoid defaulting to US near the border)
+        if lat > 49 && lat < 84 && lon > -141 && lon < -52 { return countries.firstIndex { $0.code == "CA" } ?? 0 }
         if lat > 24 && lat < 49 && lon > -125 && lon < -66 { return countries.firstIndex { $0.code == "US" } ?? 0 }
         if lat > 42 && lat < 84 && lon > -10 && lon < 40 { return countries.firstIndex { $0.code == "FR" } ?? 0 }
         if lat > 35 && lat < 72 && lon > -10 && lon < 30 { return countries.firstIndex { $0.code == "DE" } ?? 0 }
@@ -84,6 +86,21 @@ struct FeedView: View {
         } else {
             return "nil"
         }
+    }
+    
+    // Resolve ISO country code from coordinate using reverse geocoding
+    private func geocodeCountry(from coordinate: CLLocationCoordinate2D) async -> String? {
+        let geocoder = CLGeocoder()
+        let location = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+        do {
+            let placemarks = try await geocoder.reverseGeocodeLocation(location)
+            if let pm = placemarks.first, let isoCode = pm.isoCountryCode {
+                return isoCode
+            }
+        } catch {
+            print("[Geocode] reverseGeocode failed: \(error)")
+        }
+        return nil
     }
 
     var body: some View {
@@ -116,11 +133,11 @@ struct FeedView: View {
             .background(Color.black)
         }
         .task {
-            if selectedCountryIndex == 0 {
-                // Initialize strictly from current location; if no coordinate yet, wait for onChange to update
-                if let _ = locationProvider.coordinate {
-                    let idx = countryIndex(for: locationProvider.coordinate)
+            if let coord = locationProvider.coordinate {
+                if let iso = await geocodeCountry(from: coord), let idx = countries.firstIndex(where: { $0.code == iso }) {
                     selectedCountryIndex = idx
+                } else {
+                    selectedCountryIndex = countryIndex(for: coord)
                 }
             }
             showStatic = true
@@ -175,11 +192,20 @@ struct FeedView: View {
             }
         }
         .onChange(of: coordinateKey) { _ in
-            if posts.isEmpty {
-                let idx = countryIndex(for: locationProvider.coordinate)
-                if idx != selectedCountryIndex {
-                    selectedCountryIndex = idx
-                    Task { await reloadForCountry() }
+            Task {
+                if let coord = locationProvider.coordinate {
+                    if let iso = await geocodeCountry(from: coord), let idx = countries.firstIndex(where: { $0.code == iso }) {
+                        if idx != selectedCountryIndex {
+                            await MainActor.run { selectedCountryIndex = idx }
+                            await reloadForCountry()
+                        }
+                    } else {
+                        let idx = countryIndex(for: coord)
+                        if idx != selectedCountryIndex {
+                            await MainActor.run { selectedCountryIndex = idx }
+                            await reloadForCountry()
+                        }
+                    }
                 }
             }
         }
