@@ -23,19 +23,23 @@ struct AppSettingsView: View {
     }
     private var averageRadius: Double {
         guard !posts.isEmpty else { return 0 }
-        return Double(totalRadius) / Double(posts.count)
+        let avgMeters = Double(totalRadius) / Double(posts.count)
+        return avgMeters / 1000.0 // KM
     }
     private var ringMax: Double {
-        let km = max(1.0, Double(totalRadius) / 1000.0)
-        let rounded = ceil(km / 1000.0) * 1000.0
-        return max(50_000, rounded) * 1000.0
+        // Choose a max that comfortably contains the average value
+        let baseMaxKM = max(1.0, averageRadius * 3.0) // 3x average
+        // Round up to the next nice step (power of 10 multiples) and ensure a sensible floor
+        let step: Double = 10.0
+        let rounded = ceil(baseMaxKM / step) * step
+        return max(10.0, rounded) // in KM
     }
 
     private var screenSize: CGSize { UIScreen.main.bounds.size }
     private var ticketWidth: CGFloat { min(screenSize.width - 24, 700) }
     private var ticketHeight: CGFloat { screenSize.height * 0.78 }
 
-    private let brandPink = Color(red: 1.0, green: 45.0/255.0, blue: 150.0/255.0)
+    private let brandPink = Color(red: 255.0/255.0, green: 255.0/255.0, blue: 255.0/255.0)
 
     var body: some View {
         ZStack {
@@ -82,7 +86,7 @@ struct AppSettingsView: View {
                 // Title
                 Text("Average Radius")
                     .font(.system(size: 22, weight: .heavy, design: .rounded))
-                    .foregroundColor(.white)
+                    .foregroundColor(.black)
                     .padding(.top, 16)
                     .frame(maxWidth: .infinity, alignment: .center)
 
@@ -91,7 +95,7 @@ struct AppSettingsView: View {
                         Spacer()
                         ProgressView()
                             .progressViewStyle(.circular)
-                            .tint(.white)
+                            .tint(.black)
                         Spacer()
                     }
                     .padding(.vertical, 16)
@@ -104,19 +108,23 @@ struct AppSettingsView: View {
                             maxValue: ringMax,
                             unit: "KM",
                             accentColor: .black,
-                            trackColor: .white.opacity(0.25),
+                            trackColor: .black.opacity(0.15),
                             lineWidthFactor: 0.12
                         )
                         .frame(height: 260)
-                        .padding(.top, 4)
+                        .padding(.top, 35)
                         Spacer()
                     }
+                    Text("Posts counted: \(posts.count)")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundColor(.black.opacity(0.6))
+                    .padding(.bottom, 44)
                 }
 
                 VStack(alignment: .center, spacing: 8) {
                     Text("Accumulated Radius")
                         .font(.system(size: 22, weight: .heavy, design: .rounded))
-                        .foregroundColor(.white)
+                        .foregroundColor(.black)
                         .frame(maxWidth: .infinity, alignment: .center)
 
                     if isLoadingStats {
@@ -124,24 +132,24 @@ struct AppSettingsView: View {
                             Spacer()
                             ProgressView()
                                 .progressViewStyle(.circular)
-                                .tint(.white)
+                                .tint(.black)
                             Spacer()
                         }
-                        .padding(.vertical, 8)
+                        .padding(.vertical, 20)
                     } else {
                         Text("You’ve reached")
                             .font(.system(size: 16, weight: .semibold, design: .rounded))
-                            .foregroundColor(.white.opacity(0.95))
+                            .foregroundColor(.black.opacity(0.9))
                             .frame(maxWidth: .infinity, alignment: .center)
 
                         Text(formattedKM(totalRadius))
                             .font(.system(size: 44, weight: .heavy, design: .rounded))
-                            .foregroundColor(.white)
+                            .foregroundColor(.black)
                             .frame(maxWidth: .infinity, alignment: .center)
 
                         Text("in total")
                             .font(.system(size: 16, weight: .semibold, design: .rounded))
-                            .foregroundColor(.white.opacity(0.95))
+                            .foregroundColor(.black.opacity(0.9))
                             .frame(maxWidth: .infinity, alignment: .center)
                     }
                 }
@@ -160,7 +168,7 @@ struct AppSettingsView: View {
                 // Title
                 Text("Account Options")
                     .font(.system(size: 22, weight: .heavy, design: .rounded))
-                    .foregroundColor(.white)
+                    .foregroundColor(.black)
                     .padding(.top, 16)
                     .frame(maxWidth: .infinity, alignment: .center)
 
@@ -189,7 +197,7 @@ struct AppSettingsView: View {
 
                     Text("Current limit: \(Int(maxDurationDisplay))s")
                         .font(.system(size: 14, weight: .semibold, design: .rounded))
-                        .foregroundColor(.white.opacity(0.9))
+                        .foregroundColor(.black.opacity(0.9))
                         .frame(maxWidth: .infinity, alignment: .center)
                 }
 
@@ -256,7 +264,7 @@ struct AppSettingsView: View {
         HStack(alignment: .center, spacing: 12) {
             Text(title)
                 .font(.system(size: 18, weight: .heavy, design: .rounded))
-                .foregroundColor(.white)
+                .foregroundColor(.black)
             Spacer(minLength: 12)
             Toggle("", isOn: isOn)
                 .labelsHidden()
@@ -271,7 +279,7 @@ struct AppSettingsView: View {
             HStack(alignment: .center, spacing: 12) {
                 Text(title)
                     .font(.system(size: 18, weight: .heavy, design: .rounded))
-                    .foregroundColor(.white)
+                    .foregroundColor(.black)
                 Spacer(minLength: 12)
                 Image(systemName: "arrow.right")
                     .font(.system(size: 18, weight: .bold))
@@ -298,7 +306,8 @@ struct AppSettingsView: View {
         do {
             let fetched = try await fetchUserPosts(uid: userId)
             await MainActor.run {
-                self.posts = fetched
+                let unique = Dictionary(grouping: fetched, by: { $0.id }).compactMap { $0.value.first }
+                self.posts = unique
             }
         } catch {
             print("Stats fetch error: \(error.localizedDescription)")
@@ -340,8 +349,68 @@ struct AppSettingsView: View {
                         userID: userID
                     ))
                 }
-                cont.resume(returning: out)
+                let unique = Dictionary(grouping: out, by: { $0.id }).compactMap { $0.value.first }
+                cont.resume(returning: unique)
             }
+        }
+    }
+    
+    /// Fetch up to a maximum number of the current user's posts (use for map display)
+    private func fetchMyPostsForMap(maxCount: Int = 10) async throws -> [Post] {
+        try await withCheckedThrowingContinuation { cont in
+            guard let uid = Auth.auth().currentUser?.uid else {
+                cont.resume(returning: [])
+                return
+            }
+            let db = FirebaseFirestore.Firestore.firestore()
+            // If you have a createdAt field, you can order by it to get most recent first
+            db.collection("posts")
+                .whereField("userID", isEqualTo: uid)
+                .limit(to: maxCount)
+                .getDocuments { snapshot, error in
+                    if let error {
+                        cont.resume(throwing: error)
+                        return
+                    }
+                    guard let snapshot else {
+                        cont.resume(returning: [])
+                        return
+                    }
+                    var out: [Post] = []
+                    out.reserveCapacity(snapshot.documents.count)
+                    for doc in snapshot.documents {
+                        let data = doc.data()
+                        let lat = (data["latitude"] as? Double) ?? (data["latitude"] as? NSNumber)?.doubleValue ?? 0
+                        let lon = (data["longitude"] as? Double) ?? (data["longitude"] as? NSNumber)?.doubleValue ?? 0
+                        let mediaURL = data["mediaURL"] as? String ?? ""
+                        let radius = (data["radius"] as? Int) ?? (data["radius"] as? NSNumber)?.intValue ?? 0
+                        let viewCount = (data["viewCount"] as? Int) ?? (data["viewCount"] as? NSNumber)?.intValue ?? 0
+                        let userID = data["userID"] as? String ?? uid
+                        out.append(Post(
+                            id: doc.documentID,
+                            latitude: lat,
+                            longitude: lon,
+                            mediaURL: mediaURL,
+                            radius: radius,
+                            viewCount: viewCount,
+                            userID: userID
+                        ))
+                    }
+                    cont.resume(returning: out)
+                }
+        }
+    }
+    
+    /// Returns true if the user has reached or exceeded the free post cap
+    private func hasReachedFreePostCap(cap: Int = 10) async -> Bool {
+        guard let uid = Auth.auth().currentUser?.uid else { return false }
+        do {
+            let db = FirebaseFirestore.Firestore.firestore()
+            let snapshot = try await db.collection("posts").whereField("userID", isEqualTo: uid).getDocuments()
+            return snapshot.documents.count >= cap
+        } catch {
+            print("Count fetch error: \(error.localizedDescription)")
+            return false
         }
     }
 

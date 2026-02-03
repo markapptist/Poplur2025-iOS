@@ -1,695 +1,606 @@
-import Foundation
-import UIKit
 import AVFoundation
-import ARKit
-import SwiftUI
-import SCSDKCameraKit
-import SCSDKCameraKitReferenceUI
-import SCSDKCameraKitReferenceSwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
+import CoreLocation
+import FirebaseAuth
+import FirebaseStorage
+import FirebaseFirestore
 
-// Adapter for SCSDKCameraKit ErrorHandler that simply logs errors.
-private final class CameraKitPrintErrorHandler: ErrorHandler {
-    func handleError(_ error: NSException) {
-        print("[CK][ErrorHandler] CameraKit exception:", error.name.rawValue, error.reason ?? "(no reason)")
-        if !error.callStackSymbols.isEmpty {
-            print("[CK][ErrorHandler] stack:\n", error.callStackSymbols.joined(separator: "\n"))
-        }
-    }
-
-    func handle(error: Error) {
-        print("[CK][ErrorHandler] CameraKit error:", error.localizedDescription)
-    }
-}
-
-final class CameraKitController: NSObject, ObservableObject {
-    // UI-facing state must be main-actor; updates already hop to main.
-    @MainActor @Published var lastPhoto: UIImage?
-    @MainActor @Published var lastVideoURL: URL?
-    @MainActor @Published var isRecording: Bool = false
-    @MainActor @Published var isUsingFrontCamera: Bool = false
-    @MainActor @Published var mode: CaptureMode = .video
-    @MainActor @Published var flashOn: Bool = false
-    // New: readiness gate for UI
-    @MainActor @Published private(set) var isReady: Bool = false
-    @MainActor @Published private(set) var cameraKitConfigured: Bool = false
-
-    // Lenses
-    @MainActor @Published var lenses: [Lens] = []
-    @MainActor @Published var selectedLens: Lens? = nil
-
-    // Reference UI Camera Controller (CameraKit-managed)
-    private var cameraController: CameraController?
-
-    // Expose CameraKit session (read-only) for SwiftUI PreviewView hookup
-    var cameraKitSession: CameraKitProtocol? {
-        cameraController?.cameraKit
-    }
-
-    // UIKit CameraKit PreviewView (from SCSDKCameraKit) - no longer used by SwiftUI path
-    private var previewView: SCSDKCameraKit.PreviewView?
-
-    // Keep AVFoundation pieces for your capture actions (photo/video) for now
-    private let captureSession = AVCaptureSession()
-    private let sessionQueue = DispatchQueue(label: "CameraKitController.sessionQueue")
-
-    private var videoDeviceInput: AVCaptureDeviceInput?
-    private let photoOutput = AVCapturePhotoOutput()
-    private let movieOutput = AVCaptureMovieFileOutput()
-
-    private var activeRecordingURL: URL?
-
-    private var isShuttingDown = false
-    private var isStarting = false
-    private var hasConfigured = false
-
-    // MARK: - Public camera characteristics
-    var minZoomFactor: CGFloat {
-        (videoDeviceInput?.device.minAvailableVideoZoomFactor).map(CGFloat.init) ?? 1.0
-    }
-
-    var maxZoomFactor: CGFloat {
-        (videoDeviceInput?.device.maxAvailableVideoZoomFactor).map(CGFloat.init) ?? 1.0
-    }
-
-    var previewHostView: UIView? { previewView }
+class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDelegate, RecordPreviewViewControllerProviding, PreviewViewControllerProviding {
+    // MARK: - Properties
+    let sessionQueue = DispatchQueue(label: "camera.session.queue")
+    let captureSession = AVCaptureSession()
+    let photoOutput = AVCapturePhotoOutput()
+    let movieOutput = AVCaptureMovieFileOutput()
+    private var isSessionConfigured = false
     
-    // Torch availability for current active device
-    var isTorchAvailable: Bool {
-        var available = false
-        sessionQueue.sync {
-            available = self.videoDeviceInput?.device.hasTorch ?? false
-        }
-        return available
-    }
+    // Snap Kit / Record-specific camera VC. Set this from your Snap setup code.
+    var recordPreviewViewController: UIViewController?
 
-    // Expose session running state for diagnostics (thread-safe snapshot)
-    var captureSessionRunning: Bool {
-        var running = false
-        sessionQueue.sync {
-            running = self.captureSession.isRunning
-        }
-        return running
-    }
-
-    // Expose AVFoundation session for diagnostics / fallback preview (read-only)
-    var avCaptureSession: AVCaptureSession { captureSession }
+    // Optional generic preview VC fallback if needed elsewhere.
+    var previewViewController: UIViewController?
     
-    // MARK: - Lenses plumbing placeholders
-    private var lensesRepository: LensesRepository?
+    @Published var isReady: Bool = false
+    @Published var hasRecordPreview: Bool = false
 
-    private enum CameraKitConstants {
-        static var apiToken: String {
-            let token = Bundle.main.object(forInfoDictionaryKey: "CameraKitAPIToken") as? String ?? ""
-            return token
+    // Integration callbacks (set these from your app)
+    // Called when user taps Post in the preview. Provide both image and coordinate for map posting.
+    var onPostToMap: ((UIImage, CLLocationCoordinate2D) -> Void)?
+    // Called when user taps Post in the preview to add to profile.
+    var onPostToProfile: ((UIImage) -> Void)?
+
+    // MARK: - Location
+    private let locationManager = CLLocationManager()
+    private var locationContinuation: CheckedContinuation<CLLocation?, Never>?
+
+    // MARK: - SnapKit Integration
+    @MainActor
+    func installSnapRecordPreview(_ viewController: UIViewController) {
+        self.recordPreviewViewController = viewController
+        self.hasRecordPreview = true
+        // If we haven't started yet, mark ready to allow UI to render immediately
+        if !self.isReady {
+            self.isReady = true
         }
-        static var lensGroupID: String? {
-            Bundle.main.object(forInfoDictionaryKey: "CameraKitLensGroupID") as? String
+    }
+    
+    // MARK: - Session Configuration
+    private func requestCameraAccessIfNeeded() async -> Bool {
+        let status = AVCaptureDevice.authorizationStatus(for: .video)
+        switch status {
+        case .authorized:
+            return true
+        case .notDetermined:
+            return await AVCaptureDevice.requestAccess(for: .video)
+        case .denied, .restricted:
+            return false
+        @unknown default:
+            return false
         }
     }
 
-    // Simple lenses persistence
-    private let lensesCacheURL: URL = {
-        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
-        return dir.appendingPathComponent("lenses-cache.json")
-    }()
+    private func configureSessionIfNeeded() {
+        guard !isSessionConfigured else { return }
 
-    private func loadCachedLenses() -> [Lens] {
-        // If your Lens type conforms to Codable, this will work.
-        // If not, you can persist only the minimal metadata you need.
-        do {
-            let data = try Data(contentsOf: lensesCacheURL)
-            let decoded = try JSONDecoder().decode([Lens].self, from: data)
-            return decoded
-        } catch {
-            return []
-        }
-    }
+        captureSession.beginConfiguration()
 
-    private func saveCachedLenses(_ list: [Lens]) {
-        do {
-            let data = try JSONEncoder().encode(list)
-            try data.write(to: lensesCacheURL, options: .atomic)
-        } catch {
-            // Non-fatal
-        }
-    }
-
-    func makePreviewView() -> UIView {
-        if let pv = previewView { return pv }
-        // Use the SCSDKCameraKit UIKit PreviewView (legacy UIKit path; SwiftUI path uses the SDK wrapper)
-        let pv = SCSDKCameraKit.PreviewView()
-        pv.automaticallyConfiguresTouchHandler = true
-        pv.backgroundColor = .black
-        // Fill the container; its layer uses resizeAspectFill already
-        pv.contentMode = .aspectFill
-        pv.layer.contentsGravity = .resizeAspectFill
-        pv.insetsLayoutMarginsFromSafeArea = false
-        previewView = pv
-        return pv
-    }
-
-    // MARK: - Public lifecycle
-
-    func start() async {
-        // Immediately surface cached lenses to make UI feel instant.
-        if await MainActor.run(body: { self.lenses.isEmpty }) {
-            let cached = loadCachedLenses()
-            if !cached.isEmpty {
-                await MainActor.run {
-                    self.lenses = cached
-                    if self.selectedLens == nil {
-                        self.selectedLens = cached.first
-                    }
-                }
-            }
+        // Prefer a high-resolution preset to minimize black bars and match full-screen feel
+        if captureSession.canSetSessionPreset(.hd1920x1080) {
+            captureSession.sessionPreset = .hd1920x1080
+        } else if captureSession.canSetSessionPreset(.high) {
+            captureSession.sessionPreset = .high
         }
 
-        await configureIfNeeded()
-
-        // Ensure captureSession is running before marking ready
-        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
-            sessionQueue.async { [weak self] in
-                guard let self else { cont.resume(); return }
-                if !self.captureSession.isRunning {
-                    self.captureSession.startRunning()
-                }
-                cont.resume()
-            }
-        }
-
-        // Update readiness and add diagnostics
-        let runningNow = self.captureSessionRunning
-        print("[CK][Start] captureSession running after start attempt: \(runningNow)")
-        await MainActor.run { self.isReady = runningNow }
-
-        if self.cameraKitSession == nil {
-            print("[CK][Start] cameraKitSession is nil after start; attempting reconfigure")
-            await self.configureIfNeeded()
-        }
-
-        // If not running yet, try one lightweight retry after a short delay
-        if !runningNow {
-            Task {
-                try? await Task.sleep(nanoseconds: 200_000_000)
-                let stillRunning = self.captureSessionRunning
-                if !stillRunning {
-                    print("[CK][Start] Session not running yet; attempting second start")
-                    await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
-                        self.sessionQueue.async { [weak self] in
-                            guard let self else { cont.resume(); return }
-                            if !self.captureSession.isRunning {
-                                self.captureSession.startRunning()
-                            }
-                            cont.resume()
-                        }
-                    }
-                    let runningAfterRetry = self.captureSessionRunning
-                    print("[CK][Start] captureSession running after retry: \(runningAfterRetry)")
-                    await MainActor.run { self.isReady = runningAfterRetry }
-                }
-            }
-        }
-
-        // Ensure preview exists for UI layout immediately (UIKit path only).
-        _ = makePreviewView()
-
-        // Defer nonessential work slightly so the camera becomes interactive first.
-        Task {
-            try? await Task.sleep(nanoseconds: 300_000_000) // 0.3s
-            await loadLensesIfConfigured()
-            // After preview is up, bump preset to high for quality.
-            bumpPresetToHighIfPossible()
-        }
-
-        Task {
-            try? await Task.sleep(nanoseconds: 400_000_000)
-            let running = self.captureSessionRunning
-            let hasCK = (self.cameraKitSession != nil)
-            print("[CK][Start] Post-start check: running=\(running) cameraKitSession=\(hasCK)")
-        }
-    }
-
-    func stop() {
-        Task { @MainActor in self.isReady = false }
-        // We keep the session running; OS throttles in background. Add stop if you prefer.
-    }
-
-    // MARK: - Configuration bootstrap
-
-    private func configureIfNeeded() async {
-        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
-            sessionQueue.async { [weak self] in
-                guard let self else { cont.resume(); return }
-
-                // Build CameraKit CameraController once
-                if self.cameraController == nil {
-                    let token = CameraKitConstants.apiToken
-
-                    // Increase cache size to reduce re-downloads of lens content.
-                    let lensesConfig = LensesConfig(
-                        cacheConfig: CacheConfig(lensContentMaxSize: 300 * 1024 * 1024) // 300 MB
-                    )
-                    let session = Session(sessionConfig: SessionConfig(apiToken: token),
-                                          lensesConfig: lensesConfig,
-                                          errorHandler: CameraKitPrintErrorHandler())
-
-                    // Create controller with our session and our own AVCaptureSession
-                    let controller = CameraController(cameraKit: session, captureSession: self.captureSession)
-
-                    if let group = CameraKitConstants.lensGroupID, !group.isEmpty {
-                        controller.groupIDs = [group]
-                    }
-
-                    self.cameraController = controller
-                }
-
-                // Configure CameraController (starts CameraKit and AV input) once
-                if let controller = self.cameraController, !self.hasConfigured {
-                    let orientation: AVCaptureVideoOrientation = .portrait
-                    controller.configure(
-                        orientation: orientation,
-                        textInputContextProvider: nil,
-                        agreementsPresentationContextProvider: nil,
-                        completion: { [weak self] in
-                            guard let self else { return }
-                            print("[CK][Config] CameraController.configure completion called")
-                            Task { @MainActor in
-                                self.cameraKitConfigured = true
-                            }
-                        }
-                    )
-                    self.hasConfigured = true
-                    if controller.cameraKit == nil {
-                        print("[CK][Config] Warning: cameraKit session is nil right after configure")
-                    } else {
-                        print("[CK][Config] cameraKit session available after configure")
-                    }
-                }
-
-                // If we already configured AVFoundation capture session, skip setup
-                if self.videoDeviceInput == nil {
-                    // Keep AVFoundation session for your photo/video actions
-                    self.captureSession.beginConfiguration()
-                    // Faster startup: begin with medium, bump to high later
-                    if self.captureSession.canSetSessionPreset(.medium) {
-                        self.captureSession.sessionPreset = .medium
-                    } else {
-                        self.captureSession.sessionPreset = .high
-                    }
-
-                    let defaultDevice = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)
-                        ?? AVCaptureDevice.default(for: .video)
-
-                    guard let device = defaultDevice else {
-                        self.captureSession.commitConfiguration()
-                        cont.resume()
-                        return
-                    }
-
-                    do {
-                        let deviceInput = try AVCaptureDeviceInput(device: device)
-
-                        if self.captureSession.canAddInput(deviceInput) {
-                            self.captureSession.addInput(deviceInput)
-                            self.videoDeviceInput = deviceInput
-                            DispatchQueue.main.async {
-                                self.isUsingFrontCamera = (device.position == .front)
-                            }
-                        } else {
-                            print("[CK][Config] Cannot add video device input")
-                        }
-
-                        if self.captureSession.canAddOutput(self.photoOutput) {
-                            self.captureSession.addOutput(self.photoOutput)
-                            self.photoOutput.isHighResolutionCaptureEnabled = true
-                        } else {
-                            print("[CK][Config] Cannot add photo output")
-                        }
-
-                        if self.captureSession.canAddOutput(self.movieOutput) {
-                            self.captureSession.addOutput(self.movieOutput)
-                            if let connection = self.movieOutput.connection(with: .video), connection.isVideoOrientationSupported {
-                                connection.videoOrientation = .portrait
-                            }
-                        } else {
-                            print("[CK][Config] Cannot add movie output")
-                        }
-
-                        self.captureSession.commitConfiguration()
-                    } catch {
-                        print("[CK][Config] Failed to create device input: \(error.localizedDescription)")
-                        self.captureSession.commitConfiguration()
-                    }
-                }
-
-                // IMPORTANT: start running the capture session so CameraKit receives frames
-                if !self.captureSession.isRunning {
-                    self.captureSession.startRunning()
-                }
-
-                // Initialize lenses repository placeholder if lens group is configured
-                if let groupID = CameraKitConstants.lensGroupID {
-                    self.lensesRepository = LensesRepository(groupID: groupID)
-                }
-
-                print("[CK][Config] hasConfigured=\(self.hasConfigured), inputs=\(self.captureSession.inputs.count), outputs=\(self.captureSession.outputs.count), running=\(self.captureSession.isRunning)")
-
-                cont.resume()
-            }
-        }
-    }
-
-    // After initial bring-up, bump to .high for quality.
-    private func bumpPresetToHighIfPossible() {
-        sessionQueue.async { [weak self] in
-            guard let self else { return }
-            self.captureSession.beginConfiguration()
-            if self.captureSession.canSetSessionPreset(.high) {
-                self.captureSession.sessionPreset = .high
-            }
-            self.captureSession.commitConfiguration()
-        }
-    }
-
-    // MARK: - Lenses loading using placeholder repository
-
-    private func loadLensesIfConfigured() async {
-        guard let repo = lensesRepository else { return }
-        do {
-            let fetched = try await repo.fetchLenses()
-            await MainActor.run {
-                self.lenses = fetched
-                self.selectedLens = self.selectedLens ?? fetched.first
-            }
-            // Persist for next launch warm start
-            saveCachedLenses(fetched)
-        } catch {
-            print("[CK][Lenses] Failed to fetch lenses:", error.localizedDescription)
-        }
-    }
-
-    // MARK: - Camera controls (AVFoundation for now)
-
-    func switchCamera() {
-        sessionQueue.async { [weak self] in
-            guard let self else { return }
-            guard let currentInput = self.videoDeviceInput else { return }
-
-            let newPosition: AVCaptureDevice.Position = (currentInput.device.position == .back) ? .front : .back
-            guard let newDevice = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: newPosition) else {
-                return
-            }
-
+        // Input: back wide-angle camera
+        if let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) {
             do {
-                let newInput = try AVCaptureDeviceInput(device: newDevice)
-                self.captureSession.beginConfiguration()
-                self.captureSession.removeInput(currentInput)
-                if self.captureSession.canAddInput(newInput) {
-                    self.captureSession.addInput(newInput)
-                    self.videoDeviceInput = newInput
-                    DispatchQueue.main.async {
-                        self.isUsingFrontCamera = (newPosition == .front)
-                    }
-                    // Turn off torch on camera switch to avoid invalid state when moving to a device without torch
-                    if let oldDevice = currentInput.device as AVCaptureDevice?, oldDevice.hasTorch {
-                        if oldDevice.isTorchActive {
-                            do { try oldDevice.lockForConfiguration(); oldDevice.torchMode = .off; oldDevice.unlockForConfiguration() } catch {}
-                        }
-                    }
-                    // Notify UI by re-publishing flashOn if torch not available on new device
-                    DispatchQueue.main.async {
-                        if !(self.videoDeviceInput?.device.hasTorch ?? false) {
-                            self.flashOn = false
-                        }
-                    }
+                let input = try AVCaptureDeviceInput(device: device)
+                if captureSession.canAddInput(input) {
+                    captureSession.addInput(input)
                 } else {
-                    if self.captureSession.canAddInput(currentInput) {
-                        self.captureSession.addInput(currentInput)
-                    }
+                    print("[CK][Config] Cannot add camera input")
                 }
-                self.captureSession.commitConfiguration()
-                
-                if !self.captureSession.isRunning {
-                    self.captureSession.startRunning()
-                    print("[CK][SwitchCamera] captureSession restarted after input swap")
-                }
-                
-                print("[CK][SwitchCamera] Switched to \(newPosition == .front ? "front" : "back") camera")
             } catch {
-                // no print here
+                print("[CK][Config] Error creating camera input: \(error)")
+            }
+        } else {
+            print("[CK][Config] No back camera available")
+        }
+
+        // Output: photo output (if not already added)
+        if !captureSession.outputs.contains(photoOutput) {
+            if captureSession.canAddOutput(photoOutput) {
+                captureSession.addOutput(photoOutput)
+                photoOutput.isHighResolutionCaptureEnabled = true
+            } else {
+                print("[CK][Config] Cannot add photo output")
             }
         }
-    }
 
-    func setTorch(on: Bool) {
-        sessionQueue.async { [weak self] in
-            guard let self, let device = self.videoDeviceInput?.device else { return }
-            guard device.hasTorch, device.isTorchAvailable else {
-                DispatchQueue.main.async { self.flashOn = false }
-                return
+        // Output: movie output (for video recording)
+        if !captureSession.outputs.contains(movieOutput) {
+            if captureSession.canAddOutput(movieOutput) {
+                captureSession.addOutput(movieOutput)
+            } else {
+                print("[CK][Config] Cannot add movie output")
             }
+        }
+
+        // Input: microphone for video audio
+        if let audioDevice = AVCaptureDevice.default(for: .audio) {
             do {
-                try device.lockForConfiguration()
-                if on {
-                    if device.isTorchModeSupported(.on) {
-                        device.torchMode = .on
-                        try device.setTorchModeOn(level: AVCaptureDevice.maxAvailableTorchLevel)
-                        DispatchQueue.main.async { self.flashOn = true }
-                    } else {
-                        DispatchQueue.main.async { self.flashOn = false }
-                    }
+                let audioInput = try AVCaptureDeviceInput(device: audioDevice)
+                if captureSession.canAddInput(audioInput) {
+                    captureSession.addInput(audioInput)
                 } else {
-                    device.torchMode = .off
-                    DispatchQueue.main.async { self.flashOn = false }
+                    print("[CK][Config] Cannot add audio input")
                 }
-                device.unlockForConfiguration()
             } catch {
-                DispatchQueue.main.async { self.flashOn = false }
+                print("[CK][Config] Error creating audio input: \(error)")
+            }
+        } else {
+            print("[CK][Config] No audio device available")
+        }
+
+        captureSession.commitConfiguration()
+        isSessionConfigured = true
+    }
+    
+    @MainActor
+    private func requestLocationAuthorizationIfNeeded() {
+        let status = CLLocationManager.authorizationStatus()
+        if status == .notDetermined {
+            locationManager.requestWhenInUseAuthorization()
+        }
+    }
+
+    private func currentLocation() async -> CLLocation? {
+        await withCheckedContinuation { (cont: CheckedContinuation<CLLocation?, Never>) in
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { cont.resume(returning: nil); return }
+                self.locationContinuation = cont
+                self.locationManager.delegate = self
+                self.locationManager.desiredAccuracy = kCLLocationAccuracyBest
+                self.locationManager.requestLocation()
             }
         }
     }
 
-    func setZoom(factor: CGFloat) {
-        sessionQueue.async { [weak self] in
-            guard let self, let device = self.videoDeviceInput?.device else { return }
-            do {
-                try device.lockForConfiguration()
-                let clamped = max(device.minAvailableVideoZoomFactor, min(factor, device.maxAvailableVideoZoomFactor))
-                device.videoZoomFactor = clamped
-                device.unlockForConfiguration()
-            } catch {
-                // no print
+    // MARK: - Firebase Helpers
+    
+    @MainActor
+    private func writePostDocument(mediaURL: URL, coordinate: CLLocationCoordinate2D?, mediaType: String) async {
+        guard let uid = Auth.auth().currentUser?.uid else {
+            print("[CK][Post] No authenticated user; cannot write post")
+            return
+        }
+        let db = Firestore.firestore()
+        let docRef = db.collection("posts").document()
+        var data: [String: Any] = [
+            "userID": uid,
+            "createdAt": FieldValue.serverTimestamp(),
+            "mediaURL": mediaURL.absoluteString,
+            "viewCount": 0,
+            "radius": 5000,
+            "mediaType": mediaType
+        ]
+        if let c = coordinate {
+            data["latitude"] = c.latitude
+            data["longitude"] = c.longitude
+        }
+        do {
+            try await docRef.setData(data)
+            print("[CK][Post] Wrote post doc: \(docRef.documentID)")
+            NotificationCenter.default.post(name: .LoadProfileNow, object: nil)
+            NotificationCenter.default.post(name: .LoadMapNow, object: nil)
+        } catch {
+            print("[CK][Post] Failed to write post doc: \(error)")
+        }
+    }
+    
+    private func uploadImageToStorage(_ image: UIImage) async -> URL? {
+        // Ensure user is authenticated if rules require auth
+        guard let user = Auth.auth().currentUser else {
+            print("[CK][Upload] No authenticated user; Storage rules may require auth. Aborting image upload.")
+            return nil
+        }
+        guard let data = image.jpegData(compressionQuality: 0.9) else {
+            print("[CK][Upload] Could not create JPEG data from image")
+            return nil
+        }
+        let storage = Storage.storage()
+        let bucketRef = storage.reference()
+        print("[CK][Upload] Using bucket: \(bucketRef.bucket), user: \(user.uid)")
+
+        let path = "posts/\(UUID().uuidString).jpg"
+        let ref = bucketRef.child(path)
+
+        // Provide metadata to satisfy any contentType rules
+        let metadata = StorageMetadata()
+        metadata.contentType = "image/jpeg"
+        do {
+            _ = try await ref.putDataAsync(data, metadata: metadata)
+            let url = try await ref.downloadURL()
+            print("[CK][Upload] Image uploaded to: \(url.absoluteString)")
+            return url
+        } catch {
+            print("[CK][Upload] Image upload failed: \(error)")
+            return nil
+        }
+    }
+
+    private func uploadVideoToStorage(fileURL: URL) async -> URL? {
+        // Ensure user is authenticated if rules require auth
+        guard let user = Auth.auth().currentUser else {
+            print("[CK][Upload] No authenticated user; Storage rules may require auth. Aborting video upload.")
+            return nil
+        }
+        let storage = Storage.storage()
+        let bucketRef = storage.reference()
+        print("[CK][Upload] Using bucket: \(bucketRef.bucket), user: \(user.uid)")
+
+        let path = "posts/\(UUID().uuidString).mp4"
+        let ref = bucketRef.child(path)
+
+        // Provide metadata to satisfy any contentType rules
+        let metadata = StorageMetadata()
+        metadata.contentType = "video/mp4"
+        do {
+            _ = try await ref.putFileAsync(from: fileURL, metadata: metadata)
+            let url = try await ref.downloadURL()
+            print("[CK][Upload] Video uploaded to: \(url.absoluteString)")
+            return url
+        } catch {
+            print("[CK][Upload] Video upload failed: \(error)")
+            return nil
+        }
+    }
+
+    // MARK: - Video Post-Processing (Crop to 9:16 Portrait)
+    private func exportCroppedPortrait9x16(inputURL: URL) async -> URL? {
+        let asset = AVAsset(url: inputURL)
+        guard let videoTrack = asset.tracks(withMediaType: .video).first else {
+            print("[CK][Export] No video track found")
+            return nil
+        }
+
+        // Target 9:16 portrait size based on input height
+        let inputSize = videoTrack.naturalSize.applying(videoTrack.preferredTransform)
+        let width = abs(inputSize.width)
+        let height = abs(inputSize.height)
+        // We want portrait 9:16. Compute target width for the given height
+        let targetAspect: CGFloat = 9.0/16.0
+        let targetWidth = height * targetAspect
+
+        // If the input is already near 9:16 portrait, skip export
+        let inputAspect = width / height
+        if abs(inputAspect - targetAspect) < 0.01 && height >= width {
+            print("[CK][Export] Skipping crop — already near 9:16 portrait")
+            return inputURL
+        }
+
+        // Build composition
+        let composition = AVMutableComposition()
+        guard let compVideo = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid) else {
+            print("[CK][Export] Failed to create composition track")
+            return nil
+        }
+        do {
+            try compVideo.insertTimeRange(CMTimeRange(start: .zero, duration: asset.duration), of: videoTrack, at: .zero)
+        } catch {
+            print("[CK][Export] Insert time range failed: \(error)")
+            return nil
+        }
+
+        // Orientation & transform
+        compVideo.preferredTransform = videoTrack.preferredTransform
+
+        // Video composition for cropping
+        let videoComposition = AVMutableVideoComposition()
+        videoComposition.frameDuration = CMTime(value: 1, timescale: CMTimeScale(videoTrack.nominalFrameRate > 0 ? videoTrack.nominalFrameRate : 30))
+        let renderSize = CGSize(width: targetWidth, height: height)
+        videoComposition.renderSize = renderSize
+
+        let instruction = AVMutableVideoCompositionInstruction()
+        instruction.timeRange = CMTimeRange(start: .zero, duration: asset.duration)
+        let layerInstruction = AVMutableVideoCompositionLayerInstruction(assetTrack: compVideo)
+
+        // Compute scale so that the shorter dimension fills target; then center-crop horizontally
+        let naturalSize = videoTrack.naturalSize
+        let tx = videoTrack.preferredTransform
+        let transformedSize = naturalSize.applying(tx)
+        let srcWidth = abs(transformedSize.width)
+        let srcHeight = abs(transformedSize.height)
+
+        let scale = max(renderSize.width / srcWidth, renderSize.height / srcHeight)
+        let scaledWidth = srcWidth * scale
+        let scaledHeight = srcHeight * scale
+
+        // Center horizontally
+        let xOffset = (renderSize.width - scaledWidth) / 2.0
+        let yOffset = (renderSize.height - scaledHeight) / 2.0
+
+        var transform = tx
+        transform = transform.concatenating(CGAffineTransform(scaleX: scale, y: scale))
+        transform = transform.concatenating(CGAffineTransform(translationX: xOffset, y: yOffset))
+
+        layerInstruction.setTransform(transform, at: .zero)
+        instruction.layerInstructions = [layerInstruction]
+        videoComposition.instructions = [instruction]
+
+        // Export
+        let outputURL = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("mp4")
+        if FileManager.default.fileExists(atPath: outputURL.path) {
+            try? FileManager.default.removeItem(at: outputURL)
+        }
+
+        guard let export = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetHighestQuality) else {
+            print("[CK][Export] Could not create export session")
+            return nil
+        }
+        export.outputURL = outputURL
+        export.outputFileType = .mp4
+        export.shouldOptimizeForNetworkUse = true
+        export.videoComposition = videoComposition
+
+        return await withCheckedContinuation { (cont: CheckedContinuation<URL?, Never>) in
+            export.exportAsynchronously {
+                switch export.status {
+                case .completed:
+                    print("[CK][Export] Export completed: \(outputURL)")
+                    cont.resume(returning: outputURL)
+                case .failed, .cancelled:
+                    print("[CK][Export] Export failed: \(String(describing: export.error))")
+                    cont.resume(returning: nil)
+                default:
+                    // .waiting or .exporting ended unexpectedly
+                    print("[CK][Export] Export ended with status: \(export.status)")
+                    cont.resume(returning: nil)
+                }
             }
         }
     }
 
-    func focus(at point: CGPoint, in view: UIView) {
-        sessionQueue.async { [weak self] in
-            guard let self, let device = self.videoDeviceInput?.device else { return }
-            do {
-                try device.lockForConfiguration()
-                if device.isFocusPointOfInterestSupported {
-                    device.focusPointOfInterest = CGPoint(x: 0.5, y: 0.5)
-                    device.focusMode = .continuousAutoFocus
-                }
-                if device.isExposurePointOfInterestSupported {
-                    device.exposurePointOfInterest = CGPoint(x: 0.5, y: 0.5)
-                    device.exposureMode = .continuousAutoExposure
-                }
-                device.unlockForConfiguration()
-            } catch {
-                // no print
+    // MARK: - Preview Fallback
+    @MainActor
+    private func ensurePreviewFallbackIfNeeded() {
+        // If a Snap record VC is not provided, prepare a generic preview VC bound to our session.
+        if recordPreviewViewController == nil {
+            // Only create once
+            if previewViewController == nil {
+                #if canImport(UIKit)
+                let preview = CameraPreviewViewController(session: captureSession)
+                preview.onShutter = { [weak self] in self?.takePhoto() }
+                preview.onStartVideo = { [weak self] in self?.startVideoRecording() }
+                preview.onStopVideo  = { [weak self] in self?.stopVideoRecording() }
+                self.previewViewController = preview
+                #else
+                self.previewViewController = nil
+                #endif
             }
         }
     }
 
+    // MARK: - Photo Capture
     func takePhoto() {
         sessionQueue.async { [weak self] in
             guard let self else { return }
+
+            // Ensure session is running
             if !self.captureSession.isRunning {
-                print("[CK][Photo] Ignored: captureSession not running")
-                return
+                print("[CK][Photo] Session not running — attempting to start before capture")
+                self.captureSession.startRunning()
             }
+
+            // Ensure photoOutput is attached
             if !self.captureSession.outputs.contains(self.photoOutput) {
-                print("[CK][Photo] Ignored: photoOutput not attached")
+                print("[CK][Photo] photoOutput missing — attempting to attach")
+                self.captureSession.beginConfiguration()
+                if self.captureSession.canAddOutput(self.photoOutput) {
+                    self.captureSession.addOutput(self.photoOutput)
+                    self.photoOutput.isHighResolutionCaptureEnabled = true
+                } else {
+                    print("[CK][Photo] Cannot add photoOutput even after attempt")
+                }
+                self.captureSession.commitConfiguration()
+            }
+
+            // Verify running and connection
+            guard self.captureSession.isRunning else {
+                print("[CK][Photo] Abort: session still not running")
                 return
             }
+
+            // Fetch the video connection for photoOutput
+            var connection = self.photoOutput.connection(with: .video)
+            if connection == nil || (connection?.isEnabled == false) {
+                print("[CK][Photo] No active/enabled video connection — attempting to reconfigure")
+                self.captureSession.beginConfiguration()
+                // Try to re-add the output to refresh connections
+                if self.captureSession.outputs.contains(self.photoOutput) {
+                    self.captureSession.removeOutput(self.photoOutput)
+                }
+                if self.captureSession.canAddOutput(self.photoOutput) {
+                    self.captureSession.addOutput(self.photoOutput)
+                    self.photoOutput.isHighResolutionCaptureEnabled = true
+                }
+                self.captureSession.commitConfiguration()
+                // Re-fetch connection
+                connection = self.photoOutput.connection(with: .video)
+            }
+
+            guard let videoConnection = connection, videoConnection.isEnabled else {
+                print("[CK][Photo] Abort: No active and enabled video connection after reconfigure")
+                return
+            }
+
+            // Optionally align orientation if supported
+            if videoConnection.isVideoOrientationSupported {
+                videoConnection.videoOrientation = .portrait
+            }
+
             let settings = AVCapturePhotoSettings()
             settings.isHighResolutionPhotoEnabled = true
             self.photoOutput.capturePhoto(with: settings, delegate: self)
         }
     }
 
-    func startRecording() {
+    // MARK: - Video Recording
+    func startVideoRecording() {
         sessionQueue.async { [weak self] in
             guard let self else { return }
+            // Ensure session is running
             if !self.captureSession.isRunning {
-                print("[CK][Video] Cannot start: captureSession not running")
-                return
+                self.captureSession.startRunning()
             }
-            if !self.captureSession.outputs.contains(self.movieOutput) {
-                print("[CK][Video] Cannot start: movieOutput not attached")
-                return
+            // Start recording to a temp file if not already recording
+            if !self.movieOutput.isRecording {
+                let tempURL = URL(fileURLWithPath: NSTemporaryDirectory())
+                    .appendingPathComponent(UUID().uuidString)
+                    .appendingPathExtension("mov")
+
+                if let connection = self.movieOutput.connection(with: .video) {
+                    if connection.isVideoOrientationSupported {
+                        connection.videoOrientation = .portrait
+                    }
+                    if connection.isVideoStabilizationSupported {
+                        connection.preferredVideoStabilizationMode = .auto
+                    }
+                }
+
+                self.movieOutput.startRecording(to: tempURL, recordingDelegate: self)
             }
-            guard !self.movieOutput.isRecording else { return }
-
-            // Enforce max duration from settings (default 10s)
-            let maxSeconds = SettingsStore.shared.maxVideoDurationSeconds
-            self.movieOutput.maxRecordedDuration = CMTimeMakeWithSeconds(maxSeconds, preferredTimescale: 600)
-
-            let tmpURL = URL(fileURLWithPath: NSTemporaryDirectory())
-                .appendingPathComponent(UUID().uuidString)
-                .appendingPathExtension("mov")
-            self.activeRecordingURL = tmpURL
-            
-            print("[CK][Video] Starting recording to: \(tmpURL)")
-            print("[CK][Video] outputs attached at start: \(self.captureSession.outputs)")
-
-            self.movieOutput.startRecording(to: tmpURL, recordingDelegate: self)
-            DispatchQueue.main.async { self.isRecording = true }
         }
     }
 
-    func stopRecording() {
+    func stopVideoRecording() {
         sessionQueue.async { [weak self] in
             guard let self else { return }
-            guard self.movieOutput.isRecording else {
-                print("[CK][Video] Stop ignored: not recording")
-                return
+            if self.movieOutput.isRecording {
+                self.movieOutput.stopRecording()
             }
-            print("[CK][Video] stopRecording() called")
-            self.movieOutput.stopRecording()
+        }
+    }
+
+    @MainActor
+    func beginRecording() {
+        self.startVideoRecording()
+    }
+
+    @MainActor
+    func endRecording() {
+        self.stopVideoRecording()
+    }
+
+    @MainActor
+    private func postImage(_ image: UIImage, at coordinate: CLLocationCoordinate2D?) {
+        Task {
+            if let url = await uploadImageToStorage(image) {
+                await writePostDocument(mediaURL: url, coordinate: coordinate, mediaType: "photo")
+            } else {
+                print("[CK][Post] Skipping post; image upload failed")
+            }
+        }
+    }
+
+    // MARK: - AVCapturePhotoCaptureDelegate
+    func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
+        if let error = error {
+            print("[CK][Photo] Processing error: \(error)")
+        } else {
+            let data = photo.fileDataRepresentation() ?? Data()
+            print("[CK][Photo] Photo captured with \(data.count) bytes")
+            #if canImport(UIKit)
+            if let image = UIImage(data: data) {
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    let previewVC = PhotoPreviewViewController(image: image)
+                    // Prefer presenting from Snap record VC if available, otherwise fallback preview VC
+                    let presenter: UIViewController? = self.recordPreviewViewController ?? self.previewViewController
+
+                    previewVC.onPost = { [weak self, weak previewVC] img in
+                        guard let self else { return }
+                        Task { @MainActor in
+                            self.requestLocationAuthorizationIfNeeded()
+                            let loc = await self.currentLocation()
+                            let coord = loc?.coordinate
+                            self.postImage(img, at: coord)
+                            // Dismiss the preview and return to camera
+                            previewVC?.dismiss(animated: true)
+                        }
+                    }
+
+                    presenter?.present(previewVC, animated: true)
+                }
+            }
+            #endif
         }
     }
     
-    // Safety net: if delegate failed to publish, try to persist active temp file
-    func flushPendingRecordingIfAny() {
+    @MainActor
+    func start() async {
+        // Request access on main, then configure/start on sessionQueue
+        let granted = await requestCameraAccessIfNeeded()
+        guard granted else {
+            print("[CK][Start] Camera access not granted")
+            self.isReady = self.hasRecordPreview // allow UI to show fallback if present
+            return
+        }
+
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            sessionQueue.async { [weak self] in
+                guard let self else { cont.resume(); return }
+                self.configureSessionIfNeeded()
+                if !self.captureSession.isRunning {
+                    self.captureSession.startRunning()
+                }
+                cont.resume()
+            }
+        }
+
+        self.isReady = self.hasRecordPreview || self.captureSession.isRunning
+        self.ensurePreviewFallbackIfNeeded()
+        self.requestLocationAuthorizationIfNeeded()
+    }
+
+    @MainActor
+    func stop() {
+        // Stop session asynchronously; update readiness immediately for UI.
+        self.isReady = false
         sessionQueue.async { [weak self] in
             guard let self else { return }
-            guard let tmpURL = self.activeRecordingURL else {
-                print("[CK][Video] flushPendingRecordingIfAny: no activeRecordingURL")
-                return
-            }
-            let fm = FileManager.default
-            guard fm.fileExists(atPath: tmpURL.path) else {
-                print("[CK][Video] flushPendingRecordingIfAny: temp file missing at \(tmpURL.path)")
-                return
-            }
-            do {
-                let caches = try fm.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-                let recordingsDir = caches.appendingPathComponent("Recordings", isDirectory: true)
-                if !fm.fileExists(atPath: recordingsDir.path) {
-                    try fm.createDirectory(at: recordingsDir, withIntermediateDirectories: true)
-                }
-                let dest = recordingsDir.appendingPathComponent(UUID().uuidString).appendingPathExtension("mov")
-                do {
-                    try fm.moveItem(at: tmpURL, to: dest)
-                    print("[CK][Video] flushPending: moved temp to \(dest)")
-                    Task { @MainActor in
-                        self.lastVideoURL = dest
-                        print("[CK][Video] flushPending: published lastVideoURL: \(dest)")
-                    }
-                } catch {
-                    print("[CK][Video] flushPending: move failed (\(error.localizedDescription)); attempting copy")
-                    do {
-                        try fm.copyItem(at: tmpURL, to: dest)
-                        print("[CK][Video] flushPending: copied temp to \(dest)")
-                        Task { @MainActor in
-                            self.lastVideoURL = dest
-                            print("[CK][Video] flushPending: published lastVideoURL (copied): \(dest)")
-                        }
-                    } catch {
-                        print("[CK][Video] flushPending: copy failed: \(error.localizedDescription)")
-                    }
-                }
-            } catch {
-                print("[CK][Video] flushPending: failed to prepare caches dir: \(error.localizedDescription)")
+            if self.captureSession.isRunning {
+                self.captureSession.stopRunning()
             }
         }
     }
 }
 
-// MARK: - AVCapture delegates
-
-extension CameraKitController: AVCapturePhotoCaptureDelegate, AVCaptureFileOutputRecordingDelegate {
-    func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
+extension CameraKitController: AVCaptureFileOutputRecordingDelegate {
+    func fileOutput(_ output: AVCaptureFileOutput, didFinishRecordingTo outputFileURL: URL, from connections: [AVCaptureConnection], error: Error?) {
         if let error = error {
-            print("[CK][Photo] Error:", error.localizedDescription)
+            print("[CK][Video] Recording error: \(error)")
             return
         }
-        guard let data = photo.fileDataRepresentation(),
-              let image = UIImage(data: data) else {
-            print("[CK][Photo] No data")
-            return
-        }
+        print("[CK][Video] Recorded video at: \(outputFileURL)")
         Task { @MainActor in
-            self.lastPhoto = image
+            // Optionally fetch a location for the video
+            self.requestLocationAuthorizationIfNeeded()
+            let loc = await self.currentLocation()
+            let coord = loc?.coordinate
+            // Crop to 9:16 portrait before upload to reduce black bars in feed
+            let processedURL = await self.exportCroppedPortrait9x16(inputURL: outputFileURL) ?? outputFileURL
+            if let url = await self.uploadVideoToStorage(fileURL: processedURL) {
+                await self.writePostDocument(mediaURL: url, coordinate: coord, mediaType: "video")
+            } else {
+                print("[CK][Post] Skipping post; video upload failed")
+            }
         }
     }
+}
 
-    func fileOutput(_ output: AVCaptureFileOutput, didFinishRecordingTo outputFileURL: URL, from connections: [AVCaptureConnection], error: Error?) {
-        print("[CK][Video] didFinishRecording delegate fired")
-        print("[CK][Video] outputFileURL: \(outputFileURL)")
-        if let error = error {
-            print("[CK][Video] Error in delegate: \(error.localizedDescription)")
+extension CameraKitController: CLLocationManagerDelegate {
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        // Choose the most recent location with good accuracy
+        let now = Date()
+        let freshLocations = locations.filter { now.timeIntervalSince($0.timestamp) < 10 }
+        let best = (freshLocations.isEmpty ? locations : freshLocations)
+            .sorted { (a, b) in a.horizontalAccuracy < b.horizontalAccuracy }
+            .first
+        if let best = best, best.horizontalAccuracy > 0 {
+            locationContinuation?.resume(returning: best)
         } else {
-            print("[CK][Video] No error in delegate")
+            locationContinuation?.resume(returning: locations.last)
         }
-
-        // Reset limit so next recordings can adopt updated settings if changed
-        output.maxRecordedDuration = CMTime.invalid
-
-        // Attempt to persist the temp file to Caches/Recordings and publish URL
-        let fm = FileManager.default
-        var finalURL: URL? = nil
-
-        do {
-            // Ensure the file actually exists before proceeding
-            if fm.fileExists(atPath: outputFileURL.path) {
-                let caches = try fm.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-                let recordingsDir = caches.appendingPathComponent("Recordings", isDirectory: true)
-                if !fm.fileExists(atPath: recordingsDir.path) {
-                    try fm.createDirectory(at: recordingsDir, withIntermediateDirectories: true)
-                }
-                let destURL = recordingsDir.appendingPathComponent(UUID().uuidString).appendingPathExtension("mov")
-                do {
-                    try fm.moveItem(at: outputFileURL, to: destURL)
-                    finalURL = destURL
-                    print("[CK][Video] Moved recording to caches: \(destURL)")
-                } catch {
-                    print("[CK][Video] Move failed (\(error.localizedDescription)); attempting copy")
-                    do {
-                        try fm.copyItem(at: outputFileURL, to: destURL)
-                        finalURL = destURL
-                        print("[CK][Video] Copied recording to caches: \(destURL)")
-                    } catch {
-                        print("[CK][Video] Copy also failed: \(error.localizedDescription); will fall back to temp URL if usable")
-                        // As a last resort, use the temp URL if it still exists
-                        if fm.fileExists(atPath: outputFileURL.path) {
-                            finalURL = outputFileURL
-                        }
-                    }
-                }
-            } else {
-                print("[CK][Video] Temp output file does not exist; cannot persist")
-            }
-        } catch {
-            print("[CK][Video] Failed to prepare recordings directory: \(error.localizedDescription)")
-            if fm.fileExists(atPath: outputFileURL.path) {
-                finalURL = outputFileURL
-            }
-        }
-
-        Task { @MainActor in
-            self.isRecording = false
-            if let url = finalURL {
-                self.lastVideoURL = url
-                print("[CK][Video] Published lastVideoURL: \(url)")
-            } else {
-                self.lastVideoURL = nil
-                print("[CK][Video] Unable to publish lastVideoURL (nil)")
-            }
-        }
+        locationContinuation = nil
+    }
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        print("[CK][Location] Failed: \(error)")
+        locationContinuation?.resume(returning: nil)
+        locationContinuation = nil
     }
 }
 
