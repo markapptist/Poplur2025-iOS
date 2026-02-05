@@ -37,25 +37,8 @@ final class CameraPreviewViewController: UIViewController {
         view.backgroundColor = .black
         view.layer.addSublayer(previewLayer)
 
-        // Shutter button setup
-        shutterButton.translatesAutoresizingMaskIntoConstraints = false
-        shutterButton.backgroundColor = UIColor.white.withAlphaComponent(0.9)
-        shutterButton.tintColor = .black
-        shutterButton.setImage(UIImage(systemName: "camera.fill"), for: .normal)
-        shutterButton.layer.cornerRadius = 32
-        shutterButton.layer.shadowColor = UIColor.black.cgColor
-        shutterButton.layer.shadowOpacity = 0.3
-        shutterButton.layer.shadowRadius = 6
-        shutterButton.layer.shadowOffset = CGSize(width: 0, height: 2)
-        shutterButton.addTarget(self, action: #selector(shutterTapped), for: .touchUpInside)
-        view.addSubview(shutterButton)
-
-        NSLayoutConstraint.activate([
-            shutterButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            shutterButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -24),
-            shutterButton.widthAnchor.constraint(equalToConstant: 64),
-            shutterButton.heightAnchor.constraint(equalToConstant: 64)
-        ])
+        shutterButton.isHidden = true
+        shutterButton.removeTarget(self, action: #selector(shutterTapped), for: .touchUpInside)
 
         // Torch button setup
         torchButton.translatesAutoresizingMaskIntoConstraints = false
@@ -89,11 +72,6 @@ final class CameraPreviewViewController: UIViewController {
 
         updateTorchAvailability()
 
-        // Long press to record video
-        let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleShutterLongPress(_:)))
-        longPress.minimumPressDuration = 0.2
-        shutterButton.addGestureRecognizer(longPress)
-
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
         pan.maximumNumberOfTouches = 1
         view.addGestureRecognizer(pan)
@@ -103,6 +81,12 @@ final class CameraPreviewViewController: UIViewController {
         super.viewDidLayoutSubviews()
         previewLayer.frame = view.bounds
         updateTorchAvailability()
+    }
+
+    /// Programmatically trigger the shutter to take a photo.
+    /// Call this when an external UI (e.g., the cube in CubeTabView) is pressed on the record tab.
+    func triggerShutter() {
+        onShutter?()
     }
 
     @objc private func shutterTapped() {

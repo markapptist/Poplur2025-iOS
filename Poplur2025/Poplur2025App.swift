@@ -1,6 +1,9 @@
 import SwiftUI
 import FirebaseCore
 import AVFoundation
+#if canImport(GoogleMobileAds)
+import GoogleMobileAds
+#endif
 
 // AppDelegate: configure SDKs
 final class AppDelegate: NSObject, UIApplicationDelegate {
@@ -8,6 +11,10 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         if FirebaseApp.app() == nil {
             FirebaseApp.configure()
+#if canImport(GoogleMobileAds)
+            MobileAds.shared.start(completionHandler: nil)
+#endif
+            AdManager.shared.start()
         }
         return true
     }

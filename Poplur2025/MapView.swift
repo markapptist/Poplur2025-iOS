@@ -4,15 +4,22 @@ import FirebaseFirestore
 import FirebaseAuth
 import CoreLocation
 import UserNotifications
+import SceneKit
 
 struct MapView: View {
-    @State private var position: MapCameraPosition = .region(MKCoordinateRegion(
-        center: CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194),
-        span: MKCoordinateSpan(latitudeDelta: 0.2, longitudeDelta: 0.2)
-    ))
+    @State private var position: MapCameraPosition = .automatic
     @State private var posts: [Post] = []
     @State private var isLoading = false
     @State private var loadError: String?
+
+    @State private var cachedClusters: [Post] = [] // temporary holder before grouping
+    @State private var clusters: [PostCluster] = [] // cached clusters computed off-main
+    @State private var renderOverlays = false
+    @State private var useRealistic = false
+    @State private var overlayBatchCount: Int = 0
+    @State private var lightOverlayMode: Bool = true
+    @State private var allowBanners: Bool = false
+    @State private var clusterDebounceWorkItem: DispatchWorkItem?
 
     // Location
     @State private var locationManager = CLLocationManager()
@@ -28,6 +35,11 @@ struct MapView: View {
     @State private var banner: BannerData? = nil
     @State private var bannerOffset: CGFloat = -120
     @State private var bannerTimer: Timer? = nil
+
+#if DEBUG
+    @State private var debugRoughness: CGFloat = 0.6
+    @State private var debugNormalIntensity: CGFloat = 0.75
+#endif
 
     struct BannerData: Identifiable, Equatable {
         let id = UUID()
@@ -174,72 +186,50 @@ struct MapView: View {
         static func == (lhs: PostCluster, rhs: PostCluster) -> Bool { lhs.id == rhs.id }
     }
 
-    private var clusteredPosts: [PostCluster] {
-        // Quantize coordinates to ~10m grid (approx 0.0001 degrees ~ 11m latitude)
-        let quant: Double = 0.0001
-        func quantize(_ value: Double) -> Double { (value / quant).rounded() * quant }
-
-        var dict: [String: [Post]] = [:]
-        for p in posts {
-            let qLat = quantize(p.latitude)
-            let qLon = quantize(p.longitude)
-            let key = "\(qLat),\(qLon)"
-            dict[key, default: []].append(p)
-        }
-        return dict.map { (key, arr) in
-            // Use the average coordinate of the cluster for stability
-            let avgLat = arr.map { $0.latitude }.reduce(0, +) / Double(arr.count)
-            let avgLon = arr.map { $0.longitude }.reduce(0, +) / Double(arr.count)
-            let coord = CLLocationCoordinate2D(latitude: avgLat, longitude: avgLon)
-            return PostCluster(id: key, coordinate: coord, posts: arr)
+    private var limitedClusters: [PostCluster] {
+        if renderOverlays {
+            return Array(clusters.prefix(overlayBatchCount))
+        } else {
+            return []
         }
     }
 
     var body: some View {
         ZStack {
-            Map(position: $position) {
-                ForEach(clusteredPosts) { cluster in
-                    // Draw a halo sized to the largest radius in the cluster
-                    MapCircle(center: cluster.coordinate, radius: CLLocationDistance(cluster.maxRadius))
-                        .foregroundStyle(.blue.opacity(0.20))
-                        .stroke(.blue.opacity(0.5), lineWidth: 2)
+            mapContent
 
-                    // Pin annotation with optional count badge
-                    Annotation("", coordinate: cluster.coordinate) {
-                        Button {
-                            if cluster.count > 1 {
-                                presentedCluster = cluster
-                            } else {
-                                onSelect(post: cluster.representative)
-                            }
-                        } label: {
-                            ZStack {
-                                Circle()
-                                    .fill(Color.white)
-                                    .frame(width: 28, height: 28)
-                                    .shadow(color: .black.opacity(0.15), radius: 3, x: 0, y: 2)
-                                Circle()
-                                    .fill(sideBarColor.opacity(0.9))
-                                    .frame(width: 20, height: 20)
-                                if cluster.count > 1 {
-                                    Text("\(cluster.count)")
-                                        .font(.system(size: 11, weight: .bold))
-                                        .foregroundColor(.white)
-                                        .padding(.horizontal, 5)
-                                        .padding(.vertical, 2)
-                                        .background(Color.black.opacity(0.85), in: Capsule())
-                                        .overlay(
-                                            Capsule().stroke(Color.white.opacity(0.9), lineWidth: 0.5)
-                                        )
-                                }
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .contentShape(Circle())
-                    }
+#if DEBUG
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Roughness")
+                        .font(.caption)
+                        .foregroundColor(.white)
+                    Spacer()
+                    Text(String(format: "%.2f", debugRoughness))
+                        .font(.caption2)
+                        .foregroundColor(.white.opacity(0.9))
                 }
+                Slider(value: $debugRoughness, in: 0...1)
+                HStack {
+                    Text("Normal Intensity")
+                        .font(.caption)
+                        .foregroundColor(.white)
+                    Spacer()
+                    Text(String(format: "%.2f", debugNormalIntensity))
+                        .font(.caption2)
+                        .foregroundColor(.white.opacity(0.9))
+                }
+                Slider(value: $debugNormalIntensity, in: 0...2)
             }
-            .ignoresSafeArea(edges: .top)
+            .padding(10)
+            .background(Color.black.opacity(0.35), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color.white.opacity(0.15), lineWidth: 0.5)
+            )
+            .padding(.leading, 12)
+            .padding(.top, 60)
+            .frame(maxWidth: 220)
+#endif
 
             // Drop-down banner overlay
             VStack(spacing: 0) {
@@ -298,28 +288,16 @@ struct MapView: View {
             VStack {
                 Spacer()
                 ZStack(alignment: .bottomTrailing) {
-                    RoundedRectangle(cornerRadius: sideBarWidth / 2, style: .continuous)
-                        .fill(Color.gray.opacity(0.18))
-                        .frame(width: sideBarWidth, height: sideBarMaxHeight)
-
-                    VerticalRadiusBar(
-                        radius: selectedRadius,
-                        maxRadius: sideBarMaxRadius,
-                        width: sideBarWidth,
-                        maxHeight: sideBarMaxHeight,
-                        color: sideBarColor,
-                        showsLabel: true,
-                        labelFormat: { r in
-                            r >= 1000 ? "\(r / 1000) km" : "\(r) m"
-                        }
-                    )
-                    .frame(width: sideBarWidth, height: sideBarMaxHeight, alignment: .bottom)
-                    .animation(.spring(response: 0.35, dampingFraction: 0.85), value: selectedRadius)
+                    // 3D Barber Pole replacing the 2D bar
+                    BarberPole3DView(radius: selectedRadius, maxRadius: sideBarMaxRadius, maxHeight: sideBarMaxHeight)
+                        .frame(width: 80, height: sideBarMaxHeight) // give it some width for 3D
                 }
-                .padding(.trailing, 12)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+                .allowsHitTesting(false)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
             .allowsHitTesting(false)
+            .padding(.bottom, 28)
         }
         .sheet(item: $presentedCluster) { cluster in
             ClusterPostsSheet(cluster: cluster) { post in
@@ -332,24 +310,9 @@ struct MapView: View {
         .task {
             requestNotificationAuthorizationIfNeeded()
             await loadRecentPosts()
-            // Randomly schedule a suggestion notification sometime soon (does not show immediately on open)
-            Task {
-                let delay = Double.random(in: 30...120) // 30s to 2 minutes after opening
-                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-                await MainActor.run {
-                    // Use example suggestions
-                    let examples: [(String, String, CLLocationCoordinate2D)] = [
-                        ("", "Post an image about Chinese food in Chinatown Market", CLLocationCoordinate2D(latitude: 40.715, longitude: -74.009)),
-                        ("", "Post an image about Lamborghini in Italy", CLLocationCoordinate2D(latitude: 44.4949, longitude: 11.3426))
-                    ]
-                    if let pick = examples.randomElement() {
-                        scheduleSuggestionNotification(title: pick.0, message: pick.1, coordinate: pick.2)
-                    }
-                }
-            }
         }
         .onChange(of: posts) { oldValue, newValue in
-            // Removed immediate AI suggestion banner and immediate suggestion notification scheduling to avoid showing on open
+            guard allowBanners else { return }
 
             // Growth detection (views rising or radius increasing)
             // Compute deltas for both viewCount and radius
@@ -387,6 +350,38 @@ struct MapView: View {
                 }
             }
         }
+        .onChange(of: posts) { _, newValue in
+            clusterDebounceWorkItem?.cancel()
+            let work = DispatchWorkItem {
+                // compute clusters off-main
+                Task.detached {
+                    let quant: Double = 0.0001
+                    func quantize(_ value: Double) -> Double { (value / quant).rounded() * quant }
+
+                    var dict: [String: [Post]] = [:]
+                    for p in newValue {
+                        let qLat = quantize(p.latitude)
+                        let qLon = quantize(p.longitude)
+                        let key = "\(qLat),\(qLon)"
+                        dict[key, default: []].append(p)
+                    }
+                    let computed: [PostCluster] = dict.map { (key, arr) in
+                        let avgLat = arr.map { $0.latitude }.reduce(0, +) / Double(arr.count)
+                        let avgLon = arr.map { $0.longitude }.reduce(0, +) / Double(arr.count)
+                        let coord = CLLocationCoordinate2D(latitude: avgLat, longitude: avgLon)
+                        return PostCluster(id: key, coordinate: coord, posts: arr)
+                    }
+                    await MainActor.run {
+                        clusters = computed
+                        // Enable rendering overlays and show all markers immediately
+                        renderOverlays = true
+                        overlayBatchCount = computed.count
+                    }
+                }
+            }
+            clusterDebounceWorkItem = work
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.08, execute: work)
+        }
         .onReceive(NotificationCenter.default.publisher(for: .LoadMapNow)) { _ in
             Task { await loadRecentPosts() }
         }
@@ -422,6 +417,20 @@ struct MapView: View {
         }
     }
 
+    private var mapContent: some View {
+        GlobeView(
+            clusters: limitedClusters,
+            lightOverlayMode: lightOverlayMode,
+            sideBarColor: sideBarColor,
+            onSelect: { post in onSelect(post: post) },
+            onPresentCluster: { cluster in presentedCluster = cluster }
+#if DEBUG
+            , debugRoughness: debugRoughness, debugNormalIntensity: debugNormalIntensity
+#endif
+        )
+        .ignoresSafeArea(edges: .top)
+    }
+
     @MainActor
     private func onSelect(post: Post) {
         selectedPostID = post.id
@@ -446,8 +455,7 @@ struct MapView: View {
             let fetched = try await fetchMyMapPosts()
             await MainActor.run {
                 posts = fetched
-                if let firstCluster = clusteredPosts.first {
-                    let first = firstCluster.representative
+                if let first = fetched.first {
                     selectedPostID = first.id
                     selectedRadius = min(max(0, first.radius), sideBarMaxRadius)
                     position = .region(MKCoordinateRegion(center: first.coordinate,
@@ -560,6 +568,305 @@ struct MapView: View {
     }
 }
 
+private struct GlobeView: UIViewRepresentable {
+    let clusters: [MapView.PostCluster]
+    let lightOverlayMode: Bool
+    let sideBarColor: Color
+    let onSelect: (Post) -> Void
+    let onPresentCluster: (MapView.PostCluster) -> Void
+
+#if DEBUG
+    let debugRoughness: CGFloat?
+    let debugNormalIntensity: CGFloat?
+#endif
+
+    func makeUIView(context: Context) -> SCNView {
+        let scnView = SCNView()
+        scnView.backgroundColor = .black
+        scnView.scene = SCNScene()
+        scnView.allowsCameraControl = true
+        scnView.defaultCameraController.inertiaEnabled = true
+        context.coordinator.setupScene(in: scnView)
+#if DEBUG
+        // Subtle bloom post-processing using CIFilter chain
+        scnView.isPlaying = true
+        scnView.rendersContinuously = true
+        // Use built-in SCNTechnique/CIFilter chain via SCNView's "filters" property if available
+        let blur = CIFilter(name: "CIGaussianBlur")
+        blur?.setValue(NSNumber(value: 2.0), forKey: kCIInputRadiusKey)
+        scnView.filters = blur != nil ? [blur!] : nil
+#endif
+        return scnView
+    }
+
+    func updateUIView(_ scnView: SCNView, context: Context) {
+        context.coordinator.update(clusters: clusters, lightOverlayMode: lightOverlayMode, sideBarColor: UIColor(sideBarColor), onSelect: onSelect, onPresentCluster: onPresentCluster)
+#if DEBUG
+        if let r = debugRoughness, let n = debugNormalIntensity {
+            context.coordinator.applyDebugTuning(roughness: r, normalIntensity: n)
+        }
+#endif
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    final class Coordinator: NSObject {
+        private let globeNode = SCNNode()
+        private let markersNode = SCNNode()
+        private var tapHandler: ((SCNNode) -> Void)?
+        private var nodeToCluster: [SCNNode: MapView.PostCluster] = [:]
+
+        private var earthMaterial: SCNMaterial?
+
+        func setupScene(in view: SCNView) {
+            let scene = view.scene ?? SCNScene()
+            view.scene = scene
+
+            // Camera
+            let cameraNode = SCNNode()
+            cameraNode.camera = SCNCamera()
+            cameraNode.position = SCNVector3(0, 0, 3.0)
+            scene.rootNode.addChildNode(cameraNode)
+
+            // Lighting: single directional light to keep a day side and a dark night side
+            let sunNode = SCNNode()
+            let sunLight = SCNLight()
+            sunLight.type = .directional
+            sunLight.intensity = 1200
+            sunLight.castsShadow = false
+            sunNode.light = sunLight
+            // Aim from top-right-front toward origin
+            sunNode.eulerAngles = SCNVector3(-Float.pi / 6, Float.pi / 4, 0)
+            scene.rootNode.addChildNode(sunNode)
+
+            // Ambient light to softly light the dark side
+            let ambientNode = SCNNode()
+            let ambientLight = SCNLight()
+            ambientLight.type = .ambient
+            ambientLight.intensity = 300
+            ambientNode.light = ambientLight
+            scene.rootNode.addChildNode(ambientNode)
+
+            // No environment map so the night side stays dark
+            scene.lightingEnvironment.contents = nil
+            scene.lightingEnvironment.intensity = 0.0
+
+            // Globe
+            let sphere = SCNSphere(radius: 1.0)
+            sphere.segmentCount = 128
+
+            // Try to load an earth texture from the bundle with several common names
+            let earthTexture: UIImage? = {
+                let candidates = [
+                    "earth_day", "Earth_Day", "earth", "Earth", "earthTexture", "world", "world_map"
+                ]
+                for name in candidates {
+                    if let img = UIImage(named: name) { return img }
+                }
+                // As a last resort, try loading from asset catalog namespace if present
+                if let path = Bundle.main.path(forResource: "earth_day", ofType: "jpg"),
+                   let img = UIImage(contentsOfFile: path) { return img }
+                if let path = Bundle.main.path(forResource: "earth", ofType: "jpg"),
+                   let img = UIImage(contentsOfFile: path) { return img }
+                return nil
+            }()
+
+            // Configure material with enhanced specular and normal handling + filtering + PBR tuning
+            let mat = SCNMaterial()
+            mat.diffuse.contents = earthTexture ?? UIColor(white: 0.2, alpha: 1.0)
+
+            // Load specular texture if available
+            let specularTexture: UIImage? = {
+                let candidates = [
+                    "earth_specular", "Earth_Specular", "earthSpecular", "specular"
+                ]
+                for name in candidates {
+                    if let img = UIImage(named: name) { return img }
+                }
+                return nil
+            }()
+
+            if let spec = specularTexture {
+                mat.specular.contents = spec
+                mat.shininess = 0.28
+            } else {
+                mat.specular.contents = UIColor(white: 0.22, alpha: 1.0)
+                mat.shininess = 0.14
+            }
+
+            // Load normal texture if available
+            let normalTexture: UIImage? = {
+                let candidates = [
+                    "earth_normal", "Earth_Normal", "earthNormal", "normal"
+                ]
+                for name in candidates {
+                    if let img = UIImage(named: name) { return img }
+                }
+                return nil
+            }()
+
+            if let normal = normalTexture {
+                mat.normal.contents = normal
+                mat.normal.intensity = 0.75
+            }
+
+            // Improve texture sampling quality
+            for property in [mat.diffuse, mat.specular, mat.normal] {
+                property.mipFilter = .linear
+                property.minificationFilter = .linear
+                property.magnificationFilter = .linear
+                property.maxAnisotropy = 8.0
+            }
+
+            // PBR tuning
+            mat.metalness.contents = NSNumber(value: 0.0)
+            mat.roughness.contents = NSNumber(value: 0.6)
+
+            mat.isDoubleSided = false
+            mat.lightingModel = .physicallyBased
+            mat.locksAmbientWithDiffuse = false
+
+            sphere.firstMaterial = mat
+
+            globeNode.geometry = sphere
+            scene.rootNode.addChildNode(globeNode)
+
+            self.earthMaterial = sphere.firstMaterial
+
+            // Spinning disabled per request
+
+            // Container for markers
+            scene.rootNode.addChildNode(markersNode)
+
+            // Tap gesture
+            let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
+            view.addGestureRecognizer(tap)
+        }
+
+        func update(clusters: [MapView.PostCluster], lightOverlayMode: Bool, sideBarColor: UIColor, onSelect: @escaping (Post) -> Void, onPresentCluster: @escaping (MapView.PostCluster) -> Void) {
+            // Clear existing markers and mapping
+            markersNode.childNodes.forEach { $0.removeFromParentNode() }
+            nodeToCluster.removeAll(keepingCapacity: true)
+
+            // No clusters to render; clear and return
+            if clusters.isEmpty { return }
+
+            // Add markers for each cluster
+            for cluster in clusters {
+                let node = makeMarker(for: cluster, color: sideBarColor, light: lightOverlayMode)
+                node.name = cluster.id
+                // Register this node and its immediate children to map back to the cluster
+                nodeToCluster[node] = cluster
+                for child in node.childNodes {
+                    nodeToCluster[child] = cluster
+                }
+                markersNode.addChildNode(node)
+            }
+
+            // Assign tap handling
+            self.tapHandler = { node in
+                var current: SCNNode? = node
+                var matchedCluster: MapView.PostCluster? = nil
+                while let n = current, matchedCluster == nil {
+                    if let c = self.nodeToCluster[n] {
+                        matchedCluster = c
+                        break
+                    }
+                    current = n.parent
+                }
+                if let cluster = matchedCluster {
+                    if cluster.count > 1 {
+                        onPresentCluster(cluster)
+                    } else if let post = cluster.posts.first {
+                        onSelect(post)
+                    }
+                }
+            }
+        }
+
+        private func makeMarker(for cluster: MapView.PostCluster, color: UIColor, light: Bool) -> SCNNode {
+            // Marker as a small 2D billboard that always faces the camera
+            // Compute surface point
+            let lat = Float(cluster.coordinate.latitude * (Double.pi / 180))
+            let lon = Float(cluster.coordinate.longitude * (Double.pi / 180))
+            let r: Float = 1.0
+            let x = r * cos(lat) * cos(lon)
+            let y = r * sin(lat)
+            let z = -r * cos(lat) * sin(lon)
+
+            // Create a small plane with a circular colored dot
+            let size: CGFloat = 0.05
+            let plane = SCNPlane(width: size, height: size)
+            plane.cornerRadius = size * 0.5
+            let mat = SCNMaterial()
+            mat.diffuse.contents = color.withAlphaComponent(light ? 0.85 : 1.0)
+            mat.isDoubleSided = true
+            mat.lightingModel = .constant
+            plane.firstMaterial = mat
+
+            let node = SCNNode(geometry: plane)
+            // Offset slightly above the surface to avoid z-fighting
+            let normal = SCNVector3(x, y, z)
+            let offset: Float = 0.012
+            node.position = SCNVector3(x + normal.x * offset, y + normal.y * offset, z + normal.z * offset)
+
+            // Always face the camera
+            node.constraints = [SCNBillboardConstraint()]            
+
+            // If cluster has multiple posts, add a small label sprite
+            if cluster.count > 1 {
+                let labelPlane = SCNPlane(width: size * 0.85, height: size * 0.42)
+                let labelMat = SCNMaterial()
+                // Render a simple label using a UIColor with text drawn into an image
+                let renderer = UIGraphicsImageRenderer(size: CGSize(width: 90, height: 40))
+                let img = renderer.image { ctx in
+                    let rect = CGRect(x: 0, y: 0, width: 90, height: 40)
+                    UIColor.black.withAlphaComponent(0.85).setFill()
+                    UIBezierPath(roundedRect: rect, cornerRadius: 12).fill()
+                    let text = "\(cluster.count)"
+                    let attrs: [NSAttributedString.Key: Any] = [
+                        .font: UIFont.boldSystemFont(ofSize: 22),
+                        .foregroundColor: UIColor.white
+                    ]
+                    let size = (text as NSString).size(withAttributes: attrs)
+                    let origin = CGPoint(x: (rect.width - size.width)/2, y: (rect.height - size.height)/2)
+                    (text as NSString).draw(at: origin, withAttributes: attrs)
+                }
+                labelMat.diffuse.contents = img
+                labelMat.isDoubleSided = true
+                labelMat.lightingModel = .constant
+                labelPlane.firstMaterial = labelMat
+
+                let labelNode = SCNNode(geometry: labelPlane)
+                labelNode.position = SCNVector3(0, 0.06, 0)
+                node.addChildNode(labelNode)
+            }
+
+            return node
+        }
+
+        @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
+            guard let view = gesture.view as? SCNView else { return }
+            let pt = gesture.location(in: view)
+            let hits = view.hitTest(pt, options: [SCNHitTestOption.searchMode: SCNHitTestSearchMode.all.rawValue])
+            if let node = hits.first?.node {
+                tapHandler?(node)
+            }
+        }
+
+#if DEBUG
+        func applyDebugTuning(roughness: CGFloat, normalIntensity: CGFloat) {
+            guard let mat = earthMaterial else { return }
+            // Clamp values
+            let r = max(0.0, min(1.0, roughness))
+            let n = max(0.0, min(2.0, normalIntensity))
+            mat.roughness.contents = NSNumber(value: Float(r))
+            mat.normal.intensity = Float(n)
+        }
+#endif
+    }
+}
+
 extension Notification.Name {
     static let LoadMapNow = Notification.Name("LoadMapNow")
     static let FocusPostFromNotification = Notification.Name("FocusPostFromNotification")
@@ -669,6 +976,45 @@ struct BannerView: View {
     }
 }
 
+private struct ClusterPinContent: View {
+    let cluster: MapView.PostCluster
+    let lightOverlayMode: Bool
+    let sideBarColor: Color
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                Circle()
+                    .fill(Color.white)
+                    .frame(width: 28, height: 28)
+                if !lightOverlayMode {
+                    Circle()
+                        .fill(sideBarColor.opacity(0.9))
+                        .frame(width: 20, height: 20)
+                } else {
+                    Circle()
+                        .fill(sideBarColor.opacity(0.7))
+                        .frame(width: 18, height: 18)
+                }
+                if cluster.count > 1 {
+                    Text("\(cluster.count)")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(Color.black.opacity(0.85), in: Capsule())
+                        .overlay(
+                            Capsule().stroke(Color.white.opacity(0.9), lineWidth: 0.5)
+                        )
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .contentShape(Circle())
+    }
+}
+
 /*
  To deep-link from a tapped notification to the map and focus the post, forward the notification response like:
  
@@ -688,3 +1034,4 @@ struct BannerView: View {
  //     MapView.suggestionFocusRequest(latitude: lat, longitude: lon, message: msg)
  // }
 */
+

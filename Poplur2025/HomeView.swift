@@ -2,9 +2,37 @@ import SwiftUI
 import CoreLocation
 import AVFoundation
 import SceneKit
+import CoreMotion
 
 extension Notification.Name {
     static let ResetTabToTop = Notification.Name("ResetTabToTop")
+}
+
+extension Notification.Name {
+    static let CubeMotionUpdate = Notification.Name("CubeMotionUpdate")
+}
+
+@MainActor
+final class SceneMotionController: ObservableObject {
+    private let motion = CMMotionManager()
+
+    func start() {
+        guard motion.isDeviceMotionAvailable else { return }
+        motion.deviceMotionUpdateInterval = 1.0 / 60.0
+        motion.startDeviceMotionUpdates(to: .main) { data, _ in
+            guard let attitude = data?.attitude else { return }
+            let userInfo: [String: Double] = [
+                "roll": attitude.roll,
+                "pitch": attitude.pitch,
+                "yaw": attitude.yaw
+            ]
+            NotificationCenter.default.post(name: .CubeMotionUpdate, object: nil, userInfo: userInfo)
+        }
+    }
+
+    func stop() {
+        motion.stopDeviceMotionUpdates()
+    }
 }
 
 struct HomeView: View {
@@ -25,6 +53,8 @@ struct HomeView: View {
     @State private var didTriggerMapInitialLoad = false
     @State private var didTriggerProfileInitialLoad = false
     @State private var didStartCameraOnce = false
+
+    @StateObject private var motionController = SceneMotionController()
 
     init(cameraController: CameraKitController) {
         self.cameraController = cameraController
@@ -141,27 +171,18 @@ struct HomeView: View {
             // 3D Cube tab control overlay
             VStack {
                 Spacer()
-                ZStack {
-                    CubeTabView(selectedTab: $selectedTab, onSwipeUp: {
-                        if selectedTab == .settings {
-                            // Swipe up on settings returns to profile
-                            withAnimation { selectedTab = .profile }
-                        } else if selectedTab == .record {
-                            // On record tab, swipe triggers capture
-                            NotificationCenter.default.post(name: Notification.Name("TriggerCameraCapture"), object: nil)
-                        } else {
-                            // Default: keep existing behavior if needed
-                            NotificationCenter.default.post(name: Notification.Name("ShowRecordCaptureUI"), object: nil)
-                        }
-                    })
-                    // Overlay settings icon when on settings page
+                CubeTabView(selectedTab: $selectedTab, onSwipeUp: {
                     if selectedTab == .settings {
-                        Image(systemName: "gearshape.fill")
-                            .font(.system(size: 22, weight: .semibold))
-                            .foregroundColor(.white)
-                            .shadow(color: .black.opacity(0.25), radius: 4, x: 0, y: 2)
+                        // Swipe up on settings returns to profile
+                        withAnimation { selectedTab = .profile }
+                    } else if selectedTab == .record {
+                        // On record tab, swipe triggers capture
+                        NotificationCenter.default.post(name: Notification.Name("TriggerCameraCapture"), object: nil)
+                    } else {
+                        // Default: keep existing behavior if needed
+                        NotificationCenter.default.post(name: Notification.Name("ShowRecordCaptureUI"), object: nil)
                     }
-                }
+                })
                 .tint(.white)
                 .padding(.bottom, 28)
             }
@@ -188,6 +209,7 @@ struct HomeView: View {
         }
         .background(Color.clear)
         .task {
+            motionController.start()
             // Minimal bootstrap: start location early (cheap) and trigger feed load if feed is initial tab
             locationProvider.request()
             if selectedTab == .feed, !didTriggerFeedInitialLoad {
@@ -196,6 +218,7 @@ struct HomeView: View {
             }
         }
         .onAppear {
+            motionController.start()
             // Keep startup minimal; no mass notifications
             locationProvider.request()
             if selectedTab == .feed, !didTriggerFeedInitialLoad {
@@ -224,6 +247,7 @@ struct HomeView: View {
             case .background, .inactive:
                 cameraController.stop()
                 didStartCameraOnce = false
+                motionController.stop()
             @unknown default:
                 break
             }

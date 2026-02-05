@@ -1,13 +1,15 @@
 import SwiftUI
 import SceneKit
+import CoreMotion
 
 struct CubeTabView: View {
     @Binding var selectedTab: AppTab
     @State private var rotationIndex: Int = 0
     var onSwipeUp: (() -> Void)? = nil
+    var onCubeTap: (() -> Void)? = nil
 
     var body: some View {
-        FloatingCube(selectedTab: $selectedTab, rotationIndex: $rotationIndex, onSwipeUp: onSwipeUp)
+        FloatingCube(selectedTab: $selectedTab, rotationIndex: $rotationIndex, onSwipeUp: onSwipeUp, onCubeTap: onCubeTap)
             .frame(height: 200)
             .background(.clear)
             .accessibilityHidden(true)
@@ -18,12 +20,13 @@ private struct FloatingCube: View {
     @Binding var selectedTab: AppTab
     @Binding var rotationIndex: Int
     var onSwipeUp: (() -> Void)?
+    var onCubeTap: (() -> Void)?
 
     @State private var bob: CGFloat = 0
     @State private var tilt: Double = 0
 
     var body: some View {
-        CubeSceneView(selectedTab: $selectedTab, rotationIndex: $rotationIndex, parentSwipeUpHandler: onSwipeUp)
+        CubeSceneView(selectedTab: $selectedTab, rotationIndex: $rotationIndex, parentSwipeUpHandler: onSwipeUp, parentCubeTapHandler: onCubeTap)
             .offset(y: bob)
             .rotationEffect(.degrees(tilt))
             .onAppear {
@@ -41,6 +44,7 @@ private struct CubeSceneView: UIViewRepresentable {
     @Binding var selectedTab: AppTab
     @Binding var rotationIndex: Int
     var parentSwipeUpHandler: (() -> Void)? = nil
+    var parentCubeTapHandler: (() -> Void)? = nil
 
     func makeUIView(context: Context) -> SCNView {
         let scnView = SCNView()
@@ -54,13 +58,18 @@ private struct CubeSceneView: UIViewRepresentable {
         let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePan(_:)))
         let swipeUp = UISwipeGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleSwipe(_:)))
         swipeUp.direction = .up
+        let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap(_:)))
 
         scnView.addGestureRecognizer(pan)
         scnView.addGestureRecognizer(swipeUp)
+        scnView.addGestureRecognizer(tap)
 
         context.coordinator.view = scnView
-        context.coordinator.onSwipeUp = context.coordinator.parentSwipeUpHandler
         context.coordinator.syncToSelectedTab(selectedTab)
+
+        // Observe motion updates to rotate cube based on device attitude
+        context.coordinator.startObservingMotion()
+
         return scnView
     }
 
@@ -68,7 +77,12 @@ private struct CubeSceneView: UIViewRepresentable {
         context.coordinator.syncToSelectedTab(selectedTab)
     }
 
-    func makeCoordinator() -> Coordinator { Coordinator(self) }
+    func makeCoordinator() -> Coordinator {
+        let coordinator = Coordinator(self)
+        coordinator.onSwipeUp = parentSwipeUpHandler
+        coordinator.onCubeTap = parentCubeTapHandler
+        return coordinator
+    }
 
     // MARK: - Scene
     private func makeScene() -> SCNScene {
@@ -134,9 +148,15 @@ private struct CubeSceneView: UIViewRepresentable {
             UIBezierPath(roundedRect: rect.insetBy(dx: 8, dy: 8), cornerRadius: 24).fill()
 
             // Icon
-            let config = UIImage.SymbolConfiguration(pointSize: 80, weight: .bold)
-            let image = UIImage(systemName: tab.systemImage, withConfiguration: config) ?? UIImage()
-            let imgRect = CGRect(x: (size.width - 90) / 2, y: 70, width: 90, height: 90)
+            let isSettings = (tab == .settings)
+            let symbolName = isSettings ? "gearshape.fill" : tab.systemImage
+            let pointSize: CGFloat = isSettings ? 92 : 80
+            let iconWidth: CGFloat = isSettings ? 100 : 90
+            let iconHeight: CGFloat = isSettings ? 100 : 90
+            let iconY: CGFloat = isSettings ? 66 : 70
+            let config = UIImage.SymbolConfiguration(pointSize: pointSize, weight: .bold)
+            let image = UIImage(systemName: symbolName, withConfiguration: config) ?? UIImage()
+            let imgRect = CGRect(x: (size.width - iconWidth) / 2, y: iconY, width: iconWidth, height: iconHeight)
             image.withTintColor(.black, renderingMode: .alwaysOriginal).draw(in: imgRect)
 
             // Title
@@ -159,14 +179,24 @@ private struct CubeSceneView: UIViewRepresentable {
         private var currentIndex: Int = 0
         private let tabs: [AppTab] = [.map, .record, .feed, .profile, .settings]
         var onSwipeUp: (() -> Void)?
+        var onCubeTap: (() -> Void)?
         var parentSwipeUpHandler: (() -> Void)?
 
         private var panStartPoint: CGPoint = .zero
         private var panAccumulated: CGFloat = 0
-        private let panThreshold: CGFloat = 30 // lower threshold for sensitivity
+        private let panThreshold: CGFloat = 18 // lower threshold for sensitivity
         private let haptic = UIImpactFeedbackGenerator(style: .light)
 
+        private var motionObserver: NSObjectProtocol?
+        private var liveRotation: SCNVector3 = SCNVector3Zero
+
+        // Added helper functions as per instructions
+        private func deg2rad(_ degrees: Float) -> Float { degrees * .pi / 180 }
+        private func clamp(_ value: Float, min minVal: Float, max maxVal: Float) -> Float { max(minVal, min(maxVal, value)) }
+
         init(_ parent: CubeSceneView) { self.parent = parent }
+
+        deinit { stopObservingMotion() }
 
         @objc func handleSwipe(_ gesture: UISwipeGestureRecognizer) {
             guard let scnView = view, let cube = scnView.scene?.rootNode.childNode(withName: "cube", recursively: true) else { return }
@@ -176,6 +206,13 @@ private struct CubeSceneView: UIViewRepresentable {
                 flip.timingMode = .easeInEaseOut
                 cube.runAction(flip)
                 onSwipeUp?()
+            }
+        }
+
+        @objc func handleTap(_ gesture: UITapGestureRecognizer) {
+            // Only trigger when the record tab is active
+            if parent.selectedTab == .record {
+                onCubeTap?()
             }
         }
 
@@ -192,9 +229,15 @@ private struct CubeSceneView: UIViewRepresentable {
                 let deltaX = translation.x - panStartPoint.x
                 panAccumulated += deltaX
                 panStartPoint = translation
+
+                // Clear liveRotation to avoid fighting motion tilt during pan
+                self.liveRotation = SCNVector3Zero
+
                 // Optionally, apply a tiny live rotation for responsiveness
-                let liveAngle = Float(panAccumulated / 600) // small preview tilt
-                cube.eulerAngles.y = Float(currentIndex) * (-Float.pi / 2) + liveAngle
+                let liveAngle = Float(panAccumulated / 380) // small preview tilt
+                let baseY = Float(currentIndex) * (-Float.pi / 2)
+                cube.eulerAngles = SCNVector3(0, baseY + liveAngle, 0)
+
             case .ended, .cancelled, .failed:
                 // Decide if we switch faces
                 if panAccumulated <= -panThreshold {
@@ -211,8 +254,10 @@ private struct CubeSceneView: UIViewRepresentable {
                     // Snap back to current face if below threshold
                     rotateCube(cube, to: currentIndex, animated: true, bouncy: true)
                 }
-                // Reset live tilt
+                // Reset live tilt and reapply combined rotation
                 cube.eulerAngles.y = Float(currentIndex) * (-Float.pi / 2)
+                self.liveRotation = SCNVector3Zero
+                self.applyCombinedRotation(to: cube)
             default:
                 break
             }
@@ -223,6 +268,7 @@ private struct CubeSceneView: UIViewRepresentable {
             if let idx = tabs.firstIndex(of: tab), idx != currentIndex {
                 currentIndex = idx
                 rotateCube(cube, to: currentIndex, animated: true)
+                applyCombinedRotation(to: cube)
             }
         }
 
@@ -240,12 +286,67 @@ private struct CubeSceneView: UIViewRepresentable {
                 let target2 = SCNAction.rotateTo(x: 0, y: CGFloat(baseAngle), z: 0, duration: 0.22, usesShortestUnitArc: true)
                 target2.timingMode = .easeInEaseOut
                 let seq = SCNAction.sequence([target1, target2])
-                node.runAction(seq)
+                node.runAction(seq) { [weak self] in
+                    guard let self = self else { return }
+                    DispatchQueue.main.async {
+                        self.applyCombinedRotation(to: node)
+                    }
+                }
             } else {
                 let action = SCNAction.rotateTo(x: 0, y: CGFloat(baseAngle), z: 0, duration: 0.28, usesShortestUnitArc: true)
                 action.timingMode = .easeInEaseOut
-                node.runAction(action)
+                node.runAction(action) { [weak self] in
+                    guard let self = self else { return }
+                    DispatchQueue.main.async {
+                        self.applyCombinedRotation(to: node)
+                    }
+                }
             }
+        }
+
+        func startObservingMotion() {
+            stopObservingMotion()
+            motionObserver = NotificationCenter.default.addObserver(forName: Notification.Name("CubeMotionUpdate"), object: nil, queue: .main) { [weak self] notif in
+                guard let self,
+                      let scnView = self.view,
+                      let cube = scnView.scene?.rootNode.childNode(withName: "cube", recursively: true) else { return }
+
+                // Map to a single horizontal component for side-to-side sway only
+                // Use device roll (left-right tilt) to drive horizontal sway; adjust sign if needed
+                let horizontal = Float((notif.userInfo?["roll"] as? Double) ?? 0)
+
+                // Clamp raw horizontal to keep within reasonable bounds
+                let maxTiltRad: Float = deg2rad(60)
+                let clampedH = clamp(horizontal, min: -maxTiltRad, max: maxTiltRad)
+
+                // Only store Y component; zero X/Z to prevent up/down tilt
+                self.liveRotation = SCNVector3(0, clampedH, 0)
+
+                self.applyCombinedRotation(to: cube)
+            }
+        }
+
+        func stopObservingMotion() {
+            if let token = motionObserver {
+                NotificationCenter.default.removeObserver(token)
+                motionObserver = nil
+            }
+        }
+
+        private func applyCombinedRotation(to node: SCNNode) {
+            // Base rotation from current index (y-axis steps of 90 degrees)
+            let baseY = Float(currentIndex) * (-Float.pi / 2)
+
+            // We only sway side-to-side: ignore X and Z
+            let yAdditiveScale: Float = 0.7
+            let maxYAddDeg: Float = 38
+            let maxYAdd = deg2rad(maxYAddDeg)
+
+            var yAdd = liveRotation.y * yAdditiveScale
+            yAdd = clamp(yAdd, min: -maxYAdd, max: maxYAdd)
+
+            let y = baseY + yAdd
+            node.eulerAngles = SCNVector3(0, y, 0)
         }
     }
 }

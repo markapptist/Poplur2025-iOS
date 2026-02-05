@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import FirebaseAuth
 import FirebaseFirestore
 
@@ -13,6 +14,7 @@ struct ProfileView: View {
     @State private var expandedPost: Post? = nil
     @State private var showCamera = false
     @State private var profileImage: UIImage? = nil
+    @State private var profileImageURL: URL? = nil
 
     enum DisplayMode: String, CaseIterable, Identifiable {
         case list
@@ -176,7 +178,11 @@ struct ProfileView: View {
                 FrontCameraPicker { image in
                     // Update immediately
                     self.profileImage = image
-                    // Persist/update model as needed; placeholder Notification for now
+                    // Persist to disk and remember URL
+                    if let url = try? saveProfileImage(image) {
+                        self.profileImageURL = url
+                    }
+                    // Notify if other parts listen
                     NotificationCenter.default.post(name: Notification.Name("ProfilePhotoUpdated"), object: image)
                 }
                 .ignoresSafeArea()
@@ -186,6 +192,7 @@ struct ProfileView: View {
             }
             .task {
                 await loadMyPosts()
+                await loadPersistedProfileImageIfNeeded()
             }
             .onAppear { Task { await loadMyPosts() } }
             .onReceive(NotificationCenter.default.publisher(for: .LoadProfileNow)) { _ in
@@ -226,6 +233,12 @@ struct ProfileView: View {
             ZStack {
                 if let localImage = profileImage {
                     Image(uiImage: localImage)
+                        .resizable()
+                        .scaledToFill()
+                } else if let url = profileImageURL, // load persisted local file on appear
+                          let data = try? Data(contentsOf: url),
+                          let img = UIImage(data: data) {
+                    Image(uiImage: img)
                         .resizable()
                         .scaledToFill()
                 } else if let url = userProfile?.profilePictureURL {
@@ -391,6 +404,33 @@ struct ProfileView: View {
             let userID = data["userID"] as? String ?? "unknown"
             return Post(id: doc.documentID, latitude: lat, longitude: lon, mediaURL: mediaURL, radius: radius, viewCount: viewCount, userID: userID)
         }
+    }
+
+    private func loadPersistedProfileImageIfNeeded() async {
+        // Try to locate a previously saved profile image and load it into state
+        let url = profileImageFileURL()
+        if FileManager.default.fileExists(atPath: url.path) {
+            if let data = try? Data(contentsOf: url), let img = UIImage(data: data) {
+                await MainActor.run {
+                    self.profileImage = img
+                    self.profileImageURL = url
+                }
+            }
+        }
+    }
+
+    @discardableResult
+    private func saveProfileImage(_ image: UIImage) throws -> URL {
+        let url = profileImageFileURL()
+        guard let data = image.jpegData(compressionQuality: 0.9) else {
+            throw NSError(domain: "ProfileImage", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to get JPEG data"]) }
+        try data.write(to: url, options: .atomic)
+        return url
+    }
+
+    private func profileImageFileURL() -> URL {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        return docs.appendingPathComponent("profile.jpg")
     }
 
     private func initialsFrom(email: String) -> String? {

@@ -4,10 +4,66 @@ import CoreLocation
 import UIKit
 import AVFoundation
 import Contacts
+#if canImport(GoogleMobileAds)
+import GoogleMobileAds
+#endif
+
+// MARK: - Shared pole position model and overlay
+
+// Normalized pole position within the view's content area (0...1 in both axes)
+struct PolePosition {
+    var x: CGFloat
+    var y: CGFloat
+}
+
+// Observable model so multiple views (Map, Feed, Camera) can render the pole identically
+final class PolePositionModel: ObservableObject {
+    @Published var position: PolePosition = .init(x: 0.5, y: 0.5)
+}
+
+// A lightweight overlay that renders a pole at the normalized position
+private struct PoleOverlay: View {
+    @EnvironmentObject var poleModel: PolePositionModel
+
+    var body: some View {
+        GeometryReader { geo in
+            let size = geo.size
+            // Clamp normalized values to [0,1] to avoid accidental overflow
+            let nx = min(max(poleModel.position.x, 0), 1)
+            let ny = min(max(poleModel.position.y, 0), 1)
+            let x = nx * size.width
+            let y = ny * size.height
+
+            // Match Map view: blue accuracy halo + white ring center (no filled dot)
+            // Since we don't have a map projection in Feed, we use a visual heuristic to size the halo.
+            // The halo scales with the shorter screen dimension to suggest radius without geographic accuracy.
+            let haloSize = min(size.width, size.height) * 0.25 // tweak as desired for feel
+
+            ZStack {
+                // Accuracy halo (visual approximation of MapCircle)
+                Circle()
+                    .fill(Color.blue.opacity(0.20))
+                    .frame(width: haloSize, height: haloSize)
+                    .overlay(
+                        Circle().stroke(Color.blue.opacity(0.5), lineWidth: 2)
+                    )
+
+                // Center marker: white ring only (no center fill)
+                Circle()
+                    .stroke(Color.white, lineWidth: 2)
+                    .frame(width: 20, height: 20)
+            }
+            .position(x: x, y: y)
+            .accessibilityLabel("Pole indicator")
+        }
+        .allowsHitTesting(false)
+    }
+}
 
 struct FeedView: View {
     @Environment(\.locationProvider) private var injectedLocationProvider: LocationProvider?
     @StateObject private var fallbackLocationProvider = LocationProvider()
+    @StateObject private var poleModel = PolePositionModel()
     private var locationProvider: LocationProvider { injectedLocationProvider ?? fallbackLocationProvider }
 
     @State private var posts: [FeedPost] = []
@@ -44,7 +100,7 @@ struct FeedView: View {
     @State private var popPlayer: AVAudioPlayer? = nil
 
     @State private var showHeart: Bool = false
-
+    
     // Country paging
     @State private var selectedCountryIndex: Int = 0
     private let countries: [(code: String, name: String, flag: String)] = [
@@ -107,32 +163,43 @@ struct FeedView: View {
         GeometryReader { geo in
             ZStack {
                 feedContent(in: geo.size)
-
                 if showLaunchLogo {
-                    Image("logo") // Ensure this asset exists in the asset catalog
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: min(220, geo.size.width * 0.5))
-                        .opacity(launchLogoOpacity)
-                        .scaleEffect(launchLogoScale)
-                        .transition(.scale.combined(with: .opacity))
-                        .onAppear {
-                            // Subtle pop-in on first appear
-                            withAnimation(.spring(response: 0.5, dampingFraction: 0.85)) {
-                                launchLogoScale = 1.0
-                                launchLogoOpacity = 1.0
-                            }
+                    // Replace "LaunchLogo" with your asset name if different
+                    Group {
+                        if let _ = UIImage(named: "logo") {
+                            Image("logo")
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 180)
+                        } else {
+                            // Fallback: simple mark if no asset exists
+                            Image(systemName: "sparkles")
+                                .font(.system(size: 80, weight: .bold))
+                                .foregroundStyle(.white)
+                                .padding(24)
+                                .background(Color.black.opacity(0.6), in: Circle())
+                                .overlay(Circle().stroke(Color.white.opacity(0.25), lineWidth: 1))
                         }
-                        .zIndex(9)
+                    }
+                    .scaleEffect(launchLogoScale)
+                    .opacity(launchLogoOpacity)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                    .zIndex(20)
+                    .transition(.opacity)
+                    .allowsHitTesting(false)
                 }
 
                 overlayChrome
                     .zIndex(10)
+                
                 profileNavigationLink
             }
             .background(Color.black)
         }
         .task {
+            // Demo default pole position in the center; remove when wiring to real source
+            poleModel.position = PolePosition(x: 0.5, y: 0.5)
+
             if let coord = locationProvider.coordinate {
                 if let iso = await geocodeCountry(from: coord), let idx = countries.firstIndex(where: { $0.code == iso }) {
                     selectedCountryIndex = idx
@@ -267,6 +334,7 @@ struct FeedView: View {
                                                 withAnimation { showStatic = false }
                                                 stopStaticSound()
                                             }
+                                            maybeShowAd()
                                         } else if value.translation.width >= horizontalThreshold {
                                             // swipe right -> previous country
                                             selectedCountryIndex = (selectedCountryIndex - 1 + countries.count) % countries.count
@@ -291,6 +359,7 @@ struct FeedView: View {
                                                 withAnimation { showStatic = false }
                                                 stopStaticSound()
                                             }
+                                            maybeShowAd()
                                         }
                                     case .vertical:
                                         if value.translation.height <= -verticalThreshold {
@@ -318,6 +387,7 @@ struct FeedView: View {
                                                     withAnimation { showStatic = false }
                                                     stopStaticSound()
                                                 }
+                                                maybeShowAd()
                                             }
                                         } else if value.translation.height >= verticalThreshold {
                                             // swipe down -> previous (wrap to last from 0)
@@ -344,6 +414,7 @@ struct FeedView: View {
                                                     withAnimation { showStatic = false }
                                                     stopStaticSound()
                                                 }
+                                                maybeShowAd()
                                             }
                                         }
                                     }
@@ -424,6 +495,7 @@ struct FeedView: View {
                                                 stopStaticSound()
                                             }
                                             maybeLoadMoreIfNeeded(appearingIndex: currentIndex)
+                                            maybeShowAd()
                                         } else if value.translation.width >= horizontalThreshold {
                                             // swipe right -> previous country
                                             selectedCountryIndex = (selectedCountryIndex - 1 + countries.count) % countries.count
@@ -448,6 +520,7 @@ struct FeedView: View {
                                                 withAnimation { showStatic = false }
                                                 stopStaticSound()
                                             }
+                                            maybeShowAd()
                                         }
                                     case .vertical:
                                         if value.translation.height <= -verticalThreshold {
@@ -476,6 +549,7 @@ struct FeedView: View {
                                                     stopStaticSound()
                                                 }
                                                 maybeLoadMoreIfNeeded(appearingIndex: currentIndex)
+                                                maybeShowAd()
                                             }
                                         } else if value.translation.height >= verticalThreshold {
                                             // swipe down -> previous (wrap to last from 0)
@@ -502,6 +576,7 @@ struct FeedView: View {
                                                     withAnimation { showStatic = false }
                                                     stopStaticSound()
                                                 }
+                                                maybeShowAd()
                                             }
                                         }
                                     }
@@ -804,6 +879,19 @@ struct FeedView: View {
             print("[PopSound] Failed to play: \(error)")
         }
     }
+    
+    private func presentInterstitialOrFallback() {
+        guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let window = scene.windows.first,
+              let root = window.rootViewController else { return }
+        AdManager.shared.presentInterstitial(from: root)
+    }
+
+    private func maybeShowAd(probability: Double = 0.12) {
+        let roll = Double.random(in: 0...1)
+        guard roll <= probability else { return }
+        presentInterstitialOrFallback()
+    }
 
     // MARK: - Data loading stubs (fill in with your real logic)
 
@@ -1003,19 +1091,9 @@ private struct FeedFullscreenPageView: View {
 
                 VStack {
                     Spacer()
-                    VerticalRadiusBar(
-                        radius: Int(post.radius),
-                        maxRadius: 10_000,
-                        width: 10,
-                        maxHeight: 220,
-                        color: .pink,
-                        showsLabel: true,
-                        labelFormat: { r in
-                            r >= 1000 ? "\(r / 1000) km" : "\(r) m"
-                        }
-                    )
-                    .frame(width: 10, height: 220, alignment: .bottom)
-                    .padding(.trailing, 12)
+                    BarberPole3DView(radius: Int(post.radius), maxRadius: 10_000, maxHeight: 220)
+                        .frame(width: 80, height: 220)
+                        .padding(.trailing, 12)
                 }
                 .padding(.bottom, 45)
                 .frame(width: size.width, height: size.height, alignment: .trailing)
@@ -1157,5 +1235,18 @@ private extension Array {
     subscript(safe index: Int) -> Element? {
         indices.contains(index) ? self[index] : nil
     }
+}
+
+// A local host wrapper that injects PolePositionModel for use when presenting FeedView directly
+struct FeedViewHost: View {
+    @StateObject private var poleModel = PolePositionModel()
+    var body: some View {
+        FeedView()
+            .environmentObject(poleModel)
+    }
+}
+
+#Preview("FeedView with environment") {
+    FeedViewHost()
 }
 
