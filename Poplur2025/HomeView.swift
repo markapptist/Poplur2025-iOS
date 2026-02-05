@@ -76,13 +76,13 @@ struct HomeView: View {
             .task {
                 if selectedTab == .map, !didTriggerMapInitialLoad {
                     didTriggerMapInitialLoad = true
-                    NotificationCenter.default.post(name: .LoadMapNow, object: nil)
+                 
                 }
             }
             .onAppear {
                 if selectedTab == .map, !didTriggerMapInitialLoad {
                     didTriggerMapInitialLoad = true
-                    NotificationCenter.default.post(name: .LoadMapNow, object: nil)
+                   
                 }
             }
     }

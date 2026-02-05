@@ -173,7 +173,7 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
             try await docRef.setData(data)
             print("[CK][Post] Wrote post doc: \(docRef.documentID)")
             NotificationCenter.default.post(name: .LoadProfileNow, object: nil)
-            NotificationCenter.default.post(name: .LoadMapNow, object: nil)
+          
         } catch {
             print("[CK][Post] Failed to write post doc: \(error)")
         }
