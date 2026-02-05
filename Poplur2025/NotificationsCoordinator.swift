@@ -10,7 +10,14 @@ final class NotificationsCoordinator: NSObject, UNUserNotificationCenterDelegate
         UNUserNotificationCenter.current().delegate = self
     }
 
-   
+    // Handle taps on delivered notifications
+    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
+        let userInfo = response.notification.request.content.userInfo
+        if let postID = userInfo["postID"] as? String {
+            MapView.postFocusRequest(postID: postID)
+        }
+        completionHandler()
+    }
 
     // Handle notifications while app is in foreground (optional: show banner or system alert)
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {

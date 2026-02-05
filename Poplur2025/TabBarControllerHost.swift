@@ -94,7 +94,7 @@ struct TabBarControllerHost<MapContent: View, RecordContent: View, FeedContent: 
 
             // Or just post the notifications directly:
             NotificationCenter.default.post(name: .LoadFeedNow, object: nil)
-           
+            NotificationCenter.default.post(name: .LoadMapNow, object: nil)
             NotificationCenter.default.post(name: .LoadProfileNow, object: nil)
         }
     }

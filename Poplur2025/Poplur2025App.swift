@@ -4,7 +4,6 @@ import AVFoundation
 #if canImport(GoogleMobileAds)
 import GoogleMobileAds
 #endif
-import GoogleMaps3D
 
 // AppDelegate: configure SDKs
 final class AppDelegate: NSObject, UIApplicationDelegate {
@@ -36,10 +35,6 @@ struct Poplur2025App: App {
 
     // Prewarmed, shared camera controller for fast camera bring-up
     @StateObject private var cameraController = CameraKitController()
-
-    init() {
-        Map.apiKey = GoogleMaps3DConfig.apiKey
-    }
 
     var body: some Scene {
         WindowGroup {
