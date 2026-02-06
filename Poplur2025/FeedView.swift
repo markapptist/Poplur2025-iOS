@@ -69,6 +69,7 @@ struct FeedView: View {
     @State private var posts: [FeedPost] = []
     @State private var isLoading = false
     @State private var didSeedIfEmpty = false
+    @State private var didBootstrap = false
 
     // Pagination
     private let pageSize = 5
@@ -197,37 +198,51 @@ struct FeedView: View {
             .background(Color.black)
         }
         .task {
-            // Demo default pole position in the center; remove when wiring to real source
-            poleModel.position = PolePosition(x: 0.5, y: 0.5)
+            // Defer heavy bootstrap slightly to let first frame render
+            if didBootstrap == false {
+                didBootstrap = true
+                // Small delay (~140ms)
+                try? await Task.sleep(nanoseconds: 140_000_000)
 
-            if let coord = locationProvider.coordinate {
-                if let iso = await geocodeCountry(from: coord), let idx = countries.firstIndex(where: { $0.code == iso }) {
-                    selectedCountryIndex = idx
+                // Demo default pole position in the center; remove when wiring to real source
+                poleModel.position = PolePosition(x: 0.5, y: 0.5)
+
+                // Lightweight country selection; geocode if available, else heuristic
+                if let coord = locationProvider.coordinate {
+                    if let iso = await geocodeCountry(from: coord), let idx = countries.firstIndex(where: { $0.code == iso }) {
+                        selectedCountryIndex = idx
+                    } else {
+                        selectedCountryIndex = countryIndex(for: coord)
+                    }
+                }
+
+                // Brief TV static intro and initial load
+                showStatic = true
+                playStaticSound()
+                await reload()
+
+                // brief static then fade
+                try? await Task.sleep(nanoseconds: 120_000_000)
+                await MainActor.run { withAnimation { showStatic = false } }
+                stopStaticSound()
+
+                // Fade out launch logo without blocking UI
+                await MainActor.run {
+                    withAnimation(.easeOut(duration: 0.5)) {
+                        launchLogoOpacity = 0
+                        launchLogoScale = 1.05
+                    }
+                }
+                // Remove the logo overlay after the fade completes
+                try? await Task.sleep(nanoseconds: 550_000_000)
+                await MainActor.run { showLaunchLogo = false }
+
+                if posts.isEmpty, !didSeedIfEmpty {
+                    didSeedIfEmpty = true
+                    await seedAndReload()
                 } else {
-                    selectedCountryIndex = countryIndex(for: coord)
+                    prefetchVisibleUsernames()
                 }
-            }
-            showStatic = true
-            playStaticSound()
-            await reload()
-            // brief static then fade
-            try? await Task.sleep(nanoseconds: 150_000_000)
-            await MainActor.run { withAnimation { showStatic = false } }
-            stopStaticSound()
-            await MainActor.run {
-                withAnimation(.easeOut(duration: 0.6)) {
-                    launchLogoOpacity = 0
-                    launchLogoScale = 1.05
-                }
-            }
-            // Remove the logo overlay after the fade completes
-            try? await Task.sleep(nanoseconds: 700_000_000)
-            await MainActor.run { showLaunchLogo = false }
-            if posts.isEmpty, !didSeedIfEmpty {
-                didSeedIfEmpty = true
-                await seedAndReload()
-            } else {
-                prefetchVisibleUsernames()
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .LoadFeedNow)) { _ in

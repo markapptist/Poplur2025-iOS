@@ -604,3 +604,6 @@ extension CameraKitController: CLLocationManagerDelegate {
     }
 }
 
+extension Notification.Name {
+    static let LoadMapNow = Notification.Name("LoadMapNow")
+}

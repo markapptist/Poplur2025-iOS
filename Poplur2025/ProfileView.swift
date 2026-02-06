@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 import FirebaseAuth
 import FirebaseFirestore
+import UserNotifications
 
 struct ProfileView: View {
     @EnvironmentObject private var auth: AuthViewModel
@@ -15,6 +16,8 @@ struct ProfileView: View {
     @State private var showCamera = false
     @State private var profileImage: UIImage? = nil
     @State private var profileImageURL: URL? = nil
+    @State private var showDMs = false
+    @State private var showSettings = false
 
     enum DisplayMode: String, CaseIterable, Identifiable {
         case list
@@ -173,6 +176,14 @@ struct ProfileView: View {
                     .zIndex(10)
                 }
             }
+            NavigationLink(isActive: $showDMs) {
+                DMsListView()
+            } label: { EmptyView() }
+            .hidden()
+            NavigationLink(isActive: $showSettings) {
+                AppSettingsView()
+            } label: { EmptyView() }
+            .hidden()
             .navigationBarHidden(true)
             .sheet(isPresented: $showCamera) {
                 FrontCameraPicker { image in
@@ -191,6 +202,7 @@ struct ProfileView: View {
                 EditProfileView(user: $userProfile)
             }
             .task {
+                UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { _, _ in }
                 await loadMyPosts()
                 await loadPersistedProfileImageIfNeeded()
             }
@@ -208,19 +220,37 @@ struct ProfileView: View {
 
     private var headerBar: some View {
         HStack {
-            Button { } label: {
-                VStack(spacing: 4) {
-                    Capsule().fill(Color.black.opacity(0.9)).frame(width: 22, height: 3)
-                    Capsule().fill(Color.black.opacity(0.9)).frame(width: 16, height: 3)
-                    Capsule().fill(Color.black.opacity(0.9)).frame(width: 12, height: 3)
-                }
-                .padding(8)
+            // Left: Settings (gear)
+            Button {
+                showSettings = true
+            } label: {
+                Image(systemName: "gearshape.fill")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundColor(.black.opacity(0.95))
+                    .padding(10)
+                    .background(
+                        Circle().fill(Color.white)
+                            .shadow(color: Color.black.opacity(0.08), radius: 6, x: 0, y: 4)
+                    )
             }
             .buttonStyle(.plain)
+
             Spacer()
-            HStack {
-                EmptyView()
+
+            // Right: DMs (envelope)
+            Button {
+                showDMs = true
+            } label: {
+                Image(systemName: "envelope.fill")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundColor(.black.opacity(0.95))
+                    .padding(10)
+                    .background(
+                        Circle().fill(Color.white)
+                            .shadow(color: Color.black.opacity(0.08), radius: 6, x: 0, y: 4)
+                    )
             }
+            .buttonStyle(.plain)
         }
         .padding(.horizontal, 16)
         .padding(.top, headerTopPadding)
@@ -563,5 +593,7 @@ private struct QuerySnapshotProxy {
 extension Notification.Name {
     static let LoadProfileNow = Notification.Name("LoadProfileNow")
     static let CenterMapOnUserLocation = Notification.Name("CenterMapOnUserLocation")
+    static let OpenSettingsRequested = Notification.Name("OpenSettingsRequested")
+    static let OpenDMsRequested = Notification.Name("OpenDMsRequested")
 }
 

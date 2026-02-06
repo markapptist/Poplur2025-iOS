@@ -21,6 +21,7 @@
 		3936CD8F2EB649E8006502D5 /* SCSDKCameraKitReferenceSwiftUI in Frameworks */ = {isa = PBXBuildFile; productRef = 3936CD8E2EB649E8006502D5 /* SCSDKCameraKitReferenceSwiftUI */; };
 		3937AF562EB3C67300A8F548 /* SnapSDK in Frameworks */ = {isa = PBXBuildFile; productRef = 3937AF552EB3C67300A8F548 /* SnapSDK */; };
 		3970144F2EBA4B04001FBC4C /* SCSDKCameraKitReferenceUI in Frameworks */ = {isa = PBXBuildFile; productRef = 3936CD902EB649E8006502D5 /* SCSDKCameraKitReferenceUI */; };
+		F0640B822F3521FC0093A1F4 /* GoogleMaps3D in Frameworks */ = {isa = PBXBuildFile; productRef = F0640B812F3521FC0093A1F4 /* GoogleMaps3D */; };
 		F070D53D2F33B192006F44C8 /* GoogleMobileAds in Frameworks */ = {isa = PBXBuildFile; productRef = F070D53C2F33B192006F44C8 /* GoogleMobileAds */; };
 /* End PBXBuildFile section */
 
@@ -84,6 +85,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				3970144F2EBA4B04001FBC4C /* SCSDKCameraKitReferenceUI in Frameworks */,
+				F0640B822F3521FC0093A1F4 /* GoogleMaps3D in Frameworks */,
 				3937AF562EB3C67300A8F548 /* SnapSDK in Frameworks */,
 				3936CD8B2EB649E8006502D5 /* SCSDKCameraKitLoginKitAuth in Frameworks */,
 				391605ED2E3F4A0B000ACB3E /* FirebaseAppCheck in Frameworks */,
@@ -181,6 +183,7 @@
 				3936CD8E2EB649E8006502D5 /* SCSDKCameraKitReferenceSwiftUI */,
 				3936CD902EB649E8006502D5 /* SCSDKCameraKitReferenceUI */,
 				F070D53C2F33B192006F44C8 /* GoogleMobileAds */,
+				F0640B812F3521FC0093A1F4 /* GoogleMaps3D */,
 			);
 			productName = Poplur2025;
 			productReference = 391605C12E3F48FF000ACB3E /* Poplur2025.app */;
@@ -269,6 +272,7 @@
 				3937AF542EB3C67300A8F548 /* XCRemoteSwiftPackageReference "snap-kit-spm" */,
 				3936CD872EB649E8006502D5 /* XCRemoteSwiftPackageReference "camera-kit-ios-sdk" */,
 				F070D5382F331BF8006F44C8 /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */,
+				F0640B802F3521FC0093A1F4 /* XCRemoteSwiftPackageReference "ios-maps-3d-sdk" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 391605C22E3F48FF000ACB3E /* Products */;
@@ -675,6 +679,14 @@
 				minimumVersion = 2.6.0;
 			};
 		};
+		F0640B802F3521FC0093A1F4 /* XCRemoteSwiftPackageReference "ios-maps-3d-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/googlemaps/ios-maps-3d-sdk";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.0.2;
+			};
+		};
 		F070D5382F331BF8006F44C8 /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/googleads/swift-package-manager-google-mobile-ads";
@@ -755,6 +767,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 3937AF542EB3C67300A8F548 /* XCRemoteSwiftPackageReference "snap-kit-spm" */;
 			productName = SnapSDK;
+		};
+		F0640B812F3521FC0093A1F4 /* GoogleMaps3D */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F0640B802F3521FC0093A1F4 /* XCRemoteSwiftPackageReference "ios-maps-3d-sdk" */;
+			productName = GoogleMaps3D;
 		};
 		F070D53C2F33B192006F44C8 /* GoogleMobileAds */ = {
 			isa = XCSwiftPackageProductDependency;

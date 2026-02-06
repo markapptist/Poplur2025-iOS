@@ -125,7 +125,7 @@ private struct CubeSceneView: UIViewRepresentable {
     private func makeMaterials() -> [SCNMaterial] {
         // Map faces to tabs in order: +X, -X, +Y, -Y, +Z, -Z
         // We'll use 5 faces for the 5 tabs; the extra face repeats the first.
-        let tabs: [AppTab] = [.map, .record, .feed, .profile, .settings]
+        let tabs: [AppTab] = [.map, .record, .feed, .profile]
         var faces: [AppTab] = tabs
         faces.append(tabs.first!)
 
@@ -148,12 +148,11 @@ private struct CubeSceneView: UIViewRepresentable {
             UIBezierPath(roundedRect: rect.insetBy(dx: 8, dy: 8), cornerRadius: 24).fill()
 
             // Icon
-            let isSettings = (tab == .settings)
-            let symbolName = isSettings ? "gearshape.fill" : tab.systemImage
-            let pointSize: CGFloat = isSettings ? 92 : 80
-            let iconWidth: CGFloat = isSettings ? 100 : 90
-            let iconHeight: CGFloat = isSettings ? 100 : 90
-            let iconY: CGFloat = isSettings ? 66 : 70
+            let symbolName = tab.systemImage
+            let pointSize: CGFloat = 80
+            let iconWidth: CGFloat = 90
+            let iconHeight: CGFloat = 90
+            let iconY: CGFloat = 70
             let config = UIImage.SymbolConfiguration(pointSize: pointSize, weight: .bold)
             let image = UIImage(systemName: symbolName, withConfiguration: config) ?? UIImage()
             let imgRect = CGRect(x: (size.width - iconWidth) / 2, y: iconY, width: iconWidth, height: iconHeight)
@@ -177,7 +176,7 @@ private struct CubeSceneView: UIViewRepresentable {
         var parent: CubeSceneView
         weak var view: SCNView?
         private var currentIndex: Int = 0
-        private let tabs: [AppTab] = [.map, .record, .feed, .profile, .settings]
+        private let tabs: [AppTab] = [.map, .record, .feed, .profile]
         var onSwipeUp: (() -> Void)?
         var onCubeTap: (() -> Void)?
         var parentSwipeUpHandler: (() -> Void)?
@@ -210,10 +209,8 @@ private struct CubeSceneView: UIViewRepresentable {
         }
 
         @objc func handleTap(_ gesture: UITapGestureRecognizer) {
-            // Only trigger when the record tab is active
-            if parent.selectedTab == .record {
-                onCubeTap?()
-            }
+            onCubeTap?()
+            NotificationCenter.default.post(name: Notification.Name("CubeTabViewTappedNotification"), object: nil)
         }
 
         @objc func handlePan(_ gesture: UIPanGestureRecognizer) {

@@ -164,18 +164,15 @@ struct HomeView: View {
                     feedTabContent
                 case .profile:
                     profileTabContent
-                case .settings:
-                    AppSettingsView()
+                @unknown default:
+                    feedTabContent
                 }
             }
             // 3D Cube tab control overlay
             VStack {
                 Spacer()
                 CubeTabView(selectedTab: $selectedTab, onSwipeUp: {
-                    if selectedTab == .settings {
-                        // Swipe up on settings returns to profile
-                        withAnimation { selectedTab = .profile }
-                    } else if selectedTab == .record {
+                    if selectedTab == .record {
                         // On record tab, swipe triggers capture
                         NotificationCenter.default.post(name: Notification.Name("TriggerCameraCapture"), object: nil)
                     } else {
@@ -190,9 +187,9 @@ struct HomeView: View {
             .gesture(
                 DragGesture(minimumDistance: 20)
                     .onEnded { value in
-                        // Detect swipe down
+                        // Detect swipe down; settings no longer accessible via tab
                         if value.translation.height > 20, selectedTab == .profile {
-                            withAnimation { selectedTab = .settings }
+                            // No-op: settings access removed from tab navigation
                         }
                     }
             )
@@ -227,7 +224,9 @@ struct HomeView: View {
             }
         }
         .onChange(of: selectedTab) { _ in
-            // Only reset-to-top on tab changes; no mass loads
+            if !([AppTab.map, .record, .feed, .profile].contains(selectedTab)) {
+                selectedTab = .feed
+            }
             NotificationCenter.default.post(name: .ResetTabToTop, object: nil)
         }
         .onChange(of: auth.isAuthenticated) { authed in

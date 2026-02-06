@@ -14,7 +14,7 @@ final class NotificationsCoordinator: NSObject, UNUserNotificationCenterDelegate
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
         let userInfo = response.notification.request.content.userInfo
         if let postID = userInfo["postID"] as? String {
-            MapView.postFocusRequest(postID: postID)
+            NotificationCenter.default.post(name: .postFocusRequest, object: nil, userInfo: ["postID": postID])
         }
         completionHandler()
     }
@@ -24,6 +24,10 @@ final class NotificationsCoordinator: NSObject, UNUserNotificationCenterDelegate
         // Show banner/sound in foreground as well if desired
         completionHandler([.banner, .sound])
     }
+}
+
+extension Notification.Name {
+    static let postFocusRequest = Notification.Name("postFocusRequest")
 }
 
 // Ensure the coordinator is initialized early by referencing it from module load time

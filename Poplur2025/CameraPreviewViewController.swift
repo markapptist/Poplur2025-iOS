@@ -1,30 +1,39 @@
 import UIKit
 import AVFoundation
 
-/// A lightweight view controller that hosts an AVCaptureVideoPreviewLayer
-/// for a provided AVCaptureSession.
+extension Notification.Name {
+    static let cubeTabViewTapped = Notification.Name("CubeTabViewTappedNotification")
+}
+
+/// Hosts an AVCaptureVideoPreviewLayer for a provided AVCaptureSession.
 final class CameraPreviewViewController: UIViewController {
+
+    // MARK: - Properties
     private let session: AVCaptureSession
     private let previewLayer: AVCaptureVideoPreviewLayer
-    private var isTorchOn: Bool = false
-    /// Called when the shutter button is tapped.
+
+    /// Photo capture callback
     var onShutter: (() -> Void)?
-    // Video recording callbacks
+
+    /// Video recording callbacks
     var onStartVideo: (() -> Void)?
     var onStopVideo: (() -> Void)?
-    // Swipe navigation callbacks
+
+    /// Swipe navigation callbacks (optional)
     var onSwipeLeft: (() -> Void)?
     var onSwipeRight: (() -> Void)?
-    private let shutterButton = UIButton(type: .system)
+
     private let torchButton = UIButton(type: .system)
     private let flipButton = UIButton(type: .system)
 
+    private var isTorchOn: Bool = false
+
+    // MARK: - Init
     init(session: AVCaptureSession) {
         self.session = session
         self.previewLayer = AVCaptureVideoPreviewLayer(session: session)
         super.init(nibName: nil, bundle: nil)
         self.previewLayer.videoGravity = .resizeAspectFill
-        self.shutterButton.accessibilityLabel = "Shutter"
     }
 
     @available(*, unavailable)
@@ -32,29 +41,66 @@ final class CameraPreviewViewController: UIViewController {
         fatalError("init(coder:) has not been implemented")
     }
 
+    // MARK: - Lifecycle
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .black
         view.layer.addSublayer(previewLayer)
 
-        shutterButton.isHidden = true
-        shutterButton.removeTarget(self, action: #selector(shutterTapped), for: .touchUpInside)
+        setupButtons()
+        setupGestures()
+        updateTorchAvailability()
+        
+        NotificationCenter.default.addObserver(self, selector: #selector(handleCubeTappedNotification), name: .cubeTabViewTapped, object: nil)
+    }
 
-        // Torch button setup
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        previewLayer.frame = view.bounds
+        updateTorchAvailability()
+    }
+    
+    deinit {
+        NotificationCenter.default.removeObserver(self, name: .cubeTabViewTapped, object: nil)
+    }
+
+    // MARK: - Public Trigger
+    /// Programmatically trigger a photo capture
+    func triggerShutter() {
+        onShutter?()
+    }
+    
+    /// Call this when the CubeTabView is pressed to take a photo.
+    func cubePressed() {
+        // Reuse the same shutter pathway
+        onShutter?()
+    }
+    
+    @objc private func handleCubeTappedNotification() {
+        cubePressed()
+    }
+
+    /// Ask the owning coordinator/controller to present a preview after photo capture completes.
+    /// Call this from your capture completion handler once you have the image data ready.
+    var onRequestPreview: (() -> Void)?
+
+    // MARK: - Setup
+    private func setupButtons() {
+        // Torch
         torchButton.translatesAutoresizingMaskIntoConstraints = false
-        torchButton.backgroundColor = UIColor.white.withAlphaComponent(0.8)
+        torchButton.backgroundColor = UIColor.white.withAlphaComponent(0.85)
         torchButton.tintColor = .black
-        torchButton.setImage(UIImage(systemName: "flashlight.off.fill"), for: .normal)
         torchButton.layer.cornerRadius = 20
+        torchButton.setImage(UIImage(systemName: "flashlight.off.fill"), for: .normal)
         torchButton.addTarget(self, action: #selector(torchTapped), for: .touchUpInside)
         view.addSubview(torchButton)
 
-        // Flip camera button setup
+        // Flip
         flipButton.translatesAutoresizingMaskIntoConstraints = false
-        flipButton.backgroundColor = UIColor.white.withAlphaComponent(0.8)
+        flipButton.backgroundColor = UIColor.white.withAlphaComponent(0.85)
         flipButton.tintColor = .black
-        flipButton.setImage(UIImage(systemName: "arrow.triangle.2.circlepath.camera"), for: .normal)
         flipButton.layer.cornerRadius = 20
+        flipButton.setImage(UIImage(systemName: "arrow.triangle.2.circlepath.camera"), for: .normal)
         flipButton.addTarget(self, action: #selector(flipTapped), for: .touchUpInside)
         view.addSubview(flipButton)
 
@@ -69,31 +115,25 @@ final class CameraPreviewViewController: UIViewController {
             flipButton.widthAnchor.constraint(equalToConstant: 40),
             flipButton.heightAnchor.constraint(equalToConstant: 40)
         ])
+    }
 
-        updateTorchAvailability()
+    private func setupGestures() {
+        // Long press = video record
+        let longPress = UILongPressGestureRecognizer(
+            target: self,
+            action: #selector(handleLongPress(_:))
+        )
+        longPress.minimumPressDuration = 0.25
+        view.addGestureRecognizer(longPress)
 
+        // Horizontal pan = swipe navigation
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
         pan.maximumNumberOfTouches = 1
         view.addGestureRecognizer(pan)
     }
 
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        previewLayer.frame = view.bounds
-        updateTorchAvailability()
-    }
-
-    /// Programmatically trigger the shutter to take a photo.
-    /// Call this when an external UI (e.g., the cube in CubeTabView) is pressed on the record tab.
-    func triggerShutter() {
-        onShutter?()
-    }
-
-    @objc private func shutterTapped() {
-        onShutter?()
-    }
-
-    @objc private func handleShutterLongPress(_ gesture: UILongPressGestureRecognizer) {
+    // MARK: - Gesture Handlers
+    @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
         switch gesture.state {
         case .began:
             onStartVideo?()
@@ -104,8 +144,22 @@ final class CameraPreviewViewController: UIViewController {
         }
     }
 
+    @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
+        let translation = gesture.translation(in: view)
+        let threshold: CGFloat = 80
+
+        if gesture.state == .ended, abs(translation.x) > abs(translation.y) {
+            if translation.x <= -threshold {
+                onSwipeLeft?()
+            } else if translation.x >= threshold {
+                onSwipeRight?()
+            }
+        }
+    }
+
+    // MARK: - Torch / Flip
     private func activeDevice() -> AVCaptureDevice? {
-        return (session.inputs.first as? AVCaptureDeviceInput)?.device
+        (session.inputs.first as? AVCaptureDeviceInput)?.device
     }
 
     private func updateTorchAvailability() {
@@ -116,21 +170,19 @@ final class CameraPreviewViewController: UIViewController {
             torchButton.setImage(UIImage(systemName: "flashlight.off.fill"), for: .normal)
             return
         }
+
         let supported = device.hasTorch
         torchButton.isEnabled = supported
         torchButton.alpha = supported ? 1.0 : 0.5
-        if supported {
-            isTorchOn = device.isTorchActive
-            let icon = isTorchOn ? "flashlight.on.fill" : "flashlight.off.fill"
-            torchButton.setImage(UIImage(systemName: icon), for: .normal)
-        } else {
-            isTorchOn = false
-            torchButton.setImage(UIImage(systemName: "flashlight.off.fill"), for: .normal)
-        }
+
+        isTorchOn = device.isTorchActive
+        let icon = isTorchOn ? "flashlight.on.fill" : "flashlight.off.fill"
+        torchButton.setImage(UIImage(systemName: icon), for: .normal)
     }
 
     @objc private func torchTapped() {
         guard let device = activeDevice(), device.hasTorch else { return }
+
         do {
             try device.lockForConfiguration()
             if device.isTorchActive {
@@ -142,18 +194,23 @@ final class CameraPreviewViewController: UIViewController {
             }
             device.unlockForConfiguration()
         } catch {
-            print("[Camera] Torch error: \(error)")
+            print("[CameraPreviewVC] Torch error:", error)
             isTorchOn = false
         }
+
         let icon = isTorchOn ? "flashlight.on.fill" : "flashlight.off.fill"
         torchButton.setImage(UIImage(systemName: icon), for: .normal)
     }
 
     @objc private func flipTapped() {
         guard let currentInput = session.inputs.first as? AVCaptureDeviceInput else { return }
-        let newPosition: AVCaptureDevice.Position = currentInput.device.position == .back ? .front : .back
+
+        let newPosition: AVCaptureDevice.Position =
+            currentInput.device.position == .back ? .front : .back
+
         session.beginConfiguration()
         session.removeInput(currentInput)
+
         var didAdd = false
         if let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: newPosition),
            let newInput = try? AVCaptureDeviceInput(device: device),
@@ -161,36 +218,19 @@ final class CameraPreviewViewController: UIViewController {
             session.addInput(newInput)
             didAdd = true
         }
-        if didAdd == false {
-            // Re-add old input on failure
-            if session.canAddInput(currentInput) {
-                session.addInput(currentInput)
-            }
+
+        if didAdd == false, session.canAddInput(currentInput) {
+            session.addInput(currentInput)
         }
+
         session.commitConfiguration()
-        // Reset torch UI after flip; front camera typically lacks torch
+
+        // Front camera usually has no torch
         isTorchOn = false
         torchButton.setImage(UIImage(systemName: "flashlight.off.fill"), for: .normal)
-        // Update availability after swap
+
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
             self?.updateTorchAvailability()
-        }
-    }
-
-    @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
-        let translation = gesture.translation(in: view)
-        let threshold: CGFloat = 80
-        switch gesture.state {
-        case .ended:
-            if abs(translation.x) > abs(translation.y) {
-                if translation.x <= -threshold {
-                    onSwipeLeft?()
-                } else if translation.x >= threshold {
-                    onSwipeRight?()
-                }
-            }
-        default:
-            break
         }
     }
 }
