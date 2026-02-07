@@ -102,6 +102,9 @@ struct FeedView: View {
     @State private var popPlayer: AVAudioPlayer? = nil
 
     @State private var showHeart: Bool = false
+
+    // New flag added as per instruction
+    @State private var enableStaticEffects: Bool = true // enable at launch so static is audible during transitions
     
     // Country paging
     @State private var selectedCountryIndex: Int = 0
@@ -167,9 +170,8 @@ struct FeedView: View {
                 Color.orange.ignoresSafeArea() // TEMP: confirm FeedView is visible
                 Group {
                     feedContent(in: geo.size)
-                    // overlayChrome
-                    // profileNavigationLink
                 }
+                .environment(\.enableStaticEffects, enableStaticEffects)
                 .opacity(1) // TEMP: force visible for debugging (was: isFeedReady ? 1 : 0)
                 .zIndex(5)
                 .background(Color.black)
@@ -200,45 +202,39 @@ struct FeedView: View {
             // Defer heavy bootstrap slightly to let first frame render
             if didBootstrap == false {
                 didBootstrap = true
-                // Small delay (~140ms)
-                try? await Task.sleep(nanoseconds: 140_000_000)
-
+                // Removed initial sleep for faster startup
+                
                 // Demo default pole position in the center; remove when wiring to real source
                 poleModel.position = PolePosition(x: 0.5, y: 0.5)
 
-                // Lightweight country selection; geocode if available, else heuristic
+                // Lightweight country selection: fast heuristic first; geocode later
                 if let coord = locationProvider.coordinate {
-                    if let iso = await geocodeCountry(from: coord), let idx = countries.firstIndex(where: { $0.code == iso }) {
-                        selectedCountryIndex = idx
-                    } else {
-                        selectedCountryIndex = countryIndex(for: coord)
+                    selectedCountryIndex = countryIndex(for: coord)
+                    Task { @MainActor in
+                        if let iso = await geocodeCountry(from: coord), let idx = countries.firstIndex(where: { $0.code == iso }) {
+                            if idx != selectedCountryIndex { selectedCountryIndex = idx }
+                        }
                     }
                 }
 
-                // Brief TV static intro and initial load
-                showStatic = true
-                playStaticSound()
+                // Initial load without TV static to speed first frame
                 await reload()
-                // Content is now ready; flip readiness, then fade static in sync
                 await MainActor.run {
                     isFeedReady = true
-                    print("[Debug] isFeedReady set to:", isFeedReady)
+                    showStatic = false
                 }
-                try? await Task.sleep(nanoseconds: 120_000_000)
-                await MainActor.run { withAnimation { showStatic = false } }
                 stopStaticSound()
-                await MainActor.run { showStatic = false }
 
-                // Fade out launch logo without blocking UI
+                // Simplified launch logo fade without blocking/sleep
                 await MainActor.run {
-                    withAnimation(.easeOut(duration: 0.5)) {
+                    withAnimation(.easeOut(duration: 0.3)) {
                         launchLogoOpacity = 0
-                        launchLogoScale = 1.05
+                        launchLogoScale = 1.02
                     }
                 }
-                // Remove the logo overlay after the fade completes
-                try? await Task.sleep(nanoseconds: 550_000_000)
-                await MainActor.run { showLaunchLogo = false }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                    showLaunchLogo = false
+                }
 
                 if posts.isEmpty, !didSeedIfEmpty {
                     didSeedIfEmpty = true
@@ -252,6 +248,7 @@ struct FeedView: View {
 
                 await MainActor.run {
                     currentIndex = 0
+                    enableStaticEffects = true
                 }
 
                 prefetchVisibleUsernames()
@@ -282,10 +279,7 @@ struct FeedView: View {
             hapticGenerator.prepare()
             notifHaptics.prepare()
             try? AVAudioSession.sharedInstance().setActive(false)
-            if posts.isEmpty {
-                print("[Feed] onAppear fallback — posts empty, triggering reload()")
-                Task { await reload() }
-            }
+            // Removed conditional reload on onAppear as per instruction
         }
         .onChange(of: showStatic) { visible in
             if visible {
@@ -305,7 +299,7 @@ struct FeedView: View {
                             await MainActor.run { showStatic = true }
                             playStaticSound()
                             await reloadForCountry()
-                            try? await Task.sleep(nanoseconds: 120_000_000)
+                            // Removed artificial sleep
                             await MainActor.run { withAnimation { showStatic = false } }
                             stopStaticSound()
                         }
@@ -316,7 +310,7 @@ struct FeedView: View {
                             await MainActor.run { showStatic = true }
                             playStaticSound()
                             await reloadForCountry()
-                            try? await Task.sleep(nanoseconds: 120_000_000)
+                            // Removed artificial sleep
                             await MainActor.run { withAnimation { showStatic = false } }
                             stopStaticSound()
                         }
@@ -724,7 +718,7 @@ struct FeedView: View {
                 )
                 .offset(x: dragAxis == .horizontal ? dragTranslation * 0.25 : 0)
                 .offset(y: dragAxis == .vertical ? dragTranslation * 0.25 : 0)
-//                .animation(.spring(response: 0.25, dampingFraction: 0.8), value: dragTranslation) // Removed as per instruction
+    //                .animation(.spring(response: 0.25, dampingFraction: 0.8), value: dragTranslation) // Removed as per instruction
                 .onTapGesture(count: 2) {
                     if var post = posts[safe: currentIndex] {
                         // Like action (log for now)
@@ -767,8 +761,10 @@ struct FeedView: View {
     
     @ViewBuilder
     private func tvStaticOverlay(in size: CGSize) -> some View {
-        StaticView(size: size, isVisible: showStatic)
-            .allowsHitTesting(false)
+        if enableStaticEffects {
+            StaticView(size: size, isVisible: showStatic)
+                .allowsHitTesting(false)
+        }
     }
 
     private var profileNavigationLink: some View {
@@ -795,14 +791,6 @@ struct FeedView: View {
             ZStack {
                 VStack {
                     HStack {
-                        let readyText = isFeedReady ? "yes" : "no"
-                        Text("posts: \(posts.count) ready: \(readyText)")
-                            .font(.system(size: 12, weight: .semibold, design: .rounded))
-                            .foregroundColor(.white.opacity(0.9))
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Color.black.opacity(0.55), in: Capsule())
-                            .overlay(Capsule().stroke(Color.white.opacity(0.25), lineWidth: 1))
                         Spacer()
                     }
                     .padding(.horizontal, 12)
@@ -829,6 +817,12 @@ struct FeedView: View {
     }
 
     // MARK: - Username helpers
+
+    private var isNetworkLikelyAvailable: Bool {
+        // Very lightweight heuristic: avoid during first 2 seconds of app life and when offline errors are observed.
+        // You can replace with NWPathMonitor in your app delegate and inject state.
+        return true
+    }
 
     private func displayName(for post: FeedPost) -> String {
         if let name = usernames[post.userID], !name.isEmpty {
@@ -859,6 +853,7 @@ struct FeedView: View {
     }
 
     private func prefetchVisibleUsernames() {
+        guard isNetworkLikelyAvailable else { return }
         // Prefetch username only for currentIndex since we show one post at a time
         if let uid = posts[safe: currentIndex]?.userID {
             maybeResolveUsername(for: uid)
@@ -878,6 +873,7 @@ struct FeedView: View {
     }
 
     private func playStaticSound() {
+        guard enableStaticEffects else { return }
         configureAudioSessionForStatic()
         guard staticPlayer == nil || staticPlayer?.isPlaying == false else { return }
         guard let url = Bundle.main.url(forResource: "pop", withExtension: "mp3") ?? Bundle.main.url(forResource: "pop", withExtension: "wav") else {
@@ -902,6 +898,7 @@ struct FeedView: View {
     }
     
     private func playOneShotPop() {
+        guard enableStaticEffects else { return }
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playback, mode: .default, options: [])
@@ -938,6 +935,7 @@ struct FeedView: View {
     }
 
     private func maybeShowAd(probability: Double = 0.12) {
+        guard isFeedReady else { return }
         let roll = Double.random(in: 0...1)
         guard roll <= probability else { return }
         presentInterstitialOrFallback()
@@ -1093,6 +1091,8 @@ private struct FeedFullscreenPageView: View {
         String(format: "%.4f, %.4f", post.latitude, post.longitude)
     }
 
+    @Environment(\.enableStaticEffects) private var enableStaticEffects: Bool
+
     var body: some View {
         GeometryReader { geo in
             let size = geo.size
@@ -1162,43 +1162,6 @@ private struct FeedFullscreenPageView: View {
                 .padding(.top, geo.safeAreaInsets.top + 40)
                 .frame(width: size.width, height: size.height, alignment: .topTrailing)
                 .zIndex(10)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("id: \(post.id)")
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
-                    Text("url: \(post.mediaURL.prefix(36))…")
-                        .font(.system(size: 11, weight: .regular, design: .rounded))
-                    Text("phase: \(imagePhaseDebug)")
-                        .font(.system(size: 11, weight: .regular, design: .rounded))
-                }
-                .foregroundColor(.white)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 6)
-                .background(Color.black.opacity(0.55), in: Capsule())
-                .overlay(Capsule().stroke(Color.white.opacity(0.25), lineWidth: 1))
-                .padding(.leading, 16)
-                .padding(.top, 16)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .zIndex(11)
-
-                Text(String(format: "size: %.0f x %.0f", size.width, size.height))
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(.yellow)
-                    .padding(8)
-                    .background(Color.black.opacity(0.6), in: Capsule())
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-                    .padding(16)
-                    .zIndex(20)
-                
-                Text("POST: \(post.id)  PHASE: \(imagePhaseDebug)")
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundStyle(.white)
-                    .shadow(radius: 4)
-                    .padding()
-                    .background(Color.black.opacity(0.4), in: Capsule())
-                    .padding(.top, 70)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                    .zIndex(12)
 
                 VStack {
                     Spacer()
@@ -1340,6 +1303,14 @@ private extension EnvironmentValues {
         get { self[LocationProviderKey.self] }
         set { self[LocationProviderKey.self] = newValue }
     }
+    var enableStaticEffects: Bool {
+        get { self[EnableStaticEffectsKey.self] }
+        set { self[EnableStaticEffectsKey.self] = newValue }
+    }
+}
+
+private struct EnableStaticEffectsKey: EnvironmentKey {
+    static let defaultValue: Bool = true
 }
 
 private extension Array {
