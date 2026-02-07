@@ -1,5 +1,20 @@
 import SwiftUI
 
+struct MessagesRootView: View {
+    @StateObject private var store = FakeDMStore()
+
+    var body: some View {
+        NavigationStack {
+            DMsListView()
+                .navigationTitle("Messages")
+                .navigationBarTitleDisplayMode(.inline)
+                .navigationDestination(for: UUID.self) { threadID in
+                    DMThreadView(store: store, threadID: threadID)
+                }
+        }
+    }
+}
+
 // MARK: - DMs List
 struct DMsListView: View {
     @StateObject private var store = FakeDMStore()
@@ -44,9 +59,6 @@ struct DMsListView: View {
                 let thread = store.createThread(with: users)
                 // New thread appears at top; tap to open
             }
-        }
-        .navigationDestination(for: UUID.self) { threadID in
-            DMThreadView(store: store, threadID: threadID)
         }
     }
 }

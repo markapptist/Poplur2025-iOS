@@ -12,6 +12,10 @@ extension Notification.Name {
     static let CubeMotionUpdate = Notification.Name("CubeMotionUpdate")
 }
 
+extension Notification.Name {
+    static let FeedReady = Notification.Name("FeedReady")
+}
+
 @MainActor
 final class SceneMotionController: ObservableObject {
     private let motion = CMMotionManager()
@@ -53,6 +57,7 @@ struct HomeView: View {
     @State private var didTriggerMapInitialLoad = false
     @State private var didTriggerProfileInitialLoad = false
     @State private var didStartCameraOnce = false
+    @State private var isFeedReady: Bool = false
 
     @StateObject private var motionController = SceneMotionController()
 
@@ -171,18 +176,21 @@ struct HomeView: View {
             // 3D Cube tab control overlay
             VStack {
                 Spacer()
-                CubeTabView(selectedTab: $selectedTab, onSwipeUp: {
-                    if selectedTab == .record {
-                        // On record tab, swipe triggers capture
-                        NotificationCenter.default.post(name: Notification.Name("TriggerCameraCapture"), object: nil)
-                    } else {
-                        // Default: keep existing behavior if needed
-                        NotificationCenter.default.post(name: Notification.Name("ShowRecordCaptureUI"), object: nil)
-                    }
-                })
-                .tint(.white)
-                .padding(.bottom, 28)
+                if isFeedReady {
+                    CubeTabView(selectedTab: $selectedTab, onSwipeUp: {
+                        if selectedTab == .record {
+                            // On record tab, swipe triggers capture
+                            NotificationCenter.default.post(name: Notification.Name("TriggerCameraCapture"), object: nil)
+                        } else {
+                            // Default: keep existing behavior if needed
+                            NotificationCenter.default.post(name: Notification.Name("ShowRecordCaptureUI"), object: nil)
+                        }
+                    })
+                    .tint(.white)
+                    .transition(.opacity)
+                }
             }
+            .padding(.bottom, 28)
             .ignoresSafeArea(edges: .bottom)
             .gesture(
                 DragGesture(minimumDistance: 20)
@@ -250,6 +258,9 @@ struct HomeView: View {
             @unknown default:
                 break
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .FeedReady)) { _ in
+            isFeedReady = true
         }
     }
 }

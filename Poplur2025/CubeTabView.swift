@@ -34,7 +34,7 @@ private struct FloatingCube: View {
                     bob = -12
                 }
                 withAnimation(.easeInOut(duration: 2.4).repeatForever(autoreverses: true)) {
-                    tilt = 5
+                    tilt = 0
                 }
             }
     }
@@ -230,10 +230,9 @@ private struct CubeSceneView: UIViewRepresentable {
                 // Clear liveRotation to avoid fighting motion tilt during pan
                 self.liveRotation = SCNVector3Zero
 
-                // Optionally, apply a tiny live rotation for responsiveness
-                let liveAngle = Float(panAccumulated / 380) // small preview tilt
+                // Keep face flat during drag; do not expose adjacent faces
                 let baseY = Float(currentIndex) * (-Float.pi / 2)
-                cube.eulerAngles = SCNVector3(0, baseY + liveAngle, 0)
+                cube.eulerAngles = SCNVector3(0, baseY, 0)
 
             case .ended, .cancelled, .failed:
                 // Decide if we switch faces
@@ -311,10 +310,11 @@ private struct CubeSceneView: UIViewRepresentable {
                 // Map to a single horizontal component for side-to-side sway only
                 // Use device roll (left-right tilt) to drive horizontal sway; adjust sign if needed
                 let horizontal = Float((notif.userInfo?["roll"] as? Double) ?? 0)
+                let horizontalScaled = horizontal * 0.5
 
                 // Clamp raw horizontal to keep within reasonable bounds
                 let maxTiltRad: Float = deg2rad(60)
-                let clampedH = clamp(horizontal, min: -maxTiltRad, max: maxTiltRad)
+                let clampedH = clamp(horizontalScaled, min: -maxTiltRad, max: maxTiltRad)
 
                 // Only store Y component; zero X/Z to prevent up/down tilt
                 self.liveRotation = SCNVector3(0, clampedH, 0)
@@ -335,8 +335,8 @@ private struct CubeSceneView: UIViewRepresentable {
             let baseY = Float(currentIndex) * (-Float.pi / 2)
 
             // We only sway side-to-side: ignore X and Z
-            let yAdditiveScale: Float = 0.7
-            let maxYAddDeg: Float = 38
+            let yAdditiveScale: Float = 0.2
+            let maxYAddDeg: Float = 6
             let maxYAdd = deg2rad(maxYAddDeg)
 
             var yAdd = liveRotation.y * yAdditiveScale

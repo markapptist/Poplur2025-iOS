@@ -64,31 +64,54 @@ public final class FakeDMStore: ObservableObject {
         ]
         self.threads = []
 
-        if seed {
-            if let other = users.first {
-                let thread = createThread(with: [other])
-                _ = send(message: "Hey! This is a demo DM thread.", in: thread.id, from: other.id)
-                _ = send(message: "Reply to keep the conversation going.", in: thread.id, from: other.id)
-            }
+        if seed, let other = users.first {
+            let thread = createThread(with: [other]) // will reuse if exists
+            _ = send(message: "Hey! This is a demo DM thread.", in: thread.id, from: other.id)
+            _ = send(message: "Reply to keep the conversation going.", in: thread.id, from: other.id)
         }
     }
 
+    // MARK: - Thread creation (FIXED: reuse existing)
     @discardableResult
     public func createThread(with participants: [DMUser]) -> DMThread {
-        let ids = [currentUser.id] + participants.map { $0.id }
-        let thread = DMThread(id: UUID(), participantIDs: ids, messages: [])
+        let participantIDs = ([currentUser.id] + participants.map { $0.id })
+            .reduce(into: [UUID]()) { acc, id in
+                if acc.contains(id) == false { acc.append(id) }
+            }
+
+        // 🔑 Reuse: find thread with same participants (order-independent)
+        if let existingIndex = threads.firstIndex(where: { Set($0.participantIDs) == Set(participantIDs) }) {
+            let existing = threads.remove(at: existingIndex)
+            threads.insert(existing, at: 0) // move to top like Messages apps
+            return existing
+        }
+
+        // Otherwise, create a new one
+        let thread = DMThread(id: UUID(), participantIDs: participantIDs, messages: [])
         threads.insert(thread, at: 0)
         return thread
     }
 
+    // MARK: - Messaging
     @discardableResult
     public func send(message text: String, in threadID: UUID, from senderID: UUID? = nil) -> DMMessage? {
         guard let index = threads.firstIndex(where: { $0.id == threadID }) else { return nil }
-        let msg = DMMessage(id: UUID(), senderID: senderID ?? currentUser.id, text: text, timestamp: Date(), isRead: senderID == currentUser.id)
+
+        let sender = senderID ?? currentUser.id
+        let msg = DMMessage(
+            id: UUID(),
+            senderID: sender,
+            text: text,
+            timestamp: Date(),
+            isRead: sender == currentUser.id
+        )
+
         threads[index].messages.append(msg)
+
         // Move updated thread to top
         let updated = threads.remove(at: index)
         threads.insert(updated, at: 0)
+
         return msg
     }
 
@@ -99,10 +122,11 @@ public final class FakeDMStore: ObservableObject {
         }
     }
 
+    // MARK: - UI helpers
     public func displayNameForParticipants(_ ids: [UUID]) -> String {
         let others = ids.filter { $0 != currentUser.id }
         let names = others.compactMap { id in users.first(where: { $0.id == id })?.displayName }
-        return names.joined(separator: ", ")
+        return names.isEmpty ? "Messages" : names.joined(separator: ", ")
     }
 
     public func user(for id: UUID) -> DMUser? {

@@ -70,6 +70,7 @@ struct FeedView: View {
     @State private var isLoading = false
     @State private var didSeedIfEmpty = false
     @State private var didBootstrap = false
+    @State private var isFeedReady = false  // Added as per instruction
 
     // Pagination
     private let pageSize = 5
@@ -163,37 +164,35 @@ struct FeedView: View {
     var body: some View {
         GeometryReader { geo in
             ZStack {
-                feedContent(in: geo.size)
-                if showLaunchLogo {
-                    // Replace "LaunchLogo" with your asset name if different
-                    Group {
-                        if let _ = UIImage(named: "logo") {
-                            Image("logo")
-                                .resizable()
-                                .scaledToFit()
-                                .frame(width: 180)
-                        } else {
-                            // Fallback: simple mark if no asset exists
-                            Image(systemName: "sparkles")
-                                .font(.system(size: 80, weight: .bold))
-                                .foregroundStyle(.white)
-                                .padding(24)
-                                .background(Color.black.opacity(0.6), in: Circle())
-                                .overlay(Circle().stroke(Color.white.opacity(0.25), lineWidth: 1))
+                Color.orange.ignoresSafeArea() // TEMP: confirm FeedView is visible
+                Group {
+                    feedContent(in: geo.size)
+                    // overlayChrome
+                    // profileNavigationLink
+                }
+                .opacity(1) // TEMP: force visible for debugging (was: isFeedReady ? 1 : 0)
+                .zIndex(5)
+                .background(Color.black)
+
+                if isFeedReady == false {
+                    ZStack {
+                        Color.pink.ignoresSafeArea()
+                        Group {
+                            if let _ = UIImage(named: "logo") {
+                                Image("logo")
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(width: 200)
+                            } else {
+                                Image(systemName: "sparkles")
+                                    .font(.system(size: 80, weight: .bold))
+                                    .foregroundStyle(.white)
+                            }
                         }
                     }
-                    .scaleEffect(launchLogoScale)
-                    .opacity(launchLogoOpacity)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                    .zIndex(20)
                     .transition(.opacity)
-                    .allowsHitTesting(false)
+                    .zIndex(30)
                 }
-
-                overlayChrome
-                    .zIndex(10)
-                
-                profileNavigationLink
             }
             .background(Color.black)
         }
@@ -220,11 +219,15 @@ struct FeedView: View {
                 showStatic = true
                 playStaticSound()
                 await reload()
-
-                // brief static then fade
+                // Content is now ready; flip readiness, then fade static in sync
+                await MainActor.run {
+                    isFeedReady = true
+                    print("[Debug] isFeedReady set to:", isFeedReady)
+                }
                 try? await Task.sleep(nanoseconds: 120_000_000)
                 await MainActor.run { withAnimation { showStatic = false } }
                 stopStaticSound()
+                await MainActor.run { showStatic = false }
 
                 // Fade out launch logo without blocking UI
                 await MainActor.run {
@@ -240,8 +243,22 @@ struct FeedView: View {
                 if posts.isEmpty, !didSeedIfEmpty {
                     didSeedIfEmpty = true
                     await seedAndReload()
-                } else {
-                    prefetchVisibleUsernames()
+                }
+
+                // Defensive: if still empty, try one more reload
+                if posts.isEmpty {
+                    await reload()
+                }
+
+                await MainActor.run {
+                    currentIndex = 0
+                }
+
+                prefetchVisibleUsernames()
+
+                await MainActor.run {
+                    print("[Feed] Bootstrap complete — posts: \(posts.count)")
+                    NotificationCenter.default.post(name: Notification.Name("FeedReady"), object: nil)
                 }
             }
         }
@@ -265,11 +282,17 @@ struct FeedView: View {
             hapticGenerator.prepare()
             notifHaptics.prepare()
             try? AVAudioSession.sharedInstance().setActive(false)
+            if posts.isEmpty {
+                print("[Feed] onAppear fallback — posts empty, triggering reload()")
+                Task { await reload() }
+            }
         }
         .onChange(of: showStatic) { visible in
             if visible {
+                print("[Debug] showStatic changed to:", visible)
                 playStaticSound()
             } else {
+                print("[Debug] showStatic changed to:", visible)
                 stopStaticSound()
             }
         }
@@ -279,13 +302,23 @@ struct FeedView: View {
                     if let iso = await geocodeCountry(from: coord), let idx = countries.firstIndex(where: { $0.code == iso }) {
                         if idx != selectedCountryIndex {
                             await MainActor.run { selectedCountryIndex = idx }
+                            await MainActor.run { showStatic = true }
+                            playStaticSound()
                             await reloadForCountry()
+                            try? await Task.sleep(nanoseconds: 120_000_000)
+                            await MainActor.run { withAnimation { showStatic = false } }
+                            stopStaticSound()
                         }
                     } else {
                         let idx = countryIndex(for: coord)
                         if idx != selectedCountryIndex {
                             await MainActor.run { selectedCountryIndex = idx }
+                            await MainActor.run { showStatic = true }
+                            playStaticSound()
                             await reloadForCountry()
+                            try? await Task.sleep(nanoseconds: 120_000_000)
+                            await MainActor.run { withAnimation { showStatic = false } }
+                            stopStaticSound()
                         }
                     }
                 }
@@ -300,6 +333,7 @@ struct FeedView: View {
         ZStack {
             if posts.isEmpty {
                 emptyFeedView(in: size)
+                    .onAppear { print("[Feed] showing emptyFeedView") }
                     .ignoresSafeArea()
                     .contentShape(Rectangle())
                     .gesture(
@@ -460,6 +494,7 @@ struct FeedView: View {
                     }
             } else {
                 populatedFeedView(in: size)
+                    .onAppear { print("[Feed] showing populatedFeedView") }
                     .ignoresSafeArea()
                     .contentShape(Rectangle())
                     .gesture(
@@ -651,22 +686,7 @@ struct FeedView: View {
 
     private func emptyFeedView(in size: CGSize) -> some View {
         ZStack {
-            AsyncImage(url: URL(string: "https://picsum.photos/800/1400")) { phase in
-                switch phase {
-                case .empty:
-                    Color.clear
-                case .success(let img):
-                    img
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: size.width, height: size.height)
-                        .clipped()
-                case .failure:
-                    Color.black
-                @unknown default:
-                    Color.black
-                }
-            }
+            Color.gray
         }
         .frame(width: size.width, height: size.height)
         .background(Color.black)
@@ -692,6 +712,7 @@ struct FeedView: View {
 
     private func populatedFeedView(in size: CGSize) -> some View {
         ZStack {
+            Color.blue // TEMP: confirm populated feed ZStack is visible
             if let post = posts[safe: currentIndex] {
                 FeedFullscreenPageView(
                     post: post,
@@ -773,6 +794,20 @@ struct FeedView: View {
         GeometryReader { geo in
             ZStack {
                 VStack {
+                    HStack {
+                        let readyText = isFeedReady ? "yes" : "no"
+                        Text("posts: \(posts.count) ready: \(readyText)")
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .foregroundColor(.white.opacity(0.9))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.black.opacity(0.55), in: Capsule())
+                            .overlay(Capsule().stroke(Color.white.opacity(0.25), lineWidth: 1))
+                        Spacer()
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.top, 8)
+
                     HStack {
                         Text(countries[selectedCountryIndex].flag)
                             .font(.system(size: 28))
@@ -911,6 +946,7 @@ struct FeedView: View {
     // MARK: - Data loading stubs (fill in with your real logic)
 
     private func reload() async {
+        print("[Feed] reload() start")
         // Reset pagination state and load the first page.
         await MainActor.run {
             isLoading = true
@@ -918,6 +954,7 @@ struct FeedView: View {
             lastDocument = nil
             posts.removeAll()
             currentIndex = 0
+            print("[Feed] reload() reset state")
         }
 
         // Simulate network delay for UX parity.
@@ -925,6 +962,7 @@ struct FeedView: View {
 
         // In lieu of Firestore, generate a page of demo posts.
         let newPosts = Self.generateDemoPosts(start: 0, count: pageSize)
+        print("[Feed] reload() generated newPosts: \(newPosts.count)")
 
         await MainActor.run {
             posts = newPosts
@@ -932,24 +970,30 @@ struct FeedView: View {
             // If we couldn't load anything, mark as reached end to stop paginating.
             reachedEnd = newPosts.isEmpty
             prefetchVisibleUsernames()
+            print("[Debug] posts after reload:", posts.count)
+            print("[Feed] reload() end — posts: \(posts.count)")
         }
     }
 
     private func reloadForCountry() async {
+        print("[Feed] reloadForCountry() start — country: \(countries[selectedCountryIndex].code)")
         await MainActor.run {
             isLoading = true
             reachedEnd = false
             lastDocument = nil
             posts.removeAll()
             currentIndex = 0
+            print("[Feed] reloadForCountry() reset state")
         }
         try? await Task.sleep(nanoseconds: 150_000_000)
         let newPosts = Self.generateDemoPostsForCountry(country: countries[selectedCountryIndex].code, start: 0, count: pageSize)
+        print("[Feed] reloadForCountry() generated newPosts: \(newPosts.count)")
         await MainActor.run {
             posts = newPosts
             isLoading = false
             reachedEnd = newPosts.isEmpty
             prefetchVisibleUsernames()
+            print("[Feed] reloadForCountry() end — posts: \(posts.count)")
         }
     }
 
@@ -995,8 +1039,8 @@ struct FeedView: View {
         for i in start..<end {
             let id = "demo_\(i)"
             let userID = i % 3 == 0 ? "fake_user_\(i)" : String(format: "user_%06d", i)
-            // Lower resolution image as per instruction
-            let mediaURL = "https://picsum.photos/id/\(i % 100)/800/1400"
+            // Lower resolution image as per instruction, replaced with guaranteed placeholder
+            let mediaURL = "https://picsum.photos/800/1400"
             let latitude = 37.3349 + Double(i % 5) * 0.01
             let longitude = -122.0090 - Double(i % 7) * 0.01
             let radius = [50, 100, 250, 500, 1000, 5000].randomElement() ?? 250
@@ -1024,7 +1068,8 @@ struct FeedView: View {
         for i in start..<end {
             let id = "\(country.lowercased())_demo_\(i)"
             let userID = i % 3 == 0 ? "fake_user_\(i)" : String(format: "user_%06d", i)
-            let mediaURL = "https://picsum.photos/id/\(i % 100)/800/1400"
+            // Guaranteed placeholder mediaURL to avoid 404s
+            let mediaURL = "https://picsum.photos/800/1400"
             // Shift coordinates slightly by country index to vary positions
             let baseLat = 37.3349 + Double(abs(country.hashValue % 20)) * 0.01
             let baseLon = -122.0090 - Double(abs(country.hashValue % 20)) * 0.01
@@ -1042,6 +1087,8 @@ private struct FeedFullscreenPageView: View {
     let displayName: String
     var onUserTapped: (String) -> Void
 
+    @State private var imagePhaseDebug: String = ""
+
     private var coordinateText: String {
         String(format: "%.4f, %.4f", post.latitude, post.longitude)
     }
@@ -1050,13 +1097,22 @@ private struct FeedFullscreenPageView: View {
         GeometryReader { geo in
             let size = geo.size
             ZStack {
+                Color.green
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .ignoresSafeArea()
+                    .zIndex(0)
+
                 // Removed poster background AsyncImage block as per instruction
 
                 if let url = URL(string: post.mediaURL) {
                     AsyncImage(url: url, transaction: Transaction(animation: .none)) { phase in
                         switch phase {
                         case .empty:
-                            Color.black
+                            ZStack {
+                                Color.black
+                                ProgressView().tint(.white).scaleEffect(1.4)
+                            }
+                            .onAppear { imagePhaseDebug = "empty" }
                         case .success(let img):
                             img
                                 .resizable()
@@ -1064,18 +1120,21 @@ private struct FeedFullscreenPageView: View {
                                 .frame(width: size.width, height: size.height)
                                 .clipped()
                                 .background(Color.black)
+                                .onAppear { imagePhaseDebug = "success" }
                         case .failure:
                             ZStack {
-                                Color.black
+                                Color.red  // TEMP: make failure very visible
                                 Image(systemName: "photo")
                                     .font(.system(size: 40, weight: .bold))
-                                    .foregroundColor(.white.opacity(0.6))
+                                    .foregroundColor(.white.opacity(0.9))
                             }
+                            .onAppear { imagePhaseDebug = "failure" }
                         @unknown default:
-                            Color.black
+                            Color.black.onAppear { imagePhaseDebug = "unknown" }
                         }
                     }
                     .id("image_\(post.id)_\(post.mediaURL)")
+                    .onAppear { print("[Debug] mediaURL:", post.mediaURL) }
                 } else {
                     Color.black
                 }
@@ -1104,22 +1163,59 @@ private struct FeedFullscreenPageView: View {
                 .frame(width: size.width, height: size.height, alignment: .topTrailing)
                 .zIndex(10)
 
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("id: \(post.id)")
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    Text("url: \(post.mediaURL.prefix(36))…")
+                        .font(.system(size: 11, weight: .regular, design: .rounded))
+                    Text("phase: \(imagePhaseDebug)")
+                        .font(.system(size: 11, weight: .regular, design: .rounded))
+                }
+                .foregroundColor(.white)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background(Color.black.opacity(0.55), in: Capsule())
+                .overlay(Capsule().stroke(Color.white.opacity(0.25), lineWidth: 1))
+                .padding(.leading, 16)
+                .padding(.top, 16)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .zIndex(11)
+
+                Text(String(format: "size: %.0f x %.0f", size.width, size.height))
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.yellow)
+                    .padding(8)
+                    .background(Color.black.opacity(0.6), in: Capsule())
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                    .padding(16)
+                    .zIndex(20)
+                
+                Text("POST: \(post.id)  PHASE: \(imagePhaseDebug)")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundStyle(.white)
+                    .shadow(radius: 4)
+                    .padding()
+                    .background(Color.black.opacity(0.4), in: Capsule())
+                    .padding(.top, 70)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .zIndex(12)
+
                 VStack {
                     Spacer()
-                    BarberPole3DView(radius: Int(post.radius), maxRadius: 10_000, maxHeight: 220)
-                        .frame(width: 80, height: 220)
+                    IsometricRadiusBar(radius: .constant(post.radius))
+                        .frame(width: 60, height: 220)
                         .padding(.trailing, 12)
                 }
                 .padding(.bottom, 45)
                 .frame(width: size.width, height: size.height, alignment: .trailing)
                 .zIndex(10)
             }
-            .contentShape(Rectangle())
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             .background(Color.black)
+            .frame(width: geo.size.width, height: geo.size.height, alignment: .center)
         }
-        .ignoresSafeArea()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black)
+        .ignoresSafeArea()
     }
 }
 

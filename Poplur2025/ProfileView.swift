@@ -16,7 +16,6 @@ struct ProfileView: View {
     @State private var showCamera = false
     @State private var profileImage: UIImage? = nil
     @State private var profileImageURL: URL? = nil
-    @State private var showDMs = false
     @State private var showSettings = false
 
     enum DisplayMode: String, CaseIterable, Identifiable {
@@ -176,10 +175,6 @@ struct ProfileView: View {
                     .zIndex(10)
                 }
             }
-            NavigationLink(isActive: $showDMs) {
-                DMsListView()
-            } label: { EmptyView() }
-            .hidden()
             NavigationLink(isActive: $showSettings) {
                 AppSettingsView()
             } label: { EmptyView() }
@@ -238,8 +233,8 @@ struct ProfileView: View {
             Spacer()
 
             // Right: DMs (envelope)
-            Button {
-                showDMs = true
+            NavigationLink {
+                MessagesRootView()
             } label: {
                 Image(systemName: "envelope.fill")
                     .font(.system(size: 18, weight: .bold))

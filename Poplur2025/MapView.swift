@@ -78,65 +78,6 @@ private final class LocationManager: NSObject, ObservableObject, CLLocationManag
     }
 }
 
-// MARK: - 3D Radius Bar
-private struct RadiusBar3D: View {
-    @Binding var radius: Double
-
-    var body: some View {
-        VStack {
-            SceneView(scene: makeScene(), options: [.allowsCameraControl])
-                .frame(width: 44, height: 200)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-
-            Slider(
-                value: Binding(
-                    get: { min(max(radius, 100), 50_000) },
-                    set: { radius = min(max($0, 100), 50_000) }
-                ),
-                in: 100...50_000
-            )
-            .rotationEffect(.degrees(-90))
-            .frame(height: 44)
-            .opacity(0.001)
-        }
-        .frame(width: 44)
-    }
-
-    private func makeScene() -> SCNScene {
-        let scene = SCNScene()
-
-        let bar = SCNBox(
-            width: 0.3,
-            height: CGFloat(0.5 + min(radius, 50_000) / 50_000),
-            length: 0.3,
-            chamferRadius: 0.05
-        )
-        bar.firstMaterial?.diffuse.contents = UIColor.systemTeal
-
-        let node = SCNNode(geometry: bar)
-        scene.rootNode.addChildNode(node)
-
-        let cam = SCNCamera()
-        cam.usesOrthographicProjection = true
-        cam.orthographicScale = 1
-
-        let camNode = SCNNode()
-        camNode.camera = cam
-        camNode.position = SCNVector3(0, 0, 3)
-        scene.rootNode.addChildNode(camNode)
-
-        let light = SCNLight()
-        light.type = .omni
-
-        let lightNode = SCNNode()
-        lightNode.light = light
-        lightNode.position = SCNVector3(0, 5, 5)
-        scene.rootNode.addChildNode(lightNode)
-
-        return scene
-    }
-}
-
 // MARK: - Google Style Pin
 private struct GoogleStylePin: View {
     var body: some View {
@@ -212,7 +153,8 @@ struct MapView: View {
                     }
                 }
 
-                RadiusBar3D(radius: $radiusMeters)
+                IsometricRadiusBar(radius: $radiusMeters)
+                    .padding(.top, 40)
             }
             .padding(.trailing, 12)
             .padding(.top, 12)
