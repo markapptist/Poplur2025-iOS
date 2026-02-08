@@ -4,6 +4,7 @@ import CoreLocation
 import UIKit
 import AVFoundation
 import Contacts
+import WebKit
 #if canImport(GoogleMobileAds)
 import GoogleMobileAds
 #endif
@@ -102,6 +103,10 @@ struct FeedView: View {
     @State private var popPlayer: AVAudioPlayer? = nil
 
     @State private var showHeart: Bool = false
+
+    // YouTube content pool
+    @State private var youtubeVideoIDs: [String] = []
+    private var youtubeService = YouTubeService(apiKey: YouTubeAPI.apiKey)
     
     // Country paging
     @State private var selectedCountryIndex: Int = 0
@@ -164,102 +169,29 @@ struct FeedView: View {
     var body: some View {
         GeometryReader { geo in
             ZStack {
-                Color.orange.ignoresSafeArea() // TEMP: confirm FeedView is visible
+                Color.black.ignoresSafeArea()
                 Group {
                     feedContent(in: geo.size)
                     // overlayChrome
                     // profileNavigationLink
                 }
-                .opacity(1) // TEMP: force visible for debugging (was: isFeedReady ? 1 : 0)
+                .opacity(isFeedReady ? 1 : 0) // replaced from .opacity(1)
                 .zIndex(5)
                 .background(Color.black)
 
                 if isFeedReady == false {
-                    ZStack {
-                        Color.pink.ignoresSafeArea()
-                        Group {
-                            if let _ = UIImage(named: "logo") {
-                                Image("logo")
-                                    .resizable()
-                                    .scaledToFit()
-                                    .frame(width: 200)
-                            } else {
-                                Image(systemName: "sparkles")
-                                    .font(.system(size: 80, weight: .bold))
-                                    .foregroundStyle(.white)
-                            }
-                        }
-                    }
-                    .transition(.opacity)
-                    .zIndex(30)
+                    LoadingOverlayView(isPresented: true, background: .pink, logoName: "logo")
+                        .zIndex(30)
+                        .transition(.opacity)
                 }
             }
             .background(Color.black)
         }
         .task {
-            // Defer heavy bootstrap slightly to let first frame render
             if didBootstrap == false {
                 didBootstrap = true
-                // Small delay (~140ms)
-                try? await Task.sleep(nanoseconds: 140_000_000)
-
-                // Demo default pole position in the center; remove when wiring to real source
-                poleModel.position = PolePosition(x: 0.5, y: 0.5)
-
-                // Lightweight country selection; geocode if available, else heuristic
-                if let coord = locationProvider.coordinate {
-                    if let iso = await geocodeCountry(from: coord), let idx = countries.firstIndex(where: { $0.code == iso }) {
-                        selectedCountryIndex = idx
-                    } else {
-                        selectedCountryIndex = countryIndex(for: coord)
-                    }
-                }
-
-                // Brief TV static intro and initial load
-                showStatic = true
-                playStaticSound()
-                await reload()
-                // Content is now ready; flip readiness, then fade static in sync
-                await MainActor.run {
-                    isFeedReady = true
-                    print("[Debug] isFeedReady set to:", isFeedReady)
-                }
-                try? await Task.sleep(nanoseconds: 120_000_000)
-                await MainActor.run { withAnimation { showStatic = false } }
-                stopStaticSound()
-                await MainActor.run { showStatic = false }
-
-                // Fade out launch logo without blocking UI
-                await MainActor.run {
-                    withAnimation(.easeOut(duration: 0.5)) {
-                        launchLogoOpacity = 0
-                        launchLogoScale = 1.05
-                    }
-                }
-                // Remove the logo overlay after the fade completes
-                try? await Task.sleep(nanoseconds: 550_000_000)
-                await MainActor.run { showLaunchLogo = false }
-
-                if posts.isEmpty, !didSeedIfEmpty {
-                    didSeedIfEmpty = true
-                    await seedAndReload()
-                }
-
-                // Defensive: if still empty, try one more reload
-                if posts.isEmpty {
-                    await reload()
-                }
-
-                await MainActor.run {
-                    currentIndex = 0
-                }
-
-                prefetchVisibleUsernames()
-
-                await MainActor.run {
-                    print("[Feed] Bootstrap complete — posts: \(posts.count)")
-                    NotificationCenter.default.post(name: Notification.Name("FeedReady"), object: nil)
-                }
+                // Strict, sequential bootstrap to guarantee loading overlay timing and content readiness
+                await runStrictBootstrap()
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .LoadFeedNow)) { _ in
@@ -269,7 +201,6 @@ struct FeedView: View {
             currentIndex = 0
         }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("FeedRefreshRequested"))) { _ in
-            print("[Feed] Refresh requested — reloading feed")
             Task { await reload() }
         }
         .onChange(of: currentIndex) { newIndex in
@@ -283,16 +214,36 @@ struct FeedView: View {
             notifHaptics.prepare()
             try? AVAudioSession.sharedInstance().setActive(false)
             if posts.isEmpty {
-                print("[Feed] onAppear fallback — posts empty, triggering reload()")
                 Task { await reload() }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            Task { @MainActor in
+                // Force a strict refresh to recover from any overlay/black screen state
+                isFeedReady = false
+                showStatic = true
+                stopStaticSound()
+                playStaticSound()
+
+                posts.removeAll()
+                currentIndex = 0
+                await reload()
+                if posts.isEmpty {
+                    await seedAndReload()
+                }
+                if posts.isEmpty {
+                    await reload()
+                }
+
+                showStatic = false
+                stopStaticSound()
+                isFeedReady = !posts.isEmpty
             }
         }
         .onChange(of: showStatic) { visible in
             if visible {
-                print("[Debug] showStatic changed to:", visible)
                 playStaticSound()
             } else {
-                print("[Debug] showStatic changed to:", visible)
                 stopStaticSound()
             }
         }
@@ -326,6 +277,66 @@ struct FeedView: View {
         }
     }
 
+    // MARK: - Strict bootstrap sequence
+    private func runStrictBootstrap() async {
+        // Ensure loading overlay is visible immediately
+        await MainActor.run {
+            isFeedReady = false
+            showStatic = true
+        }
+        playStaticSound()
+
+        // Minimal on-screen time for the loading overlay (e.g., 1.2s)
+        async let minOverlay: Void = { try? await Task.sleep(nanoseconds: 1_200_000_000) }()
+
+        // Prepare essentials (pole, country, youtube pool) strictly in order
+        await MainActor.run { poleModel.position = PolePosition(x: 0.5, y: 0.5) }
+        if let coord = locationProvider.coordinate {
+            if let iso = await geocodeCountry(from: coord), let idx = countries.firstIndex(where: { $0.code == iso }) {
+                await MainActor.run { selectedCountryIndex = idx }
+            } else {
+                let idx = countryIndex(for: coord)
+                await MainActor.run { selectedCountryIndex = idx }
+            }
+        }
+
+        await loadYouTubePool()
+
+        // Load posts strictly and wait until we have content
+        await reload()
+        // If still empty, try seed and reload once
+        if posts.isEmpty {
+            await seedAndReload()
+        }
+        // Defensive: one more reload if still empty
+        if posts.isEmpty {
+            await reload()
+        }
+
+        // Wait for the minimum overlay time
+        _ = await minOverlay
+
+        // Small settle time to help first frame render
+        try? await Task.sleep(nanoseconds: 120_000_000)
+
+        // Hide static, stop sound, and reveal content in a tightly-controlled order
+        await MainActor.run {
+            withAnimation { showStatic = false }
+        }
+        stopStaticSound()
+
+        // Ensure we have at least one post before revealing
+        await MainActor.run {
+            isFeedReady = !posts.isEmpty
+            currentIndex = 0
+        }
+
+        // Notify observers that feed is ready
+        await MainActor.run {
+            NotificationCenter.default.post(name: Notification.Name("FeedReady"), object: nil)
+        }
+    }
+
     // MARK: - Split content to ease type-checking
 
     @ViewBuilder
@@ -333,7 +344,7 @@ struct FeedView: View {
         ZStack {
             if posts.isEmpty {
                 emptyFeedView(in: size)
-                    .onAppear { print("[Feed] showing emptyFeedView") }
+                    .onAppear { }
                     .ignoresSafeArea()
                     .contentShape(Rectangle())
                     .gesture(
@@ -494,7 +505,7 @@ struct FeedView: View {
                     }
             } else {
                 populatedFeedView(in: size)
-                    .onAppear { print("[Feed] showing populatedFeedView") }
+                    .onAppear { }
                     .ignoresSafeArea()
                     .contentShape(Rectangle())
                     .gesture(
@@ -640,7 +651,6 @@ struct FeedView: View {
                     .onTapGesture(count: 2) {
                         if var post = posts[safe: currentIndex] {
                             // Like action (log for now)
-                            print("Liked post: \(post.id)")
                             // Increase radius by 5000 meters, clamp to max 10000
                             let newRadius = min(10_000, post.radius + 5000)
                             let updated = FeedPost(
@@ -686,10 +696,9 @@ struct FeedView: View {
 
     private func emptyFeedView(in size: CGSize) -> some View {
         ZStack {
-            Color.gray
+            Color.black
         }
         .frame(width: size.width, height: size.height)
-        .background(Color.black)
         .onTapGesture(count: 2) {
             // On empty feed double-tap just fire haptics for consistency
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
@@ -712,7 +721,6 @@ struct FeedView: View {
 
     private func populatedFeedView(in size: CGSize) -> some View {
         ZStack {
-            Color.blue // TEMP: confirm populated feed ZStack is visible
             if let post = posts[safe: currentIndex] {
                 FeedFullscreenPageView(
                     post: post,
@@ -724,41 +732,7 @@ struct FeedView: View {
                 )
                 .offset(x: dragAxis == .horizontal ? dragTranslation * 0.25 : 0)
                 .offset(y: dragAxis == .vertical ? dragTranslation * 0.25 : 0)
-//                .animation(.spring(response: 0.25, dampingFraction: 0.8), value: dragTranslation) // Removed as per instruction
-                .onTapGesture(count: 2) {
-                    if var post = posts[safe: currentIndex] {
-                        // Like action (log for now)
-                        print("Liked post: \(post.id)")
-                        // Increase radius by 5000 meters, clamp to max 10000
-                        let newRadius = min(10_000, post.radius + 5000)
-                        let updated = FeedPost(
-                            id: post.id,
-                            latitude: post.latitude,
-                            longitude: post.longitude,
-                            mediaURL: post.mediaURL,
-                            radius: newRadius,
-                            viewCount: post.viewCount,
-                            userID: post.userID
-                        )
-                        posts[currentIndex] = updated
-                        // Haptic feedback for like
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
-                            hapticGenerator.impactOccurred(intensity: 1.0)
-                            UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
-                            notifHaptics.notificationOccurred(.success)
-                        }
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
-                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                        }
-                        playOneShotPop()
-                        withAnimation(.spring(response: 0.2, dampingFraction: 0.7)) { showHeart = true }
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                            withAnimation(.easeOut(duration: 0.15)) { showHeart = false }
-                        }
-                        hapticGenerator.prepare()
-                        notifHaptics.prepare()
-                    }
-                }
+                // Removed animation as per instruction
             } else {
                 Color.black
             }
@@ -935,6 +909,10 @@ struct FeedView: View {
               let window = scene.windows.first,
               let root = window.rootViewController else { return }
         AdManager.shared.presentInterstitial(from: root)
+        // After ad presentation, ensure we recover UI state when app becomes active again
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            NotificationCenter.default.post(name: UIApplication.didBecomeActiveNotification, object: nil)
+        }
     }
 
     private func maybeShowAd(probability: Double = 0.12) {
@@ -946,7 +924,6 @@ struct FeedView: View {
     // MARK: - Data loading stubs (fill in with your real logic)
 
     private func reload() async {
-        print("[Feed] reload() start")
         // Reset pagination state and load the first page.
         await MainActor.run {
             isLoading = true
@@ -954,7 +931,6 @@ struct FeedView: View {
             lastDocument = nil
             posts.removeAll()
             currentIndex = 0
-            print("[Feed] reload() reset state")
         }
 
         // Simulate network delay for UX parity.
@@ -962,38 +938,70 @@ struct FeedView: View {
 
         // In lieu of Firestore, generate a page of demo posts.
         let newPosts = Self.generateDemoPosts(start: 0, count: pageSize)
-        print("[Feed] reload() generated newPosts: \(newPosts.count)")
+
+        var mixed = newPosts
+        if youtubeVideoIDs.isEmpty == false {
+            for i in mixed.indices {
+                if true { // replaced from `if Double.random(in: 0...1) < 0.95 {`
+                    if let vid = youtubeVideoIDs.randomElement() {
+                        mixed[i] = FeedPost(
+                            id: mixed[i].id,
+                            latitude: mixed[i].latitude,
+                            longitude: mixed[i].longitude,
+                            mediaURL: "https://www.youtube.com/watch?v=\(vid)",
+                            radius: mixed[i].radius,
+                            viewCount: mixed[i].viewCount,
+                            userID: mixed[i].userID
+                        )
+                    }
+                }
+            }
+        }
 
         await MainActor.run {
-            posts = newPosts
+            posts = mixed
             isLoading = false
             // If we couldn't load anything, mark as reached end to stop paginating.
-            reachedEnd = newPosts.isEmpty
+            reachedEnd = mixed.isEmpty
             prefetchVisibleUsernames()
-            print("[Debug] posts after reload:", posts.count)
-            print("[Feed] reload() end — posts: \(posts.count)")
         }
     }
 
     private func reloadForCountry() async {
-        print("[Feed] reloadForCountry() start — country: \(countries[selectedCountryIndex].code)")
         await MainActor.run {
             isLoading = true
             reachedEnd = false
             lastDocument = nil
             posts.removeAll()
             currentIndex = 0
-            print("[Feed] reloadForCountry() reset state")
         }
         try? await Task.sleep(nanoseconds: 150_000_000)
         let newPosts = Self.generateDemoPostsForCountry(country: countries[selectedCountryIndex].code, start: 0, count: pageSize)
-        print("[Feed] reloadForCountry() generated newPosts: \(newPosts.count)")
+
+        var mixed = newPosts
+        if youtubeVideoIDs.isEmpty == false {
+            for i in mixed.indices {
+                if true { // replaced from `if Double.random(in: 0...1) < 0.95 {`
+                    if let vid = youtubeVideoIDs.randomElement() {
+                        mixed[i] = FeedPost(
+                            id: mixed[i].id,
+                            latitude: mixed[i].latitude,
+                            longitude: mixed[i].longitude,
+                            mediaURL: "https://www.youtube.com/watch?v=\(vid)",
+                            radius: mixed[i].radius,
+                            viewCount: mixed[i].viewCount,
+                            userID: mixed[i].userID
+                        )
+                    }
+                }
+            }
+        }
+
         await MainActor.run {
-            posts = newPosts
+            posts = mixed
             isLoading = false
-            reachedEnd = newPosts.isEmpty
+            reachedEnd = mixed.isEmpty
             prefetchVisibleUsernames()
-            print("[Feed] reloadForCountry() end — posts: \(posts.count)")
         }
     }
 
@@ -1017,8 +1025,24 @@ struct FeedView: View {
             // Simulate network delay
             try? await Task.sleep(nanoseconds: 250_000_000)
 
-            let start = posts.count
-            let newPage = Self.generateDemoPostsForCountry(country: countries[selectedCountryIndex].code, start: start, count: pageSize)
+            var newPage = Self.generateDemoPostsForCountry(country: countries[selectedCountryIndex].code, start: posts.count, count: pageSize)
+            if youtubeVideoIDs.isEmpty == false {
+                for i in newPage.indices {
+                    if true { // replaced from `if Double.random(in: 0...1) < 0.95 {`
+                        if let vid = youtubeVideoIDs.randomElement() {
+                            newPage[i] = FeedPost(
+                                id: newPage[i].id,
+                                latitude: newPage[i].latitude,
+                                longitude: newPage[i].longitude,
+                                mediaURL: "https://www.youtube.com/watch?v=\(vid)",
+                                radius: newPage[i].radius,
+                                viewCount: newPage[i].viewCount,
+                                userID: newPage[i].userID
+                            )
+                        }
+                    }
+                }
+            }
 
             await MainActor.run {
                 posts.append(contentsOf: newPage)
@@ -1080,6 +1104,79 @@ struct FeedView: View {
         }
         return result
     }
+
+    // MARK: - YouTube Pool Loader
+
+    private func loadYouTubePool() async {
+        guard YouTubeAPI.apiKey.isEmpty == false else { return }
+        let channels = YouTubeAPI.topChannelIDs
+        guard channels.isEmpty == false else { return }
+        // Fetch up to 10 videos per channel and flatten
+        await withTaskGroup(of: [YouTubeService.Video].self) { group in
+            for ch in channels {
+                group.addTask { await youtubeService.fetchRecentVideos(forChannel: ch, maxResults: 10) }
+            }
+            var collected: Set<String> = []
+            for await vids in group {
+                for v in vids { collected.insert(v.id) }
+            }
+            await MainActor.run {
+                self.youtubeVideoIDs = Array(collected)
+            }
+        }
+    }
+}
+
+// YouTube API configuration and lightweight fetcher
+private struct YouTubeAPI {
+    // TODO: Replace with your own API key as needed
+    static let apiKey: String = "AIzaSyDgMYA1YisgbpEGyl0Nj8VGoorbqmfAkG0"
+
+    // A configurable list of top creator channel IDs. These are examples; replace as desired.
+    // MrBeast, Marques Brownlee (MKBHD), Kurzgesagt – In a Nutshell, TED, Veritasium
+    static let topChannelIDs: [String] = [
+        "UCX6OQ3DkcsbYNE6H8uQQuVA", // MrBeast
+        "UCBJycsmduvYEL83R_U4JriQ", // MKBHD
+        "UCsXVk37bltHxD1rDPwtNM8Q", // Kurzgesagt
+        "UCAuUUnT6oDeKwE6v1NGQxug", // TED
+        "UCHnyfMqiRRG1u-2MsSQLbXA"  // Veritasium
+    ]
+}
+
+private final class YouTubeService {
+    struct Video: Hashable { let id: String }
+
+    private let apiKey: String
+
+    init(apiKey: String) { self.apiKey = apiKey }
+
+    // Fetch latest video IDs for a channel by querying the Search API (order=date)
+    func fetchRecentVideos(forChannel channelID: String, maxResults: Int = 10) async -> [Video] {
+        guard apiKey.isEmpty == false else { return [] }
+        var comps = URLComponents(string: "https://www.googleapis.com/youtube/v3/search")!
+        comps.queryItems = [
+            URLQueryItem(name: "key", value: apiKey),
+            URLQueryItem(name: "channelId", value: channelID),
+            URLQueryItem(name: "part", value: "id"),
+            URLQueryItem(name: "order", value: "date"),
+            URLQueryItem(name: "type", value: "video"),
+            URLQueryItem(name: "maxResults", value: String(max(1, min(50, maxResults))))
+        ]
+        guard let url = comps.url else { return [] }
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let items = json["items"] as? [[String: Any]] else { return [] }
+            let vids: [Video] = items.compactMap { item in
+                guard let id = item["id"] as? [String: Any], let videoId = id["videoId"] as? String else { return nil }
+                return Video(id: videoId)
+            }
+            return vids
+        } catch {
+            print("[YouTubeService] fetchRecentVideos failed for channel \(channelID): \(error)")
+            return []
+        }
+    }
 }
 
 private struct FeedFullscreenPageView: View {
@@ -1088,31 +1185,105 @@ private struct FeedFullscreenPageView: View {
     var onUserTapped: (String) -> Void
 
     @State private var imagePhaseDebug: String = ""
+    
+    @State private var ytTitle: String = ""
+    @State private var ytAuthor: String = ""
 
     private var coordinateText: String {
         String(format: "%.4f, %.4f", post.latitude, post.longitude)
+    }
+
+    private var youtubeVideoID: String? {
+        // Extract YouTube video ID if mediaURL is a YouTube link
+        guard let url = URL(string: post.mediaURL) else { return nil }
+        if url.host?.contains("youtube.com") == true {
+            if let query = url.query {
+                let components = URLComponents(string: "https://dummy.com?\(query)")
+                if let v = components?.queryItems?.first(where: { $0.name == "v" })?.value {
+                    return v
+                }
+            }
+        } else if url.host?.contains("youtu.be") == true {
+            return url.lastPathComponent
+        }
+        return nil
+    }
+    
+    private func fetchYouTubeMetadataIfNeeded() {
+        guard ytTitle.isEmpty, ytAuthor.isEmpty, let videoID = youtubeVideoID else { return }
+        let apiKey = YouTubeAPI.apiKey
+        guard apiKey.isEmpty == false else { return }
+        let urlString = "https://www.googleapis.com/youtube/v3/videos?part=snippet&id=\(videoID)&key=\(apiKey)"
+        guard let url = URL(string: urlString) else { return }
+        let task = URLSession.shared.dataTask(with: url) { data, _, _ in
+            guard let data = data,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let items = json["items"] as? [[String: Any]],
+                  let first = items.first,
+                  let snippet = first["snippet"] as? [String: Any]
+            else { return }
+            let title = (snippet["title"] as? String) ?? ""
+            let channel = (snippet["channelTitle"] as? String) ?? ""
+            DispatchQueue.main.async {
+                self.ytTitle = title
+                self.ytAuthor = channel
+            }
+        }
+        task.resume()
+    }
+
+    // Inline YouTube player using WKWebView
+    private struct YouTubePlayerView: UIViewRepresentable {
+        let videoID: String
+
+        func makeUIView(context: Context) -> WKWebView {
+            let config = WKWebViewConfiguration()
+            config.allowsInlineMediaPlayback = true
+            config.mediaTypesRequiringUserActionForPlayback = []
+            let webView = WKWebView(frame: .zero, configuration: config)
+            webView.scrollView.isScrollEnabled = false
+            webView.isOpaque = false
+            webView.backgroundColor = .black
+            return webView
+        }
+
+        func updateUIView(_ webView: WKWebView, context: Context) {
+            let html = """
+            <html><head><meta name='viewport' content='initial-scale=1, maximum-scale=1, user-scalable=no'>
+            <style>html,body{margin:0;padding:0;background:#000;height:100%;}</style>
+            </head><body>
+            <iframe id='player' type='text/html' width='100%' height='100%'
+                src='https://www.youtube.com/embed/\(videoID)?autoplay=1&mute=1&playsinline=1&controls=0&modestbranding=1&rel=0&showinfo=0&enablejsapi=1'
+                frameborder='0' allow='accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen'
+                allowfullscreen>
+            </iframe>
+            </body></html>
+            """
+            webView.loadHTMLString(html, baseURL: nil)
+        }
     }
 
     var body: some View {
         GeometryReader { geo in
             let size = geo.size
             ZStack {
-                Color.green
+                Color.black
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .ignoresSafeArea()
                     .zIndex(0)
 
-                // Removed poster background AsyncImage block as per instruction
-
-                if let url = URL(string: post.mediaURL) {
+                if let vid = youtubeVideoID {
+                    YouTubePlayerView(videoID: vid)
+                        .frame(width: size.width, height: size.height)
+                        .clipped()
+                        .background(Color.black)
+                        .onAppear { imagePhaseDebug = "youtube"; fetchYouTubeMetadataIfNeeded() }
+                } else if let url = URL(string: post.mediaURL) {
                     AsyncImage(url: url, transaction: Transaction(animation: .none)) { phase in
                         switch phase {
                         case .empty:
-                            ZStack {
-                                Color.black
-                                ProgressView().tint(.white).scaleEffect(1.4)
-                            }
-                            .onAppear { imagePhaseDebug = "empty" }
+                            Color.black
+                                .onAppear { imagePhaseDebug = "empty" }
                         case .success(let img):
                             img
                                 .resizable()
@@ -1122,21 +1293,41 @@ private struct FeedFullscreenPageView: View {
                                 .background(Color.black)
                                 .onAppear { imagePhaseDebug = "success" }
                         case .failure:
-                            ZStack {
-                                Color.red  // TEMP: make failure very visible
-                                Image(systemName: "photo")
-                                    .font(.system(size: 40, weight: .bold))
-                                    .foregroundColor(.white.opacity(0.9))
-                            }
-                            .onAppear { imagePhaseDebug = "failure" }
+                            Color.black
+                                .onAppear { imagePhaseDebug = "failure" }
                         @unknown default:
                             Color.black.onAppear { imagePhaseDebug = "unknown" }
                         }
                     }
                     .id("image_\(post.id)_\(post.mediaURL)")
-                    .onAppear { print("[Debug] mediaURL:", post.mediaURL) }
+                    .onAppear {
+                        fetchYouTubeMetadataIfNeeded()
+                    }
                 } else {
                     Color.black
+                }
+                
+                if !ytTitle.isEmpty || !ytAuthor.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        if !ytTitle.isEmpty {
+                            Text(ytTitle)
+                                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                                .foregroundColor(.white)
+                                .lineLimit(2)
+                        }
+                        if !ytAuthor.isEmpty {
+                            Text(ytAuthor)
+                                .font(.system(size: 12, weight: .regular, design: .rounded))
+                                .foregroundColor(.white.opacity(0.9))
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color.black.opacity(0.55), in: Capsule())
+                    .overlay(Capsule().stroke(Color.white.opacity(0.25), lineWidth: 1))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                    .padding(16)
+                    .zIndex(5)
                 }
 
                 VStack(alignment: .trailing, spacing: 6) {
@@ -1163,42 +1354,9 @@ private struct FeedFullscreenPageView: View {
                 .frame(width: size.width, height: size.height, alignment: .topTrailing)
                 .zIndex(10)
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("id: \(post.id)")
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
-                    Text("url: \(post.mediaURL.prefix(36))…")
-                        .font(.system(size: 11, weight: .regular, design: .rounded))
-                    Text("phase: \(imagePhaseDebug)")
-                        .font(.system(size: 11, weight: .regular, design: .rounded))
-                }
-                .foregroundColor(.white)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 6)
-                .background(Color.black.opacity(0.55), in: Capsule())
-                .overlay(Capsule().stroke(Color.white.opacity(0.25), lineWidth: 1))
-                .padding(.leading, 16)
-                .padding(.top, 16)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .zIndex(11)
+                // Removed debug VStack with id, url, and phase
 
-                Text(String(format: "size: %.0f x %.0f", size.width, size.height))
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(.yellow)
-                    .padding(8)
-                    .background(Color.black.opacity(0.6), in: Capsule())
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-                    .padding(16)
-                    .zIndex(20)
-                
-                Text("POST: \(post.id)  PHASE: \(imagePhaseDebug)")
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundStyle(.white)
-                    .shadow(radius: 4)
-                    .padding()
-                    .background(Color.black.opacity(0.4), in: Capsule())
-                    .padding(.top, 70)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                    .zIndex(12)
+                // Removed Text with size info
 
                 VStack {
                     Spacer()

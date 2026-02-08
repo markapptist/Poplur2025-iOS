@@ -1,5 +1,6 @@
 import UIKit
 import AVFoundation
+import SwiftUI
 
 extension Notification.Name {
     static let cubeTabViewTapped = Notification.Name("CubeTabViewTappedNotification")
@@ -22,6 +23,15 @@ final class CameraPreviewViewController: UIViewController {
     /// Swipe navigation callbacks (optional)
     var onSwipeLeft: (() -> Void)?
     var onSwipeRight: (() -> Void)?
+    
+    /// Radius value displayed/edited by the radius bar (in meters)
+    var radius: Double = 250 {
+        didSet { onRadiusChanged?(radius) }
+    }
+    /// Callback when radius changes interactively
+    var onRadiusChanged: ((Double) -> Void)?
+    
+    private var radiusHostController: UIHostingController<CameraRadiusBar>?
 
     private let torchButton = UIButton(type: .system)
     private let flipButton = UIButton(type: .system)
@@ -46,6 +56,8 @@ final class CameraPreviewViewController: UIViewController {
         super.viewDidLoad()
         view.backgroundColor = .black
         view.layer.addSublayer(previewLayer)
+        
+        installRadiusBar()
 
         setupButtons()
         setupGestures()
@@ -233,4 +245,50 @@ final class CameraPreviewViewController: UIViewController {
             self?.updateTorchAvailability()
         }
     }
+    
+    private func installRadiusBar() {
+        let bar = CameraRadiusBar(initialRadius: radius) { [weak self] newValue in
+            self?.radius = newValue
+        }
+        let host = UIHostingController(rootView: bar)
+        host.view.backgroundColor = .clear
+        addChild(host)
+        view.addSubview(host.view)
+        host.didMove(toParent: self)
+        host.view.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            host.view.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
+            host.view.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -45),
+            host.view.widthAnchor.constraint(equalToConstant: 60),
+            host.view.heightAnchor.constraint(equalToConstant: 220)
+        ])
+        radiusHostController = host
+    }
+    
+    private func refreshRadiusBar() {
+        guard let host = radiusHostController else { return }
+        host.rootView = CameraRadiusBar(initialRadius: radius) { [weak self] newValue in
+            self?.radius = newValue
+        }
+    }
 }
+// MARK: - SwiftUI bridge for interactive radius bar
+private struct CameraRadiusBar: View {
+    @State private var value: Double
+    var onChange: (Double) -> Void
+    
+    init(initialRadius: Double, onChange: @escaping (Double) -> Void) {
+        _value = State(initialValue: initialRadius)
+        self.onChange = onChange
+    }
+    
+    var body: some View {
+        ZStack {
+            IsometricRadiusBar(radius: $value)
+                .onChange(of: value) { newVal in
+                    onChange(newVal)
+                }
+        }
+    }
+}
+
