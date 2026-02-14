@@ -1,592 +1,200 @@
 import SwiftUI
-import AVFoundation
-import AVKit
 import CoreLocation
-import SCSDKCameraKit
-import SCSDKCameraKitReferenceUI
-import SCSDKCameraKitReferenceSwiftUI
+import AVFoundation
 
-@MainActor
+public protocol RecordPreviewViewControllerProviding {
+    var recordPreviewViewController: UIViewController? { get }
+}
+
+public protocol RecordPreviewViewProviding {
+    var recordPreviewView: UIView? { get }
+}
+
+public protocol PreviewViewControllerProviding {
+    var previewViewController: UIViewController? { get }
+}
+
+public protocol PreviewViewProviding {
+    var previewView: UIView? { get }
+}
+
 struct CameraKitView: View {
-    @StateObject private var ownedController = CameraKitController()
-    private var injectedController: CameraKitController?
-    var controller: CameraKitController { injectedController ?? ownedController }
-
+    @ObservedObject var controller: CameraKitController
     let coordinate: CLLocationCoordinate2D?
+    @State private var isVisible: Bool = false
+    @State private var isTorchOn: Bool = false
 
-    @State private var showPreview = false
-    @State private var capturedImage: UIImage?
-    @State private var capturedVideoURL: URL?
-
-    @State private var permissionDenied = false
-    @State private var permissionNotDetermined = true
-
-    @State private var showFocusReticle = false
-    @State private var focusPoint: CGPoint = .zero
-
-    @State private var currentZoom: CGFloat = 1.0
-    @State private var baseZoomAtGestureStart: CGFloat = 1.0
-    @State private var showTapToast = false
-    @State private var tapToastMessage: String = ""
-
-    @State private var showRecordingBanner = false
-    @State private var showPhotoFlash = false
-
-    @State private var diagTapPoint: CGPoint = .zero
-    @State private var showDiagDot = false
-
-    private let carouselHeight: CGFloat = 110
-    private let captureButtonSize: CGFloat = 84
-    private let rightRailSpacing: CGFloat = 14
-
-    init(controller: CameraKitController? = nil, coordinate: CLLocationCoordinate2D?) {
-        self.injectedController = controller
+    init(controller: CameraKitController, coordinate: CLLocationCoordinate2D?) {
+        self.controller = controller
         self.coordinate = coordinate
     }
 
     var body: some View {
-        GeometryReader { geo in
-            ZStack {
-                if permissionDenied {
-                    PermissionOverlay {
-                        if let url = URL(string: UIApplication.openSettingsURLString) {
-                            UIApplication.shared.open(url, options: [:], completionHandler: nil)
+        ZStack {
+            if isVisible {
+                LazyCameraPreview(controller: controller, coordinate: coordinate)
+            } else {
+                Color.black
+            }
+
+            // Top-right camera controls
+            VStack {
+                HStack {
+                    Spacer()
+                    HStack(spacing: 10) {
+                        Button {
+                            // Flip front/back camera
+                            if let flip = controllerFlipAction() { flip() }
+                        } label: {
+                            Image(systemName: "arrow.triangle.2.circlepath.camera")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .padding(10)
+                                .background(Color.black.opacity(0.35), in: Circle())
+                                .overlay(Circle().stroke(Color.white.opacity(0.25), lineWidth: 1))
                         }
-                    }
-                    .zIndex(100)
-                } else {
-                    cameraPreviewWithGestures
-                        .zIndex(0)
-                }
+                        .buttonStyle(.plain)
 
-                debugOverlay
-                    .padding(.leading, 8)
-                    .padding(.top, 8 + topSafeInset(in: geo))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .zIndex(30)
-
-                /*
-                // TEMP: stripped gestures/rail for tap isolation
-                rightActionRail
-                    .padding(.trailing, 12)
-                    .padding(.top, 28 + topSafeInset(in: geo))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-                    .zIndex(60)
-                */
-
-                if controller.mode == .video && controller.isRecording {
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(Color.red)
-                            .frame(width: 8, height: 8)
-                            .shadow(color: .red.opacity(0.6), radius: 3)
-                        Text("REC")
-                            .font(.system(size: 12, weight: .bold, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.9))
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Color.black.opacity(0.5), in: Capsule())
-                    .overlay(Capsule().stroke(Color.white.opacity(0.25), lineWidth: 1))
-                    .padding(.leading, 12)
-                    .padding(.top, 28 + topSafeInset(in: geo))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .zIndex(40)
-                }
-
-                // Live HUD showing mode/isRecording/isReady
-                HStack(spacing: 8) {
-                    Circle().fill(controller.isReady ? Color.green : Color.orange).frame(width: 8, height: 8)
-                    Text("Mode: \(String(describing: controller.mode)) | Rec: \(controller.isRecording ? "yes" : "no") | Ready: \(controller.isReady ? "yes" : "no")")
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Color.black.opacity(0.45), in: Capsule())
-                }
-                .padding(.leading, 12)
-                .padding(.top, 52 + topSafeInset(in: geo))
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .zIndex(35)
-
-                // Temporary toast for tap confirmation
-                if showTapToast {
-                    Text(tapToastMessage)
-                        .font(.system(size: 14, weight: .bold, design: .rounded))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(Color.black.opacity(0.75), in: Capsule())
-                        .padding(.bottom, dynamicBottomInset(in: geo) + 120)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                        .transition(.opacity)
-                        .zIndex(90)
-                }
-
-                // Visible recording banner at top center
-                if showRecordingBanner {
-                    HStack(spacing: 8) {
-                        Circle().fill(Color.red).frame(width: 8, height: 8)
-                        Text("Recording…")
-                            .font(.system(size: 13, weight: .bold, design: .rounded))
-                            .foregroundColor(.white)
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(Color.black.opacity(0.55), in: Capsule())
-                    .overlay(Capsule().stroke(Color.white.opacity(0.25), lineWidth: 1))
-                    .padding(.top, 28 + topSafeInset(in: geo))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                    .transition(.opacity)
-                    .zIndex(45)
-                }
-
-                // Fullscreen white flash for photo capture
-                Color.white
-                    .opacity(showPhotoFlash ? 0.85 : 0.0)
-                    .ignoresSafeArea()
-                    .animation(.easeOut(duration: 0.35), value: showPhotoFlash)
-                    .zIndex(44)
-
-                // Full-screen tap diagnostic overlay (does not block bottom controls)
-                Color.clear
-                    .contentShape(Rectangle())
-                    .simultaneousGesture(
-                        TapGesture().onEnded {
-                            let size = UIScreen.main.bounds.size
-                            // Place the dot roughly at the center horizontally and near the bottom third to reflect general area
-                            diagTapPoint = CGPoint(x: size.width / 2, y: size.height * 0.75)
-                            showDiagDot = true
-                            print("[Diag] Top-level tap received")
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                                showDiagDot = false
+                        Button {
+                            // Toggle torch/flash
+                            if let toggled = controllerToggleTorch() {
+                                isTorchOn = toggled
+                            } else {
+                                isTorchOn.toggle()
                             }
+                        } label: {
+                            Image(systemName: isTorchOn ? "flashlight.on.fill" : "flashlight.off.fill")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundStyle(isTorchOn ? .yellow : .white)
+                                .padding(10)
+                                .background(Color.black.opacity(0.35), in: Circle())
+                                .overlay(Circle().stroke(Color.white.opacity(0.25), lineWidth: 1))
                         }
-                    )
-                    .allowsHitTesting(true)
-                    .zIndex(20)
-
-                // Render diagnostic dot when a tap is detected
-                if showDiagDot {
-                    Circle()
-                        .fill(Color.red)
-                        .frame(width: 18, height: 18)
-                        .position(diagTapPoint)
-                        .transition(.opacity)
-                        .zIndex(85)
-                }
-
-                bottomStack
-                    .padding(.bottom, dynamicBottomInset(in: geo) + 60)
-                    .padding(.horizontal, 12)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                    .contentShape(Rectangle())
-                    .allowsHitTesting(true)
-                    .zIndex(100)
-            }
-            .background(Color.black)
-            .task {
-                if injectedController == nil {
-                    await ensurePermissionAndStart()
-                } else {
-                    let status = AVCaptureDevice.authorizationStatus(for: .video)
-                    permissionDenied = (status == .denied || status == .restricted)
-                    permissionNotDetermined = (status == .notDetermined)
-                    if status == .authorized, !controller.isReady {
-                        await controller.start()
+                        .buttonStyle(.plain)
                     }
+                    .padding(.trailing, 12)
+                    .padding(.top, 8)
                 }
-            }
-            .onAppear {
-                print("[CK][UI] CameraKitView appeared")
-                print("[CameraKitView] Record tab appearing; will assert camera and audio session")
-                NotificationCenter.default.post(name: Notification.Name("RecordTabDidAppear"), object: nil)
-                Task { await maybeStartIfAuthorizedAndNotReady() }
-            }
-            .onAppear {
-                print("[CameraKitView] Appeared. isReady: \(controller.isReady)")
-                let camStatus = AVCaptureDevice.authorizationStatus(for: .video)
-                let micStatus = AVCaptureDevice.authorizationStatus(for: .audio)
-                print("[CameraKitView] Camera permission: \(camStatus.rawValue), Mic permission: \(micStatus.rawValue)")
-                do {
-                    let session = AVAudioSession.sharedInstance()
-                    try session.setCategory(.playAndRecord, mode: .videoRecording, options: [.defaultToSpeaker, .allowBluetooth])
-                    try session.setActive(true, options: .notifyOthersOnDeactivation)
-                    print("[CameraKitView] AVAudioSession activated for recording")
-                } catch {
-                    print("[CameraKitView] Failed to activate AVAudioSession: \(error)")
-                }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .ResetTabToTop)) { _ in
-                // Reset camera UI state to "beginning"
-                currentZoom = 1.0
-                baseZoomAtGestureStart = 1.0
-                controller.setZoom(factor: 1.0)
-                let center = CGPoint(x: geo.size.width / 2, y: geo.size.height / 2)
-                focusPoint = center
-                showFocusReticle = false
-            }
-            .onChange(of: controller.lastPhoto) { img in
-                capturedVideoURL = nil
-                capturedImage = img
-                if img != nil {
-                    showPreview = true
-                    NotificationCenter.default.post(name: Notification.Name("FeedRefreshRequested"), object: nil)
-                }
-            }
-            .onChange(of: controller.lastVideoURL) { url in
-                capturedImage = nil
-                capturedVideoURL = url
-                if url != nil {
-                    showPreview = true
-                    NotificationCenter.default.post(name: Notification.Name("FeedRefreshRequested"), object: nil)
-                }
-            }
-            .onChange(of: controller.isRecording) { rec in
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    showRecordingBanner = rec
-                }
-            }
-            .sheet(isPresented: $showPreview) {
-                CameraKitCapturePreviewView(
-                    image: capturedImage,
-                    videoURL: capturedVideoURL,
-                    coordinate: coordinate
-                )
-            }
-            .onDisappear {
-                print("[CameraKitView] Record tab did disappear; deactivating audio session")
-                do {
-                    try AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-                } catch {
-                    print("[CameraKitView] Failed to deactivate AVAudioSession: \(error)")
-                }
-                NotificationCenter.default.post(name: Notification.Name("RecordTabDidDisappear"), object: nil)
+                Spacer()
             }
         }
         .ignoresSafeArea()
-    }
-
-    private func maybeStartIfAuthorizedAndNotReady() async {
-        let status = AVCaptureDevice.authorizationStatus(for: .video)
-        if status == .authorized, !controller.isReady {
-            await controller.start()
+        .onAppear {
+            isVisible = true
+        }
+        .onDisappear {
+            isVisible = false
         }
     }
-
-    private var cameraPreviewWithGestures: some View {
-        ZStack {
-            if let session = controller.cameraKitSession {
-                // TEMP: stripped gestures/rail for tap isolation
-                PreviewView(cameraKit: session)
-                    .contentShape(Rectangle())
-                    .onAppear {
-                        Task { await maybeStartIfAuthorizedAndNotReady() }
-                    }
-            } else {
-                Color.black
-                    .onAppear {
-                        Task { await maybeStartIfAuthorizedAndNotReady() }
-                    }
-            }
-
-            if showFocusReticle {
-                Circle()
-                    .stroke(Color.yellow, lineWidth: 2)
-                    .frame(width: 80, height: 80)
-                    .position(focusPoint)
-                    .transition(.opacity)
-                    .animation(.easeOut(duration: 0.2), value: showFocusReticle)
-            }
+    
+    // Attempt to call a flip/toggle method if the controller implements it.
+    private func controllerFlipAction() -> (() -> Void)? {
+        // Common method name
+        if controller.responds(to: Selector(("flipCamera"))) {
+            return { _ = (controller as AnyObject).perform(Selector(("flipCamera"))) }
         }
+        // Alternate names
+        if controller.responds(to: Selector(("switchCamera"))) {
+            return { _ = (controller as AnyObject).perform(Selector(("switchCamera"))) }
+        }
+        return nil
     }
 
-    private var debugOverlay: some View {
-        let auth = AVCaptureDevice.authorizationStatus(for: .video)
-        let mic = AVCaptureDevice.authorizationStatus(for: .audio)
-        let authText: String
-        switch auth {
-        case .authorized: authText = "authorized"
-        case .notDetermined: authText = "notDetermined"
-        case .denied: authText = "denied"
-        case .restricted: authText = "restricted"
-        @unknown default: authText = "unknown"
+    private func controllerToggleTorch() -> Bool? {
+        // Try common method signature returning Bool indicating new state
+        if controller.responds(to: Selector(("toggleTorch"))) {
+            let _ = (controller as AnyObject).perform(Selector(("toggleTorch")))
+            // If your controller publishes torch state, consider reading it here instead
+            return nil
         }
-        let micText: String
-        switch mic {
-        case .authorized: micText = "authorized"
-        case .notDetermined: micText = "notDetermined"
-        case .denied: micText = "denied"
-        case .restricted: micText = "restricted"
-        @unknown default: micText = "unknown"
+        // Try explicit on/off methods
+        if controller.responds(to: Selector(("toggleFlash"))) {
+            let _ = (controller as AnyObject).perform(Selector(("toggleFlash")))
+            return nil
         }
-
-        return HStack(spacing: 8) {
-            Circle()
-                .fill(controller.isReady ? Color.green : Color.orange)
-                .frame(width: 8, height: 8)
-            Text("Cam: \(authText) | Mic: \(micText) | Ready: \(controller.isReady ? "yes" : "no") | Session: \(controller.captureSessionRunning ? "running" : "stopped")")
-                .font(.system(size: 11, weight: .semibold, design: .rounded))
-                .foregroundColor(.white.opacity(0.95))
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(Color.black.opacity(0.45), in: Capsule())
-        }
-        .allowsHitTesting(false)
+        return nil
     }
 
-    private var rightActionRail: some View {
-        VStack(spacing: rightRailSpacing) {
-            Button {
-                controller.switchCamera()
-            } label: {
-                Circle()
-                    .fill(Color.black.opacity(controller.isReady ? 0.45 : 0.25))
-                    .frame(width: 44, height: 44)
-                    .overlay(
-                        Image(systemName: "arrow.triangle.2.circlepath.camera")
-                            .foregroundColor(.white.opacity(controller.isReady ? 1.0 : 0.5))
-                    )
-            }
-            .buttonStyle(.plain)
-            .disabled(!controller.isReady)
+    private struct LazyCameraPreview: View {
+        @ObservedObject var controller: CameraKitController
+        let coordinate: CLLocationCoordinate2D?
+        @State private var mounted: Bool = false
 
-            Button {
-                controller.setTorch(on: !controller.flashOn)
-            } label: {
-                Circle()
-                    .fill(Color.black.opacity(controller.isReady ? 0.45 : 0.25))
-                    .frame(width: 44, height: 44)
-                    .overlay(
-                        Image(systemName: controller.flashOn ? "bolt.fill" : "bolt.slash.fill")
-                            .foregroundColor(.white.opacity(controller.isReady ? 1.0 : 0.5))
-                    )
-            }
-            .buttonStyle(.plain)
-            .disabled(!controller.isReady)
-
-            Button {
-                print("[CK][UI] More tapped")
-            } label: {
-                Circle()
-                    .fill(Color.black.opacity(0.45))
-                    .frame(width: 44, height: 44)
-                    .overlay(
-                        Image(systemName: "ellipsis")
-                            .foregroundColor(.white)
-                    )
-            }
-            .buttonStyle(.plain)
-        }
-    }
-
-    private var bottomStack: some View {
-        VStack(spacing: 10) {
-            HStack {
-                Spacer()
-
-                Button {
-                    withAnimation(.easeInOut(duration: 0.15)) {
-                        tapToastMessage = "Record tapped"
-                        showTapToast = true
-                    }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-                        withAnimation(.easeInOut(duration: 0.25)) {
-                            showTapToast = false
-                        }
-                    }
-
-                    let haptic = UIImpactFeedbackGenerator(style: .light)
-                    haptic.impactOccurred()
-                    Task { @MainActor in
-                        print("[CameraKitView] Record button tapped. isRecording: \(controller.isRecording), isReady: \(controller.isReady), mode: \(controller.mode)")
-
-                        if !controller.isReady {
-                            print("[CameraKitView] Controller not ready. Attempting to start...")
-                            if injectedController == nil {
-                                await ensurePermissionAndStart()
-                            } else {
-                                await maybeStartIfAuthorizedAndNotReady()
-                            }
-                            print("[CameraKitView] Start attempt complete. isReady: \(controller.isReady)")
-                        }
-
-                        let wasRecording = controller.isRecording
-
-                        if String(describing: controller.mode) == "unknown" {
-                            print("[CameraKitView] Mode unknown, attempting to set video mode…")
-                        }
-
-                        switch controller.mode {
-                        case .video:
-                            if controller.isRecording {
-                                print("[CameraKitView] Stopping recording…")
-                                controller.stopRecording()
-                                withAnimation(.easeInOut(duration: 0.2)) { showRecordingBanner = false }
-                            } else {
-                                if !controller.isReady {
-                                    print("[CameraKitView] Not ready at record time; retrying start…")
-                                    if injectedController == nil {
-                                        await ensurePermissionAndStart()
-                                    } else {
-                                        await maybeStartIfAuthorizedAndNotReady()
-                                    }
-                                }
-                                print("[CameraKitView] Starting recording…")
-                                withAnimation(.easeInOut(duration: 0.2)) { showRecordingBanner = true }
-                                controller.startRecording()
-                            }
-                        case .photo:
-                            print("[CameraKitView] Taking photo…")
-                            showPhotoFlash = true
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                                showPhotoFlash = false
-                            }
-                            controller.takePhoto()
-                        }
-                    }
-                } label: {
-                    ZStack {
-                        Circle()
-                            .strokeBorder(Color.white.opacity(0.8), lineWidth: 6)
-                            .frame(width: captureButtonSize, height: captureButtonSize)
-
-                        if controller.mode == .video {
-                            if controller.isRecording {
-                                Circle()
-                                    .fill(Color.red)
-                                    .frame(width: captureButtonSize * 0.5, height: captureButtonSize * 0.5)
-                            } else {
-                                Circle()
-                                    .fill(Color.white.opacity(controller.isReady ? 1.0 : 0.5))
-                                    .frame(width: captureButtonSize * 0.7, height: captureButtonSize * 0.7)
-                            }
-                        } else {
-                            Circle()
-                                .fill(Color.white.opacity(controller.isReady ? 1.0 : 0.5))
-                                .frame(width: captureButtonSize * 0.7, height: captureButtonSize * 0.7)
-                        }
-                    }
-                }
-                .contentShape(Rectangle())
-                .frame(minWidth: 140, minHeight: 140)
-                .simultaneousGesture(TapGesture().onEnded {
-                    print("[CameraKitView] onTapGesture fired for record button")
-                })
-                .buttonStyle(.plain)
-                .contentShape(Rectangle())
-                .highPriorityGesture(TapGesture().onEnded { })
-
-                Spacer()
-            }
-            .padding(.bottom, 6)
-            .contentShape(Rectangle())
-            .allowsHitTesting(true)
-            .highPriorityGesture(TapGesture().onEnded { })
-
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color.black.opacity(0.25))
-                .frame(height: carouselHeight)
-                .overlay(
-                    Text(controller.isReady ? "Lenses / Gallery" : "Preparing camera…")
-                        .foregroundColor(.white.opacity(0.8))
-                        .font(.system(size: 14, weight: .semibold, design: .rounded))
-                )
-        }
-    }
-
-    private func topSafeInset(in geo: GeometryProxy) -> CGFloat {
-        if let window = UIApplication.shared.connectedScenes
-            .compactMap({ $0 as? UIWindowScene })
-            .first?.windows.first {
-            return window.safeAreaInsets.top
-        }
-        if #available(iOS 15.0, *) {
-            return geo.safeAreaInsets.top
-        }
-        return 0
-    }
-
-    private func dynamicBottomInset(in geo: GeometryProxy) -> CGFloat {
-        var inset: CGFloat = 16
-        if let window = UIApplication.shared.connectedScenes
-            .compactMap({ $0 as? UIWindowScene })
-            .first?.windows.first {
-            inset += window.safeAreaInsets.bottom
-        } else if #available(iOS 15.0, *) {
-            inset += geo.safeAreaInsets.bottom
-        }
-        return inset
-    }
-
-    private func ensurePermissionAndStart() async {
-        // Camera permission
-        let camStatus = AVCaptureDevice.authorizationStatus(for: .video)
-        var camGranted = (camStatus == .authorized)
-        if camStatus == .notDetermined {
-            permissionNotDetermined = true
-            camGranted = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
-                AVCaptureDevice.requestAccess(for: .video) { ok in
-                    cont.resume(returning: ok)
+        var body: some View {
+            Group {
+                if mounted {
+                    RecordPreviewContainer(controller: controller)
+                        .ignoresSafeArea()
+                } else {
+                    EmptyView()
                 }
             }
-            permissionNotDetermined = false
-        }
-        permissionDenied = !camGranted
-        guard camGranted else { return }
-
-        // Microphone permission (for recording with audio)
-        let micStatus = AVCaptureDevice.authorizationStatus(for: .audio)
-        if micStatus == .notDetermined {
-            _ = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
-                AVCaptureDevice.requestAccess(for: .audio) { ok in
-                    cont.resume(returning: ok)
-                }
+            .onAppear {
+                mounted = true
+            }
+            .onDisappear {
+                mounted = false
             }
         }
-        // Even if mic denied, we can still start the camera.
-        await controller.start()
     }
 }
 
-private struct CameraKitCapturePreviewView: View {
-    let image: UIImage?
-    let videoURL: URL?
-    let coordinate: CLLocationCoordinate2D?
+extension CameraKitView {
+    struct RecordPreviewContainer: UIViewControllerRepresentable {
+        @ObservedObject var controller: CameraKitController
 
-    @State private var player: AVPlayer?
-
-    var body: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
-            if let img = image {
-                Image(uiImage: img)
-                    .resizable()
-                    .scaledToFit()
-                    .padding()
-            } else if let url = videoURL {
-                if let player {
-                    VideoPlayer(player: player)
-                        .onAppear {
-                            player.seek(to: .zero)
-                            player.play()
-                        }
-                        .onDisappear {
-                            player.pause()
-                        }
-                        .padding()
-                } else {
-                    Color.black
-                        .onAppear {
-                            player = AVPlayer(url: url)
-                            player?.play()
-                        }
-                }
-            } else {
-                Text("No media")
-                    .foregroundColor(.white)
+        func makeUIViewController(context: Context) -> UIViewController {
+            // Prefer a dedicated RECORD preview view controller if available
+            if let provider = controller as? RecordPreviewViewControllerProviding,
+               let previewVC = provider.recordPreviewViewController {
+                return previewVC
             }
+            // Otherwise, wrap a dedicated RECORD preview view if available
+            if let viewProvider = controller as? RecordPreviewViewProviding,
+               let previewView = viewProvider.recordPreviewView {
+                let wrapper = UIViewController()
+                previewView.translatesAutoresizingMaskIntoConstraints = false
+                wrapper.view.addSubview(previewView)
+                NSLayoutConstraint.activate([
+                    previewView.topAnchor.constraint(equalTo: wrapper.view.topAnchor),
+                    previewView.bottomAnchor.constraint(equalTo: wrapper.view.bottomAnchor),
+                    previewView.leadingAnchor.constraint(equalTo: wrapper.view.leadingAnchor),
+                    previewView.trailingAnchor.constraint(equalTo: wrapper.view.trailingAnchor)
+                ])
+                return wrapper
+            }
+            // Fallback to generic preview if record-specific preview isn't available
+            if let genericVCProvider = controller as? PreviewViewControllerProviding,
+               let genericVC = genericVCProvider.previewViewController {
+                return genericVC
+            }
+            if let genericViewProvider = controller as? PreviewViewProviding,
+               let genericView = genericViewProvider.previewView {
+                let wrapper = UIViewController()
+                genericView.translatesAutoresizingMaskIntoConstraints = false
+                wrapper.view.addSubview(genericView)
+                NSLayoutConstraint.activate([
+                    genericView.topAnchor.constraint(equalTo: wrapper.view.topAnchor),
+                    genericView.bottomAnchor.constraint(equalTo: wrapper.view.bottomAnchor),
+                    genericView.leadingAnchor.constraint(equalTo: wrapper.view.leadingAnchor),
+                    genericView.trailingAnchor.constraint(equalTo: wrapper.view.trailingAnchor)
+                ])
+                return wrapper
+            }
+            // Final fallback placeholder
+            let vc = UIViewController()
+            vc.view.backgroundColor = .black
+            return vc
+        }
+
+        func updateUIViewController(_ uiViewController: UIViewController, context: Context) {
+            // No-op
         }
     }
+}
+
+#Preview {
+    CameraKitView(controller: CameraKitController(), coordinate: nil)
+        .ignoresSafeArea()
 }
 

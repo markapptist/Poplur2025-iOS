@@ -1,30 +1,88 @@
 import SwiftUI
+import StoreKit
 
 struct SettingsView: View {
     // Brand color (sRGB) #FF2D96
-    private let brandPink = Color(red: 1.0, green: 45.0/255.0, blue: 150.0/255.0)
+    private let brandPink = Color(red: 255.0/255.0, green: 255.0/255.0, blue: 255.0/255.0)
+    
+    @EnvironmentObject var quota: DailyQuotaViewModel
+    @StateObject private var purchaseVM = PurchaseViewModel()
 
     var body: some View {
         GeometryReader { geo in
             ZStack {
-                // Full-bleed ticket background
-                TicketBackground()
-                    .fill(brandPink)
+                // White background replacing ticket background
+                Color.white
                     .ignoresSafeArea() // extend under status/home areas
-                    .shadow(color: Color.black.opacity(0.12), radius: 18, x: 0, y: 10)
 
                 // Replace with your real settings content
                 ScrollView {
                     VStack(spacing: 24) {
                         Text("Settings")
                             .font(.system(size: 28, weight: .heavy, design: .rounded))
-                            .foregroundColor(.white)
+                            .foregroundColor(.black)
                             .padding(.top, 24)
 
                         Text("Account Options")
                             .font(.system(size: 18, weight: .heavy, design: .rounded))
-                            .foregroundColor(.white.opacity(0.95))
+                            .foregroundColor(.black.opacity(0.9))
                             .padding(.top, 8)
+                        
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack {
+                                Text("Daily Posts")
+                                    .font(.system(size: 18, weight: .heavy, design: .rounded))
+                                    .foregroundColor(.black)
+                                Spacer()
+                                Text("Remaining: \(quota.remainingPosts)/\(quota.dailyPostLimit)")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundColor(.secondary)
+                            }
+
+                            HStack(spacing: 12) {
+                                Image(systemName: "plus.circle.fill")
+                                    .foregroundColor(.indigo)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Boost your daily limit")
+                                        .font(.system(size: 16, weight: .heavy, design: .rounded))
+                                    Text("Upgrade to 15 posts/day for $9.99")
+                                        .font(.system(size: 14, weight: .regular))
+                                        .foregroundColor(.secondary)
+                                }
+                                Spacer()
+                                Button {
+                                    Task { await purchaseVM.buyUpgrade(quota: quota) }
+                                } label: {
+                                    Text(quota.hasDailyUpgrade ? "Purchased" : "$9.99")
+                                        .font(.system(size: 16, weight: .heavy, design: .rounded))
+                                        .foregroundColor(.white)
+                                        .padding(.vertical, 10)
+                                        .padding(.horizontal, 16)
+                                        .background(quota.hasDailyUpgrade ? Color.gray : Color.indigo, in: Capsule())
+                                }
+                                .disabled(quota.hasDailyUpgrade)
+                            }
+                            
+                            Text("Upgrades are permanent and your daily count resets at midnight.")
+                                .font(.system(size: 13, weight: .regular))
+                                .foregroundColor(.secondary)
+
+                            HStack {
+                                Spacer()
+                                Button {
+                                    Task { await purchaseVM.restoreIfNeeded(quota: quota) }
+                                } label: {
+                                    Text("Restore Purchases")
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundColor(.indigo)
+                                }
+                            }
+                        }
+                        .padding()
+                        .background(
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .fill(Color.gray.opacity(0.08))
+                        )
 
                         // Demo rows (swap for real toggles/links)
                         settingsRowLeft("Private Account") {
@@ -45,10 +103,10 @@ struct SettingsView: View {
                         } label: {
                             Text("Sign Out")
                                 .font(.system(size: 20, weight: .heavy, design: .rounded))
-                                .foregroundColor(.black)
+                                .foregroundColor(.white)
                                 .padding(.vertical, 16)
                                 .frame(maxWidth: .infinity)
-                                .background(Color.white, in: Capsule())
+                                .background(brandPink, in: Capsule())
                                 .shadow(color: .black.opacity(0.12), radius: 8, x: 0, y: 4)
                         }
                         .padding(.top, 24)
@@ -58,12 +116,21 @@ struct SettingsView: View {
                     .padding(.horizontal, 24) // internal padding only
                     .frame(maxWidth: .infinity, alignment: .topLeading)
                 }
+                .scrollIndicators(.hidden)
+                .scrollContentBackground(.hidden)
                 .frame(width: geo.size.width, height: geo.size.height)
                 .ignoresSafeArea() // scroll content goes edge-to-edge
+                .task {
+                    try? await purchaseVM.loadProducts()
+                    await purchaseVM.restoreIfNeeded(quota: quota)
+                }
             }
             .frame(width: geo.size.width, height: geo.size.height)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarBackground(Color.white, for: .navigationBar)
+            .toolbarColorScheme(.light, for: .navigationBar)
         }
-        .background(Color.clear)
+        .background(Color.white)
     }
 
     // MARK: - Row helpers
@@ -73,7 +140,7 @@ struct SettingsView: View {
         HStack {
             Text(title)
                 .font(.system(size: 20, weight: .heavy, design: .rounded))
-                .foregroundColor(.white)
+                .foregroundColor(.black)
             Spacer()
             accessory()
         }
@@ -83,11 +150,11 @@ struct SettingsView: View {
         HStack {
             Text(title)
                 .font(.system(size: 20, weight: .heavy, design: .rounded))
-                .foregroundColor(.white)
+                .foregroundColor(.black)
             Spacer()
             Image(systemName: "arrow.right")
                 .font(.system(size: 18, weight: .bold))
-                .foregroundColor(.indigo.opacity(0.95))
+                .foregroundColor(.gray)
         }
     }
 }
@@ -122,3 +189,4 @@ private extension Path {
         return p
     }
 }
+

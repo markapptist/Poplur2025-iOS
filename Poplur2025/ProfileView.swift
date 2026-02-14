@@ -1,6 +1,8 @@
 import SwiftUI
+import UIKit
 import FirebaseAuth
 import FirebaseFirestore
+import UserNotifications
 
 struct ProfileView: View {
     @EnvironmentObject private var auth: AuthViewModel
@@ -10,6 +12,11 @@ struct ProfileView: View {
 
     @State private var myPosts: [Post] = []
     @State private var isLoading = false
+    @State private var expandedPost: Post? = nil
+    @State private var showCamera = false
+    @State private var profileImage: UIImage? = nil
+    @State private var profileImageURL: URL? = nil
+    @State private var showSettings = false
 
     enum DisplayMode: String, CaseIterable, Identifiable {
         case list
@@ -55,7 +62,7 @@ struct ProfileView: View {
                         Group {
                             if isLoading {
                                 VStack { Spacer(); ProgressView().tint(.gray); Spacer() }
-                                .id("top")
+                                    .id("top")
                             } else if myPosts.isEmpty {
                                 VStack(spacing: 8) {
                                     Image(systemName: "square.stack.3d.up.slash")
@@ -75,12 +82,20 @@ struct ProfileView: View {
                                             LazyVGrid(columns: gridCols, spacing: tileSpacing) {
                                                 ForEach(myPosts) { post in
                                                     ProfileGridTile(post: post)
+                                                        .onTapGesture {
+                                                            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                                                                expandedPost = post
+                                                            }
+                                                        }
                                                 }
                                             }
                                             .padding(.horizontal, 16)
                                             .padding(.top, 8)
                                             .padding(.bottom, 16)
                                         }
+                                    }
+                                    .refreshable {
+                                        await loadMyPosts()
                                     }
                                 case .list:
                                     ScrollView {
@@ -89,12 +104,20 @@ struct ProfileView: View {
                                             VStack(spacing: 18) {
                                                 ForEach(myPosts) { post in
                                                     ProfileListCard(post: post)
+                                                        .onTapGesture {
+                                                            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                                                                expandedPost = post
+                                                            }
+                                                        }
                                                 }
                                             }
                                             .padding(.horizontal, 16)
                                             .padding(.top, 8)
                                             .padding(.bottom, 16)
                                         }
+                                    }
+                                    .refreshable {
+                                        await loadMyPosts()
                                     }
                                 }
                             }
@@ -106,46 +129,123 @@ struct ProfileView: View {
                         }
                     }
                 }
+                if let post = expandedPost {
+                    ZStack {
+                        Color.black.opacity(0.6)
+                            .ignoresSafeArea()
+                            .transition(.opacity)
+
+                        FeedFullscreenPage(
+                            post: FeedPost(
+                                id: post.id,
+                                latitude: post.latitude,
+                                longitude: post.longitude,
+                                mediaURL: post.mediaURL,
+                                radius: Double(post.radius),
+                                viewCount: post.viewCount,
+                                userID: post.userID
+                            ),
+                            displayName: "",
+                            onUserTapped: { _ in }
+                        )
+                        .transition(.scale.combined(with: .opacity))
+                        .overlay(alignment: .topTrailing) {
+                            Button {
+                                withAnimation(.easeOut(duration: 0.25)) { expandedPost = nil }
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 28, weight: .bold))
+                                    .foregroundStyle(.white.opacity(0.95))
+                                    .padding(12)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .overlay(alignment: .bottomLeading) {
+                            Text("\(max(1, Int(post.radius) / 1000)) KM")
+                                .font(.system(size: 16, weight: .heavy, design: .rounded))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(
+                                    Capsule().fill(Color.black.opacity(0.55))
+                                )
+                                .padding(16)
+                        }
+                    }
+                    .zIndex(10)
+                }
             }
+            NavigationLink(isActive: $showSettings) {
+                AppSettingsView()
+            } label: { EmptyView() }
+            .hidden()
             .navigationBarHidden(true)
+            .sheet(isPresented: $showCamera) {
+                FrontCameraPicker { image in
+                    // Update immediately
+                    self.profileImage = image
+                    // Persist to disk and remember URL
+                    if let url = try? saveProfileImage(image) {
+                        self.profileImageURL = url
+                    }
+                    // Notify if other parts listen
+                    NotificationCenter.default.post(name: Notification.Name("ProfilePhotoUpdated"), object: image)
+                }
+                .ignoresSafeArea()
+            }
             .sheet(isPresented: $editing) {
                 EditProfileView(user: $userProfile)
             }
             .task {
+                UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { _, _ in }
                 await loadMyPosts()
+                await loadPersistedProfileImageIfNeeded()
             }
             .onAppear { Task { await loadMyPosts() } }
             .onReceive(NotificationCenter.default.publisher(for: .LoadProfileNow)) { _ in
                 Task { await loadMyPosts() }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ProfileRemovePost"))) { notif in
+                if let id = notif.object as? String {
+                    myPosts.removeAll { $0.id == id }
+                }
             }
         }
     }
 
     private var headerBar: some View {
         HStack {
-            Button { } label: {
-                VStack(spacing: 4) {
-                    Capsule().fill(Color.black.opacity(0.9)).frame(width: 22, height: 3)
-                    Capsule().fill(Color.black.opacity(0.9)).frame(width: 16, height: 3)
-                    Capsule().fill(Color.black.opacity(0.9)).frame(width: 12, height: 3)
-                }
-                .padding(8)
+            // Left: Settings (gear)
+            Button {
+                showSettings = true
+            } label: {
+                Image(systemName: "gearshape.fill")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundColor(.black.opacity(0.95))
+                    .padding(10)
+                    .background(
+                        Circle().fill(Color.white)
+                            .shadow(color: Color.black.opacity(0.08), radius: 6, x: 0, y: 4)
+                    )
             }
             .buttonStyle(.plain)
+
             Spacer()
-            ZStack(alignment: .topTrailing) {
-                Button { } label: {
-                    Image(systemName: "bell.fill")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundColor(.black.opacity(0.9))
-                        .padding(8)
-                }
-                .buttonStyle(.plain)
-                Circle()
-                    .fill(Color.pink)
-                    .frame(width: 10, height: 10)
-                    .offset(x: 4, y: -2)
+
+            // Right: DMs (envelope)
+            NavigationLink {
+                MessagesRootView()
+            } label: {
+                Image(systemName: "envelope.fill")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundColor(.black.opacity(0.95))
+                    .padding(10)
+                    .background(
+                        Circle().fill(Color.white)
+                            .shadow(color: Color.black.opacity(0.08), radius: 6, x: 0, y: 4)
+                    )
             }
+            .buttonStyle(.plain)
         }
         .padding(.horizontal, 16)
         .padding(.top, headerTopPadding)
@@ -153,10 +253,20 @@ struct ProfileView: View {
 
     private var avatarRow: some View {
         Button {
-            editing = true
+            showCamera = true
         } label: {
             ZStack {
-                if let url = userProfile?.profilePictureURL {
+                if let localImage = profileImage {
+                    Image(uiImage: localImage)
+                        .resizable()
+                        .scaledToFill()
+                } else if let url = profileImageURL, // load persisted local file on appear
+                          let data = try? Data(contentsOf: url),
+                          let img = UIImage(data: data) {
+                    Image(uiImage: img)
+                        .resizable()
+                        .scaledToFill()
+                } else if let url = userProfile?.profilePictureURL {
                     AsyncImage(url: url) { phase in
                         switch phase {
                         case .empty:
@@ -241,7 +351,10 @@ struct ProfileView: View {
         do {
             let posts = try await fetchPosts(for: targetUID)
             await MainActor.run {
-                self.myPosts = posts
+                self.myPosts = posts.filter { post in
+                    guard let url = URL(string: post.mediaURL) else { return false }
+                    return !post.mediaURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && ["http", "https"].contains(url.scheme?.lowercased() ?? "")
+                }
             }
         } catch {
             print("Profile: failed to load posts -> \(error.localizedDescription)")
@@ -254,18 +367,32 @@ struct ProfileView: View {
             let db = Firestore.firestore()
             let base = db.collection("posts").whereField("userID", isEqualTo: uid)
 
-            base.order(by: "createdAt", descending: true).getDocuments { snap, err in
+            base.getDocuments { snap, err in
                 if let err = err {
-                    base.getDocuments { snap2, err2 in
-                        if let err2 = err2 {
-                            cont.resume(throwing: err2)
-                            return
-                        }
-                        cont.resume(returning: Self.mapPosts(from: snap2))
-                    }
+                    cont.resume(throwing: err)
                     return
                 }
-                cont.resume(returning: Self.mapPosts(from: snap))
+                // Sort client-side by createdAt desc if available
+                if let snap = snap {
+                    let sortedDocs = snap.documents.sorted { a, b in
+                        let ta = a.data()["createdAt"] as? Timestamp
+                        let tb = b.data()["createdAt"] as? Timestamp
+                        switch (ta, tb) {
+                        case let (a?, b?):
+                            return a.dateValue() > b.dateValue()
+                        case (_?, nil):
+                            return true
+                        case (nil, _?):
+                            return false
+                        default:
+                            return a.reference.documentID > b.reference.documentID
+                        }
+                    }
+                    let sortedSnap = QuerySnapshotProxy(documents: sortedDocs)
+                    cont.resume(returning: Self.mapPosts(from: sortedSnap))
+                } else {
+                    cont.resume(returning: [])
+                }
             }
         }
     }
@@ -274,15 +401,61 @@ struct ProfileView: View {
         guard let snapshot else { return [] }
         return snapshot.documents.compactMap { doc in
             let data = doc.data()
+            let rawURL = data["mediaURL"] as? String
+            let mediaURL = rawURL?.trimmingCharacters(in: .whitespacesAndNewlines)
             guard let lat = (data["latitude"] as? Double) ?? (data["latitude"] as? NSNumber)?.doubleValue,
                   let lon = (data["longitude"] as? Double) ?? (data["longitude"] as? NSNumber)?.doubleValue,
-                  let mediaURL = data["mediaURL"] as? String
+                  let mediaURL = mediaURL, !mediaURL.isEmpty
             else { return nil }
             let radius = (data["radius"] as? Int) ?? (data["radius"] as? NSNumber)?.intValue ?? 5000
             let viewCount = (data["viewCount"] as? Int) ?? (data["viewCount"] as? NSNumber)?.intValue ?? 0
             let userID = data["userID"] as? String ?? "unknown"
             return Post(id: doc.documentID, latitude: lat, longitude: lon, mediaURL: mediaURL, radius: radius, viewCount: viewCount, userID: userID)
         }
+    }
+
+    private static func mapPosts(from snapshot: QuerySnapshotProxy?) -> [Post] {
+        guard let snapshot else { return [] }
+        return snapshot.documents.compactMap { doc in
+            let data = doc.data()
+            let rawURL = data["mediaURL"] as? String
+            let mediaURL = rawURL?.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let lat = (data["latitude"] as? Double) ?? (data["latitude"] as? NSNumber)?.doubleValue,
+                  let lon = (data["longitude"] as? Double) ?? (data["longitude"] as? NSNumber)?.doubleValue,
+                  let mediaURL = mediaURL, !mediaURL.isEmpty
+            else { return nil }
+            let radius = (data["radius"] as? Int) ?? (data["radius"] as? NSNumber)?.intValue ?? 5000
+            let viewCount = (data["viewCount"] as? Int) ?? (data["viewCount"] as? NSNumber)?.intValue ?? 0
+            let userID = data["userID"] as? String ?? "unknown"
+            return Post(id: doc.documentID, latitude: lat, longitude: lon, mediaURL: mediaURL, radius: radius, viewCount: viewCount, userID: userID)
+        }
+    }
+
+    private func loadPersistedProfileImageIfNeeded() async {
+        // Try to locate a previously saved profile image and load it into state
+        let url = profileImageFileURL()
+        if FileManager.default.fileExists(atPath: url.path) {
+            if let data = try? Data(contentsOf: url), let img = UIImage(data: data) {
+                await MainActor.run {
+                    self.profileImage = img
+                    self.profileImageURL = url
+                }
+            }
+        }
+    }
+
+    @discardableResult
+    private func saveProfileImage(_ image: UIImage) throws -> URL {
+        let url = profileImageFileURL()
+        guard let data = image.jpegData(compressionQuality: 0.9) else {
+            throw NSError(domain: "ProfileImage", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to get JPEG data"]) }
+        try data.write(to: url, options: .atomic)
+        return url
+    }
+
+    private func profileImageFileURL() -> URL {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        return docs.appendingPathComponent("profile.jpg")
     }
 
     private func initialsFrom(email: String) -> String? {
@@ -323,6 +496,17 @@ private struct ProfileGridTile: View {
         }
         .frame(height: 120)
         .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
+        .overlay(alignment: .bottomLeading) {
+            Text("\(max(1, post.radius / 1000)) KM")
+                .font(.system(size: 12, weight: .heavy, design: .rounded))
+                .foregroundColor(.white)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(
+                    Capsule().fill(Color.black.opacity(0.55))
+                )
+                .padding(8)
+        }
     }
 
     private func loadIfNeeded() async {
@@ -332,6 +516,9 @@ private struct ProfileGridTile: View {
         await MainActor.run {
             self.image = img
             self.isLoading = false
+            if img == nil {
+                NotificationCenter.default.post(name: Notification.Name("ProfileRemovePost"), object: post.id)
+            }
         }
     }
 }
@@ -386,10 +573,22 @@ private struct ProfileListCard: View {
         await MainActor.run {
             self.image = img
             self.isLoading = false
+            if img == nil {
+                NotificationCenter.default.post(name: Notification.Name("ProfileRemovePost"), object: post.id)
+            }
         }
     }
 }
 
+// A tiny proxy to reuse existing mapPosts(from:) without changing its signature.
+private struct QuerySnapshotProxy {
+    let documents: [QueryDocumentSnapshot]
+}
+
 extension Notification.Name {
     static let LoadProfileNow = Notification.Name("LoadProfileNow")
+    static let CenterMapOnUserLocation = Notification.Name("CenterMapOnUserLocation")
+    static let OpenSettingsRequested = Notification.Name("OpenSettingsRequested")
+    static let OpenDMsRequested = Notification.Name("OpenDMsRequested")
 }
+

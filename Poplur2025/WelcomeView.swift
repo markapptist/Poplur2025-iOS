@@ -717,8 +717,7 @@ struct WelcomeView: View {
     // Persist the scene to avoid rebuilds during early layout changes
     @State private var scene: WelcomeScene?
 
-    // Present Login modally to avoid navigation races
-    @State private var showLoginSheet = false
+    @State private var navigateToLogin = false
 
     private func ensureScene(size: CGSize) -> WelcomeScene {
         if let s = scene { return s }
@@ -736,44 +735,46 @@ struct WelcomeView: View {
     }
 
     var body: some View {
-        ZStack {
-            GeometryReader { geo in
-                let s = ensureScene(size: geo.size)
-                SpriteView(scene: s)
-                    .background(Color.white)
-                    .ignoresSafeArea()
-                    .onChange(of: geo.size) { newSize in
-                        // Inform scene about size changes without recreating it
-                        s.resize(to: newSize)
-                    }
+        NavigationStack {
+            NavigationLink(isActive: $navigateToLogin) {
+                LoginView()
+            } label: { EmptyView() }
+            .hidden()
+
+            ZStack {
+                GeometryReader { geo in
+                    let s = ensureScene(size: geo.size)
+                    SpriteView(scene: s)
+                        .background(Color.white)
+                        .ignoresSafeArea()
+                        .onChange(of: geo.size) { newSize in
+                            // Inform scene about size changes without recreating it
+                            s.resize(to: newSize)
+                        }
+                }
             }
-        }
-        .sheet(isPresented: $showLoginSheet) {
-            // Keep using the SpriteKit ticket version from LoginView.swift
-            LoginView()
-        }
-        .onReceive(coordinator.$didTapSignIn) { tapped in
-            if tapped {
-                showLoginSheet = true
-                coordinator.didTapSignIn = false
+            .onReceive(coordinator.$didTapSignIn) { tapped in
+                if tapped {
+                    navigateToLogin = true
+                    coordinator.didTapSignIn = false
+                }
             }
-        }
-        .onAppear {
-            // Only replay confetti when WelcomeView appears again. Do not replay the intro.
-            scene?.startConfettiNow()
-        }
-        .onChange(of: auth.isAuthenticated) { authed in
-            if authed {
-                // In case the sheet is still up, dismiss it.
-                if showLoginSheet { showLoginSheet = false }
-                // Proactively tear down the SpriteKit scene before the root swaps to HomeView.
+            .onAppear {
+                // Only replay confetti when WelcomeView appears again. Do not replay the intro.
+                scene?.startConfettiNow()
+            }
+            .onChange(of: auth.isAuthenticated) { authed in
+                if authed {
+                    // Proactively tear down the SpriteKit scene before the root swaps to HomeView.
+                    navigateToLogin = false
+                    teardownScene()
+                }
+            }
+            .onDisappear {
+                // Defensive: if WelcomeView disappears for any reason, release the scene.
                 teardownScene()
             }
+            .navigationBarHidden(true)
         }
-        .onDisappear {
-            // Defensive: if WelcomeView disappears for any reason, release the scene.
-            teardownScene()
-        }
-        .navigationBarHidden(true)
     }
 }

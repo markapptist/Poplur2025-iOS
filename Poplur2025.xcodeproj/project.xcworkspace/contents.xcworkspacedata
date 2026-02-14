@@ -5,12 +5,6 @@
       location = "self:">
    </FileRef>
    <FileRef
-      location = "group:BitmojiManager.swift">
-   </FileRef>
-   <FileRef
-      location = "group:BitmojiAvatarView 2.swift">
-   </FileRef>
-   <FileRef
-      location = "group:BitmojiAvatarView 3.swift">
+      location = "group:AVPreviewLayerView.swift">
    </FileRef>
 </Workspace>
