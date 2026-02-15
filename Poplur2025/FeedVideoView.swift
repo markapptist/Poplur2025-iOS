@@ -1,5 +1,6 @@
 import SwiftUI
 import AVKit
+import AVFoundation
 
 public struct FeedVideoView: View {
     public let url: URL
@@ -9,6 +10,9 @@ public struct FeedVideoView: View {
     @State private var item: AVPlayerItem?
     @State private var ready: Bool = false
     @State private var loadTask: Task<Void, Never>?
+
+    @State private var statusObserver: NSKeyValueObservation?
+    @State private var endObserver: Any?
 
     public init(url: URL, aspectRatio: CGFloat? = nil) {
         self.url = url
@@ -20,7 +24,7 @@ public struct FeedVideoView: View {
             Color.black
             if let player {
                 VideoPlayer(player: player)
-                    .onAppear { if ready { player.play() } }
+                    .onAppear { /* playback controlled by FeedAudioManager */ }
                     .onDisappear { player.pause() }
                     .modifier(AspectFillModifier(aspectRatio: aspectRatio))
             } else {
@@ -30,40 +34,146 @@ public struct FeedVideoView: View {
         .clipped()
         .onAppear { startLoadingIfNeeded() }
         .onDisappear { teardown() }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("PauseGlobalFeedAudio"))) { _ in
+            print("[FeedVideoView] PauseGlobalFeedAudio received — tearing down")
+            teardown()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+            player?.pause()
+        }
     }
 
     private func startLoadingIfNeeded() {
         guard player == nil else { return }
         loadTask?.cancel()
+
+        let isRemote = (url.scheme?.lowercased().hasPrefix("http") == true)
+
         loadTask = Task { @MainActor in
-            // Ensure file exists and is non-empty
-            var attempts = 0
-            while attempts < 6 {
-                let exists = FileManager.default.fileExists(atPath: url.path)
-                let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.intValue ?? 0
-                if exists && size > 0 { break }
-                attempts += 1
-                try? await Task.sleep(nanoseconds: 150_000_000)
+            if !isRemote {
+                // Local: wait briefly for file to exist and be non-empty
+                var attempts = 0
+                while attempts < 6 {
+                    let exists = FileManager.default.fileExists(atPath: url.path)
+                    let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.intValue ?? 0
+                    if exists && size > 0 { break }
+                    attempts += 1
+                    try? await Task.sleep(nanoseconds: 150_000_000)
+                }
             }
 
-            let item = AVPlayerItem(url: url)
+            // Build asset with network-friendly options
+            let assetOptions: [String: Any] = [
+                "AVURLAssetAllowsCellularAccessKey": true,
+                "AVURLAssetAllowsConstrainedNetworkAccessKey": true
+            ]
+            let asset = AVURLAsset(url: url, options: assetOptions)
+
+            // Keys we want to ensure are loaded
+            let keys = ["playable", "tracks", "duration"]
+
+            // Load keys asynchronously with a timeout
+            let keysLoaded = await withTaskGroup(of: Bool.self) { group -> Bool in
+                group.addTask {
+                    await withCheckedContinuation { cont in
+                        asset.loadValuesAsynchronously(forKeys: keys) {
+                            var failed = false
+                            for key in keys {
+                                var error: NSError?
+                                let status = asset.statusOfValue(forKey: key, error: &error)
+                                switch status {
+                                case .loaded:
+                                    break
+                                case .failed, .cancelled, .unknown:
+                                    if let error { print("[FeedVideoView] asset key \(key) load failed: \(error)") }
+                                    failed = true
+                                default:
+                                    break
+                                }
+                            }
+                            cont.resume(returning: !failed && asset.isPlayable)
+                        }
+                    }
+                }
+                group.addTask {
+                    // Timeout after 5 seconds
+                    try? await Task.sleep(nanoseconds: 5_000_000_000)
+                    return false
+                }
+                for await result in group {
+                    if result { group.cancelAll(); return true }
+                }
+                return false
+            }
+
+            guard keysLoaded else {
+                print("[FeedVideoView] Asset keys not loaded or not playable: \(url)")
+                self.handleFailure()
+                return
+            }
+
+            // Create item/player from the verified asset
+            let item = AVPlayerItem(asset: asset)
             self.item = item
             let p = AVPlayer(playerItem: item)
+            p.automaticallyWaitsToMinimizeStalling = true
             self.player = p
+            FeedAudioManager.shared.register(p)
 
-            // Wait for readyToPlay
-            var checks = 0
-            while checks < 30 && item.status != .readyToPlay {
-                try? await Task.sleep(nanoseconds: 50_000_000)
-                checks += 1
+            // Observe status changes
+            self.statusObserver = item.observe(\.status, options: [.initial, .new]) { _, _ in
+                DispatchQueue.main.async {
+                    self.handleStatusChange(item)
+                }
             }
-            self.ready = (item.status == .readyToPlay)
-            if self.ready { p.play() }
+
+            // Observe failure to play to end
+            self.endObserver = NotificationCenter.default.addObserver(
+                forName: .AVPlayerItemFailedToPlayToEndTime,
+                object: item,
+                queue: .main
+            ) { notif in
+                let err = (notif.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? NSError)
+                print("[FeedVideoView] FailedToPlayToEnd: \(String(describing: err))")
+                self.handleFailure()
+            }
         }
+    }
+
+    @MainActor
+    private func handleStatusChange(_ item: AVPlayerItem) {
+        switch item.status {
+        case .readyToPlay:
+            self.ready = true
+            if let p = self.player {
+                FeedAudioManager.shared.playExclusively(p)
+            }
+        case .failed:
+            print("[FeedVideoView] Item failed: \(String(describing: item.error))")
+            if let underlying = (item.error as NSError?)?.userInfo[NSUnderlyingErrorKey] {
+                print("[FeedVideoView] Underlying: \(underlying)")
+            }
+            self.handleFailure()
+        case .unknown:
+            break
+        @unknown default:
+            break
+        }
+    }
+
+    @MainActor
+    private func handleFailure() {
+        teardown()
+        // Optionally: you can emit a notification or callback here to show a placeholder
     }
 
     private func teardown() {
         loadTask?.cancel()
+        statusObserver?.invalidate()
+        statusObserver = nil
+        if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
+        endObserver = nil
+
         player?.pause()
         player?.replaceCurrentItem(with: nil)
         player = nil

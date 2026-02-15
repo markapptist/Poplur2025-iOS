@@ -14,6 +14,7 @@ struct CameraPreviewHost: View {
     
     var body: some View {
         ControllerPreviewView(controller: controller)
+            .id(controller.isReady)
     }
 }
 

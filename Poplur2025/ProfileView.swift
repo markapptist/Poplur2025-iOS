@@ -17,6 +17,7 @@ struct ProfileView: View {
     @State private var profileImage: UIImage? = nil
     @State private var profileImageURL: URL? = nil
     @State private var showSettings = false
+    @State private var averageRadius: Double = 5000
 
     enum DisplayMode: String, CaseIterable, Identifiable {
         case list
@@ -129,6 +130,12 @@ struct ProfileView: View {
                         }
                     }
                 }
+                .overlay(alignment: .trailing) {
+                    IsometricRadiusBar(radius: $averageRadius)
+                        .frame(width: 44, height: 160)
+                        .padding(.trailing, 8)
+                        .padding(.top, 100)
+                }
                 if let post = expandedPost {
                     ZStack {
                         Color.black.opacity(0.6)
@@ -149,9 +156,16 @@ struct ProfileView: View {
                             onUserTapped: { _ in }
                         )
                         .transition(.scale.combined(with: .opacity))
+                        .onAppear {
+                            NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
+                        }
+                        .onDisappear {
+                            NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
+                        }
                         .overlay(alignment: .topTrailing) {
                             Button {
                                 withAnimation(.easeOut(duration: 0.25)) { expandedPost = nil }
+                                NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
                             } label: {
                                 Image(systemName: "xmark.circle.fill")
                                     .font(.system(size: 28, weight: .bold))
@@ -199,15 +213,23 @@ struct ProfileView: View {
             .task {
                 UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { _, _ in }
                 await loadMyPosts()
+                await MainActor.run { self.averageRadius = Double(self.averagePostRadius()) }
                 await loadPersistedProfileImageIfNeeded()
             }
-            .onAppear { Task { await loadMyPosts() } }
-            .onReceive(NotificationCenter.default.publisher(for: .LoadProfileNow)) { _ in
+            .onAppear {
+                NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
                 Task { await loadMyPosts() }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .LoadProfileNow)) { _ in
+                Task {
+                    await loadMyPosts()
+                    await MainActor.run { self.averageRadius = Double(self.averagePostRadius()) }
+                }
             }
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ProfileRemovePost"))) { notif in
                 if let id = notif.object as? String {
                     myPosts.removeAll { $0.id == id }
+                    self.averageRadius = Double(self.averagePostRadius())
                 }
             }
         }
@@ -355,6 +377,7 @@ struct ProfileView: View {
                     guard let url = URL(string: post.mediaURL) else { return false }
                     return !post.mediaURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && ["http", "https"].contains(url.scheme?.lowercased() ?? "")
                 }
+                self.averageRadius = Double(self.averagePostRadius())
             }
         } catch {
             print("Profile: failed to load posts -> \(error.localizedDescription)")
@@ -462,6 +485,13 @@ struct ProfileView: View {
         let base = email.components(separatedBy: "@").first ?? ""
         guard let first = base.first else { return nil }
         return String(first).uppercased()
+    }
+    
+    private func averagePostRadius() -> Int {
+        if myPosts.isEmpty { return 5000 }
+        let total = myPosts.reduce(0) { $0 + $1.radius }
+        let avg = total / max(1, myPosts.count)
+        return max(1, avg)
     }
 }
 
@@ -590,5 +620,6 @@ extension Notification.Name {
     static let CenterMapOnUserLocation = Notification.Name("CenterMapOnUserLocation")
     static let OpenSettingsRequested = Notification.Name("OpenSettingsRequested")
     static let OpenDMsRequested = Notification.Name("OpenDMsRequested")
+    static let PauseGlobalFeedAudio = Notification.Name("PauseGlobalFeedAudio")
 }
 

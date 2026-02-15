@@ -29,6 +29,29 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
     var onPostToMap: ((UIImage, CLLocationCoordinate2D) -> Void)?
     // Called when user taps Post in the preview to add to profile.
     var onPostToProfile: ((UIImage) -> Void)?
+    
+    override init() {
+        super.init()
+        // Prewarm configuration early so first appearance is fast
+        Task { [weak self] in
+            guard let self else { return }
+            // Request camera access if needed but do not block UI
+            _ = await self.requestCameraAccessIfNeeded()
+            await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+                self.sessionQueue.async { [weak self] in
+                    guard let self else { cont.resume(); return }
+                    self.configureSessionIfNeeded()
+                    cont.resume()
+                }
+            }
+            await MainActor.run {
+                // Prepare a preview fallback so the tab has something to display immediately
+                self.ensurePreviewFallbackIfNeeded()
+                // Mark ready if either we have a Snap record VC installed or our session is configured (even if not running yet)
+                self.isReady = self.hasRecordPreview || self.isSessionConfigured
+            }
+        }
+    }
 
     // MARK: - Location
     private let locationManager = CLLocationManager()
@@ -39,10 +62,8 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
     func installSnapRecordPreview(_ viewController: UIViewController) {
         self.recordPreviewViewController = viewController
         self.hasRecordPreview = true
-        // If we haven't started yet, mark ready to allow UI to render immediately
-        if !self.isReady {
-            self.isReady = true
-        }
+        // Mark ready to allow UI to render immediately
+        self.isReady = true
     }
     
     // MARK: - Session Configuration
@@ -62,15 +83,17 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
 
     private func configureSessionIfNeeded() {
         guard !isSessionConfigured else { return }
+        print("[CK][Config] Begin configuration")
 
         captureSession.beginConfiguration()
 
-        // Prefer a high-resolution preset to minimize black bars and match full-screen feel
-        if captureSession.canSetSessionPreset(.hd1920x1080) {
-            captureSession.sessionPreset = .hd1920x1080
-        } else if captureSession.canSetSessionPreset(.high) {
+        // Start with a lighter preset for faster first frame; ramp up after startRunning
+        if captureSession.canSetSessionPreset(.high) {
             captureSession.sessionPreset = .high
+        } else if captureSession.canSetSessionPreset(.hd1920x1080) {
+            captureSession.sessionPreset = .hd1920x1080
         }
+        print("[CK][Config] Session preset: \(captureSession.sessionPreset.rawValue)")
 
         // Input: back wide-angle camera
         if let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) {
@@ -78,6 +101,7 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
                 let input = try AVCaptureDeviceInput(device: device)
                 if captureSession.canAddInput(input) {
                     captureSession.addInput(input)
+                    print("[CK][Config] Added back camera input")
                 } else {
                     print("[CK][Config] Cannot add camera input")
                 }
@@ -93,6 +117,7 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
             if captureSession.canAddOutput(photoOutput) {
                 captureSession.addOutput(photoOutput)
                 photoOutput.isHighResolutionCaptureEnabled = true
+                print("[CK][Config] Added photo output")
             } else {
                 print("[CK][Config] Cannot add photo output")
             }
@@ -102,6 +127,7 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
         if !captureSession.outputs.contains(movieOutput) {
             if captureSession.canAddOutput(movieOutput) {
                 captureSession.addOutput(movieOutput)
+                print("[CK][Config] Added movie output")
             } else {
                 print("[CK][Config] Cannot add movie output")
             }
@@ -113,6 +139,7 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
                 let audioInput = try AVCaptureDeviceInput(device: audioDevice)
                 if captureSession.canAddInput(audioInput) {
                     captureSession.addInput(audioInput)
+                    print("[CK][Config] Added audio input")
                 } else {
                     print("[CK][Config] Cannot add audio input")
                 }
@@ -123,7 +150,10 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
             print("[CK][Config] No audio device available")
         }
 
+        print("[CK][Config] Committing configuration")
         captureSession.commitConfiguration()
+        print("[CK][Config] Configuration committed")
+
         isSessionConfigured = true
     }
     
@@ -344,6 +374,15 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
         }
     }
 
+    // MARK: - Verify Session Integrity
+    private func verifySessionIntegrity(context: String) {
+        let hasInputs = !captureSession.inputs.isEmpty
+        let hasOutputs = !captureSession.outputs.isEmpty
+        print("[CK][Verify][\(context)] inputs: \(hasInputs ? captureSession.inputs.count : 0), outputs: \(hasOutputs ? captureSession.outputs.count : 0), isRunning: \(captureSession.isRunning)")
+        if !hasInputs { print("[CK][Verify][\(context)] WARNING: No inputs attached") }
+        if !hasOutputs { print("[CK][Verify][\(context)] WARNING: No outputs attached") }
+    }
+
     // MARK: - Preview Fallback
     @MainActor
     private func ensurePreviewFallbackIfNeeded() {
@@ -357,6 +396,9 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
                 preview.onStartVideo = { [weak self] in self?.startVideoRecording() }
                 preview.onStopVideo  = { [weak self] in self?.stopVideoRecording() }
                 self.previewViewController = preview
+                print("[CK][Preview] Created fallback CameraPreviewViewController")
+                // Mark ready since we now have a preview to display
+                self.isReady = true
                 #else
                 self.previewViewController = nil
                 #endif
@@ -474,6 +516,12 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
     func endRecording() {
         self.stopVideoRecording()
     }
+    
+    @MainActor
+    func preparePreviewIfNeeded() {
+        self.ensurePreviewFallbackIfNeeded()
+        self.isReady = self.hasRecordPreview || self.captureSession.isRunning || self.isSessionConfigured
+    }
 
     @MainActor
     private func postImage(_ image: UIImage, at coordinate: CLLocationCoordinate2D?) {
@@ -522,10 +570,11 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
     
     @MainActor
     func start() async {
+        print("[CK][Start] Requesting camera access…")
         // Request access on main, then configure/start on sessionQueue
         let granted = await requestCameraAccessIfNeeded()
         guard granted else {
-            print("[CK][Start] Camera access not granted")
+            print("[CK][Start] Camera access not granted — ready: \(self.isReady)")
             self.isReady = self.hasRecordPreview // allow UI to show fallback if present
             return
         }
@@ -534,15 +583,34 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
             sessionQueue.async { [weak self] in
                 guard let self else { cont.resume(); return }
                 self.configureSessionIfNeeded()
+                self.verifySessionIntegrity(context: "after configure")
                 if !self.captureSession.isRunning {
                     self.captureSession.startRunning()
                 }
+                print("[CK][Start] startRunning called; isRunning now: \(self.captureSession.isRunning)")
+
+                // Ramp preset after initial start for quality
+                if self.captureSession.canSetSessionPreset(.hd1920x1080) {
+                    // Small delay to ensure first frame displays
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+                        guard let self else { return }
+                        self.sessionQueue.async {
+                            self.captureSession.beginConfiguration()
+                            self.captureSession.sessionPreset = .hd1920x1080
+                            self.captureSession.commitConfiguration()
+                            print("[CK][Start] Ramped preset to 1080p")
+                        }
+                    }
+                }
+
                 cont.resume()
             }
         }
 
-        self.isReady = self.hasRecordPreview || self.captureSession.isRunning
         self.ensurePreviewFallbackIfNeeded()
+        self.isReady = self.hasRecordPreview || self.captureSession.isRunning || self.isSessionConfigured
+        self.verifySessionIntegrity(context: "post start")
+        print("[CK][Start] Ready: \(self.isReady), hasRecordPreview: \(self.hasRecordPreview), isRunning: \(self.captureSession.isRunning)")
         self.requestLocationAuthorizationIfNeeded()
     }
 
@@ -554,8 +622,56 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
             guard let self else { return }
             if self.captureSession.isRunning {
                 self.captureSession.stopRunning()
+                print("[CK][Stop] stopRunning called")
             }
         }
+    }
+
+    @MainActor
+    func prewarm() async {
+        // Request access if not determined; do not start the session.
+        let status = AVCaptureDevice.authorizationStatus(for: .video)
+        if status == .notDetermined {
+            _ = await AVCaptureDevice.requestAccess(for: .video)
+        }
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            sessionQueue.async { [weak self] in
+                guard let self else { cont.resume(); return }
+                self.configureSessionIfNeeded()
+                cont.resume()
+            }
+        }
+    }
+
+    @MainActor
+    func startPreview() async {
+        // Assume configuration was prewarmed; just start running if not already.
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            sessionQueue.async { [weak self] in
+                guard let self else { cont.resume(); return }
+                self.configureSessionIfNeeded()
+                if !self.captureSession.isRunning {
+                    self.captureSession.startRunning()
+                }
+
+                // Ramp preset after initial start for quality
+                if self.captureSession.canSetSessionPreset(.hd1920x1080) {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+                        guard let self else { return }
+                        self.sessionQueue.async {
+                            self.captureSession.beginConfiguration()
+                            self.captureSession.sessionPreset = .hd1920x1080
+                            self.captureSession.commitConfiguration()
+                            print("[CK][Preview] Ramped preset to 1080p")
+                        }
+                    }
+                }
+
+                cont.resume()
+            }
+        }
+        self.ensurePreviewFallbackIfNeeded()
+        self.isReady = self.hasRecordPreview || self.captureSession.isRunning || self.isSessionConfigured
     }
 }
 
@@ -607,3 +723,4 @@ extension CameraKitController: CLLocationManagerDelegate {
 extension Notification.Name {
     static let LoadMapNow = Notification.Name("LoadMapNow")
 }
+

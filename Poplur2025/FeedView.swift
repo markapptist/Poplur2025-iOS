@@ -1142,6 +1142,7 @@ private struct FeedFullscreenPageView: View {
 
     // Added for playback stuck detection and UI overlay
     @State private var forceVideoPlaceholder: Bool = false
+    @State private var playbackStuck: Bool = false
 
     private var coordinateText: String {
         String(format: "%.4f, %.4f", post.latitude, post.longitude)
@@ -1162,15 +1163,13 @@ private struct FeedFullscreenPageView: View {
         let url: URL
         @Binding var hudTimeControl: AVPlayer.TimeControlStatus
         @Binding var hudItemStatus: AVPlayerItem.Status
+        @Binding var playbackStuck: Bool
         @State private var player: AVPlayer? = nil
         @State private var itemObservation: NSKeyValueObservation? = nil
         @State private var queuePlayer: AVQueuePlayer? = nil
         @State private var looper: AVPlayerLooper? = nil
 
         @State private var timeObserver: Any? = nil
-
-        // Added playback stuck state
-        @State private var playbackStuck: Bool = false
 
         private func setupPlayer() {
             guard player == nil, queuePlayer == nil else { return }
@@ -1206,6 +1205,7 @@ private struct FeedFullscreenPageView: View {
                     print("[Video] MP4 item status: \(item.status.rawValue)")
                     switch item.status {
                     case .readyToPlay:
+                        self.playbackStuck = false
                         q.seek(to: CMTime(seconds: 0.01, preferredTimescale: 600))
                         q.playImmediately(atRate: 1.0)
                         self.hudTimeControl = q.timeControlStatus
@@ -1222,6 +1222,9 @@ private struct FeedFullscreenPageView: View {
                 let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
                 self.timeObserver = q.addPeriodicTimeObserver(forInterval: interval, queue: .main) { _ in
                     self.hudTimeControl = q.timeControlStatus
+                    if q.timeControlStatus == .playing {
+                        self.playbackStuck = false
+                    }
                 }
 
                 // Retry start if still waiting after 2 seconds
@@ -1247,6 +1250,7 @@ private struct FeedFullscreenPageView: View {
                     print("[Video] Item status changed to: \(item.status.rawValue)")
                     switch item.status {
                     case .readyToPlay:
+                        self.playbackStuck = false
                         (self.player ?? p).seek(to: CMTime(seconds: 0.01, preferredTimescale: 600))
                         (self.player ?? p).playImmediately(atRate: 1.0)
                         self.hudTimeControl = p.timeControlStatus
@@ -1271,6 +1275,9 @@ private struct FeedFullscreenPageView: View {
                 let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
                 self.timeObserver = p.addPeriodicTimeObserver(forInterval: interval, queue: .main) { _ in
                     self.hudTimeControl = p.timeControlStatus
+                    if p.timeControlStatus == .playing {
+                        self.playbackStuck = false
+                    }
                 }
 
                 self.player = p
@@ -1289,6 +1296,9 @@ private struct FeedFullscreenPageView: View {
                         current.seek(to: CMTime(seconds: 0.01, preferredTimescale: 600))
                         current.playImmediately(atRate: 1.0)
                         self.hudTimeControl = current.timeControlStatus
+                        if current.timeControlStatus == .playing {
+                            self.playbackStuck = false
+                        }
                     }
                 }
 
@@ -1298,18 +1308,28 @@ private struct FeedFullscreenPageView: View {
                         current.seek(to: CMTime(seconds: 0.01, preferredTimescale: 600))
                         current.playImmediately(atRate: 1.0)
                         self.hudTimeControl = current.timeControlStatus
+                        if current.timeControlStatus == .playing {
+                            self.playbackStuck = false
+                        }
                     }
                 }
             }
 
             // Dispatch a playback stuck check after 3 seconds
             DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
-                // If after 3 seconds we are still waiting/unknown, mark as stuck
-                let stillWaiting = (self.hudTimeControl == .waitingToPlayAtSpecifiedRate)
-                let itemUnknown = (self.hudItemStatus == .unknown)
-                if stillWaiting || itemUnknown {
+                let notPlaying = (self.hudTimeControl != .playing)
+                let notReady = (self.hudItemStatus != .readyToPlay)
+                if notPlaying && notReady {
                     self.playbackStuck = true
                     print("[Video] Playback appears stuck: timeControl=\(self.hudTimeControl.rawValue) item=\(self.hudItemStatus.rawValue)")
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
+                let notPlaying = (self.hudTimeControl != .playing)
+                let notReady = (self.hudItemStatus != .readyToPlay)
+                if notPlaying && notReady {
+                    self.playbackStuck = true
+                    print("[Video] Playback still stuck (recheck): timeControl=\(self.hudTimeControl.rawValue) item=\(self.hudItemStatus.rawValue)")
                 }
             }
         }
@@ -1326,6 +1346,9 @@ private struct FeedFullscreenPageView: View {
                                 if let p = self.player, p.timeControlStatus != .playing {
                                     p.playImmediately(atRate: 1.0)
                                     self.hudTimeControl = p.timeControlStatus
+                                    if p.timeControlStatus == .playing {
+                                        self.playbackStuck = false
+                                    }
                                 }
                             }
                         }
@@ -1337,6 +1360,7 @@ private struct FeedFullscreenPageView: View {
                 setupPlayer()
             }
             .onDisappear {
+                self.playbackStuck = false
                 if let obs = timeObserver, let p = player {
                     p.removeTimeObserver(obs)
                 }
@@ -1471,7 +1495,7 @@ private struct FeedFullscreenPageView: View {
 
     @ViewBuilder
     private func videoContent(size: CGSize, videoURL: URL) -> some View {
-        VideoPlayerContainer(url: videoURL, hudTimeControl: $debugPlayerTimeControl, hudItemStatus: $debugItemStatus)
+        VideoPlayerContainer(url: videoURL, hudTimeControl: $debugPlayerTimeControl, hudItemStatus: $debugItemStatus, playbackStuck: $playbackStuck)
             .frame(width: size.width, height: size.height)
             .ignoresSafeArea()
             .contentShape(Rectangle())
@@ -1549,7 +1573,7 @@ private struct FeedFullscreenPageView: View {
 
     @ViewBuilder
     private var playerSoftPlaceholder: some View {
-        if debugPlayerTimeControl == .waitingToPlayAtSpecifiedRate && debugItemStatus == .unknown {
+        if playbackStuck {
             LinearGradient(colors: [.black, .gray.opacity(0.4), .black], startPoint: .top, endPoint: .bottom)
                 .allowsHitTesting(false)
                 .transition(.opacity)

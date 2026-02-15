@@ -38,6 +38,21 @@ final class CameraPreviewViewController: UIViewController {
 
     private var isTorchOn: Bool = false
 
+    // Debug utilities
+    private let debugEnabled: Bool = true
+    private let debugBorderLayer: CALayer = {
+        let l = CALayer()
+        l.borderColor = UIColor.systemGreen.withAlphaComponent(0.9).cgColor
+        l.borderWidth = 2
+        l.backgroundColor = UIColor.clear.cgColor
+        l.isHidden = false
+        return l
+    }()
+
+    private var appDidBecomeActiveObserver: NSObjectProtocol?
+    private var appWillResignActiveObserver: NSObjectProtocol?
+    private var isAppActive: Bool = true
+
     // MARK: - Init
     init(session: AVCaptureSession) {
         self.session = session
@@ -57,6 +72,10 @@ final class CameraPreviewViewController: UIViewController {
         view.backgroundColor = .black
         view.layer.addSublayer(previewLayer)
         
+        if debugEnabled {
+            view.layer.addSublayer(debugBorderLayer)
+        }
+        
         installRadiusBar()
 
         setupButtons()
@@ -64,16 +83,68 @@ final class CameraPreviewViewController: UIViewController {
         updateTorchAvailability()
         
         NotificationCenter.default.addObserver(self, selector: #selector(handleCubeTappedNotification), name: .cubeTabViewTapped, object: nil)
+        
+        appDidBecomeActiveObserver = NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.isAppActive = true
+            self?.updateTorchAvailability()
+        }
+        appWillResignActiveObserver = NotificationCenter.default.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.isAppActive = false
+            // Ensure torch state reflects hardware; we don't force-on when app resigns
+            self?.updateTorchAvailability()
+        }
     }
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         previewLayer.frame = view.bounds
+        
+        if debugEnabled {
+            debugBorderLayer.frame = view.bounds
+        }
+        
+        if let connection = previewLayer.connection, connection.isVideoOrientationSupported {
+            if let orientation = view.window?.windowScene?.interfaceOrientation {
+                switch orientation {
+                case .portrait: connection.videoOrientation = .portrait
+                case .portraitUpsideDown: connection.videoOrientation = .portraitUpsideDown
+                case .landscapeLeft: connection.videoOrientation = .landscapeLeft
+                case .landscapeRight: connection.videoOrientation = .landscapeRight
+                default: break
+                }
+            }
+        }
+        
         updateTorchAvailability()
+    }
+    
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        isAppActive = true
+        updateTorchAvailability()
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        print("[CameraPreviewVC] appeared; session running: \(session.isRunning), layer frame: \(previewLayer.frame)")
+        if let connection = previewLayer.connection {
+            print("[CameraPreviewVC] connection active: \(connection.isEnabled), videoOrientation: \(connection.videoOrientation.rawValue)")
+        } else {
+            print("[CameraPreviewVC] no preview connection")
+        }
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        // Reset torch UI to safe state; actual session control should be managed by owner
+        isTorchOn = false
+        torchButton.setImage(UIImage(systemName: "flashlight.off.fill"), for: .normal)
     }
     
     deinit {
         NotificationCenter.default.removeObserver(self, name: .cubeTabViewTapped, object: nil)
+        if let obs = appDidBecomeActiveObserver { NotificationCenter.default.removeObserver(obs) }
+        if let obs = appWillResignActiveObserver { NotificationCenter.default.removeObserver(obs) }
     }
 
     // MARK: - Public Trigger
@@ -193,6 +264,7 @@ final class CameraPreviewViewController: UIViewController {
     }
 
     @objc private func torchTapped() {
+        guard session.inputs.first != nil else { return }
         guard let device = activeDevice(), device.hasTorch else { return }
 
         do {
@@ -241,6 +313,9 @@ final class CameraPreviewViewController: UIViewController {
         isTorchOn = false
         torchButton.setImage(UIImage(systemName: "flashlight.off.fill"), for: .normal)
 
+        refreshRadiusBar()
+        updateTorchAvailability()
+
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
             self?.updateTorchAvailability()
         }
@@ -285,7 +360,7 @@ private struct CameraRadiusBar: View {
     var body: some View {
         ZStack {
             IsometricRadiusBar(radius: $value)
-                .onChange(of: value) { newVal in
+                .onChange(of: value) { _, newVal in
                     onChange(newVal)
                 }
         }

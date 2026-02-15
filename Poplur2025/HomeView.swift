@@ -16,6 +16,11 @@ extension Notification.Name {
     static let FeedReady = Notification.Name("FeedReady")
 }
 
+extension Notification.Name {
+    static let PauseFeedAudio = Notification.Name("PauseFeedAudio")
+    static let ResumeFeedAudio = Notification.Name("ResumeFeedAudio")
+}
+
 @MainActor
 final class SceneMotionController: ObservableObject {
     private let motion = CMMotionManager()
@@ -43,8 +48,8 @@ struct HomeView: View {
     @EnvironmentObject private var auth: AuthViewModel
     @Environment(\.scenePhase) private var scenePhase
 
-    // Start on Feed
-    @State private var selectedTab: AppTab = .feed
+    // Start on record for camera-first testing
+    @State private var selectedTab: AppTab = .record
 
     // Location only when needed
     @StateObject private var locationProvider = LocationProvider()
@@ -99,21 +104,34 @@ struct HomeView: View {
                 .ignoresSafeArea()
         }
         .task {
-            Task { @MainActor in
-                guard selectedTab == .record else { return }
-                let status = AVCaptureDevice.authorizationStatus(for: .video)
-                if status == .authorized, !cameraController.isReady {
-                    await cameraController.start()
-                }
-            }
+            ensureCameraRunningIfNeeded()
         }
         .onAppear {
-            Task { @MainActor in
-                guard selectedTab == .record else { return }
-                let status = AVCaptureDevice.authorizationStatus(for: .video)
-                if status == .authorized, !cameraController.isReady {
-                    await cameraController.start()
+            ensureCameraRunningIfNeeded()
+        }
+    }
+
+    private func ensureCameraRunningIfNeeded() {
+        Task { @MainActor in
+            guard selectedTab == .record else { 
+                return 
+            }
+            let status = AVCaptureDevice.authorizationStatus(for: .video)
+            switch status {
+            case .authorized:
+                if !cameraController.isReady {
+                    await cameraController.startPreview()
                 }
+            case .notDetermined:
+                let granted = await AVCaptureDevice.requestAccess(for: .video)
+                if granted {
+                    if !cameraController.isReady {
+                        await cameraController.start()
+                    }
+                }
+            default:
+                // denied or restricted — optionally present guidance UI
+                break
             }
         }
     }
@@ -176,19 +194,15 @@ struct HomeView: View {
             // 3D Cube tab control overlay
             VStack {
                 Spacer()
-                if isFeedReady {
-                    CubeTabView(selectedTab: $selectedTab, onSwipeUp: {
-                        if selectedTab == .record {
-                            // On record tab, swipe triggers capture
-                            NotificationCenter.default.post(name: Notification.Name("TriggerCameraCapture"), object: nil)
-                        } else {
-                            // Default: keep existing behavior if needed
-                            NotificationCenter.default.post(name: Notification.Name("ShowRecordCaptureUI"), object: nil)
-                        }
-                    })
-                    .tint(.white)
-                    .transition(.opacity)
-                }
+                CubeTabView(selectedTab: $selectedTab, onSwipeUp: {
+                    if selectedTab == .record {
+                        NotificationCenter.default.post(name: Notification.Name("TriggerCameraCapture"), object: nil)
+                    } else {
+                        NotificationCenter.default.post(name: Notification.Name("ShowRecordCaptureUI"), object: nil)
+                    }
+                })
+                .tint(.white)
+                .transition(.opacity)
             }
             .padding(.bottom, 28)
             .ignoresSafeArea(edges: .bottom)
@@ -212,28 +226,54 @@ struct HomeView: View {
                 .transition(.opacity)
             }
         }
-        .background(Color.clear)
         .task {
-            motionController.start()
+            // Removed motionController.start() here per instructions
+            
             // Minimal bootstrap: start location early (cheap) and trigger feed load if feed is initial tab
+            await cameraController.prewarm()
+            await cameraController.preparePreviewIfNeeded()
             locationProvider.request()
             if selectedTab == .feed, !didTriggerFeedInitialLoad {
                 didTriggerFeedInitialLoad = true
                 NotificationCenter.default.post(name: .LoadFeedNow, object: nil)
             }
+            if selectedTab != .feed {
+                NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
+            }
         }
         .onAppear {
-            motionController.start()
+            // Removed motionController.start() here per instructions
+            
             // Keep startup minimal; no mass notifications
             locationProvider.request()
             if selectedTab == .feed, !didTriggerFeedInitialLoad {
                 didTriggerFeedInitialLoad = true
                 NotificationCenter.default.post(name: .LoadFeedNow, object: nil)
             }
+            if selectedTab != .feed {
+                NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
+            }
         }
         .onChange(of: selectedTab) { _ in
             if !([AppTab.map, .record, .feed, .profile].contains(selectedTab)) {
                 selectedTab = .feed
+            }
+            // Pause/resume feed audio based on visibility
+            if selectedTab == .feed {
+                NotificationCenter.default.post(name: .ResumeFeedAudio, object: nil)
+            } else {
+                NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
+            }
+            if selectedTab == .feed {
+                NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil) // optional: clear lingering players before resuming
+            } else {
+                NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
+            }
+            // Start motion when cube overlay is visible (always shown) and app is active; stop on other tabs if desired
+            if selectedTab == .record {
+                motionController.start()
+            } else {
+                motionController.stop()
             }
             NotificationCenter.default.post(name: .ResetTabToTop, object: nil)
         }
@@ -249,12 +289,15 @@ struct HomeView: View {
         .onChange(of: scenePhase) { phase in
             switch phase {
             case .active:
-                // No-op; we’ll lazily start heavy work when tabs appear
-                break
+                // Resume motion only on Record tab
+                if selectedTab == .record { motionController.start() }
             case .background, .inactive:
                 cameraController.stop()
                 didStartCameraOnce = false
                 motionController.stop()
+                // Ensure feed audio is paused when app not active
+                NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
+                NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
             @unknown default:
                 break
             }

@@ -2,6 +2,20 @@ import SwiftUI
 import SceneKit
 import CoreMotion
 
+private let isRunningInPreviews: Bool = {
+    ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1"
+}()
+
+private enum CubeFaceImageCache {
+    private static var cache: [String: UIImage] = [:]
+    static func image(for key: String, builder: () -> UIImage) -> UIImage {
+        if let img = cache[key] { return img }
+        let img = builder()
+        cache[key] = img
+        return img
+    }
+}
+
 struct CubeTabView: View {
     @Binding var selectedTab: AppTab
     @State private var rotationIndex: Int = 0
@@ -13,6 +27,7 @@ struct CubeTabView: View {
             .frame(height: 200)
             .background(.clear)
             .accessibilityHidden(true)
+            .onAppear { print("[CubeTabView] Appeared") }
     }
 }
 
@@ -52,7 +67,13 @@ private struct CubeSceneView: UIViewRepresentable {
         scnView.allowsCameraControl = false
         scnView.scene = makeScene()
         scnView.isPlaying = true
-        scnView.antialiasingMode = .multisampling4X
+        scnView.antialiasingMode = .none // fast first frame
+        DispatchQueue.main.async { [weak scnView] in
+            scnView?.antialiasingMode = .multisampling4X
+        }
+
+        scnView.layer.borderColor = UIColor.systemBlue.withAlphaComponent(0.8).cgColor
+        scnView.layer.borderWidth = 1
 
         // Gestures: pan for left/right (more sensitive), swipe up for action
         let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePan(_:)))
@@ -67,8 +88,17 @@ private struct CubeSceneView: UIViewRepresentable {
         context.coordinator.view = scnView
         context.coordinator.syncToSelectedTab(selectedTab)
 
+        if selectedTab != .feed {
+            NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
+        }
+        if selectedTab == .record {
+            NotificationCenter.default.post(name: Notification.Name("RecordTabBecameActive"), object: nil)
+        }
+
         // Observe motion updates to rotate cube based on device attitude
-        context.coordinator.startObservingMotion()
+        if !isRunningInPreviews {
+            context.coordinator.startObservingMotion()
+        }
 
         return scnView
     }
@@ -139,35 +169,37 @@ private struct CubeSceneView: UIViewRepresentable {
     }
 
     private func faceImage(for tab: AppTab) -> UIImage {
-        // Render a small UIKit view with SF Symbol and label to a UIImage
-        let size = CGSize(width: 300, height: 300)
-        let renderer = UIGraphicsImageRenderer(size: size)
-        return renderer.image { ctx in
-            let rect = CGRect(origin: .zero, size: size)
-            UIColor.white.setFill()
-            UIBezierPath(roundedRect: rect.insetBy(dx: 8, dy: 8), cornerRadius: 24).fill()
+        let key = "face_\(tab.title)"
+        return CubeFaceImageCache.image(for: key) {
+            let size = CGSize(width: 300, height: 300)
+            let renderer = UIGraphicsImageRenderer(size: size)
+            return renderer.image { ctx in
+                let rect = CGRect(origin: .zero, size: size)
+                UIColor(white: 0.95, alpha: 1).setFill()
+                UIBezierPath(roundedRect: rect.insetBy(dx: 8, dy: 8), cornerRadius: 24).fill()
 
-            // Icon
-            let symbolName = tab.systemImage
-            let pointSize: CGFloat = 80
-            let iconWidth: CGFloat = 90
-            let iconHeight: CGFloat = 90
-            let iconY: CGFloat = 70
-            let config = UIImage.SymbolConfiguration(pointSize: pointSize, weight: .bold)
-            let image = UIImage(systemName: symbolName, withConfiguration: config) ?? UIImage()
-            let imgRect = CGRect(x: (size.width - iconWidth) / 2, y: iconY, width: iconWidth, height: iconHeight)
-            image.withTintColor(.black, renderingMode: .alwaysOriginal).draw(in: imgRect)
+                // Icon
+                let symbolName = tab.systemImage
+                let pointSize: CGFloat = 80
+                let iconWidth: CGFloat = 90
+                let iconHeight: CGFloat = 90
+                let iconY: CGFloat = 70
+                let config = UIImage.SymbolConfiguration(pointSize: pointSize, weight: .bold)
+                let image = UIImage(systemName: symbolName, withConfiguration: config) ?? UIImage()
+                let imgRect = CGRect(x: (size.width - iconWidth) / 2, y: iconY, width: iconWidth, height: iconHeight)
+                image.withTintColor(.black, renderingMode: .alwaysOriginal).draw(in: imgRect)
 
-            // Title
-            let paragraph = NSMutableParagraphStyle()
-            paragraph.alignment = .center
-            let attrs: [NSAttributedString.Key: Any] = [
-                .font: UIFont.systemFont(ofSize: 24, weight: .heavy),
-                .foregroundColor: UIColor.black,
-                .paragraphStyle: paragraph
-            ]
-            let title = tab.title as NSString
-            title.draw(in: CGRect(x: 0, y: 180, width: size.width, height: 40), withAttributes: attrs)
+                // Title
+                let paragraph = NSMutableParagraphStyle()
+                paragraph.alignment = .center
+                let attrs: [NSAttributedString.Key: Any] = [
+                    .font: UIFont.systemFont(ofSize: 24, weight: .heavy),
+                    .foregroundColor: UIColor.black,
+                    .paragraphStyle: paragraph
+                ]
+                let title = tab.title as NSString
+                title.draw(in: CGRect(x: 0, y: 180, width: size.width, height: 40), withAttributes: attrs)
+            }
         }
     }
 
@@ -204,13 +236,20 @@ private struct CubeSceneView: UIViewRepresentable {
                 let flip = SCNAction.rotateBy(x: CGFloat.pi, y: 0, z: 0, duration: 0.28)
                 flip.timingMode = .easeInEaseOut
                 cube.runAction(flip)
-                onSwipeUp?()
+                if parent.selectedTab == .record {
+                    onSwipeUp?()
+                }
             }
         }
 
         @objc func handleTap(_ gesture: UITapGestureRecognizer) {
             onCubeTap?()
-            NotificationCenter.default.post(name: Notification.Name("CubeTabViewTappedNotification"), object: nil)
+            if parent.selectedTab == .record {
+                print("[CubeTabView] Tap -> post cubeTabViewTapped (record tab)")
+                NotificationCenter.default.post(name: Notification.Name("CubeTabViewTappedNotification"), object: nil)
+            } else {
+                print("[CubeTabView] Tap ignored for tab: \(parent.selectedTab)")
+            }
         }
 
         @objc func handlePan(_ gesture: UIPanGestureRecognizer) {
@@ -241,14 +280,38 @@ private struct CubeSceneView: UIViewRepresentable {
                     rotateCube(cube, to: currentIndex, animated: true, bouncy: true)
                     parent.selectedTab = tabs[currentIndex]
                     haptic.impactOccurred(intensity: 0.8)
+
+                    let newTab = tabs[currentIndex]
+                    if newTab != .feed {
+                        NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
+                    }
+                    if newTab == .record {
+                        NotificationCenter.default.post(name: Notification.Name("RecordTabBecameActive"), object: nil)
+                    }
                 } else if panAccumulated >= panThreshold {
                     currentIndex = (currentIndex - 1 + tabs.count) % tabs.count
                     rotateCube(cube, to: currentIndex, animated: true, bouncy: true)
                     parent.selectedTab = tabs[currentIndex]
                     haptic.impactOccurred(intensity: 0.8)
+
+                    let newTab = tabs[currentIndex]
+                    if newTab != .feed {
+                        NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
+                    }
+                    if newTab == .record {
+                        NotificationCenter.default.post(name: Notification.Name("RecordTabBecameActive"), object: nil)
+                    }
                 } else {
                     // Snap back to current face if below threshold
                     rotateCube(cube, to: currentIndex, animated: true, bouncy: true)
+
+                    let newTab = tabs[currentIndex]
+                    if newTab != .feed {
+                        NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
+                    }
+                    if newTab == .record {
+                        NotificationCenter.default.post(name: Notification.Name("RecordTabBecameActive"), object: nil)
+                    }
                 }
                 // Reset live tilt and reapply combined rotation
                 cube.eulerAngles.y = Float(currentIndex) * (-Float.pi / 2)
@@ -265,6 +328,13 @@ private struct CubeSceneView: UIViewRepresentable {
                 currentIndex = idx
                 rotateCube(cube, to: currentIndex, animated: true)
                 applyCombinedRotation(to: cube)
+
+                if tab != .feed {
+                    NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
+                }
+                if tab == .record {
+                    NotificationCenter.default.post(name: Notification.Name("RecordTabBecameActive"), object: nil)
+                }
             }
         }
 
