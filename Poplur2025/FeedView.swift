@@ -3,8 +3,8 @@ import FirebaseFirestore
 import CoreLocation
 import UIKit
 import AVFoundation
+import AVKit
 import Contacts
-import WebKit
 #if canImport(GoogleMobileAds)
 import GoogleMobileAds
 #endif
@@ -104,10 +104,6 @@ struct FeedView: View {
 
     @State private var showHeart: Bool = false
 
-    // YouTube content pool
-    @State private var youtubeVideoIDs: [String] = []
-    private var youtubeService = YouTubeService(apiKey: YouTubeAPI.apiKey)
-    
     // Country paging
     @State private var selectedCountryIndex: Int = 0
     private let countries: [(code: String, name: String, flag: String)] = [
@@ -172,15 +168,14 @@ struct FeedView: View {
                 Color.black.ignoresSafeArea()
                 Group {
                     feedContent(in: geo.size)
-                    // overlayChrome
-                    // profileNavigationLink
+                    profileNavigationLink
                 }
-                .opacity(isFeedReady ? 1 : 0) // replaced from .opacity(1)
+                .opacity(1)
                 .zIndex(5)
                 .background(Color.black)
 
                 if isFeedReady == false {
-                    LoadingOverlayView(isPresented: true, background: .pink, logoName: "logo")
+                    LoadingOverlayView(isPresented: true, background: Color("logo"), logoName: "logo")
                         .zIndex(30)
                         .transition(.opacity)
                 }
@@ -192,6 +187,7 @@ struct FeedView: View {
                 didBootstrap = true
                 // Strict, sequential bootstrap to guarantee loading overlay timing and content readiness
                 await runStrictBootstrap()
+                print("[Feed] after bootstrap posts=\(posts.count) ready=\(isFeedReady)")
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .LoadFeedNow)) { _ in
@@ -204,15 +200,17 @@ struct FeedView: View {
             Task { await reload() }
         }
         .onChange(of: currentIndex) { newIndex in
-            if let uid = posts[safe: newIndex]?.userID {
-                maybeResolveUsername(for: uid)
+            guard newIndex >= 0, newIndex < posts.count else {
+                print("[Feed] currentIndex out of range: \(newIndex) posts=\(posts.count)")
+                return
             }
+            let uid = posts[newIndex].userID
+            maybeResolveUsername(for: uid)
         }
         .onAppear {
             // Removed duplicate reload here as per instruction
             hapticGenerator.prepare()
             notifHaptics.prepare()
-            try? AVAudioSession.sharedInstance().setActive(false)
             if posts.isEmpty {
                 Task { await reload() }
             }
@@ -221,6 +219,7 @@ struct FeedView: View {
             Task { @MainActor in
                 // Force a strict refresh to recover from any overlay/black screen state
                 isFeedReady = false
+                print("[Feed] didBecomeActive: resetting, showStatic=true")
                 showStatic = true
                 stopStaticSound()
                 playStaticSound()
@@ -228,16 +227,21 @@ struct FeedView: View {
                 posts.removeAll()
                 currentIndex = 0
                 await reload()
+                print("[Feed] didBecomeActive: reload complete posts=\(posts.count)")
                 if posts.isEmpty {
                     await seedAndReload()
+                    print("[Feed] didBecomeActive: seedAndReload done posts=\(posts.count)")
                 }
                 if posts.isEmpty {
                     await reload()
+                    print("[Feed] didBecomeActive: second reload posts=\(posts.count)")
                 }
 
                 showStatic = false
                 stopStaticSound()
+                print("[Feed] didBecomeActive: static stopped")
                 isFeedReady = !posts.isEmpty
+                print("[Feed] didBecomeActive: ready=\(isFeedReady)")
             }
         }
         .onChange(of: showStatic) { visible in
@@ -283,13 +287,14 @@ struct FeedView: View {
         await MainActor.run {
             isFeedReady = false
             showStatic = true
+            print("[Feed] bootstrap start: showStatic=\(showStatic)")
         }
         playStaticSound()
 
         // Minimal on-screen time for the loading overlay (e.g., 1.2s)
         async let minOverlay: Void = { try? await Task.sleep(nanoseconds: 1_200_000_000) }()
 
-        // Prepare essentials (pole, country, youtube pool) strictly in order
+        // Prepare essentials (pole, country) strictly in order
         await MainActor.run { poleModel.position = PolePosition(x: 0.5, y: 0.5) }
         if let coord = locationProvider.coordinate {
             if let iso = await geocodeCountry(from: coord), let idx = countries.firstIndex(where: { $0.code == iso }) {
@@ -299,8 +304,6 @@ struct FeedView: View {
                 await MainActor.run { selectedCountryIndex = idx }
             }
         }
-
-        await loadYouTubePool()
 
         // Load posts strictly and wait until we have content
         await reload()
@@ -321,13 +324,16 @@ struct FeedView: View {
 
         // Hide static, stop sound, and reveal content in a tightly-controlled order
         await MainActor.run {
+            print("[Feed] bootstrap hiding static")
             withAnimation { showStatic = false }
         }
         stopStaticSound()
+        print("[Feed] bootstrap stopped static sound")
 
         // Ensure we have at least one post before revealing
         await MainActor.run {
             isFeedReady = !posts.isEmpty
+            print("[Feed] bootstrap ready=\(isFeedReady) posts=\(posts.count)")
             currentIndex = 0
         }
 
@@ -682,7 +688,8 @@ struct FeedView: View {
                         }
                     }
             }
-            tvStaticOverlay(in: size)
+            // DEBUG: disable static overlay during debugging
+            // tvStaticOverlay(in: size)
             if showHeart {
                 Image(systemName: "heart.fill")
                     .font(.system(size: 120, weight: .bold))
@@ -697,6 +704,7 @@ struct FeedView: View {
     private func emptyFeedView(in size: CGSize) -> some View {
         ZStack {
             Color.black
+                .frame(width: size.width, height: size.height)
         }
         .frame(width: size.width, height: size.height)
         .onTapGesture(count: 2) {
@@ -725,14 +733,15 @@ struct FeedView: View {
                 FeedFullscreenPageView(
                     post: post,
                     displayName: displayName(for: post),
-                    onUserTapped: { userId in
-                        selectedUserID = userId
+                    onUserTapped: { uid in
+                        selectedUserID = uid
                         navigateToProfile = true
                     }
                 )
-                .offset(x: dragAxis == .horizontal ? dragTranslation * 0.25 : 0)
-                .offset(y: dragAxis == .vertical ? dragTranslation * 0.25 : 0)
-                // Removed animation as per instruction
+                .frame(width: size.width, height: size.height)
+                .ignoresSafeArea()
+                .clipped()
+                .background(Color.black)
             } else {
                 Color.black
             }
@@ -844,16 +853,18 @@ struct FeedView: View {
     private func configureAudioSessionForStatic() {
         do {
             let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback, mode: .default, options: [])
-            try session.setActive(true, options: [])
+            // Use ambient so it mixes and avoids activation failures on silent/route-less cases
+            try session.setCategory(.ambient, mode: .default, options: [.mixWithOthers])
+            try session.setActive(true)
         } catch {
-            print("[StaticSound] Audio session config failed: \(error)")
+            print("[StaticSound] Audio session config failed (safe): \(error)")
         }
     }
 
     private func playStaticSound() {
         configureAudioSessionForStatic()
-        guard staticPlayer == nil || staticPlayer?.isPlaying == false else { return }
+        // allow restarting even if a previous player exists but is not playing
+        if staticPlayer?.isPlaying == true { return }
         guard let url = Bundle.main.url(forResource: "pop", withExtension: "mp3") ?? Bundle.main.url(forResource: "pop", withExtension: "wav") else {
             print("[StaticSound] pop.(mp3|wav) not found in bundle")
             return
@@ -878,8 +889,9 @@ struct FeedView: View {
     private func playOneShotPop() {
         do {
             let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback, mode: .default, options: [])
-            try session.setActive(true, options: [])
+            // Use ambient to avoid errors and allow mixing
+            try session.setCategory(.ambient, mode: .default, options: [.mixWithOthers])
+            try session.setActive(true)
         } catch {
             print("[PopSound] Audio session config failed: \(error)")
         }
@@ -905,11 +917,15 @@ struct FeedView: View {
     }
     
     private func presentInterstitialOrFallback() {
-        guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-              let window = scene.windows.first,
-              let root = window.rootViewController else { return }
+        guard let scene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .first(where: { $0.activationState == .foregroundActive }),
+              let window = scene.windows.first(where: { $0.isKeyWindow }),
+              let root = window.rootViewController else {
+            print("[Ads] No active window to present interstitial")
+            return
+        }
         AdManager.shared.presentInterstitial(from: root)
-        // After ad presentation, ensure we recover UI state when app becomes active again
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
             NotificationCenter.default.post(name: UIApplication.didBecomeActiveNotification, object: nil)
         }
@@ -937,33 +953,20 @@ struct FeedView: View {
         try? await Task.sleep(nanoseconds: 250_000_000)
 
         // In lieu of Firestore, generate a page of demo posts.
+
         let newPosts = Self.generateDemoPosts(start: 0, count: pageSize)
 
-        var mixed = newPosts
-        if youtubeVideoIDs.isEmpty == false {
-            for i in mixed.indices {
-                if true { // replaced from `if Double.random(in: 0...1) < 0.95 {`
-                    if let vid = youtubeVideoIDs.randomElement() {
-                        mixed[i] = FeedPost(
-                            id: mixed[i].id,
-                            latitude: mixed[i].latitude,
-                            longitude: mixed[i].longitude,
-                            mediaURL: "https://www.youtube.com/watch?v=\(vid)",
-                            radius: mixed[i].radius,
-                            viewCount: mixed[i].viewCount,
-                            userID: mixed[i].userID
-                        )
-                    }
-                }
-            }
-        }
+        let mixed = newPosts
 
         await MainActor.run {
+            print("[Feed] reload posts loaded: \(mixed.count)")
             posts = mixed
             isLoading = false
             // If we couldn't load anything, mark as reached end to stop paginating.
             reachedEnd = mixed.isEmpty
             prefetchVisibleUsernames()
+            isFeedReady = !posts.isEmpty
+            print("[Feed] reload set ready=\(isFeedReady)")
         }
     }
 
@@ -978,30 +981,16 @@ struct FeedView: View {
         try? await Task.sleep(nanoseconds: 150_000_000)
         let newPosts = Self.generateDemoPostsForCountry(country: countries[selectedCountryIndex].code, start: 0, count: pageSize)
 
-        var mixed = newPosts
-        if youtubeVideoIDs.isEmpty == false {
-            for i in mixed.indices {
-                if true { // replaced from `if Double.random(in: 0...1) < 0.95 {`
-                    if let vid = youtubeVideoIDs.randomElement() {
-                        mixed[i] = FeedPost(
-                            id: mixed[i].id,
-                            latitude: mixed[i].latitude,
-                            longitude: mixed[i].longitude,
-                            mediaURL: "https://www.youtube.com/watch?v=\(vid)",
-                            radius: mixed[i].radius,
-                            viewCount: mixed[i].viewCount,
-                            userID: mixed[i].userID
-                        )
-                    }
-                }
-            }
-        }
+        let mixed = newPosts
 
         await MainActor.run {
+            print("[Feed] reloadForCountry posts loaded: \(mixed.count) country=\(countries[selectedCountryIndex].code)")
             posts = mixed
             isLoading = false
             reachedEnd = mixed.isEmpty
             prefetchVisibleUsernames()
+            isFeedReady = !posts.isEmpty
+            print("[Feed] reloadForCountry set ready=\(isFeedReady)")
         }
     }
 
@@ -1026,23 +1015,6 @@ struct FeedView: View {
             try? await Task.sleep(nanoseconds: 250_000_000)
 
             var newPage = Self.generateDemoPostsForCountry(country: countries[selectedCountryIndex].code, start: posts.count, count: pageSize)
-            if youtubeVideoIDs.isEmpty == false {
-                for i in newPage.indices {
-                    if true { // replaced from `if Double.random(in: 0...1) < 0.95 {`
-                        if let vid = youtubeVideoIDs.randomElement() {
-                            newPage[i] = FeedPost(
-                                id: newPage[i].id,
-                                latitude: newPage[i].latitude,
-                                longitude: newPage[i].longitude,
-                                mediaURL: "https://www.youtube.com/watch?v=\(vid)",
-                                radius: newPage[i].radius,
-                                viewCount: newPage[i].viewCount,
-                                userID: newPage[i].userID
-                            )
-                        }
-                    }
-                }
-            }
 
             await MainActor.run {
                 posts.append(contentsOf: newPage)
@@ -1063,8 +1035,36 @@ struct FeedView: View {
         for i in start..<end {
             let id = "demo_\(i)"
             let userID = i % 3 == 0 ? "fake_user_\(i)" : String(format: "user_%06d", i)
-            // Lower resolution image as per instruction, replaced with guaranteed placeholder
-            let mediaURL = "https://picsum.photos/800/1400"
+            // Force the first post to be a guaranteed playable HLS stream
+            let hlsSample = "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_4x3/gear1/prog_index.m3u8"
+            let sampleVideos = [
+                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
+                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
+                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
+                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4",
+                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
+                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/SubaruOutbackOnStreetAndDirt.mp4",
+                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/VolkswagenGTIReview.mp4",
+                "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_4x3/gear1/fileSequence0.mp4",
+                "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_4x3/gear1/fileSequence1.mp4"
+            ]
+            let mediaURL: String
+            if i == 0 {
+                // Force first item to be a known-good HLS stream for debugging playback
+                mediaURL = hlsSample
+            } else if i < 3 {
+                // Temporarily force next two items to be videos to verify pipeline
+                mediaURL = (sampleVideos.randomElement() ?? hlsSample)
+            } else if i % 2 == 0 {
+                // Even index -> image
+                let w = [640, 720, 800, 1080].randomElement() ?? 800
+                let h = [960, 1280, 1400, 1440, 1920].randomElement() ?? 1400
+                mediaURL = "https://picsum.photos/\(w)/\(h)?random=\(Int.random(in: 1...10_000))"
+            } else {
+                // Odd index -> video
+                mediaURL = (sampleVideos.randomElement() ?? hlsSample)
+            }
             let latitude = 37.3349 + Double(i % 5) * 0.01
             let longitude = -122.0090 - Double(i % 7) * 0.01
             let radius = [50, 100, 250, 500, 1000, 5000].randomElement() ?? 250
@@ -1092,8 +1092,31 @@ struct FeedView: View {
         for i in start..<end {
             let id = "\(country.lowercased())_demo_\(i)"
             let userID = i % 3 == 0 ? "fake_user_\(i)" : String(format: "user_%06d", i)
-            // Guaranteed placeholder mediaURL to avoid 404s
-            let mediaURL = "https://picsum.photos/800/1400"
+            // Force the first post to be a guaranteed playable HLS stream
+            let hlsSample = "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_4x3/gear1/prog_index.m3u8"
+            let sampleVideos = [
+                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
+                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
+                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
+                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4",
+                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
+                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/SubaruOutbackOnStreetAndDirt.mp4",
+                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/VolkswagenGTIReview.mp4",
+                "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_4x3/gear1/fileSequence0.mp4",
+                "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_4x3/gear1/fileSequence1.mp4"
+            ]
+            let mediaURL: String
+            if i < 3 {
+                // Temporarily force first three items to be videos to verify pipeline
+                mediaURL = (sampleVideos.randomElement() ?? hlsSample)
+            } else if i % 2 == 0 {
+                let w = [640, 720, 800, 1080].randomElement() ?? 800
+                let h = [960, 1280, 1400, 1440, 1920].randomElement() ?? 1400
+                mediaURL = "https://picsum.photos/\(w)/\(h)?random=\(Int.random(in: 1...10_000))"
+            } else {
+                mediaURL = (sampleVideos.randomElement() ?? hlsSample)
+            }
             // Shift coordinates slightly by country index to vary positions
             let baseLat = 37.3349 + Double(abs(country.hashValue % 20)) * 0.01
             let baseLon = -122.0090 - Double(abs(country.hashValue % 20)) * 0.01
@@ -1104,80 +1127,9 @@ struct FeedView: View {
         }
         return result
     }
-
-    // MARK: - YouTube Pool Loader
-
-    private func loadYouTubePool() async {
-        guard YouTubeAPI.apiKey.isEmpty == false else { return }
-        let channels = YouTubeAPI.topChannelIDs
-        guard channels.isEmpty == false else { return }
-        // Fetch up to 10 videos per channel and flatten
-        await withTaskGroup(of: [YouTubeService.Video].self) { group in
-            for ch in channels {
-                group.addTask { await youtubeService.fetchRecentVideos(forChannel: ch, maxResults: 10) }
-            }
-            var collected: Set<String> = []
-            for await vids in group {
-                for v in vids { collected.insert(v.id) }
-            }
-            await MainActor.run {
-                self.youtubeVideoIDs = Array(collected)
-            }
-        }
-    }
 }
 
-// YouTube API configuration and lightweight fetcher
-private struct YouTubeAPI {
-    // TODO: Replace with your own API key as needed
-    static let apiKey: String = "AIzaSyDgMYA1YisgbpEGyl0Nj8VGoorbqmfAkG0"
-
-    // A configurable list of top creator channel IDs. These are examples; replace as desired.
-    // MrBeast, Marques Brownlee (MKBHD), Kurzgesagt – In a Nutshell, TED, Veritasium
-    static let topChannelIDs: [String] = [
-        "UCX6OQ3DkcsbYNE6H8uQQuVA", // MrBeast
-        "UCBJycsmduvYEL83R_U4JriQ", // MKBHD
-        "UCsXVk37bltHxD1rDPwtNM8Q", // Kurzgesagt
-        "UCAuUUnT6oDeKwE6v1NGQxug", // TED
-        "UCHnyfMqiRRG1u-2MsSQLbXA"  // Veritasium
-    ]
-}
-
-private final class YouTubeService {
-    struct Video: Hashable { let id: String }
-
-    private let apiKey: String
-
-    init(apiKey: String) { self.apiKey = apiKey }
-
-    // Fetch latest video IDs for a channel by querying the Search API (order=date)
-    func fetchRecentVideos(forChannel channelID: String, maxResults: Int = 10) async -> [Video] {
-        guard apiKey.isEmpty == false else { return [] }
-        var comps = URLComponents(string: "https://www.googleapis.com/youtube/v3/search")!
-        comps.queryItems = [
-            URLQueryItem(name: "key", value: apiKey),
-            URLQueryItem(name: "channelId", value: channelID),
-            URLQueryItem(name: "part", value: "id"),
-            URLQueryItem(name: "order", value: "date"),
-            URLQueryItem(name: "type", value: "video"),
-            URLQueryItem(name: "maxResults", value: String(max(1, min(50, maxResults))))
-        ]
-        guard let url = comps.url else { return [] }
-        do {
-            let (data, _) = try await URLSession.shared.data(from: url)
-            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let items = json["items"] as? [[String: Any]] else { return [] }
-            let vids: [Video] = items.compactMap { item in
-                guard let id = item["id"] as? [String: Any], let videoId = id["videoId"] as? String else { return nil }
-                return Video(id: videoId)
-            }
-            return vids
-        } catch {
-            print("[YouTubeService] fetchRecentVideos failed for channel \(channelID): \(error)")
-            return []
-        }
-    }
-}
+// Removed YouTube API and YouTubeService definitions as per instruction
 
 private struct FeedFullscreenPageView: View {
     let post: FeedPost
@@ -1185,195 +1137,471 @@ private struct FeedFullscreenPageView: View {
     var onUserTapped: (String) -> Void
 
     @State private var imagePhaseDebug: String = ""
-    
-    @State private var ytTitle: String = ""
-    @State private var ytAuthor: String = ""
+    @State private var debugPlayerTimeControl: AVPlayer.TimeControlStatus = .waitingToPlayAtSpecifiedRate
+    @State private var debugItemStatus: AVPlayerItem.Status = .unknown
+
+    // Added for playback stuck detection and UI overlay
+    @State private var forceVideoPlaceholder: Bool = false
 
     private var coordinateText: String {
         String(format: "%.4f, %.4f", post.latitude, post.longitude)
     }
 
-    private var youtubeVideoID: String? {
-        // Extract YouTube video ID if mediaURL is a YouTube link
+    // Broadened video detection
+    private var directVideoURL: URL? {
         guard let url = URL(string: post.mediaURL) else { return nil }
-        if url.host?.contains("youtube.com") == true {
-            if let query = url.query {
-                let components = URLComponents(string: "https://dummy.com?\(query)")
-                if let v = components?.queryItems?.first(where: { $0.name == "v" })?.value {
-                    return v
+        let lower = url.absoluteString.lowercased()
+        // Broaden detection: handle querystrings and common video hints
+        let videoHints = [".mp4", ".m3u8", "/prog_index.m3u8", "video.mp4", "format=mp4", "format=hls", "type=video"]
+        let isVideo = videoHints.contains { lower.contains($0) }
+        return isVideo ? url : nil
+    }
+
+    // Replaced custom PlayerLayer with AVKit.VideoPlayer for reliability
+    private struct VideoPlayerContainer: View {
+        let url: URL
+        @Binding var hudTimeControl: AVPlayer.TimeControlStatus
+        @Binding var hudItemStatus: AVPlayerItem.Status
+        @State private var player: AVPlayer? = nil
+        @State private var itemObservation: NSKeyValueObservation? = nil
+        @State private var queuePlayer: AVQueuePlayer? = nil
+        @State private var looper: AVPlayerLooper? = nil
+
+        @State private var timeObserver: Any? = nil
+
+        // Added playback stuck state
+        @State private var playbackStuck: Bool = false
+
+        private func setupPlayer() {
+            guard player == nil, queuePlayer == nil else { return }
+            
+            // Configure audio session for playback with mixing disabled so audio is audible
+            let session = AVAudioSession.sharedInstance()
+            do {
+                try session.setCategory(.playback, mode: .moviePlayback, options: [])
+                try session.setActive(true)
+            } catch {
+                print("[Video] Audio session setup failed: \(error)")
+            }
+
+            let isMP4 = url.absoluteString.lowercased().hasSuffix(".mp4")
+
+            if isMP4 {
+                // Use AVQueuePlayer + AVPlayerLooper for seamless mp4 looping
+                let asset = AVURLAsset(url: url)
+                let item = AVPlayerItem(asset: asset)
+                let q = AVQueuePlayer()
+                q.allowsExternalPlayback = false
+                q.isMuted = false
+                q.automaticallyWaitsToMinimizeStalling = true
+                q.preventsDisplaySleepDuringVideoPlayback = true
+
+                self.queuePlayer = q
+                self.looper = AVPlayerLooper(player: q, templateItem: item)
+                self.player = q
+
+                // Observe readiness and start playback when ready
+                itemObservation = item.observe(\.status, options: [.initial, .new]) { _, _ in
+                    hudItemStatus = item.status
+                    print("[Video] MP4 item status: \(item.status.rawValue)")
+                    switch item.status {
+                    case .readyToPlay:
+                        q.seek(to: CMTime(seconds: 0.01, preferredTimescale: 600))
+                        q.playImmediately(atRate: 1.0)
+                        self.hudTimeControl = q.timeControlStatus
+                    case .failed:
+                        if let err = item.error { print("[Video] MP4 item failed: \(err)") }
+                    case .unknown:
+                        break
+                    @unknown default:
+                        break
+                    }
+                }
+
+                // Time observer to reflect status
+                let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
+                self.timeObserver = q.addPeriodicTimeObserver(forInterval: interval, queue: .main) { _ in
+                    self.hudTimeControl = q.timeControlStatus
+                }
+
+                // Retry start if still waiting after 2 seconds
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    if q.timeControlStatus != .playing {
+                        q.seek(to: CMTime(seconds: 0.01, preferredTimescale: 600))
+                        q.playImmediately(atRate: 1.0)
+                        self.hudTimeControl = q.timeControlStatus
+                    }
+                }
+            } else {
+                // HLS or other stream types: standard AVPlayer with end observer
+                let asset = AVURLAsset(url: url)
+                let item = AVPlayerItem(asset: asset)
+                let p = AVPlayer(playerItem: item)
+                p.allowsExternalPlayback = false
+                p.isMuted = false
+                p.automaticallyWaitsToMinimizeStalling = true
+                p.preventsDisplaySleepDuringVideoPlayback = true
+
+                itemObservation = item.observe(\.status, options: [.initial, .new]) { _, _ in
+                    hudItemStatus = item.status
+                    print("[Video] Item status changed to: \(item.status.rawValue)")
+                    switch item.status {
+                    case .readyToPlay:
+                        (self.player ?? p).seek(to: CMTime(seconds: 0.01, preferredTimescale: 600))
+                        (self.player ?? p).playImmediately(atRate: 1.0)
+                        self.hudTimeControl = p.timeControlStatus
+                    case .failed:
+                        if let err = item.error { print("[Video] Item failed: \(err)") }
+                    case .unknown:
+                        break
+                    @unknown default:
+                        break
+                    }
+                }
+
+                NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { _ in
+                    p.seek(to: .zero)
+                    p.play()
+                }
+
+                // Nudge playback to break waiting states
+                p.seek(to: CMTime(seconds: 0.01, preferredTimescale: 600))
+
+                // Periodic time observer to track progress and update HUD
+                let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
+                self.timeObserver = p.addPeriodicTimeObserver(forInterval: interval, queue: .main) { _ in
+                    self.hudTimeControl = p.timeControlStatus
+                }
+
+                self.player = p
+
+                // Poll timeControlStatus periodically to reflect in HUD
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    self.hudTimeControl = p.timeControlStatus
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    self.hudTimeControl = p.timeControlStatus
+                }
+
+                // Retry start if still waiting after 2 seconds
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    if let current = self.player, current.timeControlStatus != .playing {
+                        current.seek(to: CMTime(seconds: 0.01, preferredTimescale: 600))
+                        current.playImmediately(atRate: 1.0)
+                        self.hudTimeControl = current.timeControlStatus
+                    }
+                }
+
+                // Retry start if still waiting after 3 seconds
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                    if let current = self.player, current.timeControlStatus != .playing {
+                        current.seek(to: CMTime(seconds: 0.01, preferredTimescale: 600))
+                        current.playImmediately(atRate: 1.0)
+                        self.hudTimeControl = current.timeControlStatus
+                    }
                 }
             }
-        } else if url.host?.contains("youtu.be") == true {
-            return url.lastPathComponent
-        }
-        return nil
-    }
-    
-    private func fetchYouTubeMetadataIfNeeded() {
-        guard ytTitle.isEmpty, ytAuthor.isEmpty, let videoID = youtubeVideoID else { return }
-        let apiKey = YouTubeAPI.apiKey
-        guard apiKey.isEmpty == false else { return }
-        let urlString = "https://www.googleapis.com/youtube/v3/videos?part=snippet&id=\(videoID)&key=\(apiKey)"
-        guard let url = URL(string: urlString) else { return }
-        let task = URLSession.shared.dataTask(with: url) { data, _, _ in
-            guard let data = data,
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let items = json["items"] as? [[String: Any]],
-                  let first = items.first,
-                  let snippet = first["snippet"] as? [String: Any]
-            else { return }
-            let title = (snippet["title"] as? String) ?? ""
-            let channel = (snippet["channelTitle"] as? String) ?? ""
-            DispatchQueue.main.async {
-                self.ytTitle = title
-                self.ytAuthor = channel
+
+            // Dispatch a playback stuck check after 3 seconds
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                // If after 3 seconds we are still waiting/unknown, mark as stuck
+                let stillWaiting = (self.hudTimeControl == .waitingToPlayAtSpecifiedRate)
+                let itemUnknown = (self.hudItemStatus == .unknown)
+                if stillWaiting || itemUnknown {
+                    self.playbackStuck = true
+                    print("[Video] Playback appears stuck: timeControl=\(self.hudTimeControl.rawValue) item=\(self.hudItemStatus.rawValue)")
+                }
             }
         }
-        task.resume()
-    }
 
-    // Inline YouTube player using WKWebView
-    private struct YouTubePlayerView: UIViewRepresentable {
-        let videoID: String
-
-        func makeUIView(context: Context) -> WKWebView {
-            let config = WKWebViewConfiguration()
-            config.allowsInlineMediaPlayback = true
-            config.mediaTypesRequiringUserActionForPlayback = []
-            let webView = WKWebView(frame: .zero, configuration: config)
-            webView.scrollView.isScrollEnabled = false
-            webView.isOpaque = false
-            webView.backgroundColor = .black
-            return webView
-        }
-
-        func updateUIView(_ webView: WKWebView, context: Context) {
-            let html = """
-            <html><head><meta name='viewport' content='initial-scale=1, maximum-scale=1, user-scalable=no'>
-            <style>html,body{margin:0;padding:0;background:#000;height:100%;}</style>
-            </head><body>
-            <iframe id='player' type='text/html' width='100%' height='100%'
-                src='https://www.youtube.com/embed/\(videoID)?autoplay=1&mute=1&playsinline=1&controls=0&modestbranding=1&rel=0&showinfo=0&enablejsapi=1'
-                frameborder='0' allow='accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen'
-                allowfullscreen>
-            </iframe>
-            </body></html>
-            """
-            webView.loadHTMLString(html, baseURL: nil)
-        }
-    }
-
-    var body: some View {
-        GeometryReader { geo in
-            let size = geo.size
-            ZStack {
-                Color.black
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .ignoresSafeArea()
-                    .zIndex(0)
-
-                if let vid = youtubeVideoID {
-                    YouTubePlayerView(videoID: vid)
-                        .frame(width: size.width, height: size.height)
-                        .clipped()
-                        .background(Color.black)
-                        .onAppear { imagePhaseDebug = "youtube"; fetchYouTubeMetadataIfNeeded() }
-                } else if let url = URL(string: post.mediaURL) {
-                    AsyncImage(url: url, transaction: Transaction(animation: .none)) { phase in
-                        switch phase {
-                        case .empty:
-                            Color.black
-                                .onAppear { imagePhaseDebug = "empty" }
-                        case .success(let img):
-                            img
-                                .resizable()
-                                .scaledToFill()
-                                .frame(width: size.width, height: size.height)
-                                .clipped()
-                                .background(Color.black)
-                                .onAppear { imagePhaseDebug = "success" }
-                        case .failure:
-                            Color.black
-                                .onAppear { imagePhaseDebug = "failure" }
-                        @unknown default:
-                            Color.black.onAppear { imagePhaseDebug = "unknown" }
+        var body: some View {
+            Group {
+                if let player {
+                    PlayerLayerView(player: player)
+                        .onAppear {
+                            if player.timeControlStatus != .playing {
+                                player.playImmediately(atRate: 1.0)
+                            }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                                if let p = self.player, p.timeControlStatus != .playing {
+                                    p.playImmediately(atRate: 1.0)
+                                    self.hudTimeControl = p.timeControlStatus
+                                }
+                            }
                         }
-                    }
-                    .id("image_\(post.id)_\(post.mediaURL)")
-                    .onAppear {
-                        fetchYouTubeMetadataIfNeeded()
-                    }
                 } else {
                     Color.black
                 }
-                
-                if !ytTitle.isEmpty || !ytAuthor.isEmpty {
-                    VStack(alignment: .leading, spacing: 4) {
-                        if !ytTitle.isEmpty {
-                            Text(ytTitle)
-                                .font(.system(size: 14, weight: .semibold, design: .rounded))
-                                .foregroundColor(.white)
-                                .lineLimit(2)
-                        }
-                        if !ytAuthor.isEmpty {
-                            Text(ytAuthor)
-                                .font(.system(size: 12, weight: .regular, design: .rounded))
-                                .foregroundColor(.white.opacity(0.9))
-                        }
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Color.black.opacity(0.55), in: Capsule())
-                    .overlay(Capsule().stroke(Color.white.opacity(0.25), lineWidth: 1))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-                    .padding(16)
-                    .zIndex(5)
-                }
-
-                VStack(alignment: .trailing, spacing: 6) {
-                    Button(action: { onUserTapped(post.userID) }) {
-                        Text(displayName.isEmpty ? "User" : displayName)
-                            .font(.system(size: 16, weight: .bold, design: .rounded))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(Color.black.opacity(0.65), in: Capsule())
-                            .overlay(Capsule().stroke(Color.white.opacity(0.35), lineWidth: 1))
-                    }
-                    .buttonStyle(.plain)
-
-                    Text(coordinateText)
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
-                        .foregroundColor(.white.opacity(0.95))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 4)
-                        .background(Color.black.opacity(0.55), in: Capsule())
-                }
-                .padding(.trailing, 16)
-                .padding(.top, geo.safeAreaInsets.top + 40)
-                .frame(width: size.width, height: size.height, alignment: .topTrailing)
-                .zIndex(10)
-
-                // Removed debug VStack with id, url, and phase
-
-                // Removed Text with size info
-
-                VStack {
-                    Spacer()
-                    IsometricRadiusBar(radius: .constant(post.radius))
-                        .frame(width: 60, height: 220)
-                        .padding(.trailing, 12)
-                }
-                .padding(.bottom, 45)
-                .frame(width: size.width, height: size.height, alignment: .trailing)
-                .zIndex(10)
             }
-            .background(Color.black)
-            .frame(width: geo.size.width, height: geo.size.height, alignment: .center)
+            .onAppear {
+                setupPlayer()
+            }
+            .onDisappear {
+                if let obs = timeObserver, let p = player {
+                    p.removeTimeObserver(obs)
+                }
+                timeObserver = nil
+                player?.pause()
+                (player as? AVQueuePlayer)?.removeAllItems()
+                player = nil
+                queuePlayer = nil
+                looper = nil
+                itemObservation = nil
+            }
+            .overlay(
+                Group {
+                    if playbackStuck {
+                        VStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundColor(.yellow)
+                                .font(.system(size: 28, weight: .bold))
+                            Text("Video failed to start. Showing placeholder.")
+                                .font(.system(size: 13, weight: .semibold))
+                            Text(url.absoluteString)
+                                .font(.system(size: 11, weight: .regular, design: .monospaced))
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                        .padding(12)
+                        .background(Color.black.opacity(0.7), in: Capsule())
+                        .foregroundColor(.white)
+                    }
+                }
+            )
+        }
+    }
+
+    private struct PlayerLayerView: UIViewRepresentable {
+        let player: AVPlayer?
+
+        func makeUIView(context: Context) -> PlayerHostingView {
+            let view = PlayerHostingView()
+            view.backgroundColor = .black
+            view.translatesAutoresizingMaskIntoConstraints = false
+            view.playerLayer.videoGravity = .resizeAspect
+            view.player = player
+            return view
+        }
+
+        func updateUIView(_ uiView: PlayerHostingView, context: Context) {
+            uiView.player = player
+            uiView.playerLayer.videoGravity = .resizeAspect
+            uiView.setNeedsLayout()
+            uiView.layoutIfNeeded()
+        }
+    }
+
+    private final class PlayerHostingView: UIView {
+        override class var layerClass: AnyClass { AVPlayerLayer.self }
+        var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
+        var player: AVPlayer? {
+            get { playerLayer.player }
+            set { playerLayer.player = newValue }
+        }
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            playerLayer.frame = bounds
+            playerLayer.videoGravity = .resizeAspect
+        }
+    }
+
+    private var debugTimeControlText: String {
+        switch debugPlayerTimeControl {
+        case .paused: return "paused"
+        case .waitingToPlayAtSpecifiedRate: return "waiting"
+        case .playing: return "playing"
+        @unknown default: return "unknown"
+        }
+    }
+
+    private var debugItemStatusText: String {
+        switch debugItemStatus {
+        case .unknown: return "unknown"
+        case .readyToPlay: return "ready"
+        case .failed: return "failed"
+        @unknown default: return "unknown"
+        }
+    }
+
+    // REPLACED body implementation with a thin wrapper delegating to contentView to reduce type-checking complexity
+    var body: some View {
+        GeometryReader { geo in
+            let size = geo.size
+            contentView(size: size)
+                .background(Color.black)
+                .frame(width: geo.size.width, height: geo.size.height, alignment: .center)
+                .ignoresSafeArea()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black)
-        .ignoresSafeArea()
+    }
+
+    @ViewBuilder
+    private func contentView(size: CGSize) -> some View {
+        let isVideo = (directVideoURL != nil)
+        ZStack {
+            Color.black
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .ignoresSafeArea()
+                .zIndex(0)
+
+            if isVideo, let videoURL = directVideoURL {
+                videoContent(size: size, videoURL: videoURL)
+            } else if let url = URL(string: post.mediaURL) {
+                imageContent(size: size, url: url)
+            } else {
+                Color.black
+            }
+
+            if !post.mediaURL.isEmpty {
+                mediaURLBadge
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                    .padding(.bottom, 8)
+                    .padding(.horizontal, 12)
+                    .zIndex(6)
+            }
+
+            topRightInfo(size: size)
+                .zIndex(10)
+
+            trailingRadius(size: size)
+                .zIndex(10)
+        }
+    }
+
+    @ViewBuilder
+    private func videoContent(size: CGSize, videoURL: URL) -> some View {
+        VideoPlayerContainer(url: videoURL, hudTimeControl: $debugPlayerTimeControl, hudItemStatus: $debugItemStatus)
+            .frame(width: size.width, height: size.height)
+            .ignoresSafeArea()
+            .contentShape(Rectangle())
+            .clipped()
+            .background(Color.black)
+            .onAppear {
+                imagePhaseDebug = "video"
+                print("[Feed] Using direct video: \(videoURL.absoluteString)")
+            }
+            .overlay(alignment: .topLeading) { playerHUD }
+            .overlay { playerSoftPlaceholder }
+    }
+
+    @ViewBuilder
+    private func imageContent(size: CGSize, url: URL) -> some View {
+        AsyncImage(url: url, transaction: Transaction(animation: .none)) { phase in
+            switch phase {
+            case .empty:
+                Color.black
+                    .frame(width: size.width, height: size.height)
+                    .onAppear {
+                        imagePhaseDebug = "empty"
+                        print("[Feed] image phase: empty for URL: \(post.mediaURL)")
+                    }
+            case .success(let img):
+                img
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: size.width, height: size.height)
+                    .clipped()
+                    .background(Color.black)
+                    .onAppear {
+                        imagePhaseDebug = "success"
+                        print("[Feed] Using image: \(post.mediaURL)")
+                    }
+            case .failure:
+                ZStack {
+                    if UIImage(named: "placeholder") != nil {
+                        Image("placeholder")
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: size.width, height: size.height)
+                            .clipped()
+                    } else {
+                        LinearGradient(colors: [.black, .gray.opacity(0.4), .black], startPoint: .top, endPoint: .bottom)
+                            .frame(width: size.width, height: size.height)
+                            .clipped()
+                    }
+                }
+                .background(Color.black)
+                .frame(width: size.width, height: size.height)
+                .onAppear {
+                    imagePhaseDebug = "failure"
+                    print("[Feed] image phase: failure for URL: \(post.mediaURL)")
+                }
+            @unknown default:
+                Color.black.onAppear { imagePhaseDebug = "unknown" }
+            }
+        }
+        .id("image_\(post.id)_\(post.mediaURL)")
+    }
+
+    private var playerHUD: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("player: \(debugTimeControlText)")
+            Text("item: \(debugItemStatusText)")
+        }
+        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+        .foregroundColor(.white)
+        .padding(8)
+        .background(Color.black.opacity(0.55), in: Capsule())
+        .padding(.top, 8)
+        .padding(.leading, 12)
+    }
+
+    @ViewBuilder
+    private var playerSoftPlaceholder: some View {
+        if debugPlayerTimeControl == .waitingToPlayAtSpecifiedRate && debugItemStatus == .unknown {
+            LinearGradient(colors: [.black, .gray.opacity(0.4), .black], startPoint: .top, endPoint: .bottom)
+                .allowsHitTesting(false)
+                .transition(.opacity)
+        }
+    }
+
+    private var mediaURLBadge: some View {
+        Text(post.mediaURL)
+            .font(.system(size: 11, weight: .regular, design: .monospaced))
+            .foregroundColor(.white.opacity(0.95))
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(Color.black.opacity(0.55), in: Capsule())
+            .overlay(Capsule().stroke(Color.white.opacity(0.25), lineWidth: 1))
+    }
+
+    private func topRightInfo(size: CGSize) -> some View {
+        VStack(alignment: .trailing, spacing: 6) {
+            Button(action: { onUserTapped(post.userID) }) {
+                Text(displayName.isEmpty ? "User" : displayName)
+                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Color.black.opacity(0.65), in: Capsule())
+                    .overlay(Capsule().stroke(Color.white.opacity(0.35), lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+
+            Text(String(format: "%.4f, %.4f", post.latitude, post.longitude))
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundColor(.white.opacity(0.95))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(Color.black.opacity(0.55), in: Capsule())
+        }
+        .padding(.trailing, 16)
+        .padding(.top, 40)
+        .frame(width: size.width, height: size.height, alignment: .topTrailing)
+    }
+
+    private func trailingRadius(size: CGSize) -> some View {
+        VStack {
+            Spacer()
+            IsometricRadiusBar(radius: .constant(post.radius))
+                .frame(width: 60, height: 220)
+                .padding(.trailing, 12)
+        }
+        .padding(.bottom, 45)
+        .frame(width: size.width, height: size.height, alignment: .trailing)
     }
 }
 
