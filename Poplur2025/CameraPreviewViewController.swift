@@ -1,9 +1,12 @@
 import UIKit
 import AVFoundation
 import SwiftUI
+import AudioToolbox
 
 extension Notification.Name {
     static let cubeTabViewTapped = Notification.Name("CubeTabViewTappedNotification")
+    static let cubeHoldBegan = Notification.Name("CubeHoldBegan")
+    static let cubeHoldEnded = Notification.Name("CubeHoldEnded")
 }
 
 /// Hosts an AVCaptureVideoPreviewLayer for a provided AVCaptureSession.
@@ -39,9 +42,6 @@ final class CameraPreviewViewController: UIViewController {
     private let flipButton = UIButton(type: .system)
 
     private var isTorchOn: Bool = false
-    
-    private let loadingOverlay = UIActivityIndicatorView(style: .large)
-    private var overlayAutoHideWorkItem: DispatchWorkItem?
 
     // Debug utilities
     private let debugEnabled: Bool = true
@@ -62,6 +62,23 @@ final class CameraPreviewViewController: UIViewController {
     /// Leave true unless your owner manages the session lifecycle explicitly.
     var autoManageSession: Bool = true
 
+    private var didRunInitialAppearanceSync = false
+
+    // Recording helpers
+    private var recordStartDate: Date?
+    private var recordTimer: CADisplayLink?
+    private let recordMaxDuration: TimeInterval = 10.0
+    private var recordProgress: Double = 0.0 // 0...1
+
+    // Simple vertical progress bar next to the radius bar
+    private let recordProgressView: UIView = {
+        let v = UIView()
+        v.backgroundColor = UIColor.systemRed.withAlphaComponent(0.9)
+        v.layer.cornerRadius = 3
+        v.isHidden = true
+        return v
+    }()
+
     // MARK: - Init
     init(session: AVCaptureSession) {
         self.session = session
@@ -79,9 +96,9 @@ final class CameraPreviewViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .black
-        view.layer.addSublayer(previewLayer)
+        // Insert preview layer at the bottom to avoid zPosition quirks
         previewLayer.isHidden = false
-        previewLayer.zPosition = -1
+        view.layer.insertSublayer(previewLayer, at: 0)
         
         if debugEnabled {
             view.layer.addSublayer(debugBorderLayer)
@@ -89,9 +106,21 @@ final class CameraPreviewViewController: UIViewController {
         
         installRadiusBar()
 
+        // Install a simple recording progress bar next to the radius bar
+        view.addSubview(recordProgressView)
+        recordProgressView.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            recordProgressView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -80),
+            recordProgressView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -45),
+            recordProgressView.widthAnchor.constraint(equalToConstant: 6),
+            recordProgressView.heightAnchor.constraint(equalToConstant: 0)
+        ])
+
         setupButtons()
         setupGestures()
         updateTorchAvailability()
+        
+        print("[CameraPreviewVC] viewDidLoad window? \(self.view.window != nil), layer frame: \(self.previewLayer.frame)")
         
         // Start the session as early as possible to avoid cold-start delay
         if autoManageSession && !session.isRunning {
@@ -101,30 +130,20 @@ final class CameraPreviewViewController: UIViewController {
                 DispatchQueue.main.async { [weak self] in
                     guard let self = self else { return }
                     self.prepareUIForCubeLoad()
-                    if let connection = self.previewLayer.connection, connection.isEnabled {
-                        self.loadingOverlay.stopAnimating()
-                        self.overlayAutoHideWorkItem?.cancel()
-                        self.overlayAutoHideWorkItem = nil
-                    }
                 }
             }
         }
         
-        // Lightweight spinner overlay for first frame
-        loadingOverlay.translatesAutoresizingMaskIntoConstraints = false
-        loadingOverlay.hidesWhenStopped = true
-        view.addSubview(loadingOverlay)
-        NSLayoutConstraint.activate([
-            loadingOverlay.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            loadingOverlay.centerYAnchor.constraint(equalTo: view.centerYAnchor)
-        ])
-        loadingOverlay.startAnimating()
-        // Auto-hide as a fallback after 0.35s
-        let hideWork = DispatchWorkItem { [weak self] in self?.loadingOverlay.stopAnimating() }
-        overlayAutoHideWorkItem = hideWork
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: hideWork)
-        
         NotificationCenter.default.addObserver(self, selector: #selector(handleCubeTappedNotification), name: .cubeTabViewTapped, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(handleCubeHoldBegan), name: .cubeHoldBegan, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(handleCubeHoldEnded), name: .cubeHoldEnded, object: nil)
+        
+        // Ensure initial layout/UI sync on first load
+        view.setNeedsLayout()
+        view.layoutIfNeeded()
+        DispatchQueue.main.async { [weak self] in
+            self?.prepareUIForCubeLoad()
+        }
         
         appDidBecomeActiveObserver = NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             guard let self = self else { return }
@@ -181,11 +200,23 @@ final class CameraPreviewViewController: UIViewController {
     
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        print("[CameraPreviewVC] viewWillAppear window? \(self.view.window != nil), bounds: \(self.view.bounds)")
         isAppActive = true
         updateTorchAvailability()
         
         previewLayer.isHidden = false
         prepareUIForCubeLoad()
+        
+        if let connection = previewLayer.connection, connection.isVideoOrientationSupported,
+           let orientation = view.window?.windowScene?.interfaceOrientation {
+            switch orientation {
+            case .portrait: connection.videoOrientation = .portrait
+            case .portraitUpsideDown: connection.videoOrientation = .portraitUpsideDown
+            case .landscapeLeft: connection.videoOrientation = .landscapeLeft
+            case .landscapeRight: connection.videoOrientation = .landscapeRight
+            default: break
+            }
+        }
         
         // Defer a second pass to the next runloop to catch first-attach-to-window cases
         DispatchQueue.main.async { [weak self] in
@@ -206,6 +237,7 @@ final class CameraPreviewViewController: UIViewController {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        print("[CameraPreviewVC] viewDidAppear window? \(self.view.window != nil), bounds: \(self.view.bounds)")
         print("[CameraPreviewVC] appeared; session running: \(session.isRunning), layer frame: \(previewLayer.frame)")
         if let connection = previewLayer.connection {
             print("[CameraPreviewVC] connection active: \(connection.isEnabled), videoOrientation: \(connection.videoOrientation.rawValue)")
@@ -213,11 +245,65 @@ final class CameraPreviewViewController: UIViewController {
             print("[CameraPreviewVC] no preview connection")
         }
         prepareUIForCubeLoad()
+
+        if didRunInitialAppearanceSync == false {
+            didRunInitialAppearanceSync = true
+
+            // Ensure preview layer is at the bottom
+            if previewLayer.superlayer !== view.layer {
+                view.layer.insertSublayer(previewLayer, at: 0)
+            } else if let sublayers = view.layer.sublayers, let idx = sublayers.firstIndex(of: previewLayer), idx != 0 {
+                previewLayer.removeFromSuperlayer()
+                view.layer.insertSublayer(previewLayer, at: 0)
+            }
+
+            // Force frame and orientation now that we're in a window
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            previewLayer.frame = view.bounds
+            if let connection = previewLayer.connection, connection.isVideoOrientationSupported {
+                switch currentInterfaceOrientation() {
+                case .portrait: connection.videoOrientation = .portrait
+                case .portraitUpsideDown: connection.videoOrientation = .portraitUpsideDown
+                case .landscapeLeft: connection.videoOrientation = .landscapeLeft
+                case .landscapeRight: connection.videoOrientation = .landscapeRight
+                default: break
+                }
+            }
+            CATransaction.commit()
+
+            // Final UI sync
+            prepareUIForCubeLoad()
+        }
         
-        if session.isRunning, let connection = previewLayer.connection, connection.isEnabled {
-            loadingOverlay.stopAnimating()
-            overlayAutoHideWorkItem?.cancel()
-            overlayAutoHideWorkItem = nil
+        if autoManageSession && !session.isRunning {
+            sessionQueue.async { [weak self] in
+                self?.session.startRunning()
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self else { return }
+                    // Ensure preview layer is at the bottom
+                    if self.previewLayer.superlayer !== self.view.layer {
+                        self.view.layer.insertSublayer(self.previewLayer, at: 0)
+                    } else if let sublayers = self.view.layer.sublayers, let idx = sublayers.firstIndex(of: self.previewLayer), idx != 0 {
+                        self.previewLayer.removeFromSuperlayer()
+                        self.view.layer.insertSublayer(self.previewLayer, at: 0)
+                    }
+                    CATransaction.begin()
+                    CATransaction.setDisableActions(true)
+                    self.previewLayer.frame = self.view.bounds
+                    if let connection = self.previewLayer.connection, connection.isVideoOrientationSupported {
+                        switch self.currentInterfaceOrientation() {
+                        case .portrait: connection.videoOrientation = .portrait
+                        case .portraitUpsideDown: connection.videoOrientation = .portraitUpsideDown
+                        case .landscapeLeft: connection.videoOrientation = .landscapeLeft
+                        case .landscapeRight: connection.videoOrientation = .landscapeRight
+                        default: break
+                        }
+                    }
+                    CATransaction.commit()
+                    self.prepareUIForCubeLoad()
+                }
+            }
         }
     }
 
@@ -226,10 +312,6 @@ final class CameraPreviewViewController: UIViewController {
         // Reset torch UI to safe state; actual session control should be managed by owner
         isTorchOn = false
         torchButton.setImage(UIImage(systemName: "flashlight.off.fill"), for: .normal)
-        
-        loadingOverlay.stopAnimating()
-        overlayAutoHideWorkItem?.cancel()
-        overlayAutoHideWorkItem = nil
         
         if autoManageSession && session.isRunning {
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -240,42 +322,65 @@ final class CameraPreviewViewController: UIViewController {
     
     deinit {
         NotificationCenter.default.removeObserver(self, name: .cubeTabViewTapped, object: nil)
+        NotificationCenter.default.removeObserver(self, name: .cubeHoldBegan, object: nil)
+        NotificationCenter.default.removeObserver(self, name: .cubeHoldEnded, object: nil)
         if let obs = appDidBecomeActiveObserver { NotificationCenter.default.removeObserver(obs) }
         if let obs = appWillResignActiveObserver { NotificationCenter.default.removeObserver(obs) }
     }
 
-    // MARK: - Public Trigger
-    
-    /// Ensure UI is fully initialized and in-sync when the cube loads
-    /// Call this right after presenting/embedding this controller for immediate readiness.
-    public func prepareUIForCubeLoad() {
-        // Make sure layer is attached and visible
-        previewLayer.isHidden = false
-        // Ensure correct frame without animations
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        previewLayer.frame = view.bounds
-        CATransaction.commit()
+    private func currentInterfaceOrientation() -> UIInterfaceOrientation {
+        if let o = view.window?.windowScene?.interfaceOrientation {
+            return o
+        }
+        return .portrait
+    }
 
-        // Sync orientation if possible
-        if let connection = previewLayer.connection, connection.isVideoOrientationSupported,
-           let orientation = view.window?.windowScene?.interfaceOrientation {
-            switch orientation {
-            case .portrait: connection.videoOrientation = .portrait
-            case .portraitUpsideDown: connection.videoOrientation = .portraitUpsideDown
-            case .landscapeLeft: connection.videoOrientation = .landscapeLeft
-            case .landscapeRight: connection.videoOrientation = .landscapeRight
-            default: break
-            }
+    /// Sync UI with current capture session/preview state. Safe to call multiple times.
+    private func prepareUIForCubeLoad() {
+        // Ensure preview layer is visible and sized
+        previewLayer.isHidden = false
+        if previewLayer.frame != view.bounds {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            previewLayer.frame = view.bounds
+            CATransaction.commit()
         }
 
-        // Refresh dependent UI
-        refreshRadiusBar()
+        // Update torch and buttons state
         updateTorchAvailability()
+        flipButton.isEnabled = true
+        torchButton.isEnabled = torchButton.isEnabled // no-op to trigger UI refresh
+    }
 
-        // Apply layout immediately
-        view.setNeedsLayout()
-        view.layoutIfNeeded()
+    // MARK: - Public Trigger
+    
+    /// Begin recording via external (cube) hold
+    public func startVideoHold() {
+        // Ensure UI is ready
+        prepareUIForCubeLoad()
+        print("[CameraPreviewVC] startVideoHold()")
+        let generator = UIImpactFeedbackGenerator(style: .light)
+        generator.prepare()
+        generator.impactOccurred()
+        // Start UI and callbacks
+        animateRecordingUI(started: true)
+        startRecordingUI()
+        DispatchQueue.main.async { [weak self] in
+            self?.onStartVideo?()
+        }
+    }
+
+    /// End recording via external (cube) release
+    public func stopVideoHold() {
+        print("[CameraPreviewVC] stopVideoHold()")
+        let generator = UIImpactFeedbackGenerator(style: .light)
+        generator.prepare()
+        generator.impactOccurred()
+        animateRecordingUI(started: false)
+        stopRecordingUI()
+        DispatchQueue.main.async { [weak self] in
+            self?.onStopVideo?()
+        }
     }
 
     /// Programmatically trigger a photo capture
@@ -291,6 +396,16 @@ final class CameraPreviewViewController: UIViewController {
     
     @objc private func handleCubeTappedNotification() {
         cubePressed()
+    }
+    
+    @objc private func handleCubeHoldBegan() {
+        print("[CameraPreviewVC] handleCubeHoldBegan notification")
+        startVideoHold()
+    }
+
+    @objc private func handleCubeHoldEnded() {
+        print("[CameraPreviewVC] handleCubeHoldEnded notification")
+        stopVideoHold()
     }
 
     /// Ask the owning coordinator/controller to present a preview after photo capture completes.
@@ -351,12 +466,14 @@ final class CameraPreviewViewController: UIViewController {
         case .began:
             // Immediate UI feedback
             animateRecordingUI(started: true)
+            startRecordingUI()
             // Defer start to next runloop to avoid blocking UI
             DispatchQueue.main.async { [weak self] in
                 self?.onStartVideo?()
             }
         case .ended, .cancelled, .failed:
             animateRecordingUI(started: false)
+            stopRecordingUI()
             DispatchQueue.main.async { [weak self] in
                 self?.onStopVideo?()
             }
@@ -499,6 +616,59 @@ final class CameraPreviewViewController: UIViewController {
         UIView.animate(withDuration: 0.12, delay: 0, options: [.curveEaseOut]) {
             self.torchButton.alpha = targetAlpha
             self.flipButton.alpha = targetAlpha
+        }
+    }
+    
+    // MARK: - Recording UI & Timer
+    private func startRecordingUI() {
+        recordStartDate = Date()
+        recordProgress = 0
+        // Show progress bar and reset height to 0
+        if let heightConstraint = recordProgressView.constraints.first(where: { $0.firstAttribute == .height }) {
+            heightConstraint.constant = 0
+        }
+        recordProgressView.isHidden = false
+        // Start a display link to update progress smoothly
+        let link = CADisplayLink(target: self, selector: #selector(updateRecordingProgress))
+        link.add(to: .main, forMode: .common)
+        recordTimer = link
+        // Start pop/tick sound (placeholder system sound)
+        AudioServicesPlaySystemSound(1104) // initial tick
+    }
+
+    private func stopRecordingUI() {
+        recordTimer?.invalidate()
+        recordTimer = nil
+        recordStartDate = nil
+        recordProgress = 0
+        recordProgressView.isHidden = true
+        // Stop any ongoing feedback (no loop here; if you add AVAudioPlayer loop, stop it)
+    }
+
+    @objc private func updateRecordingProgress() {
+        guard let start = recordStartDate else { return }
+        let elapsed = Date().timeIntervalSince(start)
+        let progress = min(1.0, elapsed / recordMaxDuration)
+        recordProgress = progress
+        // Map progress to height up to the radius bar height (~220)
+        let maxHeight: CGFloat = 220
+        if let heightConstraint = recordProgressView.constraints.first(where: { $0.firstAttribute == .height }) {
+            heightConstraint.constant = maxHeight * CGFloat(progress)
+        }
+        recordProgressView.setNeedsLayout()
+        // Provide a subtle tick every second as a placeholder for a pop loop
+        if floor(elapsed) != floor(elapsed - 1) {
+            AudioServicesPlaySystemSound(1104)
+        }
+        // Auto-stop at max duration
+        if elapsed >= recordMaxDuration {
+            recordTimer?.invalidate()
+            recordTimer = nil
+            DispatchQueue.main.async { [weak self] in
+                self?.animateRecordingUI(started: false)
+                self?.stopRecordingUI()
+                self?.onStopVideo?()
+            }
         }
     }
 }

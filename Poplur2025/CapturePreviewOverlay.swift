@@ -44,7 +44,7 @@ private struct InlineCapturePreview: View {
     @State private var playerItem: AVPlayerItem?
     @State private var stabilizedURL: URL?
     @State private var playerReady: Bool = false
-    @State private var autoDismissWorkItem: DispatchWorkItem?
+//    @State private var autoDismissWorkItem: DispatchWorkItem?
     @State private var userInteracted: Bool = false
     @State private var appearedAt: Date = .distantPast
 
@@ -65,24 +65,24 @@ private struct InlineCapturePreview: View {
                             return
                         }
                         userInteracted = true
-                        autoDismissWorkItem?.cancel()
+//                        autoDismissWorkItem?.cancel()
                         NotificationCenter.default.post(name: Notification.Name("InlinePreviewDismissRequested"), object: nil)
                     }
                     .onAppear { print("[InlinePreview] appeared. image? \(image != nil), video? \(videoURL != nil)") }
-                    .onAppear {
-                        appearedAt = Date()
-                        let work = DispatchWorkItem {
-                            if !userInteracted {
-                                print("[InlinePreview] Auto-dismissing after timeout")
-                                NotificationCenter.default.post(name: Notification.Name("InlinePreviewDismissRequested"), object: nil)
-                            }
-                        }
-                        autoDismissWorkItem = work
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0, execute: work)
-                    }
-                    .onDisappear {
-                        autoDismissWorkItem?.cancel()
-                    }
+//                    .onAppear {
+//                        appearedAt = Date()
+//                        let work = DispatchWorkItem {
+//                            if !userInteracted {
+//                                print("[InlinePreview] Auto-dismissing after timeout")
+//                                NotificationCenter.default.post(name: Notification.Name("InlinePreviewDismissRequested"), object: nil)
+//                            }
+//                        }
+//                        autoDismissWorkItem = work
+//                        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0, execute: work)
+//                    }
+//                    .onDisappear {
+//                        autoDismissWorkItem?.cancel()
+//                    }
 
                 if let img = image {
                     GeometryReader { geo in
@@ -180,7 +180,7 @@ private struct InlineCapturePreview: View {
                                 return
                             }
                             userInteracted = true
-                            autoDismissWorkItem?.cancel()
+//                            autoDismissWorkItem?.cancel()
                             NotificationCenter.default.post(name: Notification.Name("InlinePreviewDismissRequested"), object: nil)
                         } label: {
                             Text("Retake")
@@ -199,7 +199,7 @@ private struct InlineCapturePreview: View {
                                 return
                             }
                             userInteracted = true
-                            autoDismissWorkItem?.cancel()
+//                            autoDismissWorkItem?.cancel()
                             NotificationCenter.default.post(name: Notification.Name("InlinePreviewUseRequested"), object: nil)
                         } label: {
                             Text("Use")

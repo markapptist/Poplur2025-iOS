@@ -1062,17 +1062,19 @@ struct FeedView: View {
                 // A couple of Apple-hosted MP4 segments are not standalone; avoid them as direct videos
             ]
             let mediaURL: String
-            if i < 5 {
-                // Prefer known-good HLS for the first few items to ensure playback reliability
-                mediaURL = hlsSample
+            if i < 2 {
+                // Force images early so the first page shows a mix
+                let w = [640, 720, 800, 1080].randomElement() ?? 800
+                let h = [960, 1280, 1400, 1440, 1920].randomElement() ?? 1400
+                mediaURL = "https://picsum.photos/\(w)/\(h)?random=\(Int.random(in: 1...10_000))"
             } else if i % 2 == 0 {
                 // Even index -> image
                 let w = [640, 720, 800, 1080].randomElement() ?? 800
                 let h = [960, 1280, 1400, 1440, 1920].randomElement() ?? 1400
                 mediaURL = "https://picsum.photos/\(w)/\(h)?random=\(Int.random(in: 1...10_000))"
             } else {
-                // Odd index -> fallback video (HLS preferred)
-                mediaURL = (sampleVideos.first ?? hlsSample)
+                // Odd index -> HLS video (reliable sample)
+                mediaURL = hlsSample
             }
             let latitude = 37.3349 + Double(i % 5) * 0.01
             let longitude = -122.0090 - Double(i % 7) * 0.01
@@ -1109,14 +1111,19 @@ struct FeedView: View {
                 // A couple of Apple-hosted MP4 segments are not standalone; avoid them as direct videos
             ]
             let mediaURL: String
-            if i < 5 {
-                mediaURL = hlsSample
+            if i < 2 {
+                // Force images early so the first page shows a mix
+                let w = [640, 720, 800, 1080].randomElement() ?? 800
+                let h = [960, 1280, 1400, 1440, 1920].randomElement() ?? 1400
+                mediaURL = "https://picsum.photos/\(w)/\(h)?random=\(Int.random(in: 1...10_000))"
             } else if i % 2 == 0 {
+                // Even index -> image
                 let w = [640, 720, 800, 1080].randomElement() ?? 800
                 let h = [960, 1280, 1400, 1440, 1920].randomElement() ?? 1400
                 mediaURL = "https://picsum.photos/\(w)/\(h)?random=\(Int.random(in: 1...10_000))"
             } else {
-                mediaURL = (sampleVideos.first ?? hlsSample)
+                // Odd index -> HLS video (reliable sample)
+                mediaURL = hlsSample
             }
             // Shift coordinates slightly by country index to vary positions
             let baseLat = 37.3349 + Double(abs(country.hashValue % 20)) * 0.01

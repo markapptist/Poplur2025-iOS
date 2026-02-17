@@ -409,6 +409,22 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
         }
     }
 
+    private func topMostViewController() -> UIViewController? {
+        #if canImport(UIKit)
+        if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+           let window = scene.windows.first(where: { $0.isKeyWindow }),
+           var top = window.rootViewController {
+            while let presented = top.presentedViewController {
+                top = presented
+            }
+            return top
+        }
+        return nil
+        #else
+        return nil
+        #endif
+    }
+
     // MARK: - Photo Capture
     func takePhoto() {
         sessionQueue.async { [weak self] in
@@ -575,7 +591,7 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
                         if let useObserver { NotificationCenter.default.removeObserver(useObserver) }
                     }
 
-                    let presenter: UIViewController? = self.recordPreviewViewController ?? self.previewViewController
+                    let presenter: UIViewController? = self.recordPreviewViewController ?? self.previewViewController ?? self.topMostViewController()
                     presenter?.present(host, animated: true)
                 }
             }
@@ -697,12 +713,62 @@ extension CameraKitController: AVCaptureFileOutputRecordingDelegate {
             return
         }
         print("[CK][Video] Recorded video at: \(outputFileURL)")
+
+        #if canImport(UIKit)
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+
+            // Present SwiftUI capture overlay full-screen for video
+            let overlay = CapturePreviewOverlay(image: nil, videoURL: outputFileURL)
+            let host = UIHostingController(rootView: overlay)
+            host.modalPresentationStyle = .fullScreen
+
+            // Observers for overlay actions
+            var dismissObserver: NSObjectProtocol?
+            var useObserver: NSObjectProtocol?
+
+            dismissObserver = NotificationCenter.default.addObserver(
+                forName: Notification.Name("InlinePreviewDismissRequested"),
+                object: nil,
+                queue: .main
+            ) { [weak host] _ in
+                host?.dismiss(animated: true)
+                if let dismissObserver { NotificationCenter.default.removeObserver(dismissObserver) }
+                if let useObserver { NotificationCenter.default.removeObserver(useObserver) }
+            }
+
+            useObserver = NotificationCenter.default.addObserver(
+                forName: Notification.Name("InlinePreviewUseRequested"),
+                object: nil,
+                queue: .main
+            ) { [weak self, weak host] _ in
+                guard let self else { return }
+                Task { @MainActor in
+                    // Proceed with crop -> upload -> post
+                    self.requestLocationAuthorizationIfNeeded()
+                    let loc = await self.currentLocation()
+                    let coord = loc?.coordinate
+                    let processedURL = await self.exportCroppedPortrait9x16(inputURL: outputFileURL) ?? outputFileURL
+                    if let url = await self.uploadVideoToStorage(fileURL: processedURL) {
+                        await self.writePostDocument(mediaURL: url, coordinate: coord, mediaType: "video")
+                    } else {
+                        print("[CK][Post] Skipping post; video upload failed")
+                    }
+                    host?.dismiss(animated: true)
+                }
+                if let dismissObserver { NotificationCenter.default.removeObserver(dismissObserver) }
+                if let useObserver { NotificationCenter.default.removeObserver(useObserver) }
+            }
+
+            let presenter: UIViewController? = self.recordPreviewViewController ?? self.previewViewController ?? self.topMostViewController()
+            presenter?.present(host, animated: true)
+        }
+        #else
+        // If UIKit not available, fallback to immediate processing
         Task { @MainActor in
-            // Optionally fetch a location for the video
             self.requestLocationAuthorizationIfNeeded()
             let loc = await self.currentLocation()
             let coord = loc?.coordinate
-            // Crop to 9:16 portrait before upload to reduce black bars in feed
             let processedURL = await self.exportCroppedPortrait9x16(inputURL: outputFileURL) ?? outputFileURL
             if let url = await self.uploadVideoToStorage(fileURL: processedURL) {
                 await self.writePostDocument(mediaURL: url, coordinate: coord, mediaType: "video")
@@ -710,6 +776,7 @@ extension CameraKitController: AVCaptureFileOutputRecordingDelegate {
                 print("[CK][Post] Skipping post; video upload failed")
             }
         }
+        #endif
     }
 }
 

@@ -21,6 +21,20 @@ extension Notification.Name {
     static let ResumeFeedAudio = Notification.Name("ResumeFeedAudio")
 }
 
+struct HomeCameraPreviewHost: UIViewControllerRepresentable {
+    @ObservedObject var controller: CameraKitController
+
+    func makeUIViewController(context: Context) -> UIViewController {
+        // Ensure the controller prepares its preview
+        controller.preparePreviewIfNeeded()
+        return controller.recordPreviewViewController ?? controller.previewViewController ?? UIViewController()
+    }
+
+    func updateUIViewController(_ uiViewController: UIViewController, context: Context) {
+        // No-op; preview controller is managed by CameraKitController
+    }
+}
+
 @MainActor
 final class SceneMotionController: ObservableObject {
     private let motion = CMMotionManager()
@@ -65,7 +79,7 @@ struct HomeView: View {
     @State private var isFeedReady: Bool = false
 
     @StateObject private var motionController = SceneMotionController()
-
+    
     init(cameraController: CameraKitController) {
         self.cameraController = cameraController
 
@@ -94,27 +108,27 @@ struct HomeView: View {
                     didTriggerMapInitialLoad = true
                     NotificationCenter.default.post(name: .LoadMapNow, object: nil)
                 }
-            }
+            } 
     }
 
     @ViewBuilder
     private var recordTabContent: some View {
         ZStack {
-            CameraPreviewHost(controller: cameraController, coordinate: locationProvider.coordinate)
+            HomeCameraPreviewHost(controller: cameraController)
                 .ignoresSafeArea()
         }
         .task {
-            ensureCameraRunningIfNeeded()
+            await cameraController.start()
         }
         .onAppear {
-            ensureCameraRunningIfNeeded()
+            Task { await cameraController.startPreview() }
         }
     }
 
     private func ensureCameraRunningIfNeeded() {
         Task { @MainActor in
-            guard selectedTab == .record else { 
-                return 
+            guard selectedTab == .record else {
+                return
             }
             let status = AVCaptureDevice.authorizationStatus(for: .video)
             switch status {
@@ -311,7 +325,6 @@ struct HomeView: View {
         }
     }
 }
-
 struct ArrowDownPrompt: UIViewRepresentable {
     func makeUIView(context: Context) -> SCNView {
         let view = SCNView()

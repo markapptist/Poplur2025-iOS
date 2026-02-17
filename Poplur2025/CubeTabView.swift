@@ -81,9 +81,24 @@ private struct CubeSceneView: UIViewRepresentable {
         swipeUp.direction = .up
         let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap(_:)))
 
+        let longPress = UILongPressGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleLongPress(_:)))
+        longPress.minimumPressDuration = 0.25
+
+        // Set delegates
+        pan.delegate = context.coordinator
+        swipeUp.delegate = context.coordinator
+        tap.delegate = context.coordinator
+        longPress.delegate = context.coordinator
+
+        // Prefer long-press for stationary holds: tap should wait for long-press to fail
+        tap.require(toFail: longPress)
+        // Pan should wait for long-press unless movement triggers pan first
+        pan.require(toFail: longPress)
+
         scnView.addGestureRecognizer(pan)
         scnView.addGestureRecognizer(swipeUp)
         scnView.addGestureRecognizer(tap)
+        scnView.addGestureRecognizer(longPress)
 
         context.coordinator.view = scnView
         context.coordinator.syncToSelectedTab(selectedTab)
@@ -204,7 +219,7 @@ private struct CubeSceneView: UIViewRepresentable {
     }
 
     // MARK: - Coordinator
-    class Coordinator: NSObject {
+    class Coordinator: NSObject, UIGestureRecognizerDelegate {
         var parent: CubeSceneView
         weak var view: SCNView?
         private var currentIndex: Int = 0
@@ -249,6 +264,19 @@ private struct CubeSceneView: UIViewRepresentable {
                 NotificationCenter.default.post(name: Notification.Name("CubeTabViewTappedNotification"), object: nil)
             } else {
                 print("[CubeTabView] Tap ignored for tab: \(parent.selectedTab)")
+            }
+        }
+
+        @objc func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
+            switch gesture.state {
+            case .began:
+                print("[CubeTabView] Long press began -> .cubeHoldBegan")
+                NotificationCenter.default.post(name: .cubeHoldBegan, object: nil)
+            case .ended, .cancelled, .failed:
+                print("[CubeTabView] Long press ended -> .cubeHoldEnded")
+                NotificationCenter.default.post(name: .cubeHoldEnded, object: nil)
+            default:
+                break
             }
         }
 
@@ -414,6 +442,22 @@ private struct CubeSceneView: UIViewRepresentable {
 
             let y = baseY + yAdd
             node.eulerAngles = SCNVector3(0, y, 0)
+        }
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+            // Allow swipeUp simultaneously; others are controlled via failure requirements
+            if gestureRecognizer is UISwipeGestureRecognizer || otherGestureRecognizer is UISwipeGestureRecognizer {
+                return true
+            }
+            return false
+        }
+
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            // If long-press already began, prevent pan/tap from starting
+            if let lp = gestureRecognizer.view?.gestureRecognizers?.first(where: { $0 is UILongPressGestureRecognizer }) as? UILongPressGestureRecognizer {
+                if lp.state == .began || lp.state == .changed { return false }
+            }
+            return true
         }
     }
 }
