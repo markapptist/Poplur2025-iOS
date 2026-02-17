@@ -2,6 +2,7 @@ import AVFoundation
 #if canImport(UIKit)
 import UIKit
 #endif
+import SwiftUI
 import CoreLocation
 import FirebaseAuth
 import FirebaseStorage
@@ -87,8 +88,10 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
 
         captureSession.beginConfiguration()
 
-        // Start with a lighter preset for faster first frame; ramp up after startRunning
-        if captureSession.canSetSessionPreset(.high) {
+        // Start with a lighter preset for fastest first frame; ramp up after startRunning
+        if captureSession.canSetSessionPreset(.medium) {
+            captureSession.sessionPreset = .medium
+        } else if captureSession.canSetSessionPreset(.high) {
             captureSession.sessionPreset = .high
         } else if captureSession.canSetSessionPreset(.hd1920x1080) {
             captureSession.sessionPreset = .hd1920x1080
@@ -545,23 +548,35 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
             if let image = UIImage(data: data) {
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
-                    let previewVC = PhotoPreviewViewController(image: image)
-                    // Prefer presenting from Snap record VC if available, otherwise fallback preview VC
-                    let presenter: UIViewController? = self.recordPreviewViewController ?? self.previewViewController
+                    // Present SwiftUI capture overlay full-screen
+                    let overlay = CapturePreviewOverlay(image: image, videoURL: nil)
+                    let host = UIHostingController(rootView: overlay)
+                    host.modalPresentationStyle = .fullScreen
 
-                    previewVC.onPost = { [weak self, weak previewVC] img in
+                    // Observers for overlay actions
+                    var dismissObserver: NSObjectProtocol?
+                    var useObserver: NSObjectProtocol?
+
+                    dismissObserver = NotificationCenter.default.addObserver(forName: Notification.Name("InlinePreviewDismissRequested"), object: nil, queue: .main) { [weak host] _ in
+                        host?.dismiss(animated: true)
+                        if let dismissObserver { NotificationCenter.default.removeObserver(dismissObserver) }
+                        if let useObserver { NotificationCenter.default.removeObserver(useObserver) }
+                    }
+                    useObserver = NotificationCenter.default.addObserver(forName: Notification.Name("InlinePreviewUseRequested"), object: nil, queue: .main) { [weak self, weak host] _ in
                         guard let self else { return }
                         Task { @MainActor in
                             self.requestLocationAuthorizationIfNeeded()
                             let loc = await self.currentLocation()
                             let coord = loc?.coordinate
-                            self.postImage(img, at: coord)
-                            // Dismiss the preview and return to camera
-                            previewVC?.dismiss(animated: true)
+                            self.postImage(image, at: coord)
+                            host?.dismiss(animated: true)
                         }
+                        if let dismissObserver { NotificationCenter.default.removeObserver(dismissObserver) }
+                        if let useObserver { NotificationCenter.default.removeObserver(useObserver) }
                     }
 
-                    presenter?.present(previewVC, animated: true)
+                    let presenter: UIViewController? = self.recordPreviewViewController ?? self.previewViewController
+                    presenter?.present(host, animated: true)
                 }
             }
             #endif

@@ -155,6 +155,10 @@ struct HomeView: View {
                     }
                 }
             }
+            .onDisappear {
+                // Ensure all feed players stop when leaving Feed tab view hierarchy
+                NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
+            }
     }
 
     @ViewBuilder

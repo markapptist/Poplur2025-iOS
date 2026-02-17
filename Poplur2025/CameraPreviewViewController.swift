@@ -13,6 +13,8 @@ final class CameraPreviewViewController: UIViewController {
     private let session: AVCaptureSession
     private let previewLayer: AVCaptureVideoPreviewLayer
 
+    private let sessionQueue = DispatchQueue(label: "camera.session.queue", qos: .userInitiated)
+
     /// Photo capture callback
     var onShutter: (() -> Void)?
 
@@ -37,6 +39,9 @@ final class CameraPreviewViewController: UIViewController {
     private let flipButton = UIButton(type: .system)
 
     private var isTorchOn: Bool = false
+    
+    private let loadingOverlay = UIActivityIndicatorView(style: .large)
+    private var overlayAutoHideWorkItem: DispatchWorkItem?
 
     // Debug utilities
     private let debugEnabled: Bool = true
@@ -52,6 +57,10 @@ final class CameraPreviewViewController: UIViewController {
     private var appDidBecomeActiveObserver: NSObjectProtocol?
     private var appWillResignActiveObserver: NSObjectProtocol?
     private var isAppActive: Bool = true
+
+    /// If true, this controller will start/stop the capture session automatically on appear/disappear.
+    /// Leave true unless your owner manages the session lifecycle explicitly.
+    var autoManageSession: Bool = true
 
     // MARK: - Init
     init(session: AVCaptureSession) {
@@ -71,6 +80,8 @@ final class CameraPreviewViewController: UIViewController {
         super.viewDidLoad()
         view.backgroundColor = .black
         view.layer.addSublayer(previewLayer)
+        previewLayer.isHidden = false
+        previewLayer.zPosition = -1
         
         if debugEnabled {
             view.layer.addSublayer(debugBorderLayer)
@@ -82,11 +93,57 @@ final class CameraPreviewViewController: UIViewController {
         setupGestures()
         updateTorchAvailability()
         
+        // Start the session as early as possible to avoid cold-start delay
+        if autoManageSession && !session.isRunning {
+            sessionQueue.async { [weak self] in
+                guard let self = self else { return }
+                self.session.startRunning()
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self else { return }
+                    self.prepareUIForCubeLoad()
+                    if let connection = self.previewLayer.connection, connection.isEnabled {
+                        self.loadingOverlay.stopAnimating()
+                        self.overlayAutoHideWorkItem?.cancel()
+                        self.overlayAutoHideWorkItem = nil
+                    }
+                }
+            }
+        }
+        
+        // Lightweight spinner overlay for first frame
+        loadingOverlay.translatesAutoresizingMaskIntoConstraints = false
+        loadingOverlay.hidesWhenStopped = true
+        view.addSubview(loadingOverlay)
+        NSLayoutConstraint.activate([
+            loadingOverlay.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            loadingOverlay.centerYAnchor.constraint(equalTo: view.centerYAnchor)
+        ])
+        loadingOverlay.startAnimating()
+        // Auto-hide as a fallback after 0.35s
+        let hideWork = DispatchWorkItem { [weak self] in self?.loadingOverlay.stopAnimating() }
+        overlayAutoHideWorkItem = hideWork
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: hideWork)
+        
         NotificationCenter.default.addObserver(self, selector: #selector(handleCubeTappedNotification), name: .cubeTabViewTapped, object: nil)
         
         appDidBecomeActiveObserver = NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
-            self?.isAppActive = true
-            self?.updateTorchAvailability()
+            guard let self = self else { return }
+            self.isAppActive = true
+            // If the session isn't running (or was interrupted), start it and then re-sync UI
+            if self.autoManageSession && !self.session.isRunning {
+                self.sessionQueue.async { [weak self] in
+                    guard let self = self else { return }
+                    self.session.startRunning()
+                    DispatchQueue.main.async { [weak self] in
+                        self?.prepareUIForCubeLoad()
+                        self?.updateTorchAvailability()
+                    }
+                }
+            } else {
+                // Session already running; just re-sync UI
+                self.prepareUIForCubeLoad()
+                self.updateTorchAvailability()
+            }
         }
         appWillResignActiveObserver = NotificationCenter.default.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
             self?.isAppActive = false
@@ -97,7 +154,11 @@ final class CameraPreviewViewController: UIViewController {
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
+        
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
         previewLayer.frame = view.bounds
+        CATransaction.commit()
         
         if debugEnabled {
             debugBorderLayer.frame = view.bounds
@@ -122,6 +183,25 @@ final class CameraPreviewViewController: UIViewController {
         super.viewWillAppear(animated)
         isAppActive = true
         updateTorchAvailability()
+        
+        previewLayer.isHidden = false
+        prepareUIForCubeLoad()
+        
+        // Defer a second pass to the next runloop to catch first-attach-to-window cases
+        DispatchQueue.main.async { [weak self] in
+            self?.prepareUIForCubeLoad()
+        }
+        
+        if autoManageSession && !session.isRunning {
+            // Start as early as possible off the main thread to avoid blocking initial UI
+            sessionQueue.async { [weak self] in
+                self?.session.startRunning()
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self else { return }
+                    self.prepareUIForCubeLoad()
+                }
+            }
+        }
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -132,6 +212,13 @@ final class CameraPreviewViewController: UIViewController {
         } else {
             print("[CameraPreviewVC] no preview connection")
         }
+        prepareUIForCubeLoad()
+        
+        if session.isRunning, let connection = previewLayer.connection, connection.isEnabled {
+            loadingOverlay.stopAnimating()
+            overlayAutoHideWorkItem?.cancel()
+            overlayAutoHideWorkItem = nil
+        }
     }
 
     override func viewWillDisappear(_ animated: Bool) {
@@ -139,6 +226,16 @@ final class CameraPreviewViewController: UIViewController {
         // Reset torch UI to safe state; actual session control should be managed by owner
         isTorchOn = false
         torchButton.setImage(UIImage(systemName: "flashlight.off.fill"), for: .normal)
+        
+        loadingOverlay.stopAnimating()
+        overlayAutoHideWorkItem?.cancel()
+        overlayAutoHideWorkItem = nil
+        
+        if autoManageSession && session.isRunning {
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                self?.session.stopRunning()
+            }
+        }
     }
     
     deinit {
@@ -148,6 +245,39 @@ final class CameraPreviewViewController: UIViewController {
     }
 
     // MARK: - Public Trigger
+    
+    /// Ensure UI is fully initialized and in-sync when the cube loads
+    /// Call this right after presenting/embedding this controller for immediate readiness.
+    public func prepareUIForCubeLoad() {
+        // Make sure layer is attached and visible
+        previewLayer.isHidden = false
+        // Ensure correct frame without animations
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        previewLayer.frame = view.bounds
+        CATransaction.commit()
+
+        // Sync orientation if possible
+        if let connection = previewLayer.connection, connection.isVideoOrientationSupported,
+           let orientation = view.window?.windowScene?.interfaceOrientation {
+            switch orientation {
+            case .portrait: connection.videoOrientation = .portrait
+            case .portraitUpsideDown: connection.videoOrientation = .portraitUpsideDown
+            case .landscapeLeft: connection.videoOrientation = .landscapeLeft
+            case .landscapeRight: connection.videoOrientation = .landscapeRight
+            default: break
+            }
+        }
+
+        // Refresh dependent UI
+        refreshRadiusBar()
+        updateTorchAvailability()
+
+        // Apply layout immediately
+        view.setNeedsLayout()
+        view.layoutIfNeeded()
+    }
+
     /// Programmatically trigger a photo capture
     func triggerShutter() {
         onShutter?()
@@ -219,9 +349,17 @@ final class CameraPreviewViewController: UIViewController {
     @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
         switch gesture.state {
         case .began:
-            onStartVideo?()
+            // Immediate UI feedback
+            animateRecordingUI(started: true)
+            // Defer start to next runloop to avoid blocking UI
+            DispatchQueue.main.async { [weak self] in
+                self?.onStartVideo?()
+            }
         case .ended, .cancelled, .failed:
-            onStopVideo?()
+            animateRecordingUI(started: false)
+            DispatchQueue.main.async { [weak self] in
+                self?.onStopVideo?()
+            }
         default:
             break
         }
@@ -292,32 +430,40 @@ final class CameraPreviewViewController: UIViewController {
         let newPosition: AVCaptureDevice.Position =
             currentInput.device.position == .back ? .front : .back
 
-        session.beginConfiguration()
-        session.removeInput(currentInput)
+        // Immediate UI feedback
+        flipButton.isEnabled = false
 
-        var didAdd = false
-        if let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: newPosition),
-           let newInput = try? AVCaptureDeviceInput(device: device),
-           session.canAddInput(newInput) {
-            session.addInput(newInput)
-            didAdd = true
-        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            self.session.beginConfiguration()
+            self.session.removeInput(currentInput)
 
-        if didAdd == false, session.canAddInput(currentInput) {
-            session.addInput(currentInput)
-        }
+            var didAdd = false
+            if let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: newPosition),
+               let newInput = try? AVCaptureDeviceInput(device: device),
+               self.session.canAddInput(newInput) {
+                self.session.addInput(newInput)
+                didAdd = true
+            }
 
-        session.commitConfiguration()
+            if didAdd == false, self.session.canAddInput(currentInput) {
+                self.session.addInput(currentInput)
+            }
 
-        // Front camera usually has no torch
-        isTorchOn = false
-        torchButton.setImage(UIImage(systemName: "flashlight.off.fill"), for: .normal)
+            self.session.commitConfiguration()
 
-        refreshRadiusBar()
-        updateTorchAvailability()
+            DispatchQueue.main.async {
+                // Front camera usually has no torch
+                self.isTorchOn = false
+                self.torchButton.setImage(UIImage(systemName: "flashlight.off.fill"), for: .normal)
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
-            self?.updateTorchAvailability()
+                self.refreshRadiusBar()
+                self.updateTorchAvailability()
+                self.flipButton.isEnabled = true
+
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+                    self?.updateTorchAvailability()
+                }
+            }
         }
     }
     
@@ -344,6 +490,15 @@ final class CameraPreviewViewController: UIViewController {
         guard let host = radiusHostController else { return }
         host.rootView = CameraRadiusBar(initialRadius: radius) { [weak self] newValue in
             self?.radius = newValue
+        }
+    }
+    
+    // Immediate visual feedback when recording starts/stops
+    private func animateRecordingUI(started: Bool) {
+        let targetAlpha: CGFloat = started ? 0.6 : 1.0
+        UIView.animate(withDuration: 0.12, delay: 0, options: [.curveEaseOut]) {
+            self.torchButton.alpha = targetAlpha
+            self.flipButton.alpha = targetAlpha
         }
     }
 }

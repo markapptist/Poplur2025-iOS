@@ -81,6 +81,12 @@ struct CameraKitView: View {
         .ignoresSafeArea()
         .onAppear {
             isVisible = true
+            // Prewarm and ensure preview is ready when the tab first appears
+            Task { @MainActor in
+                await controller.prewarm()
+                await controller.startPreview()
+                controller.preparePreviewIfNeeded()
+            }
         }
         .onDisappear {
             isVisible = false

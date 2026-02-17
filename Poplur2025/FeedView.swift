@@ -175,7 +175,7 @@ struct FeedView: View {
                 .background(Color.black)
 
                 if isFeedReady == false {
-                    LoadingOverlayView(isPresented: true, background: Color("logo"), logoName: "logo")
+                    LoadingOverlayView(isPresented: true, background: Color(red: 1.0, green: 0.2, blue: 0.4), logoName: "logo")
                         .zIndex(30)
                         .transition(.opacity)
                 }
@@ -198,6 +198,16 @@ struct FeedView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("FeedRefreshRequested"))) { _ in
             Task { await reload() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("FeedAdvanceOnMediaFailure"))) { _ in
+            // Advance to next post on media failure
+            if !posts.isEmpty {
+                if currentIndex < max(0, posts.count - 1) {
+                    currentIndex += 1
+                } else {
+                    currentIndex = 0
+                }
+            }
         }
         .onChange(of: currentIndex) { newIndex in
             guard newIndex >= 0, newIndex < posts.count else {
@@ -884,6 +894,15 @@ struct FeedView: View {
     private func stopStaticSound() {
         staticPlayer?.stop()
         staticPlayer = nil
+        // Deactivate ambient audio session to avoid conflicts with playback
+        DispatchQueue.main.async {
+            let session = AVAudioSession.sharedInstance()
+            do {
+                try session.setActive(false, options: [.notifyOthersOnDeactivation])
+            } catch {
+                print("[StaticSound] Failed to deactivate session: \(error)")
+            }
+        }
     }
     
     private func playOneShotPop() {
@@ -1038,32 +1057,22 @@ struct FeedView: View {
             // Force the first post to be a guaranteed playable HLS stream
             let hlsSample = "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_4x3/gear1/prog_index.m3u8"
             let sampleVideos = [
-                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
-                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
-                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
-                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
-                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4",
-                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
-                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/SubaruOutbackOnStreetAndDirt.mp4",
-                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/VolkswagenGTIReview.mp4",
-                "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_4x3/gear1/fileSequence0.mp4",
-                "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_4x3/gear1/fileSequence1.mp4"
+                // Prefer HLS for reliability
+                "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_4x3/gear1/prog_index.m3u8",
+                // A couple of Apple-hosted MP4 segments are not standalone; avoid them as direct videos
             ]
             let mediaURL: String
-            if i == 0 {
-                // Force first item to be a known-good HLS stream for debugging playback
+            if i < 5 {
+                // Prefer known-good HLS for the first few items to ensure playback reliability
                 mediaURL = hlsSample
-            } else if i < 3 {
-                // Temporarily force next two items to be videos to verify pipeline
-                mediaURL = (sampleVideos.randomElement() ?? hlsSample)
             } else if i % 2 == 0 {
                 // Even index -> image
                 let w = [640, 720, 800, 1080].randomElement() ?? 800
                 let h = [960, 1280, 1400, 1440, 1920].randomElement() ?? 1400
                 mediaURL = "https://picsum.photos/\(w)/\(h)?random=\(Int.random(in: 1...10_000))"
             } else {
-                // Odd index -> video
-                mediaURL = (sampleVideos.randomElement() ?? hlsSample)
+                // Odd index -> fallback video (HLS preferred)
+                mediaURL = (sampleVideos.first ?? hlsSample)
             }
             let latitude = 37.3349 + Double(i % 5) * 0.01
             let longitude = -122.0090 - Double(i % 7) * 0.01
@@ -1095,27 +1104,19 @@ struct FeedView: View {
             // Force the first post to be a guaranteed playable HLS stream
             let hlsSample = "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_4x3/gear1/prog_index.m3u8"
             let sampleVideos = [
-                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
-                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
-                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
-                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
-                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4",
-                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
-                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/SubaruOutbackOnStreetAndDirt.mp4",
-                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/VolkswagenGTIReview.mp4",
-                "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_4x3/gear1/fileSequence0.mp4",
-                "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_4x3/gear1/fileSequence1.mp4"
+                // Prefer HLS for reliability
+                "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_4x3/gear1/prog_index.m3u8",
+                // A couple of Apple-hosted MP4 segments are not standalone; avoid them as direct videos
             ]
             let mediaURL: String
-            if i < 3 {
-                // Temporarily force first three items to be videos to verify pipeline
-                mediaURL = (sampleVideos.randomElement() ?? hlsSample)
+            if i < 5 {
+                mediaURL = hlsSample
             } else if i % 2 == 0 {
                 let w = [640, 720, 800, 1080].randomElement() ?? 800
                 let h = [960, 1280, 1400, 1440, 1920].randomElement() ?? 1400
                 mediaURL = "https://picsum.photos/\(w)/\(h)?random=\(Int.random(in: 1...10_000))"
             } else {
-                mediaURL = (sampleVideos.randomElement() ?? hlsSample)
+                mediaURL = (sampleVideos.first ?? hlsSample)
             }
             // Shift coordinates slightly by country index to vary positions
             let baseLat = 37.3349 + Double(abs(country.hashValue % 20)) * 0.01
@@ -1148,10 +1149,18 @@ private struct FeedFullscreenPageView: View {
         String(format: "%.4f, %.4f", post.latitude, post.longitude)
     }
 
-    // Broadened video detection
+    // REPLACED directVideoURL property with updated logic
     private var directVideoURL: URL? {
         guard let url = URL(string: post.mediaURL) else { return nil }
         let lower = url.absoluteString.lowercased()
+
+        // If it's the Apple devstreaming segment (fileSequenceX.mp4), treat as non-direct video so we don't try to play a fragment.
+        if lower.contains("devstreaming-cdn.apple.com"),
+           lower.contains("filesequence"),
+            lower.hasSuffix(".mp4") {
+            return nil
+        }
+
         // Broaden detection: handle querystrings and common video hints
         let videoHints = [".mp4", ".m3u8", "/prog_index.m3u8", "video.mp4", "format=mp4", "format=hls", "type=video"]
         let isVideo = videoHints.contains { lower.contains($0) }
@@ -1170,17 +1179,23 @@ private struct FeedFullscreenPageView: View {
         @State private var looper: AVPlayerLooper? = nil
 
         @State private var timeObserver: Any? = nil
+        
+        @State private var pauseObserver: Any? = nil
+
+        @State private var itemFailed: Bool = false
 
         private func setupPlayer() {
             guard player == nil, queuePlayer == nil else { return }
             
             // Configure audio session for playback with mixing disabled so audio is audible
-            let session = AVAudioSession.sharedInstance()
-            do {
-                try session.setCategory(.playback, mode: .moviePlayback, options: [])
-                try session.setActive(true)
-            } catch {
-                print("[Video] Audio session setup failed: \(error)")
+            DispatchQueue.main.async {
+                let session = AVAudioSession.sharedInstance()
+                do {
+                    try session.setCategory(.playback, mode: .moviePlayback, options: [])
+                    try session.setActive(true, options: [])
+                } catch {
+                    print("[Video] Audio session setup failed (main): \(error)")
+                }
             }
 
             let isMP4 = url.absoluteString.lowercased().hasSuffix(".mp4")
@@ -1188,148 +1203,138 @@ private struct FeedFullscreenPageView: View {
             if isMP4 {
                 // Use AVQueuePlayer + AVPlayerLooper for seamless mp4 looping
                 let asset = AVURLAsset(url: url)
-                let item = AVPlayerItem(asset: asset)
+                let requiredKeys = ["playable"]
+                asset.resourceLoader.preloadsEligibleContentKeys = true
+
                 let q = AVQueuePlayer()
                 q.allowsExternalPlayback = false
                 q.isMuted = false
                 q.automaticallyWaitsToMinimizeStalling = true
                 q.preventsDisplaySleepDuringVideoPlayback = true
 
-                self.queuePlayer = q
-                self.looper = AVPlayerLooper(player: q, templateItem: item)
-                self.player = q
+                // Load required key using modern async API
+                Task { [self] in
+                    do {
+                        let playable = try await asset.load(.isPlayable)
+                        guard playable else {
+                            await MainActor.run {
+                                self.itemFailed = true
+                                self.playbackStuck = true
+                            }
+                            print("[Video] MP4 asset not playable")
+                            NotificationCenter.default.post(name: Notification.Name("FeedAdvanceOnMediaFailure"), object: nil)
+                            return
+                        }
+                        let item = AVPlayerItem(asset: asset)
+                        item.preferredForwardBufferDuration = 0
+                        q.automaticallyWaitsToMinimizeStalling = false
 
-                // Observe readiness and start playback when ready
-                itemObservation = item.observe(\.status, options: [.initial, .new]) { _, _ in
-                    hudItemStatus = item.status
-                    print("[Video] MP4 item status: \(item.status.rawValue)")
-                    switch item.status {
-                    case .readyToPlay:
-                        self.playbackStuck = false
-                        q.seek(to: CMTime(seconds: 0.01, preferredTimescale: 600))
-                        q.playImmediately(atRate: 1.0)
-                        self.hudTimeControl = q.timeControlStatus
-                    case .failed:
-                        if let err = item.error { print("[Video] MP4 item failed: \(err)") }
-                    case .unknown:
-                        break
-                    @unknown default:
-                        break
-                    }
-                }
-
-                // Time observer to reflect status
-                let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
-                self.timeObserver = q.addPeriodicTimeObserver(forInterval: interval, queue: .main) { _ in
-                    self.hudTimeControl = q.timeControlStatus
-                    if q.timeControlStatus == .playing {
-                        self.playbackStuck = false
-                    }
-                }
-
-                // Retry start if still waiting after 2 seconds
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                    if q.timeControlStatus != .playing {
-                        q.seek(to: CMTime(seconds: 0.01, preferredTimescale: 600))
-                        q.playImmediately(atRate: 1.0)
-                        self.hudTimeControl = q.timeControlStatus
+                        await MainActor.run {
+                            self.itemObservation = item.observe(\.status, options: [.initial, .new]) { _, _ in
+                                self.hudItemStatus = item.status
+                                print("[Video] MP4 item status: \(item.status.rawValue)")
+                                switch item.status {
+                                case .readyToPlay:
+                                    self.itemFailed = false
+                                    self.playbackStuck = false
+                                    q.removeAllItems()
+                                    self.looper = AVPlayerLooper(player: q, templateItem: item)
+                                    self.player = q
+                                    q.seek(to: CMTime(seconds: 0.01, preferredTimescale: 600))
+                                    FeedAudioManager.shared.playExclusively(q)
+                                    self.hudTimeControl = q.timeControlStatus
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                                        if q.timeControlStatus != .playing {
+                                            q.seek(to: CMTime(seconds: 0.02, preferredTimescale: 600))
+                                            q.playImmediately(atRate: 1.0)
+                                            self.hudTimeControl = q.timeControlStatus
+                                            if q.timeControlStatus == .playing { self.playbackStuck = false }
+                                        }
+                                    }
+                                case .failed:
+                                    self.itemFailed = true
+                                    if let err = item.error { print("[Video] MP4 item failed: \(err)") }
+                                case .unknown:
+                                    break
+                                @unknown default:
+                                    break
+                                }
+                            }
+                        }
+                    } catch {
+                        await MainActor.run { self.playbackStuck = true }
+                        print("[Video] MP4 asset load failed: \(error)")
+                        NotificationCenter.default.post(name: Notification.Name("FeedAdvanceOnMediaFailure"), object: nil)
                     }
                 }
             } else {
                 // HLS or other stream types: standard AVPlayer with end observer
                 let asset = AVURLAsset(url: url)
-                let item = AVPlayerItem(asset: asset)
-                let p = AVPlayer(playerItem: item)
-                p.allowsExternalPlayback = false
-                p.isMuted = false
-                p.automaticallyWaitsToMinimizeStalling = true
-                p.preventsDisplaySleepDuringVideoPlayback = true
+                let requiredKeys = ["playable"]
+                asset.resourceLoader.preloadsEligibleContentKeys = true
 
-                itemObservation = item.observe(\.status, options: [.initial, .new]) { _, _ in
-                    hudItemStatus = item.status
-                    print("[Video] Item status changed to: \(item.status.rawValue)")
-                    switch item.status {
-                    case .readyToPlay:
-                        self.playbackStuck = false
-                        (self.player ?? p).seek(to: CMTime(seconds: 0.01, preferredTimescale: 600))
-                        (self.player ?? p).playImmediately(atRate: 1.0)
-                        self.hudTimeControl = p.timeControlStatus
-                    case .failed:
-                        if let err = item.error { print("[Video] Item failed: \(err)") }
-                    case .unknown:
-                        break
-                    @unknown default:
-                        break
-                    }
-                }
-
-                NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { _ in
-                    p.seek(to: .zero)
-                    p.play()
-                }
-
-                // Nudge playback to break waiting states
-                p.seek(to: CMTime(seconds: 0.01, preferredTimescale: 600))
-
-                // Periodic time observer to track progress and update HUD
-                let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
-                self.timeObserver = p.addPeriodicTimeObserver(forInterval: interval, queue: .main) { _ in
-                    self.hudTimeControl = p.timeControlStatus
-                    if p.timeControlStatus == .playing {
-                        self.playbackStuck = false
-                    }
-                }
-
-                self.player = p
-
-                // Poll timeControlStatus periodically to reflect in HUD
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                    self.hudTimeControl = p.timeControlStatus
-                }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                    self.hudTimeControl = p.timeControlStatus
-                }
-
-                // Retry start if still waiting after 2 seconds
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                    if let current = self.player, current.timeControlStatus != .playing {
-                        current.seek(to: CMTime(seconds: 0.01, preferredTimescale: 600))
-                        current.playImmediately(atRate: 1.0)
-                        self.hudTimeControl = current.timeControlStatus
-                        if current.timeControlStatus == .playing {
-                            self.playbackStuck = false
+                // Load required key using modern async API
+                Task { [self] in
+                    do {
+                        let playable = try await asset.load(.isPlayable)
+                        guard playable else {
+                            await MainActor.run { self.playbackStuck = true }
+                            print("[Video] HLS asset not playable")
+                            NotificationCenter.default.post(name: Notification.Name("FeedAdvanceOnMediaFailure"), object: nil)
+                            return
                         }
-                    }
-                }
+                        let item = AVPlayerItem(asset: asset)
+                        item.preferredForwardBufferDuration = 0
+                        let p = AVPlayer(playerItem: item)
+                        p.allowsExternalPlayback = false
+                        p.isMuted = false
+                        p.automaticallyWaitsToMinimizeStalling = false
+                        p.preventsDisplaySleepDuringVideoPlayback = true
 
-                // Retry start if still waiting after 3 seconds
-                DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
-                    if let current = self.player, current.timeControlStatus != .playing {
-                        current.seek(to: CMTime(seconds: 0.01, preferredTimescale: 600))
-                        current.playImmediately(atRate: 1.0)
-                        self.hudTimeControl = current.timeControlStatus
-                        if current.timeControlStatus == .playing {
-                            self.playbackStuck = false
+                        await MainActor.run {
+                            self.itemObservation = item.observe(\.status, options: [.initial, .new]) { _, _ in
+                                self.hudItemStatus = item.status
+                                print("[Video] Item status changed to: \(item.status.rawValue)")
+                                switch item.status {
+                                case .readyToPlay:
+                                    self.itemFailed = false
+                                    self.playbackStuck = false
+                                    let current = self.player ?? p
+                                    current.seek(to: CMTime(seconds: 0.01, preferredTimescale: 600))
+                                    FeedAudioManager.shared.playExclusively(current)
+                                    current.playImmediately(atRate: 1.0)
+                                    self.hudTimeControl = current.timeControlStatus
+                                case .failed:
+                                    self.itemFailed = true
+                                    if let err = item.error { print("[Video] Item failed: \(err)") }
+                                case .unknown:
+                                    break
+                                @unknown default:
+                                    break
+                                }
+                            }
+
+                            self.player = p
+                            FeedAudioManager.shared.register(p)
+
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { self.hudTimeControl = p.timeControlStatus }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { self.hudTimeControl = p.timeControlStatus }
                         }
+                    } catch {
+                        await MainActor.run { self.playbackStuck = true }
+                        print("[Video] HLS asset load failed: \(error)")
+                        NotificationCenter.default.post(name: Notification.Name("FeedAdvanceOnMediaFailure"), object: nil)
                     }
                 }
             }
 
-            // Dispatch a playback stuck check after 3 seconds
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+            // Removed two existing playback stuck checks at 3s and 5s and replaced with a single 8s check
+            DispatchQueue.main.asyncAfter(deadline: .now() + 8.0) {
                 let notPlaying = (self.hudTimeControl != .playing)
                 let notReady = (self.hudItemStatus != .readyToPlay)
                 if notPlaying && notReady {
                     self.playbackStuck = true
-                    print("[Video] Playback appears stuck: timeControl=\(self.hudTimeControl.rawValue) item=\(self.hudItemStatus.rawValue)")
-                }
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
-                let notPlaying = (self.hudTimeControl != .playing)
-                let notReady = (self.hudItemStatus != .readyToPlay)
-                if notPlaying && notReady {
-                    self.playbackStuck = true
-                    print("[Video] Playback still stuck (recheck): timeControl=\(self.hudTimeControl.rawValue) item=\(self.hudItemStatus.rawValue)")
+                    print("[Video] Playback appears stuck after 8s: timeControl=\(self.hudTimeControl.rawValue) item=\(self.hudItemStatus.rawValue)")
                 }
             }
         }
@@ -1359,7 +1364,23 @@ private struct FeedFullscreenPageView: View {
             .onAppear {
                 setupPlayer()
             }
+            /*
+            .onAppear {
+                // Observe global pause to stop fullscreen playback immediately
+                self.pauseObserver = NotificationCenter.default.addObserver(forName: Notification.Name("PauseGlobalFeedAudio"), object: nil, queue: .main) { _ in
+                    self.playbackStuck = false
+                    if let obs = timeObserver, let p = player { p.removeTimeObserver(obs) }
+                    timeObserver = nil
+                    player?.pause()
+                    (player as? AVQueuePlayer)?.removeAllItems()
+                }
+            }
+            */
             .onDisappear {
+                if let token = pauseObserver {
+                    NotificationCenter.default.removeObserver(token)
+                    pauseObserver = nil
+                }
                 self.playbackStuck = false
                 if let obs = timeObserver, let p = player {
                     p.removeTimeObserver(obs)
@@ -1374,21 +1395,21 @@ private struct FeedFullscreenPageView: View {
             }
             .overlay(
                 Group {
-                    if playbackStuck {
+                    if itemFailed {
                         VStack(spacing: 8) {
                             Image(systemName: "exclamationmark.triangle.fill")
                                 .foregroundColor(.yellow)
                                 .font(.system(size: 28, weight: .bold))
                             Text("Video failed to start. Showing placeholder.")
                                 .font(.system(size: 13, weight: .semibold))
-                            Text(url.absoluteString)
-                                .font(.system(size: 11, weight: .regular, design: .monospaced))
-                                .lineLimit(1)
-                                .truncationMode(.middle)
                         }
                         .padding(12)
                         .background(Color.black.opacity(0.7), in: Capsule())
                         .foregroundColor(.white)
+                    } else if playbackStuck {
+                        LinearGradient(colors: [.clear, .white.opacity(0.06), .clear], startPoint: .top, endPoint: .bottom)
+                            .allowsHitTesting(false)
+                            .transition(.opacity)
                     }
                 }
             )
@@ -1506,7 +1527,7 @@ private struct FeedFullscreenPageView: View {
                 print("[Feed] Using direct video: \(videoURL.absoluteString)")
             }
             .overlay(alignment: .topLeading) { playerHUD }
-            .overlay { playerSoftPlaceholder }
+            .overlay { nonBlockingLoadingOverlay }
     }
 
     @ViewBuilder
@@ -1572,11 +1593,14 @@ private struct FeedFullscreenPageView: View {
     }
 
     @ViewBuilder
-    private var playerSoftPlaceholder: some View {
+    private var nonBlockingLoadingOverlay: some View {
+        // Show a subtle shimmer when playback appears stuck; explicit failure UI is handled inside VideoPlayerContainer
         if playbackStuck {
-            LinearGradient(colors: [.black, .gray.opacity(0.4), .black], startPoint: .top, endPoint: .bottom)
+            LinearGradient(colors: [.clear, .white.opacity(0.06), .clear], startPoint: .top, endPoint: .bottom)
                 .allowsHitTesting(false)
                 .transition(.opacity)
+        } else {
+            EmptyView()
         }
     }
 
