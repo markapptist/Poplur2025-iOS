@@ -62,8 +62,8 @@ struct HomeView: View {
     @EnvironmentObject private var auth: AuthViewModel
     @Environment(\.scenePhase) private var scenePhase
 
-    // Start on record for camera-first testing
-    @State private var selectedTab: AppTab = .record
+    // Start on map tab instead of record tab
+    @State private var selectedTab: AppTab = .map
 
     // Location only when needed
     @StateObject private var locationProvider = LocationProvider()

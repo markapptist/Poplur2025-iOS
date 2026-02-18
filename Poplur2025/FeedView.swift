@@ -698,29 +698,36 @@ struct FeedView: View {
                         }
                     }
             }
-            // DEBUG: disable static overlay during debugging
-            // tvStaticOverlay(in: size)
-            if showHeart {
-                Image(systemName: "heart.fill")
-                    .font(.system(size: 120, weight: .bold))
-                    .foregroundStyle(.red)
-                    .shadow(color: .black.opacity(0.3), radius: 6, x: 0, y: 3)
-                    .transition(.scale.combined(with: .opacity))
-                    .zIndex(20)
-            }
-            // Fixed trailing radius bar overlay (does not move with content)
-            if let current = posts[safe: currentIndex] {
-                VStack {
-                    Spacer()
-                    IsometricRadiusBar(radius: .constant(current.radius))
-                        .frame(width: 60, height: 220)
-                        .padding(.trailing, 12)
+
+            // Wrap overlays in a separate ZStack with allowsHitTesting(false) to avoid gesture conflicts and ensure no offset
+            ZStack {
+                if showHeart {
+                    Image(systemName: "heart.fill")
+                        .font(.system(size: 120, weight: .bold))
+                        .foregroundStyle(.red)
+                        .shadow(color: .black.opacity(0.3), radius: 6, x: 0, y: 3)
+                        .transition(.scale.combined(with: .opacity))
+                        .zIndex(20)
                 }
-                .padding(.bottom, 45)
-                .frame(width: size.width, height: size.height, alignment: .trailing)
-                .allowsHitTesting(false)
-                .zIndex(15)
+                if let current = posts[safe: currentIndex] {
+                    VStack {
+                        Spacer()
+                        IsometricRadiusBar(radius: .constant(current.radius))
+                            .frame(width: 60, height: 220)
+                            .padding(.trailing, 12)
+                    }
+                    .padding(.bottom, 45)
+                    .frame(width: size.width, height: size.height, alignment: .trailing)
+                    .padding(.trailing, 0)
+                    .allowsHitTesting(false)
+                    .zIndex(15)
+                }
+                overlayChrome
+                    .allowsHitTesting(false)
+                    .zIndex(25)
             }
+            .allowsHitTesting(false)
+            .padding(.top, 0)
         }
     }
 
@@ -828,9 +835,10 @@ struct FeedView: View {
                     Spacer(minLength: 0)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .padding(.top, geo.safeAreaInsets.top)
                 .allowsHitTesting(false)
+                .contentShape(Rectangle())
             }
-            .ignoresSafeArea()
         }
     }
 
@@ -963,7 +971,7 @@ struct FeedView: View {
         }
     }
 
-    private func maybeShowAd(probability: Double = 0.12) {
+    private func maybeShowAd(probability: Double = 0.03) {
         let roll = Double.random(in: 0...1)
         guard roll <= probability else { return }
         presentInterstitialOrFallback()
@@ -1069,10 +1077,23 @@ struct FeedView: View {
             let userID = i % 3 == 0 ? "fake_user_\(i)" : String(format: "user_%06d", i)
             // Force the first post to be a guaranteed playable HLS stream
             let hlsSample = "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_4x3/gear1/prog_index.m3u8"
-            let sampleVideos = [
-                // Prefer HLS for reliability
+            let sampleVideos: [String] = [
+                // Reliable HLS (landscape)
                 "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_4x3/gear1/prog_index.m3u8",
-                // A couple of Apple-hosted MP4 segments are not standalone; avoid them as direct videos
+                "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_16x9/gear1/prog_index.m3u8",
+                // HLS variants
+                "https://devstreaming-cdn.apple.com/videos/wwdc/2020/10653/4/7EEB4C51-2E7F-4B6C-BE1D-2E94C7D10C61/hls_vod_mvp.m3u8",
+                "https://devstreaming-cdn.apple.com/videos/wwdc/2019/502dvxw8o5g9v9b/502/hls_vod_mvp.m3u8",
+                // Small MP4s (landscape)
+                "https://filesamples.com/samples/video/mp4/sample_640x360.mp4",
+                "https://filesamples.com/samples/video/mp4/sample_960x400_ocean_with_audio.mp4",
+                "https://sample-videos.com/video321/mp4/720/big_buck_bunny_720p_1mb.mp4",
+                // Additional MP4s
+                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
+                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+                // Extra diversity (different encodes/aspects)
+                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
+                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4"
             ]
             let mediaURL: String
             if i < 2 {
@@ -1086,8 +1107,8 @@ struct FeedView: View {
                 let h = [960, 1280, 1400, 1440, 1920].randomElement() ?? 1400
                 mediaURL = "https://picsum.photos/\(w)/\(h)?random=\(Int.random(in: 1...10_000))"
             } else {
-                // Odd index -> HLS video (reliable sample)
-                mediaURL = hlsSample
+                // Odd index -> random video from sampleVideos
+                mediaURL = sampleVideos.randomElement() ?? hlsSample
             }
             let latitude = 37.3349 + Double(i % 5) * 0.01
             let longitude = -122.0090 - Double(i % 7) * 0.01
@@ -1118,10 +1139,23 @@ struct FeedView: View {
             let userID = i % 3 == 0 ? "fake_user_\(i)" : String(format: "user_%06d", i)
             // Force the first post to be a guaranteed playable HLS stream
             let hlsSample = "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_4x3/gear1/prog_index.m3u8"
-            let sampleVideos = [
-                // Prefer HLS for reliability
+            let sampleVideos: [String] = [
+                // Reliable HLS (landscape)
                 "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_4x3/gear1/prog_index.m3u8",
-                // A couple of Apple-hosted MP4 segments are not standalone; avoid them as direct videos
+                "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_16x9/gear1/prog_index.m3u8",
+                // HLS variants
+                "https://devstreaming-cdn.apple.com/videos/wwdc/2020/10653/4/7EEB4C51-2E7F-4B6C-BE1D-2E94C7D10C61/hls_vod_mvp.m3u8",
+                "https://devstreaming-cdn.apple.com/videos/wwdc/2019/502dvxw8o5g9v9b/502/hls_vod_mvp.m3u8",
+                // Small MP4s (landscape)
+                "https://filesamples.com/samples/video/mp4/sample_640x360.mp4",
+                "https://filesamples.com/samples/video/mp4/sample_960x400_ocean_with_audio.mp4",
+                "https://sample-videos.com/video321/mp4/720/big_buck_bunny_720p_1mb.mp4",
+                // Additional MP4s
+                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
+                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+                // Extra diversity (different encodes/aspects)
+                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
+                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4"
             ]
             let mediaURL: String
             if i < 2 {
@@ -1135,8 +1169,8 @@ struct FeedView: View {
                 let h = [960, 1280, 1400, 1440, 1920].randomElement() ?? 1400
                 mediaURL = "https://picsum.photos/\(w)/\(h)?random=\(Int.random(in: 1...10_000))"
             } else {
-                // Odd index -> HLS video (reliable sample)
-                mediaURL = hlsSample
+                // Odd index -> random video from sampleVideos
+                mediaURL = sampleVideos.randomElement() ?? hlsSample
             }
             // Shift coordinates slightly by country index to vary positions
             let baseLat = 37.3349 + Double(abs(country.hashValue % 20)) * 0.01
@@ -1443,14 +1477,14 @@ private struct FeedFullscreenPageView: View {
             let view = PlayerHostingView()
             view.backgroundColor = .black
             view.translatesAutoresizingMaskIntoConstraints = false
-            view.playerLayer.videoGravity = .resizeAspectFill
+            view.playerLayer.videoGravity = .resizeAspect  // Changed to .resizeAspect
             view.player = player
             return view
         }
 
         func updateUIView(_ uiView: PlayerHostingView, context: Context) {
             uiView.player = player
-            uiView.playerLayer.videoGravity = .resizeAspectFill
+            uiView.playerLayer.videoGravity = .resizeAspect  // Changed to .resizeAspect
             uiView.setNeedsLayout()
             uiView.layoutIfNeeded()
         }
@@ -1466,7 +1500,7 @@ private struct FeedFullscreenPageView: View {
         override func layoutSubviews() {
             super.layoutSubviews()
             playerLayer.frame = bounds
-            playerLayer.videoGravity = .resizeAspectFill
+            playerLayer.videoGravity = .resizeAspect  // Changed to .resizeAspect
         }
     }
 
@@ -1494,7 +1528,10 @@ private struct FeedFullscreenPageView: View {
             contentView(size: geo.size)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color.black)
-                .ignoresSafeArea()
+                //.ignoresSafeArea() // removed as per instructions
+                .overlay(alignment: .topTrailing) {
+                    topRightInfo(size: geo.size)
+                }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black)
@@ -1525,25 +1562,18 @@ private struct FeedFullscreenPageView: View {
                     .zIndex(6)
             }
 
+            /*
             topRightInfo(size: size)
                 .zIndex(10)
-
+            */
         }
     }
 
     @ViewBuilder
     private func videoContent(size: CGSize, videoURL: URL) -> some View {
         VideoPlayerContainer(url: videoURL, hudTimeControl: $debugPlayerTimeControl, hudItemStatus: $debugItemStatus, playbackStuck: $playbackStuck)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .ignoresSafeArea()
-            .clipped()
+            .frame(width: size.width, height: size.height)
             .background(Color.black)
-            .onAppear {
-                imagePhaseDebug = "video"
-                print("[Feed] Using direct video: \(videoURL.absoluteString)")
-            }
-            .overlay(alignment: .topLeading) { playerHUD }
-            .overlay { nonBlockingLoadingOverlay }
     }
 
     @ViewBuilder
@@ -1561,11 +1591,11 @@ private struct FeedFullscreenPageView: View {
             case .success(let img):
                 img
                     .resizable()
-                    .scaledToFill()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .ignoresSafeArea()
-                    .clipped()
+                    .aspectRatio(contentMode: .fit)  // changed from scaledToFill to aspectRatio fit
+                    .frame(width: size.width, height: size.height)  // set explicit frame to size
                     .background(Color.black)
+                    //.ignoresSafeArea() removed
+                    //.clipped() removed
                     .onAppear {
                         imagePhaseDebug = "success"
                         print("[Feed] Using image: \(post.mediaURL)")
@@ -1658,7 +1688,8 @@ private struct FeedFullscreenPageView: View {
         }
         .padding(.trailing, 16)
         .padding(.top, 40)
-        .frame(width: size.width, height: size.height, alignment: .topTrailing)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+        .allowsHitTesting(true)
     }
 }
 
