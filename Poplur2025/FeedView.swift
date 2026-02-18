@@ -708,6 +708,19 @@ struct FeedView: View {
                     .transition(.scale.combined(with: .opacity))
                     .zIndex(20)
             }
+            // Fixed trailing radius bar overlay (does not move with content)
+            if let current = posts[safe: currentIndex] {
+                VStack {
+                    Spacer()
+                    IsometricRadiusBar(radius: .constant(current.radius))
+                        .frame(width: 60, height: 220)
+                        .padding(.trailing, 12)
+                }
+                .padding(.bottom, 45)
+                .frame(width: size.width, height: size.height, alignment: .trailing)
+                .allowsHitTesting(false)
+                .zIndex(15)
+            }
         }
     }
 
@@ -1515,8 +1528,6 @@ private struct FeedFullscreenPageView: View {
             topRightInfo(size: size)
                 .zIndex(10)
 
-            trailingRadius(size: size)
-                .zIndex(10)
         }
     }
 
@@ -1648,17 +1659,6 @@ private struct FeedFullscreenPageView: View {
         .padding(.trailing, 16)
         .padding(.top, 40)
         .frame(width: size.width, height: size.height, alignment: .topTrailing)
-    }
-
-    private func trailingRadius(size: CGSize) -> some View {
-        VStack {
-            Spacer()
-            IsometricRadiusBar(radius: .constant(post.radius))
-                .frame(width: 60, height: 220)
-                .padding(.trailing, 12)
-        }
-        .padding(.bottom, 45)
-        .frame(width: size.width, height: size.height, alignment: .trailing)
     }
 }
 
