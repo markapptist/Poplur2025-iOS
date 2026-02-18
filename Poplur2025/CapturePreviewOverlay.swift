@@ -42,6 +42,7 @@ private struct InlineCapturePreview: View {
 
     @State private var player: AVPlayer?
     @State private var playerItem: AVPlayerItem?
+//    @State private var playerLooper: AVPlayerLooper?
     @State private var stabilizedURL: URL?
     @State private var playerReady: Bool = false
 //    @State private var autoDismissWorkItem: DispatchWorkItem?
@@ -111,6 +112,7 @@ private struct InlineCapturePreview: View {
                                     player.replaceCurrentItem(with: nil)
                                     self.player = nil
                                     self.playerItem = nil
+//                                    self.playerLooper = nil
                                     self.playerReady = false
                                 }
                         }
@@ -145,7 +147,15 @@ private struct InlineCapturePreview: View {
                                 // Create an AVPlayerItem and observe readiness to avoid black frames
                                 let item = AVPlayerItem(url: readyURL)
                                 self.playerItem = item
+//                                let queue = AVQueuePlayer()
+//                                queue.allowsExternalPlayback = false
+//                                queue.automaticallyWaitsToMinimizeStalling = true
+//                                let looper = AVPlayerLooper(player: queue, templateItem: item)
+//                                self.playerLooper = looper
+//                                self.player = queue
                                 let p = AVPlayer(playerItem: item)
+                                p.allowsExternalPlayback = false
+                                p.automaticallyWaitsToMinimizeStalling = true
                                 self.player = p
                                 // Observe status changes via periodic time observer fallback
                                 // Prefer KVO-like polling here in SwiftUI-friendly way
@@ -157,9 +167,13 @@ private struct InlineCapturePreview: View {
                                 }
                                 self.playerReady = (item.status == .readyToPlay)
                                 print("[InlinePreview] Player item ready? \(self.playerReady)")
-                                if self.playerReady {
+                                if self.playerReady, let p = self.player {
                                     await p.seek(to: .zero)
                                     p.play()
+                                    NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: self.playerItem, queue: .main) { _ in
+                                        p.seek(to: .zero)
+                                        p.play()
+                                    }
                                 }
                             }
                         }

@@ -748,7 +748,7 @@ struct FeedView: View {
                         navigateToProfile = true
                     }
                 )
-                .frame(width: size.width, height: size.height)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .ignoresSafeArea()
                 .clipped()
                 .background(Color.black)
@@ -1430,14 +1430,14 @@ private struct FeedFullscreenPageView: View {
             let view = PlayerHostingView()
             view.backgroundColor = .black
             view.translatesAutoresizingMaskIntoConstraints = false
-            view.playerLayer.videoGravity = .resizeAspect
+            view.playerLayer.videoGravity = .resizeAspectFill
             view.player = player
             return view
         }
 
         func updateUIView(_ uiView: PlayerHostingView, context: Context) {
             uiView.player = player
-            uiView.playerLayer.videoGravity = .resizeAspect
+            uiView.playerLayer.videoGravity = .resizeAspectFill
             uiView.setNeedsLayout()
             uiView.layoutIfNeeded()
         }
@@ -1453,7 +1453,7 @@ private struct FeedFullscreenPageView: View {
         override func layoutSubviews() {
             super.layoutSubviews()
             playerLayer.frame = bounds
-            playerLayer.videoGravity = .resizeAspect
+            playerLayer.videoGravity = .resizeAspectFill
         }
     }
 
@@ -1478,10 +1478,9 @@ private struct FeedFullscreenPageView: View {
     // REPLACED body implementation with a thin wrapper delegating to contentView to reduce type-checking complexity
     var body: some View {
         GeometryReader { geo in
-            let size = geo.size
-            contentView(size: size)
+            contentView(size: geo.size)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color.black)
-                .frame(width: geo.size.width, height: geo.size.height, alignment: .center)
                 .ignoresSafeArea()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1524,9 +1523,8 @@ private struct FeedFullscreenPageView: View {
     @ViewBuilder
     private func videoContent(size: CGSize, videoURL: URL) -> some View {
         VideoPlayerContainer(url: videoURL, hudTimeControl: $debugPlayerTimeControl, hudItemStatus: $debugItemStatus, playbackStuck: $playbackStuck)
-            .frame(width: size.width, height: size.height)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .ignoresSafeArea()
-            .contentShape(Rectangle())
             .clipped()
             .background(Color.black)
             .onAppear {
@@ -1543,7 +1541,8 @@ private struct FeedFullscreenPageView: View {
             switch phase {
             case .empty:
                 Color.black
-                    .frame(width: size.width, height: size.height)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .ignoresSafeArea()
                     .onAppear {
                         imagePhaseDebug = "empty"
                         print("[Feed] image phase: empty for URL: \(post.mediaURL)")
@@ -1552,7 +1551,8 @@ private struct FeedFullscreenPageView: View {
                 img
                     .resizable()
                     .scaledToFill()
-                    .frame(width: size.width, height: size.height)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .ignoresSafeArea()
                     .clipped()
                     .background(Color.black)
                     .onAppear {
@@ -1565,16 +1565,18 @@ private struct FeedFullscreenPageView: View {
                         Image("placeholder")
                             .resizable()
                             .scaledToFill()
-                            .frame(width: size.width, height: size.height)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .ignoresSafeArea()
                             .clipped()
                     } else {
                         LinearGradient(colors: [.black, .gray.opacity(0.4), .black], startPoint: .top, endPoint: .bottom)
-                            .frame(width: size.width, height: size.height)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .ignoresSafeArea()
                             .clipped()
                     }
                 }
                 .background(Color.black)
-                .frame(width: size.width, height: size.height)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .onAppear {
                     imagePhaseDebug = "failure"
                     print("[Feed] image phase: failure for URL: \(post.mediaURL)")
