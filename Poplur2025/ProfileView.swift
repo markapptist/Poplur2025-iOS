@@ -25,6 +25,11 @@ struct ProfileView: View {
     @State private var lastHeadModelURL: URL? = nil
     @State private var navigateToViewer = false
 
+    @State private var isLoadingMore = false
+    @State private var canLoadMore = true
+    @State private var lastDocument: QueryDocumentSnapshot? = nil
+    private let pageSize = 18
+
     enum DisplayMode: String, CaseIterable, Identifiable {
         case list
         case grid
@@ -87,21 +92,25 @@ struct ProfileView: View {
                                         VStack(spacing: 0) {
                                             Color.clear.frame(height: 0).id("top")
                                             LazyVGrid(columns: gridCols, spacing: tileSpacing) {
-                                                ForEach(myPosts) { post in
-                                                    if let img = loadedImages[post.id] {
-                                                        ProfileGridTile(post: post, preloadedImage: img)
-                                                            .onTapGesture {
-                                                                withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                                                                    expandedPost = post
-                                                                }
+                                                ForEach(myPosts.filter { loadedImages[$0.id] != nil }) { post in
+                                                    ProfileGridTile(post: post, preloadedImage: loadedImages[post.id]!)
+                                                        .onTapGesture {
+                                                            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                                                                expandedPost = post
                                                             }
-                                                    }
+                                                        }
+                                                }
+                                                Color.clear.frame(height: 1).onAppear {
+                                                    loadMoreIfNeeded(currentItem: myPosts.last)
                                                 }
                                             }
-                                            .padding(.horizontal, 16)
-                                            .padding(.top, 8)
-                                            .padding(.bottom, 16)
+                                            if isLoadingMore {
+                                                ProgressView().padding(.vertical, 12)
+                                            }
                                         }
+                                        .padding(.horizontal, 16)
+                                        .padding(.top, 8)
+                                        .padding(.bottom, 16)
                                     }
                                     .refreshable {
                                         await loadMyPosts()
@@ -111,21 +120,25 @@ struct ProfileView: View {
                                         VStack(spacing: 0) {
                                             Color.clear.frame(height: 0).id("top")
                                             VStack(spacing: 18) {
-                                                ForEach(myPosts) { post in
-                                                    if let img = loadedImages[post.id] {
-                                                        ProfileListCard(post: post, preloadedImage: img)
-                                                            .onTapGesture {
-                                                                withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                                                                    expandedPost = post
-                                                                }
+                                                ForEach(myPosts.filter { loadedImages[$0.id] != nil }) { post in
+                                                    ProfileListCard(post: post, preloadedImage: loadedImages[post.id]!)
+                                                        .onTapGesture {
+                                                            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                                                                expandedPost = post
                                                             }
-                                                    }
+                                                        }
+                                                }
+                                                Color.clear.frame(height: 1).onAppear {
+                                                    loadMoreIfNeeded(currentItem: myPosts.last)
                                                 }
                                             }
-                                            .padding(.horizontal, 16)
-                                            .padding(.top, 8)
-                                            .padding(.bottom, 16)
+                                            if isLoadingMore {
+                                                ProgressView().padding(.vertical, 12)
+                                            }
                                         }
+                                        .padding(.horizontal, 16)
+                                        .padding(.top, 8)
+                                        .padding(.bottom, 16)
                                     }
                                     .refreshable {
                                         await loadMyPosts()
@@ -180,6 +193,24 @@ struct ProfileView: View {
                                 Image(systemName: "xmark.circle.fill")
                                     .font(.system(size: 28, weight: .bold))
                                     .foregroundStyle(.white.opacity(0.95))
+                                    .padding(12)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .overlay(alignment: .topLeading) {
+                            Button(role: .destructive) {
+                                Task {
+                                    await deletePost(expandedPost)
+                                    withAnimation(.easeOut(duration: 0.25)) { expandedPost = nil }
+                                }
+                            } label: {
+                                Label("Delete", systemImage: "trash.fill")
+                                    .font(.system(size: 16, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .padding(10)
+                                    .background(
+                                        Capsule().fill(Color.red.opacity(0.85))
+                                    )
                                     .padding(12)
                             }
                             .buttonStyle(.plain)
@@ -368,6 +399,13 @@ struct ProfileView: View {
                 }
             }
         }
+        .contextMenu {
+            Button(role: .destructive) {
+                deleteProfilePhoto()
+            } label: {
+                Label("Delete Profile Photo", systemImage: "trash")
+            }
+        }
         .buttonStyle(.plain)
     }
 
@@ -415,89 +453,106 @@ struct ProfileView: View {
         } else {
             await MainActor.run {
                 myPosts = []
+                loadedImages = [:]
                 hasLoadedOnce = true
+                canLoadMore = false
+                lastDocument = nil
             }
             return
         }
 
-        await MainActor.run { isLoading = true }
+        await MainActor.run {
+            isLoading = true
+            canLoadMore = true
+            lastDocument = nil
+            myPosts = []
+            loadedImages = [:]
+        }
         defer { Task { @MainActor in isLoading = false } }
 
         do {
-            let posts = try await fetchPosts(for: targetUID)
-            // Filter to valid URLs first
-            let urlValidPosts = posts.filter { post in
-                guard let url = URL(string: post.mediaURL) else { return false }
-                return !post.mediaURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && ["http", "https"].contains(url.scheme?.lowercased() ?? "")
-            }
-
-            // Prefetch images concurrently
-            let results: [(Post, UIImage?)] = await withTaskGroup(of: (Post, UIImage?).self) { group in
-                for post in urlValidPosts {
-                    group.addTask {
-                        let img = await CachedImageLoader.shared.load(URL(string: post.mediaURL)!)
-                        return (post, img)
-                    }
-                }
-                var collected: [(Post, UIImage?)] = []
-                for await result in group { collected.append(result) }
-                return collected
-            }
-
-            // Keep only posts with successfully loaded images
-            let ready = results.compactMap { pair -> (Post, UIImage)? in
-                guard let image = pair.1 else { return nil }
-                return (pair.0, image)
-            }
-
+            let page = try await fetchPostsPage(for: targetUID, after: nil, limit: pageSize)
             await MainActor.run {
-                self.myPosts = ready.map { $0.0 }
-                // Build the image cache keyed by post.id
-                self.loadedImages = Dictionary(uniqueKeysWithValues: ready.map { ($0.0.id, $0.1) })
+                self.myPosts = page.posts
+                self.lastDocument = page.lastDoc
+                self.canLoadMore = page.posts.count >= pageSize && page.lastDoc != nil
                 self.averageRadius = Double(self.averagePostRadius())
                 self.hasLoadedOnce = true
             }
+            Task.detached { await prefetchImages(for: page.posts) }
         } catch {
             print("Profile: failed to load posts -> \(error.localizedDescription)")
             await MainActor.run {
                 self.myPosts = []
                 self.loadedImages = [:]
                 self.hasLoadedOnce = true
+                self.canLoadMore = false
             }
         }
     }
 
-    private func fetchPosts(for uid: String) async throws -> [Post] {
+    private func loadMoreIfNeeded(currentItem post: Post?) {
+        guard canLoadMore, !isLoadingMore, !isLoading else { return }
+        guard let post = post else { return }
+        // Trigger when the current item is within the last 6 items
+        let thresholdIndex = myPosts.index(myPosts.endIndex, offsetBy: -6, limitedBy: myPosts.startIndex) ?? myPosts.startIndex
+        if let currentIndex = myPosts.firstIndex(where: { $0.id == post.id }), currentIndex >= thresholdIndex {
+            Task { await loadNextPage() }
+        }
+    }
+
+    private func loadNextPage() async {
+        guard canLoadMore, !isLoadingMore else { return }
+        await MainActor.run { isLoadingMore = true }
+        defer { Task { @MainActor in isLoadingMore = false } }
+        let targetUID: String
+        if let provided = userID {
+            targetUID = provided
+        } else if let current = Auth.auth().currentUser?.uid {
+            targetUID = current
+        } else { return }
+        do {
+            let page = try await fetchPostsPage(for: targetUID, after: lastDocument, limit: pageSize)
+            await MainActor.run {
+                self.myPosts.append(contentsOf: page.posts)
+                self.lastDocument = page.lastDoc
+                self.canLoadMore = page.posts.count >= pageSize && page.lastDoc != nil
+                self.averageRadius = Double(self.averagePostRadius())
+            }
+            Task.detached { await prefetchImages(for: page.posts) }
+        } catch {
+            print("Profile: failed to load more -> \(error.localizedDescription)")
+            await MainActor.run { self.canLoadMore = false }
+        }
+    }
+
+    private struct PostsPage {
+        let posts: [Post]
+        let lastDoc: QueryDocumentSnapshot?
+    }
+
+    private func fetchPostsPage(for uid: String, after last: QueryDocumentSnapshot?, limit: Int) async throws -> PostsPage {
         try await withCheckedThrowingContinuation { cont in
             let db = Firestore.firestore()
-            let base = db.collection("posts").whereField("userID", isEqualTo: uid)
-
-            base.getDocuments { snap, err in
+            var query: Query = db.collection("posts")
+                .whereField("userID", isEqualTo: uid)
+                .order(by: "createdAt", descending: true)
+                .limit(to: limit)
+            if let last = last {
+                query = query.start(afterDocument: last)
+            }
+            query.getDocuments { snap, err in
                 if let err = err {
                     cont.resume(throwing: err)
                     return
                 }
-                // Sort client-side by createdAt desc if available
-                if let snap = snap {
-                    let sortedDocs = snap.documents.sorted { a, b in
-                        let ta = a.data()["createdAt"] as? Timestamp
-                        let tb = b.data()["createdAt"] as? Timestamp
-                        switch (ta, tb) {
-                        case let (a?, b?):
-                            return a.dateValue() > b.dateValue()
-                        case (_?, nil):
-                            return true
-                        case (nil, _?):
-                            return false
-                        default:
-                            return a.reference.documentID > b.reference.documentID
-                        }
-                    }
-                    let sortedSnap = QuerySnapshotProxy(documents: sortedDocs)
-                    cont.resume(returning: Self.mapPosts(from: sortedSnap))
-                } else {
-                    cont.resume(returning: [])
+                guard let snap = snap else {
+                    cont.resume(returning: PostsPage(posts: [], lastDoc: nil))
+                    return
                 }
+                let posts = Self.mapPosts(from: snap)
+                let lastDoc = snap.documents.last
+                cont.resume(returning: PostsPage(posts: posts, lastDoc: lastDoc))
             }
         }
     }
@@ -549,6 +604,26 @@ struct ProfileView: View {
         }
     }
 
+    private func prefetchImages(for posts: [Post]) async {
+        await withTaskGroup(of: Void.self) { group in
+            for post in posts where loadedImages[post.id] == nil {
+                group.addTask {
+                    await loadImageFor(post: post)
+                }
+            }
+        }
+    }
+
+    private func loadImageFor(post: Post) async {
+        guard let url = URL(string: post.mediaURL) else { return }
+        let image = await CachedImageLoader.shared.load(url)
+        if let image = image {
+            await MainActor.run {
+                self.loadedImages[post.id] = image
+            }
+        }
+    }
+
     @discardableResult
     private func saveProfileImage(_ image: UIImage) throws -> URL {
         let url = profileImageFileURL()
@@ -574,6 +649,44 @@ struct ProfileView: View {
         let total = myPosts.reduce(0) { $0 + $1.radius }
         let avg = total / max(1, myPosts.count)
         return max(1, avg)
+    }
+    
+    private func deletePost(_ post: Post?) async {
+        guard let post else { return }
+        do {
+            let db = Firestore.firestore()
+            try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+                db.collection("posts").document(post.id).delete { err in
+                    if let err = err {
+                        cont.resume(throwing: err)
+                    } else {
+                        cont.resume()
+                    }
+                }
+            }
+            await MainActor.run {
+                self.myPosts.removeAll { $0.id == post.id }
+                self.loadedImages.removeValue(forKey: post.id)
+                self.averageRadius = Double(self.averagePostRadius())
+                NotificationCenter.default.post(name: Notification.Name("ProfileRemovePost"), object: post.id)
+            }
+        } catch {
+            print("Failed to delete post: \(error.localizedDescription)")
+        }
+    }
+
+    private func deleteProfilePhoto() {
+        // Clear in-memory state
+        self.profileImage = nil
+        self.profileImageURL = nil
+        // Delete persisted file if present
+        let url = profileImageFileURL()
+        if FileManager.default.fileExists(atPath: url.path) {
+            do { try FileManager.default.removeItem(at: url) } catch {
+                print("Failed to remove profile photo: \(error.localizedDescription)")
+            }
+        }
+        NotificationCenter.default.post(name: Notification.Name("ProfilePhotoUpdated"), object: nil)
     }
 }
 

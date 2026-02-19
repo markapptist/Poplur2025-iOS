@@ -3,6 +3,7 @@ import CoreLocation
 import AVFoundation
 import SceneKit
 import CoreMotion
+import Combine
 
 extension Notification.Name {
     static let ResetTabToTop = Notification.Name("ResetTabToTop")
@@ -83,6 +84,7 @@ struct HomeView: View {
     @State private var isFeedReady: Bool = false
 
     @StateObject private var motionController = SceneMotionController()
+    @StateObject private var cubeTouchConfig = CubeTouchConfiguration()
     
     init(cameraController: CameraKitController) {
         self.cameraController = cameraController
