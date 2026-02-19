@@ -7,6 +7,8 @@ import ARKit
 
 struct ProfileView: View {
     @EnvironmentObject private var auth: AuthViewModel
+    @GestureState private var isInteractingWithCube: Bool = false
+    @State private var isScrollDisabled = false
 
     @State private var editing = false
     @State private var userProfile: UserProfile?
@@ -112,6 +114,7 @@ struct ProfileView: View {
                                         .padding(.top, 8)
                                         .padding(.bottom, 16)
                                     }
+                                    .scrollDisabled(isScrollDisabled)
                                     .refreshable {
                                         await loadMyPosts()
                                     }
@@ -140,6 +143,7 @@ struct ProfileView: View {
                                         .padding(.top, 8)
                                         .padding(.bottom, 16)
                                     }
+                                    .scrollDisabled(isScrollDisabled)
                                     .refreshable {
                                         await loadMyPosts()
                                     }
@@ -159,6 +163,45 @@ struct ProfileView: View {
                         .padding(.trailing, 12)
                         .padding(.bottom, 45)
                 }
+                // Global gesture layer for cube interaction
+                Color.clear
+                    .contentShape(Rectangle())
+                    .ignoresSafeArea()
+                    .highPriorityGesture(
+                        DragGesture(minimumDistance: 0)
+                            .updating($isInteractingWithCube) { _, isInteracting, _ in
+                                isInteracting = true
+                            }
+                            .onChanged { value in
+                                if !isScrollDisabled { isScrollDisabled = true }
+                                // Amplify small movements to make the cube feel more responsive
+                                let boost: CGFloat = 1.35
+                                let boosted = CGSize(width: value.translation.width * boost,
+                                                     height: value.translation.height * boost)
+                                NotificationCenter.default.post(name: Notification.Name("CubeGlobalDragChanged"), object: nil, userInfo: [
+                                    "location": NSValue(cgPoint: value.location),
+                                    "translation": NSValue(cgSize: boosted)
+                                ])
+                            }
+                            .onEnded { value in
+                                let boost: CGFloat = 1.35
+                                let boosted = CGSize(width: value.translation.width * boost,
+                                                     height: value.translation.height * boost)
+                                NotificationCenter.default.post(name: Notification.Name("CubeGlobalDragEnded"), object: nil, userInfo: [
+                                    "location": NSValue(cgPoint: value.location),
+                                    "translation": NSValue(cgSize: boosted)
+                                ])
+                                isScrollDisabled = false
+                            }
+                    )
+                    .simultaneousGesture(
+                        TapGesture()
+                            .onEnded {
+                                isScrollDisabled = true
+                                NotificationCenter.default.post(name: Notification.Name("CubeGlobalTap"), object: nil)
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { isScrollDisabled = false }
+                            }
+                    )
                 if let post = expandedPost {
                     ZStack {
                         Color.black.opacity(0.6)
@@ -756,5 +799,8 @@ extension Notification.Name {
     static let OpenSettingsRequested = Notification.Name("OpenSettingsRequested")
     static let OpenDMsRequested = Notification.Name("OpenDMsRequested")
     static let PauseGlobalFeedAudio = Notification.Name("PauseGlobalFeedAudio")
+    static let CubeGlobalDragChanged = Notification.Name("CubeGlobalDragChanged")
+    static let CubeGlobalDragEnded = Notification.Name("CubeGlobalDragEnded")
+    static let CubeGlobalTap = Notification.Name("CubeGlobalTap")
 }
 

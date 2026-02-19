@@ -12,12 +12,21 @@ public struct IsometricRadiusBar: View {
     }
 
     public var body: some View {
-        ZStack {
+        ZStack(alignment: .top) {
             RadiusBarSceneView(radius: $radius, baseColor: baseColor)
                 .frame(width: 216, height: 720)
                 .background(Color.clear)
                 .allowsHitTesting(false)
                 .offset(y: 120)
+
+            // Small radius label
+            Text("\(max(1, Int(radius) / 1000)) KM")
+                .font(.system(size: 12, weight: .heavy, design: .rounded))
+                .foregroundColor(.white)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Capsule().fill(Color.black.opacity(0.55)))
+                .padding(.top, 6)
         }
         .overlay(
             GeometryReader { proxy in
@@ -80,7 +89,13 @@ private struct RadiusBarSceneView: UIViewRepresentable {
         scnView.isPlaying = true
         scnView.scene = makeScene()
         context.coordinator.view = scnView
-        context.coordinator.updateHeight(from: radius)
+
+        // Delay the initial height growth by ~2 seconds
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            context.coordinator.markInitialAnimationRun()
+            context.coordinator.updateHeight(from: radius, isInitial: true)
+        }
+
         return scnView
     }
 
@@ -150,13 +165,13 @@ private struct RadiusBarSceneView: UIViewRepresentable {
         shadowNode.position = SCNVector3(0, -1.2, 0)
         scene.rootNode.addChildNode(shadowNode)
 
-        // Bar (SCNBox) sized to show height with small width/length
-        let box = SCNBox(width: 0.35, height: 1.2, length: 0.35, chamferRadius: 0.06)
+        // Bar (SCNBox) sized to show height with small width/length, start at height 0
+        let box = SCNBox(width: 0.35, height: 0.0, length: 0.35, chamferRadius: 0.06)
         box.chamferSegmentCount = 3
         box.materials = perFaceMaterials(from: baseColor)
         let node = SCNNode(geometry: box)
         node.name = "bar"
-        node.position = SCNVector3(0, 0.6, 0) // half initial height
+        node.position = SCNVector3(0, 0.0, 0) // half initial height 0
         scene.rootNode.addChildNode(node)
 
         // Fixed 3D pose: show two faces + top (X ~ -10°, Y ~ 20°)
@@ -184,6 +199,11 @@ private struct RadiusBarSceneView: UIViewRepresentable {
             let m = SCNMaterial()
             m.diffuse.contents = color
             m.lightingModel = .physicallyBased
+            m.multiply.contents = UIColor.systemIndigo
+            if let normal = UIImage(named: "CubeNormalMap") {
+                m.normal.contents = normal
+                m.normal.intensity = 0.6
+            }
             m.metalness.contents = metal
             m.roughness.contents = rough
             m.isDoubleSided = true
@@ -212,16 +232,33 @@ private struct RadiusBarSceneView: UIViewRepresentable {
     class Coordinator {
         var parent: RadiusBarSceneView
         weak var view: SCNView?
+        private(set) var didRunInitialAnimation = false
+
         init(_ parent: RadiusBarSceneView) { self.parent = parent }
+
+        func markInitialAnimationRun() {
+            didRunInitialAnimation = true
+        }
+
         func updateHeight(from radius: Double) {
+            updateHeight(from: radius, isInitial: false)
+        }
+
+        func updateHeight(from radius: Double, isInitial: Bool) {
             guard let scnView = view,
                   let bar = scnView.scene?.rootNode.childNode(withName: "bar", recursively: true),
                   let box = bar.geometry as? SCNBox else { return }
-            let h = clampedHeight(radius)
+            let targetH = clampedHeight(radius)
             SCNTransaction.begin()
-            SCNTransaction.animationDuration = 0.25
-            box.height = CGFloat(h)
-            bar.position.y = Float(h / 2.0)
+            let initialHeight = box.height
+            // Slower animations overall; first animation is slower and delayed externally
+            if isInitial {
+                SCNTransaction.animationDuration = 1.2
+            } else {
+                SCNTransaction.animationDuration = didRunInitialAnimation ? 0.6 : 0.6
+            }
+            box.height = CGFloat(targetH)
+            bar.position.y = Float(targetH / 2.0)
             SCNTransaction.commit()
         }
 

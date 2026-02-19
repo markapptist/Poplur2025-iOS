@@ -157,7 +157,8 @@ private struct CubeSceneView: UIViewRepresentable {
         scene.rootNode.addChildNode(ambientNode)
 
         // Cube with different materials for each face
-        let box = SCNBox(width: 2.2, height: 2.2, length: 2.2, chamferRadius: 0.18)
+//        let box = SCNBox(width: 2.2, height: 2.2, length: 2.2, chamferRadius: 0.18)
+        let box = SCNBox(width: 2.2, height: 2.2, length: 2.2, chamferRadius: 0.32)
         let node = SCNNode(geometry: box)
         node.name = "cube"
         scene.rootNode.addChildNode(node)
@@ -176,9 +177,18 @@ private struct CubeSceneView: UIViewRepresentable {
 
         return faces.map { tab in
             let mat = SCNMaterial()
+            // Base face image
             mat.diffuse.contents = faceImage(for: tab)
-            mat.locksAmbientWithDiffuse = true
+            // Brand color tint (adjust to your brand color)
+            mat.multiply.contents = UIColor.systemIndigo
+            mat.lightingModel = .physicallyBased
             mat.isDoubleSided = true
+            mat.locksAmbientWithDiffuse = true
+            // Normal map for subtle texture (ensure an asset named "CubeNormalMap" exists)
+            if let normal = UIImage(named: "CubeNormalMap") {
+                mat.normal.contents = normal
+                mat.normal.intensity = 0.6
+            }
             return mat
         }
     }
