@@ -3,6 +3,7 @@ import UIKit
 import FirebaseAuth
 import FirebaseFirestore
 import UserNotifications
+import ARKit
 
 struct ProfileView: View {
     @EnvironmentObject private var auth: AuthViewModel
@@ -11,13 +12,18 @@ struct ProfileView: View {
     @State private var userProfile: UserProfile?
 
     @State private var myPosts: [Post] = []
+    @State private var loadedImages: [String: UIImage] = [:]
     @State private var isLoading = false
+    @State private var hasLoadedOnce = false
     @State private var expandedPost: Post? = nil
-    @State private var showCamera = false
     @State private var profileImage: UIImage? = nil
     @State private var profileImageURL: URL? = nil
     @State private var showSettings = false
     @State private var averageRadius: Double = 5000
+    @State private var navigateToScanner = false
+    
+    @State private var lastHeadModelURL: URL? = nil
+    @State private var navigateToViewer = false
 
     enum DisplayMode: String, CaseIterable, Identifiable {
         case list
@@ -61,8 +67,8 @@ struct ProfileView: View {
                     // Scrollable content with readers for "scroll to top"
                     ScrollViewReader { proxy in
                         Group {
-                            if isLoading {
-                                VStack { Spacer(); ProgressView().tint(.gray); Spacer() }
+                            if isLoading || !hasLoadedOnce {
+                                VStack { Spacer(); Spacer() }
                                     .id("top")
                             } else if myPosts.isEmpty {
                                 VStack(spacing: 8) {
@@ -82,12 +88,14 @@ struct ProfileView: View {
                                             Color.clear.frame(height: 0).id("top")
                                             LazyVGrid(columns: gridCols, spacing: tileSpacing) {
                                                 ForEach(myPosts) { post in
-                                                    ProfileGridTile(post: post)
-                                                        .onTapGesture {
-                                                            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                                                                expandedPost = post
+                                                    if let img = loadedImages[post.id] {
+                                                        ProfileGridTile(post: post, preloadedImage: img)
+                                                            .onTapGesture {
+                                                                withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                                                                    expandedPost = post
+                                                                }
                                                             }
-                                                        }
+                                                    }
                                                 }
                                             }
                                             .padding(.horizontal, 16)
@@ -104,12 +112,14 @@ struct ProfileView: View {
                                             Color.clear.frame(height: 0).id("top")
                                             VStack(spacing: 18) {
                                                 ForEach(myPosts) { post in
-                                                    ProfileListCard(post: post)
-                                                        .onTapGesture {
-                                                            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                                                                expandedPost = post
+                                                    if let img = loadedImages[post.id] {
+                                                        ProfileListCard(post: post, preloadedImage: img)
+                                                            .onTapGesture {
+                                                                withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                                                                    expandedPost = post
+                                                                }
                                                             }
-                                                        }
+                                                    }
                                                 }
                                             }
                                             .padding(.horizontal, 16)
@@ -130,11 +140,11 @@ struct ProfileView: View {
                         }
                     }
                 }
-                .overlay(alignment: .trailing) {
+                .overlay(alignment: .bottomTrailing) {
                     IsometricRadiusBar(radius: $averageRadius)
-                        .frame(width: 44, height: 160)
-                        .padding(.trailing, 8)
-                        .padding(.top, 100)
+                        .frame(width: 60, height: 220)
+                        .padding(.trailing, 12)
+                        .padding(.bottom, 45)
                 }
                 if let post = expandedPost {
                     ZStack {
@@ -193,27 +203,49 @@ struct ProfileView: View {
                 AppSettingsView()
             } label: { EmptyView() }
             .hidden()
-            .navigationBarHidden(true)
-            .sheet(isPresented: $showCamera) {
-                FrontCameraPicker { image in
-                    // Update immediately
-                    self.profileImage = image
-                    // Persist to disk and remember URL
-                    if let url = try? saveProfileImage(image) {
-                        self.profileImageURL = url
+
+            NavigationLink(isActive: $navigateToScanner) {
+                HeadScannerView { result in
+                    switch result {
+                    case .success(let output):
+                        // For now, use a snapshot image if provided; otherwise ignore
+                        if let image = output.previewImage {
+                            self.profileImage = image
+                            if let url = try? saveProfileImage(image) {
+                                self.profileImageURL = url
+                            }
+                            NotificationCenter.default.post(name: Notification.Name("ProfilePhotoUpdated"), object: image)
+                        }
+                        self.lastHeadModelURL = output.usdzURL
+                        if output.usdzURL != nil {
+                            self.navigateToViewer = true
+                        }
+                    case .failure:
+                        break
                     }
-                    // Notify if other parts listen
-                    NotificationCenter.default.post(name: Notification.Name("ProfilePhotoUpdated"), object: image)
                 }
-                .ignoresSafeArea()
-            }
+            } label: { EmptyView() }
+            .hidden()
+
+            NavigationLink(isActive: $navigateToViewer) {
+                if let url = lastHeadModelURL {
+                    USDZViewerView(usdzURL: url)
+                } else {
+                    Text("No model available")
+                }
+            } label: { EmptyView() }
+            .hidden()
+
             .sheet(isPresented: $editing) {
                 EditProfileView(user: $userProfile)
             }
             .task {
                 UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { _, _ in }
                 await loadMyPosts()
-                await MainActor.run { self.averageRadius = Double(self.averagePostRadius()) }
+                await MainActor.run {
+                    self.averageRadius = Double(self.averagePostRadius())
+                    self.hasLoadedOnce = true
+                }
                 await loadPersistedProfileImageIfNeeded()
             }
             .onAppear {
@@ -223,7 +255,10 @@ struct ProfileView: View {
             .onReceive(NotificationCenter.default.publisher(for: .LoadProfileNow)) { _ in
                 Task {
                     await loadMyPosts()
-                    await MainActor.run { self.averageRadius = Double(self.averagePostRadius()) }
+                    await MainActor.run {
+                        self.averageRadius = Double(self.averagePostRadius())
+                        self.hasLoadedOnce = true
+                    }
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ProfileRemovePost"))) { notif in
@@ -275,7 +310,7 @@ struct ProfileView: View {
 
     private var avatarRow: some View {
         Button {
-            showCamera = true
+            navigateToScanner = true
         } label: {
             ZStack {
                 if let localImage = profileImage {
@@ -317,6 +352,21 @@ struct ProfileView: View {
             .frame(width: 96, height: 96)
             .clipShape(Circle())
             .shadow(color: Color.black.opacity(0.08), radius: 6, x: 0, y: 4)
+            .overlay(alignment: .bottomTrailing) {
+                if lastHeadModelURL != nil {
+                    Button {
+                        navigateToViewer = true
+                    } label: {
+                        Image(systemName: "eye.fill")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundColor(.white)
+                            .padding(6)
+                            .background(Circle().fill(Color.black.opacity(0.6)))
+                    }
+                    .buttonStyle(.plain)
+                    .padding(4)
+                }
+            }
         }
         .buttonStyle(.plain)
     }
@@ -363,7 +413,10 @@ struct ProfileView: View {
         } else if let current = Auth.auth().currentUser?.uid {
             targetUID = current
         } else {
-            await MainActor.run { myPosts = [] }
+            await MainActor.run {
+                myPosts = []
+                hasLoadedOnce = true
+            }
             return
         }
 
@@ -372,16 +425,45 @@ struct ProfileView: View {
 
         do {
             let posts = try await fetchPosts(for: targetUID)
-            await MainActor.run {
-                self.myPosts = posts.filter { post in
-                    guard let url = URL(string: post.mediaURL) else { return false }
-                    return !post.mediaURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && ["http", "https"].contains(url.scheme?.lowercased() ?? "")
+            // Filter to valid URLs first
+            let urlValidPosts = posts.filter { post in
+                guard let url = URL(string: post.mediaURL) else { return false }
+                return !post.mediaURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && ["http", "https"].contains(url.scheme?.lowercased() ?? "")
+            }
+
+            // Prefetch images concurrently
+            let results: [(Post, UIImage?)] = await withTaskGroup(of: (Post, UIImage?).self) { group in
+                for post in urlValidPosts {
+                    group.addTask {
+                        let img = await CachedImageLoader.shared.load(URL(string: post.mediaURL)!)
+                        return (post, img)
+                    }
                 }
+                var collected: [(Post, UIImage?)] = []
+                for await result in group { collected.append(result) }
+                return collected
+            }
+
+            // Keep only posts with successfully loaded images
+            let ready = results.compactMap { pair -> (Post, UIImage)? in
+                guard let image = pair.1 else { return nil }
+                return (pair.0, image)
+            }
+
+            await MainActor.run {
+                self.myPosts = ready.map { $0.0 }
+                // Build the image cache keyed by post.id
+                self.loadedImages = Dictionary(uniqueKeysWithValues: ready.map { ($0.0.id, $0.1) })
                 self.averageRadius = Double(self.averagePostRadius())
+                self.hasLoadedOnce = true
             }
         } catch {
             print("Profile: failed to load posts -> \(error.localizedDescription)")
-            await MainActor.run { self.myPosts = [] }
+            await MainActor.run {
+                self.myPosts = []
+                self.loadedImages = [:]
+                self.hasLoadedOnce = true
+            }
         }
     }
 
@@ -498,31 +580,14 @@ struct ProfileView: View {
 // Grid and list tiles unchanged…
 private struct ProfileGridTile: View {
     let post: Post
+    let preloadedImage: UIImage
     private let corner: CGFloat = 18
-    @State private var image: UIImage?
-    @State private var isLoading = false
 
     var body: some View {
         ZStack {
-            if let image {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFill()
-            } else {
-                ZStack {
-                    RoundedRectangle(cornerRadius: corner, style: .continuous)
-                        .fill(Color.gray.opacity(0.15))
-                    if isLoading {
-                        ProgressView().tint(.gray)
-                    } else {
-                        Image(systemName: "photo")
-                            .foregroundColor(.secondary)
-                    }
-                }
-                .task {
-                    await loadIfNeeded()
-                }
-            }
+            Image(uiImage: preloadedImage)
+                .resizable()
+                .scaledToFill()
         }
         .frame(height: 120)
         .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
@@ -538,48 +603,18 @@ private struct ProfileGridTile: View {
                 .padding(8)
         }
     }
-
-    private func loadIfNeeded() async {
-        guard image == nil, let url = URL(string: post.mediaURL) else { return }
-        await MainActor.run { isLoading = true }
-        let img = await CachedImageLoader.shared.load(url)
-        await MainActor.run {
-            self.image = img
-            self.isLoading = false
-            if img == nil {
-                NotificationCenter.default.post(name: Notification.Name("ProfileRemovePost"), object: post.id)
-            }
-        }
-    }
 }
 
 private struct ProfileListCard: View {
     let post: Post
+    let preloadedImage: UIImage
     private let corner: CGFloat = 22
-    @State private var image: UIImage?
-    @State private var isLoading = false
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
-            if let image {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFill()
-            } else {
-                ZStack {
-                    RoundedRectangle(cornerRadius: corner, style: .continuous)
-                        .fill(Color.gray.opacity(0.15))
-                    if isLoading {
-                        ProgressView().tint(.gray)
-                    } else {
-                        Image(systemName: "photo")
-                            .foregroundColor(.secondary)
-                    }
-                }
-                .task {
-                    await loadIfNeeded()
-                }
-            }
+            Image(uiImage: preloadedImage)
+                .resizable()
+                .scaledToFill()
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("\(max(1, post.radius / 1000)) KM")
@@ -594,19 +629,6 @@ private struct ProfileListCard: View {
         .frame(height: 200)
         .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
         .shadow(color: Color.black.opacity(0.12), radius: 12, x: 0, y: 8)
-    }
-
-    private func loadIfNeeded() async {
-        guard image == nil, let url = URL(string: post.mediaURL) else { return }
-        await MainActor.run { isLoading = true }
-        let img = await CachedImageLoader.shared.load(url)
-        await MainActor.run {
-            self.image = img
-            self.isLoading = false
-            if img == nil {
-                NotificationCenter.default.post(name: Notification.Name("ProfileRemovePost"), object: post.id)
-            }
-        }
     }
 }
 

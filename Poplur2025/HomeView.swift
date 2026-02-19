@@ -21,6 +21,10 @@ extension Notification.Name {
     static let ResumeFeedAudio = Notification.Name("ResumeFeedAudio")
 }
 
+extension Notification.Name {
+    static let CenterMapOnUser = Notification.Name("CenterMapOnUser")
+}
+
 struct HomeCameraPreviewHost: UIViewControllerRepresentable {
     @ObservedObject var controller: CameraKitController
 
@@ -63,7 +67,7 @@ struct HomeView: View {
     @Environment(\.scenePhase) private var scenePhase
 
     // Start on map tab instead of record tab
-    @State private var selectedTab: AppTab = .map
+    @State private var selectedTab: AppTab = .profile
 
     // Location only when needed
     @StateObject private var locationProvider = LocationProvider()
@@ -221,6 +225,9 @@ struct HomeView: View {
                 })
                 .tint(.white)
                 .transition(.opacity)
+                .onTapGesture {
+                    NotificationCenter.default.post(name: .CenterMapOnUser, object: nil)
+                }
             }
             .padding(.bottom, 28)
             .ignoresSafeArea(edges: .bottom)
