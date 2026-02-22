@@ -5,28 +5,23 @@ public struct IsometricRadiusBar: View {
     @Binding public var radius: Double
     @State private var dragStartRadius: Double? = nil
     private var baseColor: Color
+    private var pitchDegrees: Double
+    private var yawDegrees: Double
 
-    public init(radius: Binding<Double>, baseColor: Color = .accentColor) {
+    public init(radius: Binding<Double>, baseColor: Color = .indigo, pitchDegrees: Double = 10.0, yawDegrees: Double = 20.0) {
         self._radius = radius
         self.baseColor = baseColor
+        self.pitchDegrees = pitchDegrees
+        self.yawDegrees = yawDegrees
     }
 
     public var body: some View {
         ZStack(alignment: .top) {
-            RadiusBarSceneView(radius: $radius, baseColor: baseColor)
-                .frame(width: 216, height: 720)
+            RadiusBarSceneView(radius: $radius, baseColor: baseColor, pitchDegrees: pitchDegrees, yawDegrees: yawDegrees)
+                .frame(width: 160, height: 520)
                 .background(Color.clear)
                 .allowsHitTesting(false)
-                .offset(y: 120)
-
-            // Small radius label
-            Text("\(max(1, Int(radius) / 1000)) KM")
-                .font(.system(size: 12, weight: .heavy, design: .rounded))
-                .foregroundColor(.white)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(Capsule().fill(Color.black.opacity(0.55)))
-                .padding(.top, 6)
+                .offset(y: 80)
         }
         .overlay(
             GeometryReader { proxy in
@@ -80,18 +75,40 @@ private extension IsometricRadiusBar {
 private struct RadiusBarSceneView: UIViewRepresentable {
     @Binding var radius: Double
     var baseColor: Color
+    var pitchDegrees: Double
+    var yawDegrees: Double
+
+    private static let cachedShadowImage: UIImage = {
+        let size = CGSize(width: 256, height: 256)
+        UIGraphicsBeginImageContextWithOptions(size, false, 0)
+        let ctx = UIGraphicsGetCurrentContext()!
+        let colors = [UIColor.black.withAlphaComponent(0.38).cgColor, UIColor.black.withAlphaComponent(0.0).cgColor] as CFArray
+        let locations: [CGFloat] = [0.0, 1.0]
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let gradient = CGGradient(colorsSpace: colorSpace, colors: colors, locations: locations)!
+        ctx.drawRadialGradient(gradient,
+                               startCenter: CGPoint(x: size.width/2, y: size.height/2), startRadius: 0,
+                               endCenter: CGPoint(x: size.width/2, y: size.height/2), endRadius: min(size.width, size.height)/2,
+                               options: .drawsAfterEndLocation)
+        let image = UIGraphicsGetImageFromCurrentImageContext()!
+        UIGraphicsEndImageContext()
+        return image
+    }()
 
     func makeUIView(context: Context) -> SCNView {
         let scnView = SCNView()
         scnView.backgroundColor = .clear
         scnView.allowsCameraControl = false
-        scnView.antialiasingMode = .multisampling4X
+        scnView.antialiasingMode = .none
         scnView.isPlaying = true
+        scnView.preferredFramesPerSecond = 30
         scnView.scene = makeScene()
         context.coordinator.view = scnView
 
-        // Delay the initial height growth by ~2 seconds
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+        context.coordinator.prepareInitialState()
+
+        // Delay the initial height growth by ~0.6 seconds
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
             context.coordinator.markInitialAnimationRun()
             context.coordinator.updateHeight(from: radius, isInitial: true)
         }
@@ -111,10 +128,44 @@ private struct RadiusBarSceneView: UIViewRepresentable {
         // Camera (simple, like CubeTabView)
         let cameraNode = SCNNode()
         let camera = SCNCamera()
+        camera.zNear = 0.01
         camera.zFar = 100
         cameraNode.camera = camera
-        cameraNode.position = SCNVector3(0, 0, 5.0)
+        cameraNode.position = SCNVector3(0, 3.6, 3.5)
+        // Orientation will be driven by look-at constraint
+        cameraNode.eulerAngles = SCNVector3Zero
         scene.rootNode.addChildNode(cameraNode)
+
+        // Target node for the camera to look at (visual center)
+        let barTarget = SCNNode()
+        barTarget.name = "barTarget"
+        barTarget.position = SCNVector3(0, 1.5, 0) // raise the target (visual center) so the bar appears higher in frame
+        scene.rootNode.addChildNode(barTarget)
+
+        // Bar (SCNBox) sized to show height with small width/length, start at a tiny height so it's visible
+        let box = SCNBox(width: 0.35, height: 0.05, length: 0.35, chamferRadius: 0.06)
+        box.chamferSegmentCount = 3
+        box.materials = perFaceMaterials(from: baseColor)
+        let node = SCNNode(geometry: box)
+        node.name = "bar"
+        node.position = SCNVector3(0, 2.0, 0) // raised higher to appear more centered with current camera angle
+        node.pivot = SCNMatrix4Identity // rotate around center to keep it visually centered
+        barTarget.addChildNode(node)
+
+        // Attach camera look-at constraint to the target so the bar can be offset within the frame
+        let lookAt = SCNLookAtConstraint(target: barTarget)
+        lookAt.isGimbalLockEnabled = true
+        cameraNode.constraints = [lookAt]
+
+        // Fixed 3D pose: show two faces + top with manual pitch/yaw (restored)
+        node.eulerAngles = SCNVector3(Float(pitchDegrees * .pi / 10), -Float(yawDegrees * .pi / -65), 0)
+
+        // Gentle bob
+        let up = SCNAction.moveBy(x: 0, y: 0.06, z: 0, duration: 1.4)
+        up.timingMode = .easeInEaseOut
+        let down = up.reversed()
+        let bob = SCNAction.repeatForever(SCNAction.sequence([up, down]))
+        node.runAction(bob)
 
         // Lights (omni + ambient + subtle rim)
         let omni = SCNLight()
@@ -145,44 +196,12 @@ private struct RadiusBarSceneView: UIViewRepresentable {
         let shadow = SCNCylinder(radius: shadowRadius, height: 0.01)
         let shadowMat = SCNMaterial()
         shadowMat.lightingModel = .physicallyBased
-        let size = CGSize(width: 256, height: 256)
-        UIGraphicsBeginImageContextWithOptions(size, false, 0)
-        let ctx = UIGraphicsGetCurrentContext()!
-        let colors = [UIColor.black.withAlphaComponent(0.38).cgColor, UIColor.black.withAlphaComponent(0.0).cgColor] as CFArray
-        let locations: [CGFloat] = [0.0, 1.0]
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
-        let gradient = CGGradient(colorsSpace: colorSpace, colors: colors, locations: locations)!
-        ctx.drawRadialGradient(gradient,
-                               startCenter: CGPoint(x: size.width/2, y: size.height/2), startRadius: 0,
-                               endCenter: CGPoint(x: size.width/2, y: size.height/2), endRadius: min(size.width, size.height)/2,
-                               options: .drawsAfterEndLocation)
-        let gradientImage = UIGraphicsGetImageFromCurrentImageContext()
-        UIGraphicsEndImageContext()
-        shadowMat.diffuse.contents = gradientImage
+        shadowMat.diffuse.contents = RadiusBarSceneView.cachedShadowImage
         shadow.materials = [shadowMat]
         let shadowNode = SCNNode(geometry: shadow)
         shadowNode.eulerAngles.x = -.pi / 2
-        shadowNode.position = SCNVector3(0, -1.2, 0)
+        shadowNode.position = SCNVector3(0, -0.35, 0)
         scene.rootNode.addChildNode(shadowNode)
-
-        // Bar (SCNBox) sized to show height with small width/length, start at height 0
-        let box = SCNBox(width: 0.35, height: 0.0, length: 0.35, chamferRadius: 0.06)
-        box.chamferSegmentCount = 3
-        box.materials = perFaceMaterials(from: baseColor)
-        let node = SCNNode(geometry: box)
-        node.name = "bar"
-        node.position = SCNVector3(0, 0.0, 0) // half initial height 0
-        scene.rootNode.addChildNode(node)
-
-        // Fixed 3D pose: show two faces + top (X ~ -10°, Y ~ 20°)
-        node.eulerAngles = SCNVector3(-Float(10.0 * .pi / 180), Float(20.0 * .pi / 180), 0)
-
-        // Gentle bob
-        let up = SCNAction.moveBy(x: 0, y: 0.06, z: 0, duration: 1.4)
-        up.timingMode = .easeInEaseOut
-        let down = up.reversed()
-        let bob = SCNAction.repeatForever(SCNAction.sequence([up, down]))
-        node.runAction(bob)
 
         return scene
     }
@@ -229,12 +248,72 @@ private struct RadiusBarSceneView: UIViewRepresentable {
         ]
     }
 
+    private func makeBarLabelNode(text: String) -> SCNNode {
+        // Use SCNText for crisp vector text with a small plane background to mimic a capsule
+        let textGeom = SCNText(string: text, extrusionDepth: 0.2)
+        textGeom.font = UIFont.systemFont(ofSize: 3.0, weight: .heavy)
+        textGeom.flatness = 0.2
+        let textMat = SCNMaterial()
+        textMat.diffuse.contents = UIColor.white
+        textMat.lightingModel = .physicallyBased
+        textGeom.materials = [textMat]
+
+        // Center the text by using its bounding box
+        let textNode = SCNNode(geometry: textGeom)
+        let (minB, maxB) = textGeom.boundingBox
+        let centerX = (minB.x + maxB.x) / 2.0
+        let centerY = (minB.y + maxB.y) / 2.0
+        textNode.pivot = SCNMatrix4MakeTranslation(centerX, centerY, 0)
+        textNode.scale = SCNVector3(0.02, 0.02, 0.02) // scale down to scene units
+
+        // Background plane behind the text to simulate a capsule tag
+        let padding: CGFloat = 0.6
+        let width = CGFloat(maxB.x - minB.x) * 0.02 + padding
+        let height = CGFloat(maxB.y - minB.y) * 0.02 + padding * 0.6
+        let bgPlane = SCNPlane(width: width, height: height)
+        let bgMat = SCNMaterial()
+        bgMat.diffuse.contents = UIColor.black.withAlphaComponent(0.55)
+        bgMat.isDoubleSided = true
+        bgPlane.cornerRadius = height / 2.0
+        bgPlane.materials = [bgMat]
+        let bgNode = SCNNode(geometry: bgPlane)
+
+        let container = SCNNode()
+        container.addChildNode(bgNode)
+        container.addChildNode(textNode)
+        // Slightly offset text towards viewer to avoid z-fighting
+        textNode.position = SCNVector3(0, 0, 0.01)
+
+        // Move bg and text up so that container's origin is at the bottom edge of the label
+        let planeHeightScene = Float(height)
+        bgNode.position = SCNVector3(0, planeHeightScene / 2.0, 0)
+        textNode.position.y += planeHeightScene / 2.0
+
+        // Pivot at bottom-center so y=0 is the bottom of the label
+        container.pivot = SCNMatrix4MakeTranslation(0, 0, 0)
+
+        // Make the label always face the camera
+        container.constraints = [SCNBillboardConstraint()]
+        return container
+    }
+
     class Coordinator {
         var parent: RadiusBarSceneView
         weak var view: SCNView?
         private(set) var didRunInitialAnimation = false
 
         init(_ parent: RadiusBarSceneView) { self.parent = parent }
+
+        func prepareInitialState() {
+            guard let scnView = view,
+                  let root = scnView.scene?.rootNode,
+                  let bar = root.childNode(withName: "bar", recursively: true),
+                  let box = bar.geometry as? SCNBox else { return }
+            // Set to minimal height and position at bottom so animation grows upward
+            let minH: CGFloat = 1.2
+            box.height = minH
+            bar.position.y = Float(minH / 2.0)
+        }
 
         func markInitialAnimationRun() {
             didRunInitialAnimation = true
@@ -246,19 +325,24 @@ private struct RadiusBarSceneView: UIViewRepresentable {
 
         func updateHeight(from radius: Double, isInitial: Bool) {
             guard let scnView = view,
-                  let bar = scnView.scene?.rootNode.childNode(withName: "bar", recursively: true),
+                  let root = scnView.scene?.rootNode,
+                  let bar = root.childNode(withName: "bar", recursively: true),
                   let box = bar.geometry as? SCNBox else { return }
+
             let targetH = clampedHeight(radius)
+
             SCNTransaction.begin()
-            let initialHeight = box.height
-            // Slower animations overall; first animation is slower and delayed externally
+            SCNTransaction.animationTimingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             if isInitial {
                 SCNTransaction.animationDuration = 1.2
             } else {
                 SCNTransaction.animationDuration = didRunInitialAnimation ? 0.6 : 0.6
             }
+
+            // Update geometry height and bar position
             box.height = CGFloat(targetH)
             bar.position.y = Float(targetH / 2.0)
+
             SCNTransaction.commit()
         }
 
@@ -279,7 +363,7 @@ private struct RadiusBarSceneView: UIViewRepresentable {
 private struct StatefulPreview: View {
     @State private var radius: Double = 2500
     var body: some View {
-        IsometricRadiusBar(radius: $radius, baseColor: .accentColor)
+        IsometricRadiusBar(radius: $radius, baseColor: .accentColor, pitchDegrees: 10, yawDegrees: 20)
             .padding()
             .background(Color(.systemBackground))
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)

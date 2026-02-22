@@ -18,22 +18,25 @@ private enum CubeFaceImageCache {
 
 struct CubeTabView: View {
     @Binding var selectedTab: AppTab
+    @Environment(\.renderingConfig) private var renderingConfig
+    var tintColor: Color = .indigo
     @State private var rotationIndex: Int = 0
     var onSwipeUp: (() -> Void)? = nil
     var onCubeTap: (() -> Void)? = nil
 
     var body: some View {
-        FloatingCube(selectedTab: $selectedTab, rotationIndex: $rotationIndex, onSwipeUp: onSwipeUp, onCubeTap: onCubeTap)
+        FloatingCube(selectedTab: $selectedTab, rotationIndex: $rotationIndex, tintColor: tintColor, onSwipeUp: onSwipeUp, onCubeTap: onCubeTap)
             .frame(height: 200)
             .background(.clear)
             .accessibilityHidden(true)
-            .onAppear { print("[CubeTabView] Appeared") }
+            .onAppear { print("[CubeTabView] Appeared (forced 3D)") }
     }
 }
 
 private struct FloatingCube: View {
     @Binding var selectedTab: AppTab
     @Binding var rotationIndex: Int
+    var tintColor: Color
     var onSwipeUp: (() -> Void)?
     var onCubeTap: (() -> Void)?
 
@@ -41,23 +44,14 @@ private struct FloatingCube: View {
     @State private var tilt: Double = 0
 
     var body: some View {
-        CubeSceneView(selectedTab: $selectedTab, rotationIndex: $rotationIndex, parentSwipeUpHandler: onSwipeUp, parentCubeTapHandler: onCubeTap)
-            .offset(y: bob)
-            .rotationEffect(.degrees(tilt))
-            .onAppear {
-                withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) {
-                    bob = -12
-                }
-                withAnimation(.easeInOut(duration: 2.4).repeatForever(autoreverses: true)) {
-                    tilt = 0
-                }
-            }
+        CubeSceneView(selectedTab: $selectedTab, rotationIndex: $rotationIndex, tintColor: tintColor, parentSwipeUpHandler: onSwipeUp, parentCubeTapHandler: onCubeTap)
     }
 }
 
 private struct CubeSceneView: UIViewRepresentable {
     @Binding var selectedTab: AppTab
     @Binding var rotationIndex: Int
+    var tintColor: Color
     var parentSwipeUpHandler: (() -> Void)? = nil
     var parentCubeTapHandler: (() -> Void)? = nil
 
@@ -65,15 +59,21 @@ private struct CubeSceneView: UIViewRepresentable {
         let scnView = SCNView()
         scnView.backgroundColor = .clear
         scnView.allowsCameraControl = false
-        scnView.scene = makeScene()
+        // Fast first frame: empty scene, no AA, lower FPS
+        scnView.scene = SCNScene()
         scnView.isPlaying = true
-        scnView.antialiasingMode = .none // fast first frame
+        scnView.preferredFramesPerSecond = 30
+        scnView.antialiasingMode = .none
+        // Defer full scene build and higher quality to next runloop
         DispatchQueue.main.async { [weak scnView] in
-            scnView?.antialiasingMode = .multisampling4X
+            guard let v = scnView else { return }
+            v.scene = makeScene()
+            v.preferredFramesPerSecond = 60
+            v.antialiasingMode = .multisampling4X
         }
 
-        scnView.layer.borderColor = UIColor.systemBlue.withAlphaComponent(0.8).cgColor
-        scnView.layer.borderWidth = 1
+        // Remove border to reduce compositing cost on launch
+        scnView.layer.borderWidth = 0
 
         // Gestures: pan for left/right (more sensitive), swipe up for action
         let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePan(_:)))
@@ -140,25 +140,16 @@ private struct CubeSceneView: UIViewRepresentable {
         cameraNode.camera?.zFar = 100
         scene.rootNode.addChildNode(cameraNode)
 
-        // Light
-        let light = SCNLight()
-        light.type = .omni
-        light.intensity = 800
-        let lightNode = SCNNode()
-        lightNode.light = light
-        lightNode.position = SCNVector3(8, 8, 10)
-        scene.rootNode.addChildNode(lightNode)
-
+        // Single ambient light for minimal cost
         let ambient = SCNLight()
         ambient.type = .ambient
-        ambient.intensity = 300
+        ambient.intensity = 450
         let ambientNode = SCNNode()
         ambientNode.light = ambient
         scene.rootNode.addChildNode(ambientNode)
 
-        // Cube with different materials for each face
-//        let box = SCNBox(width: 2.2, height: 2.2, length: 2.2, chamferRadius: 0.18)
-        let box = SCNBox(width: 2.2, height: 2.2, length: 2.2, chamferRadius: 0.32)
+        // Lean cube geometry with small chamfer (lower tessellation)
+        let box = SCNBox(width: 2.2, height: 2.2, length: 2.2, chamferRadius: 0.12)
         let node = SCNNode(geometry: box)
         node.name = "cube"
         scene.rootNode.addChildNode(node)
@@ -167,6 +158,8 @@ private struct CubeSceneView: UIViewRepresentable {
 
         return scene
     }
+
+    private func uiColor(_ c: Color) -> UIColor { UIColor(c) }
 
     private func makeMaterials() -> [SCNMaterial] {
         // Map faces to tabs in order: +X, -X, +Y, -Y, +Z, -Z
@@ -177,24 +170,17 @@ private struct CubeSceneView: UIViewRepresentable {
 
         return faces.map { tab in
             let mat = SCNMaterial()
-            // Base face image
             mat.diffuse.contents = faceImage(for: tab)
-            // Brand color tint (adjust to your brand color)
-            mat.multiply.contents = UIColor.systemIndigo
-            mat.lightingModel = .physicallyBased
+            mat.multiply.contents = uiColor(tintColor)
+            mat.lightingModel = .blinn
             mat.isDoubleSided = true
             mat.locksAmbientWithDiffuse = true
-            // Normal map for subtle texture (ensure an asset named "CubeNormalMap" exists)
-            if let normal = UIImage(named: "CubeNormalMap") {
-                mat.normal.contents = normal
-                mat.normal.intensity = 0.6
-            }
             return mat
         }
     }
 
     private func faceImage(for tab: AppTab) -> UIImage {
-        let key = "face_\(tab.title)"
+        let key = "face_v2_\(tab.title)"
         return CubeFaceImageCache.image(for: key) {
             let size = CGSize(width: 300, height: 300)
             let renderer = UIGraphicsImageRenderer(size: size)
@@ -223,7 +209,8 @@ private struct CubeSceneView: UIViewRepresentable {
                     .paragraphStyle: paragraph
                 ]
                 let title = tab.title as NSString
-                title.draw(in: CGRect(x: 0, y: 180, width: size.width, height: 40), withAttributes: attrs)
+                let titleRect = CGRect(x: 0, y: 180, width: size.width, height: 40)
+                title.draw(in: titleRect, withAttributes: attrs)
             }
         }
     }
@@ -420,12 +407,17 @@ private struct CubeSceneView: UIViewRepresentable {
                 let horizontal = Float((notif.userInfo?["roll"] as? Double) ?? 0)
                 let horizontalScaled = horizontal * 0.5
 
+                // Optional: map pitch to a tiny vertical bobbing influence
+                let pitch = Float((notif.userInfo?["pitch"] as? Double) ?? 0)
+                let pitchScaled = max(-0.5, min(0.5, pitch))
+                let bobInfluence = sin(pitchScaled) * 0.02
+
                 // Clamp raw horizontal to keep within reasonable bounds
                 let maxTiltRad: Float = deg2rad(60)
                 let clampedH = clamp(horizontalScaled, min: -maxTiltRad, max: maxTiltRad)
 
-                // Only store Y component; zero X/Z to prevent up/down tilt
-                self.liveRotation = SCNVector3(0, clampedH, 0)
+                // Only store Y component and tiny Z for bob; zero X to prevent up/down tilt
+                self.liveRotation = SCNVector3(0, clampedH, bobInfluence)
 
                 self.applyCombinedRotation(to: cube)
             }
@@ -442,7 +434,7 @@ private struct CubeSceneView: UIViewRepresentable {
             // Base rotation from current index (y-axis steps of 90 degrees)
             let baseY = Float(currentIndex) * (-Float.pi / 2)
 
-            // We only sway side-to-side: ignore X and Z
+            // We only sway side-to-side: ignore X and Z for rotation, but use Z for slight tilt
             let yAdditiveScale: Float = 0.2
             let maxYAddDeg: Float = 6
             let maxYAdd = deg2rad(maxYAddDeg)
@@ -450,8 +442,13 @@ private struct CubeSceneView: UIViewRepresentable {
             var yAdd = liveRotation.y * yAdditiveScale
             yAdd = clamp(yAdd, min: -maxYAdd, max: maxYAdd)
 
+            let zAdditiveScale: Float = 0.15
+            let maxZAdd: Float = deg2rad(3)
+            var zAdd = liveRotation.z * zAdditiveScale
+            zAdd = clamp(zAdd, min: -maxZAdd, max: maxZAdd)
+
             let y = baseY + yAdd
-            node.eulerAngles = SCNVector3(0, y, 0)
+            node.eulerAngles = SCNVector3(0 + zAdd, y, 0)
         }
 
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
@@ -482,10 +479,9 @@ private struct StatefulPreview: View {
         VStack {
             Spacer()
             Text("Selected: \(tab.title)")
-            CubeTabView(selectedTab: $tab)
+            CubeTabView(selectedTab: $tab, tintColor: .indigo)
         }
         .padding()
         .background(Color(.systemBackground))
     }
 }
-

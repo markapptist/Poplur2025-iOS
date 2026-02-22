@@ -1,6 +1,9 @@
 import SwiftUI
 import Combine
 
+/// Configuration for Cube touch behavior.
+/// If `globalTouchTrackingEnabled` is true and `isLowerRegionGlobalTouchEnabled` is true,
+/// touches within the lower `restrictGlobalTouchToLowerFraction` of the screen will affect the cube.
 @MainActor
 final class CubeTouchConfiguration: ObservableObject {
     // How much a small drag translates to rotation/selection movement. Higher = more responsive.
@@ -13,6 +16,10 @@ final class CubeTouchConfiguration: ObservableObject {
     @Published var minimumDragDistance: CGFloat
     // Multiplier for swipe up gesture to trigger actions easier.
     @Published var swipeUpSensitivity: CGFloat
+    // Enable restricting global touch tracking to a vertical fraction of the screen (e.g., lower half)
+    @Published var isLowerRegionGlobalTouchEnabled: Bool
+    // Fraction (0-1] of the screen height from the bottom that is considered active for global touches. 0.5 = lower half.
+    @Published var restrictGlobalTouchToLowerFraction: CGFloat
 
     // If true, cube tracks touches anywhere on the screen (not just on the cube view)
     @Published var globalTouchTrackingEnabled: Bool
@@ -46,6 +53,8 @@ final class CubeTouchConfiguration: ObservableObject {
         damping: CGFloat = 0.48,
         minimumDragDistance: CGFloat = 0.8,
         swipeUpSensitivity: CGFloat = 1.9,
+        isLowerRegionGlobalTouchEnabled: Bool = true,
+        restrictGlobalTouchToLowerFraction: CGFloat = 0.5,
         globalTouchTrackingEnabled: Bool = true,
         extendedTouchRadius: CGFloat = 56,
         prefersHighPriorityGestures: Bool = true,
@@ -64,6 +73,8 @@ final class CubeTouchConfiguration: ObservableObject {
         self.damping = damping
         self.minimumDragDistance = minimumDragDistance
         self.swipeUpSensitivity = swipeUpSensitivity
+        self.isLowerRegionGlobalTouchEnabled = isLowerRegionGlobalTouchEnabled
+        self.restrictGlobalTouchToLowerFraction = max(0.0, min(1.0, restrictGlobalTouchToLowerFraction))
         self.globalTouchTrackingEnabled = globalTouchTrackingEnabled
         self.extendedTouchRadius = extendedTouchRadius
         self.prefersHighPriorityGestures = prefersHighPriorityGestures

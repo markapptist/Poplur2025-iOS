@@ -4,9 +4,9 @@ import SwiftUI
 import AudioToolbox
 
 extension Notification.Name {
-    static let cubeTabViewTapped = Notification.Name("CubeTabViewTappedNotification")
-    static let cubeHoldBegan = Notification.Name("CubeHoldBegan")
-    static let cubeHoldEnded = Notification.Name("CubeHoldEnded")
+    static let cameraCubeTabViewTapped = Notification.Name("Camera_CubeTabViewTappedNotification")
+    static let cameraCubeHoldBegan = Notification.Name("Camera_CubeHoldBegan")
+    static let cameraCubeHoldEnded = Notification.Name("Camera_CubeHoldEnded")
 }
 
 /// Hosts an AVCaptureVideoPreviewLayer for a provided AVCaptureSession.
@@ -134,9 +134,9 @@ final class CameraPreviewViewController: UIViewController {
             }
         }
         
-        NotificationCenter.default.addObserver(self, selector: #selector(handleCubeTappedNotification), name: .cubeTabViewTapped, object: nil)
-        NotificationCenter.default.addObserver(self, selector: #selector(handleCubeHoldBegan), name: .cubeHoldBegan, object: nil)
-        NotificationCenter.default.addObserver(self, selector: #selector(handleCubeHoldEnded), name: .cubeHoldEnded, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(handleCubeTappedNotification), name: .cameraCubeTabViewTapped, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(handleCubeHoldBegan), name: .cameraCubeHoldBegan, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(handleCubeHoldEnded), name: .cameraCubeHoldEnded, object: nil)
         
         // Ensure initial layout/UI sync on first load
         view.setNeedsLayout()
@@ -311,7 +311,7 @@ final class CameraPreviewViewController: UIViewController {
         super.viewWillDisappear(animated)
         // Reset torch UI to safe state; actual session control should be managed by owner
         isTorchOn = false
-        torchButton.setImage(UIImage(systemName: "flashlight.off.fill"), for: .normal)
+        torchButton.setImage(UIImage(systemName: "flashlight.slash.circle.fill"), for: .normal)
         
         if autoManageSession && session.isRunning {
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -321,9 +321,9 @@ final class CameraPreviewViewController: UIViewController {
     }
     
     deinit {
-        NotificationCenter.default.removeObserver(self, name: .cubeTabViewTapped, object: nil)
-        NotificationCenter.default.removeObserver(self, name: .cubeHoldBegan, object: nil)
-        NotificationCenter.default.removeObserver(self, name: .cubeHoldEnded, object: nil)
+        NotificationCenter.default.removeObserver(self, name: .cameraCubeTabViewTapped, object: nil)
+        NotificationCenter.default.removeObserver(self, name: .cameraCubeHoldBegan, object: nil)
+        NotificationCenter.default.removeObserver(self, name: .cameraCubeHoldEnded, object: nil)
         if let obs = appDidBecomeActiveObserver { NotificationCenter.default.removeObserver(obs) }
         if let obs = appWillResignActiveObserver { NotificationCenter.default.removeObserver(obs) }
     }
@@ -419,7 +419,7 @@ final class CameraPreviewViewController: UIViewController {
         torchButton.backgroundColor = UIColor.white.withAlphaComponent(0.85)
         torchButton.tintColor = .black
         torchButton.layer.cornerRadius = 20
-        torchButton.setImage(UIImage(systemName: "flashlight.off.fill"), for: .normal)
+        torchButton.setImage(UIImage(systemName: "flashlight.slash.circle.fill"), for: .normal)
         torchButton.addTarget(self, action: #selector(torchTapped), for: .touchUpInside)
         view.addSubview(torchButton)
 
@@ -428,7 +428,7 @@ final class CameraPreviewViewController: UIViewController {
         flipButton.backgroundColor = UIColor.white.withAlphaComponent(0.85)
         flipButton.tintColor = .black
         flipButton.layer.cornerRadius = 20
-        flipButton.setImage(UIImage(systemName: "arrow.triangle.2.circlepath.camera"), for: .normal)
+        flipButton.setImage(UIImage(systemName: "arrow.triangle.2.circlepath.camera.circle.fill"), for: .normal)
         flipButton.addTarget(self, action: #selector(flipTapped), for: .touchUpInside)
         view.addSubview(flipButton)
 
@@ -505,7 +505,7 @@ final class CameraPreviewViewController: UIViewController {
             torchButton.isEnabled = false
             torchButton.alpha = 0.5
             isTorchOn = false
-            torchButton.setImage(UIImage(systemName: "flashlight.off.fill"), for: .normal)
+            torchButton.setImage(UIImage(systemName: "flashlight.slash.circle.fill"), for: .normal)
             return
         }
 
@@ -514,7 +514,7 @@ final class CameraPreviewViewController: UIViewController {
         torchButton.alpha = supported ? 1.0 : 0.5
 
         isTorchOn = device.isTorchActive
-        let icon = isTorchOn ? "flashlight.on.fill" : "flashlight.off.fill"
+        let icon = isTorchOn ? "flashlight.on.circle.fill" : "flashlight.slash.circle.fill"
         torchButton.setImage(UIImage(systemName: icon), for: .normal)
     }
 
@@ -537,7 +537,7 @@ final class CameraPreviewViewController: UIViewController {
             isTorchOn = false
         }
 
-        let icon = isTorchOn ? "flashlight.on.fill" : "flashlight.off.fill"
+        let icon = isTorchOn ? "flashlight.on.circle.fill" : "flashlight.slash.circle.fill"
         torchButton.setImage(UIImage(systemName: icon), for: .normal)
     }
 
@@ -571,11 +571,13 @@ final class CameraPreviewViewController: UIViewController {
             DispatchQueue.main.async {
                 // Front camera usually has no torch
                 self.isTorchOn = false
-                self.torchButton.setImage(UIImage(systemName: "flashlight.off.fill"), for: .normal)
+                self.torchButton.setImage(UIImage(systemName: "flashlight.slash.circle.fill"), for: .normal)
 
                 self.refreshRadiusBar()
                 self.updateTorchAvailability()
                 self.flipButton.isEnabled = true
+                
+                self.flipButton.setImage(UIImage(systemName: "arrow.triangle.2.circlepath.camera.circle.fill"), for: .normal)
 
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
                     self?.updateTorchAvailability()
@@ -691,4 +693,3 @@ private struct CameraRadiusBar: View {
         }
     }
 }
-

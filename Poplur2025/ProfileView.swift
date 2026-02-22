@@ -27,6 +27,9 @@ struct ProfileView: View {
     @State private var lastHeadModelURL: URL? = nil
     @State private var navigateToViewer = false
 
+    @State private var barHeightFactor: CGFloat = 1.0
+    @State private var isHoldingCube: Bool = false
+
     @State private var isLoadingMore = false
     @State private var canLoadMore = true
     @State private var lastDocument: QueryDocumentSnapshot? = nil
@@ -53,6 +56,46 @@ struct ProfileView: View {
 
     init(userID: String? = nil) {
         self.userID = userID
+    }
+    
+    // MARK: - Simple disk cache for posts (per user)
+    private struct CachedPost: Codable {
+        let id: String
+        let latitude: Double
+        let longitude: Double
+        let mediaURL: String
+        let radius: Int
+        let viewCount: Int
+        let userID: String
+    }
+
+    private func cacheFileURL(for uid: String) -> URL {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        return docs.appendingPathComponent("profile_posts_\(uid).json")
+    }
+
+    private func loadPostsFromCache(for uid: String) -> [Post]? {
+        let url = cacheFileURL(for: uid)
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        do {
+            let data = try Data(contentsOf: url)
+            let cached = try JSONDecoder().decode([CachedPost].self, from: data)
+            return cached.map { Post(id: $0.id, latitude: $0.latitude, longitude: $0.longitude, mediaURL: $0.mediaURL, radius: $0.radius, viewCount: $0.viewCount, userID: $0.userID) }
+        } catch {
+            print("Profile cache: failed to read -> \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    private func savePostsToCache(_ posts: [Post], for uid: String) {
+        let url = cacheFileURL(for: uid)
+        let toCache = posts.map { CachedPost(id: $0.id, latitude: $0.latitude, longitude: $0.longitude, mediaURL: $0.mediaURL, radius: $0.radius, viewCount: $0.viewCount, userID: $0.userID) }
+        do {
+            let data = try JSONEncoder().encode(toCache)
+            try data.write(to: url, options: .atomic)
+        } catch {
+            print("Profile cache: failed to write -> \(error.localizedDescription)")
+        }
     }
 
     var body: some View {
@@ -158,50 +201,61 @@ struct ProfileView: View {
                     }
                 }
                 .overlay(alignment: .bottomTrailing) {
-                    IsometricRadiusBar(radius: $averageRadius)
-                        .frame(width: 60, height: 220)
-                        .padding(.trailing, 12)
-                        .padding(.bottom, 45)
+                    // Dynamic height wrapper for Record tab hold gesture
+                    VStack(spacing: 0) {
+                        IsometricRadiusBar(radius: $averageRadius)
+                            .frame(width: 60, height: 220 * barHeightFactor)
+                    }
+                    .frame(width: 60, height: 220, alignment: .bottom)
+                    .clipped()
+                    .padding(.trailing, 12)
+                    .padding(.bottom, 12)
                 }
-                // Global gesture layer for cube interaction
-                Color.clear
-                    .contentShape(Rectangle())
-                    .ignoresSafeArea()
-                    .highPriorityGesture(
-                        DragGesture(minimumDistance: 0)
-                            .updating($isInteractingWithCube) { _, isInteracting, _ in
-                                isInteracting = true
-                            }
-                            .onChanged { value in
-                                if !isScrollDisabled { isScrollDisabled = true }
-                                // Amplify small movements to make the cube feel more responsive
-                                let boost: CGFloat = 1.35
-                                let boosted = CGSize(width: value.translation.width * boost,
-                                                     height: value.translation.height * boost)
-                                NotificationCenter.default.post(name: Notification.Name("CubeGlobalDragChanged"), object: nil, userInfo: [
-                                    "location": NSValue(cgPoint: value.location),
-                                    "translation": NSValue(cgSize: boosted)
-                                ])
-                            }
-                            .onEnded { value in
-                                let boost: CGFloat = 1.35
-                                let boosted = CGSize(width: value.translation.width * boost,
-                                                     height: value.translation.height * boost)
-                                NotificationCenter.default.post(name: Notification.Name("CubeGlobalDragEnded"), object: nil, userInfo: [
-                                    "location": NSValue(cgPoint: value.location),
-                                    "translation": NSValue(cgSize: boosted)
-                                ])
-                                isScrollDisabled = false
-                            }
-                    )
-                    .simultaneousGesture(
-                        TapGesture()
-                            .onEnded {
-                                isScrollDisabled = true
-                                NotificationCenter.default.post(name: Notification.Name("CubeGlobalTap"), object: nil)
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { isScrollDisabled = false }
-                            }
-                    )
+                // Global gesture layer for cube interaction (restricted to upper area and non-preemptive)
+                GeometryReader { geo in
+                    let height = geo.size.height
+                    VStack {
+                        Color.clear
+                            .frame(height: height * 0.6) // cover upper 60% to avoid cube area
+                            .contentShape(Rectangle())
+                            .simultaneousGesture(
+                                DragGesture(minimumDistance: 0)
+                                    .updating($isInteractingWithCube) { _, isInteracting, _ in
+                                        isInteracting = true
+                                    }
+                                    .onChanged { value in
+                                        if !isScrollDisabled { isScrollDisabled = true }
+                                        let boost: CGFloat = 1.35
+                                        let boosted = CGSize(width: value.translation.width * boost,
+                                                             height: value.translation.height * boost)
+                                        NotificationCenter.default.post(name: Notification.Name("CubeGlobalDragChanged"), object: nil, userInfo: [
+                                            "location": NSValue(cgPoint: value.location),
+                                            "translation": NSValue(cgSize: boosted)
+                                        ])
+                                    }
+                                    .onEnded { value in
+                                        let boost: CGFloat = 1.35
+                                        let boosted = CGSize(width: value.translation.width * boost,
+                                                             height: value.translation.height * boost)
+                                        NotificationCenter.default.post(name: Notification.Name("CubeGlobalDragEnded"), object: nil, userInfo: [
+                                            "location": NSValue(cgPoint: value.location),
+                                            "translation": NSValue(cgSize: boosted)
+                                        ])
+                                        isScrollDisabled = false
+                                    }
+                            )
+                            .simultaneousGesture(
+                                TapGesture()
+                                    .onEnded {
+                                        isScrollDisabled = true
+                                        NotificationCenter.default.post(name: Notification.Name("CubeGlobalTap"), object: nil)
+                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { isScrollDisabled = false }
+                                    }
+                            )
+                        Spacer()
+                    }
+                    .ignoresSafeArea(edges: .top)
+                }
                 if let post = expandedPost {
                     ZStack {
                         Color.black.opacity(0.6)
@@ -340,6 +394,34 @@ struct ProfileView: View {
                     myPosts.removeAll { $0.id == id }
                     self.averageRadius = Double(self.averagePostRadius())
                 }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .cubeHoldBegan)) { _ in
+                // Start rising only on Record tab; HomeView controls selected tab, so we infer via notification usage
+                isHoldingCube = true
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .cubeHoldEnded)) { _ in
+                isHoldingCube = false
+            }
+            .task(id: isHoldingCube) {
+                // If holding, increase the bar height factor over time; otherwise, ensure default per current tab
+                if isHoldingCube {
+                    // Start from current value; rise at ~200pt/sec on a 220pt bar => ~0.9 factor per second
+                    let start = barHeightFactor
+                    var current = start
+                    let incrementPerTick: CGFloat = 0.03 // ~30 FPS * 0.03 ~= 0.9/sec
+                    while isHoldingCube && current < 1.0 {
+                        try? await Task.sleep(nanoseconds: 33_000_000)
+                        current = min(1.0, current + incrementPerTick)
+                        await MainActor.run { barHeightFactor = current }
+                    }
+                } else {
+                    // When not holding, keep current value (do not reset)
+                    // No action; could reset here if desired.
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("RecordTabBecameActive"))) { _ in
+                // When record tab becomes active, collapse the bar
+                barHeightFactor = 0.0
             }
         }
     }
@@ -503,6 +585,17 @@ struct ProfileView: View {
             }
             return
         }
+        
+        // Try to show cached posts immediately for better perceived performance
+        if let cached = loadPostsFromCache(for: targetUID), !cached.isEmpty {
+            await MainActor.run {
+                self.myPosts = cached
+                self.hasLoadedOnce = true
+                self.averageRadius = Double(self.averagePostRadius())
+            }
+            // Prefetch images for cached posts
+            Task.detached { await prefetchImages(for: cached) }
+        }
 
         await MainActor.run {
             isLoading = true
@@ -522,14 +615,28 @@ struct ProfileView: View {
                 self.averageRadius = Double(self.averagePostRadius())
                 self.hasLoadedOnce = true
             }
+            // Persist latest posts to cache
+            savePostsToCache(page.posts, for: targetUID)
             Task.detached { await prefetchImages(for: page.posts) }
         } catch {
             print("Profile: failed to load posts -> \(error.localizedDescription)")
-            await MainActor.run {
-                self.myPosts = []
-                self.loadedImages = [:]
-                self.hasLoadedOnce = true
-                self.canLoadMore = false
+            // Fall back to cache if available
+            if let cached = loadPostsFromCache(for: targetUID), !cached.isEmpty {
+                await MainActor.run {
+                    self.myPosts = cached
+                    self.loadedImages = [:]
+                    self.hasLoadedOnce = true
+                    self.canLoadMore = false
+                    self.averageRadius = Double(self.averagePostRadius())
+                }
+                Task.detached { await prefetchImages(for: cached) }
+            } else {
+                await MainActor.run {
+                    self.myPosts = []
+                    self.loadedImages = [:]
+                    self.hasLoadedOnce = true
+                    self.canLoadMore = false
+                }
             }
         }
     }
@@ -562,6 +669,8 @@ struct ProfileView: View {
                 self.canLoadMore = page.posts.count >= pageSize && page.lastDoc != nil
                 self.averageRadius = Double(self.averagePostRadius())
             }
+            // Update cache with appended posts
+            savePostsToCache(self.myPosts, for: targetUID)
             Task.detached { await prefetchImages(for: page.posts) }
         } catch {
             print("Profile: failed to load more -> \(error.localizedDescription)")
@@ -802,5 +911,8 @@ extension Notification.Name {
     static let CubeGlobalDragChanged = Notification.Name("CubeGlobalDragChanged")
     static let CubeGlobalDragEnded = Notification.Name("CubeGlobalDragEnded")
     static let CubeGlobalTap = Notification.Name("CubeGlobalTap")
-}
 
+    static let cubeHoldBegan = Notification.Name("cubeHoldBegan")
+    static let cubeHoldEnded = Notification.Name("cubeHoldEnded")
+    static let RecordTabBecameActive = Notification.Name("RecordTabBecameActive")
+}

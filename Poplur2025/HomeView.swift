@@ -47,14 +47,18 @@ final class SceneMotionController: ObservableObject {
     func start() {
         guard motion.isDeviceMotionAvailable else { return }
         motion.deviceMotionUpdateInterval = 1.0 / 60.0
-        motion.startDeviceMotionUpdates(to: .main) { data, _ in
+        let queue = OperationQueue()
+        queue.qualityOfService = .userInitiated
+        motion.startDeviceMotionUpdates(to: queue) { [weak self] data, _ in
             guard let attitude = data?.attitude else { return }
             let userInfo: [String: Double] = [
                 "roll": attitude.roll,
                 "pitch": attitude.pitch,
                 "yaw": attitude.yaw
             ]
-            NotificationCenter.default.post(name: .CubeMotionUpdate, object: nil, userInfo: userInfo)
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(name: .CubeMotionUpdate, object: nil, userInfo: userInfo)
+            }
         }
     }
 
@@ -66,9 +70,10 @@ final class SceneMotionController: ObservableObject {
 struct HomeView: View {
     @EnvironmentObject private var auth: AuthViewModel
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.renderingConfig) private var renderingConfig
 
     // Start on map tab instead of record tab
-    @State private var selectedTab: AppTab = .profile
+    @State private var selectedTab: AppTab = .record
 
     // Location only when needed
     @StateObject private var locationProvider = LocationProvider()
@@ -82,6 +87,8 @@ struct HomeView: View {
     @State private var didTriggerProfileInitialLoad = false
     @State private var didStartCameraOnce = false
     @State private var isFeedReady: Bool = false
+    @State private var enableLowerHitArea: Bool = false
+    @State private var didPrewarmSceneKit = false
 
     @StateObject private var motionController = SceneMotionController()
     @StateObject private var cubeTouchConfig = CubeTouchConfiguration()
@@ -114,7 +121,7 @@ struct HomeView: View {
                     didTriggerMapInitialLoad = true
                     NotificationCenter.default.post(name: .LoadMapNow, object: nil)
                 }
-            } 
+            }
     }
 
     @ViewBuilder
@@ -124,10 +131,21 @@ struct HomeView: View {
                 .ignoresSafeArea()
         }
         .task {
+            let t0 = CFAbsoluteTimeGetCurrent()
+            // Small delay to allow overlay UI to render before heavy camera work
+            try? await Task.sleep(nanoseconds: 60_000_000)
             await cameraController.start()
+            let dt = CFAbsoluteTimeGetCurrent() - t0
+            print("[Camera] start() took \(dt)s")
         }
         .onAppear {
-            Task { await cameraController.startPreview() }
+            Task { @MainActor in
+                let t0 = CFAbsoluteTimeGetCurrent()
+                try? await Task.sleep(nanoseconds: 40_000_000)
+                await cameraController.startPreview()
+                let dt = CFAbsoluteTimeGetCurrent() - t0
+                print("[Camera] startPreview() took \(dt)s")
+            }
         }
     }
 
@@ -196,6 +214,9 @@ struct HomeView: View {
                     NotificationCenter.default.post(name: .LoadProfileNow, object: nil)
                 }
             }
+            .onDisappear {
+                NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
+            }
     }
 
     var body: some View {
@@ -227,12 +248,20 @@ struct HomeView: View {
                 })
                 .tint(.white)
                 .transition(.opacity)
+                .padding(.trailing, 4) // Changed from 8 to 4 as per instructions
                 .onTapGesture {
                     NotificationCenter.default.post(name: .CenterMapOnUser, object: nil)
                 }
+                .simultaneousGesture(
+                    TapGesture()
+                        .onEnded {
+                            print("[CubeTabView] tap")
+                        }
+                )
             }
-            .padding(.bottom, 28)
+            .padding(.bottom, 24)
             .ignoresSafeArea(edges: .bottom)
+            .allowsHitTesting(true)
             .gesture(
                 DragGesture(minimumDistance: 20)
                     .onEnded { value in
@@ -243,22 +272,62 @@ struct HomeView: View {
                     }
             )
             
-            if selectedTab == .profile {
+            #if DEBUG
+            // Invisible hit area temporarily disabled for input testing
+            // (Re-enable after verifying CubeTabView touch responsiveness)
+            #else
+            if enableLowerHitArea {
+                // Invisible hit area to detect touches in the lower third of the screen
                 VStack {
                     Spacer()
-                    ArrowDownPrompt()
-                        .frame(height: 80)
-                        .padding(.bottom, 100)
+                    GeometryReader { geo in
+                        let height = geo.size.height
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .frame(height: height / 2) // lower half of the screen
+                            .gesture(
+                                DragGesture(minimumDistance: 0)
+                                    .onChanged { value in
+                                        let boost: CGFloat = 1.35
+                                        let boosted = CGSize(width: value.translation.width * boost,
+                                                             height: value.translation.height * boost)
+                                        NotificationCenter.default.post(name: Notification.Name("CubeGlobalDragChanged"), object: nil, userInfo: [
+                                            "location": NSValue(cgPoint: value.location),
+                                            "translation": NSValue(cgSize: boosted)
+                                        ])
+                                    }
+                                    .onEnded { value in
+                                        let boost: CGFloat = 1.35
+                                        let boosted = CGSize(width: value.translation.width * boost,
+                                                             height: value.translation.height * boost)
+                                        NotificationCenter.default.post(name: Notification.Name("CubeGlobalDragEnded"), object: nil, userInfo: [
+                                            "location": NSValue(cgPoint: value.location),
+                                            "translation": NSValue(cgSize: boosted)
+                                        ])
+                                    }
+                            )
+                            .simultaneousGesture(
+                                TapGesture()
+                                    .onEnded {
+                                        NotificationCenter.default.post(name: Notification.Name("CubeGlobalTap"), object: nil)
+                                    }
+                            )
+                            .onTapGesture {
+                                NotificationCenter.default.post(name: .CenterMapOnUser, object: nil)
+                            }
+                            .ignoresSafeArea(edges: .bottom)
+                    }
+                    .frame(height: 1) // GeometryReader expands; constrain with container
                 }
+                .allowsHitTesting(true)
                 .transition(.opacity)
             }
+            #endif
         }
         .task {
-            // Removed motionController.start() here per instructions
+            // Removed cameraController.prewarm() and preparePreviewIfNeeded() here per instructions
             
             // Minimal bootstrap: start location early (cheap) and trigger feed load if feed is initial tab
-            await cameraController.prewarm()
-            await cameraController.preparePreviewIfNeeded()
             locationProvider.request()
             if selectedTab == .feed, !didTriggerFeedInitialLoad {
                 didTriggerFeedInitialLoad = true
@@ -267,9 +336,14 @@ struct HomeView: View {
             if selectedTab != .feed {
                 NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
             }
+            if selectedTab == .profile {
+                NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
+            }
         }
         .onAppear {
-            // Removed motionController.start() here per instructions
+            let appearT0 = CFAbsoluteTimeGetCurrent()
+            print("[HomeView] onAppear at t=\(appearT0)")
+            // Removed cameraController.prewarm() and preparePreviewIfNeeded() here per instructions
             
             // Keep startup minimal; no mass notifications
             locationProvider.request()
@@ -280,6 +354,36 @@ struct HomeView: View {
             if selectedTab != .feed {
                 NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
             }
+            if selectedTab == .profile {
+                NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
+            }
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 120_000_000)
+                enableLowerHitArea = true
+            }
+            
+            if !didPrewarmSceneKit {
+                didPrewarmSceneKit = true
+                // Prewarm a tiny offscreen SCNView to compile pipelines early
+                DispatchQueue.global(qos: .userInitiated).async {
+                    let tmpView = SCNView(frame: .init(x: 0, y: 0, width: 1, height: 1))
+                    tmpView.scene = SCNScene()
+                    tmpView.antialiasingMode = .none
+                    tmpView.isPlaying = true
+                    // Prepare a minimal node to trigger geometry/material setup
+                    let box = SCNBox(width: 0.01, height: 0.01, length: 0.01, chamferRadius: 0)
+                    let node = SCNNode(geometry: box)
+                    tmpView.scene?.rootNode.addChildNode(node)
+                    tmpView.prepare([box], completionHandler: { _ in
+                        // Drop reference after preparation
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            _ = tmpView // keep alive briefly
+                        }
+                    })
+                }
+            }
+            
+            print("[HomeView] onAppear work took \(CFAbsoluteTimeGetCurrent() - appearT0)s")
         }
         .onChange(of: selectedTab) { _ in
             if !([AppTab.map, .record, .feed, .profile].contains(selectedTab)) {
@@ -291,18 +395,24 @@ struct HomeView: View {
             } else {
                 NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
             }
-            if selectedTab == .feed {
-                NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil) // optional: clear lingering players before resuming
-            } else {
-                NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
-            }
-            // Start motion when cube overlay is visible (always shown) and app is active; stop on other tabs if desired
-            if selectedTab == .record {
-                motionController.start()
-            } else {
-                motionController.stop()
+            // Motion is managed by scene phase now (runs on all tabs when active)
+            
+            if selectedTab == .profile {
+                cameraController.stop()
             }
             NotificationCenter.default.post(name: .ResetTabToTop, object: nil)
+
+            if selectedTab == .record {
+                Task { @MainActor in
+                    let t0 = CFAbsoluteTimeGetCurrent()
+                    await cameraController.prewarm()
+                    let t1 = CFAbsoluteTimeGetCurrent()
+                    print("[Camera] prewarm() took \(t1 - t0)s")
+                    await cameraController.preparePreviewIfNeeded()
+                    let t2 = CFAbsoluteTimeGetCurrent()
+                    print("[Camera] preparePreviewIfNeeded() took \(t2 - t1)s")
+                }
+            }
         }
         .onChange(of: auth.isAuthenticated) { authed in
             if authed {
@@ -316,8 +426,11 @@ struct HomeView: View {
         .onChange(of: scenePhase) { phase in
             switch phase {
             case .active:
-                // Resume motion only on Record tab
-                if selectedTab == .record { motionController.start() }
+                // Start motion on all tabs when app becomes active, with a slight delay
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 80_000_000)
+                    motionController.start()
+                }
             case .background, .inactive:
                 cameraController.stop()
                 didStartCameraOnce = false
@@ -331,51 +444,80 @@ struct HomeView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .FeedReady)) { _ in
             isFeedReady = true
+            print("[Feed] ready received at \(Date())")
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .CubeMotionUpdate)) { _ in
+            // Motion updates silenced
         }
     }
 }
 struct ArrowDownPrompt: UIViewRepresentable {
     func makeUIView(context: Context) -> SCNView {
+        // Reuse a static scene to avoid reallocating nodes/materials per view
+        struct SharedScene {
+            static let scene: SCNScene = {
+                let scene = SCNScene()
+
+                // Arrow node tree
+                let arrowNode = SCNNode()
+
+                let shaft = SCNBox(width: 0.06, height: 0.16, length: 0.02, chamferRadius: 0.01)
+                let head = SCNPyramid(width: 0.14, height: 0.10, length: 0.02)
+
+                // Single shared material
+                let material = SCNMaterial()
+                material.diffuse.contents = UIColor.white
+                material.emission.contents = UIColor.white
+                material.lightingModel = .constant
+                shaft.materials = [material]
+                head.materials = [material]
+
+                let shaftNode = SCNNode(geometry: shaft)
+                shaftNode.position = SCNVector3(0, 0.06, 0)
+                let headNode = SCNNode(geometry: head)
+                headNode.position = SCNVector3(0, -0.02, 0)
+                headNode.eulerAngles.x = .pi
+
+                arrowNode.addChildNode(shaftNode)
+                arrowNode.addChildNode(headNode)
+                scene.rootNode.addChildNode(arrowNode)
+
+                // Camera (orthographic-ish simple camera)
+                let cameraNode = SCNNode()
+                let camera = SCNCamera()
+                camera.usesOrthographicProjection = false
+                cameraNode.camera = camera
+                cameraNode.position = SCNVector3(0, 0.1, 0.6)
+                scene.rootNode.addChildNode(cameraNode)
+
+                // Prepare geometry asynchronously to warm GPU/CPU pipelines
+                scene.rootNode.flattenedClone() // encourage early geometry preparation
+                scene.isPaused = false
+
+                // Animate after scene is ready
+                let moveDown = SCNAction.moveBy(x: 0, y: -0.02, z: 0, duration: 0.6)
+                moveDown.timingMode = .easeInEaseOut
+                let moveUp = moveDown.reversed()
+                let sequence = SCNAction.sequence([moveDown, moveUp])
+                let repeatForever = SCNAction.repeatForever(sequence)
+                arrowNode.runAction(repeatForever)
+
+                return scene
+            }()
+        }
+
         let view = SCNView()
-        let scene = SCNScene()
-        view.scene = scene
+        view.scene = SharedScene.scene
         view.backgroundColor = .clear
         view.allowsCameraControl = false
-        // Simple arrow using a pyramid and a box to suggest a down arrow
-        let arrowNode = SCNNode()
+        view.antialiasingMode = .none
+        view.preferredFramesPerSecond = 30
+        view.isPlaying = true
 
-        let shaft = SCNBox(width: 0.06, height: 0.16, length: 0.02, chamferRadius: 0.01)
-        let shaftNode = SCNNode(geometry: shaft)
-        shaftNode.position = SCNVector3(0, 0.06, 0)
-
-        let head = SCNPyramid(width: 0.14, height: 0.10, length: 0.02)
-        let headNode = SCNNode(geometry: head)
-        headNode.position = SCNVector3(0, -0.02, 0)
-        headNode.eulerAngles.x = .pi // point down
-
-        let material = SCNMaterial()
-        material.diffuse.contents = UIColor.white
-        material.emission.contents = UIColor.white
-        shaft.materials = [material]
-        head.materials = [material]
-
-        arrowNode.addChildNode(shaftNode)
-        arrowNode.addChildNode(headNode)
-        scene.rootNode.addChildNode(arrowNode)
-
-        // Camera
-        let cameraNode = SCNNode()
-        cameraNode.camera = SCNCamera()
-        cameraNode.position = SCNVector3(0, 0.1, 0.6)
-        scene.rootNode.addChildNode(cameraNode)
-
-        // Subtle animation to draw attention
-        let moveDown = SCNAction.moveBy(x: 0, y: -0.02, z: 0, duration: 0.6)
-        moveDown.timingMode = .easeInEaseOut
-        let moveUp = moveDown.reversed()
-        let sequence = SCNAction.sequence([moveDown, moveUp])
-        let repeatForever = SCNAction.repeatForever(sequence)
-        arrowNode.runAction(repeatForever)
+        // Ask SceneKit to prepare resources asynchronously for faster first frame
+        if let scene = view.scene {
+            view.prepare([scene], completionHandler: { _ in })
+        }
 
         return view
     }
