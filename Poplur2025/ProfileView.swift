@@ -25,6 +25,10 @@ struct ProfileView: View {
     @State private var navigateToScanner = false
     
     @State private var lastHeadModelURL: URL? = nil
+
+    @Environment(\.isometricRadiusBarDistance) private var isometricRadiusBarDistance
+    @Environment(\.isometricBarSettings) private var barSettings
+    
     @State private var navigateToViewer = false
 
     @State private var barHeightFactor: CGFloat = 1.0
@@ -200,17 +204,8 @@ struct ProfileView: View {
                         }
                     }
                 }
-                .overlay(alignment: .bottomTrailing) {
-                    // Dynamic height wrapper for Record tab hold gesture
-                    VStack(spacing: 0) {
-                        IsometricRadiusBar(radius: $averageRadius)
-                            .frame(width: 60, height: 220 * barHeightFactor)
-                    }
-                    .frame(width: 60, height: 220, alignment: .bottom)
-                    .clipped()
-                    .padding(.trailing, 12)
-                    .padding(.bottom, 12)
-                }
+                // Removed local IsometricRadiusBar overlay here
+
                 // Global gesture layer for cube interaction (restricted to upper area and non-preemptive)
                 GeometryReader { geo in
                     let height = geo.size.height

@@ -2,6 +2,9 @@ import UIKit
 import AVFoundation
 import SwiftUI
 import AudioToolbox
+import SceneKit
+import SpriteKit
+import CoreMedia
 
 extension Notification.Name {
     static let cameraCubeTabViewTapped = Notification.Name("Camera_CubeTabViewTappedNotification")
@@ -31,20 +34,21 @@ final class CameraPreviewViewController: UIViewController {
     
     /// Radius value displayed/edited by the radius bar (in meters)
     var radius: Double = 250 {
-        didSet { onRadiusChanged?(radius) }
+        didSet {
+            onRadiusChanged?(radius)
+            NotificationCenter.default.post(name: Notification.Name("SharedRadiusDidChange"), object: nil, userInfo: ["radius": radius])
+        }
     }
     /// Callback when radius changes interactively
     var onRadiusChanged: ((Double) -> Void)?
     
-    private var radiusHostController: UIHostingController<CameraRadiusBar>?
-
     private let torchButton = UIButton(type: .system)
     private let flipButton = UIButton(type: .system)
 
     private var isTorchOn: Bool = false
 
     // Debug utilities
-    private let debugEnabled: Bool = true
+    private let debugEnabled: Bool = false
     private let debugBorderLayer: CALayer = {
         let l = CALayer()
         l.borderColor = UIColor.systemGreen.withAlphaComponent(0.9).cgColor
@@ -58,26 +62,17 @@ final class CameraPreviewViewController: UIViewController {
     private var appWillResignActiveObserver: NSObjectProtocol?
     private var isAppActive: Bool = true
 
+    // SpriteKit overlay for animated icons
+    private let spriteView = SKView()
+    private var spriteScene: SKScene = SKScene()
+    private let torchSprite = SKSpriteNode()
+    private let flipSprite = SKSpriteNode()
+
     /// If true, this controller will start/stop the capture session automatically on appear/disappear.
     /// Leave true unless your owner manages the session lifecycle explicitly.
     var autoManageSession: Bool = true
 
     private var didRunInitialAppearanceSync = false
-
-    // Recording helpers
-    private var recordStartDate: Date?
-    private var recordTimer: CADisplayLink?
-    private let recordMaxDuration: TimeInterval = 10.0
-    private var recordProgress: Double = 0.0 // 0...1
-
-    // Simple vertical progress bar next to the radius bar
-    private let recordProgressView: UIView = {
-        let v = UIView()
-        v.backgroundColor = UIColor.systemRed.withAlphaComponent(0.9)
-        v.layer.cornerRadius = 3
-        v.isHidden = true
-        return v
-    }()
 
     // MARK: - Init
     init(session: AVCaptureSession) {
@@ -103,20 +98,66 @@ final class CameraPreviewViewController: UIViewController {
         if debugEnabled {
             view.layer.addSublayer(debugBorderLayer)
         }
-        
-        installRadiusBar()
 
-        // Install a simple recording progress bar next to the radius bar
-        view.addSubview(recordProgressView)
-        recordProgressView.translatesAutoresizingMaskIntoConstraints = false
+        // SpriteKit overlay setup
+        spriteView.translatesAutoresizingMaskIntoConstraints = false
+        spriteView.backgroundColor = .clear
+        spriteView.allowsTransparency = true
+        view.addSubview(spriteView)
         NSLayoutConstraint.activate([
-            recordProgressView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -80),
-            recordProgressView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -45),
-            recordProgressView.widthAnchor.constraint(equalToConstant: 6),
-            recordProgressView.heightAnchor.constraint(equalToConstant: 0)
+            spriteView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            spriteView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            spriteView.topAnchor.constraint(equalTo: view.topAnchor),
+            spriteView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
 
+        let overlay = CameraOverlayScene()
+        overlay.backgroundColor = .clear
+        overlay.scaleMode = .resizeFill
+        overlay.owner = self
+        spriteScene = overlay
+        spriteView.presentScene(overlay)
+
+        // Configure sprites
+        let torchImage = UIImage(systemName: "flashlight.off.fill")?.withTintColor(.white, renderingMode: .alwaysOriginal)
+        let torchTex = torchImage != nil ? SKTexture(image: torchImage!) : nil
+        torchSprite.texture = torchTex
+        if let tex = torchTex { // preserve aspect ratio with target height
+            let targetH: CGFloat = 28
+            let aspect = tex.size().width / tex.size().height
+            torchSprite.size = CGSize(width: targetH * aspect, height: targetH)
+        } else {
+            torchSprite.size = CGSize(width: 28, height: 28)
+        }
+        torchSprite.name = "torchSprite"
+        torchSprite.alpha = 0.95
+        overlay.addChild(torchSprite)
+
+        // Switch camera icon with visible colors
+        let flipImage = UIImage(systemName: "arrow.triangle.2.circlepath.camera")?.withTintColor(.white, renderingMode: .alwaysOriginal)
+        let flipTex = flipImage != nil ? SKTexture(image: flipImage!) : nil
+        flipSprite.texture = flipTex
+        if let tex = flipTex { // preserve aspect ratio with target height
+            let targetH: CGFloat = 30
+            let aspect = tex.size().width / tex.size().height
+            flipSprite.size = CGSize(width: targetH * aspect, height: targetH)
+        } else {
+            flipSprite.size = CGSize(width: 30, height: 30)
+        }
+        flipSprite.name = "flipSprite"
+        flipSprite.alpha = 0.95
+        overlay.addChild(flipSprite)
+        
+        // Textures are pre-tinted white; keep blend factor minimal to avoid unintended darkening
+        torchSprite.colorBlendFactor = 0.0
+        torchSprite.blendMode = .alpha
+        flipSprite.colorBlendFactor = 0.0
+        flipSprite.blendMode = .alpha
+
+        // Setup UIKit buttons
         setupButtons()
+        torchButton.isHidden = true
+        flipButton.isHidden = true
         setupGestures()
         updateTorchAvailability()
         
@@ -137,6 +178,11 @@ final class CameraPreviewViewController: UIViewController {
         NotificationCenter.default.addObserver(self, selector: #selector(handleCubeTappedNotification), name: .cameraCubeTabViewTapped, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(handleCubeHoldBegan), name: .cameraCubeHoldBegan, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(handleCubeHoldEnded), name: .cameraCubeHoldEnded, object: nil)
+        
+        NotificationCenter.default.addObserver(self, selector: #selector(handleCubeHoldBegan), name: Notification.Name("cubeHoldBegan"), object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(handleCubeHoldEnded), name: Notification.Name("cubeHoldEnded"), object: nil)
+        
+        NotificationCenter.default.addObserver(self, selector: #selector(handleShowCapturedPreviewRequested), name: Notification.Name("ShowCapturedPreviewRequested"), object: nil)
         
         // Ensure initial layout/UI sync on first load
         view.setNeedsLayout()
@@ -196,6 +242,16 @@ final class CameraPreviewViewController: UIViewController {
         }
         
         updateTorchAvailability()
+
+        // Position SpriteKit sprites near top corners
+        let topInset = view.safeAreaInsets.top
+        let sideInset: CGFloat = 20
+        // SpriteKit coordinates origin is bottom-left; convert UIKit point to scene point
+        func scenePoint(_ p: CGPoint) -> CGPoint { return CGPoint(x: p.x, y: view.bounds.height - p.y) }
+        let torchPoint = scenePoint(CGPoint(x: sideInset + 26, y: topInset + 26))
+        let flipPoint = scenePoint(CGPoint(x: view.bounds.width - sideInset - 26, y: topInset + 26))
+        torchSprite.position = torchPoint
+        flipSprite.position = flipPoint
     }
     
     override func viewWillAppear(_ animated: Bool) {
@@ -205,7 +261,6 @@ final class CameraPreviewViewController: UIViewController {
         updateTorchAvailability()
         
         previewLayer.isHidden = false
-        prepareUIForCubeLoad()
         
         if let connection = previewLayer.connection, connection.isVideoOrientationSupported,
            let orientation = view.window?.windowScene?.interfaceOrientation {
@@ -311,7 +366,7 @@ final class CameraPreviewViewController: UIViewController {
         super.viewWillDisappear(animated)
         // Reset torch UI to safe state; actual session control should be managed by owner
         isTorchOn = false
-        torchButton.setImage(UIImage(systemName: "flashlight.slash.circle.fill"), for: .normal)
+        // torchButton.setImage(UIImage(systemName: "flashlight.slash.circle.fill"), for: .normal) // removed as button is hidden
         
         if autoManageSession && session.isRunning {
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -324,6 +379,7 @@ final class CameraPreviewViewController: UIViewController {
         NotificationCenter.default.removeObserver(self, name: .cameraCubeTabViewTapped, object: nil)
         NotificationCenter.default.removeObserver(self, name: .cameraCubeHoldBegan, object: nil)
         NotificationCenter.default.removeObserver(self, name: .cameraCubeHoldEnded, object: nil)
+        NotificationCenter.default.removeObserver(self, name: Notification.Name("ShowCapturedPreviewRequested"), object: nil)
         if let obs = appDidBecomeActiveObserver { NotificationCenter.default.removeObserver(obs) }
         if let obs = appWillResignActiveObserver { NotificationCenter.default.removeObserver(obs) }
     }
@@ -346,10 +402,10 @@ final class CameraPreviewViewController: UIViewController {
             CATransaction.commit()
         }
 
-        // Update torch and buttons state
         updateTorchAvailability()
-        flipButton.isEnabled = true
-        torchButton.isEnabled = torchButton.isEnabled // no-op to trigger UI refresh
+        // UIKit buttons are hidden, so skip their enabled state updates
+        // flipButton.isEnabled = true
+        // torchButton.isEnabled = torchButton.isEnabled
     }
 
     // MARK: - Public Trigger
@@ -364,7 +420,6 @@ final class CameraPreviewViewController: UIViewController {
         generator.impactOccurred()
         // Start UI and callbacks
         animateRecordingUI(started: true)
-        startRecordingUI()
         DispatchQueue.main.async { [weak self] in
             self?.onStartVideo?()
         }
@@ -377,7 +432,6 @@ final class CameraPreviewViewController: UIViewController {
         generator.prepare()
         generator.impactOccurred()
         animateRecordingUI(started: false)
-        stopRecordingUI()
         DispatchQueue.main.async { [weak self] in
             self?.onStopVideo?()
         }
@@ -386,11 +440,20 @@ final class CameraPreviewViewController: UIViewController {
     /// Programmatically trigger a photo capture
     func triggerShutter() {
         onShutter?()
+        // Stronger shutter feedback
+        let shutterHaptic = UINotificationFeedbackGenerator()
+        shutterHaptic.notificationOccurred(.success)
+        AudioServicesPlaySystemSound(1108) // camera shutter-like system sound
     }
     
     /// Call this when the CubeTabView is pressed to take a photo.
     func cubePressed() {
-        // Reuse the same shutter pathway
+        // Immediate shutter feedback
+        let shutterHaptic = UINotificationFeedbackGenerator()
+        shutterHaptic.notificationOccurred(.success)
+        AudioServicesPlaySystemSound(1108)
+
+        // Trigger capture
         onShutter?()
     }
     
@@ -406,6 +469,12 @@ final class CameraPreviewViewController: UIViewController {
     @objc private func handleCubeHoldEnded() {
         print("[CameraPreviewVC] handleCubeHoldEnded notification")
         stopVideoHold()
+    }
+    
+    @objc private func handleShowCapturedPreviewRequested() {
+        DispatchQueue.main.async { [weak self] in
+            self?.onRequestPreview?()
+        }
     }
 
     /// Ask the owning coordinator/controller to present a preview after photo capture completes.
@@ -443,6 +512,8 @@ final class CameraPreviewViewController: UIViewController {
             flipButton.widthAnchor.constraint(equalToConstant: 40),
             flipButton.heightAnchor.constraint(equalToConstant: 40)
         ])
+        torchButton.isHidden = true
+        flipButton.isHidden = true
     }
 
     private func setupGestures() {
@@ -466,14 +537,12 @@ final class CameraPreviewViewController: UIViewController {
         case .began:
             // Immediate UI feedback
             animateRecordingUI(started: true)
-            startRecordingUI()
             // Defer start to next runloop to avoid blocking UI
             DispatchQueue.main.async { [weak self] in
                 self?.onStartVideo?()
             }
         case .ended, .cancelled, .failed:
             animateRecordingUI(started: false)
-            stopRecordingUI()
             DispatchQueue.main.async { [weak self] in
                 self?.onStopVideo?()
             }
@@ -502,23 +571,24 @@ final class CameraPreviewViewController: UIViewController {
 
     private func updateTorchAvailability() {
         guard let device = activeDevice() else {
-            torchButton.isEnabled = false
-            torchButton.alpha = 0.5
-            isTorchOn = false
-            torchButton.setImage(UIImage(systemName: "flashlight.slash.circle.fill"), for: .normal)
+            // Keep icon white, but dim to indicate unavailable
+            torchSprite.alpha = 0.4
             return
         }
-
         let supported = device.hasTorch
-        torchButton.isEnabled = supported
-        torchButton.alpha = supported ? 1.0 : 0.5
-
+        // Removed UIKit button alpha and isEnabled updates because buttons are hidden
+        // torchButton.isEnabled = supported
+        // torchButton.alpha = supported ? 1.0 : 0.5
         isTorchOn = device.isTorchActive
-        let icon = isTorchOn ? "flashlight.on.circle.fill" : "flashlight.slash.circle.fill"
-        torchButton.setImage(UIImage(systemName: icon), for: .normal)
+        torchSprite.alpha = 0.95
+        // Removed UIKit button image update because button is hidden
+        // let icon = isTorchOn ? "flashlight.on.circle.fill" : "flashlight.slash.circle.fill"
+        // torchButton.setImage(UIImage(systemName: icon), for: .normal)
+
+        // Do not override icon color here; low-light detection controls icon colorization.
     }
 
-    @objc private func torchTapped() {
+    @objc func torchTapped() {
         guard session.inputs.first != nil else { return }
         guard let device = activeDevice(), device.hasTorch else { return }
 
@@ -537,11 +607,14 @@ final class CameraPreviewViewController: UIViewController {
             isTorchOn = false
         }
 
-        let icon = isTorchOn ? "flashlight.on.circle.fill" : "flashlight.slash.circle.fill"
-        torchButton.setImage(UIImage(systemName: icon), for: .normal)
+        // Removed UIKit button image update because button is hidden
+        // let icon = isTorchOn ? "flashlight.on.circle.fill" : "flashlight.slash.circle.fill"
+        // torchButton.setImage(UIImage(systemName: icon), for: .normal)
+
+        // Do not override icon color here; low-light detection controls icon colorization.
     }
 
-    @objc private func flipTapped() {
+    @objc func flipTapped() {
         guard let currentInput = session.inputs.first as? AVCaptureDeviceInput else { return }
 
         let newPosition: AVCaptureDevice.Position =
@@ -571,13 +644,12 @@ final class CameraPreviewViewController: UIViewController {
             DispatchQueue.main.async {
                 // Front camera usually has no torch
                 self.isTorchOn = false
-                self.torchButton.setImage(UIImage(systemName: "flashlight.slash.circle.fill"), for: .normal)
+                // Removed UIKit torchButton and flipButton UI updates because buttons are hidden
+                // self.torchButton.setImage(UIImage(systemName: "flashlight.slash.circle.fill"), for: .normal)
 
-                self.refreshRadiusBar()
                 self.updateTorchAvailability()
-                self.flipButton.isEnabled = true
-                
-                self.flipButton.setImage(UIImage(systemName: "arrow.triangle.2.circlepath.camera.circle.fill"), for: .normal)
+                // self.flipButton.isEnabled = true
+                // self.flipButton.setImage(UIImage(systemName: "arrow.triangle.2.circlepath.camera.circle.fill"), for: .normal)
 
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
                     self?.updateTorchAvailability()
@@ -586,110 +658,30 @@ final class CameraPreviewViewController: UIViewController {
         }
     }
     
-    private func installRadiusBar() {
-        let bar = CameraRadiusBar(initialRadius: radius) { [weak self] newValue in
-            self?.radius = newValue
-        }
-        let host = UIHostingController(rootView: bar)
-        host.view.backgroundColor = .clear
-        addChild(host)
-        view.addSubview(host.view)
-        host.didMove(toParent: self)
-        host.view.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            host.view.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
-            host.view.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -45),
-            host.view.widthAnchor.constraint(equalToConstant: 60),
-            host.view.heightAnchor.constraint(equalToConstant: 220)
-        ])
-        radiusHostController = host
-    }
-    
-    private func refreshRadiusBar() {
-        guard let host = radiusHostController else { return }
-        host.rootView = CameraRadiusBar(initialRadius: radius) { [weak self] newValue in
-            self?.radius = newValue
-        }
-    }
-    
     // Immediate visual feedback when recording starts/stops
     private func animateRecordingUI(started: Bool) {
         let targetAlpha: CGFloat = started ? 0.6 : 1.0
         UIView.animate(withDuration: 0.12, delay: 0, options: [.curveEaseOut]) {
-            self.torchButton.alpha = targetAlpha
-            self.flipButton.alpha = targetAlpha
-        }
-    }
-    
-    // MARK: - Recording UI & Timer
-    private func startRecordingUI() {
-        recordStartDate = Date()
-        recordProgress = 0
-        // Show progress bar and reset height to 0
-        if let heightConstraint = recordProgressView.constraints.first(where: { $0.firstAttribute == .height }) {
-            heightConstraint.constant = 0
-        }
-        recordProgressView.isHidden = false
-        // Start a display link to update progress smoothly
-        let link = CADisplayLink(target: self, selector: #selector(updateRecordingProgress))
-        link.add(to: .main, forMode: .common)
-        recordTimer = link
-        // Start pop/tick sound (placeholder system sound)
-        AudioServicesPlaySystemSound(1104) // initial tick
-    }
-
-    private func stopRecordingUI() {
-        recordTimer?.invalidate()
-        recordTimer = nil
-        recordStartDate = nil
-        recordProgress = 0
-        recordProgressView.isHidden = true
-        // Stop any ongoing feedback (no loop here; if you add AVAudioPlayer loop, stop it)
-    }
-
-    @objc private func updateRecordingProgress() {
-        guard let start = recordStartDate else { return }
-        let elapsed = Date().timeIntervalSince(start)
-        let progress = min(1.0, elapsed / recordMaxDuration)
-        recordProgress = progress
-        // Map progress to height up to the radius bar height (~220)
-        let maxHeight: CGFloat = 220
-        if let heightConstraint = recordProgressView.constraints.first(where: { $0.firstAttribute == .height }) {
-            heightConstraint.constant = maxHeight * CGFloat(progress)
-        }
-        recordProgressView.setNeedsLayout()
-        // Provide a subtle tick every second as a placeholder for a pop loop
-        if floor(elapsed) != floor(elapsed - 1) {
-            AudioServicesPlaySystemSound(1104)
-        }
-        // Auto-stop at max duration
-        if elapsed >= recordMaxDuration {
-            recordTimer?.invalidate()
-            recordTimer = nil
-            DispatchQueue.main.async { [weak self] in
-                self?.animateRecordingUI(started: false)
-                self?.stopRecordingUI()
-                self?.onStopVideo?()
-            }
+            self.torchSprite.alpha = targetAlpha
+            self.flipSprite.alpha = targetAlpha
         }
     }
 }
-// MARK: - SwiftUI bridge for interactive radius bar
-private struct CameraRadiusBar: View {
-    @State private var value: Double
-    var onChange: (Double) -> Void
-    
-    init(initialRadius: Double, onChange: @escaping (Double) -> Void) {
-        _value = State(initialValue: initialRadius)
-        self.onChange = onChange
-    }
-    
-    var body: some View {
-        ZStack {
-            IsometricRadiusBar(radius: $value)
-                .onChange(of: value) { _, newVal in
-                    onChange(newVal)
-                }
+
+class CameraOverlayScene: SKScene {
+    weak var owner: CameraPreviewViewController?
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let touch = touches.first, let owner = owner else { return }
+        let location = touch.location(in: self)
+        if let node = self.nodes(at: location).first {
+            if node.name == "torchSprite" {
+                // simple pulse animation
+                node.run(SKAction.sequence([SKAction.scale(to: 1.2, duration: 0.08), SKAction.scale(to: 1.0, duration: 0.08)]))
+                owner.torchTapped()
+            } else if node.name == "flipSprite" {
+                node.run(SKAction.sequence([SKAction.scale(to: 1.2, duration: 0.08), SKAction.scale(to: 1.0, duration: 0.08)]))
+                owner.flipTapped()
+            }
         }
     }
 }

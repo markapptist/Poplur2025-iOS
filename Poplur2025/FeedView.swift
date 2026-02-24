@@ -63,6 +63,9 @@ private struct PoleOverlay: View {
 
 struct FeedView: View {
     @Environment(\.locationProvider) private var injectedLocationProvider: LocationProvider?
+    @Environment(\.isometricRadiusBarDistance) private var isometricRadiusBarDistance
+    @Environment(\.isometricBarSettings) private var barSettings
+
     @StateObject private var fallbackLocationProvider = LocationProvider()
     @StateObject private var poleModel = PolePositionModel()
     private var locationProvider: LocationProvider { injectedLocationProvider ?? fallbackLocationProvider }
@@ -708,19 +711,6 @@ struct FeedView: View {
                         .shadow(color: .black.opacity(0.3), radius: 6, x: 0, y: 3)
                         .transition(.scale.combined(with: .opacity))
                         .zIndex(20)
-                }
-                if let current = posts[safe: currentIndex] {
-                    VStack {
-                        Spacer()
-                        IsometricRadiusBar(radius: .constant(current.radius))
-                            .frame(width: 60, height: 220)
-                            .padding(.trailing, 12)
-                    }
-                    .padding(.bottom, 45)
-                    .frame(width: size.width, height: size.height, alignment: .trailing)
-                    .padding(.trailing, 0)
-                    .allowsHitTesting(false)
-                    .zIndex(15)
                 }
                 overlayChrome
                     .allowsHitTesting(false)

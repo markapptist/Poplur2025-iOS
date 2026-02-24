@@ -63,13 +63,13 @@ private struct CubeSceneView: UIViewRepresentable {
         scnView.scene = SCNScene()
         scnView.isPlaying = true
         scnView.preferredFramesPerSecond = 30
-        scnView.antialiasingMode = .none
+        scnView.antialiasingMode = .multisampling4X
         // Defer full scene build and higher quality to next runloop
         DispatchQueue.main.async { [weak scnView] in
             guard let v = scnView else { return }
             v.scene = makeScene()
             v.preferredFramesPerSecond = 60
-            v.antialiasingMode = .multisampling4X
+            // Removed: v.antialiasingMode = .multisampling4X
         }
 
         // Remove border to reduce compositing cost on launch
@@ -133,23 +133,27 @@ private struct CubeSceneView: UIViewRepresentable {
     private func makeScene() -> SCNScene {
         let scene = SCNScene()
 
+        // Enable environment lighting for reflections if an environment image is present
+        if let env = UIImage(named: "CubeEnv") {
+            scene.lightingEnvironment.contents = env
+            scene.lightingEnvironment.intensity = 0.0
+        } else {
+            scene.lightingEnvironment.intensity = 0.0
+        }
+
         // Camera
         let cameraNode = SCNNode()
         cameraNode.camera = SCNCamera()
-        cameraNode.position = SCNVector3(0, 0, 5.0)
+        cameraNode.position = SCNVector3(0, 0, 3.7) // move even closer to enlarge cube further
+        cameraNode.camera?.fieldOfView = 50
         cameraNode.camera?.zFar = 100
         scene.rootNode.addChildNode(cameraNode)
 
-        // Single ambient light for minimal cost
-        let ambient = SCNLight()
-        ambient.type = .ambient
-        ambient.intensity = 450
-        let ambientNode = SCNNode()
-        ambientNode.light = ambient
-        scene.rootNode.addChildNode(ambientNode)
+        // Removed key directional light and fill omni light as per instructions
 
         // Lean cube geometry with small chamfer (lower tessellation)
-        let box = SCNBox(width: 2.2, height: 2.2, length: 2.2, chamferRadius: 0.12)
+        let box = SCNBox(width: 1.3, height: 1.3, length: 1.3, chamferRadius: 0.25)
+        box.chamferSegmentCount = 8
         let node = SCNNode(geometry: box)
         node.name = "cube"
         scene.rootNode.addChildNode(node)
@@ -163,16 +167,28 @@ private struct CubeSceneView: UIViewRepresentable {
 
     private func makeMaterials() -> [SCNMaterial] {
         // Map faces to tabs in order: +X, -X, +Y, -Y, +Z, -Z
-        // We'll use 5 faces for the 5 tabs; the extra face repeats the first.
         let tabs: [AppTab] = [.map, .record, .feed, .profile]
         var faces: [AppTab] = tabs
         faces.append(tabs.first!)
 
         return faces.map { tab in
             let mat = SCNMaterial()
+            // Face content
             mat.diffuse.contents = faceImage(for: tab)
             mat.multiply.contents = uiColor(tintColor)
-            mat.lightingModel = .blinn
+            mat.diffuse.intensity = 0.95
+            mat.multiply.intensity = 1.0
+            // Normal map if available
+            if let normal = UIImage(named: "CubeNormalMap") {
+                mat.normal.contents = normal
+                mat.normal.intensity = 0.7
+            }
+            // Simplify lighting model and neutralize PBR params
+            mat.lightingModel = .constant
+            mat.metalness.contents = 0.0
+            mat.roughness.contents = 1.0
+            mat.emission.contents = UIColor.clear
+            mat.emission.intensity = 0.0
             mat.isDoubleSided = true
             mat.locksAmbientWithDiffuse = true
             return mat
@@ -227,19 +243,29 @@ private struct CubeSceneView: UIViewRepresentable {
 
         private var panStartPoint: CGPoint = .zero
         private var panAccumulated: CGFloat = 0
-        private let panThreshold: CGFloat = 18 // lower threshold for sensitivity
+        private let panThreshold: CGFloat = 10 // lower threshold for sensitivity
         private let haptic = UIImpactFeedbackGenerator(style: .light)
 
         private var motionObserver: NSObjectProtocol?
         private var liveRotation: SCNVector3 = SCNVector3Zero
 
+        private var holdObservers: [NSObjectProtocol] = []
+        private var isBlinking: Bool = false
+
         // Added helper functions as per instructions
         private func deg2rad(_ degrees: Float) -> Float { degrees * .pi / 180 }
         private func clamp(_ value: Float, min minVal: Float, max maxVal: Float) -> Float { max(minVal, min(maxVal, value)) }
 
-        init(_ parent: CubeSceneView) { self.parent = parent }
+        init(_ parent: CubeSceneView) {
+            self.parent = parent
+            super.init()
+            startObservingHold()
+        }
 
-        deinit { stopObservingMotion() }
+        deinit {
+            stopObservingMotion()
+            stopObservingHold()
+        }
 
         @objc func handleSwipe(_ gesture: UISwipeGestureRecognizer) {
             guard let scnView = view, let cube = scnView.scene?.rootNode.childNode(withName: "cube", recursively: true) else { return }
@@ -258,7 +284,7 @@ private struct CubeSceneView: UIViewRepresentable {
             onCubeTap?()
             if parent.selectedTab == .record {
                 print("[CubeTabView] Tap -> post cubeTabViewTapped (record tab)")
-                NotificationCenter.default.post(name: Notification.Name("CubeTabViewTappedNotification"), object: nil)
+                NotificationCenter.default.post(name: .cameraCubeTabViewTapped, object: nil)
             } else {
                 print("[CubeTabView] Tap ignored for tab: \(parent.selectedTab)")
             }
@@ -268,10 +294,10 @@ private struct CubeSceneView: UIViewRepresentable {
             switch gesture.state {
             case .began:
                 print("[CubeTabView] Long press began -> .cubeHoldBegan")
-                NotificationCenter.default.post(name: .cubeHoldBegan, object: nil)
+                NotificationCenter.default.post(name: .cameraCubeHoldBegan, object: nil)
             case .ended, .cancelled, .failed:
                 print("[CubeTabView] Long press ended -> .cubeHoldEnded")
-                NotificationCenter.default.post(name: .cubeHoldEnded, object: nil)
+                NotificationCenter.default.post(name: .cameraCubeHoldEnded, object: nil)
             default:
                 break
             }
@@ -428,6 +454,38 @@ private struct CubeSceneView: UIViewRepresentable {
                 NotificationCenter.default.removeObserver(token)
                 motionObserver = nil
             }
+        }
+
+        private func startObservingHold() {
+            stopObservingHold()
+            let began = NotificationCenter.default.addObserver(forName: .cameraCubeHoldBegan, object: nil, queue: .main) { [weak self] _ in
+                self?.beginBlink()
+            }
+            let ended = NotificationCenter.default.addObserver(forName: .cameraCubeHoldEnded, object: nil, queue: .main) { [weak self] _ in
+                self?.endBlink()
+            }
+            holdObservers = [began, ended]
+        }
+
+        private func stopObservingHold() {
+            holdObservers.forEach { NotificationCenter.default.removeObserver($0) }
+            holdObservers.removeAll()
+        }
+
+        private func beginBlink() {
+            guard !isBlinking, let scnView = view, let cube = scnView.scene?.rootNode.childNode(withName: "cube", recursively: true) else { return }
+            isBlinking = true
+            let fadeDown = SCNAction.fadeOpacity(to: 0.4, duration: 0.35)
+            let fadeUp = SCNAction.fadeOpacity(to: 1.0, duration: 0.35)
+            let pulse = SCNAction.repeatForever(SCNAction.sequence([fadeDown, fadeUp]))
+            cube.runAction(pulse, forKey: "recordBlink")
+        }
+
+        private func endBlink() {
+            guard isBlinking, let scnView = view, let cube = scnView.scene?.rootNode.childNode(withName: "cube", recursively: true) else { return }
+            isBlinking = false
+            cube.removeAction(forKey: "recordBlink")
+            cube.opacity = 1.0
         }
 
         private func applyCombinedRotation(to node: SCNNode) {

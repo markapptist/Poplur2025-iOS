@@ -190,6 +190,8 @@ private struct DominancePin: View {
 // MARK: - Map View
 struct MapView: View {
     @StateObject private var locationManager = LocationManager()
+    @Environment(\.isometricBarSettings) private var barSettings
+    @Environment(\.isometricRadiusBarDistance) private var isometricRadiusBarDistance
 
     @State private var camera: MapCameraPosition? = .camera(
         MapCamera(
@@ -218,16 +220,6 @@ struct MapView: View {
                 .contentShape(Rectangle())
                 .simultaneousGesture(DragGesture(minimumDistance: 0).onChanged { _ in noteInteraction() })
                 .simultaneousGesture(TapGesture().onEnded { noteInteraction() })
-
-            VStack {
-                Spacer()
-                IsometricRadiusBar(radius: $radiusMeters)
-                    .frame(width: 60, height: 220)
-                    .padding(.trailing, 12)
-                    .padding(.bottom, 45)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
-            .allowsHitTesting(false)
         }
         .onAppear {
             locationManager.requestAuthorizationIfNeeded()

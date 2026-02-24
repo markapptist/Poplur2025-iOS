@@ -1,28 +1,49 @@
 import SwiftUI
 import SceneKit
 
+extension Notification.Name {
+    static let currentPostRadiusDidChange = Notification.Name("CurrentPostRadiusDidChange")
+    static let showCapturedPreviewRequested = Notification.Name("ShowCapturedPreviewRequested")
+}
+
+extension Notification.Name {
+    static let capturePreviewDidDismiss = Notification.Name("CapturePreviewDidDismiss")
+}
+
 public struct IsometricRadiusBar: View {
     @Binding public var radius: Double
     @State private var dragStartRadius: Double? = nil
+    @State private var usesImperial: Bool = Locale.current.usesMetricSystem == false
+    @State private var holdTimer: CADisplayLink? = nil
+    private var earthRadiusMeters: Double { usesImperial ? 3958.8 * 1609.34 : 6371.0 * 1000.0 }
+    private var earthRadiusCapMeters: Double { earthRadiusMeters }
     private var baseColor: Color
     private var pitchDegrees: Double
     private var yawDegrees: Double
+    private var growthSpeed: Double
+    private var maxSceneHeight: Double
+    private var uiScale: CGFloat
+    private var maxRuntimeRadius: Double
 
-    public init(radius: Binding<Double>, baseColor: Color = .indigo, pitchDegrees: Double = 10.0, yawDegrees: Double = 20.0) {
+    public init(radius: Binding<Double>, baseColor: Color = .indigo, pitchDegrees: Double = 10.0, yawDegrees: Double = 20.0, growthSpeed: Double = 1.5, maxSceneHeight: Double = 2.4, uiScale: CGFloat = 1.5, maxRuntimeRadius: Double? = nil) {
         self._radius = radius
         self.baseColor = baseColor
         self.pitchDegrees = pitchDegrees
         self.yawDegrees = yawDegrees
+        self.growthSpeed = growthSpeed
+        self.maxSceneHeight = maxSceneHeight
+        self.uiScale = uiScale
+        self.maxRuntimeRadius = maxRuntimeRadius ?? (Locale.current.usesMetricSystem ? 6_371_000.0 : 3_958.8 * 1609.34)
     }
 
     public var body: some View {
         ZStack(alignment: .top) {
-            RadiusBarSceneView(radius: $radius, baseColor: baseColor, pitchDegrees: pitchDegrees, yawDegrees: yawDegrees)
-                .frame(width: 160, height: 520)
+            RadiusBarSceneView(radius: $radius, baseColor: baseColor, pitchDegrees: pitchDegrees, yawDegrees: yawDegrees, maxSceneHeight: maxSceneHeight)
+                .frame(width: 220, height: 960)
                 .background(Color.clear)
                 .allowsHitTesting(false)
-                .offset(y: 80)
         }
+        .scaleEffect(uiScale, anchor: .bottomTrailing)
         .overlay(
             GeometryReader { proxy in
                 Rectangle()
@@ -45,6 +66,23 @@ public struct IsometricRadiusBar: View {
                     }
             }
         )
+        .onReceive(NotificationCenter.default.publisher(for: .currentPostRadiusDidChange)) { note in
+            if let r = note.userInfo?["radius"] as? Double {
+                self.radius = min(max(0, r), self.maxRuntimeRadius)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .cameraCubeHoldBegan)) { _ in
+            startAutoIncrease()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .cameraCubeHoldEnded)) { _ in
+            stopAutoIncrease()
+            // Notify that we should show the captured preview output
+            NotificationCenter.default.post(name: .showCapturedPreviewRequested, object: nil)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .capturePreviewDidDismiss)) { _ in
+            // Reset radius to zero so the bar returns to minimal height
+            self.radius = 0
+        }
     }
 }
 
@@ -53,20 +91,39 @@ private extension IsometricRadiusBar {
         let height = max(1, size.height)
         return DragGesture(minimumDistance: 0)
             .onChanged { value in
+                // Ignore manual drag while recording hold is active
+                if holdTimer != nil { return }
                 if dragStartRadius == nil {
                     dragStartRadius = radius
                 }
                 let start = dragStartRadius ?? radius
                 let dy = Double(-(value.translation.height))
-                let span: Double = 10_000 - 0
+                let span: Double = earthRadiusCapMeters
                 let factor: Double = 0.5
                 let delta = dy / Double(height) * span * factor
-                let newValue = max(0, min(10_000, start + delta))
+                let newValue = max(0, min(min(earthRadiusCapMeters, self.maxRuntimeRadius), start + delta))
                 radius = newValue
             }
             .onEnded { _ in
+                if holdTimer != nil { return }
                 dragStartRadius = nil
             }
+    }
+
+    func startAutoIncrease() {
+        stopAutoIncrease()
+        let link = CADisplayLink(target: DisplayLinkProxy { dt in
+            // Increase radius toward earth radius while held
+            let incrementPerSecond: Double = (earthRadiusMeters / 10.0) * max(0.1, self.growthSpeed) // base 10s to full; scale by growthSpeed
+            self.radius = min(self.radius + incrementPerSecond * dt, min(earthRadiusCapMeters, self.maxRuntimeRadius))
+        }, selector: #selector(DisplayLinkProxy.tick(_:)))
+        link.add(to: .main, forMode: .common)
+        holdTimer = link
+    }
+
+    func stopAutoIncrease() {
+        holdTimer?.invalidate()
+        holdTimer = nil
     }
 }
 
@@ -77,23 +134,7 @@ private struct RadiusBarSceneView: UIViewRepresentable {
     var baseColor: Color
     var pitchDegrees: Double
     var yawDegrees: Double
-
-    private static let cachedShadowImage: UIImage = {
-        let size = CGSize(width: 256, height: 256)
-        UIGraphicsBeginImageContextWithOptions(size, false, 0)
-        let ctx = UIGraphicsGetCurrentContext()!
-        let colors = [UIColor.black.withAlphaComponent(0.38).cgColor, UIColor.black.withAlphaComponent(0.0).cgColor] as CFArray
-        let locations: [CGFloat] = [0.0, 1.0]
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
-        let gradient = CGGradient(colorsSpace: colorSpace, colors: colors, locations: locations)!
-        ctx.drawRadialGradient(gradient,
-                               startCenter: CGPoint(x: size.width/2, y: size.height/2), startRadius: 0,
-                               endCenter: CGPoint(x: size.width/2, y: size.height/2), endRadius: min(size.width, size.height)/2,
-                               options: .drawsAfterEndLocation)
-        let image = UIGraphicsGetImageFromCurrentImageContext()!
-        UIGraphicsEndImageContext()
-        return image
-    }()
+    var maxSceneHeight: Double
 
     func makeUIView(context: Context) -> SCNView {
         let scnView = SCNView()
@@ -107,12 +148,6 @@ private struct RadiusBarSceneView: UIViewRepresentable {
 
         context.coordinator.prepareInitialState()
 
-        // Delay the initial height growth by ~0.6 seconds
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-            context.coordinator.markInitialAnimationRun()
-            context.coordinator.updateHeight(from: radius, isInitial: true)
-        }
-
         return scnView
     }
 
@@ -125,47 +160,37 @@ private struct RadiusBarSceneView: UIViewRepresentable {
     private func makeScene() -> SCNScene {
         let scene = SCNScene()
 
-        // Camera (simple, like CubeTabView)
+        // Camera (orthographic for straight vertical bar)
         let cameraNode = SCNNode()
         let camera = SCNCamera()
+        camera.usesOrthographicProjection = true
+        camera.orthographicScale = 4.8 // zoom in (smaller scale = closer look in ortho)
         camera.zNear = 0.01
         camera.zFar = 100
         cameraNode.camera = camera
-        cameraNode.position = SCNVector3(0, 3.6, 3.5)
-        // Orientation will be driven by look-at constraint
-        cameraNode.eulerAngles = SCNVector3Zero
+        cameraNode.position = SCNVector3(0, 3.0, 3.4)
+        cameraNode.eulerAngles = SCNVector3(0, 0, 0)
         scene.rootNode.addChildNode(cameraNode)
 
         // Target node for the camera to look at (visual center)
         let barTarget = SCNNode()
         barTarget.name = "barTarget"
-        barTarget.position = SCNVector3(0, 1.5, 0) // raise the target (visual center) so the bar appears higher in frame
+        barTarget.position = SCNVector3(0, 1.2, 0) // raise the target (visual center) so the bar appears higher in frame
         scene.rootNode.addChildNode(barTarget)
 
         // Bar (SCNBox) sized to show height with small width/length, start at a tiny height so it's visible
-        let box = SCNBox(width: 0.35, height: 0.05, length: 0.35, chamferRadius: 0.06)
+        let box = SCNBox(width: 0.42, height: 0.05, length: 0.42, chamferRadius: 0.06)
         box.chamferSegmentCount = 3
         box.materials = perFaceMaterials(from: baseColor)
         let node = SCNNode(geometry: box)
         node.name = "bar"
-        node.position = SCNVector3(0, 2.0, 0) // raised higher to appear more centered with current camera angle
+        node.position = SCNVector3(0, 1.0, 0) // lowered slightly to avoid cutoff
         node.pivot = SCNMatrix4Identity // rotate around center to keep it visually centered
         barTarget.addChildNode(node)
 
-        // Attach camera look-at constraint to the target so the bar can be offset within the frame
-        let lookAt = SCNLookAtConstraint(target: barTarget)
-        lookAt.isGimbalLockEnabled = true
-        cameraNode.constraints = [lookAt]
-
-        // Fixed 3D pose: show two faces + top with manual pitch/yaw (restored)
-        node.eulerAngles = SCNVector3(Float(pitchDegrees * .pi / 10), -Float(yawDegrees * .pi / -65), 0)
-
-        // Gentle bob
-        let up = SCNAction.moveBy(x: 0, y: 0.06, z: 0, duration: 1.4)
-        up.timingMode = .easeInEaseOut
-        let down = up.reversed()
-        let bob = SCNAction.repeatForever(SCNAction.sequence([up, down]))
-        node.runAction(bob)
+        // Remove lookAt constraint and bobbing
+        // node.eulerAngles will be used for fixed pitch/yaw for subtle 3D effect
+        node.eulerAngles = SCNVector3(Float(6.0 * .pi / 180), Float(-10.0 * .pi / 180), 0)
 
         // Lights (omni + ambient + subtle rim)
         let omni = SCNLight()
@@ -191,17 +216,7 @@ private struct RadiusBarSceneView: UIViewRepresentable {
         rimNode.eulerAngles = SCNVector3(Float(20.0 * .pi / 180), Float(-160.0 * .pi / 180), 0)
         scene.rootNode.addChildNode(rimNode)
 
-        // Radial shadow disk (floating cue)
-        let shadowRadius: CGFloat = 0.8
-        let shadow = SCNCylinder(radius: shadowRadius, height: 0.01)
-        let shadowMat = SCNMaterial()
-        shadowMat.lightingModel = .physicallyBased
-        shadowMat.diffuse.contents = RadiusBarSceneView.cachedShadowImage
-        shadow.materials = [shadowMat]
-        let shadowNode = SCNNode(geometry: shadow)
-        shadowNode.eulerAngles.x = -.pi / 2
-        shadowNode.position = SCNVector3(0, -0.35, 0)
-        scene.rootNode.addChildNode(shadowNode)
+        // Removed radial shadow disk and cachedShadowImage as per instructions
 
         return scene
     }
@@ -297,6 +312,22 @@ private struct RadiusBarSceneView: UIViewRepresentable {
         return container
     }
 
+    private func makeTickLabel(text: String) -> SCNNode {
+        let textGeom = SCNText(string: text, extrusionDepth: 0.1)
+        textGeom.font = UIFont.systemFont(ofSize: 1.6, weight: .semibold)
+        let m = SCNMaterial()
+        m.diffuse.contents = UIColor.white.withAlphaComponent(0.8)
+        textGeom.materials = [m]
+        let node = SCNNode(geometry: textGeom)
+        let (minB, maxB) = textGeom.boundingBox
+        let cx = (minB.x + maxB.x) / 2.0
+        let cy = (minB.y + maxB.y) / 2.0
+        node.pivot = SCNMatrix4MakeTranslation(cx, cy, 0)
+        node.scale = SCNVector3(0.02, 0.02, 0.02)
+        node.constraints = [SCNBillboardConstraint()]
+        return node
+    }
+
     class Coordinator {
         var parent: RadiusBarSceneView
         weak var view: SCNView?
@@ -309,8 +340,8 @@ private struct RadiusBarSceneView: UIViewRepresentable {
                   let root = scnView.scene?.rootNode,
                   let bar = root.childNode(withName: "bar", recursively: true),
                   let box = bar.geometry as? SCNBox else { return }
-            // Set to minimal height and position at bottom so animation grows upward
-            let minH: CGFloat = 1.2
+            // Start at zero height so animation grows upward
+            let minH: CGFloat = 0.0
             box.height = minH
             bar.position.y = Float(minH / 2.0)
         }
@@ -330,31 +361,43 @@ private struct RadiusBarSceneView: UIViewRepresentable {
                   let box = bar.geometry as? SCNBox else { return }
 
             let targetH = clampedHeight(radius)
+            // Hard cap to ensure we never exceed the visible scene height
+            let hardMaxH: Double = parent.maxSceneHeight
+            let appliedH = min(targetH, hardMaxH)
 
-            SCNTransaction.begin()
-            SCNTransaction.animationTimingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            if isInitial {
-                SCNTransaction.animationDuration = 1.2
-            } else {
-                SCNTransaction.animationDuration = didRunInitialAnimation ? 0.6 : 0.6
-            }
-
-            // Update geometry height and bar position
-            box.height = CGFloat(targetH)
-            bar.position.y = Float(targetH / 2.0)
-
-            SCNTransaction.commit()
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            box.height = CGFloat(appliedH)
+            bar.position.y = Float(appliedH / 2.0)
+            CATransaction.commit()
         }
 
         private func clampedHeight(_ radius: Double) -> Double {
             let r = max(0, radius)
-            let minR: Double = 50
-            let maxR: Double = 10_000
-            let minH: Double = 1.2
-            let maxH: Double = 2.6
-            let t = min(1.0, max(0.0, (r - minR) / (maxR - minR)))
-            return minH + (maxH - minH) * t
+            // Earth radius in meters based on locale (imperial uses miles)
+            let usesImperial = Locale.current.usesMetricSystem == false
+            let earthMeters: Double = usesImperial ? 3958.8 * 1609.34 : 6371.0 * 1000.0
+            let minH: Double = 0.0
+            let maxH: Double = parent.maxSceneHeight
+            let t = min(1.0, max(0.0, r / earthMeters))
+            let result = minH + (maxH - minH) * t
+            return min(result, maxH)
         }
+    }
+}
+
+// MARK: - DisplayLinkProxy
+
+private class DisplayLinkProxy {
+    private var lastTimestamp: CFTimeInterval?
+    private let handler: (Double) -> Void
+    init(_ handler: @escaping (Double) -> Void) { self.handler = handler }
+    @objc func tick(_ link: CADisplayLink) {
+        let ts = link.timestamp
+        let dt: Double
+        if let last = lastTimestamp { dt = ts - last } else { dt = link.duration }
+        lastTimestamp = ts
+        handler(max(0, dt))
     }
 }
 
@@ -373,5 +416,75 @@ private struct StatefulPreview: View {
 
 #Preview("IsometricRadiusBar") {
     StatefulPreview()
+}
+#Preview("Cube + Radius Bar") {
+    CombinedCubeRadiusPreview()
+}
+
+private struct CombinedCubeRadiusPreview: View {
+    @State private var tab: AppTab = .map
+    @State private var radius: Double = 2500
+    @State private var width: CGFloat = 360
+    @State private var cubeHeight: CGFloat = 200
+    @State private var barWidth: CGFloat = 98
+    @State private var barHeight: CGFloat = 390
+    @State private var spacing: CGFloat = 16
+    @State private var tilt: Double = -8
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Controls
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Preview Controls").font(.headline)
+                HStack {
+                    Text("Width \(Int(width))")
+                    Slider(value: $width, in: 280...520)
+                }
+                HStack {
+                    Text("Cube H \(Int(cubeHeight))")
+                    Slider(value: $cubeHeight, in: 140...280)
+                }
+                HStack {
+                    Text("Bar W \(Int(barWidth))")
+                    Slider(value: $barWidth, in: 64...160)
+                }
+                HStack {
+                    Text("Bar H \(Int(barHeight))")
+                    Slider(value: $barHeight, in: 260...520)
+                }
+                HStack {
+                    Text("Spacing \(Int(spacing))")
+                    Slider(value: $spacing, in: 0...40)
+                }
+                HStack {
+                    Text("Tilt \(Int(tilt))°")
+                    Slider(value: $tilt, in: -25...0, step: 1)
+                }
+            }
+            .padding()
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .padding(.bottom, 12)
+
+            // Test canvas
+            ZStack {
+                Color(UIColor.systemBackground)
+                VStack(spacing: spacing) {
+                    CubeTabView(selectedTab: $tab, tintColor: .indigo)
+                        .frame(height: cubeHeight)
+
+                    IsometricRadiusBar(radius: $radius, growthSpeed: 1.5, maxSceneHeight: 1.8, uiScale: 1.5, maxRuntimeRadius: 3_323_000.0)
+                        .frame(width: barWidth, height: barHeight)
+                        .rotation3DEffect(.degrees(tilt), axis: (x: 1, y: 0, z: 0), perspective: 0.65)
+                }
+                .frame(maxWidth: width)
+                .padding()
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 20))
+            .shadow(radius: 8)
+        }
+        .padding()
+        .background(Color(UIColor.secondarySystemBackground))
+    }
 }
 
