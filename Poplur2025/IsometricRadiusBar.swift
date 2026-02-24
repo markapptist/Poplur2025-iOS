@@ -403,88 +403,70 @@ private class DisplayLinkProxy {
 
 // MARK: - Preview
 
-private struct StatefulPreview: View {
-    @State private var radius: Double = 2500
-    var body: some View {
-        IsometricRadiusBar(radius: $radius, baseColor: .accentColor, pitchDegrees: 10, yawDegrees: 20)
-            .padding()
-            .background(Color(.systemBackground))
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-            .ignoresSafeArea()
-    }
+#Preview("Radius Bar Properties") {
+    RadiusBarOnlyPreview()
 }
 
-#Preview("IsometricRadiusBar") {
-    StatefulPreview()
-}
-#Preview("Cube + Radius Bar") {
-    CombinedCubeRadiusPreview()
-}
-
-private struct CombinedCubeRadiusPreview: View {
-    @State private var tab: AppTab = .map
+private struct RadiusBarOnlyPreview: View {
     @State private var radius: Double = 2500
-    @State private var width: CGFloat = 360
-    @State private var cubeHeight: CGFloat = 200
     @State private var barWidth: CGFloat = 98
     @State private var barHeight: CGFloat = 390
-    @State private var spacing: CGFloat = 16
     @State private var tilt: Double = -8
+    @State private var uiScale: CGFloat = 1.5
+    @State private var maxSceneHeight: Double = 1.8
+    @State private var growth: Double = 1.5
+    @State private var baseColor: Color = .indigo
 
     var body: some View {
-        VStack(spacing: 0) {
+        VStack(spacing: 12) {
             // Controls
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Preview Controls").font(.headline)
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Radius Bar Controls").font(.headline)
                 HStack {
-                    Text("Width \(Int(width))")
-                    Slider(value: $width, in: 280...520)
+                    Text("Radius \(Int(radius))m").monospacedDigit()
+                    Slider(value: $radius, in: 0...3_323_000)
                 }
                 HStack {
-                    Text("Cube H \(Int(cubeHeight))")
-                    Slider(value: $cubeHeight, in: 140...280)
-                }
-                HStack {
-                    Text("Bar W \(Int(barWidth))")
+                    Text("Width \(Int(barWidth))")
                     Slider(value: $barWidth, in: 64...160)
                 }
                 HStack {
-                    Text("Bar H \(Int(barHeight))")
+                    Text("Height \(Int(barHeight))")
                     Slider(value: $barHeight, in: 260...520)
-                }
-                HStack {
-                    Text("Spacing \(Int(spacing))")
-                    Slider(value: $spacing, in: 0...40)
                 }
                 HStack {
                     Text("Tilt \(Int(tilt))°")
                     Slider(value: $tilt, in: -25...0, step: 1)
                 }
+                HStack {
+                    Text("UI Scale \(String(format: "%.2f", uiScale))")
+                    Slider(value: $uiScale, in: 0.8...2.0)
+                }
+                HStack {
+                    Text("Max Scene H \(String(format: "%.1f", maxSceneHeight))")
+                    Slider(value: $maxSceneHeight, in: 0.8...3.0)
+                }
+                HStack {
+                    Text("Growth \(String(format: "%.2f", growth))")
+                    Slider(value: $growth, in: 0.5...3.0)
+                }
+                ColorPicker("Base Color", selection: $baseColor)
             }
             .padding()
             .background(.ultraThinMaterial)
             .clipShape(RoundedRectangle(cornerRadius: 12))
-            .padding(.bottom, 12)
 
-            // Test canvas
+            // Bar under test
             ZStack {
                 Color(UIColor.systemBackground)
-                VStack(spacing: spacing) {
-                    CubeTabView(selectedTab: $tab, tintColor: .indigo)
-                        .frame(height: cubeHeight)
-
-                    IsometricRadiusBar(radius: $radius, growthSpeed: 1.5, maxSceneHeight: 1.8, uiScale: 1.5, maxRuntimeRadius: 3_323_000.0)
-                        .frame(width: barWidth, height: barHeight)
-                        .rotation3DEffect(.degrees(tilt), axis: (x: 1, y: 0, z: 0), perspective: 0.65)
-                }
-                .frame(maxWidth: width)
-                .padding()
+                IsometricRadiusBar(radius: $radius, baseColor: baseColor, growthSpeed: growth, maxSceneHeight: maxSceneHeight, uiScale: uiScale, maxRuntimeRadius: 3_323_000.0)
+                    .frame(width: barWidth, height: barHeight)
+                    .rotation3DEffect(.degrees(tilt), axis: (x: 1, y: 0, z: 0), perspective: 0.65)
             }
-            .clipShape(RoundedRectangle(cornerRadius: 20))
-            .shadow(radius: 8)
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .shadow(radius: 6)
         }
         .padding()
         .background(Color(UIColor.secondarySystemBackground))
     }
 }
-

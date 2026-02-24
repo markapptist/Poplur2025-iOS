@@ -527,19 +527,49 @@ private struct CubeSceneView: UIViewRepresentable {
     }
 }
 
-#Preview {
-    StatefulPreview()
+#Preview("Cube Properties") {
+    CubeOnlyPreview()
 }
 
-private struct StatefulPreview: View {
+private struct CubeOnlyPreview: View {
     @State private var tab: AppTab = .map
+    @State private var cubeHeight: CGFloat = 200
+    @State private var tint: Color = .indigo
+
     var body: some View {
-        VStack {
-            Spacer()
-            Text("Selected: \(tab.title)")
-            CubeTabView(selectedTab: $tab, tintColor: .indigo)
+        VStack(spacing: 12) {
+            // Controls
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Cube Controls").font(.headline)
+                HStack {
+                    Text("Height \(Int(cubeHeight))")
+                    Slider(value: $cubeHeight, in: 140...280)
+                }
+                HStack {
+                    ColorPicker("Tint", selection: $tint)
+                }
+                Picker("Selected Tab", selection: $tab) {
+                    Text("Map").tag(AppTab.map)
+                    Text("Record").tag(AppTab.record)
+                    Text("Feed").tag(AppTab.feed)
+                    Text("Profile").tag(AppTab.profile)
+                }
+                .pickerStyle(.segmented)
+            }
+            .padding()
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+
+            // Cube under test
+            ZStack {
+                Color(UIColor.systemBackground)
+                CubeTabView(selectedTab: $tab, tintColor: tint)
+                    .frame(height: cubeHeight)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .shadow(radius: 6)
         }
         .padding()
-        .background(Color(.systemBackground))
+        .background(Color(UIColor.secondarySystemBackground))
     }
 }
