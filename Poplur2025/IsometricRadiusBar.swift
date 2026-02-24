@@ -17,13 +17,16 @@ public struct IsometricRadiusBar: View {
     @State private var holdTimer: CADisplayLink? = nil
     private var earthRadiusMeters: Double { usesImperial ? 3958.8 * 1609.34 : 6371.0 * 1000.0 }
     private var earthRadiusCapMeters: Double { earthRadiusMeters }
-    private var baseColor: Color
+    public var baseColor: Color
     private var pitchDegrees: Double
     private var yawDegrees: Double
     private var growthSpeed: Double
     private var maxSceneHeight: Double
     private var uiScale: CGFloat
     private var maxRuntimeRadius: Double
+
+    public var useNormalMap: Bool = true
+    public var lightingModel: SCNMaterial.LightingModel = .physicallyBased
 
     public init(radius: Binding<Double>, baseColor: Color = .indigo, pitchDegrees: Double = 10.0, yawDegrees: Double = 20.0, growthSpeed: Double = 1.5, maxSceneHeight: Double = 2.4, uiScale: CGFloat = 1.5, maxRuntimeRadius: Double? = nil) {
         self._radius = radius
@@ -38,10 +41,18 @@ public struct IsometricRadiusBar: View {
 
     public var body: some View {
         ZStack(alignment: .top) {
-            RadiusBarSceneView(radius: $radius, baseColor: baseColor, pitchDegrees: pitchDegrees, yawDegrees: yawDegrees, maxSceneHeight: maxSceneHeight)
-                .frame(width: 220, height: 960)
-                .background(Color.clear)
-                .allowsHitTesting(false)
+            RadiusBarSceneView(
+                radius: $radius,
+                baseColor: baseColor,
+                pitchDegrees: pitchDegrees,
+                yawDegrees: yawDegrees,
+                maxSceneHeight: maxSceneHeight,
+                useNormalMap: useNormalMap,
+                lightingModel: lightingModel
+            )
+            .frame(width: 220, height: 960)
+            .background(Color.clear)
+            .allowsHitTesting(false)
         }
         .scaleEffect(uiScale, anchor: .bottomTrailing)
         .overlay(
@@ -135,6 +146,9 @@ private struct RadiusBarSceneView: UIViewRepresentable {
     var pitchDegrees: Double
     var yawDegrees: Double
     var maxSceneHeight: Double
+
+    var useNormalMap: Bool
+    var lightingModel: SCNMaterial.LightingModel
 
     func makeUIView(context: Context) -> SCNView {
         let scnView = SCNView()
@@ -232,11 +246,13 @@ private struct RadiusBarSceneView: UIViewRepresentable {
         func mat(_ color: UIColor, metal: CGFloat = 0.18, rough: CGFloat = 0.35) -> SCNMaterial {
             let m = SCNMaterial()
             m.diffuse.contents = color
-            m.lightingModel = .physicallyBased
+            m.lightingModel = lightingModel
             m.multiply.contents = UIColor.systemIndigo
-            if let normal = UIImage(named: "CubeNormalMap") {
+            if useNormalMap, let normal = UIImage(named: "CubeNormalMap") {
                 m.normal.contents = normal
                 m.normal.intensity = 0.6
+            } else {
+                m.normal.contents = nil
             }
             m.metalness.contents = metal
             m.roughness.contents = rough
@@ -412,61 +428,246 @@ private struct RadiusBarOnlyPreview: View {
     @State private var barWidth: CGFloat = 98
     @State private var barHeight: CGFloat = 390
     @State private var tilt: Double = -8
+    @State private var yawDegrees: Double = 0
     @State private var uiScale: CGFloat = 1.5
     @State private var maxSceneHeight: Double = 1.8
     @State private var growth: Double = 1.5
     @State private var baseColor: Color = .indigo
+    @State private var useSpring: Bool = true
+    @State private var springResponse: Double = 0.35
+    @State private var springDamping: Double = 0.85
+    @State private var springBlend: Double = 0.0
+    @State private var useGravityRamp: Bool = false
+    @State private var gravityStrength: Double = 1.0
+    private let earthMeters: Double = (Locale.current.usesMetricSystem ? 6_371_000.0 : 3_958.8 * 1609.34)
+
+    @State private var scaleMode: ScaleMode = .scaleTo
+    @State private var scaleByFactor: CGFloat = 1.0
+    enum ScaleMode: String, CaseIterable, Identifiable { case scaleTo, scaleBy; var id: String { rawValue } }
+
+    @State private var useNormalMapPreview: Bool = true
+    @State private var lightingModelPreview: SCNMaterial.LightingModel = .physicallyBased
 
     var body: some View {
-        VStack(spacing: 12) {
-            // Controls
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Radius Bar Controls").font(.headline)
-                HStack {
-                    Text("Radius \(Int(radius))m").monospacedDigit()
-                    Slider(value: $radius, in: 0...3_323_000)
+        NavigationStack {
+            VStack(spacing: 16) {
+                // Live bar preview with controls below
+                ZStack {
+                    Color(UIColor.systemBackground)
+                    configuredBar
+                        .rotation3DEffect(.degrees(tilt), axis: (x: 1, y: 0, z: 0), perspective: 0.65)
+                        .rotation3DEffect(.degrees(yawDegrees), axis: (x: 0, y: 1, z: 0), perspective: 0.65)
                 }
-                HStack {
-                    Text("Width \(Int(barWidth))")
-                    Slider(value: $barWidth, in: 64...160)
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .shadow(radius: 6)
+
+                // Scrollable controls on same page
+                ScrollView([.vertical, .horizontal]) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Radius Bar Controls").font(.headline)
+                        HStack {
+                            Text("Radius \(Int(radius))m").monospacedDigit()
+                            Slider(value: $radius, in: 0...3_323_000)
+                            Button("Reset") { animateTo(0) }
+                                .buttonStyle(.borderedProminent)
+                        }
+                        HStack {
+                            Text("Width \(Int(barWidth))")
+                            Slider(value: $barWidth, in: 64...160)
+                        }
+                        HStack {
+                            Text("Height \(Int(barHeight))")
+                            Slider(value: $barHeight, in: 260...520)
+                        }
+                        HStack {
+                            Text("Tilt \(Int(tilt))°")
+                            Slider(value: $tilt, in: -25...0, step: 1)
+                        }
+                        HStack(spacing: 8) {
+                            Text("Yaw")
+                            Button("45°") { withAnimation(.easeInOut(duration: 0.25)) { yawDegrees += 45 } }
+                            Button("90°") { withAnimation(.easeInOut(duration: 0.25)) { yawDegrees += 90 } }
+                            Button("180°") { withAnimation(.easeInOut(duration: 0.25)) { yawDegrees += 180 } }
+                            Button("360°") { withAnimation(.easeInOut(duration: 0.35)) { yawDegrees += 360 } }
+                            Button("Reset") { withAnimation(.easeInOut(duration: 0.25)) { yawDegrees = 0 } }
+                        }
+                        HStack {
+                            Text("UI Scale \(String(format: "%.2f", uiScale))")
+                            Slider(value: $uiScale, in: 0.8...2.0)
+                        }
+                        HStack {
+                            Text("Max Scene H \(String(format: "%.1f", maxSceneHeight))")
+                            Slider(value: $maxSceneHeight, in: 0.8...3.0)
+                        }
+                        HStack {
+                            Text("Growth \(String(format: "%.2f", growth))")
+                            Slider(value: $growth, in: 0.5...3.0)
+                        }
+                        ColorPicker("Base Color", selection: $baseColor)
+
+                        Picker("Scale Mode", selection: $scaleMode) {
+                            Text("Scale To").tag(ScaleMode.scaleTo)
+                            Text("Scale By").tag(ScaleMode.scaleBy)
+                        }
+                        .pickerStyle(.segmented)
+                        if scaleMode == .scaleBy {
+                            HStack {
+                                Text("Scale By \(String(format: "%.2f", scaleByFactor))x")
+                                Slider(value: $scaleByFactor, in: 0.5...2.0)
+                            }
+                        }
+
+                        Toggle("Use Normal Map", isOn: $useNormalMapPreview)
+                        Picker("Lighting", selection: $lightingModelPreview) {
+                            Text("PBR").tag(SCNMaterial.LightingModel.physicallyBased)
+                            Text("Blinn").tag(SCNMaterial.LightingModel.blinn)
+                            Text("Lambert").tag(SCNMaterial.LightingModel.lambert)
+                            Text("Constant").tag(SCNMaterial.LightingModel.constant)
+                        }
+                        .pickerStyle(.segmented)
+
+                        Divider()
+                        Text("Animation / Physics").font(.headline)
+                        Toggle("Use Spring Animation", isOn: $useSpring)
+                        if useSpring {
+                            HStack {
+                                Text("Response \(String(format: "%.2f", springResponse))")
+                                Slider(value: $springResponse, in: 0.1...1.2)
+                            }
+                            HStack {
+                                Text("Damping \(String(format: "%.2f", springDamping))")
+                                Slider(value: $springDamping, in: 0.2...1.5)
+                            }
+                            HStack {
+                                Text("Blend \(String(format: "%.2f", springBlend))")
+                                Slider(value: $springBlend, in: 0.0...1.0)
+                            }
+                        }
+                        Toggle("Gravity-like ramp (accelerate over time)", isOn: $useGravityRamp)
+                        if useGravityRamp {
+                            HStack {
+                                Text("Gravity \(String(format: "%.2f", gravityStrength))x")
+                                Slider(value: $gravityStrength, in: 0.2...3.0)
+                            }
+                        }
+
+                        Divider()
+                        Text("Quick Targets").font(.headline)
+                        growthButtons
+                    }
+                    .padding()
+                    .background(.ultraThinMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
-                HStack {
-                    Text("Height \(Int(barHeight))")
-                    Slider(value: $barHeight, in: 260...520)
-                }
-                HStack {
-                    Text("Tilt \(Int(tilt))°")
-                    Slider(value: $tilt, in: -25...0, step: 1)
-                }
-                HStack {
-                    Text("UI Scale \(String(format: "%.2f", uiScale))")
-                    Slider(value: $uiScale, in: 0.8...2.0)
-                }
-                HStack {
-                    Text("Max Scene H \(String(format: "%.1f", maxSceneHeight))")
-                    Slider(value: $maxSceneHeight, in: 0.8...3.0)
-                }
-                HStack {
-                    Text("Growth \(String(format: "%.2f", growth))")
-                    Slider(value: $growth, in: 0.5...3.0)
-                }
-                ColorPicker("Base Color", selection: $baseColor)
             }
             .padding()
-            .background(.ultraThinMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-
-            // Bar under test
-            ZStack {
-                Color(UIColor.systemBackground)
-                IsometricRadiusBar(radius: $radius, baseColor: baseColor, growthSpeed: growth, maxSceneHeight: maxSceneHeight, uiScale: uiScale, maxRuntimeRadius: 3_323_000.0)
-                    .frame(width: barWidth, height: barHeight)
-                    .rotation3DEffect(.degrees(tilt), axis: (x: 1, y: 0, z: 0), perspective: 0.65)
+            .background(Color(UIColor.secondarySystemBackground))
+            .navigationTitle("Radius Bar Preview")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    NavigationLink("Full Bar") {
+                        ZStack {
+                            Color(UIColor.systemBackground).ignoresSafeArea()
+                            configuredBar
+                                .rotation3DEffect(.degrees(tilt), axis: (x: 1, y: 0, z: 0), perspective: 0.65)
+                                .rotation3DEffect(.degrees(yawDegrees), axis: (x: 0, y: 1, z: 0), perspective: 0.65)
+                        }
+                        .navigationTitle("Full Bar")
+                    }
+                }
             }
-            .clipShape(RoundedRectangle(cornerRadius: 16))
-            .shadow(radius: 6)
         }
-        .padding()
-        .background(Color(UIColor.secondarySystemBackground))
+    }
+
+    private var configuredBar: AnyView {
+        let base = IsometricRadiusBar(radius: $radius, baseColor: baseColor, growthSpeed: growth, maxSceneHeight: maxSceneHeight, uiScale: uiScale, maxRuntimeRadius: 3_323_000.0)
+        var cfg = base
+        cfg.useNormalMap = useNormalMapPreview
+        cfg.lightingModel = lightingModelPreview
+        if scaleMode == .scaleTo {
+            return AnyView(cfg.frame(width: barWidth, height: barHeight))
+        } else {
+            return AnyView(cfg.scaleEffect(scaleByFactor))
+        }
+    }
+
+    private var growthButtons: some View {
+        let percents: [Double] = [0.10, 0.20, 0.30, 0.40, 0.50, 0.75, 1.0]
+        return WrapHStack(spacing: 8) {
+            ForEach(percents, id: \.self) { p in
+                Button(String(format: "%.0f%%", p * 100)) {
+                    let target = earthMeters * p
+                    if useGravityRamp {
+                        runGravityRamp(to: target) {
+                            animateTo(0)
+                        }
+                    } else {
+                        animateTo(target)
+                        // After the animation completes approximately, drop back to 0
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            animateTo(0)
+                        }
+                    }
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+    }
+
+    private func animateTo(_ target: Double) {
+        if useSpring {
+            withAnimation(.interpolatingSpring(mass: 1.0, stiffness: springStiffness(), damping: springDampingCoef(), initialVelocity: 0)) {
+                radius = min(max(0, target), 3_323_000.0)
+            }
+        } else {
+            withAnimation(.easeInOut(duration: 0.35)) {
+                radius = min(max(0, target), 3_323_000.0)
+            }
+        }
+    }
+
+    private func springStiffness() -> Double {
+        // Map `response` and `damping` similar to SwiftUI's spring(response:dampingFraction:blendDuration:)
+        // Rough heuristic: stiffness ~ 1/(response^2)
+        max(10, 1.0 / max(0.05, springResponse * springResponse))
+    }
+
+    private func springDampingCoef() -> Double {
+        // Map damping fraction to a coefficient; keep in a stable range
+        max(1.0, 10.0 * springDamping)
+    }
+
+    private func runGravityRamp(to target: Double, completion: (() -> Void)? = nil) {
+        let clampedTarget = min(max(0, target), 3_323_000.0)
+        let start = radius
+        let delta = clampedTarget - start
+        guard abs(delta) > 1 else { completion?(); return }
+        let duration = max(0.3, 0.9 / gravityStrength)
+        let steps = Int(max(15, duration * 60))
+        let dt = duration / Double(steps)
+        var t: Double = 0
+        let accel = 2.0 / (duration * duration)
+        Task { @MainActor in
+            for i in 0...steps {
+                if i == steps {
+                    radius = clampedTarget
+                    completion?()
+                    break
+                }
+                t += dt
+                let normalized = min(1.0, 0.5 * accel * t * t)
+                radius = start + normalized * delta
+                try? await Task.sleep(nanoseconds: UInt64(dt * 1_000_000_000))
+            }
+        }
     }
 }
+
+private struct WrapHStack<Content: View>: View {
+    let spacing: CGFloat
+    @ViewBuilder let content: () -> Content
+    var body: some View {
+        HStack(spacing: spacing) { content() }
+    }
+}
+

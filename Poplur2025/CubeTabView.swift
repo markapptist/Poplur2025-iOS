@@ -20,12 +20,15 @@ struct CubeTabView: View {
     @Binding var selectedTab: AppTab
     @Environment(\.renderingConfig) private var renderingConfig
     var tintColor: Color = .indigo
+    var useNormalMap: Bool = true
+    var lightingModel: SCNMaterial.LightingModel = .constant
+    var rotationSpeedMultiplier: Double = 1.0 // >1.0 = slower, <1.0 = faster
     @State private var rotationIndex: Int = 0
     var onSwipeUp: (() -> Void)? = nil
     var onCubeTap: (() -> Void)? = nil
 
     var body: some View {
-        FloatingCube(selectedTab: $selectedTab, rotationIndex: $rotationIndex, tintColor: tintColor, onSwipeUp: onSwipeUp, onCubeTap: onCubeTap)
+        FloatingCube(selectedTab: $selectedTab, rotationIndex: $rotationIndex, tintColor: tintColor, useNormalMap: useNormalMap, lightingModel: lightingModel, rotationSpeedMultiplier: rotationSpeedMultiplier, onSwipeUp: onSwipeUp, onCubeTap: onCubeTap)
             .frame(height: 200)
             .background(.clear)
             .accessibilityHidden(true)
@@ -37,6 +40,9 @@ private struct FloatingCube: View {
     @Binding var selectedTab: AppTab
     @Binding var rotationIndex: Int
     var tintColor: Color
+    var useNormalMap: Bool
+    var lightingModel: SCNMaterial.LightingModel
+    var rotationSpeedMultiplier: Double
     var onSwipeUp: (() -> Void)?
     var onCubeTap: (() -> Void)?
 
@@ -44,7 +50,7 @@ private struct FloatingCube: View {
     @State private var tilt: Double = 0
 
     var body: some View {
-        CubeSceneView(selectedTab: $selectedTab, rotationIndex: $rotationIndex, tintColor: tintColor, parentSwipeUpHandler: onSwipeUp, parentCubeTapHandler: onCubeTap)
+        CubeSceneView(selectedTab: $selectedTab, rotationIndex: $rotationIndex, tintColor: tintColor, useNormalMap: useNormalMap, lightingModel: lightingModel, rotationSpeedMultiplier: rotationSpeedMultiplier, parentSwipeUpHandler: onSwipeUp, parentCubeTapHandler: onCubeTap)
     }
 }
 
@@ -52,6 +58,9 @@ private struct CubeSceneView: UIViewRepresentable {
     @Binding var selectedTab: AppTab
     @Binding var rotationIndex: Int
     var tintColor: Color
+    var useNormalMap: Bool
+    var lightingModel: SCNMaterial.LightingModel
+    var rotationSpeedMultiplier: Double
     var parentSwipeUpHandler: (() -> Void)? = nil
     var parentCubeTapHandler: (() -> Void)? = nil
 
@@ -136,8 +145,14 @@ private struct CubeSceneView: UIViewRepresentable {
         // Enable environment lighting for reflections if an environment image is present
         if let env = UIImage(named: "CubeEnv") {
             scene.lightingEnvironment.contents = env
-            scene.lightingEnvironment.intensity = 0.0
-        } else {
+        }
+        // Use non-zero IBL intensity when using a shaded model so rotation shows depth
+        switch lightingModel {
+        case .physicallyBased:
+            scene.lightingEnvironment.intensity = 0.5
+        case .blinn, .lambert:
+            scene.lightingEnvironment.intensity = 0.25
+        default:
             scene.lightingEnvironment.intensity = 0.0
         }
 
@@ -149,7 +164,24 @@ private struct CubeSceneView: UIViewRepresentable {
         cameraNode.camera?.zFar = 100
         scene.rootNode.addChildNode(cameraNode)
 
-        // Removed key directional light and fill omni light as per instructions
+        // Add subtle lights only when using shaded models
+        if lightingModel != .constant {
+            let dir = SCNLight()
+            dir.type = .directional
+            dir.intensity = 400
+            let dirNode = SCNNode()
+            dirNode.light = dir
+            dirNode.eulerAngles = SCNVector3(Float(30.0 * .pi / 180), Float(-45.0 * .pi / 180), 0)
+            scene.rootNode.addChildNode(dirNode)
+
+            let omni = SCNLight()
+            omni.type = .omni
+            omni.intensity = 200
+            let omniNode = SCNNode()
+            omniNode.light = omni
+            omniNode.position = SCNVector3(-2, 1.5, 3)
+            scene.rootNode.addChildNode(omniNode)
+        }
 
         // Lean cube geometry with small chamfer (lower tessellation)
         let box = SCNBox(width: 1.3, height: 1.3, length: 1.3, chamferRadius: 0.25)
@@ -179,12 +211,14 @@ private struct CubeSceneView: UIViewRepresentable {
             mat.diffuse.intensity = 0.95
             mat.multiply.intensity = 1.0
             // Normal map if available
-            if let normal = UIImage(named: "CubeNormalMap") {
+            if useNormalMap, let normal = UIImage(named: "CubeNormalMap") {
                 mat.normal.contents = normal
                 mat.normal.intensity = 0.7
+            } else {
+                mat.normal.contents = nil
             }
-            // Simplify lighting model and neutralize PBR params
-            mat.lightingModel = .constant
+            // Apply chosen lighting model
+            mat.lightingModel = lightingModel
             mat.metalness.contents = 0.0
             mat.roughness.contents = 1.0
             mat.emission.contents = UIColor.clear
@@ -255,6 +289,8 @@ private struct CubeSceneView: UIViewRepresentable {
         // Added helper functions as per instructions
         private func deg2rad(_ degrees: Float) -> Float { degrees * .pi / 180 }
         private func clamp(_ value: Float, min minVal: Float, max maxVal: Float) -> Float { max(minVal, min(maxVal, value)) }
+
+        private var rotationSpeedMultiplier: Double { parent.rotationSpeedMultiplier }
 
         init(_ parent: CubeSceneView) {
             self.parent = parent
@@ -398,9 +434,9 @@ private struct CubeSceneView: UIViewRepresentable {
             if bouncy {
                 // Overshoot then settle
                 let overshoot: Float = 0.12
-                let target1 = SCNAction.rotateTo(x: 0, y: CGFloat(baseAngle + overshoot), z: 0, duration: 0.18, usesShortestUnitArc: true)
+                let target1 = SCNAction.rotateTo(x: 0, y: CGFloat(baseAngle + overshoot), z: 0, duration: 0.18 * rotationSpeedMultiplier, usesShortestUnitArc: true)
                 target1.timingMode = .easeInEaseOut
-                let target2 = SCNAction.rotateTo(x: 0, y: CGFloat(baseAngle), z: 0, duration: 0.22, usesShortestUnitArc: true)
+                let target2 = SCNAction.rotateTo(x: 0, y: CGFloat(baseAngle), z: 0, duration: 0.22 * rotationSpeedMultiplier, usesShortestUnitArc: true)
                 target2.timingMode = .easeInEaseOut
                 let seq = SCNAction.sequence([target1, target2])
                 node.runAction(seq) { [weak self] in
@@ -410,7 +446,7 @@ private struct CubeSceneView: UIViewRepresentable {
                     }
                 }
             } else {
-                let action = SCNAction.rotateTo(x: 0, y: CGFloat(baseAngle), z: 0, duration: 0.28, usesShortestUnitArc: true)
+                let action = SCNAction.rotateTo(x: 0, y: CGFloat(baseAngle), z: 0, duration: 0.28 * rotationSpeedMultiplier, usesShortestUnitArc: true)
                 action.timingMode = .easeInEaseOut
                 node.runAction(action) { [weak self] in
                     guard let self = self else { return }
@@ -535,6 +571,16 @@ private struct CubeOnlyPreview: View {
     @State private var tab: AppTab = .map
     @State private var cubeHeight: CGFloat = 200
     @State private var tint: Color = .indigo
+    @State private var useNormalMapPreview: Bool = true
+    @State private var lightingModelPreview: SCNMaterial.LightingModel = .constant
+
+    @State private var tilt: Double = -8
+    @State private var yawDegrees: Double = 0
+    @State private var uiScale: CGFloat = 1.2
+    @State private var scaleMode: ScaleMode = .scaleTo
+    @State private var scaleByFactor: CGFloat = 1.0
+    @State private var rotationSpeedMultiplier: Double = 1.5
+    enum ScaleMode: String, CaseIterable, Identifiable { case scaleTo, scaleBy; var id: String { rawValue } }
 
     var body: some View {
         VStack(spacing: 12) {
@@ -555,6 +601,45 @@ private struct CubeOnlyPreview: View {
                     Text("Profile").tag(AppTab.profile)
                 }
                 .pickerStyle(.segmented)
+                HStack {
+                    Text("UI Scale \(String(format: "%.2f", uiScale))")
+                    Slider(value: $uiScale, in: 0.8...2.0)
+                }
+                HStack {
+                    Text("Tilt \(Int(tilt))°")
+                    Slider(value: $tilt, in: -25...0, step: 1)
+                }
+                HStack(spacing: 8) {
+                    Text("Yaw")
+                    Button("45°") { withAnimation(.easeInOut(duration: 0.25)) { yawDegrees += 45 } }
+                    Button("90°") { withAnimation(.easeInOut(duration: 0.25)) { yawDegrees += 90 } }
+                    Button("180°") { withAnimation(.easeInOut(duration: 0.25)) { yawDegrees += 180 } }
+                    Button("360°") { withAnimation(.easeInOut(duration: 0.35)) { yawDegrees += 360 } }
+                    Button("Reset") { withAnimation(.easeInOut(duration: 0.25)) { yawDegrees = 0 } }
+                }
+                Toggle("Use Normal Map", isOn: $useNormalMapPreview)
+                Picker("Lighting", selection: $lightingModelPreview) {
+                    Text("PBR").tag(SCNMaterial.LightingModel.physicallyBased)
+                    Text("Blinn").tag(SCNMaterial.LightingModel.blinn)
+                    Text("Lambert").tag(SCNMaterial.LightingModel.lambert)
+                    Text("Constant").tag(SCNMaterial.LightingModel.constant)
+                }
+                .pickerStyle(.segmented)
+                Picker("Scale Mode", selection: $scaleMode) {
+                    Text("Scale To").tag(ScaleMode.scaleTo)
+                    Text("Scale By").tag(ScaleMode.scaleBy)
+                }
+                .pickerStyle(.segmented)
+                if scaleMode == .scaleBy {
+                    HStack {
+                        Text("Scale By \(String(format: "%.2f", scaleByFactor))x")
+                        Slider(value: $scaleByFactor, in: 0.5...2.0)
+                    }
+                }
+                HStack {
+                    Text("Rotation Speed x\(String(format: "%.2f", rotationSpeedMultiplier))")
+                    Slider(value: $rotationSpeedMultiplier, in: 0.5...3.0)
+                }
             }
             .padding()
             .background(.ultraThinMaterial)
@@ -563,8 +648,18 @@ private struct CubeOnlyPreview: View {
             // Cube under test
             ZStack {
                 Color(UIColor.systemBackground)
-                CubeTabView(selectedTab: $tab, tintColor: tint)
+                let baseCube = CubeTabView(selectedTab: $tab, tintColor: tint, useNormalMap: useNormalMapPreview, lightingModel: lightingModelPreview, rotationSpeedMultiplier: rotationSpeedMultiplier)
                     .frame(height: cubeHeight)
+                    .scaleEffect(uiScale)
+                    .rotation3DEffect(.degrees(tilt), axis: (x: 1, y: 0, z: 0), perspective: 0.65)
+                    .rotation3DEffect(.degrees(yawDegrees), axis: (x: 0, y: 1, z: 0), perspective: 0.65)
+                Group {
+                    if scaleMode == .scaleTo {
+                        baseCube
+                    } else {
+                        baseCube.scaleEffect(scaleByFactor)
+                    }
+                }
             }
             .clipShape(RoundedRectangle(cornerRadius: 16))
             .shadow(radius: 6)

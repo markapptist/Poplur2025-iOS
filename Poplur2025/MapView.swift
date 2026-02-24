@@ -1,6 +1,6 @@
 import SwiftUI
 import MapKit
-import FirebaseFirestore
+import FirebaseFirestore 
 import FirebaseAuth
 import CoreLocation
 import UserNotifications
@@ -9,6 +9,12 @@ import GoogleMaps3D
 
 enum GoogleMaps3DConfig {
     static let apiKey: String = "AIzaSyDgMYA1YisgbpEGyl0Nj8VGoorbqmfAkG0"
+}
+
+extension Notification.Name {
+    static let startDominanceTour = Notification.Name("StartDominanceTour")
+    static let stopDominanceTour = Notification.Name("StopDominanceTour")
+    static let setTourSpeedMultiplier = Notification.Name("SetTourSpeedMultiplier")
 }
 
 // MARK: - Constants (LOCKED CAMERA VALUES)
@@ -210,6 +216,7 @@ struct MapView: View {
     @State private var tourTask: Task<Void, Never>? = nil
     @State private var tourActive: Bool = false
     @State private var tourIndex: Int = 0
+    @State private var tourSpeedMultiplier: Double = 1.0
 
     @State private var idleTask: Task<Void, Never>? = nil
     @State private var lastInteractionAt: Date = Date()
@@ -268,7 +275,7 @@ struct MapView: View {
             }
 
             // 1) Zoom out from current position
-            withAnimation(.easeInOut(duration: 2.0)) {
+            withAnimation(.easeInOut(duration: 2.0 * tourSpeedMultiplier)) {
                 camera = .camera(
                     MapCamera(
                         centerCoordinate: camera?.camera?.centerCoordinate ?? userCoord,
@@ -281,9 +288,9 @@ struct MapView: View {
 
             Task { @MainActor in
                 // Small pause
-                try? await Task.sleep(nanoseconds: 1_200_000_000)
+                try? await Task.sleep(nanoseconds: UInt64(1_200_000_000.0 * tourSpeedMultiplier))
                 // 2) Fly to user at zoomed-out distance
-                withAnimation(.easeInOut(duration: 3.0)) {
+                withAnimation(.easeInOut(duration: 3.0 * tourSpeedMultiplier)) {
                     camera = .camera(
                         MapCamera(
                             centerCoordinate: userCoord,
@@ -294,9 +301,9 @@ struct MapView: View {
                     )
                 }
                 // Small pause
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                try? await Task.sleep(nanoseconds: UInt64(1_000_000_000.0 * tourSpeedMultiplier))
                 // 3) Zoom back in
-                withAnimation(.easeInOut(duration: 2.0)) {
+                withAnimation(.easeInOut(duration: 2.0 * tourSpeedMultiplier)) {
                     camera = .camera(
                         MapCamera(
                             centerCoordinate: userCoord,
@@ -307,8 +314,19 @@ struct MapView: View {
                     )
                 }
                 // Dwell briefly after landing on user
-                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                try? await Task.sleep(nanoseconds: UInt64(3_000_000_000.0 * tourSpeedMultiplier))
                 noteInteraction()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .startDominanceTour)) { _ in
+            startDominanceTour()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .stopDominanceTour)) { _ in
+            stopDominanceTour()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .setTourSpeedMultiplier)) { note in
+            if let value = note.userInfo?["multiplier"] as? Double {
+                tourSpeedMultiplier = max(0.1, min(5.0, value))
             }
         }
     }
@@ -428,7 +446,7 @@ struct MapView: View {
             while !Task.isCancelled, tourActive, !dominance.isEmpty {
                 let dom = dominance[tourIndex % dominance.count]
                 // Zoom out significantly and prepare to move towards the destination
-                withAnimation(.easeInOut(duration: 2.0)) {
+                withAnimation(.easeInOut(duration: 2.0 * tourSpeedMultiplier)) {
                     camera = .camera(
                         MapCamera(
                             centerCoordinate: camera?.camera?.centerCoordinate ?? dom.coordinate,
@@ -439,10 +457,10 @@ struct MapView: View {
                     )
                 }
                 // Let the map settle
-                try? await Task.sleep(nanoseconds: 1_200_000_000)
+                try? await Task.sleep(nanoseconds: UInt64(1_200_000_000.0 * tourSpeedMultiplier))
 
                 // Fly to target city at zoomed-out distance
-                withAnimation(.easeInOut(duration: 3.0)) {
+                withAnimation(.easeInOut(duration: 3.0 * tourSpeedMultiplier)) {
                     camera = .camera(
                         MapCamera(
                             centerCoordinate: dom.coordinate,
@@ -453,10 +471,10 @@ struct MapView: View {
                     )
                 }
                 // Allow tiles to begin loading
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                try? await Task.sleep(nanoseconds: UInt64(1_000_000_000.0 * tourSpeedMultiplier))
 
                 // Zoom back in slowly to fixed distance at target
-                withAnimation(.easeInOut(duration: 2.0)) {
+                withAnimation(.easeInOut(duration: 2.0 * tourSpeedMultiplier)) {
                     camera = .camera(
                         MapCamera(
                             centerCoordinate: dom.coordinate,
@@ -468,7 +486,7 @@ struct MapView: View {
                 }
 
                 // Dwell longer at the destination to allow tiles/labels to fully render
-                try? await Task.sleep(nanoseconds: 15_000_000_000)
+                try? await Task.sleep(nanoseconds: UInt64(15_000_000_000.0 * tourSpeedMultiplier))
 
                 tourIndex = (tourIndex + 1) % dominance.count
             }
@@ -504,3 +522,39 @@ struct MapView: View {
     }
 }
 
+#Preview("Map Tour Preview") {
+    MapTourPreview()
+}
+
+private struct MapTourPreview: View {
+    @State private var speed: Double = 1.0
+    var body: some View {
+        ZStack(alignment: .top) {
+            MapView()
+            VStack(spacing: 12) {
+                HStack {
+                    Text("Tour Speed x\(String(format: "%.2f", speed))")
+                    Slider(value: $speed, in: 0.25...3.0, step: 0.05)
+                }
+                HStack {
+                    Button("Apply Speed") {
+                        NotificationCenter.default.post(name: .setTourSpeedMultiplier, object: nil, userInfo: ["multiplier": speed])
+                    }
+                    Button("Start Tour") {
+                        NotificationCenter.default.post(name: .startDominanceTour, object: nil)
+                    }
+                    Button("Stop Tour") {
+                        NotificationCenter.default.post(name: .stopDominanceTour, object: nil)
+                    }
+                    Button("Center On User") {
+                        NotificationCenter.default.post(name: .CenterMapOnUser, object: nil)
+                    }
+                }
+            }
+            .padding()
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .padding()
+        }
+    }
+}
