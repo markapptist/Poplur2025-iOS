@@ -19,7 +19,7 @@ final class IsometricBarSettings: ObservableObject {
     // Vertical distance from bottom safe area (points)
     @Published var bottomOffset: CGFloat
 
-    init(horizontalOffset: CGFloat = 200, bottomOffset: CGFloat = 45) {
+    init(horizontalOffset: CGFloat = 23, bottomOffset: CGFloat = 24) {
         self.horizontalOffset = horizontalOffset
         self.bottomOffset = bottomOffset
     }
@@ -28,7 +28,7 @@ final class IsometricBarSettings: ObservableObject {
 // Shared model for the isometric bar radius value
 final class IsometricBarModel: ObservableObject {
     @Published var radius: Double
-    init(radius: Double = 2500) { self.radius = radius }
+    init(radius: Double = 0) { self.radius = radius }
 }
 
 private struct IsometricBarSettingsKey: EnvironmentKey {
@@ -149,12 +149,13 @@ struct HomeView: View {
     @State private var isFeedReady: Bool = false
     @State private var enableLowerHitArea: Bool = false
     @State private var didPrewarmSceneKit = false
+    @State private var showBarTuner: Bool = false
     
     // Shared radius model controlling the global isometric bar value across all tabs
     @StateObject private var isometricBarModel = IsometricBarModel(radius: 0)
     
     // Shared settings controlling isometric bar offsets across all views
-    @StateObject private var isometricBarSettings = IsometricBarSettings(horizontalOffset: 23, bottomOffset: 24) // Adjusted bottom offset and horizontal offset per instructions
+    @StateObject private var isometricBarSettings = IsometricBarSettings(horizontalOffset: 80, bottomOffset: -80)
     
     @StateObject private var motionController = SceneMotionController()
     @StateObject private var cubeTouchConfig = CubeTouchConfiguration()
@@ -341,6 +342,7 @@ struct HomeView: View {
             .padding(.bottom, 24)
             .ignoresSafeArea(edges: .bottom)
             .allowsHitTesting(true)
+            .zIndex(998)
             .gesture(
                 DragGesture(minimumDistance: 20)
                     .onEnded { value in
@@ -422,6 +424,7 @@ struct HomeView: View {
             .ignoresSafeArea(.container, edges: [.bottom, .leading, .trailing])
             .zIndex(999)
             .allowsHitTesting(false)
+            
         }
         
         // Inject global settings for isometric radius bar positioning
@@ -565,6 +568,11 @@ struct HomeView: View {
                 // Clamp to cap used in app (3,323,000) per updated cap
                 isometricBarModel.radius = min(value, 3_323_000.0)
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("InlinePreviewDismissRequested"))) { _ in
+            // Reset the radius bar so the user can capture again
+            isometricBarModel.radius = 0
+            NotificationCenter.default.post(name: .SharedRadiusDidChange, object: nil, userInfo: ["radius": 0.0])
         }
     }
     

@@ -148,11 +148,8 @@ final class CameraPreviewViewController: UIViewController {
         flipSprite.alpha = 0.95
         overlay.addChild(flipSprite)
         
-        // Textures are pre-tinted white; keep blend factor minimal to avoid unintended darkening
-        torchSprite.colorBlendFactor = 0.0
-        torchSprite.blendMode = .alpha
-        flipSprite.colorBlendFactor = 0.0
         flipSprite.blendMode = .alpha
+        torchSprite.blendMode = .alpha
 
         // Setup UIKit buttons
         setupButtons()

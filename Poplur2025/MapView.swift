@@ -224,10 +224,13 @@ struct MapView: View {
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             mapLayer
+                .ignoresSafeArea()
                 .contentShape(Rectangle())
                 .simultaneousGesture(DragGesture(minimumDistance: 0).onChanged { _ in noteInteraction() })
                 .simultaneousGesture(TapGesture().onEnded { noteInteraction() })
         }
+        .navigationBarHidden(true)
+        .toolbar(.hidden, for: .navigationBar)
         .onAppear {
             locationManager.requestAuthorizationIfNeeded()
             // Nudge/ensure a valid initial camera so tiles render immediately
@@ -558,3 +561,4 @@ private struct MapTourPreview: View {
         }
     }
 }
+
