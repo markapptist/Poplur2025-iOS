@@ -67,6 +67,8 @@ private struct CubeSceneView: UIViewRepresentable {
     func makeUIView(context: Context) -> SCNView {
         let scnView = SCNView()
         scnView.backgroundColor = .clear
+        // Removed: scnView.autoenablesDefaultLighting = false
+        // Removed: scnView.rendersContinuously = true
         scnView.allowsCameraControl = false
         // Fast first frame: empty scene, no AA, lower FPS
         scnView.scene = SCNScene()
@@ -142,6 +144,9 @@ private struct CubeSceneView: UIViewRepresentable {
     private func makeScene() -> SCNScene {
         let scene = SCNScene()
 
+        // Removed fog for atmospheric depth cue
+        // Removed background.contents assignment
+
         // Enable environment lighting for reflections if an environment image is present
         if let env = UIImage(named: "CubeEnv") {
             scene.lightingEnvironment.contents = env
@@ -156,19 +161,48 @@ private struct CubeSceneView: UIViewRepresentable {
             scene.lightingEnvironment.intensity = 0.0
         }
 
+        // Slightly darker background helps depth; enable default lighting if needed
+        // Removed: scene.background.contents = UIColor.clear
+
         // Camera
         let cameraNode = SCNNode()
         cameraNode.camera = SCNCamera()
+        // Removed HDR/exposure/motion blur lines
+        /*
+        cameraNode.camera?.wantsHDR = true
+        cameraNode.camera?.wantsExposureAdaptation = true
+        cameraNode.camera?.motionBlurIntensity = 0.0
+        */
         cameraNode.position = SCNVector3(0, 0, 3.7) // move even closer to enlarge cube further
         cameraNode.camera?.fieldOfView = 50
         cameraNode.camera?.zFar = 100
         scene.rootNode.addChildNode(cameraNode)
 
-        // Add subtle lights only when using shaded models
+        // Removed ground plane for contact shadow
+        /*
+        let ground = SCNFloor()
+        ground.reflectivity = 0.0
+        ground.reflectionFalloffEnd = 0.0
+        ground.firstMaterial = {
+            let m = SCNMaterial()
+            m.diffuse.contents = UIColor.black.withAlphaComponent(0.0)
+            m.roughness.contents = 1.0
+            m.metalness.contents = 0.0
+            m.lightingModel = .lambert
+            m.isDoubleSided = true
+            m.writesToDepthBuffer = false
+            return m
+        }()
+        let groundNode = SCNNode(geometry: ground)
+        groundNode.position = SCNVector3(0, -1.1, 0)
+        scene.rootNode.addChildNode(groundNode)
+        */
+
+        // Add subtle lights only when using shaded models, WITHOUT shadows (reverted to original)
         if lightingModel != .constant {
             let dir = SCNLight()
             dir.type = .directional
-            dir.intensity = 400
+            dir.intensity = isRunningInPreviews ? 500 : 400
             let dirNode = SCNNode()
             dirNode.light = dir
             dirNode.eulerAngles = SCNVector3(Float(30.0 * .pi / 180), Float(-45.0 * .pi / 180), 0)
@@ -176,18 +210,21 @@ private struct CubeSceneView: UIViewRepresentable {
 
             let omni = SCNLight()
             omni.type = .omni
-            omni.intensity = 200
+            omni.intensity = isRunningInPreviews ? 150 : 200
             let omniNode = SCNNode()
             omniNode.light = omni
             omniNode.position = SCNVector3(-2, 1.5, 3)
             scene.rootNode.addChildNode(omniNode)
         }
+        // Removed else block that added light in constant mode
 
         // Lean cube geometry with small chamfer (lower tessellation)
         let box = SCNBox(width: 1.3, height: 1.3, length: 1.3, chamferRadius: 0.25)
         box.chamferSegmentCount = 8
         let node = SCNNode(geometry: box)
         node.name = "cube"
+        // Removed shadow casting on cube
+        // node.castsShadow = true
         scene.rootNode.addChildNode(node)
 
         box.materials = makeMaterials()
@@ -206,10 +243,20 @@ private struct CubeSceneView: UIViewRepresentable {
         return faces.map { tab in
             let mat = SCNMaterial()
             // Face content
-            mat.diffuse.contents = faceImage(for: tab)
+            let bgMask = faceBackgroundOnly(for: tab)
+            let emissionMask = faceEmissionMask(for: tab)
+            // Use white background mask in diffuse so geometry shows the shape
+            mat.diffuse.contents = bgMask
+            mat.diffuse.intensity = 1.0
+            // Apply live tint via multiply color
             mat.multiply.contents = uiColor(tintColor)
-            mat.diffuse.intensity = 0.95
             mat.multiply.intensity = 1.0
+            // Bright icon/title via emission mask
+            mat.emission.contents = emissionMask
+            mat.emission.intensity = 2.8
+            if isRunningInPreviews {
+                mat.emission.intensity = 0.6
+            }
             // Normal map if available
             if useNormalMap, let normal = UIImage(named: "CubeNormalMap") {
                 mat.normal.contents = normal
@@ -219,10 +266,17 @@ private struct CubeSceneView: UIViewRepresentable {
             }
             // Apply chosen lighting model
             mat.lightingModel = lightingModel
+
+            // Removed ambient occlusion, fresnel, and roughness = 0.85 block
+            /*
+            mat.ambientOcclusion.contents = UIColor(white: 0.0, alpha: 1.0)
+            mat.ambientOcclusion.intensity = 0.25
+            if lightingModel != .constant {
+                mat.fresnelExponent = 0.6
+            }
+            */
             mat.metalness.contents = 0.0
             mat.roughness.contents = 1.0
-            mat.emission.contents = UIColor.clear
-            mat.emission.intensity = 0.0
             mat.isDoubleSided = true
             mat.locksAmbientWithDiffuse = true
             return mat
@@ -248,19 +302,70 @@ private struct CubeSceneView: UIViewRepresentable {
                 let config = UIImage.SymbolConfiguration(pointSize: pointSize, weight: .bold)
                 let image = UIImage(systemName: symbolName, withConfiguration: config) ?? UIImage()
                 let imgRect = CGRect(x: (size.width - iconWidth) / 2, y: iconY, width: iconWidth, height: iconHeight)
-                image.withTintColor(.black, renderingMode: .alwaysOriginal).draw(in: imgRect)
+                image.withTintColor(.white, renderingMode: .alwaysOriginal).draw(in: imgRect)
 
                 // Title
                 let paragraph = NSMutableParagraphStyle()
                 paragraph.alignment = .center
                 let attrs: [NSAttributedString.Key: Any] = [
                     .font: UIFont.systemFont(ofSize: 24, weight: .heavy),
-                    .foregroundColor: UIColor.black,
+                    .foregroundColor: UIColor.white,
                     .paragraphStyle: paragraph
                 ]
                 let title = tab.title as NSString
                 let titleRect = CGRect(x: 0, y: 180, width: size.width, height: 40)
                 title.draw(in: titleRect, withAttributes: attrs)
+            }
+        }
+    }
+
+    private func faceEmissionMask(for tab: AppTab) -> UIImage {
+        let key = "face_emission_\(tab.title)"
+        return CubeFaceImageCache.image(for: key) {
+            let size = CGSize(width: 300, height: 300)
+            let renderer = UIGraphicsImageRenderer(size: size)
+            return renderer.image { ctx in
+                // Transparent background
+                UIColor.clear.setFill()
+                ctx.fill(CGRect(origin: .zero, size: size))
+
+                // Icon (white)
+                let symbolName = tab.systemImage
+                let pointSize: CGFloat = 80
+                let iconWidth: CGFloat = 90
+                let iconHeight: CGFloat = 90
+                let iconY: CGFloat = 70
+                let config = UIImage.SymbolConfiguration(pointSize: pointSize, weight: .bold)
+                let image = UIImage(systemName: symbolName, withConfiguration: config) ?? UIImage()
+                let imgRect = CGRect(x: (size.width - iconWidth) / 2, y: iconY, width: iconWidth, height: iconHeight)
+                image.withTintColor(.white, renderingMode: .alwaysOriginal).draw(in: imgRect)
+
+                // Title (white)
+                let paragraph = NSMutableParagraphStyle()
+                paragraph.alignment = .center
+                let attrs: [NSAttributedString.Key: Any] = [
+                    .font: UIFont.systemFont(ofSize: 24, weight: .heavy),
+                    .foregroundColor: UIColor.white,
+                    .paragraphStyle: paragraph
+                ]
+                let title = tab.title as NSString
+                let titleRect = CGRect(x: 0, y: 180, width: size.width, height: 40)
+                title.draw(in: titleRect, withAttributes: attrs)
+            }
+        }
+    }
+
+    // Added helper function per instructions
+    private func faceBackgroundOnly(for tab: AppTab) -> UIImage {
+        let key = "face_bg_only_\(tab.title)"
+        return CubeFaceImageCache.image(for: key) {
+            let size = CGSize(width: 300, height: 300)
+            let renderer = UIGraphicsImageRenderer(size: size)
+            return renderer.image { ctx in
+                // White background shape (to be tinted via material multiply)
+                UIColor.white.setFill()
+                let rect = CGRect(origin: .zero, size: size)
+                UIBezierPath(roundedRect: rect.insetBy(dx: 8, dy: 8), cornerRadius: 24).fill()
             }
         }
     }
@@ -572,14 +677,16 @@ private struct CubeOnlyPreview: View {
     @State private var cubeHeight: CGFloat = 200
     @State private var tint: Color = .indigo
     @State private var useNormalMapPreview: Bool = true
-    @State private var lightingModelPreview: SCNMaterial.LightingModel = .constant
+    @State private var lightingModelPreview: SCNMaterial.LightingModel = .lambert
 
-    @State private var tilt: Double = -8
-    @State private var yawDegrees: Double = 0
+    @State private var tilt: Double = -12
+    @State private var yawDegrees: Double = 40
     @State private var uiScale: CGFloat = 1.2
     @State private var scaleMode: ScaleMode = .scaleTo
     @State private var scaleByFactor: CGFloat = 1.0
     @State private var rotationSpeedMultiplier: Double = 1.5
+    @State private var isSpinning: Bool = true
+
     enum ScaleMode: String, CaseIterable, Identifiable { case scaleTo, scaleBy; var id: String { rawValue } }
 
     var body: some View {
@@ -666,5 +773,17 @@ private struct CubeOnlyPreview: View {
         }
         .padding()
         .background(Color(UIColor.secondarySystemBackground))
+        .task {
+            // Slow continuous spin for preview only
+            while isSpinning {
+                try? await Task.sleep(nanoseconds: 30_000_000) // ~33 fps
+                await MainActor.run {
+                    yawDegrees = (yawDegrees + 0.6).truncatingRemainder(dividingBy: 360)
+                }
+            }
+        }
+        .onDisappear {
+            isSpinning = false
+        }
     }
 }
