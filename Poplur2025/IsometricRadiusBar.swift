@@ -18,6 +18,7 @@ public struct IsometricRadiusBar: View {
     private var earthRadiusMeters: Double { usesImperial ? 3958.8 * 1609.34 : 6371.0 * 1000.0 }
     private var earthRadiusCapMeters: Double { earthRadiusMeters }
     public var baseColor: Color
+    public var tintColor: Color = .indigo
     private var pitchDegrees: Double
     private var yawDegrees: Double
     private var growthSpeed: Double
@@ -28,9 +29,10 @@ public struct IsometricRadiusBar: View {
     public var useNormalMap: Bool = true
     public var lightingModel: SCNMaterial.LightingModel = .physicallyBased
 
-    public init(radius: Binding<Double>, baseColor: Color = .indigo, pitchDegrees: Double = 10.0, yawDegrees: Double = 20.0, growthSpeed: Double = 1.5, maxSceneHeight: Double = 2.4, uiScale: CGFloat = 1.5, maxRuntimeRadius: Double? = nil) {
+    public init(radius: Binding<Double>, baseColor: Color = .indigo, tintColor: Color = .indigo, pitchDegrees: Double = 10.0, yawDegrees: Double = 20.0, growthSpeed: Double = 1.5, maxSceneHeight: Double = 2.4, uiScale: CGFloat = 1.5, maxRuntimeRadius: Double? = nil) {
         self._radius = radius
         self.baseColor = baseColor
+        self.tintColor = tintColor
         self.pitchDegrees = pitchDegrees
         self.yawDegrees = yawDegrees
         self.growthSpeed = growthSpeed
@@ -44,6 +46,7 @@ public struct IsometricRadiusBar: View {
             RadiusBarSceneView(
                 radius: $radius,
                 baseColor: baseColor,
+                tintColor: tintColor,
                 pitchDegrees: pitchDegrees,
                 yawDegrees: yawDegrees,
                 maxSceneHeight: maxSceneHeight,
@@ -143,6 +146,7 @@ private extension IsometricRadiusBar {
 private struct RadiusBarSceneView: UIViewRepresentable {
     @Binding var radius: Double
     var baseColor: Color
+    var tintColor: Color
     var pitchDegrees: Double
     var yawDegrees: Double
     var maxSceneHeight: Double
@@ -167,6 +171,7 @@ private struct RadiusBarSceneView: UIViewRepresentable {
 
     func updateUIView(_ uiView: SCNView, context: Context) {
         context.coordinator.updateHeight(from: radius)
+        context.coordinator.updateMaterials(baseColor: baseColor, tintColor: tintColor, useNormalMap: useNormalMap, lightingModel: lightingModel)
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -189,22 +194,27 @@ private struct RadiusBarSceneView: UIViewRepresentable {
         // Target node for the camera to look at (visual center)
         let barTarget = SCNNode()
         barTarget.name = "barTarget"
-        barTarget.position = SCNVector3(0, 1.2, 0) // raise the target (visual center) so the bar appears higher in frame
+        barTarget.position = SCNVector3(0, 0.3, 0) // lower the target (visual center) so the bar appears lower in frame
         scene.rootNode.addChildNode(barTarget)
 
         // Bar (SCNBox) sized to show height with small width/length, start at a tiny height so it's visible
-        let box = SCNBox(width: 0.42, height: 0.05, length: 0.42, chamferRadius: 0.06)
+        let box = SCNBox(width: 0.42, height: CGFloat(maxSceneHeight), length: 0.42, chamferRadius: 0.06)
         box.chamferSegmentCount = 3
         box.materials = perFaceMaterials(from: baseColor)
         let node = SCNNode(geometry: box)
         node.name = "bar"
-        node.position = SCNVector3(0, 1.0, 0) // lowered slightly to avoid cutoff
-        node.pivot = SCNMatrix4Identity // rotate around center to keep it visually centered
-        barTarget.addChildNode(node)
-
-        // Remove lookAt constraint and bobbing
-        // node.eulerAngles will be used for fixed pitch/yaw for subtle 3D effect
+        // Set pivot to bottom-center so scaling grows upward
+        if let box = node.geometry as? SCNBox {
+            let minY: Float = -Float(box.height) / 2.0
+            node.pivot = SCNMatrix4MakeTranslation(0, minY, 0)
+            // Position so that when scale.y == 1, the bar base sits at y=0 relative to barTarget
+            node.position = SCNVector3(0, Float(box.height) / 2.0, 0)
+        }
+        // Start collapsed in Y
+        node.scale = SCNVector3(1, 0.0001, 1)
+        // Fixed subtle 3D effect
         node.eulerAngles = SCNVector3(Float(6.0 * .pi / 180), Float(-10.0 * .pi / 180), 0)
+        barTarget.addChildNode(node)
 
         // Lights (omni + ambient + subtle rim)
         let omni = SCNLight()
@@ -232,6 +242,55 @@ private struct RadiusBarSceneView: UIViewRepresentable {
 
         // Removed radial shadow disk and cachedShadowImage as per instructions
 
+        // Add a small spinning Earth globe near the bar
+        let globeRadius: CGFloat = 0.28
+        let globe = SCNSphere(radius: globeRadius)
+        let globeMat = SCNMaterial()
+        if let earthImage = UIImage(named: "EarthDiffuse") {
+            globeMat.diffuse.contents = earthImage
+        } else {
+            globeMat.diffuse.contents = UIColor.systemBlue
+        }
+        // Slight specular for a nicer look
+        globeMat.metalness.contents = 0.05
+        globeMat.roughness.contents = 0.35
+        globe.materials = [globeMat]
+        let globeNode = SCNNode(geometry: globe)
+        // Position globe slightly to the right of the bar and lower so it sits visually near the base
+        globeNode.position = SCNVector3(0.9, 0.45, 0)
+        // Give a subtle tilt like Earth's axial tilt
+        globeNode.eulerAngles.x = Float(-23.5 * .pi / 180)
+        barTarget.addChildNode(globeNode)
+
+        // Continuous spin animation around Y
+        let spin = CABasicAnimation(keyPath: "rotation")
+        spin.fromValue = NSValue(scnVector4: SCNVector4(0, 1, 0, 0))
+        spin.toValue = NSValue(scnVector4: SCNVector4(0, 1, 0, Float(2 * Double.pi)))
+        spin.duration = 12.0
+        spin.repeatCount = .infinity
+        globeNode.addAnimation(spin, forKey: "earthSpin")
+
+        if let barNode = scene.rootNode.childNode(withName: "bar", recursively: true) {
+            // Bouncy, elastic keyframe animation for scale.y
+            let keyAnim = CAKeyframeAnimation(keyPath: "scale.y")
+            keyAnim.values = [0.0001, 1.15, 0.92, 1.05, 0.99, 1.0]
+            keyAnim.keyTimes = [0.0, 0.55, 0.7, 0.85, 0.95, 1.0] as [NSNumber]
+            keyAnim.duration = 4.0
+            keyAnim.autoreverses = true
+            keyAnim.repeatCount = .infinity
+            keyAnim.calculationMode = .cubic
+            keyAnim.isRemovedOnCompletion = false
+            // Slight ease-in at the start
+            keyAnim.timingFunctions = [
+                CAMediaTimingFunction(name: .easeIn),
+                CAMediaTimingFunction(name: .default),
+                CAMediaTimingFunction(name: .default),
+                CAMediaTimingFunction(name: .default),
+                CAMediaTimingFunction(name: .easeOut)
+            ]
+            barNode.addAnimation(keyAnim, forKey: "growYLoop")
+        }
+
         return scene
     }
 
@@ -247,7 +306,7 @@ private struct RadiusBarSceneView: UIViewRepresentable {
             let m = SCNMaterial()
             m.diffuse.contents = color
             m.lightingModel = lightingModel
-            m.multiply.contents = UIColor.systemIndigo
+            m.multiply.contents = uiColor(self.tintColor)
             if useNormalMap, let normal = UIImage(named: "CubeNormalMap") {
                 m.normal.contents = normal
                 m.normal.intensity = 0.6
@@ -356,10 +415,10 @@ private struct RadiusBarSceneView: UIViewRepresentable {
                   let root = scnView.scene?.rootNode,
                   let bar = root.childNode(withName: "bar", recursively: true),
                   let box = bar.geometry as? SCNBox else { return }
-            // Start at zero height so animation grows upward
-            let minH: CGFloat = 0.0
-            box.height = minH
-            bar.position.y = Float(minH / 2.0)
+            // Keep geometry height constant; collapse via scale so SCNAnimation can drive growth
+            bar.scale = SCNVector3(1, 0.0001, 1)
+            // Position bar so base sits at y=0 relative to barTarget
+            bar.position.y = Float(box.height) / 2.0
         }
 
         func markInitialAnimationRun() {
@@ -375,6 +434,11 @@ private struct RadiusBarSceneView: UIViewRepresentable {
                   let root = scnView.scene?.rootNode,
                   let bar = root.childNode(withName: "bar", recursively: true),
                   let box = bar.geometry as? SCNBox else { return }
+
+            // If bar has an active grow animation, skip manual height updates to keep SCNAnimation smooth
+            if bar.animation(forKey: "growYLoop") != nil {
+                return
+            }
 
             let targetH = clampedHeight(radius)
             // Hard cap to ensure we never exceed the visible scene height
@@ -398,6 +462,27 @@ private struct RadiusBarSceneView: UIViewRepresentable {
             let t = min(1.0, max(0.0, r / earthMeters))
             let result = minH + (maxH - minH) * t
             return min(result, maxH)
+        }
+        
+        func updateMaterials(baseColor: Color, tintColor: Color, useNormalMap: Bool, lightingModel: SCNMaterial.LightingModel) {
+            guard let scnView = view,
+                  let root = scnView.scene?.rootNode,
+                  let bar = root.childNode(withName: "bar", recursively: true),
+                  let box = bar.geometry as? SCNBox else { return }
+            // Rebuild per-face materials with current colors
+            let mats = parent.perFaceMaterials(from: baseColor)
+            // Update multiply and lighting model, and normal map settings per new config
+            for m in mats {
+                m.lightingModel = lightingModel
+                m.multiply.contents = UIColor(tintColor)
+                if useNormalMap, let normal = UIImage(named: "CubeNormalMap") {
+                    m.normal.contents = normal
+                    m.normal.intensity = 0.6
+                } else {
+                    m.normal.contents = nil
+                }
+            }
+            box.materials = mats
         }
     }
 }
@@ -433,6 +518,7 @@ private struct RadiusBarOnlyPreview: View {
     @State private var maxSceneHeight: Double = 1.8
     @State private var growth: Double = 1.5
     @State private var baseColor: Color = .indigo
+    @State private var tintColor: Color = .indigo
     @State private var useSpring: Bool = true
     @State private var springResponse: Double = 0.35
     @State private var springDamping: Double = 0.85
@@ -447,6 +533,7 @@ private struct RadiusBarOnlyPreview: View {
 
     @State private var useNormalMapPreview: Bool = true
     @State private var lightingModelPreview: SCNMaterial.LightingModel = .physicallyBased
+    @State private var isLooping: Bool = true
 
     var body: some View {
         NavigationStack {
@@ -504,6 +591,7 @@ private struct RadiusBarOnlyPreview: View {
                             Slider(value: $growth, in: 0.5...3.0)
                         }
                         ColorPicker("Base Color", selection: $baseColor)
+                        ColorPicker("Tint Color", selection: $tintColor)
 
                         Picker("Scale Mode", selection: $scaleMode) {
                             Text("Scale To").tag(ScaleMode.scaleTo)
@@ -576,11 +664,12 @@ private struct RadiusBarOnlyPreview: View {
                     }
                 }
             }
+            .onAppear { startLoopingAnimation() }
         }
     }
 
     private var configuredBar: AnyView {
-        let base = IsometricRadiusBar(radius: $radius, baseColor: baseColor, growthSpeed: growth, maxSceneHeight: maxSceneHeight, uiScale: uiScale, maxRuntimeRadius: 3_323_000.0)
+        let base = IsometricRadiusBar(radius: $radius, baseColor: baseColor, tintColor: tintColor, growthSpeed: growth, maxSceneHeight: maxSceneHeight, uiScale: uiScale, maxRuntimeRadius: 3_323_000.0)
         var cfg = base
         cfg.useNormalMap = useNormalMapPreview
         cfg.lightingModel = lightingModelPreview
@@ -661,6 +750,34 @@ private struct RadiusBarOnlyPreview: View {
             }
         }
     }
+
+    private func startLoopingAnimation() {
+        guard isLooping else { return }
+        let maxTarget = 3_323_000.0
+        Task { @MainActor in
+            while isLooping {
+                // Animate up to max
+                if useGravityRamp {
+                    await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+                        runGravityRamp(to: maxTarget) {
+                            cont.resume()
+                        }
+                    }
+                } else {
+                    animateTo(maxTarget)
+                    try? await Task.sleep(nanoseconds: 600_000_000)
+                }
+                // Brief pause at top
+                try? await Task.sleep(nanoseconds: 250_000_000)
+                // Reset to zero quickly
+                withAnimation(.easeOut(duration: 0.25)) {
+                    radius = 0
+                }
+                // Brief pause at bottom
+                try? await Task.sleep(nanoseconds: 250_000_000)
+            }
+        }
+    }
 }
 
 private struct WrapHStack<Content: View>: View {
@@ -670,4 +787,3 @@ private struct WrapHStack<Content: View>: View {
         HStack(spacing: spacing) { content() }
     }
 }
-
