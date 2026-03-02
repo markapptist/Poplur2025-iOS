@@ -1,6 +1,7 @@
 import SwiftUI
 import SceneKit
 import CoreMotion
+import AVFoundation
 
 private let isRunningInPreviews: Bool = {
     ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1"
@@ -18,51 +19,146 @@ private enum CubeFaceImageCache {
 
 struct CubeTabView: View {
     @Binding var selectedTab: AppTab
+    @Binding var previewHover: Bool
+    @Binding var previewPopTrigger: Int
+    @Binding var previewPopSoundEnabled: Bool
+    @Binding var previewYawRightStep: Int
+    @Binding var previewYawLeftStep: Int
     @Environment(\.renderingConfig) private var renderingConfig
     var tintColor: Color = .indigo
+    var baseColor: Color = Color(white: 0.2)
     var useNormalMap: Bool = true
     var lightingModel: SCNMaterial.LightingModel = .constant
     var rotationSpeedMultiplier: Double = 1.0 // >1.0 = slower, <1.0 = faster
+    var enablePreviewSpin: Bool = true
     @State private var rotationIndex: Int = 0
     var onSwipeUp: (() -> Void)? = nil
     var onCubeTap: (() -> Void)? = nil
 
+    init(selectedTab: Binding<AppTab>,
+         previewHover: Binding<Bool> = .constant(false),
+         previewPopTrigger: Binding<Int> = .constant(0),
+         previewPopSoundEnabled: Binding<Bool> = .constant(false),
+         previewYawRightStep: Binding<Int> = .constant(0),
+         previewYawLeftStep: Binding<Int> = .constant(0),
+         tintColor: Color = .indigo,
+         baseColor: Color = Color(white: 0.2),
+         useNormalMap: Bool = true,
+         lightingModel: SCNMaterial.LightingModel = .constant,
+         rotationSpeedMultiplier: Double = 1.0,
+         enablePreviewSpin: Bool = true,
+         onSwipeUp: (() -> Void)? = nil,
+         onCubeTap: (() -> Void)? = nil) {
+        self._selectedTab = selectedTab
+        self._previewHover = previewHover
+        self._previewPopTrigger = previewPopTrigger
+        self._previewPopSoundEnabled = previewPopSoundEnabled
+        self._previewYawRightStep = previewYawRightStep
+        self._previewYawLeftStep = previewYawLeftStep
+        self.tintColor = tintColor
+        self.baseColor = baseColor
+        self.useNormalMap = useNormalMap
+        self.lightingModel = lightingModel
+        self.rotationSpeedMultiplier = rotationSpeedMultiplier
+        self.enablePreviewSpin = enablePreviewSpin
+        self.onSwipeUp = onSwipeUp
+        self.onCubeTap = onCubeTap
+    }
+
     var body: some View {
-        FloatingCube(selectedTab: $selectedTab, rotationIndex: $rotationIndex, tintColor: tintColor, useNormalMap: useNormalMap, lightingModel: lightingModel, rotationSpeedMultiplier: rotationSpeedMultiplier, onSwipeUp: onSwipeUp, onCubeTap: onCubeTap)
-            .frame(height: 200)
-            .background(.clear)
-            .accessibilityHidden(true)
-            .onAppear { print("[CubeTabView] Appeared (forced 3D)") }
+        FloatingCube(
+            selectedTab: $selectedTab,
+            rotationIndex: $rotationIndex,
+            previewHover: $previewHover,
+            previewPopTrigger: $previewPopTrigger,
+            previewPopSoundEnabled: $previewPopSoundEnabled,
+            previewYawRightStep: $previewYawRightStep,
+            previewYawLeftStep: $previewYawLeftStep,
+            tintColor: tintColor,
+            useNormalMap: useNormalMap,
+            lightingModel: lightingModel,
+            rotationSpeedMultiplier: rotationSpeedMultiplier,
+            onSwipeUp: onSwipeUp,
+            onCubeTap: onCubeTap,
+            baseColor: baseColor,
+            enablePreviewSpin: enablePreviewSpin
+        )
+        .frame(height: 200)
+        .aspectRatio(1, contentMode: .fit)
+        .background(.clear)
+        .accessibilityHidden(true)
+        .onAppear {
+            print("[CubeTabView] Appeared (forced 3D)")
+            #if DEBUG
+            do {
+                try AVAudioSession.sharedInstance().setCategory(.ambient, options: [.mixWithOthers])
+                try AVAudioSession.sharedInstance().setActive(true)
+                print("[CubeTabView] AVAudioSession activated for previews")
+            } catch {
+                print("[CubeTabView] AVAudioSession activation failed: \(error)")
+            }
+            #endif
+        }
     }
 }
 
 private struct FloatingCube: View {
     @Binding var selectedTab: AppTab
     @Binding var rotationIndex: Int
+    @Binding var previewHover: Bool
+    @Binding var previewPopTrigger: Int
+    @Binding var previewPopSoundEnabled: Bool
+    @Binding var previewYawRightStep: Int
+    @Binding var previewYawLeftStep: Int
     var tintColor: Color
     var useNormalMap: Bool
     var lightingModel: SCNMaterial.LightingModel
     var rotationSpeedMultiplier: Double
     var onSwipeUp: (() -> Void)?
     var onCubeTap: (() -> Void)?
+    var baseColor: Color
+    var enablePreviewSpin: Bool
 
     @State private var bob: CGFloat = 0
     @State private var tilt: Double = 0
 
     var body: some View {
-        CubeSceneView(selectedTab: $selectedTab, rotationIndex: $rotationIndex, tintColor: tintColor, useNormalMap: useNormalMap, lightingModel: lightingModel, rotationSpeedMultiplier: rotationSpeedMultiplier, parentSwipeUpHandler: onSwipeUp, parentCubeTapHandler: onCubeTap)
+        CubeSceneView(
+            selectedTab: $selectedTab,
+            rotationIndex: $rotationIndex,
+            previewHover: $previewHover,
+            previewPopTrigger: $previewPopTrigger,
+            previewPopSoundEnabled: $previewPopSoundEnabled,
+            previewYawRightStep: $previewYawRightStep,
+            previewYawLeftStep: $previewYawLeftStep,
+            tintColor: tintColor,
+            baseColor: baseColor,
+            useNormalMap: useNormalMap,
+            lightingModel: lightingModel,
+            rotationSpeedMultiplier: rotationSpeedMultiplier,
+            parentSwipeUpHandler: onSwipeUp,
+            parentCubeTapHandler: onCubeTap,
+            enablePreviewSpin: enablePreviewSpin
+        )
     }
 }
 
 private struct CubeSceneView: UIViewRepresentable {
     @Binding var selectedTab: AppTab
     @Binding var rotationIndex: Int
+    @Binding var previewHover: Bool
+    @Binding var previewPopTrigger: Int
+    @Binding var previewPopSoundEnabled: Bool
+    @Binding var previewYawRightStep: Int
+    @Binding var previewYawLeftStep: Int
     var tintColor: Color
+    var baseColor: Color
     var useNormalMap: Bool
     var lightingModel: SCNMaterial.LightingModel
     var rotationSpeedMultiplier: Double
     var parentSwipeUpHandler: (() -> Void)? = nil
     var parentCubeTapHandler: (() -> Void)? = nil
+    var enablePreviewSpin: Bool
 
     func makeUIView(context: Context) -> SCNView {
         let scnView = SCNView()
@@ -114,6 +210,12 @@ private struct CubeSceneView: UIViewRepresentable {
         context.coordinator.view = scnView
         context.coordinator.syncToSelectedTab(selectedTab)
 
+        // Apply initial preview hover state and pop/yaw triggers
+        context.coordinator.applyPreviewHover(previewHover)
+        context.coordinator.lastPopTrigger = previewPopTrigger
+        context.coordinator.lastYawRightStep = previewYawRightStep
+        context.coordinator.lastYawLeftStep = previewYawLeftStep
+
         if selectedTab != .feed {
             NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
         }
@@ -130,13 +232,89 @@ private struct CubeSceneView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: SCNView, context: Context) {
+        // Keep tab state in sync
         context.coordinator.syncToSelectedTab(selectedTab)
+
+        // Propagate live tint updates to materials so previews reflect changes immediately
+        if let cube = uiView.scene?.rootNode.childNode(withName: "cube", recursively: true),
+           let box = cube.geometry as? SCNBox {
+            let uiTint = UIColor(tintColor)
+            let tabFaces: [AppTab] = [
+                .map,     // +X
+                .record,  // -X
+                .feed,    // +Y
+                .profile, // -Y
+                .map,     // +Z
+                .record   // -Z
+            ]
+            let updatedMaterials: [SCNMaterial] = box.materials.enumerated().map { i, mat in
+                let tab = tabFaces[i]
+                // Update diffuse background with baseColor
+                mat.diffuse.contents = faceBackgroundOnly(for: tab, baseColor: baseColor)
+                mat.multiply.contents = uiTint
+
+                // Update normal map live based on toggle
+                if useNormalMap, let normal = UIImage(named: "CubeNormalMap") {
+                    mat.normal.contents = normal
+                    if isRunningInPreviews {
+                        mat.normal.intensity = 2.0
+                    } else {
+                        mat.normal.intensity = 0.6
+                    }
+                } else {
+                    mat.normal.contents = nil
+                }
+                return mat
+            }
+            box.materials = updatedMaterials
+
+            // Nudge SceneKit to redraw this frame
+            uiView.sceneTime = uiView.sceneTime
+        }
+
+        // Manage preview hover animation state
+        context.coordinator.applyPreviewHover(previewHover)
+
+        // Manage preview pop trigger
+        if context.coordinator.lastPopTrigger != previewPopTrigger {
+            context.coordinator.lastPopTrigger = previewPopTrigger
+            context.coordinator.triggerPreviewPop()
+        }
+
+        // Manage preview yaw right step
+        if context.coordinator.lastYawRightStep != previewYawRightStep {
+            let diff = previewYawRightStep - context.coordinator.lastYawRightStep
+            context.coordinator.lastYawRightStep = previewYawRightStep
+            context.coordinator.applyYaw(steps: diff, direction: .right)
+        }
+        // Manage preview yaw left step
+        if context.coordinator.lastYawLeftStep != previewYawLeftStep {
+            let diff = previewYawLeftStep - context.coordinator.lastYawLeftStep
+            context.coordinator.lastYawLeftStep = previewYawLeftStep
+            context.coordinator.applyYaw(steps: diff, direction: .left)
+        }
+
+        // Manage preview spin action when toggle changes
+        if isRunningInPreviews, let cube = uiView.scene?.rootNode.childNode(withName: "cube", recursively: true) {
+            let isSpinning = cube.action(forKey: "previewSpin") != nil
+            if enablePreviewSpin && !isSpinning {
+                let spin = SCNAction.repeatForever(SCNAction.rotateBy(x: 0, y: CGFloat.pi * 2, z: 0, duration: 8.0))
+                spin.timingMode = .linear
+                cube.runAction(spin, forKey: "previewSpin")
+            } else if !enablePreviewSpin && isSpinning {
+                cube.removeAction(forKey: "previewSpin")
+            }
+        }
     }
 
     func makeCoordinator() -> Coordinator {
         let coordinator = Coordinator(self)
         coordinator.onSwipeUp = parentSwipeUpHandler
         coordinator.onCubeTap = parentCubeTapHandler
+        coordinator.applyPreviewHover(previewHover)
+        coordinator.lastPopTrigger = previewPopTrigger
+        coordinator.lastYawRightStep = previewYawRightStep
+        coordinator.lastYawLeftStep = previewYawLeftStep
         return coordinator
     }
 
@@ -152,13 +330,17 @@ private struct CubeSceneView: UIViewRepresentable {
             scene.lightingEnvironment.contents = env
         }
         // Use non-zero IBL intensity when using a shaded model so rotation shows depth
-        switch lightingModel {
-        case .physicallyBased:
-            scene.lightingEnvironment.intensity = 0.5
-        case .blinn, .lambert:
-            scene.lightingEnvironment.intensity = 0.25
-        default:
-            scene.lightingEnvironment.intensity = 0.0
+        if isRunningInPreviews {
+            scene.lightingEnvironment.intensity = 0.35
+        } else {
+            switch lightingModel {
+            case .physicallyBased:
+                scene.lightingEnvironment.intensity = 0.30
+            case .blinn, .lambert:
+                scene.lightingEnvironment.intensity = 0.15
+            default:
+                scene.lightingEnvironment.intensity = 0.0
+            }
         }
 
         // Slightly darker background helps depth; enable default lighting if needed
@@ -167,14 +349,15 @@ private struct CubeSceneView: UIViewRepresentable {
         // Camera
         let cameraNode = SCNNode()
         cameraNode.camera = SCNCamera()
+        cameraNode.eulerAngles = SCNVector3Zero
         // Removed HDR/exposure/motion blur lines
         /*
         cameraNode.camera?.wantsHDR = true
         cameraNode.camera?.wantsExposureAdaptation = true
         cameraNode.camera?.motionBlurIntensity = 0.0
         */
-        cameraNode.position = SCNVector3(0, 0, 3.7) // move even closer to enlarge cube further
-        cameraNode.camera?.fieldOfView = 50
+        cameraNode.position = SCNVector3(0, 0, 5.0) // pull back to reduce perspective distortion
+        cameraNode.camera?.fieldOfView = 40
         cameraNode.camera?.zFar = 100
         scene.rootNode.addChildNode(cameraNode)
 
@@ -199,24 +382,27 @@ private struct CubeSceneView: UIViewRepresentable {
         */
 
         // Add subtle lights only when using shaded models, WITHOUT shadows (reverted to original)
-        if lightingModel != .constant {
+        if true {
+            let intensityDirectional: CGFloat = 80
+            let intensityOmni: CGFloat = 40
+            // Directional light
             let dir = SCNLight()
             dir.type = .directional
-            dir.intensity = isRunningInPreviews ? 500 : 400
+            dir.intensity = intensityDirectional
             let dirNode = SCNNode()
             dirNode.light = dir
             dirNode.eulerAngles = SCNVector3(Float(30.0 * .pi / 180), Float(-45.0 * .pi / 180), 0)
             scene.rootNode.addChildNode(dirNode)
 
+            // Omni light
             let omni = SCNLight()
             omni.type = .omni
-            omni.intensity = isRunningInPreviews ? 150 : 200
+            omni.intensity = intensityOmni
             let omniNode = SCNNode()
             omniNode.light = omni
             omniNode.position = SCNVector3(-2, 1.5, 3)
             scene.rootNode.addChildNode(omniNode)
         }
-        // Removed else block that added light in constant mode
 
         // Lean cube geometry with small chamfer (lower tessellation)
         let box = SCNBox(width: 1.3, height: 1.3, length: 1.3, chamferRadius: 0.25)
@@ -227,58 +413,87 @@ private struct CubeSceneView: UIViewRepresentable {
         // node.castsShadow = true
         scene.rootNode.addChildNode(node)
 
-        box.materials = makeMaterials()
+        node.eulerAngles = SCNVector3(0.0, 0.0, 0.0)
+
+        // In previews, continuously rotate the cube to preview all sides
+        if isRunningInPreviews && enablePreviewSpin {
+            let spin = SCNAction.repeatForever(SCNAction.rotateBy(x: 0, y: CGFloat.pi * 2, z: 0, duration: 8.0))
+            spin.timingMode = .linear
+            node.runAction(spin, forKey: "previewSpin")
+        }
+
+        box.materials = makeMaterials(baseColor: baseColor)
 
         return scene
     }
 
     private func uiColor(_ c: Color) -> UIColor { UIColor(c) }
 
-    private func makeMaterials() -> [SCNMaterial] {
-        // Map faces to tabs in order: +X, -X, +Y, -Y, +Z, -Z
-        let tabs: [AppTab] = [.map, .record, .feed, .profile]
-        var faces: [AppTab] = tabs
-        faces.append(tabs.first!)
+    private func makeMaterials(baseColor: Color) -> [SCNMaterial] {
+        // Build exactly six faces in +X, -X, +Y, -Y, +Z, -Z order
+        // Repeat app tabs to fill all six faces so each side renders content
+        let tabFaces: [AppTab] = [
+            .map,     // +X
+            .record,  // -X
+            .feed,    // +Y
+            .profile, // -Y
+            .map,     // +Z
+            .record   // -Z
+        ]
 
-        return faces.map { tab in
+        return tabFaces.map { tab in
             let mat = SCNMaterial()
             // Face content
-            let bgMask = faceBackgroundOnly(for: tab)
+            let bgMask = faceBackgroundOnly(for: tab, baseColor: baseColor)
             let emissionMask = faceEmissionMask(for: tab)
             // Use white background mask in diffuse so geometry shows the shape
             mat.diffuse.contents = bgMask
             mat.diffuse.intensity = 1.0
             // Apply live tint via multiply color
             mat.multiply.contents = uiColor(tintColor)
-            mat.multiply.intensity = 1.0
-            // Bright icon/title via emission mask
-            mat.emission.contents = emissionMask
-            mat.emission.intensity = 2.8
+            mat.multiply.intensity = 0.75
+            // Removed preview override for multiply intensity:
+            /*
             if isRunningInPreviews {
-                mat.emission.intensity = 0.6
+                mat.multiply.intensity = 0.9
             }
+            */
+            // Boost emission for better icon readability
+            mat.emission.intensity = 0.5
+            if isRunningInPreviews {
+                mat.emission.intensity = 0.4
+            }
+            mat.emission.contents = emissionMask
             // Normal map if available
             if useNormalMap, let normal = UIImage(named: "CubeNormalMap") {
                 mat.normal.contents = normal
-                mat.normal.intensity = 0.7
+                if isRunningInPreviews {
+                    mat.normal.intensity = 2.0
+                } else {
+                    mat.normal.intensity = 0.6
+                }
             } else {
                 mat.normal.contents = nil
             }
             // Apply chosen lighting model
             mat.lightingModel = lightingModel
 
-            // Removed ambient occlusion, fresnel, and roughness = 0.85 block
-            /*
-            mat.ambientOcclusion.contents = UIColor(white: 0.0, alpha: 1.0)
-            mat.ambientOcclusion.intensity = 0.25
             if lightingModel != .constant {
-                mat.fresnelExponent = 0.6
+                mat.metalness.contents = 0.15
+                mat.roughness.contents = 0.8
+                // Removed mat.fresnelExponent = 0.7 completely
+                if useNormalMap {
+                    mat.normal.intensity = 1.3
+                }
+                mat.selfIllumination.contents = UIColor.black
+            } else {
+                mat.metalness.contents = 0.0
+                mat.roughness.contents = 1.0
             }
-            */
-            mat.metalness.contents = 0.0
-            mat.roughness.contents = 1.0
-            mat.isDoubleSided = true
-            mat.locksAmbientWithDiffuse = true
+
+            mat.isDoubleSided = false
+            mat.locksAmbientWithDiffuse = false
+
             return mat
         }
     }
@@ -300,8 +515,17 @@ private struct CubeSceneView: UIViewRepresentable {
                 let iconHeight: CGFloat = 90
                 let iconY: CGFloat = 70
                 let config = UIImage.SymbolConfiguration(pointSize: pointSize, weight: .bold)
-                let image = UIImage(systemName: symbolName, withConfiguration: config) ?? UIImage()
+
                 let imgRect = CGRect(x: (size.width - iconWidth) / 2, y: iconY, width: iconWidth, height: iconHeight)
+
+                // Soft glow behind icon
+                let glowConfig = UIImage.SymbolConfiguration(pointSize: pointSize + 10, weight: .bold)
+                let glowImage = UIImage(systemName: symbolName, withConfiguration: glowConfig) ?? UIImage()
+                let glowRect = imgRect.insetBy(dx: -6, dy: -6)
+                UIColor.white.withAlphaComponent(0.25).setFill()
+                glowImage.withTintColor(.white, renderingMode: .alwaysOriginal).draw(in: glowRect, blendMode: .normal, alpha: 0.25)
+
+                let image = UIImage(systemName: symbolName, withConfiguration: config) ?? UIImage()
                 image.withTintColor(.white, renderingMode: .alwaysOriginal).draw(in: imgRect)
 
                 // Title
@@ -314,6 +538,16 @@ private struct CubeSceneView: UIViewRepresentable {
                 ]
                 let title = tab.title as NSString
                 let titleRect = CGRect(x: 0, y: 180, width: size.width, height: 40)
+                // Outline attributes
+                let outlineAttrs: [NSAttributedString.Key: Any] = [
+                    .font: UIFont.systemFont(ofSize: 24, weight: .heavy),
+                    .foregroundColor: UIColor.white.withAlphaComponent(0.35),
+                    .strokeColor: UIColor.white.withAlphaComponent(0.35),
+                    .strokeWidth: -3,
+                    .paragraphStyle: paragraph
+                ]
+                title.draw(in: titleRect.offsetBy(dx: 0.5, dy: 0.5), withAttributes: outlineAttrs)
+                // Main fill
                 title.draw(in: titleRect, withAttributes: attrs)
             }
         }
@@ -336,34 +570,51 @@ private struct CubeSceneView: UIViewRepresentable {
                 let iconHeight: CGFloat = 90
                 let iconY: CGFloat = 70
                 let config = UIImage.SymbolConfiguration(pointSize: pointSize, weight: .bold)
-                let image = UIImage(systemName: symbolName, withConfiguration: config) ?? UIImage()
                 let imgRect = CGRect(x: (size.width - iconWidth) / 2, y: iconY, width: iconWidth, height: iconHeight)
+
+                // Stronger glow for emission
+                let glowConfig = UIImage.SymbolConfiguration(pointSize: pointSize + 10, weight: .bold)
+                let glowImage = UIImage(systemName: symbolName, withConfiguration: glowConfig) ?? UIImage()
+                let glowRect = imgRect.insetBy(dx: -6, dy: -6)
+                glowImage.withTintColor(.white, renderingMode: .alwaysOriginal).draw(in: glowRect, blendMode: .normal, alpha: 0.55)
+
+                let image = UIImage(systemName: symbolName, withConfiguration: config) ?? UIImage()
                 image.withTintColor(.white, renderingMode: .alwaysOriginal).draw(in: imgRect)
 
                 // Title (white)
                 let paragraph = NSMutableParagraphStyle()
                 paragraph.alignment = .center
-                let attrs: [NSAttributedString.Key: Any] = [
+                let title = tab.title as NSString
+                let titleRect = CGRect(x: 0, y: 180, width: size.width, height: 40)
+                // Bold pass to thicken emission mask
+                let boldAttrs: [NSAttributedString.Key: Any] = [
+                    .font: UIFont.systemFont(ofSize: 26, weight: .black),
+                    .foregroundColor: UIColor.white,
+                    .paragraphStyle: paragraph
+                ]
+                title.draw(in: titleRect, withAttributes: boldAttrs)
+                // Regular pass for crisp edges
+                let regularAttrs: [NSAttributedString.Key: Any] = [
                     .font: UIFont.systemFont(ofSize: 24, weight: .heavy),
                     .foregroundColor: UIColor.white,
                     .paragraphStyle: paragraph
                 ]
-                let title = tab.title as NSString
-                let titleRect = CGRect(x: 0, y: 180, width: size.width, height: 40)
-                title.draw(in: titleRect, withAttributes: attrs)
+                title.draw(in: titleRect, withAttributes: regularAttrs)
             }
         }
     }
 
-    // Added helper function per instructions
-    private func faceBackgroundOnly(for tab: AppTab) -> UIImage {
-        let key = "face_bg_only_\(tab.title)"
+    private func faceBackgroundOnly(for tab: AppTab, baseColor: Color) -> UIImage {
+        // Include baseColor components in cache key so live changes are reflected
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        UIColor(baseColor).getRed(&r, green: &g, blue: &b, alpha: &a)
+        let key = String(format: "face_bg_only_%@_r%.3f_g%.3f_b%.3f_a%.3f", tab.title, r, g, b, a)
         return CubeFaceImageCache.image(for: key) {
             let size = CGSize(width: 300, height: 300)
             let renderer = UIGraphicsImageRenderer(size: size)
             return renderer.image { ctx in
                 // White background shape (to be tinted via material multiply)
-                UIColor.white.setFill()
+                UIColor(baseColor).setFill()
                 let rect = CGRect(origin: .zero, size: size)
                 UIBezierPath(roundedRect: rect.insetBy(dx: 8, dy: 8), cornerRadius: 24).fill()
             }
@@ -391,11 +642,64 @@ private struct CubeSceneView: UIViewRepresentable {
         private var holdObservers: [NSObjectProtocol] = []
         private var isBlinking: Bool = false
 
+        var lastPopTrigger: Int = 0
+        var lastYawRightStep: Int = 0
+        var lastYawLeftStep: Int = 0
+
         // Added helper functions as per instructions
         private func deg2rad(_ degrees: Float) -> Float { degrees * .pi / 180 }
         private func clamp(_ value: Float, min minVal: Float, max maxVal: Float) -> Float { max(minVal, min(maxVal, value)) }
 
         private var rotationSpeedMultiplier: Double { parent.rotationSpeedMultiplier }
+
+        private var popAudioSource: SCNAudioSource? = {
+            let candidates: [(name: String, ext: String?)] = [
+                ("pop", "mp3"),
+                ("pop", "caf"),
+                ("pop", "wav")
+            ]
+            for cand in candidates {
+                if let url = Bundle.main.url(forResource: cand.name, withExtension: cand.ext) {
+                    if let src = SCNAudioSource(url: url) {
+                        src.volume = 0.9
+                        src.isPositional = false
+                        src.shouldStream = false
+                        src.loops = false
+                        src.load()
+                        print("[CubeTabView] Loaded pop audio from bundle: \(url.lastPathComponent)")
+                        return src
+                    }
+                }
+            }
+            print("[CubeTabView] Failed to load 'pop' audio (mp3/caf/wav) from bundle")
+            return nil
+        }()
+        
+        #if DEBUG
+        private var popAVPlayer: AVAudioPlayer? = {
+            let candidates: [(name: String, ext: String?)] = [
+                ("pop", "mp3"),
+                ("pop", "caf"),
+                ("pop", "wav")
+            ]
+            for cand in candidates {
+                if let url = Bundle.main.url(forResource: cand.name, withExtension: cand.ext) {
+                    do {
+                        let player = try AVAudioPlayer(contentsOf: url)
+                        player.volume = 0.9
+                        player.numberOfLoops = 0
+                        player.prepareToPlay()
+                        print("[CubeTabView] AVAudioPlayer prepared: \(url.lastPathComponent)")
+                        return player
+                    } catch {
+                        print("[CubeTabView] AVAudioPlayer init failed for \(url.lastPathComponent): \(error)")
+                    }
+                }
+            }
+            print("[CubeTabView] AVAudioPlayer fallback not available for 'pop'")
+            return nil
+        }()
+        #endif
 
         init(_ parent: CubeSceneView) {
             self.parent = parent
@@ -650,6 +954,84 @@ private struct CubeSceneView: UIViewRepresentable {
             node.eulerAngles = SCNVector3(0 + zAdd, y, 0)
         }
 
+        func applyPreviewHover(_ enabled: Bool) {
+            guard let scnView = view, let cube = scnView.scene?.rootNode.childNode(withName: "cube", recursively: true) else { return }
+            if enabled {
+                if cube.action(forKey: "previewHover") == nil {
+                    let up = SCNAction.moveBy(x: 0, y: 0.08, z: 0, duration: 0.9)
+                    up.timingMode = .easeInEaseOut
+                    let down = SCNAction.moveBy(x: 0, y: -0.08, z: 0, duration: 0.9)
+                    down.timingMode = .easeInEaseOut
+                    let seq = SCNAction.sequence([up, down])
+                    cube.runAction(.repeatForever(seq), forKey: "previewHover")
+                }
+            } else {
+                cube.removeAction(forKey: "previewHover")
+                cube.position.y = 0
+            }
+        }
+
+        func triggerPreviewPop() {
+            guard let scnView = view, let cube = scnView.scene?.rootNode.childNode(withName: "cube", recursively: true) else { return }
+            let up = SCNAction.scale(to: 1.15, duration: 0.18)
+            up.timingMode = .easeOut
+            let down = SCNAction.scale(to: 1.0, duration: 0.22)
+            down.timingMode = .easeInEaseOut
+            cube.runAction(SCNAction.sequence([up, down]), forKey: "previewPop")
+            if parent.previewPopSoundEnabled {
+                print("[CubeTabView] Pop sound requested")
+                guard let src = popAudioSource else { print("[CubeTabView] No audio source available"); return }
+                #if DEBUG
+                do {
+                    try AVAudioSession.sharedInstance().setCategory(.ambient, options: [.mixWithOthers])
+                    try AVAudioSession.sharedInstance().setActive(true)
+                    print("[CubeTabView] AVAudioSession ensured active for pop")
+                } catch {
+                    print("[CubeTabView] AVAudioSession ensure active failed: \(error)")
+                }
+                #endif
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    if cube.parent == nil { print("[CubeTabView] Cube node missing parent; skipping audio"); return }
+                    let player = SCNAudioPlayer(source: src)
+                    cube.addAudioPlayer(player)
+                    print("[CubeTabView] Added SCNAudioPlayer to cube")
+                    // Fallback: also run a playAudio action in case player is ignored in previews
+                    let playAction = SCNAction.playAudio(src, waitForCompletion: false)
+                    cube.runAction(playAction)
+                    print("[CubeTabView] Triggered playAudio action fallback")
+                    
+                    #if DEBUG
+                    if let player = self.popAVPlayer {
+                        player.currentTime = 0
+                        if !player.isPlaying {
+                            player.play()
+                            print("[CubeTabView] AVAudioPlayer played pop")
+                        } else {
+                            // Restart to ensure audible response
+                            player.stop()
+                            player.currentTime = 0
+                            player.play()
+                            print("[CubeTabView] AVAudioPlayer restarted pop")
+                        }
+                    } else {
+                        print("[CubeTabView] AVAudioPlayer fallback not available")
+                    }
+                    #endif
+                }
+            }
+        }
+
+        enum YawDirection { case left, right }
+        func applyYaw(steps: Int, direction: YawDirection) {
+            guard steps != 0, let scnView = view, let cube = scnView.scene?.rootNode.childNode(withName: "cube", recursively: true) else { return }
+            let degreesPerStep: CGFloat = 45
+            let totalDegrees = degreesPerStep * CGFloat(steps)
+            let radians = (direction == .right ? 1 : -1) * totalDegrees * .pi / 180
+            let action = SCNAction.rotateBy(x: 0, y: radians, z: 0, duration: 0.25 * Double(abs(steps)))
+            action.timingMode = .easeInEaseOut
+            cube.runAction(action)
+        }
+
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
             // Allow swipeUp simultaneously; others are controlled via failure requirements
             if gestureRecognizer is UISwipeGestureRecognizer || otherGestureRecognizer is UISwipeGestureRecognizer {
@@ -674,18 +1056,28 @@ private struct CubeSceneView: UIViewRepresentable {
 
 private struct CubeOnlyPreview: View {
     @State private var tab: AppTab = .map
-    @State private var cubeHeight: CGFloat = 200
     @State private var tint: Color = .indigo
+    @State private var base: Color = Color(white: 0.2)
     @State private var useNormalMapPreview: Bool = true
-    @State private var lightingModelPreview: SCNMaterial.LightingModel = .lambert
+    @State private var lightingModelPreview: SCNMaterial.LightingModel = isRunningInPreviews ? .physicallyBased : .lambert
 
-    @State private var tilt: Double = -12
-    @State private var yawDegrees: Double = 40
     @State private var uiScale: CGFloat = 1.2
     @State private var scaleMode: ScaleMode = .scaleTo
     @State private var scaleByFactor: CGFloat = 1.0
     @State private var rotationSpeedMultiplier: Double = 1.5
-    @State private var isSpinning: Bool = true
+    @State private var enablePreviewSpin: Bool = true
+
+    @State private var hoverEnabled: Bool = false
+    @State private var popEnabled: Bool = false
+
+    @State private var previewHover: Bool = false
+    @State private var previewPopTrigger: Int = 0
+    @State private var previewPopSoundEnabled: Bool = false
+    @State private var previewYawRightStep: Int = 0
+    @State private var previewYawLeftStep: Int = 0
+    
+    @State private var directPopPlayer: AVAudioPlayer? = nil
+    @State private var lastDirectPopError: String? = nil
 
     enum ScaleMode: String, CaseIterable, Identifiable { case scaleTo, scaleBy; var id: String { rawValue } }
 
@@ -695,11 +1087,10 @@ private struct CubeOnlyPreview: View {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Cube Controls").font(.headline)
                 HStack {
-                    Text("Height \(Int(cubeHeight))")
-                    Slider(value: $cubeHeight, in: 140...280)
+                    ColorPicker("Tint", selection: $tint)
                 }
                 HStack {
-                    ColorPicker("Tint", selection: $tint)
+                    ColorPicker("Base Color", selection: $base)
                 }
                 Picker("Selected Tab", selection: $tab) {
                     Text("Map").tag(AppTab.map)
@@ -712,17 +1103,19 @@ private struct CubeOnlyPreview: View {
                     Text("UI Scale \(String(format: "%.2f", uiScale))")
                     Slider(value: $uiScale, in: 0.8...2.0)
                 }
-                HStack {
-                    Text("Tilt \(Int(tilt))°")
-                    Slider(value: $tilt, in: -25...0, step: 1)
+                HStack(spacing: 8) {
+                    Text("Yaw Right")
+                    Button("45°") { previewYawRightStep += 1 }
+                    Button("90°") { previewYawRightStep += 2 }
+                    Button("180°") { previewYawRightStep += 4 }
+                    Button("360°") { previewYawRightStep += 8 }
                 }
                 HStack(spacing: 8) {
-                    Text("Yaw")
-                    Button("45°") { withAnimation(.easeInOut(duration: 0.25)) { yawDegrees += 45 } }
-                    Button("90°") { withAnimation(.easeInOut(duration: 0.25)) { yawDegrees += 90 } }
-                    Button("180°") { withAnimation(.easeInOut(duration: 0.25)) { yawDegrees += 180 } }
-                    Button("360°") { withAnimation(.easeInOut(duration: 0.35)) { yawDegrees += 360 } }
-                    Button("Reset") { withAnimation(.easeInOut(duration: 0.25)) { yawDegrees = 0 } }
+                    Text("Yaw Left")
+                    Button("45°") { previewYawLeftStep += 1 }
+                    Button("90°") { previewYawLeftStep += 2 }
+                    Button("180°") { previewYawLeftStep += 4 }
+                    Button("360°") { previewYawLeftStep += 8 }
                 }
                 Toggle("Use Normal Map", isOn: $useNormalMapPreview)
                 Picker("Lighting", selection: $lightingModelPreview) {
@@ -732,6 +1125,26 @@ private struct CubeOnlyPreview: View {
                     Text("Constant").tag(SCNMaterial.LightingModel.constant)
                 }
                 .pickerStyle(.segmented)
+                Toggle("Spin Cube in Preview", isOn: $enablePreviewSpin)
+                Toggle("Hover", isOn: $hoverEnabled)
+                    .onChange(of: hoverEnabled) { _, new in previewHover = new }
+                Toggle("Pop", isOn: $popEnabled)
+                    .onChange(of: popEnabled) { _, new in
+                        if new {
+                            previewPopTrigger += 1
+                            popEnabled = false
+                        }
+                    }
+                Toggle("Pop Sound", isOn: $previewPopSoundEnabled)
+
+                HStack(spacing: 10) {
+                    Button("Play Pop Now") { playPopDirect() }
+                        .buttonStyle(.borderedProminent)
+                    if let err = lastDirectPopError {
+                        Text(err).font(.footnote).foregroundStyle(.secondary)
+                    }
+                }
+
                 Picker("Scale Mode", selection: $scaleMode) {
                     Text("Scale To").tag(ScaleMode.scaleTo)
                     Text("Scale By").tag(ScaleMode.scaleBy)
@@ -755,11 +1168,25 @@ private struct CubeOnlyPreview: View {
             // Cube under test
             ZStack {
                 Color(UIColor.systemBackground)
-                let baseCube = CubeTabView(selectedTab: $tab, tintColor: tint, useNormalMap: useNormalMapPreview, lightingModel: lightingModelPreview, rotationSpeedMultiplier: rotationSpeedMultiplier)
-                    .frame(height: cubeHeight)
-                    .scaleEffect(uiScale)
-                    .rotation3DEffect(.degrees(tilt), axis: (x: 1, y: 0, z: 0), perspective: 0.65)
-                    .rotation3DEffect(.degrees(yawDegrees), axis: (x: 0, y: 1, z: 0), perspective: 0.65)
+                let lightingModelToUse = isRunningInPreviews ? SCNMaterial.LightingModel.physicallyBased : lightingModelPreview
+                let baseCube = CubeTabView(
+                    selectedTab: $tab,
+                    previewHover: $previewHover,
+                    previewPopTrigger: $previewPopTrigger,
+                    previewPopSoundEnabled: $previewPopSoundEnabled,
+                    previewYawRightStep: $previewYawRightStep,
+                    previewYawLeftStep: $previewYawLeftStep,
+                    tintColor: tint,
+                    baseColor: base,
+                    useNormalMap: useNormalMapPreview,
+                    lightingModel: lightingModelToUse,
+                    rotationSpeedMultiplier: rotationSpeedMultiplier,
+                    enablePreviewSpin: enablePreviewSpin
+                )
+                .frame(height: 200)
+                .aspectRatio(1, contentMode: .fit)
+                .scaleEffect(uiScale)
+                .shadow(radius: 12, y: 8)
                 Group {
                     if scaleMode == .scaleTo {
                         baseCube
@@ -774,16 +1201,44 @@ private struct CubeOnlyPreview: View {
         .padding()
         .background(Color(UIColor.secondarySystemBackground))
         .task {
-            // Slow continuous spin for preview only
-            while isSpinning {
-                try? await Task.sleep(nanoseconds: 30_000_000) // ~33 fps
-                await MainActor.run {
-                    yawDegrees = (yawDegrees + 0.6).truncatingRemainder(dividingBy: 360)
-                }
+            // SceneKit handles preview spin now; no SwiftUI rotation needed
+        }
+    }
+    
+    private func playPopDirect() {
+        lastDirectPopError = nil
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.ambient, options: [.mixWithOthers])
+            try AVAudioSession.sharedInstance().setActive(true)
+        } catch {
+            print("[CubeOnlyPreview] AVAudioSession activation failed: \(error)")
+        }
+        let candidates: [(String, String?)] = [("pop", "mp3"), ("pop", "caf"), ("pop", "wav")]
+        var loaded: URL? = nil
+        for (name, ext) in candidates {
+            if let url = Bundle.main.url(forResource: name, withExtension: ext) {
+                loaded = url
+                break
             }
         }
-        .onDisappear {
-            isSpinning = false
+        guard let url = loaded else {
+            let msg = "Could not find 'pop' (mp3/caf/wav) in bundle"
+            lastDirectPopError = msg
+            print("[CubeOnlyPreview] \(msg)")
+            return
+        }
+        do {
+            let player = try AVAudioPlayer(contentsOf: url)
+            player.volume = 0.95
+            player.numberOfLoops = 0
+            player.prepareToPlay()
+            directPopPlayer = player
+            player.currentTime = 0
+            player.play()
+            print("[CubeOnlyPreview] Played pop directly: \(url.lastPathComponent)")
+        } catch {
+            lastDirectPopError = "AVAudioPlayer failed: \(error.localizedDescription)"
+            print("[CubeOnlyPreview] AVAudioPlayer error: \(error)")
         }
     }
 }
