@@ -24,6 +24,7 @@ struct CubeTabView: View {
     @Binding var previewPopSoundEnabled: Bool
     @Binding var previewYawRightStep: Int
     @Binding var previewYawLeftStep: Int
+    @Binding var previewHoldActive: Bool
     @Environment(\.renderingConfig) private var renderingConfig
     var tintColor: Color = .indigo
     var baseColor: Color = Color(white: 0.2)
@@ -41,6 +42,7 @@ struct CubeTabView: View {
          previewPopSoundEnabled: Binding<Bool> = .constant(false),
          previewYawRightStep: Binding<Int> = .constant(0),
          previewYawLeftStep: Binding<Int> = .constant(0),
+         previewHoldActive: Binding<Bool> = .constant(false),
          tintColor: Color = .indigo,
          baseColor: Color = Color(white: 0.2),
          useNormalMap: Bool = true,
@@ -55,6 +57,7 @@ struct CubeTabView: View {
         self._previewPopSoundEnabled = previewPopSoundEnabled
         self._previewYawRightStep = previewYawRightStep
         self._previewYawLeftStep = previewYawLeftStep
+        self._previewHoldActive = previewHoldActive
         self.tintColor = tintColor
         self.baseColor = baseColor
         self.useNormalMap = useNormalMap
@@ -74,6 +77,7 @@ struct CubeTabView: View {
             previewPopSoundEnabled: $previewPopSoundEnabled,
             previewYawRightStep: $previewYawRightStep,
             previewYawLeftStep: $previewYawLeftStep,
+            previewHoldActive: $previewHoldActive,
             tintColor: tintColor,
             useNormalMap: useNormalMap,
             lightingModel: lightingModel,
@@ -110,6 +114,7 @@ private struct FloatingCube: View {
     @Binding var previewPopSoundEnabled: Bool
     @Binding var previewYawRightStep: Int
     @Binding var previewYawLeftStep: Int
+    @Binding var previewHoldActive: Bool
     var tintColor: Color
     var useNormalMap: Bool
     var lightingModel: SCNMaterial.LightingModel
@@ -131,6 +136,7 @@ private struct FloatingCube: View {
             previewPopSoundEnabled: $previewPopSoundEnabled,
             previewYawRightStep: $previewYawRightStep,
             previewYawLeftStep: $previewYawLeftStep,
+            previewHoldActive: $previewHoldActive,
             tintColor: tintColor,
             baseColor: baseColor,
             useNormalMap: useNormalMap,
@@ -151,6 +157,7 @@ private struct CubeSceneView: UIViewRepresentable {
     @Binding var previewPopSoundEnabled: Bool
     @Binding var previewYawRightStep: Int
     @Binding var previewYawLeftStep: Int
+    @Binding var previewHoldActive: Bool
     var tintColor: Color
     var baseColor: Color
     var useNormalMap: Bool
@@ -206,6 +213,12 @@ private struct CubeSceneView: UIViewRepresentable {
         scnView.addGestureRecognizer(swipeUp)
         scnView.addGestureRecognizer(tap)
         scnView.addGestureRecognizer(longPress)
+        
+        if isRunningInPreviews {
+            let lp = UILongPressGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePreviewLongPress(_:)))
+            lp.minimumPressDuration = 0.25
+            scnView.addGestureRecognizer(lp)
+        }
 
         context.coordinator.view = scnView
         context.coordinator.syncToSelectedTab(selectedTab)
@@ -808,6 +821,17 @@ private struct CubeSceneView: UIViewRepresentable {
             }
         }
 
+        @objc func handlePreviewLongPress(_ gesture: UILongPressGestureRecognizer) {
+            switch gesture.state {
+            case .began:
+                parent.previewHoldActive = true
+            case .ended, .cancelled, .failed:
+                parent.previewHoldActive = false
+            default:
+                break
+            }
+        }
+
         @objc func handlePan(_ gesture: UIPanGestureRecognizer) {
             guard let scnView = view, let cube = scnView.scene?.rootNode.childNode(withName: "cube", recursively: true) else { return }
             let translation = gesture.translation(in: scnView)
@@ -1088,12 +1112,31 @@ private struct CubeSceneView: UIViewRepresentable {
         enum YawDirection { case left, right }
         func applyYaw(steps: Int, direction: YawDirection) {
             guard steps != 0, let scnView = view, let cube = scnView.scene?.rootNode.childNode(withName: "cube", recursively: true) else { return }
+            // Pause any continuous spin during manual yaw so the action isn't overridden
+            let wasSpinning = cube.action(forKey: "previewSpin") != nil
+            if wasSpinning { cube.removeAction(forKey: "previewSpin") }
+
             let degreesPerStep: CGFloat = 45
             let totalDegrees = degreesPerStep * CGFloat(steps)
             let radians = (direction == .right ? 1 : -1) * totalDegrees * .pi / 180
-            let action = SCNAction.rotateBy(x: 0, y: radians, z: 0, duration: 0.25 * Double(abs(steps)))
-            action.timingMode = .easeInEaseOut
-            cube.runAction(action)
+
+            // Update our continuous yaw state so subsequent pans/snaps start from the new angle
+            currentYaw += Float(radians)
+
+            let secondsPer45: Double = 0.35
+            let action = SCNAction.rotateBy(x: 0, y: radians, z: 0, duration: secondsPer45 * Double(abs(steps)))
+            action.timingMode = .easeIn
+            cube.runAction(action) { [weak self] in
+                guard let self = self else { return }
+                // After finishing, reapply combined rotation to include motion tilt
+                self.applyCombinedRotation(to: cube)
+                // Optionally resume spin in previews if it was active and enabled
+                if isRunningInPreviews && self.parent.enablePreviewSpin && wasSpinning == true {
+                    let spin = SCNAction.repeatForever(SCNAction.rotateBy(x: 0, y: CGFloat.pi * 2, z: 0, duration: 8.0))
+                    spin.timingMode = .linear
+                    cube.runAction(spin, forKey: "previewSpin")
+                }
+            }
         }
 
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
@@ -1183,6 +1226,7 @@ private struct CubeOnlyPreview: View {
     @State private var previewPopSoundEnabled: Bool = false
     @State private var previewYawRightStep: Int = 0
     @State private var previewYawLeftStep: Int = 0
+    @State private var previewHoldActive: Bool = false
     
     @State private var directPopPlayer: AVAudioPlayer? = nil
     @State private var lastDirectPopError: String? = nil
@@ -1249,6 +1293,7 @@ private struct CubeOnlyPreview: View {
                         }
                     }
                 Toggle("Pop Sound", isOn: $previewPopSoundEnabled)
+                Toggle("Hold (Preview Only)", isOn: $previewHoldActive)
 
                 Toggle("Simulate Motion (Preview)", isOn: $simulateMotion)
                     .onChange(of: simulateMotion) { _, new in
@@ -1325,6 +1370,7 @@ private struct CubeOnlyPreview: View {
                     previewPopSoundEnabled: $previewPopSoundEnabled,
                     previewYawRightStep: $previewYawRightStep,
                     previewYawLeftStep: $previewYawLeftStep,
+                    previewHoldActive: $previewHoldActive,
                     tintColor: tint,
                     baseColor: base,
                     useNormalMap: useNormalMapPreview,
@@ -1391,4 +1437,3 @@ private struct CubeOnlyPreview: View {
         }
     }
 }
-

@@ -68,3 +68,26 @@ struct CameraPreviewContainer: UIViewControllerRepresentable {
         }
     }
 }
+#if DEBUG
+private final class _PreviewSessionFactory {
+    static func makeSession() -> AVCaptureSession {
+        // Create a lightweight session suitable for previews. This won't actually run in previews,
+        // but provides a non-optional session for initialization.
+        let session = AVCaptureSession()
+        session.beginConfiguration()
+        // Keep it minimal to avoid requiring camera access in previews.
+        if session.canSetSessionPreset(.photo) {
+            session.sessionPreset = .photo
+        }
+        session.commitConfiguration()
+        return session
+    }
+}
+
+#Preview("CameraPreviewContainer") {
+    // Provide a minimal session; callbacks are left nil for preview.
+    CameraPreviewContainer(session: _PreviewSessionFactory.makeSession())
+        .ignoresSafeArea()
+}
+#endif
+

@@ -272,3 +272,31 @@ private struct InlineCapturePreview: View {
     }
 }
 
+#if DEBUG
+import CoreLocation
+
+#Preview("CapturePreviewOverlay – Image") {
+    // Simple solid color image for preview purposes
+    let renderer = UIGraphicsImageRenderer(size: CGSize(width: 300, height: 500))
+    let img = renderer.image { ctx in
+        UIColor.systemIndigo.setFill()
+        ctx.fill(CGRect(x: 0, y: 0, width: 300, height: 500))
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: UIFont.systemFont(ofSize: 36, weight: .black),
+            .foregroundColor: UIColor.white
+        ]
+        let text = NSString(string: "Preview")
+        text.draw(at: CGPoint(x: 80, y: 220), withAttributes: attrs)
+    }
+    return CapturePreviewOverlay(image: img, videoURL: nil)
+        .ignoresSafeArea()
+}
+
+#Preview("CapturePreviewOverlay – Video Placeholder") {
+    // Provide a non-existent URL to exercise the preparing UI path safely in previews
+    let tempURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("preview.mp4")
+    return CapturePreviewOverlay(image: nil, videoURL: tempURL)
+        .ignoresSafeArea()
+}
+#endif
+

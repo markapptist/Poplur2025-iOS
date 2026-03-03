@@ -160,6 +160,12 @@ struct HomeView: View {
     @StateObject private var motionController = SceneMotionController()
     @StateObject private var cubeTouchConfig = CubeTouchConfiguration()
     
+    @State private var recordHoldTask: Task<Void, Never>? = nil
+    @State private var isRecordHolding: Bool = false
+    
+    // Added state for cube yaw angle
+    @State private var cubeYawDegrees: Double = 0
+    
     init(cameraController: CameraKitController) {
         self.cameraController = cameraController
         
@@ -245,6 +251,95 @@ struct HomeView: View {
         }
     }
     
+    private func startRecordHoldRamp() {
+        recordHoldTask?.cancel()
+        let maxMeters: Double = 3_323_000.0
+        let duration: Double = 10.0 // seconds to reach max
+        let start = isometricBarModel.radius
+        let t0 = CACurrentMediaTime()
+        recordHoldTask = Task { @MainActor in
+            while !Task.isCancelled && isRecordHolding && selectedTab == .record {
+                let t = min(1.0, (CACurrentMediaTime() - t0) / duration)
+                let eased = t * t * (3 - 2 * t) // smoothstep ease-in-out
+                let next = start + (maxMeters - start) * eased
+                isometricBarModel.radius = min(maxMeters, next)
+                try? await Task.sleep(nanoseconds: 16_000_000) // ~60fps
+            }
+        }
+    }
+
+    private func stopRecordHoldRamp(reset: Bool) {
+        recordHoldTask?.cancel()
+        recordHoldTask = nil
+        if reset {
+            withAnimation(.easeOut(duration: 0.35)) {
+                isometricBarModel.radius = 0
+            }
+            NotificationCenter.default.post(name: .SharedRadiusDidChange, object: nil, userInfo: ["radius": 0.0])
+        }
+    }
+    
+    // MARK: - Helper rotation logic for cube yaw and tab switching
+    
+    private enum RotationDirection { case left, right }
+    
+    private func yawForTab(_ tab: AppTab) -> Double {
+        // Define faces: record=0°, feed=90°, profile=180°, map=270°
+        switch tab {
+        case .record: return 0
+        case .feed: return 90
+        case .profile: return 180
+        case .map: return 270
+        @unknown default: return 0
+        }
+    }
+    
+    private func normalizedDelta(from current: Double, to target: Double, prefer direction: RotationDirection?) -> Double {
+        // Compute shortest delta in [-180, 180]
+        var delta = fmod(target - current + 540, 360) - 180
+        if let dir = direction {
+            // Force direction if provided
+            if dir == .left && delta > 0 { delta -= 360 }
+            if dir == .right && delta < 0 { delta += 360 }
+        }
+        return delta
+    }
+    
+    private func animateYaw(to targetYaw: Double, duration: Double = 0.45, direction: RotationDirection? = nil) {
+        let current = cubeYawDegrees.truncatingRemainder(dividingBy: 360)
+        let delta = normalizedDelta(from: current, to: targetYaw, prefer: direction)
+        let final = current + delta
+        withAnimation(.timingCurve(0.2, 0.8, 0.2, 1.0, duration: duration)) {
+            cubeYawDegrees = final
+        }
+    }
+    
+    private func nextTab(from tab: AppTab) -> AppTab {
+        switch tab {
+        case .map: return .record
+        case .record: return .feed
+        case .feed: return .profile
+        case .profile: return .map
+        @unknown default: return .feed
+        }
+    }
+    
+    private func previousTab(from tab: AppTab) -> AppTab {
+        switch tab {
+        case .map: return .profile
+        case .record: return .map
+        case .feed: return .record
+        case .profile: return .feed
+        @unknown default: return .feed
+        }
+    }
+    
+    private func rotateCube(to newTab: AppTab, direction: RotationDirection) {
+        let targetYaw = yawForTab(newTab)
+        animateYaw(to: targetYaw, duration: 0.45, direction: direction)
+        selectedTab = newTab
+    }
+    
     @ViewBuilder
     private var feedTabContent: some View {
         FeedView()
@@ -276,7 +371,37 @@ struct HomeView: View {
     
     @ViewBuilder
     private var profileTabContent: some View {
-        ProfileView()
+        let resolvedUserID: String = {
+            // Try to discover a plausible user id without requiring a concrete API on AuthViewModel.
+            let modelMirror = Mirror(reflecting: auth)
+
+            // 1) Look for a child named `currentUserID`, `userID`, or `uid` directly on the auth model
+            let commonIDKeys = ["currentUserID", "userID", "uid", "id"]
+            for key in commonIDKeys {
+                if let child = modelMirror.children.first(where: { $0.label == key }) {
+                    if let id = child.value as? String { return id }
+                    if let idOpt = child.value as? String? { return idOpt ?? "" }
+                }
+            }
+
+            // 2) If there is a `user`-like child (e.g., `currentUser`, `userObject`, etc.), search it for an id
+            let possibleUserKeys = ["user", "currentUser", "account", "profile"]
+            for key in possibleUserKeys {
+                if let userChild = modelMirror.children.first(where: { $0.label == key }) {
+                    let userMirror = Mirror(reflecting: userChild.value)
+                    for idKey in commonIDKeys + ["identifier"] {
+                        if let idChild = userMirror.children.first(where: { $0.label == idKey }) {
+                            if let id = idChild.value as? String { return id }
+                            if let idOpt = idChild.value as? String? { return idOpt ?? "" }
+                        }
+                    }
+                }
+            }
+
+            // 3) Give up and return empty string
+            return ""
+        }()
+        ProfileView(userID: resolvedUserID)
             .task {
                 if selectedTab == .profile, !didTriggerProfileInitialLoad {
                     DispatchQueue.main.async {
@@ -326,18 +451,9 @@ struct HomeView: View {
                     }
                 })
                 .tint(.white)
-                .transition(.opacity)
-                .padding(.trailing, 8) // Restored to previous trailing padding
-                .frame(height: 230) // Increased cube size
-                .onTapGesture {
-                    NotificationCenter.default.post(name: .CenterMapOnUser, object: nil)
-                }
-                .simultaneousGesture(
-                    TapGesture()
-                        .onEnded {
-                            print("[CubeTabView] tap")
-                        }
-                )
+                .frame(height: 230)
+                .padding(.bottom, 8)
+                .padding(.trailing, 8)
             }
             .padding(.bottom, 24)
             .ignoresSafeArea(edges: .bottom)
@@ -349,6 +465,18 @@ struct HomeView: View {
                         // Detect swipe down; settings no longer accessible via tab
                         if value.translation.height > 20, selectedTab == .profile {
                             // No-op: settings access removed from tab navigation
+                        }
+                        // New swipe logic for cube rotation based on horizontal swipe
+                        let dx = value.translation.width
+                        let dy = value.translation.height
+                        if abs(dx) > abs(dy) {
+                            if dx < -20 {
+                                // swipe left -> next tab, rotate right 90°
+                                rotateCube(to: nextTab(from: selectedTab), direction: .right)
+                            } else if dx > 20 {
+                                // swipe right -> previous tab, rotate left 90°
+                                rotateCube(to: previousTab(from: selectedTab), direction: .left)
+                            }
                         }
                     }
             )
@@ -496,6 +624,8 @@ struct HomeView: View {
             print("[HomeView] onAppear work took \(CFAbsoluteTimeGetCurrent() - appearT0)s")
         }
         .onChange(of: selectedTab) { _ in
+            animateYaw(to: yawForTab(selectedTab), duration: 0.45, direction: nil)
+
             if !([AppTab.map, .record, .feed, .profile].contains(selectedTab)) {
                 selectedTab = .feed
             }
@@ -522,6 +652,10 @@ struct HomeView: View {
                     let t2 = CFAbsoluteTimeGetCurrent()
                     print("[Camera] preparePreviewIfNeeded() took \(t2 - t1)s")
                 }
+            }
+            if selectedTab != .record {
+                isRecordHolding = false
+                stopRecordHoldRamp(reset: false)
             }
         }
         .onChange(of: auth.isAuthenticated) { authed in
@@ -574,6 +708,15 @@ struct HomeView: View {
             isometricBarModel.radius = 0
             NotificationCenter.default.post(name: .SharedRadiusDidChange, object: nil, userInfo: ["radius": 0.0])
         }
+        .onReceive(NotificationCenter.default.publisher(for: .cameraCubeHoldBegan)) { _ in
+            guard selectedTab == .record else { return }
+            isRecordHolding = true
+            startRecordHoldRamp()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .cameraCubeHoldEnded)) { _ in
+            isRecordHolding = false
+            stopRecordHoldRamp(reset: true)
+        }
     }
     
     
@@ -615,11 +758,97 @@ private struct HomeBarPlacementPreview: View {
     @State private var previewHover: Bool = false
     @State private var previewPopTrigger: Int = 0
     @State private var previewPopSoundEnabled: Bool = true
-    @State private var previewYawRightStep: Int = 0
-    @State private var previewYawLeftStep: Int = 0
-
+    
+    @State private var previewHoldActive: Bool = false
+    @State private var holdTask: Task<Void, Never>? = nil
+    
+    // Added state for continuous yaw
+    @State private var yawDegrees: Double = 0
+    
     var usesImperial: Bool { Locale.current.usesMetricSystem == false }
     var earthMaxUnit: Double { usesImperial ? 3958.8 : 6371.0 }
+    
+    private func startPreviewHoldRamp() {
+        holdTask?.cancel()
+        let maxMeters: Double = 3_323_000.0
+        let duration: Double = 10.0
+        let start = radius
+        let t0 = CACurrentMediaTime()
+        holdTask = Task { @MainActor in
+            while !Task.isCancelled && previewHoldActive && selectedTab == .record {
+                let t = min(1.0, (CACurrentMediaTime() - t0) / duration)
+                let eased = t * t * (3 - 2 * t)
+                let next = start + (maxMeters - start) * eased
+                radius = min(maxMeters, next)
+                try? await Task.sleep(nanoseconds: 16_000_000)
+            }
+        }
+    }
+    
+    private func stopPreviewHoldRamp(reset: Bool) {
+        holdTask?.cancel()
+        holdTask = nil
+        if reset {
+            withAnimation(.easeOut(duration: 0.35)) { radius = 0 }
+        }
+    }
+    
+    // MARK: - Helper rotation logic for preview cube yaw and tab switching
+    private enum RotationDirection { case left, right }
+    
+    private func yawForTab(_ tab: AppTab) -> Double {
+        switch tab {
+        case .record: return 0
+        case .feed: return 90
+        case .profile: return 180
+        case .map: return 270
+        @unknown default: return 0
+        }
+    }
+    
+    private func normalizedDelta(from current: Double, to target: Double, prefer direction: RotationDirection?) -> Double {
+        var delta = fmod(target - current + 540, 360) - 180
+        if let dir = direction {
+            if dir == .left && delta > 0 { delta -= 360 }
+            if dir == .right && delta < 0 { delta += 360 }
+        }
+        return delta
+    }
+    
+    private func animateYaw(to targetYaw: Double, duration: Double = 0.45, direction: RotationDirection? = nil) {
+        let current = yawDegrees.truncatingRemainder(dividingBy: 360)
+        let delta = normalizedDelta(from: current, to: targetYaw, prefer: direction)
+        let final = current + delta
+        withAnimation(.timingCurve(0.2, 0.8, 0.2, 1.0, duration: duration)) {
+            yawDegrees = final
+        }
+    }
+    
+    private func nextPreviewTab(from tab: AppTab) -> AppTab {
+        switch tab {
+        case .map: return .record
+        case .record: return .feed
+        case .feed: return .profile
+        case .profile: return .map
+        @unknown default: return .feed
+        }
+    }
+    
+    private func previousPreviewTab(from tab: AppTab) -> AppTab {
+        switch tab {
+        case .map: return .profile
+        case .record: return .map
+        case .feed: return .record
+        case .profile: return .feed
+        @unknown default: return .feed
+        }
+    }
+    
+    private func rotatePreview(to newTab: AppTab, direction: RotationDirection) {
+        let targetYaw = yawForTab(newTab)
+        animateYaw(to: targetYaw, duration: 0.45, direction: direction)
+        selectedTab = newTab
+    }
 
     var body: some View {
         ZStack {
@@ -633,15 +862,26 @@ private struct HomeBarPlacementPreview: View {
                     previewHover: $previewHover,
                     previewPopTrigger: $previewPopTrigger,
                     previewPopSoundEnabled: $previewPopSoundEnabled,
-                    previewYawRightStep: $previewYawRightStep,
-                    previewYawLeftStep: $previewYawLeftStep,
-                    tintColor: .indigo,
-                    onSwipeUp: {}
+                    previewHoldActive: $previewHoldActive
                 )
-                    .tint(.white)
-                    .frame(height: 230)
-                    .padding(.bottom, 8)
-                    .padding(.trailing, 8)
+                .tint(.white)
+                .frame(height: 230)
+                .gesture(
+                    DragGesture(minimumDistance: 20)
+                        .onEnded { value in
+                            let dx = value.translation.width
+                            let dy = value.translation.height
+                            if abs(dx) > abs(dy) {
+                                if dx < -20 {
+                                    rotatePreview(to: nextPreviewTab(from: selectedTab), direction: .right)
+                                } else if dx > 20 {
+                                    rotatePreview(to: previousPreviewTab(from: selectedTab), direction: .left)
+                                }
+                            }
+                        }
+                )
+                .padding(.bottom, 8)
+                .padding(.trailing, 8)
             }
             .ignoresSafeArea(edges: .bottom)
 
@@ -661,10 +901,14 @@ private struct HomeBarPlacementPreview: View {
                 .padding(.horizontal, 16)
                 HStack(spacing: 12) {
                     Text("Simulate Swipe:")
-                    Button("Left 90°") { previewYawLeftStep += 2 }
-                        .buttonStyle(.bordered)
-                    Button("Right 90°") { previewYawRightStep += 2 }
-                        .buttonStyle(.bordered)
+                    Button("Left 90°") {
+                        rotatePreview(to: previousPreviewTab(from: selectedTab), direction: .left)
+                    }
+                    .buttonStyle(.bordered)
+                    Button("Right 90°") {
+                        rotatePreview(to: nextPreviewTab(from: selectedTab), direction: .right)
+                    }
+                    .buttonStyle(.bordered)
                     Button("Pop") { previewPopTrigger += 1 }
                         .buttonStyle(.bordered)
                     Toggle("Hover", isOn: $previewHover)
@@ -734,6 +978,24 @@ private struct HomeBarPlacementPreview: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onChange(of: previewHoldActive) { newValue in
+            if newValue && selectedTab == .record {
+                startPreviewHoldRamp()
+            } else {
+                stopPreviewHoldRamp(reset: true)
+            }
+        }
+        .onChange(of: selectedTab) { newValue in
+            if newValue != .record {
+                previewHoldActive = false
+                stopPreviewHoldRamp(reset: true)
+            }
+            animateYaw(to: yawForTab(newValue), duration: 0.45, direction: nil)
+        }
+        .onDisappear {
+            previewHoldActive = false
+            stopPreviewHoldRamp(reset: false)
+        }
     }
 }
 

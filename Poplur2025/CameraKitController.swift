@@ -804,5 +804,5 @@ extension CameraKitController: CLLocationManagerDelegate {
 
 extension Notification.Name {
     static let LoadMapNow = Notification.Name("LoadMapNow")
+    static let LoadProfileNow = Notification.Name("LoadProfileNow")
 }
-
