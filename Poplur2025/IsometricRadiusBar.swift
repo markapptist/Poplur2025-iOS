@@ -29,7 +29,11 @@ public struct IsometricRadiusBar: View {
     public var useNormalMap: Bool = true
     public var lightingModel: SCNMaterial.LightingModel = .physicallyBased
 
-    public init(radius: Binding<Double>, baseColor: Color = .indigo, tintColor: Color = .indigo, pitchDegrees: Double = 10.0, yawDegrees: Double = 20.0, growthSpeed: Double = 1.5, maxSceneHeight: Double = 2.4, uiScale: CGFloat = 1.5, maxRuntimeRadius: Double? = nil) {
+    public var autoLoop: Bool = true
+    @State private var isAutoLooping: Bool = false
+    @State private var autoLoopTask: Task<Void, Never>? = nil
+
+    public init(radius: Binding<Double>, baseColor: Color = .cyan, tintColor: Color = .teal, pitchDegrees: Double = 10.0, yawDegrees: Double = 20.0, growthSpeed: Double = 1.5, maxSceneHeight: Double = 2.4, uiScale: CGFloat = 1.5, maxRuntimeRadius: Double? = nil) {
         self._radius = radius
         self.baseColor = baseColor
         self.tintColor = tintColor
@@ -39,6 +43,7 @@ public struct IsometricRadiusBar: View {
         self.maxSceneHeight = maxSceneHeight
         self.uiScale = uiScale
         self.maxRuntimeRadius = maxRuntimeRadius ?? (Locale.current.usesMetricSystem ? 6_371_000.0 : 3_958.8 * 1609.34)
+        // autoLoop defaults to true by declaration, no assignment needed here
     }
 
     public var body: some View {
@@ -85,18 +90,10 @@ public struct IsometricRadiusBar: View {
                 self.radius = min(max(0, r), self.maxRuntimeRadius)
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .cameraCubeHoldBegan)) { _ in
-            startAutoIncrease()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .cameraCubeHoldEnded)) { _ in
-            stopAutoIncrease()
-            // Notify that we should show the captured preview output
-            NotificationCenter.default.post(name: .showCapturedPreviewRequested, object: nil)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .capturePreviewDidDismiss)) { _ in
-            // Reset radius to zero so the bar returns to minimal height
-            self.radius = 0
-        }
+        // Removed cameraCubeHoldBegan and cameraCubeHoldEnded notifications and related actions
+        // Removed capturePreviewDidDismiss notification that resets radius to zero
+        .onAppear { if autoLoop { startAutoLooping() } }
+        .onDisappear { stopAutoLooping() }
     }
 }
 
@@ -124,21 +121,50 @@ private extension IsometricRadiusBar {
             }
     }
 
-    func startAutoIncrease() {
-        stopAutoIncrease()
-        let link = CADisplayLink(target: DisplayLinkProxy { dt in
-            // Increase radius toward earth radius while held
-            let incrementPerSecond: Double = (earthRadiusMeters / 10.0) * max(0.1, self.growthSpeed) // base 10s to full; scale by growthSpeed
-            self.radius = min(self.radius + incrementPerSecond * dt, min(earthRadiusCapMeters, self.maxRuntimeRadius))
-        }, selector: #selector(DisplayLinkProxy.tick(_:)))
-        link.add(to: .main, forMode: .common)
-        holdTimer = link
+    // Removed startAutoIncrease() and stopAutoIncrease() functions as instructed
+
+    func startAutoLooping() {
+        stopAutoLooping()
+        isAutoLooping = true
+        autoLoopTask = Task { @MainActor in
+            var goingUp = true
+            let earthMeters: Double = (Locale.current.usesMetricSystem ? 6_371_000.0 : 3_958.8 * 1609.34)
+            var targetHigh = earthMeters * Double.random(in: 0.3...0.8)
+            let fps: Double = 60.0
+            let dt: Double = 1.0 / fps
+            while !Task.isCancelled && isAutoLooping {
+                let current = radius
+                let target = goingUp ? min(targetHigh, maxRuntimeRadius) : 0.0
+                let diff = target - current
+                let ratePerSecond = max(0.25, min(0.6, abs(diff) / (earthMeters * 2.0)))
+                let step = diff * ratePerSecond * dt
+                let next = current + step
+                withAnimation(.interpolatingSpring(mass: 1.0, stiffness: springStiffnessAuto(), damping: springDampingCoefAuto(), initialVelocity: 0)) {
+                    radius = min(max(0, next), maxRuntimeRadius)
+                }
+                if goingUp {
+                    if abs(diff) < max(250.0, targetHigh * 0.01) {
+                        goingUp = false
+                    }
+                } else {
+                    if radius <= 1.0 {
+                        goingUp = true
+                        targetHigh = earthMeters * Double.random(in: 0.3...0.8)
+                    }
+                }
+                try? await Task.sleep(nanoseconds: UInt64(dt * 1_000_000_000))
+            }
+        }
     }
 
-    func stopAutoIncrease() {
-        holdTimer?.invalidate()
-        holdTimer = nil
+    func stopAutoLooping() {
+        isAutoLooping = false
+        autoLoopTask?.cancel()
+        autoLoopTask = nil
     }
+
+    func springStiffnessAuto() -> Double { max(10, 1.0 / max(0.05, 0.35 * 0.35)) }
+    func springDampingCoefAuto() -> Double { max(1.0, 10.0 * 0.85) }
 }
 
 // MARK: - UIViewRepresentable SCNView (matches CubeTabView approach)
@@ -158,9 +184,9 @@ private struct RadiusBarSceneView: UIViewRepresentable {
         let scnView = SCNView()
         scnView.backgroundColor = .clear
         scnView.allowsCameraControl = false
-        scnView.antialiasingMode = .none
+        scnView.antialiasingMode = .multisampling4X
         scnView.isPlaying = true
-        scnView.preferredFramesPerSecond = 30
+        scnView.preferredFramesPerSecond = 60
         scnView.scene = makeScene()
         context.coordinator.view = scnView
 
@@ -198,9 +224,10 @@ private struct RadiusBarSceneView: UIViewRepresentable {
         scene.rootNode.addChildNode(barTarget)
 
         // Bar (SCNBox) sized to show height with small width/length, start at a tiny height so it's visible
-        let box = SCNBox(width: 0.42, height: CGFloat(maxSceneHeight), length: 0.42, chamferRadius: 0.06)
+        let box = SCNBox(width: 0.60, height: CGFloat(maxSceneHeight), length: 0.60, chamferRadius: 0.06)
         box.chamferSegmentCount = 3
-        box.materials = perFaceMaterials(from: baseColor)
+        // Updated: pass radius = 0 for initial setup
+        box.materials = perFaceMaterials(from: baseColor, radius: 0)
         let node = SCNNode(geometry: box)
         node.name = "bar"
         // Set pivot to bottom-center so scaling grows upward
@@ -210,8 +237,8 @@ private struct RadiusBarSceneView: UIViewRepresentable {
             // Position so that when scale.y == 1, the bar base sits at y=0 relative to barTarget
             node.position = SCNVector3(0, Float(box.height) / 2.0, 0)
         }
-        // Start collapsed in Y
-        node.scale = SCNVector3(1, 0.0001, 1)
+        // Start with no collapsed scale
+        node.scale = SCNVector3(1, 1, 1)
         // Fixed subtle 3D effect
         node.eulerAngles = SCNVector3(Float(6.0 * .pi / 180), Float(-10.0 * .pi / 180), 0)
         barTarget.addChildNode(node)
@@ -219,7 +246,7 @@ private struct RadiusBarSceneView: UIViewRepresentable {
         // Lights (omni + ambient + subtle rim)
         let omni = SCNLight()
         omni.type = .omni
-        omni.intensity = 900
+        omni.intensity = 1200
         let omniNode = SCNNode()
         omniNode.light = omni
         omniNode.position = SCNVector3(4, 6, 8)
@@ -227,74 +254,97 @@ private struct RadiusBarSceneView: UIViewRepresentable {
 
         let ambient = SCNLight()
         ambient.type = .ambient
-        ambient.intensity = 260
+        ambient.intensity = 500
         let ambientNode = SCNNode()
         ambientNode.light = ambient
         scene.rootNode.addChildNode(ambientNode)
 
         let rim = SCNLight()
         rim.type = .directional
-        rim.intensity = 600
+        rim.intensity = 700
         let rimNode = SCNNode()
         rimNode.light = rim
         rimNode.eulerAngles = SCNVector3(Float(20.0 * .pi / 180), Float(-160.0 * .pi / 180), 0)
         scene.rootNode.addChildNode(rimNode)
 
+        let fill = SCNLight()
+        fill.type = .omni
+        fill.intensity = 600
+        let fillNode = SCNNode()
+        fillNode.light = fill
+        fillNode.position = SCNVector3(-4, 5, -6)
+        scene.rootNode.addChildNode(fillNode)
+
         // Removed radial shadow disk and cachedShadowImage as per instructions
 
+        // Helper function to create multiple thin horizontal stripes texture
+        func makeMultiStripeTexture(size: CGSize = CGSize(width: 512, height: 256), baseColor: UIColor = UIColor.systemIndigo, stripeColor: UIColor = .white, stripeCount: Int = 8, stripeThickness: CGFloat = 0.06, stripeSpacing: CGFloat = 0.08) -> UIImage {
+            let renderer = UIGraphicsImageRenderer(size: size)
+            return renderer.image { ctx in
+                // Fill base color
+                baseColor.setFill()
+                ctx.fill(CGRect(origin: .zero, size: size))
+                // Draw multiple thin horizontal stripes centered around the equator
+                let totalHeight = size.height
+                let bandHeight = totalHeight * stripeThickness
+                let gapHeight = totalHeight * stripeSpacing
+                let totalStripeBlock = CGFloat(stripeCount) * bandHeight + CGFloat(stripeCount - 1) * gapHeight
+                var y = (totalHeight - totalStripeBlock) / 2.0
+                for _ in 0..<stripeCount {
+                    let rect = CGRect(x: 0, y: y, width: size.width, height: bandHeight)
+                    stripeColor.setFill()
+                    ctx.fill(rect)
+                    y += bandHeight + gapHeight
+                }
+            }
+        }
+
         // Add a small spinning Earth globe near the bar
-        let globeRadius: CGFloat = 0.28
+        let globeRadius: CGFloat = 0.10
         let globe = SCNSphere(radius: globeRadius)
         let globeMat = SCNMaterial()
-        if let earthImage = UIImage(named: "EarthDiffuse") {
-            globeMat.diffuse.contents = earthImage
-        } else {
-            globeMat.diffuse.contents = UIColor.systemBlue
-        }
-        // Slight specular for a nicer look
-        globeMat.metalness.contents = 0.05
-        globeMat.roughness.contents = 0.35
+        // Apply a multi-stripe texture and glossy finish
+        // Replaced multi-stripe texture with earth_day texture from asset catalog
+        let earthTexture = UIImage(named: "earth_day")
+        globeMat.diffuse.contents = earthTexture
+        globeMat.normal.contents = UIImage(named: "8k_Earth_normal_map")
+        globeMat.normal.intensity = 0.8
+        globeMat.metalness.contents = 0.0
+        globeMat.roughness.contents = 0.15
+        globeMat.specular.contents = UIColor.white
+        globeMat.shininess = 0.6
         globe.materials = [globeMat]
         let globeNode = SCNNode(geometry: globe)
-        // Position globe slightly to the right of the bar and lower so it sits visually near the base
-        globeNode.position = SCNVector3(0.9, 0.45, 0)
+        globeNode.name = "globe"
+        globeNode.scale = SCNVector3(1, 1, 1)  // <--- Added line to keep globe scale constant
+        // Position globe centered above the bar top face with a slight gap
+        globeNode.position = SCNVector3(0.0, Float((box.height / 2.0) + CGFloat(globeRadius) + 0.20), 0.0)
         // Give a subtle tilt like Earth's axial tilt
         globeNode.eulerAngles.x = Float(-23.5 * .pi / 180)
         barTarget.addChildNode(globeNode)
 
-        // Continuous spin animation around Y
+        // Add constant spin animation to globe node with random direction and faster speed
         let spin = CABasicAnimation(keyPath: "rotation")
-        spin.fromValue = NSValue(scnVector4: SCNVector4(0, 1, 0, 0))
-        spin.toValue = NSValue(scnVector4: SCNVector4(0, 1, 0, Float(2 * Double.pi)))
-        spin.duration = 12.0
+        // Random unit axis
+        let ax = Float.random(in: -1...1)
+        let ay = Float.random(in: -1...1)
+        let az = Float.random(in: -1...1)
+        let len = max(0.0001, sqrt(ax*ax + ay*ay + az*az))
+        let ux = ax/len, uy = ay/len, uz = az/len
+        spin.fromValue = NSValue(scnVector4: SCNVector4(ux, uy, uz, 0))
+        spin.toValue = NSValue(scnVector4: SCNVector4(ux, uy, uz, Float(2 * Double.pi)))
+        spin.duration = 1.2 // faster spin
         spin.repeatCount = .infinity
-        globeNode.addAnimation(spin, forKey: "earthSpin")
+        spin.isRemovedOnCompletion = false
+        globeNode.addAnimation(spin, forKey: "globeRandomSpin")
 
-        if let barNode = scene.rootNode.childNode(withName: "bar", recursively: true) {
-            // Bouncy, elastic keyframe animation for scale.y
-            let keyAnim = CAKeyframeAnimation(keyPath: "scale.y")
-            keyAnim.values = [0.0001, 1.15, 0.92, 1.05, 0.99, 1.0]
-            keyAnim.keyTimes = [0.0, 0.55, 0.7, 0.85, 0.95, 1.0] as [NSNumber]
-            keyAnim.duration = 4.0
-            keyAnim.autoreverses = true
-            keyAnim.repeatCount = .infinity
-            keyAnim.calculationMode = .cubic
-            keyAnim.isRemovedOnCompletion = false
-            // Slight ease-in at the start
-            keyAnim.timingFunctions = [
-                CAMediaTimingFunction(name: .easeIn),
-                CAMediaTimingFunction(name: .default),
-                CAMediaTimingFunction(name: .default),
-                CAMediaTimingFunction(name: .default),
-                CAMediaTimingFunction(name: .easeOut)
-            ]
-            barNode.addAnimation(keyAnim, forKey: "growYLoop")
-        }
+        // Removed growYLoop keyframe animation block per instructions
 
         return scene
     }
 
-    private func perFaceMaterials(from color: Color) -> [SCNMaterial] {
+    // Updated signature to accept radius
+    private func perFaceMaterials(from color: Color, radius: Double) -> [SCNMaterial] {
         func uiColor(_ c: Color) -> UIColor {
             #if os(iOS)
             return UIColor(c)
@@ -302,11 +352,11 @@ private struct RadiusBarSceneView: UIViewRepresentable {
             return UIColor.systemTeal
             #endif
         }
-        func mat(_ color: UIColor, metal: CGFloat = 0.18, rough: CGFloat = 0.35) -> SCNMaterial {
+        func mat(_ color: UIColor, metal: CGFloat = 0.05, rough: CGFloat = 0.25) -> SCNMaterial {
             let m = SCNMaterial()
             m.diffuse.contents = color
             m.lightingModel = lightingModel
-            m.multiply.contents = uiColor(self.tintColor)
+            m.multiply.contents = uiColor(self.tintColor).withAlphaComponent(0.4)
             if useNormalMap, let normal = UIImage(named: "CubeNormalMap") {
                 m.normal.contents = normal
                 m.normal.intensity = 0.6
@@ -316,8 +366,65 @@ private struct RadiusBarSceneView: UIViewRepresentable {
             m.metalness.contents = metal
             m.roughness.contents = rough
             m.isDoubleSided = true
+            m.specular.contents = UIColor.white.withAlphaComponent(0.2)
+            m.shininess = 0.3
             return m
         }
+
+        // Vertical gradient image helper (unused now, kept for reference)
+        func verticalGradientImage(bottom: UIColor, top: UIColor, size: CGSize = CGSize(width: 8, height: 256)) -> UIImage {
+            let renderer = UIGraphicsImageRenderer(size: size)
+            return renderer.image { ctx in
+                let colors = [bottom.cgColor, top.cgColor] as CFArray
+                let space = CGColorSpaceCreateDeviceRGB()
+                if let grad = CGGradient(colorsSpace: space, colors: colors, locations: [0.0, 1.0]) {
+                    ctx.cgContext.drawLinearGradient(grad, start: CGPoint(x: size.width/2, y: size.height), end: CGPoint(x: size.width/2, y: 0), options: [])
+                }
+            }
+        }
+        // New helper to create vertical gradient with 3 stops: bottom, middle, top
+        func verticalGradientImage3(bottom: UIColor, middle: UIColor, top: UIColor, size: CGSize = CGSize(width: 8, height: 256)) -> UIImage {
+            let renderer = UIGraphicsImageRenderer(size: size)
+            return renderer.image { ctx in
+                let colors = [bottom.cgColor, middle.cgColor, top.cgColor] as CFArray
+                let locations: [CGFloat] = [0.0, 0.5, 1.0]
+                let space = CGColorSpaceCreateDeviceRGB()
+                if let grad = CGGradient(colorsSpace: space, colors: colors, locations: locations) {
+                    ctx.cgContext.drawLinearGradient(grad, start: CGPoint(x: size.width/2, y: size.height), end: CGPoint(x: size.width/2, y: 0), options: [])
+                }
+            }
+        }
+
+        // Compute the fraction of radius relative to earth radius (meters)
+        let earthMeters: Double = Locale.current.usesMetricSystem ? 6_371_000.0 : 3_958.8 * 1609.34
+        let t = min(1.0, max(0.0, radius / earthMeters))
+
+        // Helper to blend two colors by fraction
+        func blend(_ c1: UIColor, _ c2: UIColor, fraction: CGFloat) -> UIColor {
+            var r1: CGFloat = 0, g1: CGFloat = 0, b1: CGFloat = 0, a1: CGFloat = 0
+            var r2: CGFloat = 0, g2: CGFloat = 0, b2: CGFloat = 0, a2: CGFloat = 0
+            c1.getRed(&r1, green: &g1, blue: &b1, alpha: &a1)
+            c2.getRed(&r2, green: &g2, blue: &b2, alpha: &a2)
+            let r = r1 + (r2 - r1) * fraction
+            let g = g1 + (g2 - g1) * fraction
+            let b = b1 + (b2 - b1) * fraction
+            let a = a1 + (a2 - a1) * fraction
+            return UIColor(red: r, green: g, blue: b, alpha: a)
+        }
+
+        // Base system colors for gradient stops
+        let baseBottom = UIColor.systemRed
+        let baseMiddle = UIColor.systemYellow
+        let baseTop = UIColor.systemGreen
+
+        // Modulate gradient colors by blending with baseColor tint with t factor
+        let baseColorUI = uiColor(color)
+        let bottomColor = blend(baseBottom, baseColorUI, fraction: CGFloat(t * 0.25)) // slight blend with base color
+        let middleColor = blend(baseMiddle, baseColorUI, fraction: CGFloat(t * 0.5))
+        let topColor = blend(baseTop, baseColorUI, fraction: CGFloat(t))
+
+        let gradient = verticalGradientImage3(bottom: bottomColor, middle: middleColor, top: topColor)
+
         // Derive a few tints from the base color for subtle face variation
         let base = uiColor(color)
         var hue: CGFloat = 0, sat: CGFloat = 0, bri: CGFloat = 0, alpha: CGFloat = 0
@@ -328,14 +435,19 @@ private struct RadiusBarSceneView: UIViewRepresentable {
         let left = UIColor(hue: hue, saturation: max(0, sat * 0.85), brightness: min(1, bri * 1.05), alpha: alpha)
         let top = UIColor(hue: hue, saturation: max(0, sat * 0.20), brightness: min(1, bri * 1.10), alpha: alpha)
         let bottom = UIColor(hue: hue, saturation: min(1, sat * 1.00), brightness: max(0, bri * 0.60), alpha: alpha)
-        return [
-            mat(front),
-            mat(right),
-            mat(back),
-            mat(left),
-            mat(top, metal: 0.08, rough: 0.25),
-            mat(bottom, metal: 0.10, rough: 0.60)
-        ]
+        
+        let bottomColorForFaces = uiColor(self.tintColor).withAlphaComponent(0.95)
+        let topColorForFaces = uiColor(color).withAlphaComponent(0.75)
+        // For front, right, back, left faces use the new gradient that changes with radius
+        let mFront = mat(front); mFront.diffuse.contents = gradient
+        let mRight = mat(right); mRight.diffuse.contents = gradient
+        let mBack = mat(back); mBack.diffuse.contents = gradient
+        let mLeft = mat(left); mLeft.diffuse.contents = gradient
+        // Top and bottom faces keep original solid colors
+        let mTop = mat(top, metal: 0.08, rough: 0.25)
+        let mBottom = mat(bottom, metal: 0.10, rough: 0.60)
+
+        return [mFront, mRight, mBack, mLeft, mTop, mBottom]
     }
 
     private func makeBarLabelNode(text: String) -> SCNNode {
@@ -407,8 +519,23 @@ private struct RadiusBarSceneView: UIViewRepresentable {
         var parent: RadiusBarSceneView
         weak var view: SCNView?
         private(set) var didRunInitialAnimation = false
+        
+        private var followLink: CADisplayLink?
+        private let globeRadius: CGFloat = 0.10
+
+        private var loopLink: CADisplayLink?
+        private var loopPhase: Phase = .idle
+        private var loopTime: CFTimeInterval = 0
+        private var loopDuration: CFTimeInterval = 2.5
+        private var loopTargetHeight: Double = 0
+        private enum Phase { case idle, rising, falling }
 
         init(_ parent: RadiusBarSceneView) { self.parent = parent }
+        
+        deinit {
+            stopFollowingGlobe()
+            stopLoopingBar()
+        }
 
         func prepareInitialState() {
             guard let scnView = view,
@@ -416,9 +543,15 @@ private struct RadiusBarSceneView: UIViewRepresentable {
                   let bar = root.childNode(withName: "bar", recursively: true),
                   let box = bar.geometry as? SCNBox else { return }
             // Keep geometry height constant; collapse via scale so SCNAnimation can drive growth
-            bar.scale = SCNVector3(1, 0.0001, 1)
+            bar.scale = SCNVector3(1, 1, 1)
             // Position bar so base sits at y=0 relative to barTarget
-            bar.position.y = Float(box.height) / 2.0
+            // Apply 75% cap to initial bar height
+            let capped = min(Double(box.height), parent.maxSceneHeight * 0.75)
+            box.height = CGFloat(capped)
+            bar.position.y = Float(capped / 2.0)
+            
+            startFollowingGlobe()
+            startLoopingBar()
         }
 
         func markInitialAnimationRun() {
@@ -434,21 +567,21 @@ private struct RadiusBarSceneView: UIViewRepresentable {
                   let root = scnView.scene?.rootNode,
                   let bar = root.childNode(withName: "bar", recursively: true),
                   let box = bar.geometry as? SCNBox else { return }
+            
+            if loopLink != nil { return }
 
-            // If bar has an active grow animation, skip manual height updates to keep SCNAnimation smooth
-            if bar.animation(forKey: "growYLoop") != nil {
-                return
-            }
+            // Removed early return for active growYLoop animation so manual height updates always apply
 
             let targetH = clampedHeight(radius)
-            // Hard cap to ensure we never exceed the visible scene height
-            let hardMaxH: Double = parent.maxSceneHeight
+            // Hard cap to ensure we never exceed 75% of the visible scene height
+            let hardMaxH: Double = parent.maxSceneHeight * 0.75
             let appliedH = min(targetH, hardMaxH)
 
             CATransaction.begin()
             CATransaction.setDisableActions(true)
             box.height = CGFloat(appliedH)
             bar.position.y = Float(appliedH / 2.0)
+            
             CATransaction.commit()
         }
 
@@ -469,8 +602,8 @@ private struct RadiusBarSceneView: UIViewRepresentable {
                   let root = scnView.scene?.rootNode,
                   let bar = root.childNode(withName: "bar", recursively: true),
                   let box = bar.geometry as? SCNBox else { return }
-            // Rebuild per-face materials with current colors
-            let mats = parent.perFaceMaterials(from: baseColor)
+            // Rebuild per-face materials with current colors and current radius
+            let mats = parent.perFaceMaterials(from: baseColor, radius: parent.radius)
             // Update multiply and lighting model, and normal map settings per new config
             for m in mats {
                 m.lightingModel = lightingModel
@@ -483,6 +616,109 @@ private struct RadiusBarSceneView: UIViewRepresentable {
                 }
             }
             box.materials = mats
+        }
+
+        private func startFollowingGlobe() {
+            stopFollowingGlobe()
+            let link = CADisplayLink(target: self, selector: #selector(followTick(_:)))
+            link.add(to: .main, forMode: .common)
+            followLink = link
+        }
+
+        private func stopFollowingGlobe() {
+            followLink?.invalidate()
+            followLink = nil
+        }
+        
+        private func startLoopingBar() {
+            stopLoopingBar()
+            pickNewTarget()
+            loopPhase = .rising
+            loopTime = 0
+            let link = CADisplayLink(target: self, selector: #selector(loopTick(_:)))
+            link.add(to: .main, forMode: .common)
+            loopLink = link
+        }
+
+        private func stopLoopingBar() {
+            loopLink?.invalidate()
+            loopLink = nil
+            loopPhase = .idle
+        }
+        
+        private func pickNewTarget() {
+            // Choose a random target between 30% and 80% of maxSceneHeight
+            let minFrac: Double = 0.30
+            let maxFrac: Double = 0.80
+            let frac = Double.random(in: minFrac...maxFrac)
+            loopTargetHeight = parent.maxSceneHeight * frac
+            loopDuration = 2.2 + CFTimeInterval.random(in: 0.0...0.8)
+        }
+
+        private func easeInOut(_ t: Double) -> Double {
+            // Smoothstep-like ease-in-out
+            let tt = max(0.0, min(1.0, t))
+            return tt * tt * (3 - 2 * tt)
+        }
+
+        @objc private func followTick(_ link: CADisplayLink) {
+            guard let scnView = view,
+                  let root = scnView.scene?.rootNode,
+                  let bar = root.childNode(withName: "bar", recursively: true),
+                  let box = bar.geometry as? SCNBox,
+                  let barTarget = root.childNode(withName: "barTarget", recursively: true),
+                  let globe = barTarget.childNode(withName: "globe", recursively: false) else { return }
+            let baseGap: CGFloat = 0.08 // closer hover gap
+            // Subtle bobbing using time
+            let t = CGFloat(link.timestamp)
+            let bob = sin(t * 2.0) * 0.01 // ~1 cm bobbing
+            // Compute the bar's top center in its local space, then convert to barTarget's space
+            let halfH = box.height / 2.0
+            let topLocal = SCNVector3(0, Float(halfH), 0)
+            let topInBarTarget = bar.convertPosition(topLocal, to: barTarget)
+            let yAboveTop = topInBarTarget.y + Float(globeRadius + baseGap + bob)
+            globe.position = SCNVector3(0, yAboveTop, 0)
+        }
+
+        @objc private func loopTick(_ link: CADisplayLink) {
+            guard let scnView = view,
+                  let root = scnView.scene?.rootNode,
+                  let bar = root.childNode(withName: "bar", recursively: true),
+                  let box = bar.geometry as? SCNBox else { return }
+            let dt = link.duration
+            switch loopPhase {
+            case .idle:
+                return
+            case .rising:
+                loopTime += dt
+                let t = min(1.0, loopTime / loopDuration)
+                let eased = easeInOut(t)
+                let h = loopTargetHeight * eased
+                CATransaction.begin()
+                CATransaction.setDisableActions(true)
+                box.height = CGFloat(h)
+                bar.position.y = Float(h / 2.0)
+                CATransaction.commit()
+                if t >= 1.0 {
+                    loopPhase = .falling
+                    loopTime = 0
+                }
+            case .falling:
+                loopTime += dt
+                let t = min(1.0, loopTime / (loopDuration * 0.8))
+                let eased = easeInOut(t)
+                let h = loopTargetHeight * (1.0 - eased)
+                CATransaction.begin()
+                CATransaction.setDisableActions(true)
+                box.height = CGFloat(h)
+                bar.position.y = Float(h / 2.0)
+                CATransaction.commit()
+                if t >= 1.0 {
+                    pickNewTarget()
+                    loopPhase = .rising
+                    loopTime = 0
+                }
+            }
         }
     }
 }
@@ -686,17 +922,7 @@ private struct RadiusBarOnlyPreview: View {
             ForEach(percents, id: \.self) { p in
                 Button(String(format: "%.0f%%", p * 100)) {
                     let target = earthMeters * p
-                    if useGravityRamp {
-                        runGravityRamp(to: target) {
-                            animateTo(0)
-                        }
-                    } else {
-                        animateTo(target)
-                        // After the animation completes approximately, drop back to 0
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                            animateTo(0)
-                        }
-                    }
+                    animateTo(target)
                 }
                 .buttonStyle(.bordered)
             }
@@ -704,14 +930,8 @@ private struct RadiusBarOnlyPreview: View {
     }
 
     private func animateTo(_ target: Double) {
-        if useSpring {
-            withAnimation(.interpolatingSpring(mass: 1.0, stiffness: springStiffness(), damping: springDampingCoef(), initialVelocity: 0)) {
-                radius = min(max(0, target), 3_323_000.0)
-            }
-        } else {
-            withAnimation(.easeInOut(duration: 0.35)) {
-                radius = min(max(0, target), 3_323_000.0)
-            }
+        withAnimation(.interpolatingSpring(mass: 1.0, stiffness: springStiffness(), damping: springDampingCoef(), initialVelocity: 0)) {
+            radius = min(max(0, target), 3_323_000.0)
         }
     }
 
@@ -728,53 +948,41 @@ private struct RadiusBarOnlyPreview: View {
 
     private func runGravityRamp(to target: Double, completion: (() -> Void)? = nil) {
         let clampedTarget = min(max(0, target), 3_323_000.0)
-        let start = radius
-        let delta = clampedTarget - start
-        guard abs(delta) > 1 else { completion?(); return }
-        let duration = max(0.3, 0.9 / gravityStrength)
-        let steps = Int(max(15, duration * 60))
-        let dt = duration / Double(steps)
-        var t: Double = 0
-        let accel = 2.0 / (duration * duration)
-        Task { @MainActor in
-            for i in 0...steps {
-                if i == steps {
-                    radius = clampedTarget
-                    completion?()
-                    break
-                }
-                t += dt
-                let normalized = min(1.0, 0.5 * accel * t * t)
-                radius = start + normalized * delta
-                try? await Task.sleep(nanoseconds: UInt64(dt * 1_000_000_000))
-            }
-        }
+        animateTo(clampedTarget)
+        completion?()
     }
 
     private func startLoopingAnimation() {
-        guard isLooping else { return }
-        let maxTarget = 3_323_000.0
         Task { @MainActor in
+            // Water-like continuous driver: small nudges each frame
+            var goingUp = true
+            var targetHigh = earthMeters * Double.random(in: 0.3...0.8)
+            let fps: Double = 60.0
+            let dt: Double = 1.0 / fps
             while isLooping {
-                // Animate up to max
-                if useGravityRamp {
-                    await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
-                        runGravityRamp(to: maxTarget) {
-                            cont.resume()
-                        }
+                let current = radius
+                let target = goingUp ? targetHigh : 0.0
+                // Move a small fraction toward the target each frame
+                let diff = target - current
+                // Speed: reach ~in 4–6 seconds depending on distance
+                let ratePerSecond = max(0.25, min(0.6, abs(diff) / (earthMeters * 2.0)))
+                let step = diff * ratePerSecond * dt
+                let next = current + step
+                withAnimation(.interpolatingSpring(mass: 1.0, stiffness: springStiffness(), damping: springDampingCoef(), initialVelocity: 0)) {
+                    radius = min(max(0, next), 3_323_000.0)
+                }
+                // Check bounds to flip direction
+                if goingUp {
+                    if abs(diff) < max(250.0, targetHigh * 0.01) { // close to high target
+                        goingUp = false
                     }
                 } else {
-                    animateTo(maxTarget)
-                    try? await Task.sleep(nanoseconds: 600_000_000)
+                    if radius <= 1.0 { // close to zero
+                        goingUp = true
+                        targetHigh = earthMeters * Double.random(in: 0.3...0.8)
+                    }
                 }
-                // Brief pause at top
-                try? await Task.sleep(nanoseconds: 250_000_000)
-                // Reset to zero quickly
-                withAnimation(.easeOut(duration: 0.25)) {
-                    radius = 0
-                }
-                // Brief pause at bottom
-                try? await Task.sleep(nanoseconds: 250_000_000)
+                try? await Task.sleep(nanoseconds: UInt64(dt * 1_000_000_000))
             }
         }
     }
