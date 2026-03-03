@@ -682,3 +682,104 @@ class CameraOverlayScene: SKScene {
         }
     }
 }
+
+private final class CameraPlaceholderView: UIView {
+    private let iconView = UIImageView(image: UIImage(systemName: "camera.fill"))
+    private let titleLabel: UILabel = {
+        let l = UILabel()
+        l.text = "Camera Preview Placeholder"
+        l.textColor = .secondaryLabel
+        l.font = .systemFont(ofSize: 15, weight: .medium)
+        l.textAlignment = .center
+        l.translatesAutoresizingMaskIntoConstraints = false
+        return l
+    }()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        backgroundColor = UIColor.secondarySystemBackground
+        layer.cornerRadius = 12
+        layer.cornerCurve = .continuous
+        layer.masksToBounds = true
+
+        iconView.tintColor = .tertiaryLabel
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+
+        addSubview(iconView)
+        addSubview(titleLabel)
+
+        NSLayoutConstraint.activate([
+            iconView.centerXAnchor.constraint(equalTo: centerXAnchor),
+            iconView.centerYAnchor.constraint(equalTo: centerYAnchor, constant: -10),
+            iconView.widthAnchor.constraint(equalToConstant: 44),
+            iconView.heightAnchor.constraint(equalToConstant: 36),
+
+            titleLabel.topAnchor.constraint(equalTo: iconView.bottomAnchor, constant: 8),
+            titleLabel.centerXAnchor.constraint(equalTo: centerXAnchor)
+        ])
+
+        // Subtle inner border
+        let border = CAShapeLayer()
+        border.strokeColor = UIColor.separator.cgColor
+        border.fillColor = UIColor.clear.cgColor
+        border.lineWidth = 1
+        border.frame = bounds
+        border.path = UIBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), cornerRadius: 12).cgPath
+        layer.addSublayer(border)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        // Keep border path in sync with bounds
+        if let border = layer.sublayers?.compactMap({ $0 as? CAShapeLayer }).last {
+            border.frame = bounds
+            border.path = UIBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), cornerRadius: 12).cgPath
+        }
+    }
+}
+
+#if DEBUG
+import SwiftUI
+
+private struct CameraPreviewVC_Host: UIViewControllerRepresentable {
+    func makeUIViewController(context: Context) -> CameraPreviewViewController {
+        // Create a lightweight dummy session for previews
+        let session = AVCaptureSession()
+        session.beginConfiguration()
+        session.sessionPreset = .photo
+        // Do not add inputs/outputs in previews to avoid permission prompts
+        session.commitConfiguration()
+
+        let vc = CameraPreviewViewController(session: session)
+        vc.autoManageSession = false // do not start/stop in previews
+        vc.onShutter = { print("[Preview] Shutter") }
+        vc.onStartVideo = { print("[Preview] Start video") }
+        vc.onStopVideo = { print("[Preview] Stop video") }
+        
+        #if DEBUG
+        let placeholder = CameraPlaceholderView()
+        placeholder.translatesAutoresizingMaskIntoConstraints = false
+        vc.view.addSubview(placeholder)
+        NSLayoutConstraint.activate([
+            placeholder.leadingAnchor.constraint(equalTo: vc.view.leadingAnchor),
+            placeholder.trailingAnchor.constraint(equalTo: vc.view.trailingAnchor),
+            placeholder.topAnchor.constraint(equalTo: vc.view.topAnchor),
+            placeholder.bottomAnchor.constraint(equalTo: vc.view.bottomAnchor)
+        ])
+        #endif
+        
+        return vc
+    }
+
+    func updateUIViewController(_ uiViewController: CameraPreviewViewController, context: Context) { }
+}
+
+#Preview("CameraPreviewViewController") {
+    CameraPreviewVC_Host()
+        .ignoresSafeArea()
+}
+#endif
+

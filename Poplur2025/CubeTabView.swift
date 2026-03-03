@@ -209,9 +209,11 @@ private struct CubeSceneView: UIViewRepresentable {
 
         context.coordinator.view = scnView
         context.coordinator.syncToSelectedTab(selectedTab)
+        context.coordinator.setInitialYaw(for: selectedTab)
 
         // Apply initial preview hover state and pop/yaw triggers
         context.coordinator.applyPreviewHover(previewHover)
+        context.coordinator.applyPreviewHover(true)
         context.coordinator.lastPopTrigger = previewPopTrigger
         context.coordinator.lastYawRightStep = previewYawRightStep
         context.coordinator.lastYawLeftStep = previewYawLeftStep
@@ -228,9 +230,7 @@ private struct CubeSceneView: UIViewRepresentable {
         }
 
         // Observe motion updates to rotate cube based on device attitude
-        if !isRunningInPreviews {
-            context.coordinator.startObservingMotion()
-        }
+        context.coordinator.startObservingMotion()
 
         return scnView
     }
@@ -661,9 +661,27 @@ private struct CubeSceneView: UIViewRepresentable {
         private var accelTime: CFTimeInterval = 0
         private var isAccelSimulating: Bool = false
 
+        // New stored property for preview sim observer
+        private var previewSimObserver: NSObjectProtocol?
+
+        // New stored property for continuous yaw state (radians)
+        private var currentYaw: Float = 0
+
+        // New stored property for pan starting yaw
+        private var panStartYaw: Float = 0
+
+        // Sensitivity: radians per point of horizontal pan
+        private let radiansPerPoint: Float = Float.pi / 360
+
         // Added helper functions as per instructions
         private func deg2rad(_ degrees: Float) -> Float { degrees * .pi / 180 }
         private func clamp(_ value: Float, min minVal: Float, max maxVal: Float) -> Float { max(minVal, min(maxVal, value)) }
+
+        private func snappedIndex(from yaw: Float) -> Int {
+            let rawIndex = Int(round(yaw / (-Float.pi / 2)))
+            let modIndex = ((rawIndex % tabs.count) + tabs.count) % tabs.count
+            return modIndex
+        }
 
         private var rotationSpeedMultiplier: Double { parent.rotationSpeedMultiplier }
 
@@ -721,12 +739,37 @@ private struct CubeSceneView: UIViewRepresentable {
             super.init()
             startObservingHold()
             startAccelerometerSimulation()
+            previewSimObserver = NotificationCenter.default.addObserver(forName: Notification.Name("CubePreviewSimulateMotionEnabled"), object: nil, queue: .main) { [weak self] notif in
+                guard let self = self else { return }
+                let enabled = (notif.userInfo?["enabled"] as? Bool) ?? false
+                if enabled {
+                    // Pause internal simulation so external posts (sliders) control the cube
+                    self.stopAccelerometerSimulation()
+                } else {
+                    // Resume internal simulation in previews only
+                    if isRunningInPreviews {
+                        self.startAccelerometerSimulation()
+                    }
+                }
+            }
         }
 
         deinit {
+            if let token = previewSimObserver {
+                NotificationCenter.default.removeObserver(token)
+                previewSimObserver = nil
+            }
             stopObservingMotion()
             stopObservingHold()
             stopAccelerometerSimulation()
+        }
+
+        func setInitialYaw(for tab: AppTab) {
+            let idx = tabs.firstIndex(of: tab) ?? 0
+            currentIndex = idx
+            currentYaw = Float(idx) * (-Float.pi / 2)
+            guard let scnView = view, let cube = scnView.scene?.rootNode.childNode(withName: "cube", recursively: true) else { return }
+            cube.eulerAngles = SCNVector3(0, currentYaw, 0)
         }
 
         @objc func handleSwipe(_ gesture: UISwipeGestureRecognizer) {
@@ -773,63 +816,45 @@ private struct CubeSceneView: UIViewRepresentable {
             case .began:
                 panStartPoint = translation
                 panAccumulated = 0
+                panStartYaw = currentYaw
+
             case .changed:
                 // Accumulate horizontal movement
                 let deltaX = translation.x - panStartPoint.x
                 panAccumulated += deltaX
                 panStartPoint = translation
 
+                // Update currentYaw by pan offset scaled by radiansPerPoint
+                currentYaw = panStartYaw + Float(panAccumulated) * radiansPerPoint
+
+                // Apply rotation immediately
+                cube.eulerAngles = SCNVector3(0, currentYaw, 0)
+
                 // Clear liveRotation to avoid fighting motion tilt during pan
                 self.liveRotation = SCNVector3Zero
 
-                // Keep face flat during drag; do not expose adjacent faces
-                let baseY = Float(currentIndex) * (-Float.pi / 2)
-                cube.eulerAngles = SCNVector3(0, baseY, 0)
-
             case .ended, .cancelled, .failed:
-                // Decide if we switch faces
-                if panAccumulated <= -panThreshold {
-                    currentIndex = (currentIndex + 1) % tabs.count
-                    rotateCube(cube, to: currentIndex, animated: true, bouncy: true)
-                    parent.selectedTab = tabs[currentIndex]
-                    haptic.impactOccurred(intensity: 0.8)
+                // Snap to nearest face based on currentYaw
+                let targetIndex = snappedIndex(from: currentYaw)
+                let targetYaw = Float(targetIndex) * (-Float.pi / 2)
 
-                    let newTab = tabs[currentIndex]
-                    if newTab != .feed {
-                        NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
-                    }
-                    if newTab == .record {
-                        NotificationCenter.default.post(name: Notification.Name("RecordTabBecameActive"), object: nil)
-                    }
-                } else if panAccumulated >= panThreshold {
-                    currentIndex = (currentIndex - 1 + tabs.count) % tabs.count
-                    rotateCube(cube, to: currentIndex, animated: true, bouncy: true)
-                    parent.selectedTab = tabs[currentIndex]
-                    haptic.impactOccurred(intensity: 0.8)
+                currentIndex = targetIndex
+                animateToYaw(targetYaw, bouncy: true)
+                parent.selectedTab = tabs[currentIndex]
+                haptic.impactOccurred(intensity: 0.8)
 
-                    let newTab = tabs[currentIndex]
-                    if newTab != .feed {
-                        NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
-                    }
-                    if newTab == .record {
-                        NotificationCenter.default.post(name: Notification.Name("RecordTabBecameActive"), object: nil)
-                    }
-                } else {
-                    // Snap back to current face if below threshold
-                    rotateCube(cube, to: currentIndex, animated: true, bouncy: true)
-
-                    let newTab = tabs[currentIndex]
-                    if newTab != .feed {
-                        NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
-                    }
-                    if newTab == .record {
-                        NotificationCenter.default.post(name: Notification.Name("RecordTabBecameActive"), object: nil)
-                    }
+                let newTab = tabs[currentIndex]
+                if newTab != .feed {
+                    NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
                 }
+                if newTab == .record {
+                    NotificationCenter.default.post(name: Notification.Name("RecordTabBecameActive"), object: nil)
+                }
+
                 // Reset live tilt and reapply combined rotation
-                cube.eulerAngles.y = Float(currentIndex) * (-Float.pi / 2)
                 self.liveRotation = SCNVector3Zero
                 self.applyCombinedRotation(to: cube)
+
             default:
                 break
             }
@@ -839,7 +864,8 @@ private struct CubeSceneView: UIViewRepresentable {
             guard let scnView = view, let cube = scnView.scene?.rootNode.childNode(withName: "cube", recursively: true) else { return }
             if let idx = tabs.firstIndex(of: tab), idx != currentIndex {
                 currentIndex = idx
-                rotateCube(cube, to: currentIndex, animated: true)
+                currentYaw = Float(idx) * (-Float.pi / 2)
+                animateToYaw(currentYaw)
                 applyCombinedRotation(to: cube)
 
                 if tab != .feed {
@@ -851,36 +877,36 @@ private struct CubeSceneView: UIViewRepresentable {
             }
         }
 
+        private func animateToYaw(_ yaw: Float, bouncy: Bool = false) {
+            guard let scnView = view, let cube = scnView.scene?.rootNode.childNode(withName: "cube", recursively: true) else { return }
+            let cgYaw = CGFloat(yaw)
+            if bouncy {
+                let overshoot: CGFloat = 0.12
+                let target1 = SCNAction.rotateTo(x: 0, y: cgYaw + overshoot, z: 0, duration: 0.18 * parent.rotationSpeedMultiplier, usesShortestUnitArc: true)
+                target1.timingMode = .easeInEaseOut
+                let target2 = SCNAction.rotateTo(x: 0, y: cgYaw, z: 0, duration: 0.22 * parent.rotationSpeedMultiplier, usesShortestUnitArc: true)
+                target2.timingMode = .easeInEaseOut
+                cube.runAction(SCNAction.sequence([target1, target2])) { [weak self] in
+                    self?.applyCombinedRotation(to: cube)
+                }
+            } else {
+                let action = SCNAction.rotateTo(x: 0, y: cgYaw, z: 0, duration: 0.28 * parent.rotationSpeedMultiplier, usesShortestUnitArc: true)
+                action.timingMode = .easeInEaseOut
+                cube.runAction(action) { [weak self] in
+                    self?.applyCombinedRotation(to: cube)
+                }
+            }
+        }
+
         private func rotateCube(_ node: SCNNode, to index: Int, animated: Bool = true, bouncy: Bool = false) {
             let baseAngle = Float(index) * (-Float.pi / 2)
             if !animated {
                 node.eulerAngles.y = baseAngle
+                currentYaw = baseAngle
                 return
             }
-            if bouncy {
-                // Overshoot then settle
-                let overshoot: Float = 0.12
-                let target1 = SCNAction.rotateTo(x: 0, y: CGFloat(baseAngle + overshoot), z: 0, duration: 0.18 * rotationSpeedMultiplier, usesShortestUnitArc: true)
-                target1.timingMode = .easeInEaseOut
-                let target2 = SCNAction.rotateTo(x: 0, y: CGFloat(baseAngle), z: 0, duration: 0.22 * rotationSpeedMultiplier, usesShortestUnitArc: true)
-                target2.timingMode = .easeInEaseOut
-                let seq = SCNAction.sequence([target1, target2])
-                node.runAction(seq) { [weak self] in
-                    guard let self = self else { return }
-                    DispatchQueue.main.async {
-                        self.applyCombinedRotation(to: node)
-                    }
-                }
-            } else {
-                let action = SCNAction.rotateTo(x: 0, y: CGFloat(baseAngle), z: 0, duration: 0.28 * rotationSpeedMultiplier, usesShortestUnitArc: true)
-                action.timingMode = .easeInEaseOut
-                node.runAction(action) { [weak self] in
-                    guard let self = self else { return }
-                    DispatchQueue.main.async {
-                        self.applyCombinedRotation(to: node)
-                    }
-                }
-            }
+            currentYaw = baseAngle
+            animateToYaw(currentYaw, bouncy: bouncy)
         }
 
         func startObservingMotion() {
@@ -893,19 +919,21 @@ private struct CubeSceneView: UIViewRepresentable {
                 // Map to a single horizontal component for side-to-side sway only
                 // Use device roll (left-right tilt) to drive horizontal sway; adjust sign if needed
                 let horizontal = Float((notif.userInfo?["roll"] as? Double) ?? 0)
-                let horizontalScaled = horizontal * 0.5
 
-                // Optional: map pitch to a tiny vertical bobbing influence
+                // Optional: map pitch to X tilt directly for visible up/down look
                 let pitch = Float((notif.userInfo?["pitch"] as? Double) ?? 0)
-                let pitchScaled = max(-0.5, min(0.5, pitch))
-                let bobInfluence = sin(pitchScaled) * 0.02
-
                 // Clamp raw horizontal to keep within reasonable bounds
                 let maxTiltRad: Float = deg2rad(60)
-                let clampedH = clamp(horizontalScaled, min: -maxTiltRad, max: maxTiltRad)
+                let clampedH = clamp(horizontal * 0.5, min: -maxTiltRad, max: maxTiltRad)
 
-                // Only store Y component and tiny Z for bob; zero X to prevent up/down tilt
-                self.liveRotation = SCNVector3(0, clampedH, bobInfluence)
+                // Direct X from pitch (no sin), with small clamp here; final clamp happens later
+                let clampedPitch = clamp(pitch, min: -maxTiltRad, max: maxTiltRad)
+
+                // Keep a tiny Z bob based on pitch for subtle roll-off
+                let bobInfluence = clampedPitch * 0.10
+
+                // Store X (pitch), Y (roll-based sway), and tiny Z bob
+                self.liveRotation = SCNVector3(clampedPitch, clampedH, bobInfluence)
 
                 self.applyCombinedRotation(to: cube)
             }
@@ -937,46 +965,40 @@ private struct CubeSceneView: UIViewRepresentable {
         private func beginBlink() {
             guard !isBlinking, let scnView = view, let cube = scnView.scene?.rootNode.childNode(withName: "cube", recursively: true) else { return }
             isBlinking = true
-            // Define a single pop sequence (scale up then down)
-            let up = SCNAction.scale(to: 1.15, duration: 0.18)
-            up.timingMode = .easeOut
-            let down = SCNAction.scale(to: 1.0, duration: 0.22)
-            down.timingMode = .easeInEaseOut
-            let popOnce = SCNAction.sequence([up, down])
-            // Repeat forever while long-press is active
-            let loop = SCNAction.repeatForever(popOnce)
-            // Run the looping pop animation
-            cube.runAction(loop, forKey: "recordBlink")
-            // Play pop sound at the start and schedule repeats aligned with animation duration
-            if parent.previewPopSoundEnabled, let src = popAudioSource {
+
+            // Slow build-up pop cycle
+            let up = SCNAction.scale(to: 1.15, duration: 0.9)
+            up.timingMode = .easeIn
+            let peakHold = SCNAction.wait(duration: 0.05)
+            let down = SCNAction.scale(to: 1.0, duration: 0.6)
+            down.timingMode = .easeOut
+            let rest = SCNAction.wait(duration: 0.2)
+
+            // Pop sound exactly at peak
+            var peakSound: SCNAction = .wait(duration: 0)
+            if let src = popAudioSource {
                 #if DEBUG
                 do {
                     try AVAudioSession.sharedInstance().setCategory(.ambient, options: [.mixWithOthers])
                     try AVAudioSession.sharedInstance().setActive(true)
-                    print("[CubeTabView] AVAudioSession ensured active for long-press pop loop")
+                    print("[CubeTabView] AVAudioSession ensured active for long-press slow pop")
                 } catch {
                     print("[CubeTabView] AVAudioSession ensure active failed: \(error)")
                 }
                 #endif
-                // Action to play the audio once
-                let playAudio = SCNAction.run { node in
-                    let player = SCNAudioPlayer(source: src)
-                    node.addAudioPlayer(player)
-                    let playAction = SCNAction.playAudio(src, waitForCompletion: false)
-                    node.runAction(playAction)
-                }
-                // Total cycle duration matches up+down durations
-                let cycleDuration: Double = 0.18 + 0.22
-                let soundLoop = SCNAction.repeatForever(SCNAction.sequence([playAudio, SCNAction.wait(duration: cycleDuration)]))
-                cube.runAction(soundLoop, forKey: "recordBlinkSoundLoop")
+                peakSound = SCNAction.playAudio(src, waitForCompletion: false)
             }
+
+            let peakGroup = SCNAction.group([peakHold, peakSound])
+            let cycle = SCNAction.sequence([up, peakGroup, down, rest])
+            let loop = SCNAction.repeatForever(cycle)
+            cube.runAction(loop, forKey: "recordBlink")
         }
 
         private func endBlink() {
             guard isBlinking, let scnView = view, let cube = scnView.scene?.rootNode.childNode(withName: "cube", recursively: true) else { return }
             isBlinking = false
             cube.removeAction(forKey: "recordBlink")
-            cube.removeAction(forKey: "recordBlinkSoundLoop")
             cube.scale = SCNVector3(1.0, 1.0, 1.0)
         }
 
@@ -984,37 +1006,34 @@ private struct CubeSceneView: UIViewRepresentable {
             // Base rotation from current index (y-axis steps of 90 degrees)
             let baseY = Float(currentIndex) * (-Float.pi / 2)
 
-            // We only sway side-to-side: ignore X and Z for rotation, but use Z for slight tilt
-            let yAdditiveScale: Float = 0.2
-            let maxYAddDeg: Float = 6
-            let maxYAdd = deg2rad(maxYAddDeg)
+            // Larger, clearer response
+            let yAdditiveScale: Float = 0.8
+            let maxYAdd: Float = deg2rad(25)
+            var yAdd = clamp(liveRotation.y * yAdditiveScale, min: -maxYAdd, max: maxYAdd)
 
-            var yAdd = liveRotation.y * yAdditiveScale
-            yAdd = clamp(yAdd, min: -maxYAdd, max: maxYAdd)
+            // Direct X from pitch
+            let xAdditiveScale: Float = 0.7
+            let maxXAdd: Float = deg2rad(15)
+            var xAdd = clamp(liveRotation.x * xAdditiveScale, min: -maxXAdd, max: maxXAdd)
 
-            let zAdditiveScale: Float = 0.15
-            let maxZAdd: Float = deg2rad(3)
-            var zAdd = liveRotation.z * zAdditiveScale
-            zAdd = clamp(zAdd, min: -maxZAdd, max: maxZAdd)
+            // Keep subtle Z bob
+            let zAdditiveScale: Float = 0.6
+            let maxZAdd: Float = deg2rad(12)
+            var zAdd = clamp(liveRotation.z * zAdditiveScale, min: -maxZAdd, max: maxZAdd)
 
             let y = baseY + yAdd
-            node.eulerAngles = SCNVector3(0 + zAdd, y, 0)
+            node.eulerAngles = SCNVector3(xAdd + zAdd, y, 0)
         }
 
         func applyPreviewHover(_ enabled: Bool) {
             guard let scnView = view, let cube = scnView.scene?.rootNode.childNode(withName: "cube", recursively: true) else { return }
-            if enabled {
-                if cube.action(forKey: "previewHover") == nil {
-                    let up = SCNAction.moveBy(x: 0, y: 0.08, z: 0, duration: 0.9)
-                    up.timingMode = .easeInEaseOut
-                    let down = SCNAction.moveBy(x: 0, y: -0.08, z: 0, duration: 0.9)
-                    down.timingMode = .easeInEaseOut
-                    let seq = SCNAction.sequence([up, down])
-                    cube.runAction(.repeatForever(seq), forKey: "previewHover")
-                }
-            } else {
-                cube.removeAction(forKey: "previewHover")
-                cube.position.y = 0
+            if cube.action(forKey: "previewHover") == nil {
+                let up = SCNAction.moveBy(x: 0, y: 0.08, z: 0, duration: 0.9)
+                up.timingMode = .easeInEaseOut
+                let down = SCNAction.moveBy(x: 0, y: -0.08, z: 0, duration: 0.9)
+                down.timingMode = .easeInEaseOut
+                let seq = SCNAction.sequence([up, down])
+                cube.runAction(.repeatForever(seq), forKey: "previewHover")
             }
         }
 
@@ -1025,46 +1044,44 @@ private struct CubeSceneView: UIViewRepresentable {
             let down = SCNAction.scale(to: 1.0, duration: 0.22)
             down.timingMode = .easeInEaseOut
             cube.runAction(SCNAction.sequence([up, down]), forKey: "previewPop")
-            if parent.previewPopSoundEnabled {
-                print("[CubeTabView] Pop sound requested")
-                guard let src = popAudioSource else { print("[CubeTabView] No audio source available"); return }
+            print("[CubeTabView] Pop sound requested")
+            guard let src = popAudioSource else { print("[CubeTabView] No audio source available"); return }
+            #if DEBUG
+            do {
+                try AVAudioSession.sharedInstance().setCategory(.ambient, options: [.mixWithOthers])
+                try AVAudioSession.sharedInstance().setActive(true)
+                print("[CubeTabView] AVAudioSession ensured active for pop")
+            } catch {
+                print("[CubeTabView] AVAudioSession ensure active failed: \(error)")
+            }
+            #endif
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                if cube.parent == nil { print("[CubeTabView] Cube node missing parent; skipping audio"); return }
+                let player = SCNAudioPlayer(source: src)
+                cube.addAudioPlayer(player)
+                print("[CubeTabView] Added SCNAudioPlayer to cube")
+                // Fallback: also run a playAudio action in case player is ignored in previews
+                let playAction = SCNAction.playAudio(src, waitForCompletion: false)
+                cube.runAction(playAction)
+                print("[CubeTabView] Triggered playAudio action fallback")
+                
                 #if DEBUG
-                do {
-                    try AVAudioSession.sharedInstance().setCategory(.ambient, options: [.mixWithOthers])
-                    try AVAudioSession.sharedInstance().setActive(true)
-                    print("[CubeTabView] AVAudioSession ensured active for pop")
-                } catch {
-                    print("[CubeTabView] AVAudioSession ensure active failed: \(error)")
+                if let player = self.popAVPlayer {
+                    player.currentTime = 0
+                    if !player.isPlaying {
+                        player.play()
+                        print("[CubeTabView] AVAudioPlayer played pop")
+                    } else {
+                        // Restart to ensure audible response
+                        player.stop()
+                        player.currentTime = 0
+                        player.play()
+                        print("[CubeTabView] AVAudioPlayer restarted pop")
+                    }
+                } else {
+                    print("[CubeTabView] AVAudioPlayer fallback not available")
                 }
                 #endif
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                    if cube.parent == nil { print("[CubeTabView] Cube node missing parent; skipping audio"); return }
-                    let player = SCNAudioPlayer(source: src)
-                    cube.addAudioPlayer(player)
-                    print("[CubeTabView] Added SCNAudioPlayer to cube")
-                    // Fallback: also run a playAudio action in case player is ignored in previews
-                    let playAction = SCNAction.playAudio(src, waitForCompletion: false)
-                    cube.runAction(playAction)
-                    print("[CubeTabView] Triggered playAudio action fallback")
-                    
-                    #if DEBUG
-                    if let player = self.popAVPlayer {
-                        player.currentTime = 0
-                        if !player.isPlaying {
-                            player.play()
-                            print("[CubeTabView] AVAudioPlayer played pop")
-                        } else {
-                            // Restart to ensure audible response
-                            player.stop()
-                            player.currentTime = 0
-                            player.play()
-                            print("[CubeTabView] AVAudioPlayer restarted pop")
-                        }
-                    } else {
-                        print("[CubeTabView] AVAudioPlayer fallback not available")
-                    }
-                    #endif
-                }
             }
         }
 
@@ -1170,6 +1187,11 @@ private struct CubeOnlyPreview: View {
     @State private var directPopPlayer: AVAudioPlayer? = nil
     @State private var lastDirectPopError: String? = nil
 
+    // Preview-only simulated motion controls
+    @State private var simulateMotion: Bool = false
+    @State private var simRoll: Double = 0.0   // radians
+    @State private var simPitch: Double = 0.0  // radians
+
     enum ScaleMode: String, CaseIterable, Identifiable { case scaleTo, scaleBy; var id: String { rawValue } }
 
     var body: some View {
@@ -1228,6 +1250,14 @@ private struct CubeOnlyPreview: View {
                     }
                 Toggle("Pop Sound", isOn: $previewPopSoundEnabled)
 
+                Toggle("Simulate Motion (Preview)", isOn: $simulateMotion)
+                    .onChange(of: simulateMotion) { _, new in
+                        NotificationCenter.default.post(
+                            name: Notification.Name("CubePreviewSimulateMotionEnabled"),
+                            object: nil,
+                            userInfo: ["enabled": new]
+                        )
+                    }
                 HStack(spacing: 10) {
                     Button("Play Pop Now") { playPopDirect() }
                         .buttonStyle(.borderedProminent)
@@ -1250,6 +1280,34 @@ private struct CubeOnlyPreview: View {
                 HStack {
                     Text("Rotation Speed x\(String(format: "%.2f", rotationSpeedMultiplier))")
                     Slider(value: $rotationSpeedMultiplier, in: 0.5...3.0)
+                }
+
+                // Simulated accelerometer controls for previews
+                HStack {
+                    Text("Roll")
+                    Slider(value: $simRoll, in: -0.8...0.8)
+                }
+                .disabled(!simulateMotion)
+                HStack {
+                    Text("Pitch")
+                    Slider(value: $simPitch, in: -0.8...0.8)
+                }
+                .disabled(!simulateMotion)
+                .onChange(of: simRoll) { _, new in
+                    guard simulateMotion else { return }
+                    NotificationCenter.default.post(
+                        name: Notification.Name("CubeMotionUpdate"),
+                        object: nil,
+                        userInfo: ["roll": new, "pitch": simPitch]
+                    )
+                }
+                .onChange(of: simPitch) { _, new in
+                    guard simulateMotion else { return }
+                    NotificationCenter.default.post(
+                        name: Notification.Name("CubeMotionUpdate"),
+                        object: nil,
+                        userInfo: ["roll": simRoll, "pitch": new]
+                    )
                 }
             }
             .padding()

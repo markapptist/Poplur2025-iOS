@@ -611,6 +611,12 @@ private struct HomeBarPlacementPreview: View {
     @State private var radius: Double = 0
     @StateObject private var tuning = BarCubePreviewTuning()
     @State private var selectedTab: AppTab = .record
+    
+    @State private var previewHover: Bool = false
+    @State private var previewPopTrigger: Int = 0
+    @State private var previewPopSoundEnabled: Bool = true
+    @State private var previewYawRightStep: Int = 0
+    @State private var previewYawLeftStep: Int = 0
 
     var usesImperial: Bool { Locale.current.usesMetricSystem == false }
     var earthMaxUnit: Double { usesImperial ? 3958.8 : 6371.0 }
@@ -622,7 +628,16 @@ private struct HomeBarPlacementPreview: View {
 
             VStack {
                 Spacer()
-                CubeTabView(selectedTab: $selectedTab, tintColor: .indigo, onSwipeUp: {})
+                CubeTabView(
+                    selectedTab: $selectedTab,
+                    previewHover: $previewHover,
+                    previewPopTrigger: $previewPopTrigger,
+                    previewPopSoundEnabled: $previewPopSoundEnabled,
+                    previewYawRightStep: $previewYawRightStep,
+                    previewYawLeftStep: $previewYawLeftStep,
+                    tintColor: .indigo,
+                    onSwipeUp: {}
+                )
                     .tint(.white)
                     .frame(height: 230)
                     .padding(.bottom, 8)
@@ -633,6 +648,30 @@ private struct HomeBarPlacementPreview: View {
             CubeAndBarOverlay(radius: $radius, tuning: tuning)
 
             VStack {
+                // Inserted segmented control picker for tab selection
+                VStack {
+                    Picker("Tab", selection: $selectedTab) {
+                        Text("Record").tag(AppTab.record)
+                        Text("Map").tag(AppTab.map)
+                        Text("Profile").tag(AppTab.profile)
+                        Text("Feed").tag(AppTab.feed)
+                    }
+                    .pickerStyle(.segmented)
+                }
+                .padding(.horizontal, 16)
+                HStack(spacing: 12) {
+                    Text("Simulate Swipe:")
+                    Button("Left 90°") { previewYawLeftStep += 2 }
+                        .buttonStyle(.bordered)
+                    Button("Right 90°") { previewYawRightStep += 2 }
+                        .buttonStyle(.bordered)
+                    Button("Pop") { previewPopTrigger += 1 }
+                        .buttonStyle(.bordered)
+                    Toggle("Hover", isOn: $previewHover)
+                        .toggleStyle(.switch)
+                }
+                .padding(.horizontal, 16)
+
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Bar/Cube Placement Tuning").font(.headline)
                     HStack {
