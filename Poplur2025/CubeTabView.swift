@@ -215,6 +215,10 @@ private struct CubeSceneView: UIViewRepresentable {
         context.coordinator.lastPopTrigger = previewPopTrigger
         context.coordinator.lastYawRightStep = previewYawRightStep
         context.coordinator.lastYawLeftStep = previewYawLeftStep
+        
+        if isRunningInPreviews {
+            context.coordinator.startAccelerometerSimulation()
+        }
 
         if selectedTab != .feed {
             NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
@@ -270,6 +274,10 @@ private struct CubeSceneView: UIViewRepresentable {
 
             // Nudge SceneKit to redraw this frame
             uiView.sceneTime = uiView.sceneTime
+        }
+
+        if isRunningInPreviews {
+            context.coordinator.startAccelerometerSimulation()
         }
 
         // Manage preview hover animation state
@@ -646,6 +654,13 @@ private struct CubeSceneView: UIViewRepresentable {
         var lastYawRightStep: Int = 0
         var lastYawLeftStep: Int = 0
 
+        // Added stored properties for accelerometer simulation
+        private var accelSimLink: CADisplayLink?
+        private var accelTarget: SCNVector3 = SCNVector3Zero
+        private var accelCurrent: SCNVector3 = SCNVector3Zero
+        private var accelTime: CFTimeInterval = 0
+        private var isAccelSimulating: Bool = false
+
         // Added helper functions as per instructions
         private func deg2rad(_ degrees: Float) -> Float { degrees * .pi / 180 }
         private func clamp(_ value: Float, min minVal: Float, max maxVal: Float) -> Float { max(minVal, min(maxVal, value)) }
@@ -705,11 +720,13 @@ private struct CubeSceneView: UIViewRepresentable {
             self.parent = parent
             super.init()
             startObservingHold()
+            startAccelerometerSimulation()
         }
 
         deinit {
             stopObservingMotion()
             stopObservingHold()
+            stopAccelerometerSimulation()
         }
 
         @objc func handleSwipe(_ gesture: UISwipeGestureRecognizer) {
@@ -920,17 +937,47 @@ private struct CubeSceneView: UIViewRepresentable {
         private func beginBlink() {
             guard !isBlinking, let scnView = view, let cube = scnView.scene?.rootNode.childNode(withName: "cube", recursively: true) else { return }
             isBlinking = true
-            let fadeDown = SCNAction.fadeOpacity(to: 0.4, duration: 0.35)
-            let fadeUp = SCNAction.fadeOpacity(to: 1.0, duration: 0.35)
-            let pulse = SCNAction.repeatForever(SCNAction.sequence([fadeDown, fadeUp]))
-            cube.runAction(pulse, forKey: "recordBlink")
+            // Define a single pop sequence (scale up then down)
+            let up = SCNAction.scale(to: 1.15, duration: 0.18)
+            up.timingMode = .easeOut
+            let down = SCNAction.scale(to: 1.0, duration: 0.22)
+            down.timingMode = .easeInEaseOut
+            let popOnce = SCNAction.sequence([up, down])
+            // Repeat forever while long-press is active
+            let loop = SCNAction.repeatForever(popOnce)
+            // Run the looping pop animation
+            cube.runAction(loop, forKey: "recordBlink")
+            // Play pop sound at the start and schedule repeats aligned with animation duration
+            if parent.previewPopSoundEnabled, let src = popAudioSource {
+                #if DEBUG
+                do {
+                    try AVAudioSession.sharedInstance().setCategory(.ambient, options: [.mixWithOthers])
+                    try AVAudioSession.sharedInstance().setActive(true)
+                    print("[CubeTabView] AVAudioSession ensured active for long-press pop loop")
+                } catch {
+                    print("[CubeTabView] AVAudioSession ensure active failed: \(error)")
+                }
+                #endif
+                // Action to play the audio once
+                let playAudio = SCNAction.run { node in
+                    let player = SCNAudioPlayer(source: src)
+                    node.addAudioPlayer(player)
+                    let playAction = SCNAction.playAudio(src, waitForCompletion: false)
+                    node.runAction(playAction)
+                }
+                // Total cycle duration matches up+down durations
+                let cycleDuration: Double = 0.18 + 0.22
+                let soundLoop = SCNAction.repeatForever(SCNAction.sequence([playAudio, SCNAction.wait(duration: cycleDuration)]))
+                cube.runAction(soundLoop, forKey: "recordBlinkSoundLoop")
+            }
         }
 
         private func endBlink() {
             guard isBlinking, let scnView = view, let cube = scnView.scene?.rootNode.childNode(withName: "cube", recursively: true) else { return }
             isBlinking = false
             cube.removeAction(forKey: "recordBlink")
-            cube.opacity = 1.0
+            cube.removeAction(forKey: "recordBlinkSoundLoop")
+            cube.scale = SCNVector3(1.0, 1.0, 1.0)
         }
 
         private func applyCombinedRotation(to node: SCNNode) {
@@ -1046,6 +1093,50 @@ private struct CubeSceneView: UIViewRepresentable {
                 if lp.state == .began || lp.state == .changed { return false }
             }
             return true
+        }
+
+        // MARK: - Accelerometer simulation for previews
+        func startAccelerometerSimulation() {
+            stopAccelerometerSimulation()
+            guard isRunningInPreviews else { return }
+            isAccelSimulating = true
+            accelTime = 0
+            accelCurrent = SCNVector3Zero
+            accelTarget = SCNVector3Zero
+            let link = CADisplayLink(target: self, selector: #selector(accelSimTick(_:)))
+            link.add(to: .main, forMode: .common)
+            accelSimLink = link
+        }
+
+        func stopAccelerometerSimulation() {
+            accelSimLink?.invalidate()
+            accelSimLink = nil
+            isAccelSimulating = false
+        }
+
+        @objc private func accelSimTick(_ link: CADisplayLink) {
+            guard let scnView = view, let cube = scnView.scene?.rootNode.childNode(withName: "cube", recursively: true) else { return }
+            // Advance time
+            accelTime += link.duration
+            // Create a slow-moving pseudo-gravity direction (roll/pitch) in radians
+            let roll = sin(accelTime * 0.45) * 0.35 // side-to-side
+            let pitch = cos(accelTime * 0.30) * 0.20 // subtle forward/back
+            // Map to our horizontal sway (y) and tiny z bob like real motion mapping
+            let targetY = Float(roll)
+            let targetZ = Float(pitch * 0.15)
+            accelTarget = SCNVector3(0, targetY, targetZ)
+
+            // Low-pass filter toward target for delayed timing behavior
+            // alpha determines responsiveness (smaller = more delay)
+            let alpha: Float = 0.08
+            accelCurrent.x = accelCurrent.x + alpha * (accelTarget.x - accelCurrent.x)
+            accelCurrent.y = accelCurrent.y + alpha * (accelTarget.y - accelCurrent.y)
+            accelCurrent.z = accelCurrent.z + alpha * (accelTarget.z - accelCurrent.z)
+
+            // Blend simulated reading into liveRotation only in previews
+            // Do not override during pan gesture: if user is panning, keep liveRotation zeroed (handled elsewhere)
+            self.liveRotation = accelCurrent
+            self.applyCombinedRotation(to: cube)
         }
     }
 }
@@ -1242,3 +1333,4 @@ private struct CubeOnlyPreview: View {
         }
     }
 }
+

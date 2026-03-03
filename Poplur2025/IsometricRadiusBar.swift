@@ -1,5 +1,6 @@
 import SwiftUI
 import SceneKit
+import ObjectiveC
 
 extension Notification.Name {
     static let currentPostRadiusDidChange = Notification.Name("CurrentPostRadiusDidChange")
@@ -10,13 +11,23 @@ extension Notification.Name {
     static let capturePreviewDidDismiss = Notification.Name("CapturePreviewDidDismiss")
 }
 
+extension Notification.Name {
+    static let radiusBarGlobeTap = Notification.Name("RadiusBarGlobeTap")
+}
+
+extension Notification.Name {
+    static let radiusBarHoldBegan = Notification.Name("RadiusBarHoldBegan")
+    static let radiusBarHoldEnded = Notification.Name("RadiusBarHoldEnded")
+}
+
 public struct IsometricRadiusBar: View {
     @Binding public var radius: Double
     @State private var dragStartRadius: Double? = nil
     @State private var usesImperial: Bool = Locale.current.usesMetricSystem == false
     @State private var holdTimer: CADisplayLink? = nil
-    private var earthRadiusMeters: Double { usesImperial ? 3958.8 * 1609.34 : 6371.0 * 1000.0 }
-    private var earthRadiusCapMeters: Double { earthRadiusMeters }
+    @State private var holdStartTime: CFTimeInterval? = nil
+    @State private var holdStartRadius: Double = 0
+    @State private var drainTimer: CADisplayLink? = nil
     public var baseColor: Color
     public var tintColor: Color = .indigo
     private var pitchDegrees: Double
@@ -29,9 +40,12 @@ public struct IsometricRadiusBar: View {
     public var useNormalMap: Bool = true
     public var lightingModel: SCNMaterial.LightingModel = .physicallyBased
 
-    public var autoLoop: Bool = true
+    public var autoLoop: Bool = false
     @State private var isAutoLooping: Bool = false
     @State private var autoLoopTask: Task<Void, Never>? = nil
+
+    private var earthRadiusMeters: Double { usesImperial ? 3958.8 * 1609.34 : 6371.0 * 1000.0 }
+    private var earthRadiusCapMeters: Double { earthRadiusMeters }
 
     public init(radius: Binding<Double>, baseColor: Color = .cyan, tintColor: Color = .teal, pitchDegrees: Double = 10.0, yawDegrees: Double = 20.0, growthSpeed: Double = 1.5, maxSceneHeight: Double = 2.4, uiScale: CGFloat = 1.5, maxRuntimeRadius: Double? = nil) {
         self._radius = radius
@@ -43,7 +57,7 @@ public struct IsometricRadiusBar: View {
         self.maxSceneHeight = maxSceneHeight
         self.uiScale = uiScale
         self.maxRuntimeRadius = maxRuntimeRadius ?? (Locale.current.usesMetricSystem ? 6_371_000.0 : 3_958.8 * 1609.34)
-        // autoLoop defaults to true by declaration, no assignment needed here
+        // autoLoop defaults to false by declaration, no assignment needed here
     }
 
     public var body: some View {
@@ -56,7 +70,8 @@ public struct IsometricRadiusBar: View {
                 yawDegrees: yawDegrees,
                 maxSceneHeight: maxSceneHeight,
                 useNormalMap: useNormalMap,
-                lightingModel: lightingModel
+                lightingModel: lightingModel,
+                autoLoop: autoLoop
             )
             .frame(width: 220, height: 960)
             .background(Color.clear)
@@ -90,6 +105,13 @@ public struct IsometricRadiusBar: View {
                 self.radius = min(max(0, r), self.maxRuntimeRadius)
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .radiusBarHoldBegan)) { _ in
+            stopDrain()
+            startHoldIncrease()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .radiusBarHoldEnded)) { _ in
+            stopHoldIncrease()
+        }
         // Removed cameraCubeHoldBegan and cameraCubeHoldEnded notifications and related actions
         // Removed capturePreviewDidDismiss notification that resets radius to zero
         .onAppear { if autoLoop { startAutoLooping() } }
@@ -102,8 +124,8 @@ private extension IsometricRadiusBar {
         let height = max(1, size.height)
         return DragGesture(minimumDistance: 0)
             .onChanged { value in
-                // Ignore manual drag while recording hold is active
-                if holdTimer != nil { return }
+                // Ignore manual drag while recording hold or drain is active
+                if holdTimer != nil || drainTimer != nil { return }
                 if dragStartRadius == nil {
                     dragStartRadius = radius
                 }
@@ -116,9 +138,72 @@ private extension IsometricRadiusBar {
                 radius = newValue
             }
             .onEnded { _ in
-                if holdTimer != nil { return }
+                if holdTimer != nil || drainTimer != nil { return }
                 dragStartRadius = nil
             }
+    }
+
+    func startHoldIncrease() {
+        // Stop any existing timers (hold or drain)
+        stopHoldIncrease()
+        stopDrain()
+        // Record the start state for a faster pressurized ramp
+        holdStartTime = CACurrentMediaTime()
+        holdStartRadius = radius
+        let proxy = DisplayLinkProxy { _ in
+            guard let start = holdStartTime else { return }
+            let elapsed = CACurrentMediaTime() - start
+            // Replaced original quintic ease-in with fast-start S-curve and shorter duration
+            let duration: CFTimeInterval = 5.0 // quicker response
+            let t = max(0.0, min(1.0, elapsed / duration))
+            // Fast-start S-curve: ease out then ease in (emphasize early movement)
+            let pressure = 0.5 - 0.5 * cos(Double.pi * t)
+            let target = min(self.maxRuntimeRadius, self.earthRadiusCapMeters)
+            let next = holdStartRadius + (target - holdStartRadius) * pressure
+            self.radius = min(max(0, next), self.maxRuntimeRadius)
+            if t >= 1.0 {
+                self.stopHoldIncrease()
+            }
+        }
+        let link = CADisplayLink(target: proxy, selector: #selector(DisplayLinkProxy.tick(_:)))
+        objc_setAssociatedObject(link, UnsafeRawPointer(bitPattern: 0xDEADBEEF)!, proxy, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+        link.add(to: .main, forMode: .common)
+        holdTimer = link
+    }
+
+    func stopHoldIncrease() {
+        holdStartTime = nil
+        holdTimer?.invalidate()
+        holdTimer = nil
+        startDrain()
+    }
+
+    func startDrain() {
+        stopDrain()
+        let startRadius = radius
+        let startTime = CACurrentMediaTime()
+        let duration: CFTimeInterval = 1.2 // quick fall
+        let proxy = DisplayLinkProxy { _ in
+            let elapsed = CACurrentMediaTime() - startTime
+            let t = max(0.0, min(1.0, elapsed / duration))
+            // Ease-out (fast at start, slow at end)
+            let easeOut = 1.0 - pow(1.0 - t, 3.0)
+            let next = max(0, startRadius * (1.0 - easeOut))
+            self.radius = next
+            if t >= 1.0 || next <= 0.5 {
+                self.stopDrain()
+                self.radius = 0
+            }
+        }
+        let link = CADisplayLink(target: proxy, selector: #selector(DisplayLinkProxy.tick(_:)))
+        objc_setAssociatedObject(link, UnsafeRawPointer(bitPattern: 0xFEEDBEEF)!, proxy, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+        link.add(to: .main, forMode: .common)
+        drainTimer = link
+    }
+
+    func stopDrain() {
+        drainTimer?.invalidate()
+        drainTimer = nil
     }
 
     // Removed startAutoIncrease() and stopAutoIncrease() functions as instructed
@@ -179,6 +264,7 @@ private struct RadiusBarSceneView: UIViewRepresentable {
 
     var useNormalMap: Bool
     var lightingModel: SCNMaterial.LightingModel
+    var autoLoop: Bool
 
     func makeUIView(context: Context) -> SCNView {
         let scnView = SCNView()
@@ -191,6 +277,7 @@ private struct RadiusBarSceneView: UIViewRepresentable {
         context.coordinator.view = scnView
 
         context.coordinator.prepareInitialState()
+        context.coordinator.setAutoLoopingEnabled(autoLoop)
 
         return scnView
     }
@@ -198,6 +285,7 @@ private struct RadiusBarSceneView: UIViewRepresentable {
     func updateUIView(_ uiView: SCNView, context: Context) {
         context.coordinator.updateHeight(from: radius)
         context.coordinator.updateMaterials(baseColor: baseColor, tintColor: tintColor, useNormalMap: useNormalMap, lightingModel: lightingModel)
+        context.coordinator.setAutoLoopingEnabled(autoLoop)
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -395,58 +483,15 @@ private struct RadiusBarSceneView: UIViewRepresentable {
             }
         }
 
-        // Compute the fraction of radius relative to earth radius (meters)
-        let earthMeters: Double = Locale.current.usesMetricSystem ? 6_371_000.0 : 3_958.8 * 1609.34
-        let t = min(1.0, max(0.0, radius / earthMeters))
+        // Replace gradient-based diffuse with solid base color on all faces:
 
-        // Helper to blend two colors by fraction
-        func blend(_ c1: UIColor, _ c2: UIColor, fraction: CGFloat) -> UIColor {
-            var r1: CGFloat = 0, g1: CGFloat = 0, b1: CGFloat = 0, a1: CGFloat = 0
-            var r2: CGFloat = 0, g2: CGFloat = 0, b2: CGFloat = 0, a2: CGFloat = 0
-            c1.getRed(&r1, green: &g1, blue: &b1, alpha: &a1)
-            c2.getRed(&r2, green: &g2, blue: &b2, alpha: &a2)
-            let r = r1 + (r2 - r1) * fraction
-            let g = g1 + (g2 - g1) * fraction
-            let b = b1 + (b2 - b1) * fraction
-            let a = a1 + (a2 - a1) * fraction
-            return UIColor(red: r, green: g, blue: b, alpha: a)
-        }
-
-        // Base system colors for gradient stops
-        let baseBottom = UIColor.systemRed
-        let baseMiddle = UIColor.systemYellow
-        let baseTop = UIColor.systemGreen
-
-        // Modulate gradient colors by blending with baseColor tint with t factor
-        let baseColorUI = uiColor(color)
-        let bottomColor = blend(baseBottom, baseColorUI, fraction: CGFloat(t * 0.25)) // slight blend with base color
-        let middleColor = blend(baseMiddle, baseColorUI, fraction: CGFloat(t * 0.5))
-        let topColor = blend(baseTop, baseColorUI, fraction: CGFloat(t))
-
-        let gradient = verticalGradientImage3(bottom: bottomColor, middle: middleColor, top: topColor)
-
-        // Derive a few tints from the base color for subtle face variation
         let base = uiColor(color)
-        var hue: CGFloat = 0, sat: CGFloat = 0, bri: CGFloat = 0, alpha: CGFloat = 0
-        base.getHue(&hue, saturation: &sat, brightness: &bri, alpha: &alpha)
-        let front = UIColor(hue: hue, saturation: max(0, sat * 0.95), brightness: min(1, bri * 0.95), alpha: alpha)
-        let right = UIColor(hue: hue, saturation: min(1, sat * 1.05), brightness: min(1, bri * 1.00), alpha: alpha)
-        let back = UIColor(hue: hue, saturation: min(1, sat * 1.10), brightness: max(0, bri * 0.90), alpha: alpha)
-        let left = UIColor(hue: hue, saturation: max(0, sat * 0.85), brightness: min(1, bri * 1.05), alpha: alpha)
-        let top = UIColor(hue: hue, saturation: max(0, sat * 0.20), brightness: min(1, bri * 1.10), alpha: alpha)
-        let bottom = UIColor(hue: hue, saturation: min(1, sat * 1.00), brightness: max(0, bri * 0.60), alpha: alpha)
-        
-        let bottomColorForFaces = uiColor(self.tintColor).withAlphaComponent(0.95)
-        let topColorForFaces = uiColor(color).withAlphaComponent(0.75)
-        // For front, right, back, left faces use the new gradient that changes with radius
-        let mFront = mat(front); mFront.diffuse.contents = gradient
-        let mRight = mat(right); mRight.diffuse.contents = gradient
-        let mBack = mat(back); mBack.diffuse.contents = gradient
-        let mLeft = mat(left); mLeft.diffuse.contents = gradient
-        // Top and bottom faces keep original solid colors
-        let mTop = mat(top, metal: 0.08, rough: 0.25)
-        let mBottom = mat(bottom, metal: 0.10, rough: 0.60)
-
+        let mFront = mat(base)
+        let mRight = mat(base)
+        let mBack = mat(base)
+        let mLeft = mat(base)
+        let mTop = mat(base)
+        let mBottom = mat(base)
         return [mFront, mRight, mBack, mLeft, mTop, mBottom]
     }
 
@@ -529,12 +574,18 @@ private struct RadiusBarSceneView: UIViewRepresentable {
         private var loopDuration: CFTimeInterval = 2.5
         private var loopTargetHeight: Double = 0
         private enum Phase { case idle, rising, falling }
+        
+        private var tapObserver: NSObjectProtocol?
 
         init(_ parent: RadiusBarSceneView) { self.parent = parent }
         
         deinit {
             stopFollowingGlobe()
             stopLoopingBar()
+            if let token = tapObserver {
+                NotificationCenter.default.removeObserver(token)
+                tapObserver = nil
+            }
         }
 
         func prepareInitialState() {
@@ -551,7 +602,11 @@ private struct RadiusBarSceneView: UIViewRepresentable {
             bar.position.y = Float(capped / 2.0)
             
             startFollowingGlobe()
-            startLoopingBar()
+            // Removed startLoopingBar() call here as per instructions
+            
+            tapObserver = NotificationCenter.default.addObserver(forName: .radiusBarGlobeTap, object: nil, queue: .main) { [weak self] _ in
+                self?.globePop()
+            }
         }
 
         func markInitialAnimationRun() {
@@ -720,6 +775,28 @@ private struct RadiusBarSceneView: UIViewRepresentable {
                 }
             }
         }
+        
+        func globePop() {
+            guard let scnView = view,
+                  let root = scnView.scene?.rootNode,
+                  let barTarget = root.childNode(withName: "barTarget", recursively: true),
+                  let globe = barTarget.childNode(withName: "globe", recursively: false) else { return }
+            
+            let scaleUp = SCNAction.scale(to: 1.15, duration: 0.18)
+            scaleUp.timingMode = .easeInEaseOut
+            let scaleDown = SCNAction.scale(to: 1.0, duration: 0.22)
+            scaleDown.timingMode = .easeInEaseOut
+            let sequence = SCNAction.sequence([scaleUp, scaleDown])
+            globe.runAction(sequence, forKey: "globePop")
+        }
+
+        func setAutoLoopingEnabled(_ enabled: Bool) {
+            if enabled {
+                if loopLink == nil { startLoopingBar() }
+            } else {
+                if loopLink != nil { stopLoopingBar() }
+            }
+        }
     }
 }
 
@@ -753,7 +830,7 @@ private struct RadiusBarOnlyPreview: View {
     @State private var uiScale: CGFloat = 1.5
     @State private var maxSceneHeight: Double = 1.8
     @State private var growth: Double = 1.5
-    @State private var baseColor: Color = .indigo
+    @State private var baseColor: Color = Color(white: 0.2)
     @State private var tintColor: Color = .indigo
     @State private var useSpring: Bool = true
     @State private var springResponse: Double = 0.35
@@ -771,9 +848,27 @@ private struct RadiusBarOnlyPreview: View {
     @State private var lightingModelPreview: SCNMaterial.LightingModel = .physicallyBased
     @State private var isLooping: Bool = true
 
+    @State private var selectedTab: AppTab = .record
+    enum AppTab: String, CaseIterable, Identifiable {
+        case record, feed, profile, map
+        var id: String { rawValue }
+    }
+    
+    @State private var isHoldingRecord: Bool = false
+    @State private var feedSimValue: Double = 0
+    @State private var feedAnimTask: Task<Void, Never>? = nil
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 16) {
+                Picker("Tab", selection: $selectedTab) {
+                    Text("Record").tag(AppTab.record)
+                    Text("Feed").tag(AppTab.feed)
+                    Text("Profile").tag(AppTab.profile)
+                    Text("Map").tag(AppTab.map)
+                }
+                .pickerStyle(.segmented)
+
                 // Live bar preview with controls below
                 ZStack {
                     Color(UIColor.systemBackground)
@@ -793,6 +888,22 @@ private struct RadiusBarOnlyPreview: View {
                             Slider(value: $radius, in: 0...3_323_000)
                             Button("Reset") { animateTo(0) }
                                 .buttonStyle(.borderedProminent)
+                        }
+                        if selectedTab == .feed || selectedTab == .profile || selectedTab == .map {
+                            HStack(spacing: 12) {
+                                Text("Feed Simulated Height:")
+                                Button(action: {
+                                    let maxVal: Double = 3_323_000.0
+                                    let newVal = Double.random(in: 0...maxVal)
+                                    feedSimValue = newVal
+                                    tweenRadius(to: newVal)
+                                }) {
+                                    Text("\(Int(feedSimValue)) m")
+                                        .monospacedDigit()
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .accessibilityLabel("Simulate feed content height")
+                            }
                         }
                         HStack {
                             Text("Width \(Int(barWidth))")
@@ -901,14 +1012,46 @@ private struct RadiusBarOnlyPreview: View {
                 }
             }
             .onAppear { startLoopingAnimation() }
+            .onChange(of: selectedTab) { newValue in
+                if newValue == .record && !isHoldingRecord {
+                    radius = 0
+                }
+            }
+            .onChange(of: isHoldingRecord) { newValue in
+                if selectedTab == .record && !newValue {
+                    radius = 0
+                }
+            }
         }
     }
 
     private var configuredBar: AnyView {
-        let base = IsometricRadiusBar(radius: $radius, baseColor: baseColor, tintColor: tintColor, growthSpeed: growth, maxSceneHeight: maxSceneHeight, uiScale: uiScale, maxRuntimeRadius: 3_323_000.0)
+        let tabBase: Color
+        let tabTint: Color
+        switch selectedTab {
+        case .record:
+            tabBase = Color(white: 0.2)
+            tabTint = .indigo
+        case .feed:
+            tabBase = Color(white: 0.2)
+            tabTint = .teal
+        case .profile:
+            tabBase = Color(white: 0.2)
+            tabTint = .pink
+        case .map:
+            tabBase = Color(white: 0.2)
+            tabTint = .green
+        }
+        let effectiveRadius: Binding<Double> = $radius
+        
+        let base = IsometricRadiusBar(radius: effectiveRadius, baseColor: tabBase, tintColor: tabTint, growthSpeed: growth, maxSceneHeight: maxSceneHeight, uiScale: uiScale, maxRuntimeRadius: 3_323_000.0)
         var cfg = base
         cfg.useNormalMap = useNormalMapPreview
         cfg.lightingModel = lightingModelPreview
+        cfg.autoLoop = true
+        if selectedTab == .record || selectedTab == .feed || selectedTab == .profile || selectedTab == .map {
+            cfg.autoLoop = false
+        }
         if scaleMode == .scaleTo {
             return AnyView(cfg.frame(width: barWidth, height: barHeight))
         } else {
@@ -960,6 +1103,10 @@ private struct RadiusBarOnlyPreview: View {
             let fps: Double = 60.0
             let dt: Double = 1.0 / fps
             while isLooping {
+                if selectedTab == .record || selectedTab == .feed || selectedTab == .profile || selectedTab == .map {
+                    try? await Task.sleep(nanoseconds: UInt64(dt * 1_000_000_000))
+                    continue
+                }
                 let current = radius
                 let target = goingUp ? targetHigh : 0.0
                 // Move a small fraction toward the target each frame
@@ -982,6 +1129,27 @@ private struct RadiusBarOnlyPreview: View {
                         targetHigh = earthMeters * Double.random(in: 0.3...0.8)
                     }
                 }
+                try? await Task.sleep(nanoseconds: UInt64(dt * 1_000_000_000))
+            }
+        }
+    }
+
+    private func tweenRadius(to target: Double, duration: Double = 0.6) {
+        let start = radius
+        let end = min(max(0, target), 3_323_000.0)
+        if start == end { return }
+        feedAnimTask?.cancel()
+        let fps: Double = 60.0
+        let dt: Double = 1.0 / fps
+        let startTime = CACurrentMediaTime()
+        feedAnimTask = Task { @MainActor in
+            while !Task.isCancelled {
+                let t = min(1.0, (CACurrentMediaTime() - startTime) / duration)
+                // Smooth ease-in-out
+                let eased = t * t * (3 - 2 * t)
+                let value = start + (end - start) * eased
+                radius = value
+                if t >= 1.0 { break }
                 try? await Task.sleep(nanoseconds: UInt64(dt * 1_000_000_000))
             }
         }
