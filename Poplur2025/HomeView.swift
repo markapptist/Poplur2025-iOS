@@ -768,6 +768,9 @@ private struct HomeBarPlacementPreview: View {
     var usesImperial: Bool { Locale.current.usesMetricSystem == false }
     var earthMaxUnit: Double { usesImperial ? 3958.8 : 6371.0 }
     
+    // Added state to control animation flag
+    @State private var previewAnimateTabChange: Bool = true
+    
     private func startPreviewHoldRamp() {
         holdTask?.cancel()
         let maxMeters: Double = 3_323_000.0
@@ -815,7 +818,7 @@ private struct HomeBarPlacementPreview: View {
         return delta
     }
     
-    private func animateYaw(to targetYaw: Double, duration: Double = 0.45, direction: RotationDirection? = nil) {
+    private func animateYaw(to targetYaw: Double, duration: Double = 0.8, direction: RotationDirection? = nil) {
         let current = yawDegrees.truncatingRemainder(dividingBy: 360)
         let delta = normalizedDelta(from: current, to: targetYaw, prefer: direction)
         let final = current + delta
@@ -845,9 +848,14 @@ private struct HomeBarPlacementPreview: View {
     }
     
     private func rotatePreview(to newTab: AppTab, direction: RotationDirection) {
-        let targetYaw = yawForTab(newTab)
-        animateYaw(to: targetYaw, duration: 0.45, direction: direction)
-        selectedTab = newTab
+        // Animate the selectedTab change so CubeTabView performs a visible 90° rotation in the requested direction
+        if previewAnimateTabChange {
+            withAnimation(Animation.timingCurve(0.2, 0.8, 0.2, 1.0, duration: 1.0)) {
+                selectedTab = newTab
+            }
+        } else {
+            selectedTab = newTab
+        }
     }
 
     var body: some View {
@@ -990,7 +998,6 @@ private struct HomeBarPlacementPreview: View {
                 previewHoldActive = false
                 stopPreviewHoldRamp(reset: true)
             }
-            animateYaw(to: yawForTab(newValue), duration: 0.45, direction: nil)
         }
         .onDisappear {
             previewHoldActive = false
