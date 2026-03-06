@@ -4,6 +4,7 @@ import AVFoundation
 import SceneKit
 import CoreMotion
 import Combine
+import AudioToolbox
 
 // Usage elsewhere:
 // @Environment(\.isometricRadiusBarDistance) private var isometricRadiusBarDistance
@@ -63,26 +64,11 @@ extension EnvironmentValues {
 
 extension Notification.Name {
     static let ResetTabToTop = Notification.Name("ResetTabToTop")
-}
-
-extension Notification.Name {
     static let CubeMotionUpdate = Notification.Name("CubeMotionUpdate")
-}
-
-extension Notification.Name {
     static let FeedReady = Notification.Name("FeedReady")
-}
-
-extension Notification.Name {
     static let PauseFeedAudio = Notification.Name("PauseFeedAudio")
     static let ResumeFeedAudio = Notification.Name("ResumeFeedAudio")
-}
-
-extension Notification.Name {
     static let CenterMapOnUser = Notification.Name("CenterMapOnUser")
-}
-
-extension Notification.Name {
     static let SharedRadiusDidChange = Notification.Name("SharedRadiusDidChange")
 }
 
@@ -741,6 +727,11 @@ private struct CubeAndBarOverlay: View {
                 IsometricRadiusBar(radius: $radius, uiScale: 1.0)
                     .frame(width: tuning.barWidth, height: tuning.barHeight)
                     .rotation3DEffect(.degrees(tuning.barTiltDegrees), axis: (x: 1, y: 0, z: 0), perspective: 0.65)
+                    .animation(nil, value: tuning.barHorizontalOffset)
+                    .animation(nil, value: tuning.barBottomOffset)
+                    .animation(nil, value: tuning.barTiltDegrees)
+                    .animation(nil, value: tuning.barWidth)
+                    .animation(nil, value: tuning.barHeight)
                     .padding(.trailing, tuning.barHorizontalOffset)
             }
             .padding(.trailing, 8)
@@ -765,11 +756,21 @@ private struct HomeBarPlacementPreview: View {
     // Added state for continuous yaw
     @State private var yawDegrees: Double = 0
     
+    // Inserted states as per instructions:
+    @State private var isPreviewRotating: Bool = false
+    @State private var queuedPreviewTab: AppTab? = nil
+    
     var usesImperial: Bool { Locale.current.usesMetricSystem == false }
     var earthMaxUnit: Double { usesImperial ? 3958.8 : 6371.0 }
     
     // Added state to control animation flag
     @State private var previewAnimateTabChange: Bool = true
+    
+    private func playPopSound() {
+        // Use a lightweight system sound for preview pop feedback
+        let systemSoundID: SystemSoundID = 1104 // Tock-like sound
+        AudioServicesPlaySystemSound(systemSoundID)
+    }
     
     private func startPreviewHoldRamp() {
         holdTask?.cancel()
@@ -847,14 +848,25 @@ private struct HomeBarPlacementPreview: View {
         }
     }
     
+    // Replaced rotatePreview function as per instructions:
     private func rotatePreview(to newTab: AppTab, direction: RotationDirection) {
-        // Animate the selectedTab change so CubeTabView performs a visible 90° rotation in the requested direction
-        if previewAnimateTabChange {
-            withAnimation(Animation.timingCurve(0.2, 0.8, 0.2, 1.0, duration: 1.0)) {
-                selectedTab = newTab
-            }
-        } else {
+        let duration: Double = 1.0
+        // If a rotation is in progress, queue this request
+        if isPreviewRotating {
+            queuedPreviewTab = newTab
+            return
+        }
+        isPreviewRotating = true
+        withAnimation(Animation.timingCurve(0.2, 0.8, 0.2, 1.0, duration: duration)) {
             selectedTab = newTab
+        }
+        // Schedule completion to allow chained rotations
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
+            isPreviewRotating = false
+            if let queued = queuedPreviewTab {
+                queuedPreviewTab = nil
+                rotatePreview(to: queued, direction: direction)
+            }
         }
     }
 
@@ -874,6 +886,9 @@ private struct HomeBarPlacementPreview: View {
                 )
                 .tint(.white)
                 .frame(height: 230)
+                .transaction { tx in
+                    tx.animation = .timingCurve(0.2, 0.8, 0.2, 1.0, duration: 1.0)
+                }
                 .gesture(
                     DragGesture(minimumDistance: 20)
                         .onEnded { value in
@@ -894,6 +909,7 @@ private struct HomeBarPlacementPreview: View {
             .ignoresSafeArea(edges: .bottom)
 
             CubeAndBarOverlay(radius: $radius, tuning: tuning)
+                .animation(nil, value: radius)
 
             VStack {
                 // Inserted segmented control picker for tab selection
@@ -988,7 +1004,17 @@ private struct HomeBarPlacementPreview: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onChange(of: previewHoldActive) { newValue in
             if newValue && selectedTab == .record {
+                // Trigger pop animation immediately on hold begin
+                previewPopTrigger += 1
+                // Start the radius growth ramp
                 startPreviewHoldRamp()
+                // Play pop sound at the end of the pop animation
+                let popAnimationDuration: Double = 0.35
+                DispatchQueue.main.asyncAfter(deadline: .now() + popAnimationDuration) {
+                    if previewPopSoundEnabled {
+                        playPopSound()
+                    }
+                }
             } else {
                 stopPreviewHoldRamp(reset: true)
             }

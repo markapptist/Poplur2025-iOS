@@ -1,11 +1,13 @@
 import SwiftUI
 import MapKit
-import FirebaseFirestore 
+import FirebaseFirestore
 import FirebaseAuth
+import SceneKit
 import CoreLocation
 import UserNotifications
-import SceneKit
+#if canImport(GoogleMaps3D)
 import GoogleMaps3D
+#endif
 
 enum GoogleMaps3DConfig {
     static let apiKey: String = "AIzaSyDgMYA1YisgbpEGyl0Nj8VGoorbqmfAkG0"
@@ -48,7 +50,7 @@ private struct CityDominance: Identifiable {
 
 private func demoDominanceCities() -> [CityDominance] {
     // Simple pool of fake usernames and profile images
-    let names = [
+    let names: [String] = [
         "FAKE USER 1", "FAKE USER 2", "FAKE USER 3", "FAKE USER 4", "FAKE USER 5",
         "FAKE USER 6", "FAKE USER 7", "FAKE USER 8", "FAKE USER 9", "FAKE USER 10"
     ]
@@ -85,14 +87,15 @@ private func demoDominanceCities() -> [CityDominance] {
         ("Madrid", 40.4168, -3.7038)
     ]
 
-    return cities.map { (name, lat, lon) in
-        CityDominance(
-            city: name,
-            coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lon),
-            username: names.randomElement()!,
-            profileURL: randomFaceURL()
-        )
+    var result: [CityDominance] = []
+    result.reserveCapacity(cities.count)
+    for (name, lat, lon) in cities {
+        let coord = CLLocationCoordinate2D(latitude: lat, longitude: lon)
+        let username = names.randomElement() ?? "USER"
+        let profile = randomFaceURL()
+        result.append(CityDominance(city: name, coordinate: coord, username: username, profileURL: profile))
     }
+    return result
 }
 
 // MARK: - Location Manager
@@ -232,7 +235,13 @@ struct MapView: View {
         .navigationBarHidden(true)
         .toolbar(.hidden, for: .navigationBar)
         .onAppear {
+#if DEBUG
+            if ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] != "1" {
+                locationManager.requestAuthorizationIfNeeded()
+            }
+#else
             locationManager.requestAuthorizationIfNeeded()
+#endif
             // Nudge/ensure a valid initial camera so tiles render immediately
             if camera == nil {
                 camera = .camera(
@@ -261,13 +270,19 @@ struct MapView: View {
             idleTask?.cancel()
             idleTask = nil
         }
-        .onChange(of: locationManager.location) { _ in
+        .onChange(of: locationManager.location) { _, _ in
+#if DEBUG
+            if ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1" { return }
+#endif
             // Center only once when we get the first location fix
             if let _ = locationManager.location, camera?.camera == nil {
                 locationManager.centerOnUser(&camera)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .CenterMapOnUser)) { _ in
+#if DEBUG
+            if ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1" { return }
+#endif
             stopDominanceTour()
             // Get user coordinate if available
             guard let userCoord = locationManager.location?.coordinate else {
@@ -336,18 +351,38 @@ struct MapView: View {
 
     // MARK: - Map Layer (LOCKED ZOOM)
     private var mapLayer: some View {
-        Map(
+        // Choose interaction modes at runtime (previews vs app)
+        let modes: MapInteractionModes = {
+            #if DEBUG
+            if ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1" {
+                return [.pan]
+            }
+            #endif
+            return [.pan, .rotate]
+        }()
+
+        return Map(
             position: Binding(
                 get: { camera ?? .automatic },
                 set: { camera = lockCamera($0) }
             ),
-            interactionModes: [.pan, .rotate]
+            interactionModes: modes
         ) {
+            #if DEBUG
+            if ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] != "1" {
+                if locationManager.location != nil {
+                    UserAnnotation {
+                        Label("You", systemImage: "location.fill")
+                    }
+                }
+            }
+            #else
             if locationManager.location != nil {
                 UserAnnotation {
                     Label("You", systemImage: "location.fill")
                 }
             }
+            #endif
 
             ForEach(filteredPosts()) { post in
                 Annotation(coordinate: post.coordinate) {
@@ -369,7 +404,11 @@ struct MapView: View {
                 }
             }
         }
-        .mapStyle(.hybrid(elevation: .realistic))
+        .mapStyle(
+            (ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1")
+            ? .standard
+            : .hybrid(elevation: .realistic)
+        )
     }
 
     // MARK: - Camera Lock
@@ -426,6 +465,24 @@ struct MapView: View {
     }
 
     private func fetchPosts() {
+        // Skip Firebase network calls when running SwiftUI previews
+        if ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1" {
+            posts = [
+                MapAnnotationPost(
+                    id: "1",
+                    title: "Preview A",
+                    coordinate: CLLocationCoordinate2D(latitude: 40.748339, longitude: -73.985912),
+                    radius: 5000
+                ),
+                MapAnnotationPost(
+                    id: "2",
+                    title: "Preview B",
+                    coordinate: CLLocationCoordinate2D(latitude: 40.758896, longitude: -73.985130),
+                    radius: 3000
+                )
+            ]
+            return
+        }
         Firestore.firestore().collection("posts").getDocuments { snap, _ in
             posts = snap?.documents.compactMap { doc in
                 let d = doc.data()
@@ -505,7 +562,7 @@ struct MapView: View {
     private func scheduleIdleCheck() {
         idleTask?.cancel()
         idleTask = Task { @MainActor in
-            let start = Date()
+            // let start = Date()
             // Wait until 15 seconds after the most recent interaction time
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 1_000_000_000) // check every 1s
@@ -525,40 +582,40 @@ struct MapView: View {
     }
 }
 
-#Preview("Map Tour Preview") {
-    MapTourPreview()
-}
+#if DEBUG
+private struct MapViewPreviewHost: View {
+    @State private var camera: MapCameraPosition? = .camera(
+        MapCamera(
+            centerCoordinate: CLLocationCoordinate2D(latitude: 40.748339, longitude: -73.985912),
+            distance: 1039,
+            heading: 52,
+            pitch: 68
+        )
+    )
 
-private struct MapTourPreview: View {
-    @State private var speed: Double = 1.0
     var body: some View {
-        ZStack(alignment: .top) {
-            MapView()
-            VStack(spacing: 12) {
-                HStack {
-                    Text("Tour Speed x\(String(format: "%.2f", speed))")
-                    Slider(value: $speed, in: 0.25...3.0, step: 0.05)
-                }
-                HStack {
-                    Button("Apply Speed") {
-                        NotificationCenter.default.post(name: .setTourSpeedMultiplier, object: nil, userInfo: ["multiplier": speed])
-                    }
-                    Button("Start Tour") {
-                        NotificationCenter.default.post(name: .startDominanceTour, object: nil)
-                    }
-                    Button("Stop Tour") {
-                        NotificationCenter.default.post(name: .stopDominanceTour, object: nil)
-                    }
-                    Button("Center On User") {
-                        NotificationCenter.default.post(name: .CenterMapOnUser, object: nil)
-                    }
-                }
+        Map(
+            position: Binding(
+                get: { camera ?? .automatic },
+                set: { camera = $0 }
+            ),
+            interactionModes: [.pan]
+        ) {
+            Annotation(coordinate: CLLocationCoordinate2D(latitude: 40.748339, longitude: -73.985912)) {
+                Circle().fill(Color.red).frame(width: 12, height: 12)
+            } label: {
+                Text("Preview")
             }
-            .padding()
-            .background(.ultraThinMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-            .padding()
         }
+        .mapStyle(.standard)
     }
 }
+#endif
 
+#Preview("Map Tour Preview") {
+    #if DEBUG
+    MapViewPreviewHost()
+    #else
+    MapView()
+    #endif
+}
