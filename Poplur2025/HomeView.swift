@@ -526,12 +526,11 @@ struct HomeView: View {
                     Spacer(minLength: 0)
                     IsometricRadiusBar(radius: $isometricBarModel.radius, growthSpeed: 1.5, maxSceneHeight: 1.8, uiScale: 1.5, maxRuntimeRadius: 3_323_000.0)
                         .frame(width: 98, height: 390)
-                        .rotation3DEffect(.degrees(-8), axis: (x: 1, y: 0, z: 0), perspective: 0.65)
                         .animation(.interpolatingSpring(stiffness: 180, damping: 18), value: isometricBarModel.radius)
                         .padding(.trailing, isometricBarSettings.horizontalOffset)
                 }
                 .padding(.trailing, 8)
-                .padding(.bottom, isometricBarSettings.bottomOffset) // Restored bottom alignment to first tick
+                .padding(.bottom, max(8, isometricBarSettings.bottomOffset)) // Match preview bottom offset behavior
                 .background(Color.clear) // placeholder to keep structure; ticks assumed removed in IsometricRadiusBar component
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
