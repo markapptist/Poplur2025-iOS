@@ -817,11 +817,29 @@ private class DisplayLinkProxy {
 
 // MARK: - Preview
 
-#Preview("Radius Bar Properties") {
-    RadiusBarOnlyPreview()
-}
-
 private struct RadiusBarOnlyPreview: View {
+    private enum LightingChoice: String, CaseIterable, Identifiable {
+        case physicallyBased, blinn, lambert, constant
+        var id: String { rawValue }
+        var model: SCNMaterial.LightingModel {
+            switch self {
+            case .physicallyBased: return .physicallyBased
+            case .blinn: return .blinn
+            case .lambert: return .lambert
+            case .constant: return .constant
+            }
+        }
+        static func from(_ model: SCNMaterial.LightingModel) -> LightingChoice {
+            switch model {
+            case .physicallyBased: return .physicallyBased
+            case .blinn: return .blinn
+            case .lambert: return .lambert
+            case .constant: return .constant
+            default: return .physicallyBased
+            }
+        }
+    }
+
     @State private var radius: Double = 2500
     @State private var barWidth: CGFloat = 98
     @State private var barHeight: CGFloat = 390
@@ -845,7 +863,7 @@ private struct RadiusBarOnlyPreview: View {
     enum ScaleMode: String, CaseIterable, Identifiable { case scaleTo, scaleBy; var id: String { rawValue } }
 
     @State private var useNormalMapPreview: Bool = true
-    @State private var lightingModelPreview: SCNMaterial.LightingModel = .physicallyBased
+    @State private var lightingChoice: LightingChoice = .physicallyBased
     @State private var isLooping: Bool = true
 
     @State private var selectedTab: AppTab = .record
@@ -857,6 +875,8 @@ private struct RadiusBarOnlyPreview: View {
     @State private var isHoldingRecord: Bool = false
     @State private var feedSimValue: Double = 0
     @State private var feedAnimTask: Task<Void, Never>? = nil
+
+    @EnvironmentObject private var isometricBarSettings: IsometricBarSettings
 
     var body: some View {
         NavigationStack {
@@ -953,11 +973,11 @@ private struct RadiusBarOnlyPreview: View {
                         }
 
                         Toggle("Use Normal Map", isOn: $useNormalMapPreview)
-                        Picker("Lighting", selection: $lightingModelPreview) {
-                            Text("PBR").tag(SCNMaterial.LightingModel.physicallyBased)
-                            Text("Blinn").tag(SCNMaterial.LightingModel.blinn)
-                            Text("Lambert").tag(SCNMaterial.LightingModel.lambert)
-                            Text("Constant").tag(SCNMaterial.LightingModel.constant)
+                        Picker("Lighting", selection: $lightingChoice) {
+                            Text("PBR").tag(LightingChoice.physicallyBased)
+                            Text("Blinn").tag(LightingChoice.blinn)
+                            Text("Lambert").tag(LightingChoice.lambert)
+                            Text("Constant").tag(LightingChoice.constant)
                         }
                         .pickerStyle(.segmented)
 
@@ -1044,19 +1064,26 @@ private struct RadiusBarOnlyPreview: View {
         }
         let effectiveRadius: Binding<Double> = $radius
         
-        let base = IsometricRadiusBar(radius: effectiveRadius, baseColor: tabBase, tintColor: tabTint, growthSpeed: growth, maxSceneHeight: maxSceneHeight, uiScale: uiScale, maxRuntimeRadius: 3_323_000.0)
+        let base = IsometricRadiusBar(radius: effectiveRadius, baseColor: tabBase, tintColor: tabTint, growthSpeed: 1.5, maxSceneHeight: 1.8, uiScale: 1.5, maxRuntimeRadius: 3_323_000.0)
         var cfg = base
         cfg.useNormalMap = useNormalMapPreview
-        cfg.lightingModel = lightingModelPreview
+        cfg.lightingModel = lightingChoice.model
         cfg.autoLoop = true
         if selectedTab == .record || selectedTab == .feed || selectedTab == .profile || selectedTab == .map {
             cfg.autoLoop = false
         }
-        if scaleMode == .scaleTo {
-            return AnyView(cfg.frame(width: barWidth, height: barHeight))
-        } else {
-            return AnyView(cfg.scaleEffect(scaleByFactor))
+
+        var view = AnyView(cfg)
+        // Apply app-matching sizing and tilt from shared settings
+        view = AnyView(view
+            .frame(width: isometricBarSettings.barWidth, height: isometricBarSettings.barHeight)
+            .rotation3DEffect(.degrees(isometricBarSettings.barTiltDegrees), axis: (x: 1, y: 0, z: 0), perspective: 0.65)
+        )
+        // If the preview wants to scale the whole bar additionally, apply it after frame/tilt
+        if scaleMode == .scaleBy {
+            view = AnyView(view.scaleEffect(scaleByFactor))
         }
+        return view
     }
 
     private var growthButtons: some View {
@@ -1162,4 +1189,24 @@ private struct WrapHStack<Content: View>: View {
     var body: some View {
         HStack(spacing: spacing) { content() }
     }
+}
+
+#if DEBUG
+// Preview-only fallback declarations if the app target doesn’t import these types here.
+// Comment these out if the real types are available to this file.
+final class IsometricBarSettings: ObservableObject {
+    @Published var horizontalOffset: CGFloat = 80
+    @Published var bottomOffset: CGFloat = 1
+    @Published var barWidth: CGFloat = 98
+    @Published var barHeight: CGFloat = 390
+    @Published var barTiltDegrees: Double = -8
+}
+private struct SharedPreviewSettings {
+    static let settings = IsometricBarSettings()
+}
+#endif
+
+#Preview("Radius Bar Properties") {
+    RadiusBarOnlyPreview()
+        .environmentObject(SharedPreviewSettings.settings)
 }

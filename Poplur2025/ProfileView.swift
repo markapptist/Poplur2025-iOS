@@ -26,9 +26,6 @@ struct ProfileView: View {
     
     @State private var lastHeadModelURL: URL? = nil
 
-    @Environment(\.isometricRadiusBarDistance) private var isometricRadiusBarDistance
-    @Environment(\.isometricBarSettings) private var barSettings
-    
     @State private var navigateToViewer = false
 
     @State private var barHeightFactor: CGFloat = 1.0

@@ -13,27 +13,10 @@ import AudioToolbox
 // @Environment(\.isometricBarSettings) private var barSettings
 // barSettings.horizontalOffset / barSettings.bottomOffset
 
-// Shared settings for isometric radius bar positioning
-final class IsometricBarSettings: ObservableObject {
-    // Horizontal distance from screen center (points)
-    @Published var horizontalOffset: CGFloat
-    // Vertical distance from bottom safe area (points)
-    @Published var bottomOffset: CGFloat
-
-    init(horizontalOffset: CGFloat = 23, bottomOffset: CGFloat = 24) {
-        self.horizontalOffset = horizontalOffset
-        self.bottomOffset = bottomOffset
-    }
-}
-
 // Shared model for the isometric bar radius value
 final class IsometricBarModel: ObservableObject {
     @Published var radius: Double
     init(radius: Double = 0) { self.radius = radius }
-}
-
-private struct IsometricBarSettingsKey: EnvironmentKey {
-    static let defaultValue: IsometricBarSettings = IsometricBarSettings()
 }
 
 private struct IsometricBarModelKey: EnvironmentKey {
@@ -46,10 +29,6 @@ private struct IsometricRadiusBarDistanceKey: EnvironmentKey {
 }
 
 extension EnvironmentValues {
-    var isometricBarSettings: IsometricBarSettings {
-        get { self[IsometricBarSettingsKey.self] }
-        set { self[IsometricBarSettingsKey.self] = newValue }
-    }
 
     var isometricRadiusBarDistance: CGFloat {
         get { self[IsometricRadiusBarDistanceKey.self] }
@@ -118,6 +97,9 @@ struct HomeView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.renderingConfig) private var renderingConfig
     
+    // Changed per instructions to use EnvironmentObject
+    @EnvironmentObject private var isometricBarSettings: IsometricBarSettings
+    
     // Start on map tab instead of record tab
     @State private var selectedTab: AppTab = .record
     
@@ -139,9 +121,6 @@ struct HomeView: View {
     
     // Shared radius model controlling the global isometric bar value across all tabs
     @StateObject private var isometricBarModel = IsometricBarModel(radius: 0)
-    
-    // Shared settings controlling isometric bar offsets across all views
-    @StateObject private var isometricBarSettings = IsometricBarSettings(horizontalOffset: 80, bottomOffset: -80)
     
     @StateObject private var motionController = SceneMotionController()
     @StateObject private var cubeTouchConfig = CubeTouchConfiguration()
@@ -525,12 +504,13 @@ struct HomeView: View {
                 HStack {
                     Spacer(minLength: 0)
                     IsometricRadiusBar(radius: $isometricBarModel.radius, growthSpeed: 1.5, maxSceneHeight: 1.8, uiScale: 1.5, maxRuntimeRadius: 3_323_000.0)
-                        .frame(width: 98, height: 390)
+                        .frame(width: isometricBarSettings.barWidth, height: isometricBarSettings.barHeight)
+                        .rotation3DEffect(.degrees(isometricBarSettings.barTiltDegrees), axis: (x: 1, y: 0, z: 0), perspective: 0.65)
                         .animation(.interpolatingSpring(stiffness: 180, damping: 18), value: isometricBarModel.radius)
                         .padding(.trailing, isometricBarSettings.horizontalOffset)
                 }
                 .padding(.trailing, 8)
-                .padding(.bottom, max(8, isometricBarSettings.bottomOffset)) // Match preview bottom offset behavior
+                .padding(.bottom, isometricBarSettings.bottomOffset) // Removed clamp here
                 .background(Color.clear) // placeholder to keep structure; ticks assumed removed in IsometricRadiusBar component
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -542,7 +522,7 @@ struct HomeView: View {
         
         // Inject global settings for isometric radius bar positioning
         .environment(\.isometricRadiusBarDistance, isometricBarSettings.horizontalOffset)
-        .environment(\.isometricBarSettings, isometricBarSettings)
+        // Removed `.environment(\.isometricBarSettings, isometricBarSettings)` per instructions
         .environment(\.isometricBarModel, isometricBarModel)
         
         .task {
@@ -590,19 +570,29 @@ struct HomeView: View {
             
             if !didPrewarmSceneKit {
                 didPrewarmSceneKit = true
-                DispatchQueue.main.async {
-                    let tmpView = SCNView(frame: .init(x: 0, y: 0, width: 1, height: 1))
-                    tmpView.scene = SCNScene()
-                    tmpView.antialiasingMode = .none
-                    tmpView.isPlaying = true
-                    let box = SCNBox(width: 0.01, height: 0.01, length: 0.01, chamferRadius: 0)
-                    let node = SCNNode(geometry: box)
-                    tmpView.scene?.rootNode.addChildNode(node)
-                    tmpView.prepare([box], completionHandler: { _ in
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                            _ = tmpView
+                // Defer slightly to let the initial UI render first
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                    // Build scene and geometry off the main thread to reduce blocking
+                    Task.detached(priority: .utility) {
+                        let scene = SCNScene()
+                        let box = SCNBox(width: 0.01, height: 0.01, length: 0.01, chamferRadius: 0)
+                        let node = SCNNode(geometry: box)
+                        scene.rootNode.addChildNode(node)
+
+                        // Switch to main to create and assign the SCNView
+                        await MainActor.run {
+                            // Keep the view tiny and detached from the view hierarchy
+                            let tmpView = SCNView(frame: CGRect(x: -1000, y: -1000, width: 1, height: 1))
+                            tmpView.antialiasingMode = .none
+                            tmpView.isPlaying = false // avoid starting render loop; not needed for prewarm
+                            tmpView.scene = scene
+
+                            // Ask SceneKit to prepare geometry/materials for quicker first real render
+                            tmpView.prepare([box], completionHandler: { _ in
+                                // Allow tmpView to deallocate; no strong capture
+                            })
                         }
-                    })
+                    }
                 }
             }
             
@@ -707,16 +697,13 @@ struct HomeView: View {
     
 }
 final class BarCubePreviewTuning: ObservableObject {
-    @Published var barHorizontalOffset: CGFloat = 23
-    @Published var barBottomOffset: CGFloat = 24
-    @Published var barTiltDegrees: Double = -8
-    @Published var barWidth: CGFloat = 98
-    @Published var barHeight: CGFloat = 390
+    // Removed barHorizontalOffset, barBottomOffset, barTiltDegrees, barWidth, barHeight per instructions (no longer used)
 }
 
 private struct CubeAndBarOverlay: View {
     @Binding var radius: Double
-    @ObservedObject var tuning: BarCubePreviewTuning
+    // Changed per instructions to EnvironmentObject
+    @EnvironmentObject private var isometricBarSettings: IsometricBarSettings
 
     var body: some View {
         VStack {
@@ -724,17 +711,18 @@ private struct CubeAndBarOverlay: View {
             HStack {
                 Spacer()
                 IsometricRadiusBar(radius: $radius, uiScale: 1.0)
-                    .frame(width: tuning.barWidth, height: tuning.barHeight)
-                    .rotation3DEffect(.degrees(tuning.barTiltDegrees), axis: (x: 1, y: 0, z: 0), perspective: 0.65)
-                    .animation(nil, value: tuning.barHorizontalOffset)
-                    .animation(nil, value: tuning.barBottomOffset)
-                    .animation(nil, value: tuning.barTiltDegrees)
-                    .animation(nil, value: tuning.barWidth)
-                    .animation(nil, value: tuning.barHeight)
-                    .padding(.trailing, tuning.barHorizontalOffset)
+                    .frame(width: isometricBarSettings.barWidth, height: isometricBarSettings.barHeight)
+                    .rotation3DEffect(.degrees(isometricBarSettings.barTiltDegrees), axis: (x: 1, y: 0, z: 0), perspective: 0.65)
+                    .padding(.trailing, isometricBarSettings.horizontalOffset)
             }
             .padding(.trailing, 8)
-            .padding(.bottom, max(8, tuning.barBottomOffset))
+            .padding(.bottom, isometricBarSettings.bottomOffset)
+        }
+        .onChange(of: isometricBarSettings.horizontalOffset) { newValue in
+            print("[Preview Debug] Horizontal offset ->", newValue)
+        }
+        .onChange(of: isometricBarSettings.bottomOffset) { newValue in
+            print("[Preview Debug] Bottom offset ->", newValue)
         }
         .allowsHitTesting(false)
     }
@@ -742,7 +730,8 @@ private struct CubeAndBarOverlay: View {
 
 private struct HomeBarPlacementPreview: View {
     @State private var radius: Double = 0
-    @StateObject private var tuning = BarCubePreviewTuning()
+    //@StateObject private var tuning = BarCubePreviewTuning() // Removed tuning usage
+    
     @State private var selectedTab: AppTab = .record
     
     @State private var previewHover: Bool = false
@@ -758,6 +747,9 @@ private struct HomeBarPlacementPreview: View {
     // Inserted states as per instructions:
     @State private var isPreviewRotating: Bool = false
     @State private var queuedPreviewTab: AppTab? = nil
+    
+    // Changed per instructions to EnvironmentObject
+    @EnvironmentObject private var isometricBarSettings: IsometricBarSettings
     
     var usesImperial: Bool { Locale.current.usesMetricSystem == false }
     var earthMaxUnit: Double { usesImperial ? 3958.8 : 6371.0 }
@@ -907,12 +899,11 @@ private struct HomeBarPlacementPreview: View {
             }
             .ignoresSafeArea(edges: .bottom)
 
-            CubeAndBarOverlay(radius: $radius, tuning: tuning)
+            CubeAndBarOverlay(radius: $radius)
                 .animation(nil, value: radius)
 
             VStack {
-                // Inserted segmented control picker for tab selection
-                VStack {
+                VStack(alignment: .leading, spacing: 12) {
                     Picker("Tab", selection: $selectedTab) {
                         Text("Record").tag(AppTab.record)
                         Text("Map").tag(AppTab.map)
@@ -920,63 +911,72 @@ private struct HomeBarPlacementPreview: View {
                         Text("Feed").tag(AppTab.feed)
                     }
                     .pickerStyle(.segmented)
-                }
-                .padding(.horizontal, 16)
-                HStack(spacing: 12) {
-                    Text("Simulate Swipe:")
-                    Button("Left 90°") {
-                        rotatePreview(to: previousPreviewTab(from: selectedTab), direction: .left)
-                    }
-                    .buttonStyle(.bordered)
-                    Button("Right 90°") {
-                        rotatePreview(to: nextPreviewTab(from: selectedTab), direction: .right)
-                    }
-                    .buttonStyle(.bordered)
-                    Button("Pop") { previewPopTrigger += 1 }
-                        .buttonStyle(.bordered)
-                    Toggle("Hover", isOn: $previewHover)
-                        .toggleStyle(.switch)
-                }
-                .padding(.horizontal, 16)
 
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Bar/Cube Placement Tuning").font(.headline)
                     HStack {
                         Text("Horizontal")
-                        Slider(value: Binding(get: { Double(tuning.barHorizontalOffset) }, set: { tuning.barHorizontalOffset = CGFloat($0) }), in: 0...80)
-                        Text("\(Int(tuning.barHorizontalOffset))").monospacedDigit()
+                        Slider(
+                            value: Binding<Double>(
+                                get: { Double(isometricBarSettings.horizontalOffset) },
+                                set: { isometricBarSettings.horizontalOffset = CGFloat($0) }
+                            ),
+                            in: 0...80
+                        )
+                        Text("\(Int(isometricBarSettings.horizontalOffset))").monospacedDigit()
                     }
                     HStack {
                         Text("Bottom")
-                        Slider(value: Binding(get: { Double(tuning.barBottomOffset) }, set: { tuning.barBottomOffset = CGFloat($0) }), in: 0...80)
-                        Text("\(Int(tuning.barBottomOffset))").monospacedDigit()
+                        Slider(
+                            value: Binding<Double>(
+                                get: { Double(isometricBarSettings.bottomOffset) },
+                                set: { isometricBarSettings.bottomOffset = CGFloat($0) }
+                            ),
+                            in: -120...120
+                        )
+                        Text("\(Int(isometricBarSettings.bottomOffset))").monospacedDigit()
                     }
                     HStack {
                         Text("Tilt")
-                        Slider(value: $tuning.barTiltDegrees, in: -25...0, step: 1)
-                        Text("\(Int(tuning.barTiltDegrees))°").monospacedDigit()
+                        Slider(
+                            value: Binding<Double>(
+                                get: { isometricBarSettings.barTiltDegrees },
+                                set: { isometricBarSettings.barTiltDegrees = $0 }
+                            ),
+                            in: -25...0,
+                            step: 1
+                        )
+                        Text("\(Int(isometricBarSettings.barTiltDegrees))°").monospacedDigit()
                     }
                     HStack {
                         Text("Width")
-                        Slider(value: Binding(get: { Double(tuning.barWidth) }, set: { tuning.barWidth = CGFloat($0) }), in: 64...128)
-                        Text("\(Int(tuning.barWidth))").monospacedDigit()
+                        Slider(
+                            value: Binding<Double>(
+                                get: { Double(isometricBarSettings.barWidth) },
+                                set: { isometricBarSettings.barWidth = CGFloat($0) }
+                            ),
+                            in: 64...128
+                        )
+                        Text("\(Int(isometricBarSettings.barWidth))").monospacedDigit()
                     }
                     HStack {
                         Text("Height")
-                        Slider(value: Binding(get: { Double(tuning.barHeight) }, set: { tuning.barHeight = CGFloat($0) }), in: 260...480)
-                        Text("\(Int(tuning.barHeight))").monospacedDigit()
+                        Slider(
+                            value: Binding<Double>(
+                                get: { Double(isometricBarSettings.barHeight) },
+                                set: { isometricBarSettings.barHeight = CGFloat($0) }
+                            ),
+                            in: 260...480
+                        )
+                        Text("\(Int(isometricBarSettings.barHeight))").monospacedDigit()
                     }
                     HStack {
                         Text("Radius")
                         Slider(
                             value: Binding(
                                 get: {
-                                    // Convert meters to unit (km or mi)
                                     let meters = radius
-                                    if usesImperial { return meters / 1609.34 } else { return meters / 1000.0 }
+                                    return usesImperial ? (meters / 1609.34) : (meters / 1000.0)
                                 },
                                 set: { unitValue in
-                                    // Convert unit (km or mi) back to meters
                                     if usesImperial { radius = unitValue * 1609.34 } else { radius = unitValue * 1000.0 }
                                 }
                             ),
@@ -992,11 +992,27 @@ private struct HomeBarPlacementPreview: View {
                     Text(usesImperial ? "out of 3,958.8 mi" : "out of 6,371 km")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                    HStack {
+                        Spacer()
+                        Button(role: .destructive) {
+                            isometricBarSettings.horizontalOffset = 80
+                            isometricBarSettings.bottomOffset = 1
+                            isometricBarSettings.barWidth = 98
+                            isometricBarSettings.barHeight = 390
+                            isometricBarSettings.barTiltDegrees = -8
+                            // Optionally reset preview radius as well
+                            radius = 0
+                        } label: {
+                            Label("Reset to Defaults", systemImage: "arrow.counterclockwise")
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
                 }
                 .padding(12)
                 .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .padding(.horizontal, 16)
                 .padding(.top, 24)
+
                 Spacer()
             }
         }
@@ -1028,10 +1044,23 @@ private struct HomeBarPlacementPreview: View {
             previewHoldActive = false
             stopPreviewHoldRamp(reset: false)
         }
+        // Removed the entire `.onAppear { ... }` block here as per instructions
     }
 }
 
-#Preview("HomeView Bar Placement") {
-    HomeBarPlacementPreview()
+private struct SharedPreviewSettings {
+    static let settings: IsometricBarSettings = {
+        let s = IsometricBarSettings()
+        s.horizontalOffset = 80
+        s.bottomOffset = 1
+        s.barWidth = 98
+        s.barHeight = 390
+        s.barTiltDegrees = -8
+        return s
+    }()
 }
 
+#Preview("HomeView") {
+    HomeBarPlacementPreview()
+        .environmentObject(SharedPreviewSettings.settings)
+}

@@ -63,8 +63,7 @@ private struct PoleOverlay: View {
 
 struct FeedView: View {
     @Environment(\.locationProvider) private var injectedLocationProvider: LocationProvider?
-    @Environment(\.isometricRadiusBarDistance) private var isometricRadiusBarDistance
-    @Environment(\.isometricBarSettings) private var barSettings
+    // Removed isometric environment keys to fix ambiguous/invalid redeclaration errors
 
     @StateObject private var fallbackLocationProvider = LocationProvider()
     @StateObject private var poleModel = PolePositionModel()

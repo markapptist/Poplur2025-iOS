@@ -120,7 +120,7 @@ private final class LocationManager: NSObject, ObservableObject, CLLocationManag
         }
     }
 
-    func centerOnUser(_ camera: inout MapCameraPosition?) {
+    func centerOnUser(_ camera: inout MapCameraPosition) {
         guard let loc = location else { return }
         camera = .camera(
             MapCamera(
@@ -199,10 +199,10 @@ private struct DominancePin: View {
 // MARK: - Map View
 struct MapView: View {
     @StateObject private var locationManager = LocationManager()
-    @Environment(\.isometricBarSettings) private var barSettings
-    @Environment(\.isometricRadiusBarDistance) private var isometricRadiusBarDistance
+    // @Environment(\.isometricBarSettings) private var barSettings
+    // @Environment(\.isometricRadiusBarDistance) private var isometricRadiusBarDistance
 
-    @State private var camera: MapCameraPosition? = .camera(
+    @State private var camera: MapCameraPosition = .camera(
         MapCamera(
             centerCoordinate: CLLocationCoordinate2D(latitude: 40.748339, longitude: -73.985912),
             distance: fixedDistance,
@@ -242,17 +242,8 @@ struct MapView: View {
 #else
             locationManager.requestAuthorizationIfNeeded()
 #endif
-            // Nudge/ensure a valid initial camera so tiles render immediately
-            if camera == nil {
-                camera = .camera(
-                    MapCamera(
-                        centerCoordinate: CLLocationCoordinate2D(latitude: 40.748339, longitude: -73.985912),
-                        distance: fixedDistance,
-                        heading: 52,
-                        pitch: fixedPitch
-                    )
-                )
-            } else if let current = camera?.camera {
+            // Normalize camera to fixed pitch/distance so tiles render immediately
+            if let current = camera.camera {
                 camera = .camera(
                     MapCamera(
                         centerCoordinate: current.centerCoordinate,
@@ -275,7 +266,7 @@ struct MapView: View {
             if ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1" { return }
 #endif
             // Center only once when we get the first location fix
-            if let _ = locationManager.location, camera?.camera == nil {
+            if let _ = locationManager.location {
                 locationManager.centerOnUser(&camera)
             }
         }
@@ -294,11 +285,13 @@ struct MapView: View {
 
             // 1) Zoom out from current position
             withAnimation(.easeInOut(duration: 2.0 * tourSpeedMultiplier)) {
+                let currentCenter = camera.camera?.centerCoordinate ?? userCoord
+                let currentHeading = camera.camera?.heading ?? 0
                 camera = .camera(
                     MapCamera(
-                        centerCoordinate: camera?.camera?.centerCoordinate ?? userCoord,
+                        centerCoordinate: currentCenter,
                         distance: max(fixedDistance * 6, 6000),
-                        heading: camera?.camera?.heading ?? 0,
+                        heading: currentHeading,
                         pitch: fixedPitch
                     )
                 )
@@ -313,7 +306,7 @@ struct MapView: View {
                         MapCamera(
                             centerCoordinate: userCoord,
                             distance: max(fixedDistance * 6, 6000),
-                            heading: camera?.camera?.heading ?? 0,
+                            heading: camera.camera?.heading ?? 0,
                             pitch: fixedPitch
                         )
                     )
@@ -326,7 +319,7 @@ struct MapView: View {
                         MapCamera(
                             centerCoordinate: userCoord,
                             distance: fixedDistance,
-                            heading: camera?.camera?.heading ?? 0,
+                            heading: camera.camera?.heading ?? 0,
                             pitch: fixedPitch
                         )
                     )
@@ -363,7 +356,7 @@ struct MapView: View {
 
         return Map(
             position: Binding(
-                get: { camera ?? .automatic },
+                get: { camera },
                 set: { camera = lockCamera($0) }
             ),
             interactionModes: modes
@@ -428,7 +421,7 @@ struct MapView: View {
 
     // MARK: - Navigation
     private func panTo(_ coordinate: CLLocationCoordinate2D) {
-        let heading = camera?.camera?.heading ?? 0
+        let heading = camera.camera?.heading ?? 0
         withAnimation(.easeInOut(duration: 0.8)) {
             camera = .camera(
                 MapCamera(
@@ -507,11 +500,13 @@ struct MapView: View {
                 let dom = dominance[tourIndex % dominance.count]
                 // Zoom out significantly and prepare to move towards the destination
                 withAnimation(.easeInOut(duration: 2.0 * tourSpeedMultiplier)) {
+                    let currentCenter = camera.camera?.centerCoordinate ?? dom.coordinate
+                    let currentHeading = camera.camera?.heading ?? 0
                     camera = .camera(
                         MapCamera(
-                            centerCoordinate: camera?.camera?.centerCoordinate ?? dom.coordinate,
+                            centerCoordinate: currentCenter,
                             distance: max(fixedDistance * 10, 12000),
-                            heading: camera?.camera?.heading ?? 0,
+                            heading: currentHeading,
                             pitch: fixedPitch
                         )
                     )
@@ -525,7 +520,7 @@ struct MapView: View {
                         MapCamera(
                             centerCoordinate: dom.coordinate,
                             distance: max(fixedDistance * 10, 12000),
-                            heading: camera?.camera?.heading ?? 0,
+                            heading: camera.camera?.heading ?? 0,
                             pitch: fixedPitch
                         )
                     )
@@ -539,7 +534,7 @@ struct MapView: View {
                         MapCamera(
                             centerCoordinate: dom.coordinate,
                             distance: fixedDistance,
-                            heading: camera?.camera?.heading ?? 0,
+                            heading: camera.camera?.heading ?? 0,
                             pitch: fixedPitch
                         )
                     )
@@ -619,3 +614,4 @@ private struct MapViewPreviewHost: View {
     MapView()
     #endif
 }
+
