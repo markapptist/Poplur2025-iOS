@@ -35,6 +35,16 @@ struct Poplur2025App: App {
 
     // Prewarmed, shared camera controller for fast camera bring-up
     @StateObject private var cameraController = CameraKitController()
+    
+    @StateObject private var isometricBarSettings: IsometricBarSettings = {
+        let s = IsometricBarSettings()
+        s.horizontalOffset = 24
+        s.bottomOffset = 12
+        s.barWidth = 98
+        s.barHeight = 390
+        s.barTiltDegrees = -8
+        return s
+    }()
 
     var body: some Scene {
         WindowGroup {
@@ -42,12 +52,14 @@ struct Poplur2025App: App {
                 if auth.isAuthenticated {
                     HomeView(cameraController: cameraController)
                         .environmentObject(auth)
+                        .environmentObject(isometricBarSettings)
                         .task {
                             await prewarmCameraIfAllowed()
                         }
                 } else {
                     WelcomeView()
                         .environmentObject(auth)
+                        .environmentObject(isometricBarSettings)
                         .task {
                             await prewarmCameraIfAllowed()
                         }
@@ -63,6 +75,16 @@ struct Poplur2025App: App {
                     UITabBar.appearance().scrollEdgeAppearance = appearance
                 }
                 UITabBar.appearance().isTranslucent = true
+            }
+            .task {
+                // Stagger SceneKit prewarm slightly after first frame
+                try? await Task.sleep(nanoseconds: 200_000_000)
+                await SceneKitPrewarmer.prewarmIfNeeded()
+            }
+            .task {
+                // Stagger camera prewarm a bit later
+                try? await Task.sleep(nanoseconds: 400_000_000)
+                await prewarmCameraIfAllowed()
             }
         }
     }
@@ -99,3 +121,4 @@ struct Poplur2025App: App {
         await cameraController.start()
     }
 }
+

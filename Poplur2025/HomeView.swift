@@ -5,6 +5,7 @@ import SceneKit
 import CoreMotion
 import Combine
 import AudioToolbox
+import Foundation
 
 // Usage elsewhere:
 // @Environment(\.isometricRadiusBarDistance) private var isometricRadiusBarDistance
@@ -41,6 +42,45 @@ extension EnvironmentValues {
     }
 }
 
+// One-time SceneKit prewarmer to avoid first-frame stalls
+private enum HomeSceneKitPrewarmer {
+    private static var didPrewarm: Bool = false
+
+    static func prewarmIfNeeded() async {
+        if didPrewarm { return }
+        didPrewarm = true
+
+        // Build a tiny scene off-main
+        let scene = SCNScene()
+        let box = SCNBox(width: 0.01, height: 0.01, length: 0.01, chamferRadius: 0)
+        let mat = SCNMaterial()
+        mat.lightingModel = .physicallyBased
+        box.materials = [mat]
+        let node = SCNNode(geometry: box)
+        scene.rootNode.addChildNode(node)
+
+        // 1) Offscreen renderer path (no view)
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let device = MTLCreateSystemDefaultDevice()
+                let renderer = SCNRenderer(device: device, options: nil)
+                renderer.scene = scene
+                renderer.render(atTime: 0)
+                cont.resume()
+            }
+        }
+
+        // 2) Tiny SCNView path to exercise view-based code
+        await MainActor.run {
+            let tmpView = SCNView(frame: CGRect(x: -1000, y: -1000, width: 1, height: 1))
+            tmpView.antialiasingMode = .none
+            tmpView.isPlaying = false
+            tmpView.scene = scene
+            tmpView.prepare([box], completionHandler: { _ in })
+        }
+    }
+}
+
 extension Notification.Name {
     static let ResetTabToTop = Notification.Name("ResetTabToTop")
     static let CubeMotionUpdate = Notification.Name("CubeMotionUpdate")
@@ -55,8 +95,7 @@ struct HomeCameraPreviewHost: UIViewControllerRepresentable {
     @ObservedObject var controller: CameraKitController
 
     func makeUIViewController(context: Context) -> UIViewController {
-        // Ensure the controller prepares its preview
-        controller.preparePreviewIfNeeded()
+        // Removed controller.preparePreviewIfNeeded() per instructions
         return controller.recordPreviewViewController ?? controller.previewViewController ?? UIViewController()
     }
 
@@ -100,8 +139,8 @@ struct HomeView: View {
     // Changed per instructions to use EnvironmentObject
     @EnvironmentObject private var isometricBarSettings: IsometricBarSettings
     
-    // Start on map tab instead of record tab
-    @State private var selectedTab: AppTab = .record
+    // Start on feed tab instead of record tab
+    @State private var selectedTab: AppTab = .feed
     
     // Location only when needed
     @StateObject private var locationProvider = LocationProvider()
@@ -118,6 +157,7 @@ struct HomeView: View {
     @State private var enableLowerHitArea: Bool = false
     @State private var didPrewarmSceneKit = false
     @State private var showBarTuner: Bool = false
+    @State private var didApplyDefaultBarSettings = false
     
     // Shared radius model controlling the global isometric bar value across all tabs
     @StateObject private var isometricBarModel = IsometricBarModel(radius: 0)
@@ -130,6 +170,11 @@ struct HomeView: View {
     
     // Added state for cube yaw angle
     @State private var cubeYawDegrees: Double = 0
+    
+    // Added per instruction to gate animations
+    @State private var isSceneKitReady: Bool = false
+
+    private let launchGate = LaunchGate.shared
     
     init(cameraController: CameraKitController) {
         self.cameraController = cameraController
@@ -150,17 +195,12 @@ struct HomeView: View {
         MapView()
             .task {
                 if selectedTab == .map, !didTriggerMapInitialLoad {
-                    DispatchQueue.main.async {
-                        didTriggerMapInitialLoad = true
-                        NotificationCenter.default.post(name: .LoadMapNow, object: nil)
-                    }
-                }
-            }
-            .onAppear {
-                if selectedTab == .map, !didTriggerMapInitialLoad {
-                    DispatchQueue.main.async {
-                        didTriggerMapInitialLoad = true
-                        NotificationCenter.default.post(name: .LoadMapNow, object: nil)
+                    deferUntilAfterLaunch {
+                        await MainActor.run {
+                            didTriggerMapInitialLoad = true
+                            NotificationCenter.default.post(name: .LoadMapNow, object: nil)
+                            locationProvider.request()
+                        }
                     }
                 }
             }
@@ -172,28 +212,28 @@ struct HomeView: View {
             HomeCameraPreviewHost(controller: cameraController)
                 .ignoresSafeArea()
         }
-        .task {
-            let t0 = CFAbsoluteTimeGetCurrent()
-            // Small delay to allow overlay UI to render before heavy camera work
-            try? await Task.sleep(nanoseconds: 60_000_000)
-            await cameraController.start()
-            let dt = CFAbsoluteTimeGetCurrent() - t0
-            print("[Camera] start() took \(dt)s")
-        }
         .onAppear {
             Task { @MainActor in
-                let t0 = CFAbsoluteTimeGetCurrent()
-                try? await Task.sleep(nanoseconds: 40_000_000)
-                await cameraController.startPreview()
-                let dt = CFAbsoluteTimeGetCurrent() - t0
-                print("[Camera] startPreview() took \(dt)s")
+                guard selectedTab == .record else { return }
+                let status = AVCaptureDevice.authorizationStatus(for: .video)
+                switch status {
+                case .authorized:
+                    if !cameraController.isReady {
+                        await cameraController.startPreview()
+                    }
+                case .notDetermined:
+                    // Do not prompt on appear; let user interaction trigger request
+                    break
+                default:
+                    break
+                }
             }
         }
     }
     
     private func ensureCameraRunningIfNeeded() {
         Task { @MainActor in
-            guard selectedTab == .record else {
+            guard selectedTab == .record, isRecordHolding else {
                 return
             }
             let status = AVCaptureDevice.authorizationStatus(for: .video)
@@ -214,6 +254,10 @@ struct HomeView: View {
                 break
             }
         }
+    }
+
+    private func deferUntilAfterLaunch(_ work: @escaping @Sendable () async -> Void) {
+        launchGate.afterGate(work)
     }
     
     private func startRecordHoldRamp() {
@@ -274,7 +318,11 @@ struct HomeView: View {
         let current = cubeYawDegrees.truncatingRemainder(dividingBy: 360)
         let delta = normalizedDelta(from: current, to: targetYaw, prefer: direction)
         let final = current + delta
-        withAnimation(.timingCurve(0.2, 0.8, 0.2, 1.0, duration: duration)) {
+        if isSceneKitReady {
+            withAnimation(.timingCurve(0.2, 0.8, 0.2, 1.0, duration: duration)) {
+                cubeYawDegrees = final
+            }
+        } else {
             cubeYawDegrees = final
         }
     }
@@ -309,19 +357,9 @@ struct HomeView: View {
     private var feedTabContent: some View {
         FeedView()
             .task {
-                if selectedTab == .feed {
-                    if !didTriggerFeedInitialLoad {
-                        DispatchQueue.main.async {
-                            didTriggerFeedInitialLoad = true
-                            NotificationCenter.default.post(name: .LoadFeedNow, object: nil)
-                        }
-                    }
-                }
-            }
-            .onAppear {
-                if selectedTab == .feed {
-                    if !didTriggerFeedInitialLoad {
-                        DispatchQueue.main.async {
+                if selectedTab == .feed, !didTriggerFeedInitialLoad {
+                    deferUntilAfterLaunch {
+                        await MainActor.run {
                             didTriggerFeedInitialLoad = true
                             NotificationCenter.default.post(name: .LoadFeedNow, object: nil)
                         }
@@ -369,17 +407,11 @@ struct HomeView: View {
         ProfileView(userID: resolvedUserID)
             .task {
                 if selectedTab == .profile, !didTriggerProfileInitialLoad {
-                    DispatchQueue.main.async {
-                        didTriggerProfileInitialLoad = true
-                        NotificationCenter.default.post(name: .LoadProfileNow, object: nil)
-                    }
-                }
-            }
-            .onAppear {
-                if selectedTab == .profile, !didTriggerProfileInitialLoad {
-                    DispatchQueue.main.async {
-                        didTriggerProfileInitialLoad = true
-                        NotificationCenter.default.post(name: .LoadProfileNow, object: nil)
+                    deferUntilAfterLaunch {
+                        await MainActor.run {
+                            didTriggerProfileInitialLoad = true
+                            NotificationCenter.default.post(name: .LoadProfileNow, object: nil)
+                        }
                     }
                 }
             }
@@ -389,6 +421,7 @@ struct HomeView: View {
     }
     
     var body: some View {
+        
         ZStack {
             // Content switching by selectedTab (replaces TabView)
             Group {
@@ -498,22 +531,36 @@ struct HomeView: View {
             }
 #endif
             
-            // Global isometric radius bar overlay (visible on all tabs)
-            VStack {
-                Spacer()
-                HStack {
-                    Spacer(minLength: 0)
-                    IsometricRadiusBar(radius: $isometricBarModel.radius, growthSpeed: 1.5, maxSceneHeight: 1.8, uiScale: 1.5, maxRuntimeRadius: 3_323_000.0)
+            // Global isometric radius bar overlay (visible on all tabs) — safe-area aware
+            GeometryReader { proxy in
+                let safe = proxy.safeAreaInsets
+                let xOffset = isometricBarSettings.horizontalOffset
+                let yOffset = isometricBarSettings.bottomOffset
+
+                VStack {
+                    Spacer()
+                    HStack {
+                        Spacer(minLength: 0)
+                        IsometricRadiusBar(
+                            radius: $isometricBarModel.radius,
+                            growthSpeed: 1.5,
+                            maxSceneHeight: 1.8,
+                            uiScale: 1.5,
+                            maxRuntimeRadius: 3_323_000.0
+                        )
                         .frame(width: isometricBarSettings.barWidth, height: isometricBarSettings.barHeight)
                         .rotation3DEffect(.degrees(isometricBarSettings.barTiltDegrees), axis: (x: 1, y: 0, z: 0), perspective: 0.65)
-                        .animation(.interpolatingSpring(stiffness: 180, damping: 18), value: isometricBarModel.radius)
-                        .padding(.trailing, isometricBarSettings.horizontalOffset)
+                        .animation(isSceneKitReady ? .interpolatingSpring(stiffness: 180, damping: 18) : nil, value: isometricBarModel.radius)
+                    }
+                    .allowsHitTesting(false)
+                    .padding(.trailing, safe.trailing)
+                    .padding(.bottom, safe.bottom)
                 }
-                .padding(.trailing, 8)
-                .padding(.bottom, isometricBarSettings.bottomOffset) // Removed clamp here
-                .background(Color.clear) // placeholder to keep structure; ticks assumed removed in IsometricRadiusBar component
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                .padding(.trailing, safe.trailing)
+                .padding(.bottom, safe.bottom)
+                .offset(x: xOffset, y: -yOffset)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .ignoresSafeArea(.container, edges: [.bottom, .leading, .trailing])
             .zIndex(999)
             .allowsHitTesting(false)
@@ -527,35 +574,18 @@ struct HomeView: View {
         
         .task {
             // Removed cameraController.prewarm() and preparePreviewIfNeeded() here per instructions
-            
-            // Minimal bootstrap: start location early (cheap) and trigger feed load if feed is initial tab
-            locationProvider.request()
-            if selectedTab == .feed, !didTriggerFeedInitialLoad {
-                DispatchQueue.main.async {
-                    didTriggerFeedInitialLoad = true
-                    NotificationCenter.default.post(name: .LoadFeedNow, object: nil)
-                }
-            }
-            if selectedTab != .feed {
-                NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
-            }
-            if selectedTab == .profile {
-                NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
-            }
+
+            // Removed all feed triggers to defer until launch gate
         }
+        // Removed locationProvider.request() task entirely per instructions
+
         .onAppear {
+            launchGate.start()
             let appearT0 = CFAbsoluteTimeGetCurrent()
             print("[HomeView] onAppear at t=\(appearT0)")
             // Removed cameraController.prewarm() and preparePreviewIfNeeded() here per instructions
             
-            // Keep startup minimal; no mass notifications
-            locationProvider.request()
-            if selectedTab == .feed, !didTriggerFeedInitialLoad {
-                DispatchQueue.main.async {
-                    didTriggerFeedInitialLoad = true
-                    NotificationCenter.default.post(name: .LoadFeedNow, object: nil)
-                }
-            }
+            // Keep startup minimal; no immediate location or feed triggers here
             if selectedTab != .feed {
                 NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
             }
@@ -566,35 +596,19 @@ struct HomeView: View {
                 try? await Task.sleep(nanoseconds: 120_000_000)
                 await Task.yield()
                 enableLowerHitArea = true
-            }
-            
-            if !didPrewarmSceneKit {
-                didPrewarmSceneKit = true
-                // Defer slightly to let the initial UI render first
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                    // Build scene and geometry off the main thread to reduce blocking
-                    Task.detached(priority: .utility) {
-                        let scene = SCNScene()
-                        let box = SCNBox(width: 0.01, height: 0.01, length: 0.01, chamferRadius: 0)
-                        let node = SCNNode(geometry: box)
-                        scene.rootNode.addChildNode(node)
-
-                        // Switch to main to create and assign the SCNView
-                        await MainActor.run {
-                            // Keep the view tiny and detached from the view hierarchy
-                            let tmpView = SCNView(frame: CGRect(x: -1000, y: -1000, width: 1, height: 1))
-                            tmpView.antialiasingMode = .none
-                            tmpView.isPlaying = false // avoid starting render loop; not needed for prewarm
-                            tmpView.scene = scene
-
-                            // Ask SceneKit to prepare geometry/materials for quicker first real render
-                            tmpView.prepare([box], completionHandler: { _ in
-                                // Allow tmpView to deallocate; no strong capture
-                            })
-                        }
-                    }
+                
+                if !didApplyDefaultBarSettings {
+                    didApplyDefaultBarSettings = true
+                    // Apply unified defaults for bar settings
+                    isometricBarSettings.horizontalOffset = 40
+                    isometricBarSettings.bottomOffset = -80
+                    isometricBarSettings.barWidth = 98
+                    isometricBarSettings.barHeight = 390
+                    isometricBarSettings.barTiltDegrees = -8
                 }
             }
+            
+            // Removed entire SceneKit prewarm block per instructions
             
             print("[HomeView] onAppear work took \(CFAbsoluteTimeGetCurrent() - appearT0)s")
         }
@@ -617,21 +631,14 @@ struct HomeView: View {
             }
             NotificationCenter.default.post(name: .ResetTabToTop, object: nil)
             
-            if selectedTab == .record {
-                Task { @MainActor in
-                    let t0 = CFAbsoluteTimeGetCurrent()
-                    await cameraController.prewarm()
-                    let t1 = CFAbsoluteTimeGetCurrent()
-                    print("[Camera] prewarm() took \(t1 - t0)s")
-                    await cameraController.preparePreviewIfNeeded()
-                    let t2 = CFAbsoluteTimeGetCurrent()
-                    print("[Camera] preparePreviewIfNeeded() took \(t2 - t1)s")
-                }
-            }
+            // Removed prewarm and preparePreviewIfNeeded task per instructions
+            
             if selectedTab != .record {
                 isRecordHolding = false
                 stopRecordHoldRamp(reset: false)
             }
+            
+            enableLowerHitArea = (selectedTab != .record)
         }
         .onChange(of: auth.isAuthenticated) { authed in
             if authed {
@@ -647,10 +654,11 @@ struct HomeView: View {
         .onChange(of: scenePhase) { phase in
             switch phase {
             case .active:
-                // Start motion on all tabs when app becomes active, with a slight delay
+                // Start motion on all tabs when app becomes active, delay to 150ms, but defer until launch gate
                 Task { @MainActor in
-                    try? await Task.sleep(nanoseconds: 80_000_000)
-                    motionController.start()
+                    deferUntilAfterLaunch {
+                        await MainActor.run { self.motionController.start() }
+                    }
                 }
             case .background, .inactive:
                 cameraController.stop()
@@ -686,11 +694,24 @@ struct HomeView: View {
         .onReceive(NotificationCenter.default.publisher(for: .cameraCubeHoldBegan)) { _ in
             guard selectedTab == .record else { return }
             isRecordHolding = true
+            ensureCameraRunningIfNeeded()
             startRecordHoldRamp()
         }
         .onReceive(NotificationCenter.default.publisher(for: .cameraCubeHoldEnded)) { _ in
             isRecordHolding = false
             stopRecordHoldRamp(reset: true)
+        }
+        .task {
+            deferUntilAfterLaunch {
+                await MainActor.run { isSceneKitReady = true }
+            }
+        }
+        .task {
+            // Removed the 2s TTI marker print task per instructions
+        }
+        .task {
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            print("[Startup] Watchdog 5s: heavy work deferred until 10s gate; if UI is still slow, check synchronous work on main thread")
         }
     }
     
@@ -706,25 +727,27 @@ private struct CubeAndBarOverlay: View {
     @EnvironmentObject private var isometricBarSettings: IsometricBarSettings
 
     var body: some View {
-        VStack {
-            Spacer()
-            HStack {
+        GeometryReader { proxy in
+            let safe = proxy.safeAreaInsets
+            let xOffset = isometricBarSettings.horizontalOffset
+            let yOffset = isometricBarSettings.bottomOffset
+
+            VStack {
                 Spacer()
-                IsometricRadiusBar(radius: $radius, uiScale: 1.0)
-                    .frame(width: isometricBarSettings.barWidth, height: isometricBarSettings.barHeight)
-                    .rotation3DEffect(.degrees(isometricBarSettings.barTiltDegrees), axis: (x: 1, y: 0, z: 0), perspective: 0.65)
-                    .padding(.trailing, isometricBarSettings.horizontalOffset)
+                HStack {
+                    Spacer()
+                    IsometricRadiusBar(radius: $radius, uiScale: 1.5)
+                        .frame(width: isometricBarSettings.barWidth, height: isometricBarSettings.barHeight)
+                        .rotation3DEffect(.degrees(isometricBarSettings.barTiltDegrees), axis: (x: 1, y: 0, z: 0), perspective: 0.65)
+                }
+                .padding(.trailing, safe.trailing)
+                .padding(.bottom, safe.bottom)
             }
-            .padding(.trailing, 8)
-            .padding(.bottom, isometricBarSettings.bottomOffset)
+            .allowsHitTesting(false)
+            .padding(.trailing, safe.trailing)
+            .padding(.bottom, safe.bottom)
+            .offset(x: xOffset, y: -yOffset)
         }
-        .onChange(of: isometricBarSettings.horizontalOffset) { newValue in
-            print("[Preview Debug] Horizontal offset ->", newValue)
-        }
-        .onChange(of: isometricBarSettings.bottomOffset) { newValue in
-            print("[Preview Debug] Bottom offset ->", newValue)
-        }
-        .allowsHitTesting(false)
     }
 }
 
@@ -919,7 +942,7 @@ private struct HomeBarPlacementPreview: View {
                                 get: { Double(isometricBarSettings.horizontalOffset) },
                                 set: { isometricBarSettings.horizontalOffset = CGFloat($0) }
                             ),
-                            in: 0...80
+                            in: -200...200
                         )
                         Text("\(Int(isometricBarSettings.horizontalOffset))").monospacedDigit()
                     }
@@ -930,7 +953,7 @@ private struct HomeBarPlacementPreview: View {
                                 get: { Double(isometricBarSettings.bottomOffset) },
                                 set: { isometricBarSettings.bottomOffset = CGFloat($0) }
                             ),
-                            in: -120...120
+                            in: -440...240
                         )
                         Text("\(Int(isometricBarSettings.bottomOffset))").monospacedDigit()
                     }
@@ -1051,8 +1074,8 @@ private struct HomeBarPlacementPreview: View {
 private struct SharedPreviewSettings {
     static let settings: IsometricBarSettings = {
         let s = IsometricBarSettings()
-        s.horizontalOffset = 80
-        s.bottomOffset = 1
+        s.horizontalOffset = 40
+        s.bottomOffset = -113
         s.barWidth = 98
         s.barHeight = 390
         s.barTiltDegrees = -8
@@ -1062,5 +1085,8 @@ private struct SharedPreviewSettings {
 
 #Preview("HomeView") {
     HomeBarPlacementPreview()
+        .previewDevice("iPhone 15 Pro")
+        .ignoresSafeArea(.container, edges: [.bottom, .leading, .trailing])
         .environmentObject(SharedPreviewSettings.settings)
 }
+
