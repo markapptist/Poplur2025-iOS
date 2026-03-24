@@ -87,7 +87,6 @@ extension Notification.Name {
     static let FeedReady = Notification.Name("FeedReady")
     static let PauseFeedAudio = Notification.Name("PauseFeedAudio")
     static let ResumeFeedAudio = Notification.Name("ResumeFeedAudio")
-    static let CenterMapOnUser = Notification.Name("CenterMapOnUser")
     static let SharedRadiusDidChange = Notification.Name("SharedRadiusDidChange")
 }
 

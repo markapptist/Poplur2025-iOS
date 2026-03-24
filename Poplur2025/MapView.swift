@@ -17,11 +17,13 @@ extension Notification.Name {
     static let startDominanceTour = Notification.Name("StartDominanceTour")
     static let stopDominanceTour = Notification.Name("StopDominanceTour")
     static let setTourSpeedMultiplier = Notification.Name("SetTourSpeedMultiplier")
+    static let setTourZoomOutDistance = Notification.Name("SetTourZoomOutDistance")
+    static let CenterMapOnUser = Notification.Name("CenterMapOnUser")
 }
 
 // MARK: - Constants (LOCKED CAMERA VALUES)
-private let fixedDistance: CLLocationDistance = 1039   // 🔒 zoom / height
-private let fixedPitch: CGFloat = 68                   // 🔒 pitch
+private let fixedDistance: CLLocationDistance = 1600   // 🔒 zoom / height
+private let fixedPitch: CGFloat = 52                   // 🔒 pitch
 
 // MARK: - Models
 private struct MapAnnotationPost: Identifiable, Hashable {
@@ -220,17 +222,65 @@ struct MapView: View {
     @State private var tourActive: Bool = false
     @State private var tourIndex: Int = 0
     @State private var tourSpeedMultiplier: Double = 1.0
+    
+    @State private var tourZoomOutDistance: CLLocationDistance = 25_000_000 // far enough to see the planet
+    @State private var showFavorites: Bool = false
+    @State private var showSearch: Bool = false
+    @State private var searchQuery: String = ""
+    @State private var searchResults: [MKMapItem] = []
 
     @State private var idleTask: Task<Void, Never>? = nil
     @State private var lastInteractionAt: Date = Date()
 
     var body: some View {
-        ZStack(alignment: .bottomTrailing) {
+        ZStack {
             mapLayer
                 .ignoresSafeArea()
                 .contentShape(Rectangle())
                 .simultaneousGesture(DragGesture(minimumDistance: 0).onChanged { _ in noteInteraction() })
                 .simultaneousGesture(TapGesture().onEnded { noteInteraction() })
+            
+            // Top-left Search button
+            VStack {
+                HStack {
+                    Button(action: { showSearch.toggle() }) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(.primary)
+                            .padding(10)
+                            .background(.ultraThinMaterial, in: Circle())
+                    }
+                    Spacer()
+                    Button(action: { showFavorites.toggle() }) {
+                        Image(systemName: "line.3.horizontal")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(.primary)
+                            .padding(10)
+                            .background(.ultraThinMaterial, in: Circle())
+                    }
+                }
+                .padding([.top, .horizontal])
+                Spacer()
+            }
+            
+            // Favorites sheet
+            .sheet(isPresented: $showFavorites) {
+                FavoritesListView(
+                    onSelect: { coord in panTo(coord) },
+                    currentCenter: camera.camera?.centerCoordinate,
+                    userLocation: locationManager.location?.coordinate
+                )
+                .presentationDetents([.medium, .large])
+            }
+            // Search sheet
+            .sheet(isPresented: $showSearch) {
+                SearchView(query: $searchQuery, results: $searchResults) { item in
+                    if let coord = item.placemark.location?.coordinate {
+                        panTo(coord)
+                    }
+                }
+                .presentationDetents([.medium, .large])
+            }
         }
         .navigationBarHidden(true)
         .toolbar(.hidden, for: .navigationBar)
@@ -286,13 +336,12 @@ struct MapView: View {
             // 1) Zoom out from current position
             withAnimation(.easeInOut(duration: 2.0 * tourSpeedMultiplier)) {
                 let currentCenter = camera.camera?.centerCoordinate ?? userCoord
-                let currentHeading = camera.camera?.heading ?? 0
                 camera = .camera(
                     MapCamera(
                         centerCoordinate: currentCenter,
-                        distance: max(fixedDistance * 6, 6000),
-                        heading: currentHeading,
-                        pitch: fixedPitch
+                        distance: max(tourZoomOutDistance, 12_000),
+                        heading: 0,
+                        pitch: (max(tourZoomOutDistance, 12_000) >= 20_000_000 ? 0 : fixedPitch)
                     )
                 )
             }
@@ -305,9 +354,9 @@ struct MapView: View {
                     camera = .camera(
                         MapCamera(
                             centerCoordinate: userCoord,
-                            distance: max(fixedDistance * 6, 6000),
-                            heading: camera.camera?.heading ?? 0,
-                            pitch: fixedPitch
+                            distance: max(tourZoomOutDistance, 12_000),
+                            heading: 0,
+                            pitch: (max(tourZoomOutDistance, 12_000) >= 20_000_000 ? 0 : fixedPitch)
                         )
                     )
                 }
@@ -338,6 +387,24 @@ struct MapView: View {
         .onReceive(NotificationCenter.default.publisher(for: .setTourSpeedMultiplier)) { note in
             if let value = note.userInfo?["multiplier"] as? Double {
                 tourSpeedMultiplier = max(0.1, min(5.0, value))
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .setTourZoomOutDistance)) { note in
+            if let value = note.userInfo?["zoomOutDistance"] as? Double {
+                tourZoomOutDistance = max(1_000_000, min(1_000_000_000, value))
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ShowFullGlobe"))) { note in
+            let dist = (note.userInfo?["distance"] as? Double) ?? 200_000_000.0
+            withAnimation(.easeInOut(duration: 1.2)) {
+                camera = .camera(
+                    MapCamera(
+                        centerCoordinate: CLLocationCoordinate2D(latitude: 0, longitude: 0),
+                        distance: dist,
+                        heading: 0,
+                        pitch: 0
+                    )
+                )
             }
         }
     }
@@ -385,8 +452,8 @@ struct MapView: View {
                 }
 
                 MapCircle(center: post.coordinate, radius: post.radius)
-                    .foregroundStyle(.blue.opacity(0.15))
-                    .stroke(.blue.opacity(0.6), lineWidth: 1)
+                    .foregroundStyle(Color.white.opacity(0.08))
+                    .stroke(Color.white.opacity(0.25), lineWidth: 1)
             }
             
             ForEach(dominance) { dom in
@@ -400,7 +467,7 @@ struct MapView: View {
         .mapStyle(
             (ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1")
             ? .standard
-            : .hybrid(elevation: .realistic)
+            : .hybrid(elevation: .flat)
         )
     }
 
@@ -499,37 +566,36 @@ struct MapView: View {
             while !Task.isCancelled, tourActive, !dominance.isEmpty {
                 let dom = dominance[tourIndex % dominance.count]
                 // Zoom out significantly and prepare to move towards the destination
-                withAnimation(.easeInOut(duration: 2.0 * tourSpeedMultiplier)) {
+                withAnimation(.easeInOut(duration: 2.0 / max(0.1, tourSpeedMultiplier))) {
                     let currentCenter = camera.camera?.centerCoordinate ?? dom.coordinate
-                    let currentHeading = camera.camera?.heading ?? 0
                     camera = .camera(
                         MapCamera(
                             centerCoordinate: currentCenter,
-                            distance: max(fixedDistance * 10, 12000),
-                            heading: currentHeading,
-                            pitch: fixedPitch
+                            distance: max(tourZoomOutDistance, 12_000),
+                            heading: (max(tourZoomOutDistance, 12_000) >= 10_000_000 ? 0 : (camera.camera?.heading ?? 0)),
+                            pitch: (max(tourZoomOutDistance, 12_000) >= 20_000_000 ? 0 : fixedPitch)
                         )
                     )
                 }
                 // Let the map settle
-                try? await Task.sleep(nanoseconds: UInt64(1_200_000_000.0 * tourSpeedMultiplier))
+                try? await Task.sleep(nanoseconds: UInt64(1_200_000_000.0 / max(0.1, tourSpeedMultiplier)))
 
                 // Fly to target city at zoomed-out distance
-                withAnimation(.easeInOut(duration: 3.0 * tourSpeedMultiplier)) {
+                withAnimation(.easeInOut(duration: 3.0 / max(0.1, tourSpeedMultiplier))) {
                     camera = .camera(
                         MapCamera(
                             centerCoordinate: dom.coordinate,
-                            distance: max(fixedDistance * 10, 12000),
-                            heading: camera.camera?.heading ?? 0,
-                            pitch: fixedPitch
+                            distance: max(tourZoomOutDistance, 12_000),
+                            heading: (max(tourZoomOutDistance, 12_000) >= 10_000_000 ? 0 : (camera.camera?.heading ?? 0)),
+                            pitch: (max(tourZoomOutDistance, 12_000) >= 20_000_000 ? 0 : fixedPitch)
                         )
                     )
                 }
                 // Allow tiles to begin loading
-                try? await Task.sleep(nanoseconds: UInt64(1_000_000_000.0 * tourSpeedMultiplier))
+                try? await Task.sleep(nanoseconds: UInt64(1_000_000_000.0 / max(0.1, tourSpeedMultiplier)))
 
                 // Zoom back in slowly to fixed distance at target
-                withAnimation(.easeInOut(duration: 2.0 * tourSpeedMultiplier)) {
+                withAnimation(.easeInOut(duration: 2.0 / max(0.1, tourSpeedMultiplier))) {
                     camera = .camera(
                         MapCamera(
                             centerCoordinate: dom.coordinate,
@@ -541,7 +607,7 @@ struct MapView: View {
                 }
 
                 // Dwell longer at the destination to allow tiles/labels to fully render
-                try? await Task.sleep(nanoseconds: UInt64(15_000_000_000.0 * tourSpeedMultiplier))
+                try? await Task.sleep(nanoseconds: UInt64(15_000_000_000.0 / max(0.1, tourSpeedMultiplier)))
 
                 tourIndex = (tourIndex + 1) % dominance.count
             }
@@ -577,41 +643,435 @@ struct MapView: View {
     }
 }
 
-#if DEBUG
-private struct MapViewPreviewHost: View {
-    @State private var camera: MapCameraPosition? = .camera(
-        MapCamera(
-            centerCoordinate: CLLocationCoordinate2D(latitude: 40.748339, longitude: -73.985912),
-            distance: 1039,
-            heading: 52,
-            pitch: 68
-        )
-    )
+private struct FavoritesListView: View {
+    let onSelect: (CLLocationCoordinate2D) -> Void
+    var currentCenter: CLLocationCoordinate2D?
+    var userLocation: CLLocationCoordinate2D?
+
+    @State private var isLoading: Bool = true
+    @State private var errorMessage: String? = nil
+    @State private var favorites: [(id: String, name: String, coordinate: CLLocationCoordinate2D, rank: Int?)] = []
+    @State private var addingName: String = ""
+    @State private var addError: String? = nil
+
+    private var userFavoritesCollection: CollectionReference? {
+        guard let uid = Auth.auth().currentUser?.uid else { return nil }
+        return Firestore.firestore().collection("users").document(uid).collection("favorites")
+    }
 
     var body: some View {
-        Map(
-            position: Binding(
-                get: { camera ?? .automatic },
-                set: { camera = $0 }
-            ),
-            interactionModes: [.pan]
-        ) {
-            Annotation(coordinate: CLLocationCoordinate2D(latitude: 40.748339, longitude: -73.985912)) {
-                Circle().fill(Color.red).frame(width: 12, height: 12)
-            } label: {
-                Text("Preview")
+        NavigationStack {
+            Group {
+                if isLoading {
+                    VStack(spacing: 12) {
+                        ProgressView()
+                        Text("Loading favorites…")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if let errorMessage = errorMessage {
+                    VStack(spacing: 12) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.largeTitle)
+                            .foregroundStyle(.orange)
+                        Text(errorMessage)
+                            .multilineTextAlignment(.center)
+                            .foregroundStyle(.secondary)
+                        Button("Retry") { fetchFavorites() }
+                            .buttonStyle(.borderedProminent)
+                    }
+                    .padding()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List {
+                        Section("Add Favorite") {
+                            VStack(alignment: .leading, spacing: 8) {
+                                TextField("Name (e.g. Home, Office)", text: $addingName)
+                                    .textFieldStyle(.roundedBorder)
+                                if let addError { Text(addError).font(.footnote).foregroundStyle(.red) }
+                                HStack {
+                                    Button {
+                                        if let coord = userLocation { addFavorite(name: addingNameOrFallback("My Location"), coordinate: coord) }
+                                    } label: {
+                                        Label("Add Current Location", systemImage: "location.fill")
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .disabled(userLocation == nil)
+                                    Button {
+                                        if let coord = currentCenter { addFavorite(name: addingNameOrFallback("Map Center"), coordinate: coord) }
+                                    } label: {
+                                        Label("Add Current View Center", systemImage: "viewfinder")
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                    .disabled(currentCenter == nil)
+                                }
+                            }
+                        }
+
+                        Section("Your Favorites") {
+                            if favorites.isEmpty {
+                                Text("No favorites yet. Use the buttons above to add one.")
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                ForEach(favorites, id: \.id) { fav in
+                                    Button(action: { onSelect(fav.coordinate) }) {
+                                        HStack {
+                                            Image(systemName: "mappin.and.ellipse")
+                                            VStack(alignment: .leading) {
+                                                Text(fav.name)
+                                                if let rank = fav.rank { Text("Rank: \(rank)").font(.caption).foregroundStyle(.secondary) }
+                                            }
+                                        }
+                                    }
+                                }
+                                .onDelete(perform: deleteFavorites)
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Favorites")
+            .task { fetchFavorites() }
+            .refreshable { fetchFavorites() }
+        }
+    }
+
+    private func fetchFavorites() {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1" {
+            self.isLoading = false
+            self.errorMessage = "Favorites are disabled in previews."
+            self.favorites = []
+            return
+        }
+        #endif
+
+        guard let col = userFavoritesCollection else {
+            self.errorMessage = "You must be signed in to view favorites."
+            self.isLoading = false
+            return
+        }
+        isLoading = true
+        errorMessage = nil
+        col.order(by: "rank", descending: false).limit(to: 10).getDocuments { snap, err in
+            if let err = err {
+                // Fall back to ordering by name if rank missing
+                (col.order(by: "name").limit(to: 10)).getDocuments { snap2, err2 in
+                    self.handleSnapshot(snap2, err: err2)
+                }
+            } else {
+                self.handleSnapshot(snap, err: nil)
             }
         }
-        .mapStyle(.standard)
+    }
+
+    private func handleSnapshot(_ snap: QuerySnapshot?, err: Error?) {
+        if let err = err {
+            self.errorMessage = "Failed to load favorites: \(err.localizedDescription)"
+            self.favorites = []
+            self.isLoading = false
+            return
+        }
+        let items: [(String, String, CLLocationCoordinate2D, Int?)] = snap?.documents.compactMap { doc in
+            let d = doc.data()
+            guard let name = d["name"] as? String,
+                  let lat = d["latitude"] as? CLLocationDegrees,
+                  let lon = d["longitude"] as? CLLocationDegrees else { return nil }
+            let rank = d["rank"] as? Int
+            return (doc.documentID, name, CLLocationCoordinate2D(latitude: lat, longitude: lon), rank)
+        } ?? []
+        self.favorites = items.map { (id, name, coord, rank) in (id: id, name: name, coordinate: coord, rank: rank) }
+        self.isLoading = false
+    }
+
+    private func addingNameOrFallback(_ fallback: String) -> String {
+        let trimmed = addingName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? fallback : trimmed
+    }
+
+    private func addFavorite(name: String, coordinate: CLLocationCoordinate2D) {
+        guard let col = userFavoritesCollection else { return }
+        addError = nil
+        let data: [String: Any] = [
+            "name": name,
+            "latitude": coordinate.latitude,
+            "longitude": coordinate.longitude,
+            "createdAt": FieldValue.serverTimestamp()
+        ]
+        col.addDocument(data: data) { err in
+            if let err = err {
+                self.addError = "Failed to add favorite: \(err.localizedDescription)"
+            } else {
+                self.addingName = ""
+                fetchFavorites()
+            }
+        }
+    }
+
+    private func deleteFavorites(at offsets: IndexSet) {
+        guard let col = userFavoritesCollection else { return }
+        let idsToDelete = offsets.map { favorites[$0].id }
+        for id in idsToDelete {
+            col.document(id).delete { _ in }
+        }
+        favorites.remove(atOffsets: offsets)
+    }
+}
+
+private struct SearchView: View {
+    @Binding var query: String
+    @Binding var results: [MKMapItem]
+    let onSelect: (MKMapItem) -> Void
+
+    @State private var isSearching = false
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 12) {
+                HStack {
+                    TextField("Search for a place or address", text: $query)
+                        .textFieldStyle(.roundedBorder)
+                        .disableAutocorrection(true)
+                        .textInputAutocapitalization(.never)
+                    if isSearching { ProgressView().padding(.leading, 4) }
+                    Button("Go") { performSearch() }
+                        .buttonStyle(.borderedProminent)
+                }
+                .padding(.horizontal)
+
+                List(results, id: \.self) { item in
+                    Button(action: { onSelect(item) }) {
+                        VStack(alignment: .leading) {
+                            Text(item.name ?? "Result")
+                                .font(.headline)
+                            Text(item.placemark.title ?? "")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Search")
+        }
+    }
+
+    private func performSearch() {
+        guard !query.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        isSearching = true
+        let request = MKLocalSearch.Request()
+        request.naturalLanguageQuery = query
+        let search = MKLocalSearch(request: request)
+        search.start { response, _ in
+            self.results = response?.mapItems ?? []
+            self.isSearching = false
+        }
+    }
+}
+
+#if DEBUG
+private struct MapViewPreviewHost: View {
+    @State private var previewMode: Int = 1
+    @State private var previewSpeed: Double = 1.0
+    @State private var previewZoomOut: Double = 25_000_000
+
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            Group {
+                if previewMode == 0 {
+                    MapView()
+                        .ignoresSafeArea()
+                } else {
+                    Color.black.ignoresSafeArea()
+                }
+            }
+
+            GeometryReader { proxy in
+                ScrollView(.vertical) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Picker("Preview Mode", selection: $previewMode) {
+                            Text("MapKit").tag(0)
+                            Text("SceneKit").tag(1)
+                        }
+                        .pickerStyle(.segmented)
+                        .padding(.horizontal)
+
+                        if previewMode == 1 {
+                            SpaceGlobeView()
+                                .frame(height: 300)
+                                .cornerRadius(12)
+                                .padding(.horizontal)
+                        }
+
+                        Text("Tour Controls").font(.headline).padding(.horizontal)
+                        HStack(spacing: 10) {
+                            Button("Start Tour") {
+                                NotificationCenter.default.post(name: .startDominanceTour, object: nil)
+                            }
+                            .buttonStyle(.borderedProminent)
+
+                            Button("Stop Tour") {
+                                NotificationCenter.default.post(name: .stopDominanceTour, object: nil)
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                        .padding(.horizontal)
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Speed Multiplier")
+                            Slider(value: $previewSpeed, in: 0.1...3.0)
+                                .onChange(of: previewSpeed) { newVal in
+                                    NotificationCenter.default.post(name: .setTourSpeedMultiplier, object: nil, userInfo: ["multiplier": newVal])
+                                    NotificationCenter.default.post(name: .startDominanceTour, object: nil)
+                                }
+                            Text(String(format: "%.2fx", previewSpeed)).font(.caption).foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal)
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Zoom-out Distance")
+                            Slider(value: $previewZoomOut, in: 1_000_000...1_000_000_000)
+                                .onChange(of: previewZoomOut) { newVal in
+                                    NotificationCenter.default.post(name: .setTourZoomOutDistance, object: nil, userInfo: ["zoomOutDistance": newVal])
+                                    NotificationCenter.default.post(name: .startDominanceTour, object: nil)
+                                }
+                            Text("\(Int(previewZoomOut / 1000)) km").font(.caption).foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal)
+
+                        // Simulate zoom from globe (space) into MapKit
+                        HStack(spacing: 10) {
+                            Button("Show Globe First") { previewMode = 1 }
+                                .buttonStyle(.bordered)
+                            Button("Zoom In to MapKit") { withAnimation { previewMode = 0 } }
+                                .buttonStyle(.borderedProminent)
+                        }
+                        .padding(.horizontal)
+
+                        /*
+                        Button("Show Globe") {
+                            NotificationCenter.default.post(name: Notification.Name("ShowFullGlobe"), object: nil, userInfo: ["distance": 200_000_000.0])
+                        }
+                        .buttonStyle(.borderedProminent)
+                        */
+
+                        Button("Show Max Globe") {
+                            NotificationCenter.default.post(name: Notification.Name("ShowFullGlobe"), object: nil, userInfo: ["distance": 1_000_000_000.0])
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .padding(.horizontal)
+                        
+                        Button("Show Space View") {
+                            NotificationCenter.default.post(name: Notification.Name("ShowFullGlobe"), object: nil, userInfo: ["distance": 3_000_000_000.0])
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .padding(.horizontal)
+
+                        Button("Fit Globe") {
+                            let size = proxy.size
+                            let fitDistance = max(size.width, size.height) * 12000.0
+                            NotificationCenter.default.post(name: Notification.Name("ShowFullGlobe"), object: nil, userInfo: ["distance": fitDistance])
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .padding(.horizontal)
+
+                        Text("Note: Buttons post notifications used by MapView to drive the tour.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal)
+                            .padding(.bottom, 12)
+                    }
+                    .background(.ultraThinMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .padding()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .ignoresSafeArea(edges: .bottom)
+            }
+        }
+    }
+}
+
+private struct SpaceGlobeView: UIViewRepresentable {
+    // Simple heuristic: daytime between 6am and 6pm local time
+    private var isDaytime: Bool {
+        let hour = Calendar.current.component(.hour, from: Date())
+        return (6...17).contains(hour)
+    }
+
+    func makeUIView(context: Context) -> SCNView {
+        let scnView = SCNView()
+
+        // Scene setup
+        let scene = SCNScene()
+
+        // Earth sphere
+        let sphere = SCNSphere(radius: 1.0)
+        sphere.segmentCount = 128
+
+        // Materials: use images named "earth_day" and "earth_night" from assets
+        let material = SCNMaterial()
+        material.diffuse.contents = UIImage(named: isDaytime ? "earth_day" : "earth_night") ?? UIColor.systemGray
+        material.locksAmbientWithDiffuse = true
+        material.isDoubleSided = false
+        sphere.firstMaterial = material
+
+        let sphereNode = SCNNode(geometry: sphere)
+        scene.rootNode.addChildNode(sphereNode)
+
+        // Camera
+        let cameraNode = SCNNode()
+        cameraNode.camera = SCNCamera()
+        cameraNode.position = SCNVector3(x: 0, y: 0, z: 3)
+        scene.rootNode.addChildNode(cameraNode)
+
+        // Ambient light
+        let ambientLight = SCNLight()
+        ambientLight.type = .ambient
+        ambientLight.intensity = 500
+        let ambientNode = SCNNode()
+        ambientNode.light = ambientLight
+        scene.rootNode.addChildNode(ambientNode)
+
+        // Directional light to give some shading
+        let directionalLight = SCNLight()
+        directionalLight.type = .directional
+        directionalLight.intensity = 800
+        let directionalNode = SCNNode()
+        directionalNode.light = directionalLight
+        directionalNode.eulerAngles = SCNVector3(-CGFloat.pi/4, CGFloat.pi/4, 0)
+        scene.rootNode.addChildNode(directionalNode)
+
+        // Slow constant rotation on Y axis
+        let duration: TimeInterval = 60 // one full rotation per minute
+        let rotateAction = SCNAction.repeatForever(SCNAction.rotateBy(x: 0, y: CGFloat.pi * 2, z: 0, duration: duration))
+        sphereNode.runAction(rotateAction)
+
+        scnView.scene = scene
+        scnView.backgroundColor = UIColor.black
+        scnView.allowsCameraControl = true
+        scnView.autoenablesDefaultLighting = false
+
+        return scnView
+    }
+
+    func updateUIView(_ uiView: SCNView, context: Context) {
+        // Update the texture if day/night boundary has changed while preview is live
+        let desiredImageName = isDaytime ? "earth_day" : "earth_night"
+        if let sphere = (uiView.scene?.rootNode.childNodes.first { $0.geometry is SCNSphere })?.geometry as? SCNSphere,
+           let mat = sphere.firstMaterial {
+            if let currentImage = mat.diffuse.contents as? UIImage,
+               let desiredImage = UIImage(named: desiredImageName),
+               currentImage !== desiredImage {
+                mat.diffuse.contents = desiredImage
+            } else if mat.diffuse.contents is UIColor, let desiredImage = UIImage(named: desiredImageName) {
+                mat.diffuse.contents = desiredImage
+            }
+        }
     }
 }
 #endif
 
 #Preview("Map Tour Preview") {
-    #if DEBUG
     MapViewPreviewHost()
-    #else
-    MapView()
-    #endif
 }
-

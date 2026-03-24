@@ -1061,25 +1061,8 @@ private struct CubeSceneView: UIViewRepresentable {
                 // Skip motion updates while user is interacting (panning)
                 if self.isInteracting { return }
 
-                // Map to a single horizontal component for side-to-side sway only
-                // Use device roll (left-right tilt) to drive horizontal sway; adjust sign if needed
-                let horizontal = Float((notif.userInfo?["roll"] as? Double) ?? 0)
-
-                // Optional: map pitch to X tilt directly for visible up/down look
-                let pitch = Float((notif.userInfo?["pitch"] as? Double) ?? 0)
-                // Clamp raw horizontal to keep within reasonable bounds
-                let maxTiltRad: Float = deg2rad(60)
-                let clampedH = clamp(horizontal * 0.5, min: -maxTiltRad, max: maxTiltRad)
-
-                // Direct X from pitch (no sin), with small clamp here; final clamp happens later
-                let clampedPitch = clamp(pitch, min: -maxTiltRad, max: maxTiltRad)
-
-                // Keep a tiny Z bob based on pitch for subtle roll-off
-                let bobInfluence = clampedPitch * 0.10
-
-                // Store X (pitch), Y (roll-based sway), and tiny Z bob
-                self.liveRotation = SCNVector3(clampedPitch, clampedH, bobInfluence)
-
+                // Ignore device pitch/roll; keep faces square
+                self.liveRotation = SCNVector3Zero
                 self.applyCombinedRotation(to: cube)
             }
         }
@@ -1148,26 +1131,9 @@ private struct CubeSceneView: UIViewRepresentable {
         }
 
         private func applyCombinedRotation(to node: SCNNode) {
-            // Use currentYaw as base rotation instead of currentIndex
-            let baseY = currentYaw
-
-            // Larger, clearer response
-            let yAdditiveScale: Float = 0.8
-            let maxYAdd: Float = deg2rad(25)
-            var yAdd = clamp(liveRotation.y * yAdditiveScale, min: -maxYAdd, max: maxYAdd)
-
-            // Direct X from pitch
-            let xAdditiveScale: Float = 0.7
-            let maxXAdd: Float = deg2rad(15)
-            var xAdd = clamp(liveRotation.x * xAdditiveScale, min: -maxXAdd, max: maxXAdd)
-
-            // Keep subtle Z bob
-            let zAdditiveScale: Float = 0.6
-            let maxZAdd: Float = deg2rad(12)
-            var zAdd = clamp(liveRotation.z * zAdditiveScale, min: -maxZAdd, max: maxZAdd)
-
-            let y = baseY + yAdd
-            node.eulerAngles = SCNVector3(xAdd + zAdd, y, 0)
+            // Lock cube to yaw-only so faces stay square to the screen
+            let y = currentYaw
+            node.eulerAngles = SCNVector3(0, y, 0)
         }
 
         func applyPreviewHover(_ enabled: Bool) {
@@ -1305,26 +1271,8 @@ private struct CubeSceneView: UIViewRepresentable {
         @objc private func accelSimTick(_ link: CADisplayLink) {
             guard let scnView = view, let cube = scnView.scene?.rootNode.childNode(withName: "cube", recursively: true) else { return }
             if isInteracting { return }
-            // Advance time
-            accelTime += link.duration
-            // Create a slow-moving pseudo-gravity direction (roll/pitch) in radians
-            let roll = sin(accelTime * 0.45) * 0.35 // side-to-side
-            let pitch = cos(accelTime * 0.30) * 0.20 // subtle forward/back
-            // Map to our horizontal sway (y) and tiny z bob like real motion mapping
-            let targetY = Float(roll)
-            let targetZ = Float(pitch * 0.15)
-            accelTarget = SCNVector3(0, targetY, targetZ)
-
-            // Low-pass filter toward target for delayed timing behavior
-            // alpha determines responsiveness (smaller = more delay)
-            let alpha: Float = 0.08
-            accelCurrent.x = accelCurrent.x + alpha * (accelTarget.x - accelCurrent.x)
-            accelCurrent.y = accelCurrent.y + alpha * (accelTarget.y - accelCurrent.y)
-            accelCurrent.z = accelCurrent.z + alpha * (accelTarget.z - accelCurrent.z)
-
-            // Blend simulated reading into liveRotation only in previews
-            // Do not override during pan gesture: if user is panning, keep liveRotation zeroed (handled elsewhere)
-            self.liveRotation = accelCurrent
+            // Ignore simulated tilt; keep yaw-only orientation
+            self.liveRotation = SCNVector3Zero
             self.applyCombinedRotation(to: cube)
         }
     }
@@ -1374,202 +1322,204 @@ private struct CubeOnlyPreview: View {
     enum ScaleMode: String, CaseIterable, Identifiable { case scaleTo, scaleBy; var id: String { rawValue } }
 
     var body: some View {
-        VStack(spacing: 12) {
-            // Controls
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Cube Controls").font(.headline)
-                HStack {
-                    ColorPicker("Tint", selection: $tint)
-                }
-                HStack {
-                    ColorPicker("Glow", selection: $glow)
-                }
-                HStack {
-                    Text("Glow Opacity \(String(format: "%.2f", glowOpacity))")
-                    Slider(value: $glowOpacity, in: 0.1...1.0)
-                }
-                HStack {
-                    ColorPicker("Base Color", selection: $base)
-                }
-                Picker("Selected Tab", selection: $tab) {
-                    Text("Map").tag(AppTab.map)
-                    Text("Record").tag(AppTab.record)
-                    Text("Feed").tag(AppTab.feed)
-                    Text("Profile").tag(AppTab.profile)
-                }
-                .pickerStyle(.segmented)
-                HStack {
-                    Text("UI Scale \(String(format: "%.2f", uiScale))")
-                    Slider(value: $uiScale, in: 0.8...2.0)
-                }
-                HStack(spacing: 8) {
-                    Text("Yaw Right")
-                    Button("45°") { previewYawRightStep += 1 }
-                    Button("90°") { previewYawRightStep += 2 }
-                    Button("180°") { previewYawRightStep += 4 }
-                    Button("360°") { previewYawRightStep += 8 }
-                }
-                HStack(spacing: 8) {
-                    Text("Yaw Left")
-                    Button("45°") { previewYawLeftStep += 1 }
-                    Button("90°") { previewYawLeftStep += 2 }
-                    Button("180°") { previewYawLeftStep += 4 }
-                    Button("360°") { previewYawLeftStep += 8 }
-                }
-                Toggle("Use Normal Map", isOn: $useNormalMapPreview)
-                Picker("Lighting", selection: $lightingModelPreview) {
-                    Text("PBR").tag(SCNMaterial.LightingModel.physicallyBased)
-                    Text("Blinn").tag(SCNMaterial.LightingModel.blinn)
-                    Text("Lambert").tag(SCNMaterial.LightingModel.lambert)
-                    Text("Constant").tag(SCNMaterial.LightingModel.constant)
-                }
-                .pickerStyle(.segmented)
-                Toggle("Spin Cube in Preview", isOn: $enablePreviewSpin)
-                Toggle("High FPS (120) in Preview", isOn: $highFPSPreview)
-                Toggle("Glow Enabled", isOn: $previewGlowEnabled)
-                Toggle("Hover", isOn: $hoverEnabled)
-                    .onChange(of: hoverEnabled) { _, new in previewHover = new }
-                Toggle("Pop", isOn: $popEnabled)
-                    .onChange(of: popEnabled) { _, new in
-                        if new {
-                            previewPopTrigger += 1
-                            popEnabled = false
+        ScrollView(.vertical) {
+            VStack(spacing: 12) {
+                // Controls
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Cube Controls").font(.headline)
+                    HStack {
+                        ColorPicker("Tint", selection: $tint)
+                    }
+                    HStack {
+                        ColorPicker("Glow", selection: $glow)
+                    }
+                    HStack {
+                        Text("Glow Opacity \(String(format: "%.2f", glowOpacity))")
+                        Slider(value: $glowOpacity, in: 0.1...1.0)
+                    }
+                    HStack {
+                        ColorPicker("Base Color", selection: $base)
+                    }
+                    Picker("Selected Tab", selection: $tab) {
+                        Text("Map").tag(AppTab.map)
+                        Text("Record").tag(AppTab.record)
+                        Text("Feed").tag(AppTab.feed)
+                        Text("Profile").tag(AppTab.profile)
+                    }
+                    .pickerStyle(.segmented)
+                    HStack {
+                        Text("UI Scale \(String(format: "%.2f", uiScale))")
+                        Slider(value: $uiScale, in: 0.8...2.0)
+                    }
+                    HStack(spacing: 8) {
+                        Text("Yaw Right")
+                        Button("45°") { previewYawRightStep += 1 }
+                        Button("90°") { previewYawRightStep += 2 }
+                        Button("180°") { previewYawRightStep += 4 }
+                        Button("360°") { previewYawRightStep += 8 }
+                    }
+                    HStack(spacing: 8) {
+                        Text("Yaw Left")
+                        Button("45°") { previewYawLeftStep += 1 }
+                        Button("90°") { previewYawLeftStep += 2 }
+                        Button("180°") { previewYawLeftStep += 4 }
+                        Button("360°") { previewYawLeftStep += 8 }
+                    }
+                    Toggle("Use Normal Map", isOn: $useNormalMapPreview)
+                    Picker("Lighting", selection: $lightingModelPreview) {
+                        Text("PBR").tag(SCNMaterial.LightingModel.physicallyBased)
+                        Text("Blinn").tag(SCNMaterial.LightingModel.blinn)
+                        Text("Lambert").tag(SCNMaterial.LightingModel.lambert)
+                        Text("Constant").tag(SCNMaterial.LightingModel.constant)
+                    }
+                    .pickerStyle(.segmented)
+                    Toggle("Spin Cube in Preview", isOn: $enablePreviewSpin)
+                    Toggle("High FPS (120) in Preview", isOn: $highFPSPreview)
+                    Toggle("Glow Enabled", isOn: $previewGlowEnabled)
+                    Toggle("Hover", isOn: $hoverEnabled)
+                        .onChange(of: hoverEnabled) { _, new in previewHover = new }
+                    Toggle("Pop", isOn: $popEnabled)
+                        .onChange(of: popEnabled) { _, new in
+                            if new {
+                                previewPopTrigger += 1
+                                popEnabled = false
+                            }
+                        }
+                    Toggle("Pop Sound", isOn: $previewPopSoundEnabled)
+                    Toggle("Hold (Preview Only)", isOn: $previewHoldActive)
+
+                    Toggle("Simulate Motion (Preview)", isOn: $simulateMotion)
+                        .onChange(of: simulateMotion) { _, new in
+                            NotificationCenter.default.post(
+                                name: Notification.Name("CubePreviewSimulateMotionEnabled"),
+                                object: nil,
+                                userInfo: ["enabled": new]
+                            )
+                        }
+                    HStack(spacing: 10) {
+                        Button("Play Pop Now") { playPopDirect() }
+                            .buttonStyle(.borderedProminent)
+                        if let err = lastDirectPopError {
+                            Text(err).font(.footnote).foregroundStyle(.secondary)
                         }
                     }
-                Toggle("Pop Sound", isOn: $previewPopSoundEnabled)
-                Toggle("Hold (Preview Only)", isOn: $previewHoldActive)
 
-                Toggle("Simulate Motion (Preview)", isOn: $simulateMotion)
-                    .onChange(of: simulateMotion) { _, new in
+                    Picker("Scale Mode", selection: $scaleMode) {
+                        Text("Scale To").tag(ScaleMode.scaleTo)
+                        Text("Scale By").tag(ScaleMode.scaleBy)
+                    }
+                    .pickerStyle(.segmented)
+                    if scaleMode == .scaleBy {
+                        HStack {
+                            Text("Scale By \(String(format: "%.2f", scaleByFactor))x")
+                            Slider(value: $scaleByFactor, in: 0.5...2.0)
+                        }
+                    }
+                    HStack {
+                        Text("Rotation Speed x\(String(format: "%.2f", rotationSpeedMultiplier))")
+                        Slider(value: $rotationSpeedMultiplier, in: 0.5...3.0)
+                    }
+
+                    // Simulated accelerometer controls for previews
+                    HStack {
+                        Text("Roll")
+                        Slider(value: $simRoll, in: -0.8...0.8)
+                    }
+                    .disabled(!simulateMotion)
+                    HStack {
+                        Text("Pitch")
+                        Slider(value: $simPitch, in: -0.8...0.8)
+                    }
+                    .disabled(!simulateMotion)
+                    .onChange(of: simRoll) { _, new in
+                        guard simulateMotion else { return }
                         NotificationCenter.default.post(
-                            name: Notification.Name("CubePreviewSimulateMotionEnabled"),
+                            name: Notification.Name("CubeMotionUpdate"),
                             object: nil,
-                            userInfo: ["enabled": new]
+                            userInfo: ["roll": new, "pitch": simPitch]
                         )
                     }
-                HStack(spacing: 10) {
-                    Button("Play Pop Now") { playPopDirect() }
-                        .buttonStyle(.borderedProminent)
-                    if let err = lastDirectPopError {
-                        Text(err).font(.footnote).foregroundStyle(.secondary)
+                    .onChange(of: simPitch) { _, new in
+                        guard simulateMotion else { return }
+                        NotificationCenter.default.post(
+                            name: Notification.Name("CubeMotionUpdate"),
+                            object: nil,
+                            userInfo: ["roll": simRoll, "pitch": new]
+                        )
                     }
                 }
+                .padding()
+                .background(.ultraThinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
 
-                Picker("Scale Mode", selection: $scaleMode) {
-                    Text("Scale To").tag(ScaleMode.scaleTo)
-                    Text("Scale By").tag(ScaleMode.scaleBy)
-                }
-                .pickerStyle(.segmented)
-                if scaleMode == .scaleBy {
-                    HStack {
-                        Text("Scale By \(String(format: "%.2f", scaleByFactor))x")
-                        Slider(value: $scaleByFactor, in: 0.5...2.0)
+                // Cube under test
+                ZStack {
+                    Color(UIColor.systemBackground)
+                    Group {
+                        if scaleMode == .scaleTo {
+                            CubeTabView(
+                                selectedTab: $tab,
+                                previewHover: $previewHover,
+                                previewPopTrigger: $previewPopTrigger,
+                                previewPopSoundEnabled: $previewPopSoundEnabled,
+                                previewYawRightStep: $previewYawRightStep,
+                                previewYawLeftStep: $previewYawLeftStep,
+                                previewHoldActive: $previewHoldActive,
+                                tintColor: tint,
+                                baseColor: base,
+                                glowColor: glow,
+                                glowOpacity: glowOpacity,
+                                useNormalMap: useNormalMapPreview,
+                                lightingModel: (isRunningInPreviews ? SCNMaterial.LightingModel.physicallyBased : lightingModelPreview),
+                                rotationSpeedMultiplier: rotationSpeedMultiplier,
+                                enablePreviewSpin: enablePreviewSpin,
+                                enableGlow: previewGlowEnabled
+                            )
+                            .frame(height: 200)
+                            .aspectRatio(1, contentMode: .fit)
+                            .scaleEffect(uiScale)
+                            .shadow(radius: 12, y: 8)
+                        } else {
+                            CubeTabView(
+                                selectedTab: $tab,
+                                previewHover: $previewHover,
+                                previewPopTrigger: $previewPopTrigger,
+                                previewPopSoundEnabled: $previewPopSoundEnabled,
+                                previewYawRightStep: $previewYawRightStep,
+                                previewYawLeftStep: $previewYawLeftStep,
+                                previewHoldActive: $previewHoldActive,
+                                tintColor: tint,
+                                baseColor: base,
+                                glowColor: glow,
+                                glowOpacity: glowOpacity,
+                                useNormalMap: useNormalMapPreview,
+                                lightingModel: (isRunningInPreviews ? SCNMaterial.LightingModel.physicallyBased : lightingModelPreview),
+                                rotationSpeedMultiplier: rotationSpeedMultiplier,
+                                enablePreviewSpin: enablePreviewSpin,
+                                enableGlow: previewGlowEnabled
+                            )
+                            .frame(height: 200)
+                            .aspectRatio(1, contentMode: .fit)
+                            .scaleEffect(uiScale)
+                            .shadow(radius: 12, y: 8)
+                            .scaleEffect(scaleByFactor)
+                        }
                     }
                 }
-                HStack {
-                    Text("Rotation Speed x\(String(format: "%.2f", rotationSpeedMultiplier))")
-                    Slider(value: $rotationSpeedMultiplier, in: 0.5...3.0)
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .shadow(radius: 6)
+                .onAppear {
+                    NotificationCenter.default.post(name: Notification.Name("CubePreviewSetFPS"), object: nil, userInfo: ["fps": highFPSPreview ? 120 : 60])
                 }
-
-                // Simulated accelerometer controls for previews
-                HStack {
-                    Text("Roll")
-                    Slider(value: $simRoll, in: -0.8...0.8)
-                }
-                .disabled(!simulateMotion)
-                HStack {
-                    Text("Pitch")
-                    Slider(value: $simPitch, in: -0.8...0.8)
-                }
-                .disabled(!simulateMotion)
-                .onChange(of: simRoll) { _, new in
-                    guard simulateMotion else { return }
-                    NotificationCenter.default.post(
-                        name: Notification.Name("CubeMotionUpdate"),
-                        object: nil,
-                        userInfo: ["roll": new, "pitch": simPitch]
-                    )
-                }
-                .onChange(of: simPitch) { _, new in
-                    guard simulateMotion else { return }
-                    NotificationCenter.default.post(
-                        name: Notification.Name("CubeMotionUpdate"),
-                        object: nil,
-                        userInfo: ["roll": simRoll, "pitch": new]
-                    )
+                .onChange(of: highFPSPreview) { _, new in
+                    NotificationCenter.default.post(name: Notification.Name("CubePreviewSetFPS"), object: nil, userInfo: ["fps": new ? 120 : 60])
                 }
             }
             .padding()
-            .background(.ultraThinMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-
-            // Cube under test
-            ZStack {
-                Color(UIColor.systemBackground)
-                Group {
-                    if scaleMode == .scaleTo {
-                        CubeTabView(
-                            selectedTab: $tab,
-                            previewHover: $previewHover,
-                            previewPopTrigger: $previewPopTrigger,
-                            previewPopSoundEnabled: $previewPopSoundEnabled,
-                            previewYawRightStep: $previewYawRightStep,
-                            previewYawLeftStep: $previewYawLeftStep,
-                            previewHoldActive: $previewHoldActive,
-                            tintColor: tint,
-                            baseColor: base,
-                            glowColor: glow,
-                            glowOpacity: glowOpacity,
-                            useNormalMap: useNormalMapPreview,
-                            lightingModel: (isRunningInPreviews ? SCNMaterial.LightingModel.physicallyBased : lightingModelPreview),
-                            rotationSpeedMultiplier: rotationSpeedMultiplier,
-                            enablePreviewSpin: enablePreviewSpin,
-                            enableGlow: previewGlowEnabled
-                        )
-                        .frame(height: 200)
-                        .aspectRatio(1, contentMode: .fit)
-                        .scaleEffect(uiScale)
-                        .shadow(radius: 12, y: 8)
-                    } else {
-                        CubeTabView(
-                            selectedTab: $tab,
-                            previewHover: $previewHover,
-                            previewPopTrigger: $previewPopTrigger,
-                            previewPopSoundEnabled: $previewPopSoundEnabled,
-                            previewYawRightStep: $previewYawRightStep,
-                            previewYawLeftStep: $previewYawLeftStep,
-                            previewHoldActive: $previewHoldActive,
-                            tintColor: tint,
-                            baseColor: base,
-                            glowColor: glow,
-                            glowOpacity: glowOpacity,
-                            useNormalMap: useNormalMapPreview,
-                            lightingModel: (isRunningInPreviews ? SCNMaterial.LightingModel.physicallyBased : lightingModelPreview),
-                            rotationSpeedMultiplier: rotationSpeedMultiplier,
-                            enablePreviewSpin: enablePreviewSpin,
-                            enableGlow: previewGlowEnabled
-                        )
-                        .frame(height: 200)
-                        .aspectRatio(1, contentMode: .fit)
-                        .scaleEffect(uiScale)
-                        .shadow(radius: 12, y: 8)
-                        .scaleEffect(scaleByFactor)
-                    }
-                }
+            .background(Color(UIColor.secondarySystemBackground))
+            .task {
+                // SceneKit handles preview spin now; no SwiftUI rotation needed
             }
-            .clipShape(RoundedRectangle(cornerRadius: 16))
-            .shadow(radius: 6)
-            .onAppear {
-                NotificationCenter.default.post(name: Notification.Name("CubePreviewSetFPS"), object: nil, userInfo: ["fps": highFPSPreview ? 120 : 60])
-            }
-            .onChange(of: highFPSPreview) { _, new in
-                NotificationCenter.default.post(name: Notification.Name("CubePreviewSetFPS"), object: nil, userInfo: ["fps": new ? 120 : 60])
-            }
-        }
-        .padding()
-        .background(Color(UIColor.secondarySystemBackground))
-        .task {
-            // SceneKit handles preview spin now; no SwiftUI rotation needed
         }
     }
     

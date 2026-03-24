@@ -1824,3 +1824,11 @@ struct FeedViewHost: View {
     FeedViewHost()
 }
 
+#Preview("FeedView (basic)") {
+    FeedViewHost()
+}
+
+#Preview("FeedView iPhone 15 Pro") {
+    FeedViewHost()
+        .previewDevice("iPhone 15 Pro")
+}
