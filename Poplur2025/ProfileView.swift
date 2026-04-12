@@ -891,20 +891,6 @@ private struct QuerySnapshotProxy {
     let documents: [QueryDocumentSnapshot]
 }
 
-extension Notification.Name {
-    // Removed the LoadProfileNow static let as per instructions
-    static let CenterMapOnUserLocation = Notification.Name("CenterMapOnUserLocation")
-    static let OpenSettingsRequested = Notification.Name("OpenSettingsRequested")
-    static let OpenDMsRequested = Notification.Name("OpenDMsRequested")
-    static let PauseGlobalFeedAudio = Notification.Name("PauseGlobalFeedAudio")
-    static let CubeGlobalDragChanged = Notification.Name("CubeGlobalDragChanged")
-    static let CubeGlobalDragEnded = Notification.Name("CubeGlobalDragEnded")
-    static let CubeGlobalTap = Notification.Name("CubeGlobalTap")
-
-    static let cubeHoldBegan = Notification.Name("cubeHoldBegan")
-    static let cubeHoldEnded = Notification.Name("cubeHoldEnded")
-    static let RecordTabBecameActive = Notification.Name("RecordTabBecameActive")
-}
 #if DEBUG
 import SwiftUI
 

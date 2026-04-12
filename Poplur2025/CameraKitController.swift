@@ -33,6 +33,14 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
     
     override init() {
         super.init()
+        #if DEBUG
+        // Skip heavy prewarm when running SwiftUI previews (handle both env var and launch arg)
+        let isRunningInPreviews = ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1" ||
+                                  ProcessInfo.processInfo.arguments.contains("-XcodePreviews")
+        if isRunningInPreviews {
+            return
+        }
+        #endif
         // Prewarm configuration early so first appearance is fast
         Task { [weak self] in
             guard let self else { return }
@@ -800,9 +808,4 @@ extension CameraKitController: CLLocationManagerDelegate {
         locationContinuation?.resume(returning: nil)
         locationContinuation = nil
     }
-}
-
-extension Notification.Name {
-    static let LoadMapNow = Notification.Name("LoadMapNow")
-    static let LoadProfileNow = Notification.Name("LoadProfileNow")
 }

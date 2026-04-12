@@ -106,12 +106,16 @@ struct CubeTabView: View {
         .onAppear {
             print("[CubeTabView] Appeared (forced 3D)")
             #if DEBUG
-            do {
-                try AVAudioSession.sharedInstance().setCategory(.ambient, options: [.mixWithOthers])
-                try AVAudioSession.sharedInstance().setActive(true)
-                print("[CubeTabView] AVAudioSession activated for previews")
-            } catch {
-                print("[CubeTabView] AVAudioSession activation failed: \(error)")
+            if !isRunningInPreviews {
+                do {
+                    try AVAudioSession.sharedInstance().setCategory(.ambient, options: [.mixWithOthers])
+                    try AVAudioSession.sharedInstance().setActive(true)
+                    print("[CubeTabView] AVAudioSession activated")
+                } catch {
+                    print("[CubeTabView] AVAudioSession activation failed: \(error)")
+                }
+            } else {
+                print("[CubeTabView] Skipping AVAudioSession setup in previews")
             }
             #endif
         }
@@ -205,6 +209,28 @@ private struct CubeSceneView: UIViewRepresentable {
             v.scene = makeScene()
             v.preferredFramesPerSecond = 120
             // Removed: v.antialiasingMode = .multisampling4X
+
+            if let cube = v.scene?.rootNode.childNode(withName: "cube", recursively: true), let box = cube.geometry as? SCNBox {
+                context.coordinator.cubeMaterials = box.materials
+            }
+            // Defer normal map and glow attachment one more pass in previews
+            if isRunningInPreviews {
+                DispatchQueue.main.async {
+                    if let cube = v.scene?.rootNode.childNode(withName: "cube", recursively: true), let box = cube.geometry as? SCNBox {
+                        // Apply normal maps now if enabled
+                        if self.useNormalMap, let normal = UIImage(named: "CubeNormalMap") {
+                            for m in context.coordinator.cubeMaterials {
+                                m.normal.contents = normal
+                                m.normal.intensity = 2.0
+                            }
+                        }
+                        // Attach or update glow now
+                        if self.enableGlow {
+                            self.attachOrUpdateGlow(to: cube)
+                        }
+                    }
+                }
+            }
         }
 
         // Remove border to reduce compositing cost on launch
@@ -247,7 +273,6 @@ private struct CubeSceneView: UIViewRepresentable {
 
         // Apply initial preview hover state and pop/yaw triggers
         context.coordinator.applyPreviewHover(previewHover)
-        context.coordinator.applyPreviewHover(true)
         context.coordinator.lastPopTrigger = previewPopTrigger
         context.coordinator.lastYawRightStep = previewYawRightStep
         context.coordinator.lastYawLeftStep = previewYawLeftStep
@@ -278,34 +303,24 @@ private struct CubeSceneView: UIViewRepresentable {
            let box = cube.geometry as? SCNBox {
             let uiTint = UIColor(tintColor)
             let tabFaces: [AppTab] = [
-                .map,     // +X
-                .record,  // -X
-                .feed,    // +Y
-                .profile, // -Y
-                .map,     // +Z
-                .record   // -Z
+                .map, .record, .feed, .profile, .map, .record
             ]
-            let updatedMaterials: [SCNMaterial] = box.materials.enumerated().map { i, mat in
+            let mats = context.coordinator.cubeMaterials.isEmpty ? box.materials : context.coordinator.cubeMaterials
+            for (i, mat) in mats.enumerated() where i < tabFaces.count {
                 let tab = tabFaces[i]
-                // Update diffuse background with baseColor
                 mat.diffuse.contents = faceBackgroundOnly(for: tab, baseColor: baseColor)
                 mat.multiply.contents = uiTint
-
-                // Update normal map live based on toggle
                 if useNormalMap, let normal = UIImage(named: "CubeNormalMap") {
                     mat.normal.contents = normal
-                    if isRunningInPreviews {
-                        mat.normal.intensity = 2.0
-                    } else {
-                        mat.normal.intensity = 0.6
-                    }
+                    mat.normal.intensity = isRunningInPreviews ? 2.0 : 0.6
                 } else {
                     mat.normal.contents = nil
                 }
-                return mat
             }
-            box.materials = updatedMaterials
-
+            // If we used cached materials, ensure the box still points to them (only once). Avoid resetting each frame.
+            if context.coordinator.cubeMaterials.isEmpty == false {
+                box.materials = context.coordinator.cubeMaterials
+            }
             // Nudge SceneKit to redraw this frame
             uiView.sceneTime = uiView.sceneTime
         }
@@ -468,7 +483,7 @@ private struct CubeSceneView: UIViewRepresentable {
         node.eulerAngles = SCNVector3(0.0, 0.0, 0.0)
 
         // Attach or update glow particle system for previews (only if enableGlow true)
-        if enableGlow {
+        if enableGlow && !isRunningInPreviews {
             attachOrUpdateGlow(to: node)
         }
 
@@ -479,7 +494,10 @@ private struct CubeSceneView: UIViewRepresentable {
             node.runAction(spin, forKey: "previewSpin")
         }
 
-        box.materials = makeMaterials(baseColor: baseColor)
+        let mats = makeMaterials(baseColor: baseColor)
+        box.materials = mats
+        // Cache materials for in-place mutation during updates
+        // Not here because coordinator is unavailable - handled in makeUIView
 
         return scene
     }
@@ -521,15 +539,11 @@ private struct CubeSceneView: UIViewRepresentable {
                 mat.emission.intensity = 0.4
             }
             mat.emission.contents = emissionMask
-            // Normal map if available
-            if useNormalMap, let normal = UIImage(named: "CubeNormalMap") {
+            // Normal map if available - only if NOT in previews
+            if useNormalMap && !isRunningInPreviews, let normal = UIImage(named: "CubeNormalMap") {
                 mat.normal.contents = normal
-                if isRunningInPreviews {
-                    mat.normal.intensity = 2.0
-                } else {
-                    mat.normal.intensity = 0.6
-                }
-            } else {
+                mat.normal.intensity = 0.6
+            } else if !useNormalMap {
                 mat.normal.contents = nil
             }
             // Apply chosen lighting model
@@ -735,6 +749,7 @@ private struct CubeSceneView: UIViewRepresentable {
 
         private var holdObservers: [NSObjectProtocol] = []
         private var isBlinking: Bool = false
+        var cubeMaterials: [SCNMaterial] = []
 
         var lastPopTrigger: Int = 0
         var lastYawRightStep: Int = 0
@@ -1106,12 +1121,16 @@ private struct CubeSceneView: UIViewRepresentable {
             var peakSound: SCNAction = .wait(duration: 0)
             if let src = popAudioSource {
                 #if DEBUG
-                do {
-                    try AVAudioSession.sharedInstance().setCategory(.ambient, options: [.mixWithOthers])
-                    try AVAudioSession.sharedInstance().setActive(true)
-                    print("[CubeTabView] AVAudioSession ensured active for long-press slow pop")
-                } catch {
-                    print("[CubeTabView] AVAudioSession ensure active failed: \(error)")
+                if !isRunningInPreviews {
+                    do {
+                        try AVAudioSession.sharedInstance().setCategory(.ambient, options: [.mixWithOthers])
+                        try AVAudioSession.sharedInstance().setActive(true)
+                        print("[CubeTabView] AVAudioSession ensured active for long-press slow pop")
+                    } catch {
+                        print("[CubeTabView] AVAudioSession ensure active failed: \(error)")
+                    }
+                } else {
+                    print("[CubeTabView] Skipping AVAudioSession ensure active in previews")
                 }
                 #endif
                 peakSound = SCNAction.playAudio(src, waitForCompletion: false)
@@ -1164,12 +1183,16 @@ private struct CubeSceneView: UIViewRepresentable {
                 print("[CubeTabView] Pop sound requested")
                 guard let src = popAudioSource else { print("[CubeTabView] No audio source available"); return }
                 #if DEBUG
-                do {
-                    try AVAudioSession.sharedInstance().setCategory(.ambient, options: [.mixWithOthers])
-                    try AVAudioSession.sharedInstance().setActive(true)
-                    print("[CubeTabView] AVAudioSession ensured active for pop")
-                } catch {
-                    print("[CubeTabView] AVAudioSession ensure active failed: \(error)")
+                if !isRunningInPreviews {
+                    do {
+                        try AVAudioSession.sharedInstance().setCategory(.ambient, options: [.mixWithOthers])
+                        try AVAudioSession.sharedInstance().setActive(true)
+                        print("[CubeTabView] AVAudioSession ensured active for pop")
+                    } catch {
+                        print("[CubeTabView] AVAudioSession ensure active failed: \(error)")
+                    }
+                } else {
+                    print("[CubeTabView] Skipping AVAudioSession ensure active for pop in previews")
                 }
                 #endif
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {

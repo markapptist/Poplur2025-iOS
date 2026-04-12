@@ -1,20 +1,44 @@
 import SwiftUI
+
+// Only import heavy frameworks when NOT in preview mode
+#if !DEBUG || !targetEnvironment(simulator)
 import FirebaseCore
-import AVFoundation
 #if canImport(GoogleMobileAds)
 import GoogleMobileAds
 #endif
+#endif
+
+import AVFoundation
+
+// Detect when running inside Xcode Previews
+private enum PreviewEnv {
+    static var isPreview: Bool {
+        let env = ProcessInfo.processInfo.environment
+        // Xcode sets one of these when hosting previews
+        return env["XCODE_RUNNING_FOR_PREVIEWS"] == "1" || env["XCODE_RUNNING_FOR_PLAYGROUNDS"] == "1"
+    }
+}
 
 // AppDelegate: configure SDKs
 final class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
-        if FirebaseApp.app() == nil {
-            FirebaseApp.configure()
-#if canImport(GoogleMobileAds)
+        if !PreviewEnv.isPreview {
+            #if !DEBUG || !targetEnvironment(simulator)
+            if FirebaseApp.app() == nil {
+                FirebaseApp.configure()
+            }
+            #if canImport(GoogleMobileAds)
             MobileAds.shared.start(completionHandler: nil)
-#endif
+            #endif
+            #endif
+            
+            #if !targetEnvironment(simulator)
             AdManager.shared.start()
+            #endif
+        } else {
+            // Skip heavy SDK bootstrap in previews to avoid timeouts/crashes
+            print("[AppDelegate] Skipping Firebase/Ads init in Previews")
         }
         return true
     }
@@ -54,14 +78,18 @@ struct Poplur2025App: App {
                         .environmentObject(auth)
                         .environmentObject(isometricBarSettings)
                         .task {
-                            await prewarmCameraIfAllowed()
+                            if !PreviewEnv.isPreview {
+                                await prewarmCameraIfAllowed()
+                            }
                         }
                 } else {
                     WelcomeView()
                         .environmentObject(auth)
                         .environmentObject(isometricBarSettings)
                         .task {
-                            await prewarmCameraIfAllowed()
+                            if !PreviewEnv.isPreview {
+                                await prewarmCameraIfAllowed()
+                            }
                         }
                 }
             }
@@ -79,12 +107,16 @@ struct Poplur2025App: App {
             .task {
                 // Stagger SceneKit prewarm slightly after first frame
                 try? await Task.sleep(nanoseconds: 200_000_000)
-                await SceneKitPrewarmer.prewarmIfNeeded()
+                if !PreviewEnv.isPreview {
+                    await SceneKitPrewarmer.prewarmIfNeeded()
+                }
             }
             .task {
                 // Stagger camera prewarm a bit later
                 try? await Task.sleep(nanoseconds: 400_000_000)
-                await prewarmCameraIfAllowed()
+                if !PreviewEnv.isPreview {
+                    await prewarmCameraIfAllowed()
+                }
             }
         }
     }

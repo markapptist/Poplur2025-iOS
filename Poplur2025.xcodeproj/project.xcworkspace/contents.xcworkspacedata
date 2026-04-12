@@ -4,4 +4,13 @@
    <FileRef
       location = "self:">
    </FileRef>
+   <FileRef
+      location = "group:PreviewSupportPreviewModels.swift">
+   </FileRef>
+   <FileRef
+      location = "group:PreviewSupportPreviewViews.swift">
+   </FileRef>
+   <FileRef
+      location = "group:PreviewSupportPreviewHarness.swift">
+   </FileRef>
 </Workspace>

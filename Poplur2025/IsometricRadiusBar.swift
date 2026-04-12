@@ -1194,15 +1194,17 @@ private struct WrapHStack<Content: View>: View {
 #if DEBUG
 // Preview-only fallback declarations if the app target doesn’t import these types here.
 // Comment these out if the real types are available to this file.
-final class IsometricBarSettings: ObservableObject {
-    @Published var horizontalOffset: CGFloat = 80
-    @Published var bottomOffset: CGFloat = 1
-    @Published var barWidth: CGFloat = 98
-    @Published var barHeight: CGFloat = 390
-    @Published var barTiltDegrees: Double = -8
-}
+// IsometricBarSettings is now imported from IsometricBarSettings.swift
 private struct SharedPreviewSettings {
-    static let settings = IsometricBarSettings()
+    static let settings: IsometricBarSettings = {
+        let s = IsometricBarSettings()
+        s.horizontalOffset = 80
+        s.bottomOffset = 1
+        s.barWidth = 98
+        s.barHeight = 390
+        s.barTiltDegrees = -8
+        return s
+    }()
 }
 #endif
 

@@ -9,6 +9,19 @@ import Contacts
 import GoogleMobileAds
 #endif
 
+// MARK: - Environment key for LocationProvider
+
+private struct LocationProviderKey: EnvironmentKey {
+    static let defaultValue: LocationProvider? = nil
+}
+
+extension EnvironmentValues {
+    var locationProvider: LocationProvider? {
+        get { self[LocationProviderKey.self] }
+        set { self[LocationProviderKey.self] = newValue }
+    }
+}
+
 // MARK: - Shared pole position model and overlay
 
 // Normalized pole position within the view's content area (0...1 in both axes)
@@ -62,12 +75,9 @@ private struct PoleOverlay: View {
 }
 
 struct FeedView: View {
-    @Environment(\.locationProvider) private var injectedLocationProvider: LocationProvider?
-    // Removed isometric environment keys to fix ambiguous/invalid redeclaration errors
-
     @StateObject private var fallbackLocationProvider = LocationProvider()
     @StateObject private var poleModel = PolePositionModel()
-    private var locationProvider: LocationProvider { injectedLocationProvider ?? fallbackLocationProvider }
+    private var activeLocationProvider: LocationProvider { fallbackLocationProvider }
 
     @State private var posts: [FeedPost] = []
     @State private var isLoading = false
@@ -142,7 +152,7 @@ struct FeedView: View {
 
     // Equatable proxy for coordinate changes
     private var coordinateKey: String {
-        if let c = locationProvider.coordinate {
+        if let c = activeLocationProvider.coordinate {
             return String(format: "%.6f,%.6f", c.latitude, c.longitude)
         } else {
             return "nil"
@@ -265,7 +275,7 @@ struct FeedView: View {
         }
         .onChange(of: coordinateKey) { _ in
             Task {
-                if let coord = locationProvider.coordinate {
+                if let coord = activeLocationProvider.coordinate {
                     if let iso = await geocodeCountry(from: coord), let idx = countries.firstIndex(where: { $0.code == iso }) {
                         if idx != selectedCountryIndex {
                             await MainActor.run { selectedCountryIndex = idx }
@@ -308,7 +318,7 @@ struct FeedView: View {
 
         // Prepare essentials (pole, country) strictly in order
         await MainActor.run { poleModel.position = PolePosition(x: 0.5, y: 0.5) }
-        if let coord = locationProvider.coordinate {
+        if let coord = activeLocationProvider.coordinate {
             if let iso = await geocodeCountry(from: coord), let idx = countries.firstIndex(where: { $0.code == iso }) {
                 await MainActor.run { selectedCountryIndex = idx }
             } else {
@@ -868,7 +878,7 @@ struct FeedView: View {
         }
     }
 
-    private var currentCoordinate: CLLocationCoordinate2D? { locationProvider.coordinate }
+    private var currentCoordinate: CLLocationCoordinate2D? { activeLocationProvider.coordinate }
     
     private func configureAudioSessionForStatic() {
         do {
@@ -1790,18 +1800,6 @@ private struct Stripes: Shape {
             y += lineWidth + spacing
         }
         return p
-    }
-}
-
-// Optional environment key to allow graceful fallback when not provided by ancestor
-private struct LocationProviderKey: EnvironmentKey {
-    static let defaultValue: LocationProvider? = nil
-}
-
-private extension EnvironmentValues {
-    var locationProvider: LocationProvider? {
-        get { self[LocationProviderKey.self] }
-        set { self[LocationProviderKey.self] = newValue }
     }
 }
 

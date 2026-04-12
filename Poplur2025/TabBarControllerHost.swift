@@ -12,11 +12,6 @@ extension EnvironmentValues {
     }
 }
 
-// MARK: - Notification names used for routing and preloading
-extension Notification.Name {
-    static let ShowUserProfile = Notification.Name("ShowUserProfile")
-}
-
 struct TabBarControllerHost<MapContent: View, RecordContent: View, FeedContent: View, ProfileContent: View, SettingsContent: View>: View {
     @Binding var selection: AppTab
 

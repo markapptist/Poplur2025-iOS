@@ -7,6 +7,20 @@ import Combine
 import AudioToolbox
 import Foundation
 
+private enum PreviewEnvHomeView {
+    static var isPreview: Bool {
+        let env = ProcessInfo.processInfo.environment
+        return env["XCODE_RUNNING_FOR_PREVIEWS"] == "1" || env["XCODE_RUNNING_FOR_PLAYGROUNDS"] == "1"
+    }
+}
+
+// Preview tab enum for environment
+enum PreviewAppTab: Hashable, CaseIterable {
+    case map, record, feed, profile
+}
+
+// Verified: no references to deprecated map2 remain.
+
 // Usage elsewhere:
 // @Environment(\.isometricRadiusBarDistance) private var isometricRadiusBarDistance
 // Use `isometricRadiusBarDistance` to position your isometric radius bar from the screen center
@@ -29,6 +43,14 @@ private struct IsometricRadiusBarDistanceKey: EnvironmentKey {
     static let defaultValue: CGFloat = 2000 // default distance in points; adjust as needed
 }
 
+private struct IsPreviewRuntimeKey: EnvironmentKey {
+    static let defaultValue: Bool = false
+}
+
+private struct PreviewSelectedTabKey: EnvironmentKey {
+    static let defaultValue: PreviewAppTab = .feed
+}
+
 extension EnvironmentValues {
 
     var isometricRadiusBarDistance: CGFloat {
@@ -39,6 +61,16 @@ extension EnvironmentValues {
     var isometricBarModel: IsometricBarModel {
         get { self[IsometricBarModelKey.self] }
         set { self[IsometricBarModelKey.self] = newValue }
+    }
+    
+    var isPreviewRuntime: Bool {
+        get { self[IsPreviewRuntimeKey.self] }
+        set { self[IsPreviewRuntimeKey.self] = newValue }
+    }
+    
+    var previewSelectedTab: PreviewAppTab {
+        get { self[PreviewSelectedTabKey.self] }
+        set { self[PreviewSelectedTabKey.self] = newValue }
     }
 }
 
@@ -79,15 +111,6 @@ private enum HomeSceneKitPrewarmer {
             tmpView.prepare([box], completionHandler: { _ in })
         }
     }
-}
-
-extension Notification.Name {
-    static let ResetTabToTop = Notification.Name("ResetTabToTop")
-    static let CubeMotionUpdate = Notification.Name("CubeMotionUpdate")
-    static let FeedReady = Notification.Name("FeedReady")
-    static let PauseFeedAudio = Notification.Name("PauseFeedAudio")
-    static let ResumeFeedAudio = Notification.Name("ResumeFeedAudio")
-    static let SharedRadiusDidChange = Notification.Name("SharedRadiusDidChange")
 }
 
 struct HomeCameraPreviewHost: UIViewControllerRepresentable {
@@ -134,6 +157,9 @@ struct HomeView: View {
     @EnvironmentObject private var auth: AuthViewModel
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.renderingConfig) private var renderingConfig
+    
+    @Environment(\.isPreviewRuntime) private var isPreviewRuntime
+    @Environment(\.previewSelectedTab) private var previewSelectedTab
     
     // Changed per instructions to use EnvironmentObject
     @EnvironmentObject private var isometricBarSettings: IsometricBarSettings
@@ -191,7 +217,7 @@ struct HomeView: View {
     
     @ViewBuilder
     private var mapTabContent: some View {
-        MapView()
+        MapView(coordinate: locationProvider.coordinate ?? CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194))
             .task {
                 if selectedTab == .map, !didTriggerMapInitialLoad {
                     deferUntilAfterLaunch {
@@ -213,6 +239,7 @@ struct HomeView: View {
         }
         .onAppear {
             Task { @MainActor in
+                // Removed guard !PreviewEnvHomeView.isPreview else { return }
                 guard selectedTab == .record else { return }
                 let status = AVCaptureDevice.authorizationStatus(for: .video)
                 switch status {
@@ -232,6 +259,7 @@ struct HomeView: View {
     
     private func ensureCameraRunningIfNeeded() {
         Task { @MainActor in
+            guard !PreviewEnvHomeView.isPreview else { return }
             guard selectedTab == .record, isRecordHolding else {
                 return
             }
@@ -626,7 +654,9 @@ struct HomeView: View {
             // Motion is managed by scene phase now (runs on all tabs when active)
             
             if selectedTab == .profile {
-                cameraController.stop()
+                if !PreviewEnvHomeView.isPreview {
+                    cameraController.stop()
+                }
             }
             NotificationCenter.default.post(name: .ResetTabToTop, object: nil)
             
@@ -653,8 +683,8 @@ struct HomeView: View {
         .onChange(of: scenePhase) { phase in
             switch phase {
             case .active:
-                // Start motion on all tabs when app becomes active, delay to 150ms, but defer until launch gate
                 Task { @MainActor in
+                    guard !PreviewEnvHomeView.isPreview else { return }
                     deferUntilAfterLaunch {
                         await MainActor.run { self.motionController.start() }
                     }
@@ -699,6 +729,19 @@ struct HomeView: View {
         .onReceive(NotificationCenter.default.publisher(for: .cameraCubeHoldEnded)) { _ in
             isRecordHolding = false
             stopRecordHoldRamp(reset: true)
+        }
+        .onChange(of: isPreviewRuntime) { isPreview in
+            if isPreview {
+                if let mapped = AppTab(fromPreview: previewSelectedTab) {
+                    selectedTab = mapped
+                }
+            }
+        }
+        .onChange(of: previewSelectedTab) { tab in
+            guard isPreviewRuntime else { return }
+            if let mapped = AppTab(fromPreview: tab) {
+                selectedTab = mapped
+            }
         }
         .task {
             deferUntilAfterLaunch {
@@ -1089,3 +1132,13 @@ private struct SharedPreviewSettings {
         .environmentObject(SharedPreviewSettings.settings)
 }
 
+private extension AppTab {
+    init?(fromPreview tab: PreviewAppTab) {
+        switch tab {
+        case .map: self = .map
+        case .record: self = .record
+        case .feed: self = .feed
+        case .profile: self = .profile
+        }
+    }
+}

@@ -746,30 +746,134 @@ import SwiftUI
 
 private struct CameraPreviewVC_Host: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> CameraPreviewViewController {
-        // Create a lightweight dummy session for previews
+        // Create a real capture session for live preview
         let session = AVCaptureSession()
         session.beginConfiguration()
         session.sessionPreset = .photo
-        // Do not add inputs/outputs in previews to avoid permission prompts
+        
+        // Try to add a camera input for live preview
+        var didAddInput = false
+        if let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
+           let input = try? AVCaptureDeviceInput(device: device),
+           session.canAddInput(input) {
+            session.addInput(input)
+            didAddInput = true
+            print("[Preview] ✅ Added back camera input")
+        } else {
+            print("[Preview] ⚠️ Failed to add camera input - trying alternatives")
+            // Try front camera as fallback
+            if let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front),
+               let input = try? AVCaptureDeviceInput(device: device),
+               session.canAddInput(input) {
+                session.addInput(input)
+                didAddInput = true
+                print("[Preview] ✅ Added front camera input")
+            }
+        }
+        
         session.commitConfiguration()
 
         let vc = CameraPreviewViewController(session: session)
-        vc.autoManageSession = false // do not start/stop in previews
-        vc.onShutter = { print("[Preview] Shutter") }
-        vc.onStartVideo = { print("[Preview] Start video") }
-        vc.onStopVideo = { print("[Preview] Stop video") }
+        vc.autoManageSession = true // Allow session to run in preview
+        vc.onShutter = { print("[Preview] 📸 Shutter") }
+        vc.onStartVideo = { print("[Preview] 🎥 Start video") }
+        vc.onStopVideo = { print("[Preview] ⏹️ Stop video") }
         
-        #if DEBUG
-        let placeholder = CameraPlaceholderView()
-        placeholder.translatesAutoresizingMaskIntoConstraints = false
-        vc.view.addSubview(placeholder)
-        NSLayoutConstraint.activate([
-            placeholder.leadingAnchor.constraint(equalTo: vc.view.leadingAnchor),
-            placeholder.trailingAnchor.constraint(equalTo: vc.view.trailingAnchor),
-            placeholder.topAnchor.constraint(equalTo: vc.view.topAnchor),
-            placeholder.bottomAnchor.constraint(equalTo: vc.view.bottomAnchor)
-        ])
-        #endif
+        if didAddInput {
+            // Start the session for live preview
+            DispatchQueue.global(qos: .userInitiated).async {
+                session.startRunning()
+                print("[Preview] 🎬 Session started running")
+            }
+        } else {
+            print("[Preview] ❌ No camera input available - showing simulated camera view")
+            // Add simulated camera view if no camera available
+            DispatchQueue.main.async {
+                // Create a simulated camera view with a gradient background
+                let simulatedView = UIView()
+                simulatedView.translatesAutoresizingMaskIntoConstraints = false
+                
+                // Add a subtle gradient to simulate a camera viewfinder
+                let gradientLayer = CAGradientLayer()
+                gradientLayer.colors = [
+                    UIColor.systemGray.cgColor,
+                    UIColor.systemGray2.cgColor,
+                    UIColor.systemGray3.cgColor
+                ]
+                gradientLayer.locations = [0.0, 0.5, 1.0]
+                simulatedView.layer.addSublayer(gradientLayer)
+                
+                // Add a centered image view with a camera scene illustration
+                let imageView = UIImageView()
+                imageView.translatesAutoresizingMaskIntoConstraints = false
+                imageView.contentMode = .scaleAspectFit
+                imageView.tintColor = .white.withAlphaComponent(0.3)
+                
+                // Create a composite image showing a viewfinder grid
+                let renderer = UIGraphicsImageRenderer(size: CGSize(width: 300, height: 300))
+                let gridImage = renderer.image { context in
+                    // Draw viewfinder grid lines
+                    UIColor.white.withAlphaComponent(0.3).setStroke()
+                    let path = UIBezierPath()
+                    
+                    // Vertical lines
+                    path.move(to: CGPoint(x: 100, y: 0))
+                    path.addLine(to: CGPoint(x: 100, y: 300))
+                    path.move(to: CGPoint(x: 200, y: 0))
+                    path.addLine(to: CGPoint(x: 200, y: 300))
+                    
+                    // Horizontal lines
+                    path.move(to: CGPoint(x: 0, y: 100))
+                    path.addLine(to: CGPoint(x: 300, y: 100))
+                    path.move(to: CGPoint(x: 0, y: 200))
+                    path.addLine(to: CGPoint(x: 300, y: 200))
+                    
+                    path.lineWidth = 1.0
+                    path.stroke()
+                    
+                    // Draw center focus indicator
+                    let centerRect = CGRect(x: 125, y: 125, width: 50, height: 50)
+                    let centerPath = UIBezierPath(rect: centerRect)
+                    centerPath.lineWidth = 2.0
+                    UIColor.white.withAlphaComponent(0.5).setStroke()
+                    centerPath.stroke()
+                }
+                
+                imageView.image = gridImage
+                simulatedView.addSubview(imageView)
+                
+                // Add label
+                let label = UILabel()
+                label.translatesAutoresizingMaskIntoConstraints = false
+                label.text = "Camera Preview Simulation"
+                label.textColor = .white.withAlphaComponent(0.7)
+                label.font = .systemFont(ofSize: 13, weight: .medium)
+                label.textAlignment = .center
+                simulatedView.addSubview(label)
+                
+                vc.view.insertSubview(simulatedView, at: 0)
+                
+                NSLayoutConstraint.activate([
+                    simulatedView.leadingAnchor.constraint(equalTo: vc.view.leadingAnchor),
+                    simulatedView.trailingAnchor.constraint(equalTo: vc.view.trailingAnchor),
+                    simulatedView.topAnchor.constraint(equalTo: vc.view.topAnchor),
+                    simulatedView.bottomAnchor.constraint(equalTo: vc.view.bottomAnchor),
+                    
+                    imageView.centerXAnchor.constraint(equalTo: simulatedView.centerXAnchor),
+                    imageView.centerYAnchor.constraint(equalTo: simulatedView.centerYAnchor),
+                    imageView.widthAnchor.constraint(equalToConstant: 300),
+                    imageView.heightAnchor.constraint(equalToConstant: 300),
+                    
+                    label.bottomAnchor.constraint(equalTo: simulatedView.safeAreaLayoutGuide.bottomAnchor, constant: -20),
+                    label.centerXAnchor.constraint(equalTo: simulatedView.centerXAnchor)
+                ])
+                
+                // Update gradient frame when layout changes
+                DispatchQueue.main.async {
+                    gradientLayer.frame = simulatedView.bounds
+                }
+            }
+        }
         
         return vc
     }
@@ -777,7 +881,7 @@ private struct CameraPreviewVC_Host: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: CameraPreviewViewController, context: Context) { }
 }
 
-#Preview("CameraPreviewViewController") {
+#Preview {
     CameraPreviewVC_Host()
         .ignoresSafeArea()
 }
