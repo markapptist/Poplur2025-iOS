@@ -43,7 +43,7 @@ private struct IsometricRadiusBarDistanceKey: EnvironmentKey {
     static let defaultValue: CGFloat = 2000 // default distance in points; adjust as needed
 }
 
-private struct IsPreviewRuntimeKey: EnvironmentKey {
+private struct HomeViewIsPreviewRuntimeKey: EnvironmentKey {
     static let defaultValue: Bool = false
 }
 
@@ -63,9 +63,9 @@ extension EnvironmentValues {
         set { self[IsometricBarModelKey.self] = newValue }
     }
     
-    var isPreviewRuntime: Bool {
-        get { self[IsPreviewRuntimeKey.self] }
-        set { self[IsPreviewRuntimeKey.self] = newValue }
+    var homeViewIsPreviewRuntime: Bool {
+        get { self[HomeViewIsPreviewRuntimeKey.self] }
+        set { self[HomeViewIsPreviewRuntimeKey.self] = newValue }
     }
     
     var previewSelectedTab: PreviewAppTab {
@@ -156,9 +156,8 @@ final class SceneMotionController: ObservableObject {
 struct HomeView: View {
     @EnvironmentObject private var auth: AuthViewModel
     @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.renderingConfig) private var renderingConfig
     
-    @Environment(\.isPreviewRuntime) private var isPreviewRuntime
+    @Environment(\.homeViewIsPreviewRuntime) private var isPreviewRuntime
     @Environment(\.previewSelectedTab) private var previewSelectedTab
     
     // Changed per instructions to use EnvironmentObject
@@ -1142,3 +1141,4 @@ private extension AppTab {
         }
     }
 }
+
