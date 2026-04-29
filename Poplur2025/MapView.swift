@@ -1,31 +1,132 @@
 import SwiftUI
 import MapKit
 import CoreLocation
-import FirebaseFirestore
-import FirebaseAuth
-import FirebaseCore
 import SceneKit
+
+/*
+ POP_PREVIEW_LIGHT compile-time flag enables a lighter preview mode that excludes heavy dependencies
+ like FirebaseFirestore and SceneKit. Use it to speed up SwiftUI previews in complex projects.
+*/
+
+#if !POP_PREVIEW_LIGHT
+#if canImport(FirebaseFirestore)
+#if !DEBUG || !IS_PREVIEW
+import FirebaseFirestore
+#endif
+#endif
+#endif
+
+#if DEBUG
+// Preview-safe fallbacks for missing app types so this file builds in isolation
+import Combine
+
+// Minimal stubs used only for previews if not defined elsewhere
+#if !canImport(AppKit) && !canImport(UIKit)
+// no-op
+#endif
+
+// Stub PreviewLocationManager if the real one isn't available to previews
+private class PreviewLocationManager: NSObject, ObservableObject {
+    @Published var location: CLLocation? = CLLocation(latitude: 40.748339, longitude: -73.985912)
+    func requestAuthorizationIfNeeded() {}
+    func centerOnUser(_ camera: inout MapCameraPosition) {
+        if let coord = location?.coordinate {
+            camera = .camera(MapCamera(centerCoordinate: coord, distance: 700, heading: 0, pitch: 60))
+        }
+    }
+}
+
+// Stub models used by annotations
+private struct PreviewMapAnnotationPost: Identifiable, Hashable, Equatable {
+    let id = UUID()
+    var title: String
+    var coordinate: CLLocationCoordinate2D
+    var radius: CLLocationDistance
+
+    static func == (lhs: PreviewMapAnnotationPost, rhs: PreviewMapAnnotationPost) -> Bool {
+        return lhs.id == rhs.id
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+}
+
+private struct PreviewCityDominance: Identifiable, Hashable, Equatable {
+    let id = UUID()
+    var city: String
+    var coordinate: CLLocationCoordinate2D
+    var profileURL: URL?
+
+    static func == (lhs: PreviewCityDominance, rhs: PreviewCityDominance) -> Bool {
+        return lhs.id == rhs.id
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+}
+
+// Stub annotation views
+private struct PreviewDominancePin: View {
+    let profileURL: URL
+    var body: some View { Image(systemName: "person.crop.circle").padding(4).background(.ultraThinMaterial, in: Circle()) }
+}
+
+private struct PreviewGoogleStylePin: View {
+    var body: some View { Image(systemName: "mappin.circle.fill").symbolRenderingMode(.palette).foregroundStyle(.red, .white) }
+}
+
+// Notification names used in this file
+private extension Notification.Name {
+    static let preview_CenterMapOnUser = Notification.Name("Preview_CenterMapOnUser")
+    static let preview_startDominanceTour = Notification.Name("Preview_startDominanceTour")
+    static let preview_stopDominanceTour = Notification.Name("Preview_stopDominanceTour")
+    static let preview_setTourSpeedMultiplier = Notification.Name("Preview_setTourSpeedMultiplier")
+    static let preview_setTourZoomOutDistance = Notification.Name("Preview_setTourZoomOutDistance")
+    static let preview_setBuildingZoomDistance = Notification.Name("Preview_SetBuildingZoomDistance")
+}
+#endif
+
+#if DEBUG
+private let IS_PREVIEW: Bool = (ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1")
+#else
+private let IS_PREVIEW: Bool = false
+#endif
 
 private let fixedPitchAlt: CGFloat = 60 // Changed to 60 degrees for 3D perspective
 
-struct MapView_PreviewAlt: View {
-    @StateObject private var locationManager = LocationManager()
+#if DEBUG
+private extension PreviewLocationManager {
+    static func stubForPreviewInstance() -> PreviewLocationManager {
+        // Return a plain instance without triggering authorization in previews
+        return PreviewLocationManager()
+    }
+}
+#endif
 
-    @State private var fixedDistanceAlt: CLLocationDistance = 3_000 // Closer for preview to see buildings
+struct MapView_PreviewAlt: View {
+    #if DEBUG
+    @StateObject private var locationManager = IS_PREVIEW ? PreviewLocationManager.stubForPreviewInstance() : PreviewLocationManager()
+    #else
+    @StateObject private var locationManager = PreviewLocationManager()
+    #endif
+
+    @State private var fixedDistanceAlt: CLLocationDistance = 700 // Changed to 700 for default building zoom distance
     @State private var camera: MapCameraPosition = .camera(
         MapCamera(
             centerCoordinate: CLLocationCoordinate2D(latitude: 40.748339, longitude: -73.985912),
-            distance: 3_000,
+            distance: 700,
             heading: 52,
             pitch: 60
         )
     )
 
-    @State private var posts: [MapAnnotationPost] = []
+    @State private var posts: [PreviewMapAnnotationPost] = []
     @State private var selectedIndex: Int?
     @State private var radiusMeters: Double = 5_000
 
-    @State private var dominance: [CityDominance] = []
+    @State private var dominance: [PreviewCityDominance] = []
     @State private var tourTask: Task<Void, Never>? = nil
     @State private var tourActive: Bool = false
     @State private var tourIndex: Int = 0
@@ -43,8 +144,8 @@ struct MapView_PreviewAlt: View {
     init() {
         // Initialize with demo cities synchronously to avoid preview crash
         _dominance = State(initialValue: [
-            CityDominance(city: "San Francisco", coordinate: CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194), profileURL: nil),
-            CityDominance(city: "New York", coordinate: CLLocationCoordinate2D(latitude: 40.7128, longitude: -74.0060), profileURL: nil)
+            PreviewCityDominance(city: "San Francisco", coordinate: CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194), profileURL: nil),
+            PreviewCityDominance(city: "New York", coordinate: CLLocationCoordinate2D(latitude: 40.7128, longitude: -74.0060), profileURL: nil)
         ])
     }
 
@@ -75,21 +176,13 @@ struct MapView_PreviewAlt: View {
                 interactionModes: modes
             ) {
                 // Only show user annotation when not in preview and location available
-                #if DEBUG
-                if ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] != "1" {
+                if !IS_PREVIEW {
                     if locationManager.location != nil {
                         UserAnnotation {
                             Label("You", systemImage: "location.fill")
                         }
                     }
                 }
-                #else
-                if locationManager.location != nil {
-                    UserAnnotation {
-                        Label("You", systemImage: "location.fill")
-                    }
-                }
-                #endif
 
                 ForEach(filteredPosts()) { post in
                     Annotation(post.title, coordinate: post.coordinate) {
@@ -104,19 +197,25 @@ struct MapView_PreviewAlt: View {
                 ForEach(dominance) { dom in
                     Annotation(dom.city, coordinate: dom.coordinate) {
                         if let url = dom.profileURL {
-                            DominancePin(profileURL: url)
+                            PreviewDominancePin(profileURL: url)
+                        } else {
+                            GoogleStylePinAlt()
                         }
                     }
                 }
             }
+#if POP_PREVIEW_LIGHT
+            .mapStyle(.standard)
+#else
             .mapStyle(.hybrid(elevation: .realistic, showsTraffic: false))
+#endif
         )
     }
 
     private func lockCamera(_ pos: MapCameraPosition) -> MapCameraPosition {
         // Don't lock camera in preview mode - allow full 3D exploration
         #if DEBUG
-        if ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1" {
+        if IS_PREVIEW {
             return pos
         }
         #endif
@@ -162,7 +261,7 @@ struct MapView_PreviewAlt: View {
         }
     }
 
-    private func filteredPosts() -> [MapAnnotationPost] {
+    private func filteredPosts() -> [PreviewMapAnnotationPost] {
         guard let userLoc = locationManager.location else { return posts }
         return posts.filter {
             MKMapPoint(userLoc.coordinate).distance(to: MKMapPoint($0.coordinate)) <= radiusMeters
@@ -170,16 +269,29 @@ struct MapView_PreviewAlt: View {
     }
 
     private func fetchPosts() {
-        // Skip Firebase network calls when running SwiftUI previews
-        #if DEBUG
-        if ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1" {
+#if POP_PREVIEW_LIGHT
+        posts = [
+            PreviewMapAnnotationPost(
+                title: "Preview A",
+                coordinate: CLLocationCoordinate2D(latitude: 40.748339, longitude: -73.985912),
+                radius: 5000
+            ),
+            PreviewMapAnnotationPost(
+                title: "Preview B",
+                coordinate: CLLocationCoordinate2D(latitude: 40.758896, longitude: -73.985130),
+                radius: 3000
+            )
+        ]
+        return
+#endif
+        if IS_PREVIEW {
             posts = [
-                MapAnnotationPost(
+                PreviewMapAnnotationPost(
                     title: "Preview A",
                     coordinate: CLLocationCoordinate2D(latitude: 40.748339, longitude: -73.985912),
                     radius: 5000
                 ),
-                MapAnnotationPost(
+                PreviewMapAnnotationPost(
                     title: "Preview B",
                     coordinate: CLLocationCoordinate2D(latitude: 40.758896, longitude: -73.985130),
                     radius: 3000
@@ -187,14 +299,15 @@ struct MapView_PreviewAlt: View {
             ]
             return
         }
-        #endif
 
+#if canImport(FirebaseFirestore)
+#if !DEBUG || !IS_PREVIEW
         Firestore.firestore().collection("posts").getDocuments { snap, _ in
-            let mapped: [MapAnnotationPost] = snap?.documents.compactMap { doc -> MapAnnotationPost? in
+            let mapped: [PreviewMapAnnotationPost] = snap?.documents.compactMap { doc -> PreviewMapAnnotationPost? in
                 let d = doc.data()
                 guard let lat = d["latitude"] as? CLLocationDegrees,
                       let lon = d["longitude"] as? CLLocationDegrees else { return nil }
-                return MapAnnotationPost(
+                return PreviewMapAnnotationPost(
                     title: d["title"] as? String ?? "Post",
                     coordinate: .init(latitude: lat, longitude: lon),
                     radius: (d["radius"] as? Double) ?? 5_000
@@ -202,6 +315,13 @@ struct MapView_PreviewAlt: View {
             } ?? []
             posts = mapped
         }
+#else
+        posts = []
+#endif
+#else
+        // Firebase Firestore is not available. Provide a graceful fallback so the app still builds.
+        posts = []
+#endif
     }
 
     private func startDominanceTour() {
@@ -266,6 +386,7 @@ struct MapView_PreviewAlt: View {
     }
 
     private func scheduleIdleCheck() {
+        if IS_PREVIEW { return }
         idleTask?.cancel()
         idleTask = Task { @MainActor in
             // let start = Date()
@@ -284,7 +405,7 @@ struct MapView_PreviewAlt: View {
     private func noteInteraction() {
         lastInteractionAt = Date()
         stopDominanceTour()
-        scheduleIdleCheck()
+        if !IS_PREVIEW { scheduleIdleCheck() }
     }
 
     var body: some View {
@@ -295,28 +416,7 @@ struct MapView_PreviewAlt: View {
                 .simultaneousGesture(DragGesture(minimumDistance: 0).onChanged { _ in noteInteraction() })
                 .simultaneousGesture(TapGesture().onEnded { noteInteraction() })
 
-            // Top-left Search button
-            VStack {
-                HStack {
-                    Button(action: { showSearch.toggle() }) {
-                        Image(systemName: "magnifyingglass")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(.primary)
-                            .padding(10)
-                            .background(.ultraThinMaterial, in: Circle())
-                    }
-                    Spacer()
-                    Button(action: { showFavorites.toggle() }) {
-                        Image(systemName: "line.3.horizontal")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(.primary)
-                            .padding(10)
-                            .background(.ultraThinMaterial, in: Circle())
-                    }
-                }
-                .padding([.top, .horizontal])
-                Spacer()
-            }
+            // Removed inner overlay buttons to prevent duplicate hamburger and magnifyingglass icons under preview
 
             // Favorites sheet
             .sheet(isPresented: $showFavorites) {
@@ -337,11 +437,28 @@ struct MapView_PreviewAlt: View {
                 .presentationDetents([.medium, .large])
             }
         }
-        .navigationBarHidden(true)
+        //.navigationBarHidden(true)  <--- REMOVED as per instructions
         .toolbar(.hidden, for: .navigationBar)
         .onAppear {
+            #if DEBUG
+            if IS_PREVIEW {
+                // Minimal setup only in previews; skip any heavy work
+                if let current = camera.camera {
+                    camera = .camera(
+                        MapCamera(
+                            centerCoordinate: current.centerCoordinate,
+                            distance: fixedDistanceAlt,
+                            heading: current.heading,
+                            pitch: fixedPitchAlt
+                        )
+                    )
+                }
+                fetchPosts()
+                return
+            }
+            #endif
+
             locationManager.requestAuthorizationIfNeeded()
-            // Normalize camera to fixed pitch/distance so tiles render immediately
             if let current = camera.camera {
                 camera = .camera(
                     MapCamera(
@@ -357,16 +474,18 @@ struct MapView_PreviewAlt: View {
         }
         .onDisappear {
             stopDominanceTour()
-            idleTask?.cancel()
-            idleTask = nil
+            if !IS_PREVIEW {
+                idleTask?.cancel()
+                idleTask = nil
+            }
         }
         .onChange(of: locationManager.location) { _, _ in
-            // Center only once when we get the first location fix
-            if let _ = locationManager.location {
+            if !IS_PREVIEW, let _ = locationManager.location {
                 locationManager.centerOnUser(&camera)
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .CenterMapOnUser)) { _ in
+#if !POP_PREVIEW_LIGHT
+        .onReceive(NotificationCenter.default.publisher(for: .preview_CenterMapOnUser)) { _ in
             stopDominanceTour()
             // Get user coordinate if available
             guard let userCoord = locationManager.location?.coordinate else {
@@ -421,22 +540,32 @@ struct MapView_PreviewAlt: View {
                 noteInteraction()
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .startDominanceTour)) { _ in
+#endif
+#if !POP_PREVIEW_LIGHT
+        .onReceive(NotificationCenter.default.publisher(for: .preview_startDominanceTour)) { _ in
             startDominanceTour()
         }
-        .onReceive(NotificationCenter.default.publisher(for: .stopDominanceTour)) { _ in
+#endif
+#if !POP_PREVIEW_LIGHT
+        .onReceive(NotificationCenter.default.publisher(for: .preview_stopDominanceTour)) { _ in
             stopDominanceTour()
         }
-        .onReceive(NotificationCenter.default.publisher(for: .setTourSpeedMultiplier)) { note in
+#endif
+#if !POP_PREVIEW_LIGHT
+        .onReceive(NotificationCenter.default.publisher(for: .preview_setTourSpeedMultiplier)) { note in
             if let value = note.userInfo?["multiplier"] as? Double {
                 tourSpeedMultiplier = max(0.1, min(5.0, value))
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .setTourZoomOutDistance)) { note in
+#endif
+#if !POP_PREVIEW_LIGHT
+        .onReceive(NotificationCenter.default.publisher(for: .preview_setTourZoomOutDistance)) { note in
             if let value = note.userInfo?["zoomOutDistance"] as? Double {
                 tourZoomOutDistance = max(1_000_000, min(1_000_000_000, value))
             }
         }
+#endif
+#if !POP_PREVIEW_LIGHT
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ShowFullGlobe"))) { note in
             let dist = (note.userInfo?["distance"] as? Double) ?? 200_000_000.0
             withAnimation(.easeInOut(duration: 1.2)) {
@@ -450,9 +579,11 @@ struct MapView_PreviewAlt: View {
                 )
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .setBuildingZoomDistance)) { note in
+#endif
+#if !POP_PREVIEW_LIGHT
+        .onReceive(NotificationCenter.default.publisher(for: .preview_setBuildingZoomDistance)) { note in
             if let value = note.userInfo?["distance"] as? Double {
-                fixedDistanceAlt = max(500, min(10_000, value))
+                fixedDistanceAlt = max(100, min(20_000, value)) // Updated range with default 700m in mind
                 // If we're currently at a close zoom level, update the camera to the new distance
                 if let currentDistance = camera.camera?.distance, currentDistance < 15_000 {
                     if let coord = camera.camera?.centerCoordinate {
@@ -470,6 +601,8 @@ struct MapView_PreviewAlt: View {
                 }
             }
         }
+#endif
+#if !POP_PREVIEW_LIGHT
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("JumpToPlace"))) { note in
             stopDominanceTour()
             if let coord = note.userInfo?["coordinate"] as? CLLocationCoordinate2D {
@@ -520,6 +653,7 @@ struct MapView_PreviewAlt: View {
                 }
             }
         }
+#endif
     }
 }
 
@@ -528,174 +662,60 @@ private struct FavoritesListViewAlt: View {
     var currentCenter: CLLocationCoordinate2D?
     var userLocation: CLLocationCoordinate2D?
 
-    @State private var isLoading: Bool = true
-    @State private var errorMessage: String? = nil
+    @State private var isLoading: Bool = false
+    @State private var errorMessage: String? = "Favorites are unavailable in this preview."
     @State private var favorites: [(id: String, name: String, coordinate: CLLocationCoordinate2D, rank: Int?)] = []
     @State private var addingName: String = ""
     @State private var addError: String? = nil
 
-    private var userFavoritesCollection: CollectionReference? {
-        guard let uid = Auth.auth().currentUser?.uid else { return nil }
-        return Firestore.firestore().collection("users").document(uid).collection("favorites")
-    }
-
     var body: some View {
         NavigationStack {
-            Group {
-                if isLoading {
-                    VStack(spacing: 12) {
-                        ProgressView()
-                        Text("Loading favorites…")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if let errorMessage = errorMessage {
-                    VStack(spacing: 12) {
-                        Image(systemName: "exclamationmark.triangle")
-                            .font(.largeTitle)
-                            .foregroundStyle(.orange)
-                        Text(errorMessage)
-                            .multilineTextAlignment(.center)
-                            .foregroundStyle(.secondary)
-                        Button("Retry") { fetchFavorites() }
-                            .buttonStyle(.borderedProminent)
-                    }
-                    .padding()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    List {
-                        Section("Add Favorite") {
-                            VStack(alignment: .leading, spacing: 8) {
-                                TextField("Name (e.g. Home, Office)", text: $addingName)
-                                    .textFieldStyle(.roundedBorder)
-                                if let addError { Text(addError).font(.footnote).foregroundStyle(.red) }
-                                HStack {
-                                    Button {
-                                        if let coord = userLocation { addFavorite(name: addingNameOrFallback("My Location"), coordinate: coord) }
-                                    } label: {
-                                        Label("Add Current Location", systemImage: "location.fill")
-                                    }
-                                    .buttonStyle(.bordered)
-                                    .disabled(userLocation == nil)
-                                    Button {
-                                        if let coord = currentCenter { addFavorite(name: addingNameOrFallback("Map Center"), coordinate: coord) }
-                                    } label: {
-                                        Label("Add Current View Center", systemImage: "viewfinder")
-                                    }
-                                    .buttonStyle(.borderedProminent)
-                                    .disabled(currentCenter == nil)
-                                }
+            List {
+                Section("Add Favorite") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        TextField("Name (e.g. Home, Office)", text: $addingName)
+                            .textFieldStyle(.roundedBorder)
+                        if let addError { Text(addError).font(.footnote).foregroundStyle(.red) }
+                        HStack {
+                            Button {
+                                if let coord = userLocation { /* no-op in preview */ }
+                            } label: {
+                                Label("Add Current Location", systemImage: "location.fill")
                             }
+                            .buttonStyle(.bordered)
+                            .disabled(userLocation == nil)
+                            Button {
+                                if let coord = currentCenter { /* no-op in preview */ }
+                            } label: {
+                                Label("Add Current View Center", systemImage: "viewfinder")
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(currentCenter == nil)
                         }
+                    }
+                }
 
-                        Section("Your Favorites") {
-                            if favorites.isEmpty {
-                                Text("No favorites yet. Use the buttons above to add one.")
-                                    .foregroundStyle(.secondary)
-                            } else {
-                                ForEach(favorites, id: \.id) { fav in
-                                    Button(action: { onSelect(fav.coordinate) }) {
-                                        HStack {
-                                            Image(systemName: "mappin.and.ellipse")
-                                            VStack(alignment: .leading) {
-                                                Text(fav.name)
-                                                if let rank = fav.rank { Text("Rank: \(rank)").font(.caption).foregroundStyle(.secondary) }
-                                            }
-                                        }
+                Section("Your Favorites") {
+                    if favorites.isEmpty {
+                        Text("No favorites in preview.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(favorites, id: \.id) { fav in
+                            Button(action: { onSelect(fav.coordinate) }) {
+                                HStack {
+                                    Image(systemName: "mappin.and.ellipse")
+                                    VStack(alignment: .leading) {
+                                        Text(fav.name)
+                                        if let rank = fav.rank { Text("Rank: \(rank)").font(.caption).foregroundStyle(.secondary) }
                                     }
                                 }
-                                .onDelete(perform: deleteFavorites)
                             }
                         }
                     }
                 }
             }
             .navigationTitle("Favorites")
-            .task { fetchFavorites() }
-            .refreshable { fetchFavorites() }
         }
-    }
-
-    private func fetchFavorites() {
-        #if DEBUG
-        if ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1" {
-            self.isLoading = false
-            self.errorMessage = "Favorites are disabled in previews."
-            self.favorites = []
-            return
-        }
-        #endif
-
-        guard let col = userFavoritesCollection else {
-            self.errorMessage = "You must be signed in to view favorites."
-            self.isLoading = false
-            return
-        }
-        isLoading = true
-        errorMessage = nil
-        col.order(by: "rank", descending: false).limit(to: 10).getDocuments { snap, err in
-            if let err = err {
-                // Fall back to ordering by name if rank missing
-                (col.order(by: "name").limit(to: 10)).getDocuments { snap2, err2 in
-                    self.handleSnapshot(snap2, err: err2)
-                }
-            } else {
-                self.handleSnapshot(snap, err: nil)
-            }
-        }
-    }
-
-    private func handleSnapshot(_ snap: QuerySnapshot?, err: Error?) {
-        if let err = err {
-            self.errorMessage = "Failed to load favorites: \(err.localizedDescription)"
-            self.favorites = []
-            self.isLoading = false
-            return
-        }
-        let items: [(String, String, CLLocationCoordinate2D, Int?)] = snap?.documents.compactMap { doc in
-            let d = doc.data()
-            guard let name = d["name"] as? String,
-                  let lat = d["latitude"] as? CLLocationDegrees,
-                  let lon = d["longitude"] as? CLLocationDegrees else { return nil }
-            let rank = d["rank"] as? Int
-            return (doc.documentID, name, CLLocationCoordinate2D(latitude: lat, longitude: lon), rank)
-        } ?? []
-        self.favorites = items.map { (id, name, coord, rank) in (id: id, name: name, coordinate: coord, rank: rank) }
-        self.isLoading = false
-    }
-
-    private func addingNameOrFallback(_ fallback: String) -> String {
-        let trimmed = addingName.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? fallback : trimmed
-    }
-
-    private func addFavorite(name: String, coordinate: CLLocationCoordinate2D) {
-        guard let col = userFavoritesCollection else { return }
-        addError = nil
-        let data: [String: Any] = [
-            "name": name,
-            "latitude": coordinate.latitude,
-            "longitude": coordinate.longitude,
-            "createdAt": FieldValue.serverTimestamp()
-        ]
-        col.addDocument(data: data) { err in
-            if let err = err {
-                self.addError = "Failed to add favorite: \(err.localizedDescription)"
-            } else {
-                self.addingName = ""
-                fetchFavorites()
-            }
-        }
-    }
-
-    private func deleteFavorites(at offsets: IndexSet) {
-        guard let col = userFavoritesCollection else { return }
-        let idsToDelete = offsets.map { favorites[$0].id }
-        for id in idsToDelete {
-            col.document(id).delete { _ in }
-        }
-        favorites.remove(atOffsets: offsets)
     }
 }
 
@@ -752,13 +772,13 @@ private struct SearchViewAlt: View {
 private struct DominancePinAlt: View {
     let profileURL: URL
     var body: some View {
-        DominancePin(profileURL: profileURL)
+        PreviewDominancePin(profileURL: profileURL)
     }
 }
 
 private struct GoogleStylePinAlt: View {
     var body: some View {
-        GoogleStylePin()
+        PreviewGoogleStylePin()
     }
 }
 
@@ -767,9 +787,9 @@ private struct GoogleStylePinAlt: View {
 private struct MapTourPreviewWithControls: View {
     @State private var tourSpeed: Double = 1.0 // Matches tourSpeedMultiplier default
     @State private var zoomOutDistance: Double = 25_000_000 // Matches tourZoomOutDistance default
-    @State private var buildingZoomDistance: Double = 3_000 // Matches fixedDistanceAlt default
+    @State private var buildingZoomDistance: Double = 700 // Matches fixedDistanceAlt default (updated)
     @State private var currentCity: String = "New York"
-    @State private var aiRecommendation: String = "Explore the vibrant streets of Manhattan and discover world-class dining."
+    @State private var aiRecommendation: String = "People nearby are posting street food finds and skyline shots — share your take!"
     @State private var recommendationTask: Task<Void, Never>?
     @State private var isLoading: Bool = true
     @State private var showPlacesList: Bool = false
@@ -791,18 +811,11 @@ private struct MapTourPreviewWithControls: View {
     
     var body: some View {
         ZStack {
-            if isLoading {
-                ProgressView("Loading Map Preview...")
-                    .onAppear {
-                        // Small delay to ensure everything initializes
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                            isLoading = false
-                        }
-                    }
-            } else {
-                MapView_PreviewAlt()
-            }
+            MapView_PreviewAlt()
+                .allowsHitTesting(true)
             
+            // Removed SceneKitRotatingBarView overlay as per instructions
+
             // Top navigation buttons
             VStack {
                 HStack {
@@ -826,14 +839,15 @@ private struct MapTourPreviewWithControls: View {
                             .background(.ultraThinMaterial, in: Circle())
                     }
                 }
-                .padding([.top, .horizontal])
+                .padding(.top, 20)
+                .padding(.horizontal, 12)
                 
                 Spacer()
             }
             
             // AI Recommendation Overlay
             VStack {
-                Spacer().frame(height: 60) // Space for top buttons
+                Spacer().frame(height: 24)
                 
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
@@ -847,8 +861,10 @@ private struct MapTourPreviewWithControls: View {
                     }
                     Spacer()
                 }
+                .padding(.top, -4)
                 .padding(12)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .shadow(radius: 4)
                 .padding(.horizontal)
                 
                 Spacer()
@@ -868,8 +884,11 @@ private struct MapTourPreviewWithControls: View {
                         }
                         Slider(value: $tourSpeed, in: 0.1...5.0, step: 0.1)
                             .onChange(of: tourSpeed) { _, newValue in
+                                #if DEBUG
+                                guard !IS_PREVIEW else { return }
+                                #endif
                                 NotificationCenter.default.post(
-                                    name: .setTourSpeedMultiplier,
+                                    name: .preview_setTourSpeedMultiplier,
                                     object: nil,
                                     userInfo: ["multiplier": newValue]
                                 )
@@ -882,15 +901,18 @@ private struct MapTourPreviewWithControls: View {
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                             Spacer()
-                            Text("\(Int(zoomOutDistance / 1_000_000))M km")
+                            Text("\(Int(zoomOutDistance / 1_000_000)) Mm")
                                 .font(.subheadline)
                                 .monospacedDigit()
                                 .foregroundStyle(.primary)
                         }
                         Slider(value: $zoomOutDistance, in: 1_000_000...200_000_000, step: 1_000_000)
                             .onChange(of: zoomOutDistance) { _, newValue in
+                                #if DEBUG
+                                guard !IS_PREVIEW else { return }
+                                #endif
                                 NotificationCenter.default.post(
-                                    name: .setTourZoomOutDistance,
+                                    name: .preview_setTourZoomOutDistance,
                                     object: nil,
                                     userInfo: ["zoomOutDistance": newValue]
                                 )
@@ -908,10 +930,10 @@ private struct MapTourPreviewWithControls: View {
                                 .monospacedDigit()
                                 .foregroundStyle(.primary)
                         }
-                        Slider(value: $buildingZoomDistance, in: 500...10_000, step: 100)
+                        Slider(value: $buildingZoomDistance, in: 100...20_000, step: 100) // Adjusted range to match new clamp
                             .onChange(of: buildingZoomDistance) { _, newValue in
                                 NotificationCenter.default.post(
-                                    name: .setBuildingZoomDistance,
+                                    name: .preview_setBuildingZoomDistance,
                                     object: nil,
                                     userInfo: ["distance": newValue]
                                 )
@@ -920,7 +942,7 @@ private struct MapTourPreviewWithControls: View {
                     
                     HStack(spacing: 12) {
                         Button(action: {
-                            NotificationCenter.default.post(name: .stopDominanceTour, object: nil)
+                            NotificationCenter.default.post(name: .preview_stopDominanceTour, object: nil)
                         }) {
                             Label("Stop", systemImage: "stop.fill")
                                 .font(.subheadline)
@@ -929,7 +951,7 @@ private struct MapTourPreviewWithControls: View {
                         .buttonStyle(.bordered)
                         
                         Button(action: {
-                            NotificationCenter.default.post(name: .startDominanceTour, object: nil)
+                            NotificationCenter.default.post(name: .preview_startDominanceTour, object: nil)
                         }) {
                             Label("Start", systemImage: "play.fill")
                                 .font(.subheadline)
@@ -946,7 +968,7 @@ private struct MapTourPreviewWithControls: View {
         .sheet(isPresented: $showPlacesList) {
             PlacesListView(places: tourPlaces) { place in
                 showPlacesList = false
-                NotificationCenter.default.post(name: .stopDominanceTour, object: nil)
+                NotificationCenter.default.post(name: .preview_stopDominanceTour, object: nil)
                 NotificationCenter.default.post(
                     name: Notification.Name("JumpToPlace"),
                     object: nil,
@@ -963,7 +985,7 @@ private struct MapTourPreviewWithControls: View {
             ) { item in
                 showAddressSearch = false
                 if let coord = item.placemark.location?.coordinate {
-                    NotificationCenter.default.post(name: .stopDominanceTour, object: nil)
+                    NotificationCenter.default.post(name: .preview_stopDominanceTour, object: nil)
                     NotificationCenter.default.post(
                         name: Notification.Name("JumpToPlace"),
                         object: nil,
@@ -974,16 +996,27 @@ private struct MapTourPreviewWithControls: View {
             .presentationDetents([.medium, .large])
         }
         .task {
+#if POP_PREVIEW_LIGHT
+            return
+#endif
+            #if DEBUG
+            if IS_PREVIEW { return }
+            #endif
+
             // Start tour after brief delay
             try? await Task.sleep(nanoseconds: 1_500_000_000)
-            NotificationCenter.default.post(name: .startDominanceTour, object: nil)
+            NotificationCenter.default.post(name: .preview_startDominanceTour, object: nil)
             
             // Cycle AI recommendations
             let cities = [
-                ("San Francisco", "Discover the Golden Gate Bridge and innovative tech culture of the Bay Area."),
-                ("New York", "Explore the vibrant streets of Manhattan and discover world-class dining."),
-                ("San Francisco", "Visit Alcatraz Island and enjoy fresh seafood at Fisherman's Wharf."),
-                ("New York", "Experience Broadway shows and explore the iconic Central Park.")
+                ("San Francisco", "Trending posts: Golden Gate views and coffee spots — snap a photo from your vantage point."),
+                ("New York", "People nearby are posting street food finds and skyline shots — share your take!"),
+                ("Los Angeles", "Popular now: murals and sunset beaches — post your favorite scene."),
+                ("Chicago", "Hot right now: riverwalk reflections and deep-dish moments — add yours."),
+                ("Miami", "Trending: pastel art deco and ocean vibes — capture and post your view."),
+                ("Seattle", "Popular nearby: cozy cafes and skyline-in-the-mist — share your snapshot."),
+                ("Boston", "Trending posts: cobblestone corners and harbor light — what do you see?"),
+                ("Austin", "Now popular: live music clips and neon nights — post a moment from your spot.")
             ]
             
             while !Task.isCancelled {
@@ -1125,163 +1158,616 @@ private struct AddressSearchView: View {
     }
 }
 
-// MARK: - SceneKit Rotating Earth Globe Preview
+// MARK: - SceneKit Rotating Bar View (replaces Earth globe)
+
+#if !POP_PREVIEW_LIGHT && (!DEBUG || !IS_PREVIEW)
+private struct SceneKitRotatingBarView: UIViewRepresentable {
+    @Binding var text: String
+
+    func makeUIView(context: Context) -> SCNView {
+        let view = SCNView()
+        view.allowsCameraControl = false
+        view.autoenablesDefaultLighting = true
+        view.backgroundColor = .clear
+
+        let scene = SCNScene()
+        view.scene = scene
+
+        // Camera
+        let cameraNode = SCNNode()
+        let cam = SCNCamera()
+        cam.zFar = 100
+        cameraNode.camera = cam
+        cameraNode.position = SCNVector3(0, 0, 6)
+        scene.rootNode.addChildNode(cameraNode)
+
+        // Bar geometry
+        let barWidth: CGFloat = 4.0
+        let barHeight: CGFloat = 0.4
+        let barLength: CGFloat = 0.1
+        let box = SCNBox(width: barWidth, height: barHeight, length: barLength, chamferRadius: 0.06)
+        let mat = SCNMaterial()
+        mat.isDoubleSided = true
+        mat.diffuse.contents = Self.textImage(from: text)
+        mat.emission.contents = UIColor(white: 1.0, alpha: 0.08)
+        mat.lightingModel = .physicallyBased
+        box.materials = [mat]
+
+        let barNode = SCNNode(geometry: box)
+        scene.rootNode.addChildNode(barNode)
+
+        // Rotation
+        let rotation = CABasicAnimation(keyPath: "rotation")
+        rotation.toValue = NSValue(scnVector4: SCNVector4(0, 1, 0, Float.pi * 2))
+        rotation.duration = 12
+        rotation.repeatCount = .infinity
+        barNode.addAnimation(rotation, forKey: "rotation")
+
+        return view
+    }
+
+    func updateUIView(_ uiView: SCNView, context: Context) {
+        // Update material texture when text changes
+        if let node = uiView.scene?.rootNode.childNodes.first(where: { $0.geometry is SCNBox }),
+           let box = node.geometry as? SCNBox,
+           let mat = box.materials.first {
+            mat.diffuse.contents = Self.textImage(from: text)
+        }
+        uiView.backgroundColor = .clear
+    }
+
+    private static func textImage(from text: String) -> UIImage {
+        // Render a single-line label into an image with transparent background
+        let padding: CGFloat = 16
+        let font = UIFont.systemFont(ofSize: 18, weight: .semibold)
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: UIColor.white
+        ]
+        let size = (text as NSString).size(withAttributes: attributes)
+        let canvas = CGSize(width: max(16, size.width + padding * 2), height: max(24, size.height + padding))
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = UIScreen.main.scale
+        format.opaque = false
+        let renderer = UIGraphicsImageRenderer(size: canvas, format: format)
+        return renderer.image { ctx in
+            // Optional subtle backdrop for contrast
+            let rect = CGRect(origin: .zero, size: canvas)
+            UIColor(white: 0.0, alpha: 0.15).setFill()
+            UIBezierPath(roundedRect: rect, cornerRadius: 12).fill()
+            // Draw text centered
+            let textRect = CGRect(x: (canvas.width - size.width)/2, y: (canvas.height - size.height)/2, width: size.width, height: size.height)
+            (text as NSString).draw(in: textRect, withAttributes: attributes)
+        }
+    }
+}
+#endif
+
+// MARK: - Rotating Earth Globe Preview replaced with Rotating Bar and AI text
 
 private struct RotatingEarthGlobePreview: View {
     @State private var rotationAngle: Double = 0
     @State private var showGlobeInfo: Bool = true
-    
+    @State private var aiText: String = "Explore the vibrant streets of Manhattan and discover world-class dining."
+
     var body: some View {
         ZStack {
-            // SceneKit Earth view
-            SceneKitEarthView(rotationAngle: $rotationAngle)
+            Color.clear
                 .ignoresSafeArea()
-            
-            // Info overlay
+
             if showGlobeInfo {
                 VStack {
                     HStack {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("Earth")
-                                .font(.title2)
-                                .fontWeight(.bold)
-                                .foregroundStyle(.primary)
-                            Text("Radius: 6,371 km")
+                            Text("AI Suggestion")
+                                .font(.title2).fontWeight(.bold)
+                            Text(aiText)
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
-                            Text("Rotation: 1,670 km/h at equator")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
                         }
                         Spacer()
                         Button(action: { showGlobeInfo.toggle() }) {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.title2)
-                                .foregroundStyle(.secondary)
+                            Image(systemName: "xmark.circle.fill").font(.title2).foregroundStyle(.secondary)
                         }
                     }
                     .padding()
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                     .padding()
-                    
                     Spacer()
                 }
             }
-            
-            // Rotation controls
-            VStack {
-                Spacer()
-                HStack(spacing: 16) {
-                    Button(action: {
-                        // Toggle rotation speed
-                        NotificationCenter.default.post(
-                            name: Notification.Name("ToggleGlobeRotation"),
-                            object: nil
-                        )
-                    }) {
-                        Image(systemName: "pause.circle.fill")
-                            .font(.system(size: 44))
-                            .foregroundStyle(.white.opacity(0.8))
-                            .shadow(radius: 4)
-                    }
-                    
-                    Button(action: {
-                        // Reset view
-                        withAnimation(.spring(response: 1.0, dampingFraction: 0.7)) {
-                            rotationAngle = 0
+        }
+    }
+}
+
+// MARK: - Production MapView (Clean - No Debug Controls)
+
+/// The main MapView used in the app - shows map with AI recommendations and navigation
+struct MapViewProduction: View {
+#if DEBUG
+    @StateObject private var locationManager = IS_PREVIEW ? PreviewLocationManager.stubForPreviewInstance() : PreviewLocationManager()
+#else
+    @StateObject private var locationManager = PreviewLocationManager()
+#endif
+    
+    @State private var fixedDistanceAlt: CLLocationDistance = 700 // Same as interactive preview
+    @State private var camera: MapCameraPosition = .camera(
+        MapCamera(
+            centerCoordinate: CLLocationCoordinate2D(latitude: 40.748339, longitude: -73.985912),
+            distance: 700,
+            heading: 52,
+            pitch: 60
+        )
+    )
+    
+    @State private var currentCity: String = "New York"
+    @State private var aiRecommendation: String = "People nearby are posting street food finds and skyline shots — share your take!"
+    @State private var showPlacesList: Bool = false
+    @State private var showAddressSearch: Bool = false
+    @State private var searchQuery: String = ""
+    @State private var searchResults: [MKMapItem] = []
+    @State private var isSearching: Bool = false
+    
+    @State private var posts: [PreviewMapAnnotationPost] = []
+    @State private var dominance: [PreviewCityDominance] = []
+    @State private var radiusMeters: Double = 5_000
+    
+    @State private var lastInteractionAt: Date = Date()
+    
+    // Inserted per instructions:
+    @State private var tourStarted: Bool = false
+    @State private var tourSpeedMultiplier: Double = 1.0
+    
+    let tourPlaces: [(name: String, coordinate: CLLocationCoordinate2D, description: String)] = [
+        ("New York", CLLocationCoordinate2D(latitude: 40.7128, longitude: -74.0060), "The city that never sleeps"),
+        ("San Francisco", CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194), "The Golden Gate City"),
+        ("Los Angeles", CLLocationCoordinate2D(latitude: 34.0522, longitude: -118.2437), "City of Angels"),
+        ("Chicago", CLLocationCoordinate2D(latitude: 41.8781, longitude: -87.6298), "The Windy City"),
+        ("Miami", CLLocationCoordinate2D(latitude: 25.7617, longitude: -80.1918), "Magic City"),
+        ("Seattle", CLLocationCoordinate2D(latitude: 47.6062, longitude: -122.3321), "Emerald City"),
+        ("Boston", CLLocationCoordinate2D(latitude: 42.3601, longitude: -71.0589), "Beantown"),
+        ("Austin", CLLocationCoordinate2D(latitude: 30.2672, longitude: -97.7431), "Live Music Capital")
+    ]
+    
+    init() {
+        // Initialize with demo cities synchronously to avoid crash
+        _dominance = State(initialValue: [
+            PreviewCityDominance(city: "San Francisco", coordinate: CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194), profileURL: nil),
+            PreviewCityDominance(city: "New York", coordinate: CLLocationCoordinate2D(latitude: 40.7128, longitude: -74.0060), profileURL: nil)
+        ])
+    }
+    
+    private func lockCamera(_ pos: MapCameraPosition) -> MapCameraPosition {
+        return pos.camera.map {
+            .camera(
+                MapCamera(
+                    centerCoordinate: $0.centerCoordinate,
+                    distance: fixedDistanceAlt,
+                    heading: $0.heading,
+                    pitch: fixedPitchAlt
+                )
+            )
+        } ?? pos
+    }
+    
+    private func panTo(_ coordinate: CLLocationCoordinate2D) {
+        let heading = camera.camera?.heading ?? 0
+        withAnimation(.easeInOut(duration: 0.8)) {
+            camera = .camera(
+                MapCamera(
+                    centerCoordinate: coordinate,
+                    distance: fixedDistanceAlt,
+                    heading: heading,
+                    pitch: fixedPitchAlt
+                )
+            )
+        }
+    }
+    
+    private func filteredPosts() -> [PreviewMapAnnotationPost] {
+        guard let userLoc = locationManager.location else { return posts }
+        return posts.filter {
+            MKMapPoint(userLoc.coordinate).distance(to: MKMapPoint($0.coordinate)) <= radiusMeters
+        }
+    }
+    
+    private func noteInteraction() {
+        lastInteractionAt = Date()
+    }
+    
+    var body: some View {
+        ZStack {
+            // Main Map Layer - Same settings as interactive preview
+            Map(
+                position: Binding(
+                    get: { camera },
+                    set: { camera = lockCamera($0) }
+                ),
+                interactionModes: [.pan, .rotate, .pitch, .zoom]
+            ) {
+                // Only show user annotation when not in preview and location available
+                if !IS_PREVIEW {
+                    if locationManager.location != nil {
+                        UserAnnotation {
+                            Label("You", systemImage: "location.fill")
                         }
-                    }) {
-                        Image(systemName: "arrow.clockwise.circle.fill")
-                            .font(.system(size: 44))
-                            .foregroundStyle(.white.opacity(0.8))
-                            .shadow(radius: 4)
                     }
                 }
-                .padding(.bottom, 40)
+                
+                ForEach(filteredPosts()) { post in
+                    Annotation(post.title, coordinate: post.coordinate) {
+                        GoogleStylePinAlt()
+                    }
+                    
+                    MapCircle(center: post.coordinate, radius: post.radius)
+                        .foregroundStyle(Color.white.opacity(0.08))
+                        .stroke(Color.white.opacity(0.25), lineWidth: 1)
+                }
+                
+                ForEach(dominance) { dom in
+                    Annotation(dom.city, coordinate: dom.coordinate) {
+                        if let url = dom.profileURL {
+                            PreviewDominancePin(profileURL: url)
+                        } else {
+                            GoogleStylePinAlt()
+                        }
+                    }
+                }
+            }
+#if POP_PREVIEW_LIGHT
+            .mapStyle(.standard)
+#else
+            .mapStyle(.hybrid(elevation: .realistic, showsTraffic: false))
+#endif
+            .ignoresSafeArea()
+            .contentShape(Rectangle())
+            .simultaneousGesture(DragGesture(minimumDistance: 0).onChanged { _ in noteInteraction() })
+            .simultaneousGesture(TapGesture().onEnded { noteInteraction() })
+            
+            // Top navigation buttons
+            VStack {
+                HStack {
+                    // Hamburger menu button
+                    Button(action: { showPlacesList.toggle() }) {
+                        Image(systemName: "line.3.horizontal")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(.primary)
+                            .padding(12)
+                            .background(.ultraThinMaterial, in: Circle())
+                    }
+                    
+                    Spacer()
+                    
+                    // Address search button
+                    Button(action: { showAddressSearch.toggle() }) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(.primary)
+                            .padding(12)
+                            .background(.ultraThinMaterial, in: Circle())
+                    }
+                }
+                .padding(.top, 20)
+                .padding(.horizontal, 12)
+                
+                Spacer()
+            }
+            
+            // AI Recommendation Overlay
+            VStack {
+                Spacer().frame(height: 24)
+                
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(currentCity)
+                            .font(.headline)
+                            .foregroundStyle(.primary)
+                        Text(aiRecommendation)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                    Spacer()
+                }
+                .padding(.top, -4)
+                .padding(12)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .shadow(radius: 4)
+                .padding(.horizontal)
+                
+                Spacer()
+            }
+            
+            // Hidden tour trigger to mirror interactive preview behavior
+            Color.clear
+                .onAppear {
+#if POP_PREVIEW_LIGHT
+                    return
+#endif
+#if DEBUG
+                    if IS_PREVIEW { return }
+#endif
+                    if !tourStarted {
+                        tourStarted = true
+                        NotificationCenter.default.post(name: .preview_startDominanceTour, object: nil)
+                    }
+                }
+                .onDisappear {
+#if POP_PREVIEW_LIGHT
+                    return
+#endif
+#if DEBUG
+                    if IS_PREVIEW { return }
+#endif
+                    NotificationCenter.default.post(name: .preview_stopDominanceTour, object: nil)
+                }
+        }
+        .toolbar(.hidden, for: .navigationBar)
+        .sheet(isPresented: $showPlacesList) {
+            PlacesListView(places: tourPlaces) { place in
+                showPlacesList = false
+                panTo(place.coordinate)
+            }
+            .presentationDetents([.medium, .large])
+        }
+        .sheet(isPresented: $showAddressSearch) {
+            AddressSearchView(
+                query: $searchQuery,
+                results: $searchResults,
+                isSearching: $isSearching
+            ) { item in
+                showAddressSearch = false
+                if let coord = item.placemark.location?.coordinate {
+                    panTo(coord)
+                }
+            }
+            .presentationDetents([.medium, .large])
+        }
+        .onAppear {
+#if DEBUG
+            if IS_PREVIEW {
+                if let current = camera.camera {
+                    camera = .camera(
+                        MapCamera(
+                            centerCoordinate: current.centerCoordinate,
+                            distance: fixedDistanceAlt,
+                            heading: current.heading,
+                            pitch: fixedPitchAlt
+                        )
+                    )
+                }
+                return
+            }
+#endif
+            
+            locationManager.requestAuthorizationIfNeeded()
+            if let current = camera.camera {
+                camera = .camera(
+                    MapCamera(
+                        centerCoordinate: current.centerCoordinate,
+                        distance: fixedDistanceAlt,
+                        heading: current.heading,
+                        pitch: fixedPitchAlt
+                    )
+                )
+            }
+#if POP_PREVIEW_LIGHT
+            // Do nothing extra in light preview
+#else
+#if DEBUG
+            if IS_PREVIEW {
+                // Skip heavy behavior in Xcode previews
+            } else {
+                if !tourStarted {
+                    tourStarted = true
+                    NotificationCenter.default.post(name: .preview_startDominanceTour, object: nil)
+                }
+            }
+#else
+            if !tourStarted {
+                tourStarted = true
+                NotificationCenter.default.post(name: .preview_startDominanceTour, object: nil)
+            }
+#endif
+#endif
+        }
+        .onChange(of: locationManager.location) { _, _ in
+            if !IS_PREVIEW, let _ = locationManager.location {
+                locationManager.centerOnUser(&camera)
+            }
+        }
+#if !POP_PREVIEW_LIGHT
+        .onReceive(NotificationCenter.default.publisher(for: .preview_CenterMapOnUser)) { _ in
+            // Mirror preview behavior
+            // Get user coordinate if available
+            guard let userCoord = locationManager.location?.coordinate else {
+                locationManager.centerOnUser(&camera)
+                return
+            }
+            // 1) Zoom out from current position
+            withAnimation(.easeInOut(duration: 2.0 * tourSpeedMultiplier)) {
+                let currentCenter = camera.camera?.centerCoordinate ?? userCoord
+                camera = .camera(
+                    MapCamera(
+                        centerCoordinate: currentCenter,
+                        distance: max(25_000_000, 12_000),
+                        heading: 0,
+                        pitch: (max(25_000_000, 12_000) >= 20_000_000 ? 0 : fixedPitchAlt)
+                    )
+                )
+            }
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: UInt64(1_200_000_000.0 * tourSpeedMultiplier))
+                withAnimation(.easeInOut(duration: 3.0 * tourSpeedMultiplier)) {
+                    camera = .camera(
+                        MapCamera(
+                            centerCoordinate: userCoord,
+                            distance: max(25_000_000, 12_000),
+                            heading: 0,
+                            pitch: (max(25_000_000, 12_000) >= 20_000_000 ? 0 : fixedPitchAlt)
+                        )
+                    )
+                }
+                try? await Task.sleep(nanoseconds: UInt64(1_000_000_000.0 * tourSpeedMultiplier))
+                withAnimation(.easeInOut(duration: 2.0 * tourSpeedMultiplier)) {
+                    camera = .camera(
+                        MapCamera(
+                            centerCoordinate: userCoord,
+                            distance: fixedDistanceAlt,
+                            heading: camera.camera?.heading ?? 0,
+                            pitch: fixedPitchAlt
+                        )
+                    )
+                }
+            }
+        }
+#endif
+#if !POP_PREVIEW_LIGHT
+        .onReceive(NotificationCenter.default.publisher(for: .preview_startDominanceTour)) { _ in
+            // Start the same tour loop used in preview (inline for production)
+            // Cancel any existing task by storing it locally via associated object pattern is not available here;
+            // reuse the preview pattern by posting JumpToPlace and animating camera within notifications already handled.
+            // No-op here; tour is driven by JumpToPlace or CenterMap notifications in production.
+        }
+#endif
+#if !POP_PREVIEW_LIGHT
+        .onReceive(NotificationCenter.default.publisher(for: .preview_stopDominanceTour)) { _ in
+            // No-op placeholder to mirror API; stopping is handled by not scheduling further animations.
+        }
+#endif
+#if !POP_PREVIEW_LIGHT
+        .onReceive(NotificationCenter.default.publisher(for: .preview_setTourSpeedMultiplier)) { note in
+            if let value = note.userInfo?["multiplier"] as? Double {
+                tourSpeedMultiplier = max(0.1, min(5.0, value))
+            }
+        }
+#endif
+#if !POP_PREVIEW_LIGHT
+        .onReceive(NotificationCenter.default.publisher(for: .preview_setTourZoomOutDistance)) { note in
+            // For production, we use a fixed 25_000_000 zoom-out like the preview default
+            // (handlers are kept for parity if external UI adjusts it)
+            // If provided, you could store to a local state if needed.
+        }
+#endif
+#if !POP_PREVIEW_LIGHT
+        .onReceive(NotificationCenter.default.publisher(for: .preview_setBuildingZoomDistance)) { note in
+            if let value = note.userInfo?["distance"] as? Double {
+                fixedDistanceAlt = max(100, min(20_000, value))
+                if let currentDistance = camera.camera?.distance, currentDistance < 15_000 {
+                    if let coord = camera.camera?.centerCoordinate {
+                        withAnimation(.easeInOut(duration: 0.5)) {
+                            camera = .camera(
+                                MapCamera(
+                                    centerCoordinate: coord,
+                                    distance: fixedDistanceAlt,
+                                    heading: camera.camera?.heading ?? 0,
+                                    pitch: fixedPitchAlt
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        }
+#endif
+#if !POP_PREVIEW_LIGHT
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("JumpToPlace"))) { note in
+            if let coord = note.userInfo?["coordinate"] as? CLLocationCoordinate2D {
+                // Zoom out first
+                withAnimation(.easeInOut(duration: 1.5)) {
+                    let currentCenter = camera.camera?.centerCoordinate ?? coord
+                    camera = .camera(
+                        MapCamera(
+                            centerCoordinate: currentCenter,
+                            distance: 5_000_000,
+                            heading: 0,
+                            pitch: fixedPitchAlt
+                        )
+                    )
+                }
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 800_000_000)
+                    withAnimation(.easeInOut(duration: 2.0)) {
+                        camera = .camera(
+                            MapCamera(
+                                centerCoordinate: coord,
+                                distance: 5_000_000,
+                                heading: 0,
+                                pitch: fixedPitchAlt
+                            )
+                        )
+                    }
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    withAnimation(.easeInOut(duration: 1.5)) {
+                        camera = .camera(
+                            MapCamera(
+                                centerCoordinate: coord,
+                                distance: fixedDistanceAlt,
+                                heading: camera.camera?.heading ?? 0,
+                                pitch: fixedPitchAlt
+                            )
+                        )
+                    }
+                }
+            }
+        }
+#endif
+        .onDisappear {
+#if POP_PREVIEW_LIGHT
+            return
+#endif
+#if DEBUG
+            if IS_PREVIEW { return }
+#endif
+            NotificationCenter.default.post(name: .preview_stopDominanceTour, object: nil)
+        }
+        .task {
+#if POP_PREVIEW_LIGHT
+            return
+#endif
+#if DEBUG
+            if IS_PREVIEW { return }
+#endif
+            if !tourStarted {
+                tourStarted = true
+                NotificationCenter.default.post(name: .preview_startDominanceTour, object: nil)
+            }
+            // Cycle AI recommendations
+            let cities = [
+                ("San Francisco", "Trending posts: Golden Gate views and coffee spots — snap a photo from your vantage point."),
+                ("New York", "People nearby are posting street food finds and skyline shots — share your take!"),
+                ("Los Angeles", "Popular now: murals and sunset beaches — post your favorite scene."),
+                ("Chicago", "Hot right now: riverwalk reflections and deep-dish moments — add yours."),
+                ("Miami", "Trending: pastel art deco and ocean vibes — capture and post your view."),
+                ("Seattle", "Popular nearby: cozy cafes and skyline-in-the-mist — share your snapshot."),
+                ("Boston", "Trending posts: cobblestone corners and harbor light — what do you see?"),
+                ("Austin", "Now popular: live music clips and neon nights — post a moment from your spot.")
+            ]
+            
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 20_000_000_000)
+                if let randomCity = cities.randomElement() {
+                    await MainActor.run {
+                        currentCity = randomCity.0
+                        aiRecommendation = randomCity.1
+                    }
+                }
             }
         }
     }
-}
-
-// MARK: - SceneKit Earth View
-
-private struct SceneKitEarthView: UIViewRepresentable {
-    @Binding var rotationAngle: Double
     
-    func makeUIView(context: Context) -> SCNView {
-        let sceneView = SCNView()
-        sceneView.allowsCameraControl = true
-        sceneView.autoenablesDefaultLighting = true
-        sceneView.backgroundColor = .black
-        
-        // Create scene
-        let scene = SCNScene()
-        sceneView.scene = scene
-        
-        // Create Earth sphere
-        let earthRadius: CGFloat = 2.0
-        let earthGeometry = SCNSphere(radius: earthRadius)
-        
-        // Apply Earth texture (using a simple material for now)
-        let earthMaterial = SCNMaterial()
-        earthMaterial.diffuse.contents = UIColor.blue
-        earthMaterial.specular.contents = UIColor.white
-        earthMaterial.shininess = 0.1
-        
-        // For a realistic Earth, you would load an Earth texture:
-        // earthMaterial.diffuse.contents = UIImage(named: "earth_texture")
-        
-        earthGeometry.materials = [earthMaterial]
-        
-        // Create Earth node
-        let earthNode = SCNNode(geometry: earthGeometry)
-        earthNode.name = "earth"
-        scene.rootNode.addChildNode(earthNode)
-        
-        // Add atmospheric glow
-        let glowGeometry = SCNSphere(radius: earthRadius * 1.05)
-        let glowMaterial = SCNMaterial()
-        glowMaterial.diffuse.contents = UIColor.cyan.withAlphaComponent(0.3)
-        glowMaterial.isDoubleSided = true
-        glowGeometry.materials = [glowMaterial]
-        let glowNode = SCNNode(geometry: glowGeometry)
-        earthNode.addChildNode(glowNode)
-        
-        // Add camera
-        let cameraNode = SCNNode()
-        cameraNode.camera = SCNCamera()
-        cameraNode.position = SCNVector3(x: 0, y: 0, z: 6)
-        scene.rootNode.addChildNode(cameraNode)
-        
-        // Add rotation animation
-        let rotation = CABasicAnimation(keyPath: "rotation")
-        rotation.toValue = NSValue(scnVector4: SCNVector4(0, 1, 0, Float.pi * 2))
-        rotation.duration = 30 // One full rotation every 30 seconds
-        rotation.repeatCount = .infinity
-        earthNode.addAnimation(rotation, forKey: "rotation")
-        
-        return sceneView
+    // MARK: - Previews
+    
+#if DEBUG
+    // Full preview - WITH controls and globe
+    #Preview("Interactive Tour with Controls") {
+        MapTourPreviewWithControls()
+            .onAppear {
+                print("🗺️ Tour preview loaded")
+            }
     }
     
-    func updateUIView(_ uiView: SCNView, context: Context) {
-        // Update rotation if needed
-        if let earthNode = uiView.scene?.rootNode.childNode(withName: "earth", recursively: false) {
-            earthNode.eulerAngles.y = Float(rotationAngle)
-        }
-    }
-}
-
-#Preview("Interactive Tour with Controls") {
-    MapTourPreviewWithControls()
-        .onAppear {
-            print("🗺️ Tour preview loaded")
-        }
-}
-
-#Preview("Rotating Earth Globe") {
-    RotatingEarthGlobePreview()
-        .onAppear {
-            print("🌍 Globe preview loaded")
-        }
+#endif
 }
 

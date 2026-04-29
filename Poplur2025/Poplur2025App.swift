@@ -3,6 +3,7 @@ import SwiftUI
 // Only import heavy frameworks when NOT in preview mode
 #if !DEBUG || !targetEnvironment(simulator)
 import FirebaseCore
+import FirebaseFirestore
 #if canImport(GoogleMobileAds)
 import GoogleMobileAds
 #endif
@@ -27,6 +28,13 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
             #if !DEBUG || !targetEnvironment(simulator)
             if FirebaseApp.app() == nil {
                 FirebaseApp.configure()
+                
+                // Disable Firestore offline persistence to avoid disk space issues in simulator
+                #if targetEnvironment(simulator)
+                let settings = FirestoreSettings()
+                settings.isPersistenceEnabled = false
+                Firestore.firestore().settings = settings
+                #endif
             }
             #if canImport(GoogleMobileAds)
             MobileAds.shared.start(completionHandler: nil)

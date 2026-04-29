@@ -216,7 +216,7 @@ struct HomeView: View {
     
     @ViewBuilder
     private var mapTabContent: some View {
-        MapView(coordinate: locationProvider.coordinate ?? CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194))
+        MapViewProduction()
             .task {
                 if selectedTab == .map, !didTriggerMapInitialLoad {
                     deferUntilAfterLaunch {
