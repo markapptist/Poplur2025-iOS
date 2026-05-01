@@ -308,7 +308,7 @@ struct MapView: View {
                     }
                 }
             }
-            .mapStyle(.hybrid(elevation: .flat))
+            .mapStyle(.hybrid(elevation: .realistic, showsTraffic: false))
             .ignoresSafeArea()
             .contentShape(Rectangle())
             .simultaneousGesture(DragGesture(minimumDistance: 0).onChanged { _ in noteInteraction() })

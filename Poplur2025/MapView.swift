@@ -4,6 +4,31 @@ import CoreLocation
 import SceneKit
 
 /*
+ ═══════════════════════════════════════════════════════════════════════════════
+ MapView.swift - Production Map Implementation
+ ═══════════════════════════════════════════════════════════════════════════════
+ 
+ PRIMARY MAP VIEW (DO NOT REPLACE):
+ • MapViewProduction - The ONLY map view used in the production app
+   - Hybrid map style with realistic 3D elevation  
+   - AI recommendations overlay
+   - Navigation controls (places list, address search)
+   - Optimized 60° pitch camera at 700m distance
+   - Used in HomeView.swift mapTabContent
+ 
+ PREVIEW/DEVELOPMENT VIEWS:
+ • MapTourPreviewWithControls - Interactive preview with debug controls
+   - Used for testing and tuning map behavior
+   - Includes speed/zoom/distance sliders for development
+ 
+ REMOVED VIEWS:
+ • MapView_PreviewAlt - Removed (duplicate/unused)
+ • MapView (basic) - Replaced by MapViewProduction
+ 
+ ═══════════════════════════════════════════════════════════════════════════════
+*/
+
+/*
  POP_PREVIEW_LIGHT compile-time flag enables a lighter preview mode that excludes heavy dependencies
  like FirebaseFirestore and SceneKit. Use it to speed up SwiftUI previews in complex projects.
 */
@@ -103,684 +128,11 @@ private extension PreviewLocationManager {
         return PreviewLocationManager()
     }
 }
+
 #endif
 
-struct MapView_PreviewAlt: View {
-    #if DEBUG
-    @StateObject private var locationManager = IS_PREVIEW ? PreviewLocationManager.stubForPreviewInstance() : PreviewLocationManager()
-    #else
-    @StateObject private var locationManager = PreviewLocationManager()
-    #endif
-
-    @State private var fixedDistanceAlt: CLLocationDistance = 700 // Changed to 700 for default building zoom distance
-    @State private var camera: MapCameraPosition = .camera(
-        MapCamera(
-            centerCoordinate: CLLocationCoordinate2D(latitude: 40.748339, longitude: -73.985912),
-            distance: 700,
-            heading: 52,
-            pitch: 60
-        )
-    )
-
-    @State private var posts: [PreviewMapAnnotationPost] = []
-    @State private var selectedIndex: Int?
-    @State private var radiusMeters: Double = 5_000
-
-    @State private var dominance: [PreviewCityDominance] = []
-    @State private var tourTask: Task<Void, Never>? = nil
-    @State private var tourActive: Bool = false
-    @State private var tourIndex: Int = 0
-    @State private var tourSpeedMultiplier: Double = 1.0
-
-    @State private var tourZoomOutDistance: CLLocationDistance = 25_000_000 // far enough to see the planet
-    @State private var showFavorites: Bool = false
-    @State private var showSearch: Bool = false
-    @State private var searchQuery: String = ""
-    @State private var searchResults: [MKMapItem] = []
-
-    @State private var idleTask: Task<Void, Never>? = nil
-    @State private var lastInteractionAt: Date = Date()
-    
-    init() {
-        // Initialize with demo cities synchronously to avoid preview crash
-        _dominance = State(initialValue: [
-            PreviewCityDominance(city: "San Francisco", coordinate: CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194), profileURL: nil),
-            PreviewCityDominance(city: "New York", coordinate: CLLocationCoordinate2D(latitude: 40.7128, longitude: -74.0060), profileURL: nil)
-        ])
-    }
-
-    var aiMessage: String {
-        """
-        This is an alternate preview of MapView with suffixed constants and alternative view components to avoid conflicts.
-        """
-    }
-
-    @ViewBuilder
-    func mapContent() -> some View {
-        VStack {
-            Text(aiMessage).padding()
-            Spacer()
-        }
-    }
-
-    var mapLayer: AnyView {
-        // Use full interaction modes in previews too
-        let modes: MapInteractionModes = [.pan, .rotate, .pitch, .zoom]
-
-        return AnyView(
-            Map(
-                position: Binding(
-                    get: { camera },
-                    set: { camera = lockCamera($0) }
-                ),
-                interactionModes: modes
-            ) {
-                // Only show user annotation when not in preview and location available
-                if !IS_PREVIEW {
-                    if locationManager.location != nil {
-                        UserAnnotation {
-                            Label("You", systemImage: "location.fill")
-                        }
-                    }
-                }
-
-                ForEach(filteredPosts()) { post in
-                    Annotation(post.title, coordinate: post.coordinate) {
-                        GoogleStylePinAlt()
-                    }
-
-                    MapCircle(center: post.coordinate, radius: post.radius)
-                        .foregroundStyle(Color.white.opacity(0.08))
-                        .stroke(Color.white.opacity(0.25), lineWidth: 1)
-                }
-
-                ForEach(dominance) { dom in
-                    Annotation(dom.city, coordinate: dom.coordinate) {
-                        if let url = dom.profileURL {
-                            PreviewDominancePin(profileURL: url)
-                        } else {
-                            GoogleStylePinAlt()
-                        }
-                    }
-                }
-            }
-#if POP_PREVIEW_LIGHT
-            .mapStyle(.standard)
-#else
-            .mapStyle(.hybrid(elevation: .realistic, showsTraffic: false))
-#endif
-        )
-    }
-
-    private func lockCamera(_ pos: MapCameraPosition) -> MapCameraPosition {
-        // Don't lock camera in preview mode - allow full 3D exploration
-        #if DEBUG
-        if IS_PREVIEW {
-            return pos
-        }
-        #endif
-        
-        return pos.camera.map {
-            .camera(
-                MapCamera(
-                    centerCoordinate: $0.centerCoordinate,
-                    distance: fixedDistanceAlt,
-                    heading: $0.heading,
-                    pitch: fixedPitchAlt
-                )
-            )
-        } ?? pos
-    }
-
-    private func panTo(_ coordinate: CLLocationCoordinate2D) {
-        let heading = camera.camera?.heading ?? 0
-        withAnimation(.easeInOut(duration: 0.8)) {
-            camera = .camera(
-                MapCamera(
-                    centerCoordinate: coordinate,
-                    distance: fixedDistanceAlt,
-                    heading: heading,
-                    pitch: fixedPitchAlt
-                )
-            )
-        }
-    }
-
-    private func cyclePost(direction: Int) {
-        let items = filteredPosts()
-        guard !items.isEmpty else { return }
-
-        if let idx = selectedIndex {
-            selectedIndex = (idx + direction + items.count) % items.count
-        } else {
-            selectedIndex = 0
-        }
-
-        if let idx = selectedIndex {
-            panTo(items[idx].coordinate)
-        }
-    }
-
-    private func filteredPosts() -> [PreviewMapAnnotationPost] {
-        guard let userLoc = locationManager.location else { return posts }
-        return posts.filter {
-            MKMapPoint(userLoc.coordinate).distance(to: MKMapPoint($0.coordinate)) <= radiusMeters
-        }
-    }
-
-    private func fetchPosts() {
-#if POP_PREVIEW_LIGHT
-        posts = [
-            PreviewMapAnnotationPost(
-                title: "Preview A",
-                coordinate: CLLocationCoordinate2D(latitude: 40.748339, longitude: -73.985912),
-                radius: 5000
-            ),
-            PreviewMapAnnotationPost(
-                title: "Preview B",
-                coordinate: CLLocationCoordinate2D(latitude: 40.758896, longitude: -73.985130),
-                radius: 3000
-            )
-        ]
-        return
-#endif
-        if IS_PREVIEW {
-            posts = [
-                PreviewMapAnnotationPost(
-                    title: "Preview A",
-                    coordinate: CLLocationCoordinate2D(latitude: 40.748339, longitude: -73.985912),
-                    radius: 5000
-                ),
-                PreviewMapAnnotationPost(
-                    title: "Preview B",
-                    coordinate: CLLocationCoordinate2D(latitude: 40.758896, longitude: -73.985130),
-                    radius: 3000
-                )
-            ]
-            return
-        }
-
-#if canImport(FirebaseFirestore)
-#if !DEBUG || !IS_PREVIEW
-        Firestore.firestore().collection("posts").getDocuments { snap, _ in
-            let mapped: [PreviewMapAnnotationPost] = snap?.documents.compactMap { doc -> PreviewMapAnnotationPost? in
-                let d = doc.data()
-                guard let lat = d["latitude"] as? CLLocationDegrees,
-                      let lon = d["longitude"] as? CLLocationDegrees else { return nil }
-                return PreviewMapAnnotationPost(
-                    title: d["title"] as? String ?? "Post",
-                    coordinate: .init(latitude: lat, longitude: lon),
-                    radius: (d["radius"] as? Double) ?? 5_000
-                )
-            } ?? []
-            posts = mapped
-        }
-#else
-        posts = []
-#endif
-#else
-        // Firebase Firestore is not available. Provide a graceful fallback so the app still builds.
-        posts = []
-#endif
-    }
-
-    private func startDominanceTour() {
-        tourTask?.cancel()
-        tourActive = true
-        tourTask = Task { @MainActor in
-            while !Task.isCancelled, tourActive, !dominance.isEmpty {
-                let dom = dominance[tourIndex % dominance.count]
-                // Zoom out significantly and prepare to move towards the destination
-                withAnimation(.easeInOut(duration: 2.0 / max(0.1, tourSpeedMultiplier))) {
-                    let currentCenter = camera.camera?.centerCoordinate ?? dom.coordinate
-                    camera = .camera(
-                        MapCamera(
-                            centerCoordinate: currentCenter,
-                            distance: max(tourZoomOutDistance, 12_000),
-                            heading: (max(tourZoomOutDistance, 12_000) >= 10_000_000 ? 0 : (camera.camera?.heading ?? 0)),
-                            pitch: (max(tourZoomOutDistance, 12_000) >= 20_000_000 ? 0 : fixedPitchAlt)
-                        )
-                    )
-                }
-                // Let the map settle
-                try? await Task.sleep(nanoseconds: UInt64(1_200_000_000.0 / max(0.1, tourSpeedMultiplier)))
-
-                // Fly to target city at zoomed-out distance
-                withAnimation(.easeInOut(duration: 3.0 / max(0.1, tourSpeedMultiplier))) {
-                    camera = .camera(
-                        MapCamera(
-                            centerCoordinate: dom.coordinate,
-                            distance: max(tourZoomOutDistance, 12_000),
-                            heading: (max(tourZoomOutDistance, 12_000) >= 10_000_000 ? 0 : (camera.camera?.heading ?? 0)),
-                            pitch: (max(tourZoomOutDistance, 12_000) >= 20_000_000 ? 0 : fixedPitchAlt)
-                        )
-                    )
-                }
-                // Allow tiles to begin loading
-                try? await Task.sleep(nanoseconds: UInt64(1_000_000_000.0 / max(0.1, tourSpeedMultiplier)))
-
-                // Zoom back in slowly to fixed distance at target
-                withAnimation(.easeInOut(duration: 2.0 / max(0.1, tourSpeedMultiplier))) {
-                    camera = .camera(
-                        MapCamera(
-                            centerCoordinate: dom.coordinate,
-                            distance: fixedDistanceAlt,
-                            heading: camera.camera?.heading ?? 0,
-                            pitch: fixedPitchAlt
-                        )
-                    )
-                }
-
-                // Dwell longer at the destination to allow tiles/labels to fully render
-                try? await Task.sleep(nanoseconds: UInt64(15_000_000_000.0 / max(0.1, tourSpeedMultiplier)))
-
-                tourIndex = (tourIndex + 1) % dominance.count
-            }
-        }
-    }
-
-    private func stopDominanceTour() {
-        tourActive = false
-        tourTask?.cancel()
-        tourTask = nil
-    }
-
-    private func scheduleIdleCheck() {
-        if IS_PREVIEW { return }
-        idleTask?.cancel()
-        idleTask = Task { @MainActor in
-            // let start = Date()
-            // Wait until 15 seconds after the most recent interaction time
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 1_000_000_000) // check every 1s
-                let elapsed = Date().timeIntervalSince(lastInteractionAt)
-                if elapsed >= 15.0 {
-                    startDominanceTour()
-                    break
-                }
-            }
-        }
-    }
-
-    private func noteInteraction() {
-        lastInteractionAt = Date()
-        stopDominanceTour()
-        if !IS_PREVIEW { scheduleIdleCheck() }
-    }
-
-    var body: some View {
-        ZStack {
-            mapLayer
-                .ignoresSafeArea()
-                .contentShape(Rectangle())
-                .simultaneousGesture(DragGesture(minimumDistance: 0).onChanged { _ in noteInteraction() })
-                .simultaneousGesture(TapGesture().onEnded { noteInteraction() })
-
-            // Removed inner overlay buttons to prevent duplicate hamburger and magnifyingglass icons under preview
-
-            // Favorites sheet
-            .sheet(isPresented: $showFavorites) {
-                FavoritesListViewAlt(
-                    onSelect: { coord in panTo(coord) },
-                    currentCenter: camera.camera?.centerCoordinate,
-                    userLocation: locationManager.location?.coordinate
-                )
-                .presentationDetents([.medium, .large])
-            }
-            // Search sheet
-            .sheet(isPresented: $showSearch) {
-                SearchViewAlt(query: $searchQuery, results: $searchResults) { item in
-                    if let coord = item.placemark.location?.coordinate {
-                        panTo(coord)
-                    }
-                }
-                .presentationDetents([.medium, .large])
-            }
-        }
-        //.navigationBarHidden(true)  <--- REMOVED as per instructions
-        .toolbar(.hidden, for: .navigationBar)
-        .onAppear {
-            #if DEBUG
-            if IS_PREVIEW {
-                // Minimal setup only in previews; skip any heavy work
-                if let current = camera.camera {
-                    camera = .camera(
-                        MapCamera(
-                            centerCoordinate: current.centerCoordinate,
-                            distance: fixedDistanceAlt,
-                            heading: current.heading,
-                            pitch: fixedPitchAlt
-                        )
-                    )
-                }
-                fetchPosts()
-                return
-            }
-            #endif
-
-            locationManager.requestAuthorizationIfNeeded()
-            if let current = camera.camera {
-                camera = .camera(
-                    MapCamera(
-                        centerCoordinate: current.centerCoordinate,
-                        distance: fixedDistanceAlt,
-                        heading: current.heading,
-                        pitch: fixedPitchAlt
-                    )
-                )
-            }
-            fetchPosts()
-            scheduleIdleCheck()
-        }
-        .onDisappear {
-            stopDominanceTour()
-            if !IS_PREVIEW {
-                idleTask?.cancel()
-                idleTask = nil
-            }
-        }
-        .onChange(of: locationManager.location) { _, _ in
-            if !IS_PREVIEW, let _ = locationManager.location {
-                locationManager.centerOnUser(&camera)
-            }
-        }
-#if !POP_PREVIEW_LIGHT
-        .onReceive(NotificationCenter.default.publisher(for: .preview_CenterMapOnUser)) { _ in
-            stopDominanceTour()
-            // Get user coordinate if available
-            guard let userCoord = locationManager.location?.coordinate else {
-                // Fallback to instant center if we don't have a fix yet
-                locationManager.centerOnUser(&camera)
-                noteInteraction()
-                return
-            }
-
-            // 1) Zoom out from current position
-            withAnimation(.easeInOut(duration: 2.0 * tourSpeedMultiplier)) {
-                let currentCenter = camera.camera?.centerCoordinate ?? userCoord
-                camera = .camera(
-                    MapCamera(
-                        centerCoordinate: currentCenter,
-                        distance: max(tourZoomOutDistance, 12_000),
-                        heading: 0,
-                        pitch: (max(tourZoomOutDistance, 12_000) >= 20_000_000 ? 0 : fixedPitchAlt)
-                    )
-                )
-            }
-
-            Task { @MainActor in
-                // Small pause
-                try? await Task.sleep(nanoseconds: UInt64(1_200_000_000.0 * tourSpeedMultiplier))
-                // 2) Fly to user at zoomed-out distance
-                withAnimation(.easeInOut(duration: 3.0 * tourSpeedMultiplier)) {
-                    camera = .camera(
-                        MapCamera(
-                            centerCoordinate: userCoord,
-                            distance: max(tourZoomOutDistance, 12_000),
-                            heading: 0,
-                            pitch: (max(tourZoomOutDistance, 12_000) >= 20_000_000 ? 0 : fixedPitchAlt)
-                        )
-                    )
-                }
-                // Small pause
-                try? await Task.sleep(nanoseconds: UInt64(1_000_000_000.0 * tourSpeedMultiplier))
-                // 3) Zoom back in
-                withAnimation(.easeInOut(duration: 2.0 * tourSpeedMultiplier)) {
-                    camera = .camera(
-                        MapCamera(
-                            centerCoordinate: userCoord,
-                            distance: fixedDistanceAlt,
-                            heading: camera.camera?.heading ?? 0,
-                            pitch: fixedPitchAlt
-                        )
-                    )
-                }
-                // Dwell briefly after landing on user
-                try? await Task.sleep(nanoseconds: UInt64(3_000_000_000.0 * tourSpeedMultiplier))
-                noteInteraction()
-            }
-        }
-#endif
-#if !POP_PREVIEW_LIGHT
-        .onReceive(NotificationCenter.default.publisher(for: .preview_startDominanceTour)) { _ in
-            startDominanceTour()
-        }
-#endif
-#if !POP_PREVIEW_LIGHT
-        .onReceive(NotificationCenter.default.publisher(for: .preview_stopDominanceTour)) { _ in
-            stopDominanceTour()
-        }
-#endif
-#if !POP_PREVIEW_LIGHT
-        .onReceive(NotificationCenter.default.publisher(for: .preview_setTourSpeedMultiplier)) { note in
-            if let value = note.userInfo?["multiplier"] as? Double {
-                tourSpeedMultiplier = max(0.1, min(5.0, value))
-            }
-        }
-#endif
-#if !POP_PREVIEW_LIGHT
-        .onReceive(NotificationCenter.default.publisher(for: .preview_setTourZoomOutDistance)) { note in
-            if let value = note.userInfo?["zoomOutDistance"] as? Double {
-                tourZoomOutDistance = max(1_000_000, min(1_000_000_000, value))
-            }
-        }
-#endif
-#if !POP_PREVIEW_LIGHT
-        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ShowFullGlobe"))) { note in
-            let dist = (note.userInfo?["distance"] as? Double) ?? 200_000_000.0
-            withAnimation(.easeInOut(duration: 1.2)) {
-                camera = .camera(
-                    MapCamera(
-                        centerCoordinate: CLLocationCoordinate2D(latitude: 0, longitude: 0),
-                        distance: dist,
-                        heading: 0,
-                        pitch: 0
-                    )
-                )
-            }
-        }
-#endif
-#if !POP_PREVIEW_LIGHT
-        .onReceive(NotificationCenter.default.publisher(for: .preview_setBuildingZoomDistance)) { note in
-            if let value = note.userInfo?["distance"] as? Double {
-                fixedDistanceAlt = max(100, min(20_000, value)) // Updated range with default 700m in mind
-                // If we're currently at a close zoom level, update the camera to the new distance
-                if let currentDistance = camera.camera?.distance, currentDistance < 15_000 {
-                    if let coord = camera.camera?.centerCoordinate {
-                        withAnimation(.easeInOut(duration: 0.5)) {
-                            camera = .camera(
-                                MapCamera(
-                                    centerCoordinate: coord,
-                                    distance: fixedDistanceAlt,
-                                    heading: camera.camera?.heading ?? 0,
-                                    pitch: fixedPitchAlt
-                                )
-                            )
-                        }
-                    }
-                }
-            }
-        }
-#endif
-#if !POP_PREVIEW_LIGHT
-        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("JumpToPlace"))) { note in
-            stopDominanceTour()
-            if let coord = note.userInfo?["coordinate"] as? CLLocationCoordinate2D {
-                // Zoom out first
-                withAnimation(.easeInOut(duration: 1.5)) {
-                    let currentCenter = camera.camera?.centerCoordinate ?? coord
-                    camera = .camera(
-                        MapCamera(
-                            centerCoordinate: currentCenter,
-                            distance: 5_000_000,
-                            heading: 0,
-                            pitch: fixedPitchAlt
-                        )
-                    )
-                }
-                
-                Task { @MainActor in
-                    try? await Task.sleep(nanoseconds: 800_000_000)
-                    
-                    // Fly to destination
-                    withAnimation(.easeInOut(duration: 2.0)) {
-                        camera = .camera(
-                            MapCamera(
-                                centerCoordinate: coord,
-                                distance: 5_000_000,
-                                heading: 0,
-                                pitch: fixedPitchAlt
-                            )
-                        )
-                    }
-                    
-                    try? await Task.sleep(nanoseconds: 1_000_000_000)
-                    
-                    // Zoom in
-                    withAnimation(.easeInOut(duration: 1.5)) {
-                        camera = .camera(
-                            MapCamera(
-                                centerCoordinate: coord,
-                                distance: fixedDistanceAlt,
-                                heading: camera.camera?.heading ?? 0,
-                                pitch: fixedPitchAlt
-                            )
-                        )
-                    }
-                    
-                    try? await Task.sleep(nanoseconds: 2_000_000_000)
-                    noteInteraction()
-                }
-            }
-        }
-#endif
-    }
-}
-
-private struct FavoritesListViewAlt: View {
-    let onSelect: (CLLocationCoordinate2D) -> Void
-    var currentCenter: CLLocationCoordinate2D?
-    var userLocation: CLLocationCoordinate2D?
-
-    @State private var isLoading: Bool = false
-    @State private var errorMessage: String? = "Favorites are unavailable in this preview."
-    @State private var favorites: [(id: String, name: String, coordinate: CLLocationCoordinate2D, rank: Int?)] = []
-    @State private var addingName: String = ""
-    @State private var addError: String? = nil
-
-    var body: some View {
-        NavigationStack {
-            List {
-                Section("Add Favorite") {
-                    VStack(alignment: .leading, spacing: 8) {
-                        TextField("Name (e.g. Home, Office)", text: $addingName)
-                            .textFieldStyle(.roundedBorder)
-                        if let addError { Text(addError).font(.footnote).foregroundStyle(.red) }
-                        HStack {
-                            Button {
-                                if let coord = userLocation { /* no-op in preview */ }
-                            } label: {
-                                Label("Add Current Location", systemImage: "location.fill")
-                            }
-                            .buttonStyle(.bordered)
-                            .disabled(userLocation == nil)
-                            Button {
-                                if let coord = currentCenter { /* no-op in preview */ }
-                            } label: {
-                                Label("Add Current View Center", systemImage: "viewfinder")
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(currentCenter == nil)
-                        }
-                    }
-                }
-
-                Section("Your Favorites") {
-                    if favorites.isEmpty {
-                        Text("No favorites in preview.")
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(favorites, id: \.id) { fav in
-                            Button(action: { onSelect(fav.coordinate) }) {
-                                HStack {
-                                    Image(systemName: "mappin.and.ellipse")
-                                    VStack(alignment: .leading) {
-                                        Text(fav.name)
-                                        if let rank = fav.rank { Text("Rank: \(rank)").font(.caption).foregroundStyle(.secondary) }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            .navigationTitle("Favorites")
-        }
-    }
-}
-
-private struct SearchViewAlt: View {
-    @Binding var query: String
-    @Binding var results: [MKMapItem]
-    let onSelect: (MKMapItem) -> Void
-
-    @State private var isSearching = false
-
-    var body: some View {
-        NavigationStack {
-            VStack(spacing: 12) {
-                HStack {
-                    TextField("Search for a place or address", text: $query)
-                        .textFieldStyle(.roundedBorder)
-                        .disableAutocorrection(true)
-                        .textInputAutocapitalization(.never)
-                    if isSearching { ProgressView().padding(.leading, 4) }
-                    Button("Go") { performSearch() }
-                        .buttonStyle(.borderedProminent)
-                }
-                .padding(.horizontal)
-
-                List(results, id: \.self) { item in
-                    Button(action: { onSelect(item) }) {
-                        VStack(alignment: .leading) {
-                            Text(item.name ?? "Result")
-                                .font(.headline)
-                            Text(item.placemark.title ?? "")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-            }
-            .navigationTitle("Search")
-        }
-    }
-
-    private func performSearch() {
-        guard !query.trimmingCharacters(in: .whitespaces).isEmpty else { return }
-        isSearching = true
-        let request = MKLocalSearch.Request()
-        request.naturalLanguageQuery = query
-        let search = MKLocalSearch(request: request)
-        search.start { response, _ in
-            self.results = response?.mapItems ?? []
-            self.isSearching = false
-        }
-    }
-}
-
-private struct DominancePinAlt: View {
-    let profileURL: URL
-    var body: some View {
-        PreviewDominancePin(profileURL: profileURL)
-    }
-}
-
-private struct GoogleStylePinAlt: View {
-    var body: some View {
-        PreviewGoogleStylePin()
-    }
-}
+// REMOVED: MapView_PreviewAlt - Not used in production. Use MapViewProduction instead.
+// REMOVED: Helper views (FavoritesListViewAlt, SearchViewAlt, etc.) - No longer needed since MapView_PreviewAlt was removed.
 
 // MARK: - Interactive Tour Preview with Controls
 
@@ -811,7 +163,7 @@ private struct MapTourPreviewWithControls: View {
     
     var body: some View {
         ZStack {
-            MapView_PreviewAlt()
+            MapViewProduction()
                 .allowsHitTesting(true)
             
             // Removed SceneKitRotatingBarView overlay as per instructions
@@ -1285,11 +637,11 @@ private struct RotatingEarthGlobePreview: View {
 
 /// The main MapView used in the app - shows map with AI recommendations and navigation
 struct MapViewProduction: View {
-#if DEBUG
+    #if DEBUG
     @StateObject private var locationManager = IS_PREVIEW ? PreviewLocationManager.stubForPreviewInstance() : PreviewLocationManager()
-#else
+    #else
     @StateObject private var locationManager = PreviewLocationManager()
-#endif
+    #endif
     
     @State private var fixedDistanceAlt: CLLocationDistance = 700 // Same as interactive preview
     @State private var camera: MapCameraPosition = .camera(
@@ -1314,10 +666,10 @@ struct MapViewProduction: View {
     @State private var radiusMeters: Double = 5_000
     
     @State private var lastInteractionAt: Date = Date()
-    
-    // Inserted per instructions:
-    @State private var tourStarted: Bool = false
-    @State private var tourSpeedMultiplier: Double = 1.0
+    @State private var isTourActive: Bool = false
+    @State private var currentTourIndex: Int = 0
+    @State private var tourZoomOutDistance: CLLocationDistance = 25_000_000 // Distance for zoom out
+    @State private var isZoomedOut: Bool = false
     
     let tourPlaces: [(name: String, coordinate: CLLocationCoordinate2D, description: String)] = [
         ("New York", CLLocationCoordinate2D(latitude: 40.7128, longitude: -74.0060), "The city that never sleeps"),
@@ -1365,6 +717,34 @@ struct MapViewProduction: View {
         }
     }
     
+    private func zoomOut(to coordinate: CLLocationCoordinate2D) {
+        let heading = camera.camera?.heading ?? 0
+        withAnimation(.easeInOut(duration: 2.5)) {
+            camera = .camera(
+                MapCamera(
+                    centerCoordinate: coordinate,
+                    distance: tourZoomOutDistance,
+                    heading: heading,
+                    pitch: 0 // Flat view when zoomed out
+                )
+            )
+        }
+    }
+    
+    private func zoomIn(to coordinate: CLLocationCoordinate2D) {
+        let heading = camera.camera?.heading ?? 0
+        withAnimation(.easeInOut(duration: 2.5)) {
+            camera = .camera(
+                MapCamera(
+                    centerCoordinate: coordinate,
+                    distance: fixedDistanceAlt,
+                    heading: heading,
+                    pitch: fixedPitchAlt
+                )
+            )
+        }
+    }
+    
     private func filteredPosts() -> [PreviewMapAnnotationPost] {
         guard let userLoc = locationManager.location else { return posts }
         return posts.filter {
@@ -1374,6 +754,115 @@ struct MapViewProduction: View {
     
     private func noteInteraction() {
         lastInteractionAt = Date()
+        // Stop tour when user interacts with map
+        isTourActive = false
+    }
+    
+    private func startTour() {
+        guard !isTourActive else { return }
+        isTourActive = true
+        currentTourIndex = 0
+    }
+    
+    private func stopTour() {
+        isTourActive = false
+    }
+    
+    private func centerOnUserLocation() {
+        guard let userCoordinate = locationManager.location?.coordinate else { return }
+        
+        // Stop any active tour
+        isTourActive = false
+        isZoomedOut = false
+        
+        // Update city and recommendation based on location (default to current city name)
+        currentCity = "Your Location"
+        aiRecommendation = "Explore what's happening around you right now!"
+        
+        // Animate to user's location
+        let heading = camera.camera?.heading ?? 0
+        withAnimation(.easeInOut(duration: 1.2)) {
+            camera = .camera(
+                MapCamera(
+                    centerCoordinate: userCoordinate,
+                    distance: fixedDistanceAlt,
+                    heading: heading,
+                    pitch: fixedPitchAlt
+                )
+            )
+        }
+    }
+    
+    private func tourToNextPlace() {
+        guard isTourActive, !tourPlaces.isEmpty else { return }
+        
+        let place = tourPlaces[currentTourIndex]
+        
+        // Update AI recommendation for current city
+        let cityRecommendations: [String: String] = [
+            "San Francisco": "Trending posts: Golden Gate views and coffee spots — snap a photo from your vantage point.",
+            "New York": "People nearby are posting street food finds and skyline shots — share your take!",
+            "Los Angeles": "Popular now: murals and sunset beaches — post your favorite scene.",
+            "Chicago": "Hot right now: riverwalk reflections and deep-dish moments — add yours.",
+            "Miami": "Trending: pastel art deco and ocean vibes — capture and post your view.",
+            "Seattle": "Popular nearby: cozy cafes and skyline-in-the-mist — share your snapshot.",
+            "Boston": "Trending posts: cobblestone corners and harbor light — what do you see?",
+            "Austin": "Now popular: live music clips and neon nights — post a moment from your spot."
+        ]
+        
+        // Zoom out first, then zoom back in at the new location
+        if !isZoomedOut {
+            // Zoom out from current location - reset radius to 0
+            if let currentCoord = camera.camera?.centerCoordinate {
+                // Reset radius bar when zooming out
+                print("[MapTour] Zooming out - resetting radius to 0")
+                NotificationCenter.default.post(
+                    name: .MapSuggestedRadius,
+                    object: nil,
+                    userInfo: ["radius": 0.0]
+                )
+                withAnimation(.easeInOut(duration: 1.5)) {
+                    radiusMeters = 0
+                }
+                
+                zoomOut(to: currentCoord)
+                isZoomedOut = true
+            }
+        } else {
+            // Update city and recommendation BEFORE zooming in
+            currentCity = place.name
+            aiRecommendation = cityRecommendations[place.name] ?? "Explore what's happening here!"
+            
+            // Zoom in to the new place
+            zoomIn(to: place.coordinate)
+            isZoomedOut = false
+            
+            // Update radius to a random value between 2km and 15km AFTER starting zoom
+            // This creates the effect of the bar rising as we zoom into the city
+            let newRadius = Double.random(in: 2_000...15_000)
+            
+            // Delay slightly to sync with zoom-in animation
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 second delay
+                
+                print("[MapTour] Zooming into \(place.name) - setting radius to \(Int(newRadius))m")
+                
+                // Animate radius bar up
+                withAnimation(.easeInOut(duration: 2.0)) {
+                    radiusMeters = newRadius
+                }
+                
+                // Notify HomeView to animate the radius bar
+                NotificationCenter.default.post(
+                    name: .MapSuggestedRadius,
+                    object: nil,
+                    userInfo: ["radius": newRadius]
+                )
+            }
+            
+            // Move to next place
+            currentTourIndex = (currentTourIndex + 1) % tourPlaces.count
+        }
     }
     
     var body: some View {
@@ -1397,7 +886,7 @@ struct MapViewProduction: View {
                 
                 ForEach(filteredPosts()) { post in
                     Annotation(post.title, coordinate: post.coordinate) {
-                        GoogleStylePinAlt()
+                        PreviewGoogleStylePin()
                     }
                     
                     MapCircle(center: post.coordinate, radius: post.radius)
@@ -1410,7 +899,7 @@ struct MapViewProduction: View {
                         if let url = dom.profileURL {
                             PreviewDominancePin(profileURL: url)
                         } else {
-                            GoogleStylePinAlt()
+                            PreviewGoogleStylePin()
                         }
                     }
                 }
@@ -1478,30 +967,6 @@ struct MapViewProduction: View {
                 
                 Spacer()
             }
-            
-            // Hidden tour trigger to mirror interactive preview behavior
-            Color.clear
-                .onAppear {
-#if POP_PREVIEW_LIGHT
-                    return
-#endif
-#if DEBUG
-                    if IS_PREVIEW { return }
-#endif
-                    if !tourStarted {
-                        tourStarted = true
-                        NotificationCenter.default.post(name: .preview_startDominanceTour, object: nil)
-                    }
-                }
-                .onDisappear {
-#if POP_PREVIEW_LIGHT
-                    return
-#endif
-#if DEBUG
-                    if IS_PREVIEW { return }
-#endif
-                    NotificationCenter.default.post(name: .preview_stopDominanceTour, object: nil)
-                }
         }
         .toolbar(.hidden, for: .navigationBar)
         .sheet(isPresented: $showPlacesList) {
@@ -1525,7 +990,7 @@ struct MapViewProduction: View {
             .presentationDetents([.medium, .large])
         }
         .onAppear {
-#if DEBUG
+            #if DEBUG
             if IS_PREVIEW {
                 if let current = camera.camera {
                     camera = .camera(
@@ -1539,7 +1004,7 @@ struct MapViewProduction: View {
                 }
                 return
             }
-#endif
+            #endif
             
             locationManager.requestAuthorizationIfNeeded()
             if let current = camera.camera {
@@ -1552,222 +1017,69 @@ struct MapViewProduction: View {
                     )
                 )
             }
-#if POP_PREVIEW_LIGHT
-            // Do nothing extra in light preview
-#else
-#if DEBUG
-            if IS_PREVIEW {
-                // Skip heavy behavior in Xcode previews
-            } else {
-                if !tourStarted {
-                    tourStarted = true
-                    NotificationCenter.default.post(name: .preview_startDominanceTour, object: nil)
-                }
-            }
-#else
-            if !tourStarted {
-                tourStarted = true
-                NotificationCenter.default.post(name: .preview_startDominanceTour, object: nil)
-            }
-#endif
-#endif
         }
         .onChange(of: locationManager.location) { _, _ in
             if !IS_PREVIEW, let _ = locationManager.location {
                 locationManager.centerOnUser(&camera)
             }
         }
-#if !POP_PREVIEW_LIGHT
-        .onReceive(NotificationCenter.default.publisher(for: .preview_CenterMapOnUser)) { _ in
-            // Mirror preview behavior
-            // Get user coordinate if available
-            guard let userCoord = locationManager.location?.coordinate else {
-                locationManager.centerOnUser(&camera)
-                return
-            }
-            // 1) Zoom out from current position
-            withAnimation(.easeInOut(duration: 2.0 * tourSpeedMultiplier)) {
-                let currentCenter = camera.camera?.centerCoordinate ?? userCoord
-                camera = .camera(
-                    MapCamera(
-                        centerCoordinate: currentCenter,
-                        distance: max(25_000_000, 12_000),
-                        heading: 0,
-                        pitch: (max(25_000_000, 12_000) >= 20_000_000 ? 0 : fixedPitchAlt)
-                    )
-                )
-            }
-            Task { @MainActor in
-                try? await Task.sleep(nanoseconds: UInt64(1_200_000_000.0 * tourSpeedMultiplier))
-                withAnimation(.easeInOut(duration: 3.0 * tourSpeedMultiplier)) {
-                    camera = .camera(
-                        MapCamera(
-                            centerCoordinate: userCoord,
-                            distance: max(25_000_000, 12_000),
-                            heading: 0,
-                            pitch: (max(25_000_000, 12_000) >= 20_000_000 ? 0 : fixedPitchAlt)
-                        )
-                    )
-                }
-                try? await Task.sleep(nanoseconds: UInt64(1_000_000_000.0 * tourSpeedMultiplier))
-                withAnimation(.easeInOut(duration: 2.0 * tourSpeedMultiplier)) {
-                    camera = .camera(
-                        MapCamera(
-                            centerCoordinate: userCoord,
-                            distance: fixedDistanceAlt,
-                            heading: camera.camera?.heading ?? 0,
-                            pitch: fixedPitchAlt
-                        )
-                    )
-                }
-            }
+        .onReceive(NotificationCenter.default.publisher(for: .CubeGlobalTap)) { _ in
+            // When cube is tapped while on map tab, center on user location
+            centerOnUserLocation()
         }
-#endif
-#if !POP_PREVIEW_LIGHT
-        .onReceive(NotificationCenter.default.publisher(for: .preview_startDominanceTour)) { _ in
-            // Start the same tour loop used in preview (inline for production)
-            // Cancel any existing task by storing it locally via associated object pattern is not available here;
-            // reuse the preview pattern by posting JumpToPlace and animating camera within notifications already handled.
-            // No-op here; tour is driven by JumpToPlace or CenterMap notifications in production.
-        }
-#endif
-#if !POP_PREVIEW_LIGHT
-        .onReceive(NotificationCenter.default.publisher(for: .preview_stopDominanceTour)) { _ in
-            // No-op placeholder to mirror API; stopping is handled by not scheduling further animations.
-        }
-#endif
-#if !POP_PREVIEW_LIGHT
-        .onReceive(NotificationCenter.default.publisher(for: .preview_setTourSpeedMultiplier)) { note in
-            if let value = note.userInfo?["multiplier"] as? Double {
-                tourSpeedMultiplier = max(0.1, min(5.0, value))
-            }
-        }
-#endif
-#if !POP_PREVIEW_LIGHT
-        .onReceive(NotificationCenter.default.publisher(for: .preview_setTourZoomOutDistance)) { note in
-            // For production, we use a fixed 25_000_000 zoom-out like the preview default
-            // (handlers are kept for parity if external UI adjusts it)
-            // If provided, you could store to a local state if needed.
-        }
-#endif
-#if !POP_PREVIEW_LIGHT
-        .onReceive(NotificationCenter.default.publisher(for: .preview_setBuildingZoomDistance)) { note in
-            if let value = note.userInfo?["distance"] as? Double {
-                fixedDistanceAlt = max(100, min(20_000, value))
-                if let currentDistance = camera.camera?.distance, currentDistance < 15_000 {
-                    if let coord = camera.camera?.centerCoordinate {
-                        withAnimation(.easeInOut(duration: 0.5)) {
-                            camera = .camera(
-                                MapCamera(
-                                    centerCoordinate: coord,
-                                    distance: fixedDistanceAlt,
-                                    heading: camera.camera?.heading ?? 0,
-                                    pitch: fixedPitchAlt
-                                )
-                            )
-                        }
-                    }
-                }
-            }
-        }
-#endif
-#if !POP_PREVIEW_LIGHT
-        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("JumpToPlace"))) { note in
-            if let coord = note.userInfo?["coordinate"] as? CLLocationCoordinate2D {
-                // Zoom out first
-                withAnimation(.easeInOut(duration: 1.5)) {
-                    let currentCenter = camera.camera?.centerCoordinate ?? coord
-                    camera = .camera(
-                        MapCamera(
-                            centerCoordinate: currentCenter,
-                            distance: 5_000_000,
-                            heading: 0,
-                            pitch: fixedPitchAlt
-                        )
-                    )
-                }
-                Task { @MainActor in
-                    try? await Task.sleep(nanoseconds: 800_000_000)
-                    withAnimation(.easeInOut(duration: 2.0)) {
-                        camera = .camera(
-                            MapCamera(
-                                centerCoordinate: coord,
-                                distance: 5_000_000,
-                                heading: 0,
-                                pitch: fixedPitchAlt
-                            )
-                        )
-                    }
-                    try? await Task.sleep(nanoseconds: 1_000_000_000)
-                    withAnimation(.easeInOut(duration: 1.5)) {
-                        camera = .camera(
-                            MapCamera(
-                                centerCoordinate: coord,
-                                distance: fixedDistanceAlt,
-                                heading: camera.camera?.heading ?? 0,
-                                pitch: fixedPitchAlt
-                            )
-                        )
-                    }
-                }
-            }
-        }
-#endif
-        .onDisappear {
-#if POP_PREVIEW_LIGHT
-            return
-#endif
-#if DEBUG
-            if IS_PREVIEW { return }
-#endif
-            NotificationCenter.default.post(name: .preview_stopDominanceTour, object: nil)
+        .onReceive(NotificationCenter.default.publisher(for: .CenterMapOnUser)) { _ in
+            // Also respond to the standard center map notification
+            centerOnUserLocation()
         }
         .task {
-#if POP_PREVIEW_LIGHT
-            return
-#endif
-#if DEBUG
-            if IS_PREVIEW { return }
-#endif
-            if !tourStarted {
-                tourStarted = true
-                NotificationCenter.default.post(name: .preview_startDominanceTour, object: nil)
-            }
-            // Cycle AI recommendations
-            let cities = [
-                ("San Francisco", "Trending posts: Golden Gate views and coffee spots — snap a photo from your vantage point."),
-                ("New York", "People nearby are posting street food finds and skyline shots — share your take!"),
-                ("Los Angeles", "Popular now: murals and sunset beaches — post your favorite scene."),
-                ("Chicago", "Hot right now: riverwalk reflections and deep-dish moments — add yours."),
-                ("Miami", "Trending: pastel art deco and ocean vibes — capture and post your view."),
-                ("Seattle", "Popular nearby: cozy cafes and skyline-in-the-mist — share your snapshot."),
-                ("Boston", "Trending posts: cobblestone corners and harbor light — what do you see?"),
-                ("Austin", "Now popular: live music clips and neon nights — post a moment from your spot.")
-            ]
+            // Start tour after 5 seconds
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            startTour()
             
+            // Tour loop - alternates between zoom out (3s) and zoom in (12s at location)
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 20_000_000_000)
-                if let randomCity = cities.randomElement() {
-                    await MainActor.run {
-                        currentCity = randomCity.0
-                        aiRecommendation = randomCity.1
+                if isTourActive {
+                    tourToNextPlace()
+                    
+                    // Wait for animation duration based on zoom state
+                    if isZoomedOut {
+                        // Just zoomed out, wait 3 seconds before zooming in
+                        try? await Task.sleep(nanoseconds: 3_000_000_000)
+                    } else {
+                        // Just zoomed in, wait 12 seconds at this location before next transition
+                        try? await Task.sleep(nanoseconds: 12_000_000_000)
                     }
+                } else {
+                    // If tour is stopped, wait a bit before checking again
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
                 }
             }
         }
     }
-    
-    // MARK: - Previews
-    
-#if DEBUG
-    // Full preview - WITH controls and globe
-    #Preview("Interactive Tour with Controls") {
-        MapTourPreviewWithControls()
-            .onAppear {
-                print("🗺️ Tour preview loaded")
-            }
-    }
-    
-#endif
 }
 
+// MARK: - Previews
+
+#if DEBUG
+// Full preview - WITH controls and globe
+#Preview("Interactive Tour with Controls") {
+    MapTourPreviewWithControls()
+        .onAppear {
+            print("🗺️ Tour preview loaded")
+        }
+}
+
+#Preview("Production MapView") {
+    MapViewProduction()
+        .onAppear {
+            print("🗺️ Production MapView loaded")
+        }
+}
+
+#Preview("Rotating Earth Globe") {
+    RotatingEarthGlobePreview()
+        .onAppear {
+            print("🌍 Globe preview loaded")
+        }
+}
+#endif

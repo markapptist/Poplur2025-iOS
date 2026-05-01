@@ -28,6 +28,7 @@ extension Notification.Name {
     // Map and location
     static let CenterMapOnUserLocation = Notification.Name("CenterMapOnUserLocation")
     static let SharedRadiusDidChange = Notification.Name("SharedRadiusDidChange")
+    static let MapSuggestedRadius = Notification.Name("MapSuggestedRadius")
     
     // Settings and UI
     static let OpenSettingsRequested = Notification.Name("OpenSettingsRequested")

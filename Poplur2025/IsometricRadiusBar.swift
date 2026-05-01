@@ -20,6 +20,10 @@ extension Notification.Name {
     static let radiusBarHoldEnded = Notification.Name("RadiusBarHoldEnded")
 }
 
+extension Notification.Name {
+    static let animateRadiusBarToValue = Notification.Name("AnimateRadiusBarToValue")
+}
+
 public struct IsometricRadiusBar: View {
     @Binding public var radius: Double
     @State private var dragStartRadius: Double? = nil
@@ -43,6 +47,9 @@ public struct IsometricRadiusBar: View {
     public var autoLoop: Bool = false
     @State private var isAutoLooping: Bool = false
     @State private var autoLoopTask: Task<Void, Never>? = nil
+    
+    // Smooth animation state for external radius changes
+    @State private var animationTask: Task<Void, Never>? = nil
 
     private var earthRadiusMeters: Double { usesImperial ? 3958.8 * 1609.34 : 6371.0 * 1000.0 }
     private var earthRadiusCapMeters: Double { earthRadiusMeters }
@@ -102,7 +109,21 @@ public struct IsometricRadiusBar: View {
         )
         .onReceive(NotificationCenter.default.publisher(for: .currentPostRadiusDidChange)) { note in
             if let r = note.userInfo?["radius"] as? Double {
-                self.radius = min(max(0, r), self.maxRuntimeRadius)
+                print("🔵 [RadiusBar] Received currentPostRadiusDidChange: \(r)m")
+                let duration = (note.userInfo?["duration"] as? Double) ?? 0.8
+                animateToRadius(r, duration: duration)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ForceRadiusBarUpdate"))) { note in
+            if let value = note.userInfo?["radius"] as? Double {
+                print("🔵 [RadiusBar] Received ForceRadiusBarUpdate: \(value)m")
+                let duration = (note.userInfo?["duration"] as? Double) ?? 0.6
+                if duration == 0.0 {
+                    // Instant update
+                    radius = min(max(0, value), maxRuntimeRadius)
+                } else {
+                    animateToRadius(value, duration: duration)
+                }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .radiusBarHoldBegan)) { _ in
@@ -112,10 +133,40 @@ public struct IsometricRadiusBar: View {
         .onReceive(NotificationCenter.default.publisher(for: .radiusBarHoldEnded)) { _ in
             stopHoldIncrease()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .animateRadiusBarToValue)) { note in
+            if let targetRadius = note.userInfo?["radius"] as? Double {
+                print("🔵 [RadiusBar] Received animateRadiusBarToValue: \(targetRadius)m")
+                let duration = (note.userInfo?["duration"] as? Double) ?? 0.8
+                animateToRadius(targetRadius, duration: duration)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .MapSuggestedRadius)) { note in
+            if let targetRadius = note.userInfo?["radius"] as? Double {
+                print("🔵 [RadiusBar] Received MapSuggestedRadius: \(targetRadius)m")
+                let duration = (note.userInfo?["duration"] as? Double) ?? 2.0
+                animateToRadius(targetRadius, duration: duration)
+            }
+        }
         // Removed cameraCubeHoldBegan and cameraCubeHoldEnded notifications and related actions
         // Removed capturePreviewDidDismiss notification that resets radius to zero
-        .onAppear { if autoLoop { startAutoLooping() } }
-        .onDisappear { stopAutoLooping() }
+        .onAppear {
+            print("🟢 [RadiusBar] BAR IS NOW VISIBLE - onAppear called, autoLoop: \(autoLoop)")
+            // Visual confirmation - flash the bar white
+            withAnimation(.easeInOut(duration: 0.3).repeatCount(3, autoreverses: true)) {
+                // This will make it obvious the bar is there
+            }
+            if autoLoop { startAutoLooping() }
+        }
+        .onDisappear {
+            print("🔴 [RadiusBar] BAR IS NOW HIDDEN - onDisappear called")
+            stopAutoLooping()
+        }
+        .background(
+            // TEMPORARY DEBUG: Red border to see if bar exists
+            Rectangle()
+                .strokeBorder(Color.red, lineWidth: 3)
+                .allowsHitTesting(false)
+        )
     }
 }
 
@@ -250,6 +301,36 @@ private extension IsometricRadiusBar {
 
     func springStiffnessAuto() -> Double { max(10, 1.0 / max(0.05, 0.35 * 0.35)) }
     func springDampingCoefAuto() -> Double { max(1.0, 10.0 * 0.85) }
+    
+    /// Smoothly animates the radius to a target value
+    func animateToRadius(_ target: Double, duration: Double = 0.8) {
+        print("🎬 [RadiusBar] animateToRadius called: \(target)m over \(duration)s (current: \(radius)m)")
+        
+        // Stop any active hold/drain timers that would interfere
+        stopHoldIncrease()
+        stopDrain()
+        stopAutoLooping()
+        
+        // Cancel any existing animation
+        animationTask?.cancel()
+        
+        let clampedTarget = min(max(0, target), maxRuntimeRadius)
+        let startValue = radius
+        
+        print("🎬 [RadiusBar] Animation: \(startValue)m → \(clampedTarget)m")
+        
+        // If already at target, don't animate
+        if abs(startValue - clampedTarget) < 1.0 {
+            print("⚠️ [RadiusBar] Already at target, skipping animation")
+            return
+        }
+        
+        // Use SwiftUI animation on the binding instead of manual frame-by-frame
+        withAnimation(.easeInOut(duration: duration)) {
+            radius = clampedTarget
+        }
+        print("✅ [RadiusBar] Animation started with SwiftUI animation")
+    }
 }
 
 // MARK: - UIViewRepresentable SCNView (matches CubeTabView approach)
@@ -815,6 +896,46 @@ private class DisplayLinkProxy {
     }
 }
 
+// MARK: - Public API for triggering radius animations
+
+/// Helper to animate the radius bar from anywhere in your app
+public struct RadiusBarAnimator {
+    /// Animate the bar to a specific radius value
+    /// - Parameters:
+    ///   - radius: Target radius in meters
+    ///   - duration: Animation duration in seconds (default: 0.8)
+    public static func animate(to radius: Double, duration: Double = 0.8) {
+        print("🟡 [RadiusBarAnimator] POSTING animateRadiusBarToValue notification with radius: \(radius)m")
+        NotificationCenter.default.post(
+            name: .animateRadiusBarToValue,
+            object: nil,
+            userInfo: ["radius": radius, "duration": duration]
+        )
+    }
+    
+    /// Update the bar to show a post's radius (uses currentPostRadiusDidChange notification)
+    /// - Parameter radius: The post's radius in meters
+    public static func showPostRadius(_ radius: Double, duration: Double = 0.8) {
+        print("🟡 [RadiusBarAnimator] POSTING currentPostRadiusDidChange notification with radius: \(radius)m")
+        NotificationCenter.default.post(
+            name: .currentPostRadiusDidChange,
+            object: nil,
+            userInfo: ["radius": radius, "duration": duration]
+        )
+    }
+    
+    /// Instantly set the bar radius without animation (for initialization)
+    /// - Parameter radius: Target radius in meters
+    public static func setInstant(_ radius: Double) {
+        print("🟡 [RadiusBarAnimator] POSTING ForceRadiusBarUpdate notification with radius: \(radius)m (instant)")
+        NotificationCenter.default.post(
+            name: Notification.Name("ForceRadiusBarUpdate"),
+            object: nil,
+            userInfo: ["radius": radius, "duration": 0.0]
+        )
+    }
+}
+
 // MARK: - Preview
 
 private struct RadiusBarOnlyPreview: View {
@@ -910,19 +1031,55 @@ private struct RadiusBarOnlyPreview: View {
                                 .buttonStyle(.borderedProminent)
                         }
                         if selectedTab == .feed || selectedTab == .profile || selectedTab == .map {
-                            HStack(spacing: 12) {
-                                Text("Feed Simulated Height:")
-                                Button(action: {
-                                    let maxVal: Double = 3_323_000.0
-                                    let newVal = Double.random(in: 0...maxVal)
-                                    feedSimValue = newVal
-                                    tweenRadius(to: newVal)
-                                }) {
-                                    Text("\(Int(feedSimValue)) m")
-                                        .monospacedDigit()
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Simulate Tab Content:").font(.subheadline).fontWeight(.medium)
+                                HStack(spacing: 12) {
+                                    Button(action: {
+                                        let maxVal: Double = 3_323_000.0
+                                        let newVal = Double.random(in: 0...maxVal)
+                                        feedSimValue = newVal
+                                        print("🔴 [Preview] Button tapped - calling animator with \(Int(newVal))m")
+                                        // Use the new animation API
+                                        RadiusBarAnimator.animate(to: newVal, duration: 0.8)
+                                    }) {
+                                        VStack(spacing: 2) {
+                                            Image(systemName: "photo")
+                                            Text("\(Int(feedSimValue)) m")
+                                                .monospacedDigit()
+                                                .font(.caption2)
+                                        }
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                    .accessibilityLabel("Simulate feed/profile content")
+                                    
+                                    Button("Quick 1km") {
+                                        print("🔴 [Preview] 1km button tapped")
+                                        RadiusBarAnimator.showPostRadius(1_000, duration: 0.5)
+                                    }
+                                    .buttonStyle(.bordered)
+                                    
+                                    Button("5km") {
+                                        print("🔴 [Preview] 5km button tapped")
+                                        RadiusBarAnimator.showPostRadius(5_000, duration: 0.6)
+                                    }
+                                    .buttonStyle(.bordered)
+                                    
+                                    Button("50km") {
+                                        print("🔴 [Preview] 50km button tapped")
+                                        RadiusBarAnimator.showPostRadius(50_000, duration: 0.8)
+                                    }
+                                    .buttonStyle(.bordered)
+                                }
+                                
+                                // DEBUG: Direct binding test
+                                Button("🧪 Test Direct Binding") {
+                                    print("🔴 [Preview] Direct binding test - animating to 10km")
+                                    withAnimation(.easeInOut(duration: 0.8)) {
+                                        radius = 10_000
+                                    }
                                 }
                                 .buttonStyle(.borderedProminent)
-                                .accessibilityLabel("Simulate feed content height")
+                                .tint(.orange)
                             }
                         }
                         HStack {

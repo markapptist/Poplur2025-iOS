@@ -3,7 +3,7 @@ import MapKit
 import FirebaseFirestore
 import FirebaseAuth
 
-private struct FavoritesListViewAlt: View {
+struct FavoritesListViewAlt: View {
     let onSelect: (CLLocationCoordinate2D) -> Void
     var currentCenter: CLLocationCoordinate2D?
     var userLocation: CLLocationCoordinate2D?

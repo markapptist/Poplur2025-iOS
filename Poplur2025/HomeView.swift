@@ -216,6 +216,13 @@ struct HomeView: View {
     
     @ViewBuilder
     private var mapTabContent: some View {
+        // LOCKED: MapViewProduction is the ONLY map view used in production.
+        // DO NOT replace with any other map view (MapView, MapView_PreviewAlt, etc.)
+        // MapViewProduction provides:
+        // - Hybrid map style with realistic 3D elevation
+        // - AI recommendations overlay
+        // - Navigation controls (places list, address search)
+        // - Optimized camera with 60° pitch at 700m distance
         MapViewProduction()
             .task {
                 if selectedTab == .map, !didTriggerMapInitialLoad {
@@ -478,6 +485,13 @@ struct HomeView: View {
                 .frame(height: 230)
                 .padding(.bottom, 8)
                 .padding(.trailing, 8)
+                // Only activate this tap gesture when map tab is selected to center the map on the user.
+                // This prevents interference with other tabs' gestures or overlays.
+                .onTapGesture {
+                    if selectedTab == .map {
+                        NotificationCenter.default.post(name: .CenterMapOnUser, object: nil)
+                    }
+                }
             }
             .padding(.bottom, 24)
             .ignoresSafeArea(edges: .bottom)
@@ -714,6 +728,40 @@ struct HomeView: View {
                 isometricBarModel.radius = min(value, 3_323_000.0)
             }
         }
+        // Added new onReceive for post-driven radius changes to animate bar in sync with preview/demo conventions
+        .onReceive(NotificationCenter.default.publisher(for: .currentPostRadiusDidChange)) { note in
+            if let value = note.userInfo?["radius"] as? Double {
+                // Clamp to app cap
+                let clampedValue = min(value, 3_323_000.0)
+                // Only run the full up+down animation sequence if radius > 0
+                if clampedValue > 0 {
+                    // Animate radius up
+                    withAnimation(.interpolatingSpring(mass: 1.0, stiffness: 180, damping: 18, initialVelocity: 0)) {
+                        isometricBarModel.radius = clampedValue
+                    }
+                    // After 1 second delay, animate back down to zero
+                    Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 1_000_000_000)
+                        withAnimation(.easeOut(duration: 0.6)) {
+                            isometricBarModel.radius = 0
+                        }
+                    }
+                } else {
+                    // If radius is zero or less, just animate radius up then down in sequence
+                    withAnimation(.interpolatingSpring(mass: 1.0, stiffness: 180, damping: 18, initialVelocity: 0)) {
+                        isometricBarModel.radius = clampedValue
+                    }
+                    Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 1_000_000_000)
+                        withAnimation(.easeOut(duration: 0.6)) {
+                            isometricBarModel.radius = 0
+                        }
+                    }
+                }
+                // This matches the preview's trained interaction:
+                // bar animates up to radius, then gently back down to zero after a short hold
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("InlinePreviewDismissRequested"))) { _ in
             // Reset the radius bar so the user can capture again
             isometricBarModel.radius = 0
@@ -753,6 +801,22 @@ struct HomeView: View {
         .task {
             try? await Task.sleep(nanoseconds: 5_000_000_000)
             print("[Startup] Watchdog 5s: heavy work deferred until 10s gate; if UI is still slow, check synchronous work on main thread")
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .MapSuggestedRadius)) { note in
+            if let value = note.userInfo?["radius"] as? Double {
+                print("[HomeView] Received MapSuggestedRadius: \(Int(value))m")
+                // Clamp to app cap and apply to the global bar with animation on every update
+                let clampedValue = min(value, 3_323_000.0)
+                withAnimation(.easeInOut(duration: 2.0)) {
+                    isometricBarModel.radius = clampedValue
+                }
+                print("[HomeView] Updated isometricBarModel.radius to: \(Int(clampedValue))m")
+            }
+        }
+        // Added the requested .onChange for isometricBarModel.radius:
+        .onChange(of: isometricBarModel.radius) { newValue in
+            // Force update of SceneKit bar via notification (used by IsometricRadiusBar internally)
+            NotificationCenter.default.post(name: Notification.Name("ForceRadiusBarUpdate"), object: nil, userInfo: ["radius": newValue])
         }
     }
     

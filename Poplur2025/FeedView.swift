@@ -228,6 +228,11 @@ struct FeedView: View {
             }
             let uid = posts[newIndex].userID
             maybeResolveUsername(for: uid)
+            
+            // Animate the radius bar to match the current post's radius
+            let post = posts[newIndex]
+            print("📱 [Feed] Showing post at index \(newIndex), radius: \(post.radius)m")
+            RadiusBarAnimator.showPostRadius(post.radius, duration: 0.6)
         }
         .onAppear {
             // Removed duplicate reload here as per instruction

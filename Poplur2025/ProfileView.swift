@@ -144,6 +144,8 @@ struct ProfileView: View {
                                                         .onTapGesture {
                                                             withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                                                                 expandedPost = post
+                                                                // Notify radius change for global radius bar sync
+                                                                NotificationCenter.default.post(name: Notification.Name("currentPostRadiusDidChange"), object: nil, userInfo: ["radius": Double(post.radius)])
                                                             }
                                                         }
                                                 }
@@ -173,6 +175,8 @@ struct ProfileView: View {
                                                         .onTapGesture {
                                                             withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                                                                 expandedPost = post
+                                                                // Notify radius change for global radius bar sync
+                                                                NotificationCenter.default.post(name: Notification.Name("currentPostRadiusDidChange"), object: nil, userInfo: ["radius": Double(post.radius)])
                                                             }
                                                         }
                                                 }
@@ -275,6 +279,8 @@ struct ProfileView: View {
                         )
                         .transition(.scale.combined(with: .opacity))
                         .onAppear {
+                            // Notify radius change for global radius bar sync on fullscreen appearance
+                            NotificationCenter.default.post(name: Notification.Name("currentPostRadiusDidChange"), object: nil, userInfo: ["radius": Double(post.radius)])
                             NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
                         }
                         .onDisappear {
