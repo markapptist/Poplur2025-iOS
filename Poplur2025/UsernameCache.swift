@@ -8,6 +8,12 @@ actor UsernameCache {
     private var inFlight: [String: Task<String?, Never>] = [:]
 
     func username(for uid: String) async -> String? {
+        // Guard against empty UIDs
+        guard !uid.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            print("UsernameCache: attempted to fetch username for empty UID")
+            return nil
+        }
+        
         if let cached = cache[uid] { return cached }
         if let task = inFlight[uid] {
             return await task.value

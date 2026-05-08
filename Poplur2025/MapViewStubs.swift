@@ -275,6 +275,33 @@ struct MapView: View {
         tourTask = nil
     }
     
+    @MapContentBuilder
+    private var mapContent: some MapContent {
+        if locationManager.location != nil {
+            UserAnnotation {
+                Label("You", systemImage: "location.fill")
+            }
+        }
+        
+        ForEach(filteredPosts()) { post in
+            Annotation(post.title, coordinate: post.coordinate) {
+                GoogleStylePin()
+            }
+            
+            MapCircle(center: post.coordinate, radius: post.radius)
+                .foregroundStyle(Color.white.opacity(0.08))
+                .stroke(Color.white.opacity(0.25), lineWidth: 1)
+        }
+        
+        ForEach(dominance) { dom in
+            Annotation(dom.city, coordinate: dom.coordinate) {
+                if let url = dom.profileURL {
+                    DominancePin(profileURL: url)
+                }
+            }
+        }
+    }
+    
     var body: some View {
         ZStack {
             Map(
@@ -284,29 +311,7 @@ struct MapView: View {
                 ),
                 interactionModes: [.pan, .rotate]
             ) {
-                if locationManager.location != nil {
-                    UserAnnotation {
-                        Label("You", systemImage: "location.fill")
-                    }
-                }
-                
-                ForEach(filteredPosts()) { post in
-                    Annotation(post.title, coordinate: post.coordinate) {
-                        GoogleStylePin()
-                    }
-                    
-                    MapCircle(center: post.coordinate, radius: post.radius)
-                        .foregroundStyle(Color.white.opacity(0.08))
-                        .stroke(Color.white.opacity(0.25), lineWidth: 1)
-                }
-                
-                ForEach(dominance) { dom in
-                    Annotation(dom.city, coordinate: dom.coordinate) {
-                        if let url = dom.profileURL {
-                            DominancePin(profileURL: url)
-                        }
-                    }
-                }
+                mapContent
             }
             .mapStyle(.hybrid(elevation: .realistic, showsTraffic: false))
             .ignoresSafeArea()
@@ -374,7 +379,7 @@ struct MapView: View {
             idleTask = nil
         }
         .onChange(of: locationManager.location) { _, _ in
-            if let _ = locationManager.location {
+            if locationManager.location != nil {
                 locationManager.centerOnUser(&camera)
             }
         }
@@ -386,41 +391,56 @@ struct MapView: View {
                 return
             }
             
+            // Break down complex expressions
+            let currentCenter = camera.camera?.centerCoordinate ?? userCoord
+            let zoomDistance = max(tourZoomOutDistance, 12_000)
+            let shouldResetPitch = zoomDistance >= 20_000_000
+            let initialPitch: CGFloat = shouldResetPitch ? 0 : fixedPitch
+            
             withAnimation(.easeInOut(duration: 2.0 * tourSpeedMultiplier)) {
-                let currentCenter = camera.camera?.centerCoordinate ?? userCoord
                 camera = .camera(
                     MapCamera(
                         centerCoordinate: currentCenter,
-                        distance: max(tourZoomOutDistance, 12_000),
+                        distance: zoomDistance,
                         heading: 0,
-                        pitch: (max(tourZoomOutDistance, 12_000) >= 20_000_000 ? 0 : fixedPitch)
+                        pitch: initialPitch
                     )
                 )
             }
             
             Task { @MainActor in
                 try? await Task.sleep(nanoseconds: UInt64(1_200_000_000.0 * tourSpeedMultiplier))
+                
+                let zoomDist = max(tourZoomOutDistance, 12_000)
+                let resetPitch = zoomDist >= 20_000_000
+                let pitch: CGFloat = resetPitch ? 0 : fixedPitch
+                
                 withAnimation(.easeInOut(duration: 3.0 * tourSpeedMultiplier)) {
                     camera = .camera(
                         MapCamera(
                             centerCoordinate: userCoord,
-                            distance: max(tourZoomOutDistance, 12_000),
+                            distance: zoomDist,
                             heading: 0,
-                            pitch: (max(tourZoomOutDistance, 12_000) >= 20_000_000 ? 0 : fixedPitch)
+                            pitch: pitch
                         )
                     )
                 }
+                
                 try? await Task.sleep(nanoseconds: UInt64(1_000_000_000.0 * tourSpeedMultiplier))
+                
+                let currentHeading = camera.camera?.heading ?? 0
+                
                 withAnimation(.easeInOut(duration: 2.0 * tourSpeedMultiplier)) {
                     camera = .camera(
                         MapCamera(
                             centerCoordinate: userCoord,
                             distance: fixedDistance,
-                            heading: camera.camera?.heading ?? 0,
+                            heading: currentHeading,
                             pitch: fixedPitch
                         )
                     )
                 }
+                
                 try? await Task.sleep(nanoseconds: UInt64(3_000_000_000.0 * tourSpeedMultiplier))
                 noteInteraction()
             }

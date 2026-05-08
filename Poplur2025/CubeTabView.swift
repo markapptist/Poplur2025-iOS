@@ -903,6 +903,12 @@ private struct CubeSceneView: UIViewRepresentable {
             if parent.selectedTab == .record {
                 print("[CubeTabView] Tap -> post cubeTabViewTapped (record tab)")
                 NotificationCenter.default.post(name: .cameraCubeTabViewTapped, object: nil)
+            } else if parent.selectedTab == .map {
+                print("[CubeTabView] Tap -> handled by onCubeTap callback (map tab)")
+                // Map centering is handled by onCubeTap callback in HomeView
+            } else if parent.selectedTab == .profile {
+                print("[CubeTabView] Tap -> posting CubeTapped for profile")
+                NotificationCenter.default.post(name: Notification.Name("CubeTapped"), object: nil)
             } else {
                 print("[CubeTabView] Tap ignored for tab: \(parent.selectedTab)")
             }
@@ -913,6 +919,11 @@ private struct CubeSceneView: UIViewRepresentable {
             case .began:
                 print("[CubeTabView] Long press began -> .cubeHoldBegan")
                 NotificationCenter.default.post(name: .cameraCubeHoldBegan, object: nil)
+                // Also send profile-specific notification if on profile tab
+                if parent.selectedTab == .profile {
+                    print("[CubeTabView] Long press on profile -> posting CubeLongPressed")
+                    NotificationCenter.default.post(name: Notification.Name("CubeLongPressed"), object: nil)
+                }
             case .ended, .cancelled, .failed:
                 print("[CubeTabView] Long press ended -> .cubeHoldEnded")
                 NotificationCenter.default.post(name: .cameraCubeHoldEnded, object: nil)

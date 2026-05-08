@@ -116,10 +116,24 @@ struct FeedView: View {
 
     @State private var showHeart: Bool = false
 
-    // Country paging
+    // Country paging (horizontal swipe)
     @State private var selectedCountryIndex: Int = 0
     private let countries: [(code: String, name: String, flag: String)] = [
         ("US","United States","🇺🇸"), ("CA","Canada","🇨🇦"), ("MX","Mexico","🇲🇽"), ("BR","Brazil","🇧🇷"), ("AR","Argentina","🇦🇷"), ("CL","Chile","🇨🇱"), ("GB","United Kingdom","🇬🇧"), ("IE","Ireland","🇮🇪"), ("FR","France","🇫🇷"), ("DE","Germany","🇩🇪"), ("ES","Spain","🇪🇸"), ("IT","Italy","🇮🇹"), ("PT","Portugal","🇵🇹"), ("NL","Netherlands","🇳🇱"), ("BE","Belgium","🇧🇪"), ("SE","Sweden","🇸🇪"), ("NO","Norway","🇳🇴"), ("FI","Finland","🇫🇮"), ("DK","Denmark","🇩🇰"), ("PL","Poland","🇵🇱"), ("CZ","Czechia","🇨🇿"), ("AT","Austria","🇦🇹"), ("CH","Switzerland","🇨🇭"), ("GR","Greece","🇬🇷"), ("TR","Türkiye","🇹🇷"), ("RU","Russia","🇷🇺"), ("UA","Ukraine","🇺🇦"), ("CN","China","🇨🇳"), ("JP","Japan","🇯🇵"), ("KR","South Korea","🇰🇷"), ("IN","India","🇮🇳"), ("PK","Pakistan","🇵🇰"), ("ID","Indonesia","🇮🇩"), ("AU","Australia","🇦🇺"), ("NZ","New Zealand","🇳🇿"), ("SA","Saudi Arabia","🇸🇦"), ("AE","UAE","🇦🇪"), ("EG","Egypt","🇪🇬"), ("ZA","South Africa","🇿🇦"), ("NG","Nigeria","🇳🇬"), ("KE","Kenya","🇰🇪"), ("MA","Morocco","🇲🇦"), ("TN","Tunisia","🇹🇳"), ("IL","Israel","🇮🇱"), ("IR","Iran","🇮🇷"), ("TH","Thailand","🇹🇭"), ("VN","Vietnam","🇻🇳"), ("PH","Philippines","🇵🇭"), ("MY","Malaysia","🇲🇾"), ("SG","Singapore","🇸🇬"), ("TW","Taiwan","🇹🇼"), ("HK","Hong Kong","🇭🇰")
+    ]
+    
+    // Channel/Category paging (vertical swipe)
+    @State private var selectedChannelIndex: Int = 0
+    private let channels: [(id: String, name: String, emoji: String)] = [
+        ("food", "Food", "🍔"),
+        ("fitness", "Fitness", "💪"),
+        ("beauty", "Beauty", "💄"),
+        ("sports", "Sports", "⚽"),
+        ("modelling", "Modelling", "📸"),
+        ("fashion", "Fashion", "👗"),
+        ("music", "Music", "🎵"),
+        ("tech", "Tech", "💻"),
+        ("news", "News", "📰")
     ]
 
     @State private var showLaunchLogo: Bool = true
@@ -187,7 +201,7 @@ struct FeedView: View {
                 .background(Color.black)
 
                 if isFeedReady == false {
-                    LoadingOverlayView(isPresented: true, background: Color(red: 1.0, green: 0.2, blue: 0.4), logoName: "logo")
+                    LoadingOverlayView(isPresented: true, background: Color.clear, logoName: "logo")
                         .zIndex(30)
                         .transition(.opacity)
                 }
@@ -221,6 +235,16 @@ struct FeedView: View {
                 }
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ProfileViewDismissed"))) { _ in
+            // Restore feed radius when returning from profile
+            if let post = posts[safe: currentIndex] {
+                print("📱 [Feed] ProfileViewDismissed - restoring radius to \(post.radius)m")
+                RadiusBarAnimator.showPostRadius(post.radius, duration: 0.6)
+            } else if posts.isEmpty {
+                print("📱 [Feed] ProfileViewDismissed - no posts, setting radius to 0")
+                RadiusBarAnimator.showPostRadius(0, duration: 0.3)
+            }
+        }
         .onChange(of: currentIndex) { newIndex in
             guard newIndex >= 0, newIndex < posts.count else {
                 print("[Feed] currentIndex out of range: \(newIndex) posts=\(posts.count)")
@@ -240,6 +264,12 @@ struct FeedView: View {
             notifHaptics.prepare()
             if posts.isEmpty {
                 Task { await reload() }
+            }
+            
+            // Ensure feed is ready when returning from navigation
+            if !posts.isEmpty && !isFeedReady {
+                print("[Feed] onAppear - restoring feed ready state")
+                isFeedReady = true
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
@@ -456,59 +486,55 @@ struct FeedView: View {
                                         }
                                     case .vertical:
                                         if value.translation.height <= -verticalThreshold {
-                                            // swipe up -> next (wrap to 0 from last)
-                                            if posts.isEmpty == false {
-                                                if currentIndex < max(0, posts.count - 1) {
-                                                    currentIndex += 1
-                                                } else {
-                                                    currentIndex = 0
-                                                }
-                                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
-                                                    hapticGenerator.impactOccurred(intensity: 1.0)
-                                                    UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
-                                                    notifHaptics.notificationOccurred(.success)
-                                                }
-                                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
-                                                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                                                }
-                                                hapticGenerator.prepare()
-                                                notifHaptics.prepare()
-                                                showStatic = true
-                                                playOneShotPop()
-                                                playStaticSound()
-                                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
-                                                    withAnimation { showStatic = false }
-                                                    stopStaticSound()
-                                                }
-                                                maybeShowAd()
+                                            // swipe up -> next channel
+                                            selectedChannelIndex = (selectedChannelIndex + 1) % channels.count
+                                            currentIndex = 0
+                                            Task {
+                                                await reloadForChannel()
                                             }
+                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
+                                                hapticGenerator.impactOccurred(intensity: 1.0)
+                                                UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+                                                notifHaptics.notificationOccurred(.success)
+                                            }
+                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                                                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                                            }
+                                            hapticGenerator.prepare()
+                                            notifHaptics.prepare()
+                                            showStatic = true
+                                            playOneShotPop()
+                                            playStaticSound()
+                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                                                withAnimation { showStatic = false }
+                                                stopStaticSound()
+                                            }
+                                            maybeShowAd()
                                         } else if value.translation.height >= verticalThreshold {
-                                            // swipe down -> previous (wrap to last from 0)
-                                            if posts.isEmpty == false {
-                                                if currentIndex > 0 {
-                                                    currentIndex -= 1
-                                                } else {
-                                                    currentIndex = max(0, posts.count - 1)
-                                                }
-                                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
-                                                    hapticGenerator.impactOccurred(intensity: 1.0)
-                                                    UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
-                                                    notifHaptics.notificationOccurred(.success)
-                                                }
-                                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
-                                                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                                                }
-                                                hapticGenerator.prepare()
-                                                notifHaptics.prepare()
-                                                showStatic = true
-                                                playOneShotPop()
-                                                playStaticSound()
-                                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
-                                                    withAnimation { showStatic = false }
-                                                    stopStaticSound()
-                                                }
-                                                maybeShowAd()
+                                            // swipe down -> previous channel
+                                            selectedChannelIndex = (selectedChannelIndex - 1 + channels.count) % channels.count
+                                            currentIndex = 0
+                                            Task {
+                                                await reloadForChannel()
                                             }
+                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
+                                                hapticGenerator.impactOccurred(intensity: 1.0)
+                                                UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+                                                notifHaptics.notificationOccurred(.success)
+                                            }
+                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                                                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                                            }
+                                            hapticGenerator.prepare()
+                                            notifHaptics.prepare()
+                                            showStatic = true
+                                            playOneShotPop()
+                                            playStaticSound()
+                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                                                withAnimation { showStatic = false }
+                                                stopStaticSound()
+                                            }
+                                            maybeShowAd()
                                         }
                                     }
                                 }
@@ -618,60 +644,56 @@ struct FeedView: View {
                                         }
                                     case .vertical:
                                         if value.translation.height <= -verticalThreshold {
-                                            // swipe up -> next (wrap to 0 from last)
-                                            if posts.isEmpty == false {
-                                                if currentIndex < max(0, posts.count - 1) {
-                                                    currentIndex += 1
-                                                } else {
-                                                    currentIndex = 0
-                                                }
-                                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
-                                                    hapticGenerator.impactOccurred(intensity: 1.0)
-                                                    UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
-                                                    notifHaptics.notificationOccurred(.success)
-                                                }
-                                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
-                                                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                                                }
-                                                hapticGenerator.prepare()
-                                                notifHaptics.prepare()
-                                                showStatic = true
-                                                playOneShotPop()
-                                                playStaticSound()
-                                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
-                                                    withAnimation { showStatic = false }
-                                                    stopStaticSound()
-                                                }
-                                                maybeLoadMoreIfNeeded(appearingIndex: currentIndex)
-                                                maybeShowAd()
+                                            // swipe up -> next channel
+                                            selectedChannelIndex = (selectedChannelIndex + 1) % channels.count
+                                            currentIndex = 0
+                                            Task {
+                                                await reloadForChannel()
                                             }
+                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
+                                                hapticGenerator.impactOccurred(intensity: 1.0)
+                                                UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+                                                notifHaptics.notificationOccurred(.success)
+                                            }
+                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                                                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                                            }
+                                            hapticGenerator.prepare()
+                                            notifHaptics.prepare()
+                                            showStatic = true
+                                            playOneShotPop()
+                                            playStaticSound()
+                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                                                withAnimation { showStatic = false }
+                                                stopStaticSound()
+                                            }
+                                            maybeLoadMoreIfNeeded(appearingIndex: currentIndex)
+                                            maybeShowAd()
                                         } else if value.translation.height >= verticalThreshold {
-                                            // swipe down -> previous (wrap to last from 0)
-                                            if posts.isEmpty == false {
-                                                if currentIndex > 0 {
-                                                    currentIndex -= 1
-                                                } else {
-                                                    currentIndex = max(0, posts.count - 1)
-                                                }
-                                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
-                                                    hapticGenerator.impactOccurred(intensity: 1.0)
-                                                    UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
-                                                    notifHaptics.notificationOccurred(.success)
-                                                }
-                                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
-                                                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                                                }
-                                                hapticGenerator.prepare()
-                                                notifHaptics.prepare()
-                                                showStatic = true
-                                                playOneShotPop()
-                                                playStaticSound()
-                                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
-                                                    withAnimation { showStatic = false }
-                                                    stopStaticSound()
-                                                }
-                                                maybeShowAd()
+                                            // swipe down -> previous channel
+                                            selectedChannelIndex = (selectedChannelIndex - 1 + channels.count) % channels.count
+                                            currentIndex = 0
+                                            Task {
+                                                await reloadForChannel()
                                             }
+                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
+                                                hapticGenerator.impactOccurred(intensity: 1.0)
+                                                UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+                                                notifHaptics.notificationOccurred(.success)
+                                            }
+                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                                                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                                            }
+                                            hapticGenerator.prepare()
+                                            notifHaptics.prepare()
+                                            showStatic = true
+                                            playOneShotPop()
+                                            playStaticSound()
+                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                                                withAnimation { showStatic = false }
+                                                stopStaticSound()
+                                            }
+                                            maybeShowAd()
                                         }
                                     }
                                 }
@@ -712,6 +734,20 @@ struct FeedView: View {
                             }
                             hapticGenerator.prepare()
                             notifHaptics.prepare()
+                        }
+                    }
+                    .onLongPressGesture(minimumDuration: 0.5) {
+                        // Long press to show post location on map
+                        if let post = posts[safe: currentIndex] {
+                            let coordinate = CLLocationCoordinate2D(latitude: post.latitude, longitude: post.longitude)
+                            print("📍 [FeedView] Long press - showing post location on map: \(coordinate.latitude), \(coordinate.longitude)")
+                            NotificationCenter.default.post(
+                                name: Notification.Name("ShowLocationOnMap"),
+                                object: nil,
+                                userInfo: ["coordinate": coordinate]
+                            )
+                            // Haptic feedback
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                         }
                     }
             }
@@ -768,6 +804,11 @@ struct FeedView: View {
                     post: post,
                     displayName: displayName(for: post),
                     onUserTapped: { uid in
+                        print("👤 [FeedView] User tapped - userID: '\(uid)'")
+                        guard !uid.isEmpty else {
+                            print("⚠️ [FeedView] Cannot navigate to profile - userID is empty")
+                            return
+                        }
                         selectedUserID = uid
                         navigateToProfile = true
                     }
@@ -776,6 +817,53 @@ struct FeedView: View {
                 .ignoresSafeArea()
                 .clipped()
                 .background(Color.black)
+                
+                // Post info overlay
+                VStack {
+                    HStack(spacing: 12) {
+                        // Country flag and channel emoji
+                        HStack(spacing: 6) {
+                            Text(countries[selectedCountryIndex].flag)
+                                .font(.system(size: 32))
+                            
+                            Text(channels[selectedChannelIndex].emoji)
+                                .font(.system(size: 32))
+                        }
+                        
+                        // User info and coordinates
+                        VStack(alignment: .leading, spacing: 4) {
+                            Button {
+                                print("👤 [FeedView] User info tapped - userID: '\(post.userID)'")
+                                guard !post.userID.isEmpty else {
+                                    print("⚠️ [FeedView] Cannot navigate to profile - userID is empty")
+                                    return
+                                }
+                                selectedUserID = post.userID
+                                navigateToProfile = true
+                            } label: {
+                                Text(displayName(for: post))
+                                    .font(.subheadline)
+                                    .foregroundStyle(.primary)
+                            }
+                            .buttonStyle(.plain)
+                            
+                            Text(String(format: "%.4f, %.4f", post.latitude, post.longitude))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                        }
+                        
+                        Spacer()
+                    }
+                    .padding(12)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .shadow(radius: 4)
+                    .padding(.horizontal)
+                    .padding(.top, 60)
+                    
+                    Spacer()
+                }
+                .allowsHitTesting(true)
             } else {
                 Color.black
             }
@@ -793,7 +881,10 @@ struct FeedView: View {
             isActive: $navigateToProfile,
             destination: {
                 if let userId = selectedUserID {
-                    AnyView(ProfileView(userID: userId))
+                    AnyView(
+                        ProfileView(userID: userId)
+                            .id(userId) // Force view recreation when userID changes
+                    )
                 } else {
                     AnyView(Text("No user selected"))
                 }
@@ -811,31 +902,33 @@ struct FeedView: View {
         GeometryReader { geo in
             ZStack {
                 VStack {
-                    HStack {
-                        let readyText = isFeedReady ? "yes" : "no"
-                        Text("posts: \(posts.count) ready: \(readyText)")
-                            .font(.system(size: 12, weight: .semibold, design: .rounded))
-                            .foregroundColor(.white.opacity(0.9))
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Color.black.opacity(0.55), in: Capsule())
-                            .overlay(Capsule().stroke(Color.white.opacity(0.25), lineWidth: 1))
-                        Spacer()
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.top, 8)
-
-                    HStack {
+                    // REMOVED: Debug label showing posts count and ready state
+                    
+                    // REMOVED: Country flag and channel emoji badges (now shown in post info overlay)
+                    /*
+                    HStack(spacing: 8) {
+                        // Country flag (horizontal swipe)
                         Text(countries[selectedCountryIndex].flag)
                             .font(.system(size: 28))
                             .padding(.horizontal, 10)
                             .padding(.vertical, 6)
                             .background(Color.black.opacity(0.55), in: Capsule())
                             .overlay(Capsule().stroke(Color.white.opacity(0.25), lineWidth: 1))
+                        
+                        // Channel emoji (vertical swipe)
+                        Text(channels[selectedChannelIndex].emoji)
+                            .font(.system(size: 28))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Color.black.opacity(0.55), in: Capsule())
+                            .overlay(Capsule().stroke(Color.white.opacity(0.25), lineWidth: 1))
+                        
                         Spacer()
                     }
                     .padding(.leading, 12)
                     .padding(.top, geo.safeAreaInsets.top + 8)
+                    */
+                    
                     Spacer(minLength: 0)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -862,6 +955,10 @@ struct FeedView: View {
     }
 
     private func maybeResolveUsername(for uid: String) {
+        // Guard against empty UIDs
+        guard !uid.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return
+        }
         // Avoid duplicate fetches per-view
         if usernames[uid] != nil || usernameLoadsInProgress.contains(uid) { return }
         usernameLoadsInProgress.insert(uid)
@@ -996,14 +1093,18 @@ struct FeedView: View {
         // Simulate network delay for UX parity.
         try? await Task.sleep(nanoseconds: 250_000_000)
 
-        // In lieu of Firestore, generate a page of demo posts.
-
-        let newPosts = Self.generateDemoPosts(start: 0, count: pageSize)
+        // Use the country and channel-aware generator for consistency
+        let newPosts = Self.generateDemoPostsForCountryAndChannel(
+            country: countries[selectedCountryIndex].code,
+            channel: channels[selectedChannelIndex].id,
+            start: 0,
+            count: pageSize
+        )
 
         let mixed = newPosts
 
         await MainActor.run {
-            print("[Feed] reload posts loaded: \(mixed.count)")
+            print("[Feed] reload posts loaded: \(mixed.count) country=\(countries[selectedCountryIndex].code) channel=\(channels[selectedChannelIndex].id)")
             posts = mixed
             isLoading = false
             // If we couldn't load anything, mark as reached end to stop paginating.
@@ -1011,6 +1112,17 @@ struct FeedView: View {
             prefetchVisibleUsernames()
             isFeedReady = !posts.isEmpty
             print("[Feed] reload set ready=\(isFeedReady)")
+            
+            // Trigger radius bar update for the first post
+            if !posts.isEmpty {
+                let firstPost = posts[0]
+                print("📱 [Feed] Initial load - showing first post radius: \(firstPost.radius)m")
+                RadiusBarAnimator.showPostRadius(firstPost.radius, duration: 0.8)
+            } else {
+                // No posts - set radius to 0
+                print("📱 [Feed] No posts - setting radius to 0")
+                RadiusBarAnimator.showPostRadius(0, duration: 0.3)
+            }
         }
     }
 
@@ -1023,18 +1135,66 @@ struct FeedView: View {
             currentIndex = 0
         }
         try? await Task.sleep(nanoseconds: 150_000_000)
-        let newPosts = Self.generateDemoPostsForCountry(country: countries[selectedCountryIndex].code, start: 0, count: pageSize)
+        let newPosts = Self.generateDemoPostsForCountryAndChannel(
+            country: countries[selectedCountryIndex].code,
+            channel: channels[selectedChannelIndex].id,
+            start: 0,
+            count: pageSize
+        )
 
         let mixed = newPosts
 
         await MainActor.run {
-            print("[Feed] reloadForCountry posts loaded: \(mixed.count) country=\(countries[selectedCountryIndex].code)")
+            print("[Feed] reloadForCountry posts loaded: \(mixed.count) country=\(countries[selectedCountryIndex].code) channel=\(channels[selectedChannelIndex].id)")
             posts = mixed
             isLoading = false
             reachedEnd = mixed.isEmpty
             prefetchVisibleUsernames()
             isFeedReady = !posts.isEmpty
             print("[Feed] reloadForCountry set ready=\(isFeedReady)")
+            
+            // Trigger radius bar update for the first post
+            if !posts.isEmpty {
+                let firstPost = posts[0]
+                print("📱 [Feed] Country reload - showing first post radius: \(firstPost.radius)m")
+                RadiusBarAnimator.showPostRadius(firstPost.radius, duration: 0.8)
+            }
+        }
+    }
+    
+    private func reloadForChannel() async {
+        await MainActor.run {
+            isLoading = true
+            reachedEnd = false
+            lastDocument = nil
+            posts.removeAll()
+            currentIndex = 0
+        }
+        try? await Task.sleep(nanoseconds: 150_000_000)
+        let newPosts = Self.generateDemoPostsForCountryAndChannel(
+            country: countries[selectedCountryIndex].code,
+            channel: channels[selectedChannelIndex].id,
+            start: 0,
+            count: pageSize
+        )
+
+        let mixed = newPosts
+
+        await MainActor.run {
+            print("[Feed] reloadForChannel posts loaded: \(mixed.count) country=\(countries[selectedCountryIndex].code) channel=\(channels[selectedChannelIndex].id)")
+            posts = mixed
+            isLoading = false
+            reachedEnd = mixed.isEmpty
+            prefetchVisibleUsernames()
+            isFeedReady = !posts.isEmpty
+            print("[Feed] reloadForChannel set ready=\(isFeedReady)")
+            
+            // Trigger radius bar update for the first post
+            if !posts.isEmpty {
+                let firstPost = posts[0]
+                print("📱 [Feed] Channel reload - showing first post radius: \(firstPost.radius)m")
+                RadiusBarAnimator.showPostRadius(firstPost.radius, duration: 0.8)
+            }
         }
     }
 
@@ -1058,7 +1218,12 @@ struct FeedView: View {
             // Simulate network delay
             try? await Task.sleep(nanoseconds: 250_000_000)
 
-            var newPage = Self.generateDemoPostsForCountry(country: countries[selectedCountryIndex].code, start: posts.count, count: pageSize)
+            var newPage = Self.generateDemoPostsForCountryAndChannel(
+                country: countries[selectedCountryIndex].code,
+                channel: channels[selectedChannelIndex].id,
+                start: posts.count,
+                count: pageSize
+            )
 
             await MainActor.run {
                 posts.append(contentsOf: newPage)
@@ -1128,6 +1293,61 @@ struct FeedView: View {
                 userID: userID
             )
             result.append(post)
+        }
+        return result
+    }
+    
+    private static func generateDemoPostsForCountryAndChannel(country: String, channel: String, start: Int, count: Int) -> [FeedPost] {
+        guard count > 0 else { return [] }
+        let totalCap = 30
+        let end = min(start + count, totalCap)
+        guard start < end else { return [] }
+        var result: [FeedPost] = []
+        for i in start..<end {
+            let id = "\(country.lowercased())_\(channel)_demo_\(i)"
+            let userID = i % 3 == 0 ? "\(channel)_user_\(i)" : String(format: "%@_user_%06d", channel, i)
+            // Force the first post to be a guaranteed playable HLS stream
+            let hlsSample = "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_4x3/gear1/prog_index.m3u8"
+            let sampleVideos: [String] = [
+                // Reliable HLS (landscape)
+                "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_4x3/gear1/prog_index.m3u8",
+                "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_16x9/gear1/prog_index.m3u8",
+                // HLS variants
+                "https://devstreaming-cdn.apple.com/videos/wwdc/2020/10653/4/7EEB4C51-2E7F-4B6C-BE1D-2E94C7D10C61/hls_vod_mvp.m3u8",
+                "https://devstreaming-cdn.apple.com/videos/wwdc/2019/502dvxw8o5g9v9b/502/hls_vod_mvp.m3u8",
+                // Small MP4s (landscape)
+                "https://filesamples.com/samples/video/mp4/sample_640x360.mp4",
+                "https://filesamples.com/samples/video/mp4/sample_960x400_ocean_with_audio.mp4",
+                "https://sample-videos.com/video321/mp4/720/big_buck_bunny_720p_1mb.mp4",
+                // Additional MP4s
+                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
+                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+                // Extra diversity (different encodes/aspects)
+                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
+                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4"
+            ]
+            let mediaURL: String
+            if i < 2 {
+                // Force images early so the first page shows a mix
+                let w = [640, 720, 800, 1080].randomElement() ?? 800
+                let h = [960, 1280, 1400, 1440, 1920].randomElement() ?? 1400
+                mediaURL = "https://picsum.photos/\(w)/\(h)?random=\(Int.random(in: 1...10_000))"
+            } else if i % 2 == 0 {
+                // Even index -> image
+                let w = [640, 720, 800, 1080].randomElement() ?? 800
+                let h = [960, 1280, 1400, 1440, 1920].randomElement() ?? 1400
+                mediaURL = "https://picsum.photos/\(w)/\(h)?random=\(Int.random(in: 1...10_000))"
+            } else {
+                // Odd index -> random video from sampleVideos
+                mediaURL = sampleVideos.randomElement() ?? hlsSample
+            }
+            // Shift coordinates slightly by country and channel hash to vary positions
+            let baseLat = 37.3349 + Double(abs(country.hashValue % 20)) * 0.01 + Double(abs(channel.hashValue % 10)) * 0.005
+            let baseLon = -122.0090 - Double(abs(country.hashValue % 20)) * 0.01 - Double(abs(channel.hashValue % 10)) * 0.005
+            let latitude = baseLat + Double(i % 5) * 0.01
+            let longitude = baseLon - Double(i % 7) * 0.01
+            let radius = [50, 100, 250, 500, 1000, 5000].randomElement() ?? 250
+            result.append(FeedPost(id: id, latitude: latitude, longitude: longitude, mediaURL: mediaURL, radius: Double(radius), viewCount: radius, userID: userID))
         }
         return result
     }
@@ -1533,9 +1753,6 @@ private struct FeedFullscreenPageView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color.black)
                 //.ignoresSafeArea() // removed as per instructions
-                .overlay(alignment: .topTrailing) {
-                    topRightInfo(size: geo.size)
-                }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black)
@@ -1557,19 +1774,6 @@ private struct FeedFullscreenPageView: View {
             } else {
                 Color.black
             }
-
-            if !post.mediaURL.isEmpty {
-                mediaURLBadge
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                    .padding(.bottom, 8)
-                    .padding(.horizontal, 12)
-                    .zIndex(6)
-            }
-
-            /*
-            topRightInfo(size: size)
-                .zIndex(10)
-            */
         }
     }
 

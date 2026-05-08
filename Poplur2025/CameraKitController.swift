@@ -8,6 +8,11 @@ import FirebaseAuth
 import FirebaseStorage
 import FirebaseFirestore
 
+private var isRunningInPreviews: Bool {
+    let env = ProcessInfo.processInfo.environment
+    return env["XCODE_RUNNING_FOR_PREVIEWS"] == "1" || env["XCODE_RUNNING_FOR_PLAYGROUNDS"] == "1" || ProcessInfo.processInfo.arguments.contains("-XcodePreviews")
+}
+
 class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDelegate, RecordPreviewViewControllerProviding, PreviewViewControllerProviding {
     // MARK: - Properties
     let sessionQueue = DispatchQueue(label: "camera.session.queue")
@@ -33,6 +38,71 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
     
     override init() {
         super.init()
+        
+        // Listen for coordinate override from map long-press
+        NotificationCenter.default.addObserver(
+            forName: Notification.Name("SetCameraCoordinate"),
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self = self,
+                  let userInfo = notification.userInfo,
+                  let latitude = userInfo["latitude"] as? Double,
+                  let longitude = userInfo["longitude"] as? Double else {
+                return
+            }
+            
+            Task { @MainActor in
+                self.overrideCoordinate = CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+                print("📍 [CameraKit] Set override coordinate: \(latitude), \(longitude)")
+            }
+        }
+        
+        // Listen for image upload request from map placement
+        NotificationCenter.default.addObserver(
+            forName: Notification.Name("UploadImageToCurrentCoordinate"),
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self = self,
+                  let image = notification.object as? UIImage else {
+                return
+            }
+            
+            Task { @MainActor in
+                self.requestLocationAuthorizationIfNeeded()
+                let loc = await self.currentLocation()
+                let coord = loc?.coordinate
+                await self.postImage(image, at: coord)
+                print("📤 [CameraKit] Uploaded image to coordinate: \(String(describing: coord))")
+            }
+        }
+        
+        // Listen for video upload request from map placement
+        NotificationCenter.default.addObserver(
+            forName: Notification.Name("UploadVideoToCurrentCoordinate"),
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self = self,
+                  let videoURL = notification.object as? URL else {
+                return
+            }
+            
+            Task { @MainActor in
+                self.requestLocationAuthorizationIfNeeded()
+                let loc = await self.currentLocation()
+                let coord = loc?.coordinate
+                let processedURL = await self.exportCroppedPortrait9x16(inputURL: videoURL) ?? videoURL
+                if let url = await self.uploadVideoToStorage(fileURL: processedURL) {
+                    await self.writePostDocument(mediaURL: url, coordinate: coord, mediaType: "video")
+                    print("📤 [CameraKit] Uploaded video to coordinate: \(String(describing: coord))")
+                } else {
+                    print("❌ [CameraKit] Failed to upload video")
+                }
+            }
+        }
+        
         #if DEBUG
         // Skip heavy prewarm when running SwiftUI previews (handle both env var and launch arg)
         let isRunningInPreviews = ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1" ||
@@ -65,6 +135,9 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
     // MARK: - Location
     private let locationManager = CLLocationManager()
     private var locationContinuation: CheckedContinuation<CLLocation?, Never>?
+    
+    // Override coordinate - set when user long-presses on map
+    private var overrideCoordinate: CLLocationCoordinate2D?
 
     // MARK: - SnapKit Integration
     @MainActor
@@ -177,7 +250,16 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
     }
 
     private func currentLocation() async -> CLLocation? {
-        await withCheckedContinuation { (cont: CheckedContinuation<CLLocation?, Never>) in
+        // If override coordinate is set (from map long-press), use it and clear
+        if let override = overrideCoordinate {
+            print("📍 [CameraKit] Using override coordinate: \(override.latitude), \(override.longitude)")
+            let location = CLLocation(latitude: override.latitude, longitude: override.longitude)
+            overrideCoordinate = nil // Clear after use
+            return location
+        }
+        
+        // Otherwise, request current location
+        return await withCheckedContinuation { (cont: CheckedContinuation<CLLocation?, Never>) in
             DispatchQueue.main.async { [weak self] in
                 guard let self else { cont.resume(returning: nil); return }
                 self.locationContinuation = cont
@@ -192,6 +274,10 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
     
     @MainActor
     private func writePostDocument(mediaURL: URL, coordinate: CLLocationCoordinate2D?, mediaType: String) async {
+        #if DEBUG
+        if isRunningInPreviews { return }
+        #endif
+        
         guard let uid = Auth.auth().currentUser?.uid else {
             print("[CK][Post] No authenticated user; cannot write post")
             return
@@ -221,6 +307,10 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
     }
     
     private func uploadImageToStorage(_ image: UIImage) async -> URL? {
+        #if DEBUG
+        if isRunningInPreviews { return nil }
+        #endif
+        
         // Ensure user is authenticated if rules require auth
         guard let user = Auth.auth().currentUser else {
             print("[CK][Upload] No authenticated user; Storage rules may require auth. Aborting image upload.")
@@ -252,6 +342,10 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
     }
 
     private func uploadVideoToStorage(fileURL: URL) async -> URL? {
+        #if DEBUG
+        if isRunningInPreviews { return nil }
+        #endif
+        
         // Ensure user is authenticated if rules require auth
         guard let user = Auth.auth().currentUser else {
             print("[CK][Upload] No authenticated user; Storage rules may require auth. Aborting video upload.")
@@ -576,6 +670,18 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
                     let overlay = CapturePreviewOverlay(image: image, videoURL: nil)
                     let host = UIHostingController(rootView: overlay)
                     host.modalPresentationStyle = .fullScreen
+                    
+                    // Notify preview if we have a map-selected coordinate
+                    if let coord = self.overrideCoordinate {
+                        NotificationCenter.default.post(
+                            name: Notification.Name("CapturePreviewFromMapLocation"),
+                            object: nil,
+                            userInfo: [
+                                "latitude": coord.latitude,
+                                "longitude": coord.longitude
+                            ]
+                        )
+                    }
 
                     // Observers for overlay actions
                     var dismissObserver: NSObjectProtocol?
@@ -609,6 +715,10 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
     
     @MainActor
     func start() async {
+        #if DEBUG
+        if isRunningInPreviews { return }
+        #endif
+        
         print("[CK][Start] Requesting camera access…")
         // Request access on main, then configure/start on sessionQueue
         let granted = await requestCameraAccessIfNeeded()
@@ -668,6 +778,10 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
 
     @MainActor
     func prewarm() async {
+        #if DEBUG
+        if isRunningInPreviews { return }
+        #endif
+        
         // Request access if not determined; do not start the session.
         let status = AVCaptureDevice.authorizationStatus(for: .video)
         if status == .notDetermined {
@@ -684,6 +798,10 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
 
     @MainActor
     func startPreview() async {
+        #if DEBUG
+        if isRunningInPreviews { return }
+        #endif
+        
         // Assume configuration was prewarmed; just start running if not already.
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
             sessionQueue.async { [weak self] in
@@ -730,6 +848,18 @@ extension CameraKitController: AVCaptureFileOutputRecordingDelegate {
             let overlay = CapturePreviewOverlay(image: nil, videoURL: outputFileURL)
             let host = UIHostingController(rootView: overlay)
             host.modalPresentationStyle = .fullScreen
+            
+            // Notify preview if we have a map-selected coordinate
+            if let coord = self.overrideCoordinate {
+                NotificationCenter.default.post(
+                    name: Notification.Name("CapturePreviewFromMapLocation"),
+                    object: nil,
+                    userInfo: [
+                        "latitude": coord.latitude,
+                        "longitude": coord.longitude
+                    ]
+                )
+            }
 
             // Observers for overlay actions
             var dismissObserver: NSObjectProtocol?
@@ -809,3 +939,4 @@ extension CameraKitController: CLLocationManagerDelegate {
         locationContinuation = nil
     }
 }
+

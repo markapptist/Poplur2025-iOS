@@ -5,12 +5,30 @@ import FirebaseFirestore
 import UserNotifications
 import ARKit
 
+private var isRunningInPreviews: Bool {
+    let env = ProcessInfo.processInfo.environment
+    return env["XCODE_RUNNING_FOR_PREVIEWS"] == "1" || env["XCODE_RUNNING_FOR_PLAYGROUNDS"] == "1"
+}
+
 struct ProfileView: View {
     @EnvironmentObject private var auth: AuthViewModel
     @GestureState private var isInteractingWithCube: Bool = false
     @State private var isScrollDisabled = false
+    
+    // Track if we're viewing own profile or another user's
+    private var isOwnProfile: Bool {
+        if let userID = userID, !userID.isEmpty {
+            let currentUID = Auth.auth().currentUser?.uid
+            let result = currentUID == userID
+            print("🔍 [ProfileView] isOwnProfile check - currentUID: \(currentUID ?? "nil"), userID: \(userID), result: \(result)")
+            return result
+        }
+        print("🔍 [ProfileView] isOwnProfile check - no userID or empty string, assuming own profile")
+        return true // If no userID provided or empty string, assume own profile
+    }
 
     @State private var editing = false
+    @State private var displayUsername: String? = nil
     @State private var userProfile: UserProfile?
 
     @State private var myPosts: [Post] = []
@@ -21,6 +39,7 @@ struct ProfileView: View {
     @State private var profileImage: UIImage? = nil
     @State private var profileImageURL: URL? = nil
     @State private var showSettings = false
+    @State private var navigateToMessages = false
     @State private var averageRadius: Double = 5000
     @State private var navigateToScanner = false
     
@@ -51,13 +70,18 @@ struct ProfileView: View {
 
     private let tileCorner: CGFloat = 18
     private let tileSpacing: CGFloat = 12
-    private let headerTopPadding: CGFloat = 12
 
     let userID: String?
+    
+    // Use a stable ID to force view recreation when userID changes
+    private var viewID: String {
+        userID ?? "own-profile"
+    }
 
     init(userID: String? = nil, initialMode: DisplayMode = .grid) {
         self.userID = userID
         _mode = State(initialValue: initialMode)
+        print("🏗️ [ProfileView] Initialized with userID: \(userID ?? "nil")")
     }
     
     // MARK: - Simple disk cache for posts (per user)
@@ -82,7 +106,7 @@ struct ProfileView: View {
         do {
             let data = try Data(contentsOf: url)
             let cached = try JSONDecoder().decode([CachedPost].self, from: data)
-            return cached.map { Post(id: $0.id, latitude: $0.latitude, longitude: $0.longitude, mediaURL: $0.mediaURL, radius: $0.radius, viewCount: $0.viewCount, userID: $0.userID) }
+            return cached.map { Post(id: $0.id, latitude: $0.latitude, longitude: $0.longitude, mediaURL: $0.mediaURL, radius: $0.radius, viewCount: $0.viewCount, userID: $0.userID, posterURL: nil) }
         } catch {
             print("Profile cache: failed to read -> \(error.localizedDescription)")
             return nil
@@ -106,7 +130,24 @@ struct ProfileView: View {
                 Color.white.ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    headerBar
+                    // Explanatory text box at the top
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(isOwnProfile ? "Your Profile" : "User Profile")
+                            .font(.system(size: 16, weight: .bold, design: .rounded))
+                            .foregroundColor(.primary)
+                        
+                        Text(isOwnProfile ? "View all your posts in grid or list mode. Tap any post to view fullscreen. Tap the cube to access settings, or long-press for messages." : "View this user's posts in grid or list mode. Tap any post to view fullscreen.")
+                            .font(.system(size: 13, weight: .regular, design: .rounded))
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(14)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+                    .padding(.bottom, 8)
 
                     VStack(spacing: 10) {
                         avatarRow
@@ -148,6 +189,18 @@ struct ProfileView: View {
                                                                 NotificationCenter.default.post(name: Notification.Name("currentPostRadiusDidChange"), object: nil, userInfo: ["radius": Double(post.radius)])
                                                             }
                                                         }
+                                                        .onLongPressGesture(minimumDuration: 0.5) {
+                                                            // Long press to show post location on map
+                                                            let coordinate = CLLocationCoordinate2D(latitude: post.latitude, longitude: post.longitude)
+                                                            print("📍 [ProfileView] Long press - showing post location on map: \(coordinate.latitude), \(coordinate.longitude)")
+                                                            NotificationCenter.default.post(
+                                                                name: Notification.Name("ShowLocationOnMap"),
+                                                                object: nil,
+                                                                userInfo: ["coordinate": coordinate]
+                                                            )
+                                                            // Haptic feedback
+                                                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                                                        }
                                                 }
                                                 Color.clear.frame(height: 1).onAppear {
                                                     loadMoreIfNeeded(currentItem: myPosts.last)
@@ -178,6 +231,18 @@ struct ProfileView: View {
                                                                 // Notify radius change for global radius bar sync
                                                                 NotificationCenter.default.post(name: Notification.Name("currentPostRadiusDidChange"), object: nil, userInfo: ["radius": Double(post.radius)])
                                                             }
+                                                        }
+                                                        .onLongPressGesture(minimumDuration: 0.5) {
+                                                            // Long press to show post location on map
+                                                            let coordinate = CLLocationCoordinate2D(latitude: post.latitude, longitude: post.longitude)
+                                                            print("📍 [ProfileView] Long press - showing post location on map: \(coordinate.latitude), \(coordinate.longitude)")
+                                                            NotificationCenter.default.post(
+                                                                name: Notification.Name("ShowLocationOnMap"),
+                                                                object: nil,
+                                                                userInfo: ["coordinate": coordinate]
+                                                            )
+                                                            // Haptic feedback
+                                                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                                                         }
                                                 }
                                                 Color.clear.frame(height: 1).onAppear {
@@ -210,54 +275,7 @@ struct ProfileView: View {
 
                 // Removed local IsometricRadiusBar overlay here
 
-                // Global gesture layer for cube interaction (restricted to upper area and non-preemptive)
-                GeometryReader { geo in
-                    let height = geo.size.height
-                    VStack(spacing: 0) {
-                        // Leave header + avatar + username + mode switcher tappable
-                        Spacer().frame(height: 260)
-
-                        Color.clear
-                            .frame(height: height * 0.6)
-                            .contentShape(Rectangle())
-                            .simultaneousGesture(
-                                DragGesture(minimumDistance: 0)
-                                    .updating($isInteractingWithCube) { _, isInteracting, _ in
-                                        isInteracting = true
-                                    }
-                                    .onChanged { value in
-                                        if !isScrollDisabled { isScrollDisabled = true }
-                                        let boost: CGFloat = 1.35
-                                        let boosted = CGSize(width: value.translation.width * boost,
-                                                             height: value.translation.height * boost)
-                                        NotificationCenter.default.post(name: Notification.Name("CubeGlobalDragChanged"), object: nil, userInfo: [
-                                            "location": NSValue(cgPoint: value.location),
-                                            "translation": NSValue(cgSize: boosted)
-                                        ])
-                                    }
-                                    .onEnded { value in
-                                        let boost: CGFloat = 1.35
-                                        let boosted = CGSize(width: value.translation.width * boost,
-                                                             height: value.translation.height * boost)
-                                        NotificationCenter.default.post(name: Notification.Name("CubeGlobalDragEnded"), object: nil, userInfo: [
-                                            "location": NSValue(cgPoint: value.location),
-                                            "translation": NSValue(cgSize: boosted)
-                                        ])
-                                        isScrollDisabled = false
-                                    }
-                            )
-                            .simultaneousGesture(
-                                TapGesture()
-                                    .onEnded {
-                                        isScrollDisabled = true
-                                        NotificationCenter.default.post(name: Notification.Name("CubeGlobalTap"), object: nil)
-                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { isScrollDisabled = false }
-                                    }
-                            )
-                        Spacer()
-                    }
-                    .ignoresSafeArea(edges: .top)
-                }
+                // REMOVED: Global gesture layer - cube gestures now handled by the cube itself in TabBarControllerHost
                 if let post = expandedPost {
                     ZStack {
                         Color.black.opacity(0.6)
@@ -299,22 +317,24 @@ struct ProfileView: View {
                             .buttonStyle(.plain)
                         }
                         .overlay(alignment: .topLeading) {
-                            Button(role: .destructive) {
-                                Task {
-                                    await deletePost(expandedPost)
-                                    withAnimation(.easeOut(duration: 0.25)) { expandedPost = nil }
+                            if isOwnProfile {
+                                Button(role: .destructive) {
+                                    Task {
+                                        await deletePost(expandedPost)
+                                        withAnimation(.easeOut(duration: 0.25)) { expandedPost = nil }
+                                    }
+                                } label: {
+                                    Label("Delete", systemImage: "trash.fill")
+                                        .font(.system(size: 16, weight: .bold))
+                                        .foregroundStyle(.white)
+                                        .padding(10)
+                                        .background(
+                                            Capsule().fill(Color.red.opacity(0.85))
+                                        )
+                                        .padding(12)
                                 }
-                            } label: {
-                                Label("Delete", systemImage: "trash.fill")
-                                    .font(.system(size: 16, weight: .bold))
-                                    .foregroundStyle(.white)
-                                    .padding(10)
-                                    .background(
-                                        Capsule().fill(Color.red.opacity(0.85))
-                                    )
-                                    .padding(12)
+                                .buttonStyle(.plain)
                             }
-                            .buttonStyle(.plain)
                         }
                         .overlay(alignment: .bottomLeading) {
                             Text("\(max(1, Int(post.radius) / 1000)) KM")
@@ -333,6 +353,11 @@ struct ProfileView: View {
             }
             NavigationLink(isActive: $showSettings) {
                 AppSettingsView()
+            } label: { EmptyView() }
+            .hidden()
+            
+            NavigationLink(isActive: $navigateToMessages) {
+                MessagesRootView()
             } label: { EmptyView() }
             .hidden()
 
@@ -372,17 +397,51 @@ struct ProfileView: View {
                 EditProfileView(user: $userProfile)
             }
             .task {
-                UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { _, _ in }
-                await loadMyPosts()
-                await MainActor.run {
-                    self.averageRadius = Double(self.averagePostRadius())
-                    self.hasLoadedOnce = true
+                if !isRunningInPreviews {
+                    print("📊 [ProfileView] Initial .task running for userID: \(userID ?? "nil")")
+                    UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { _, _ in }
+                    await loadMyPosts()
+                    await MainActor.run {
+                        self.averageRadius = Double(self.averagePostRadius())
+                        self.hasLoadedOnce = true
+                        
+                        // Animate radius bar to show total accumulated radius after loading
+                        if self.averageRadius > 0 {
+                            print("📊 [ProfileView] Posts loaded, animating radius bar to total: \(self.averageRadius)m")
+                            RadiusBarAnimator.animate(to: self.averageRadius, duration: 1.2)
+                        } else {
+                            print("📊 [ProfileView] No posts loaded, radius stays at 0")
+                        }
+                    }
+                    
+                    // Only load profile image for own profile
+                    if isOwnProfile {
+                        await loadPersistedProfileImageIfNeeded()
+                    }
+                } else {
+                    await MainActor.run {
+                        self.myPosts = []
+                        self.loadedImages = [:]
+                        self.hasLoadedOnce = true
+                        self.canLoadMore = false
+                    }
                 }
-                await loadPersistedProfileImageIfNeeded()
             }
             .onAppear {
                 NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
-                Task { await loadMyPosts() }
+                
+                // Immediately set radius to 0 when profile appears (before posts load)
+                print("📊 [ProfileView] onAppear - setting radius to 0")
+                RadiusBarAnimator.animate(to: 0, duration: 0.3)
+                
+                // Don't load posts here if we're already loading in .task
+                // This prevents double-loading
+                
+                // Animate radius bar to show total accumulated radius (only if already loaded)
+                if hasLoadedOnce && averageRadius > 0 {
+                    print("📊 [ProfileView] Animating radius bar to total: \(averageRadius)m")
+                    RadiusBarAnimator.animate(to: averageRadius, duration: 1.0)
+                }
             }
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ProfileRemovePost"))) { notif in
                 if let id = notif.object as? String {
@@ -391,13 +450,27 @@ struct ProfileView: View {
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: .cubeHoldBegan)) { _ in
-                // Start rising only on Record tab; HomeView controls selected tab, so we infer via notification usage
-                isHoldingCube = true
+                print("🎯 [ProfileView] Received cubeHoldBegan - isOwnProfile: \(isOwnProfile)")
+                if !isRunningInPreviews { 
+                    isHoldingCube = true
+                    
+                    // Navigate to messages if viewing own profile (after brief delay to allow hold gesture to complete)
+                    if isOwnProfile {
+                        print("✅ [ProfileView] Navigating to messages in 0.1s")
+                        Task { @MainActor in
+                            try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 second
+                            navigateToMessages = true
+                        }
+                    } else {
+                        print("⚠️ [ProfileView] Not navigating to messages - not own profile")
+                    }
+                }
             }
             .onReceive(NotificationCenter.default.publisher(for: .cubeHoldEnded)) { _ in
-                isHoldingCube = false
+                if !isRunningInPreviews { isHoldingCube = false }
             }
             .task(id: isHoldingCube) {
+                if isRunningInPreviews { return }
                 // If holding, increase the bar height factor over time; otherwise, ensure default per current tab
                 if isHoldingCube {
                     // Start from current value; rise at ~200pt/sec on a 220pt bar => ~0.9 factor per second
@@ -418,122 +491,116 @@ struct ProfileView: View {
                 // When record tab becomes active, collapse the bar
                 barHeightFactor = 0.0
             }
-        }
-    }
-
-    private var headerBar: some View {
-        HStack {
-            // Left: Settings (gear)
-            Button {
+            .onReceive(NotificationCenter.default.publisher(for: .CubeGlobalTap)) { _ in
+                print("🎯 [ProfileView] Received CubeGlobalTap - isOwnProfile: \(isOwnProfile)")
+                // Only respond if we're viewing our own profile
+                guard isOwnProfile else { 
+                    print("⚠️ [ProfileView] Ignoring CubeGlobalTap - not own profile")
+                    return 
+                }
+                print("✅ [ProfileView] Opening settings")
                 showSettings = true
-            } label: {
-                Image(systemName: "gearshape.fill")
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundColor(.black.opacity(0.95))
-                    .padding(10)
-                    .background(
-                        Circle().fill(Color.white)
-                            .shadow(color: Color.black.opacity(0.08), radius: 6, x: 0, y: 4)
-                    )
             }
-            .buttonStyle(.plain)
-
-            Spacer()
-
-            // Right: DMs (envelope)
-            NavigationLink {
-                MessagesRootView()
-            } label: {
-                Image(systemName: "envelope.fill")
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundColor(.black.opacity(0.95))
-                    .padding(10)
-                    .background(
-                        Circle().fill(Color.white)
-                            .shadow(color: Color.black.opacity(0.08), radius: 6, x: 0, y: 4)
-                    )
+            .onDisappear {
+                // Reset radius bar when leaving profile view
+                print("📊 [ProfileView] onDisappear - notifying to restore feed radius")
+                NotificationCenter.default.post(name: Notification.Name("ProfileViewDismissed"), object: nil)
             }
-            .buttonStyle(.plain)
         }
-        .padding(.horizontal, 16)
-        .padding(.top, headerTopPadding)
+        .id(viewID) // Force recreation when viewing different user
     }
 
     private var avatarRow: some View {
-        Button {
-            navigateToScanner = true
-        } label: {
-            ZStack {
-                if let localImage = profileImage {
-                    Image(uiImage: localImage)
-                        .resizable()
-                        .scaledToFill()
-                } else if let url = profileImageURL, // load persisted local file on appear
-                          let data = try? Data(contentsOf: url),
-                          let img = UIImage(data: data) {
-                    Image(uiImage: img)
-                        .resizable()
-                        .scaledToFill()
-                } else if let url = userProfile?.profilePictureURL {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .empty:
-                            Circle().fill(Color.gray.opacity(0.2))
-                                .overlay(ProgressView().tint(.gray))
-                        case .success(let img):
-                            img.resizable().scaledToFill()
-                        case .failure:
-                            Circle().fill(Color.gray.opacity(0.2))
-                                .overlay(Image(systemName: "person.fill").foregroundColor(.white))
-                        @unknown default:
-                            Circle().fill(Color.gray.opacity(0.2))
-                        }
-                    }
-                } else if let email = auth.currentUser?.email,
-                          let initials = initialsFrom(email: email) {
-                    Circle()
-                        .fill(Color.gray.opacity(0.2))
-                        .overlay(Text(initials).font(.system(size: 24, weight: .bold)))
-                } else {
-                    Circle()
-                        .fill(Color.gray.opacity(0.2))
-                        .overlay(Image(systemName: "person.fill").foregroundColor(.white))
+        Group {
+            if isOwnProfile {
+                Button {
+                    navigateToScanner = true
+                } label: {
+                    avatarContent
                 }
-            }
-            .frame(width: 96, height: 96)
-            .clipShape(Circle())
-            .shadow(color: Color.black.opacity(0.08), radius: 6, x: 0, y: 4)
-            .overlay(alignment: .bottomTrailing) {
-                if lastHeadModelURL != nil {
-                    Button {
-                        navigateToViewer = true
+                .contextMenu {
+                    Button(role: .destructive) {
+                        deleteProfilePhoto()
                     } label: {
-                        Image(systemName: "eye.fill")
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundColor(.white)
-                            .padding(6)
-                            .background(Circle().fill(Color.black.opacity(0.6)))
+                        Label("Delete Profile Photo", systemImage: "trash")
                     }
-                    .buttonStyle(.plain)
-                    .padding(4)
                 }
+                .buttonStyle(.plain)
+            } else {
+                avatarContent
             }
         }
-        .contextMenu {
-            Button(role: .destructive) {
-                deleteProfilePhoto()
-            } label: {
-                Label("Delete Profile Photo", systemImage: "trash")
+    }
+    
+    private var avatarContent: some View {
+        ZStack {
+            if let localImage = profileImage {
+                Image(uiImage: localImage)
+                    .resizable()
+                    .scaledToFill()
+            } else if let url = profileImageURL, // load persisted local file on appear
+                      let data = try? Data(contentsOf: url),
+                      let img = UIImage(data: data) {
+                Image(uiImage: img)
+                    .resizable()
+                    .scaledToFill()
+            } else if let url = userProfile?.profilePictureURL {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .empty:
+                        Circle().fill(Color.gray.opacity(0.2))
+                            .overlay(ProgressView().tint(.gray))
+                    case .success(let img):
+                        img.resizable().scaledToFill()
+                    case .failure:
+                        Circle().fill(Color.gray.opacity(0.2))
+                            .overlay(Image(systemName: "person.fill").foregroundColor(.white))
+                    @unknown default:
+                        Circle().fill(Color.gray.opacity(0.2))
+                    }
+                }
+            } else if isOwnProfile, let email = auth.currentUser?.email,
+                      let initials = initialsFrom(email: email) {
+                Circle()
+                    .fill(Color.gray.opacity(0.2))
+                    .overlay(Text(initials).font(.system(size: 24, weight: .bold)))
+            } else {
+                Circle()
+                    .fill(Color.gray.opacity(0.2))
+                    .overlay(Image(systemName: "person.fill").foregroundColor(.white))
             }
         }
-        .buttonStyle(.plain)
+        .frame(width: 96, height: 96)
+        .clipShape(Circle())
+        .shadow(color: Color.black.opacity(0.08), radius: 6, x: 0, y: 4)
+        .overlay(alignment: .bottomTrailing) {
+            if lastHeadModelURL != nil && isOwnProfile {
+                Button {
+                    navigateToViewer = true
+                } label: {
+                    Image(systemName: "eye.fill")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(.white)
+                        .padding(6)
+                        .background(Circle().fill(Color.black.opacity(0.6)))
+                }
+                .buttonStyle(.plain)
+                .padding(4)
+            }
+        }
     }
 
     private var usernameRow: some View {
-        Text(userProfile?.username ?? (auth.currentUser?.email?.components(separatedBy: "@").first?.uppercased() ?? "USERNAME"))
+        Text(displayUsername ?? (isOwnProfile ? (auth.currentUser?.email?.components(separatedBy: "@").first?.uppercased() ?? "USERNAME") : "USER"))
             .font(.system(size: 22, weight: .heavy, design: .rounded))
             .foregroundColor(.black.opacity(0.95))
             .padding(.top, 4)
+            .task {
+                // Fetch username for the profile being viewed
+                if let uid = userID ?? Auth.auth().currentUser?.uid {
+                    displayUsername = await UsernameCache.shared.username(for: uid)
+                }
+            }
     }
 
     private var modeSwitcher: some View {
@@ -565,12 +632,25 @@ struct ProfileView: View {
     }
 
     private func loadMyPosts() async {
+        if isRunningInPreviews {
+            await MainActor.run {
+                self.myPosts = []
+                self.loadedImages = [:]
+                self.hasLoadedOnce = true
+                self.canLoadMore = false
+            }
+            return
+        }
+
         let targetUID: String
-        if let provided = userID {
+        if let provided = userID, !provided.isEmpty {
             targetUID = provided
+            print("🔑 [ProfileView] Using provided userID: \(targetUID) (viewing \(isOwnProfile ? "own" : "other") profile)")
         } else if let current = Auth.auth().currentUser?.uid {
             targetUID = current
+            print("🔑 [ProfileView] Using current user's UID: \(targetUID) (own profile)")
         } else {
+            print("❌ [ProfileView] No user ID available - not logged in?")
             await MainActor.run {
                 myPosts = []
                 loadedImages = [:]
@@ -580,6 +660,9 @@ struct ProfileView: View {
             }
             return
         }
+        
+        print("🔍 [ProfileView] About to query posts for userID: '\(targetUID)'")
+        print("📊 [ProfileView] isOwnProfile: \(isOwnProfile)")
         
         // Try to show cached posts immediately for better perceived performance
         if let cached = loadPostsFromCache(for: targetUID), !cached.isEmpty {
@@ -651,7 +734,7 @@ struct ProfileView: View {
         await MainActor.run { isLoadingMore = true }
         defer { Task { @MainActor in isLoadingMore = false } }
         let targetUID: String
-        if let provided = userID {
+        if let provided = userID, !provided.isEmpty {
             targetUID = provided
         } else if let current = Auth.auth().currentUser?.uid {
             targetUID = current
@@ -679,25 +762,94 @@ struct ProfileView: View {
     }
 
     private func fetchPostsPage(for uid: String, after last: QueryDocumentSnapshot?, limit: Int) async throws -> PostsPage {
-        try await withCheckedThrowingContinuation { cont in
+        print("🔍 [ProfileView] Fetching posts for userID: \(uid)")
+        print("📄 [ProfileView] Query params - limit: \(limit), after: \(last?.documentID ?? "start")")
+        return try await withCheckedThrowingContinuation { (cont: CheckedContinuation<PostsPage, Error>) in
             let db = Firestore.firestore()
+            // Try query with createdAt first, fall back to query without if it fails
             var query: Query = db.collection("posts")
                 .whereField("userID", isEqualTo: uid)
-                .order(by: "createdAt", descending: true)
-                .limit(to: limit)
+            
+            print("🔎 [ProfileView] Executing Firestore query: posts where userID == '\(uid)'")
+            
+            // Only order by createdAt if we're not starting from a cursor
+            // This helps with posts that might not have createdAt field
+            if last == nil {
+                query = query.order(by: "createdAt", descending: true)
+                print("🔎 [ProfileView] Adding order by createdAt (descending)")
+            }
+            
+            query = query.limit(to: limit)
+            
             if let last = last {
                 query = query.start(afterDocument: last)
+                print("🔎 [ProfileView] Starting after document: \(last.documentID)")
             }
+            
             query.getDocuments { snap, err in
                 if let err = err {
-                    cont.resume(throwing: err)
+                    print("❌ [ProfileView] Error fetching posts: \(err.localizedDescription)")
+                    // Try fallback query without createdAt ordering
+                    print("🔄 [ProfileView] Trying fallback query without createdAt ordering...")
+                    let fallbackQuery = db.collection("posts")
+                        .whereField("userID", isEqualTo: uid)
+                        .limit(to: limit)
+                    
+                    fallbackQuery.getDocuments { snap2, err2 in
+                        if let err2 = err2 {
+                            print("❌ [ProfileView] Fallback query also failed: \(err2.localizedDescription)")
+                            cont.resume(throwing: err2)
+                            return
+                        }
+                        guard let snap2 = snap2 else {
+                            print("⚠️ [ProfileView] No snapshot returned from fallback")
+                            cont.resume(returning: PostsPage(posts: [], lastDoc: nil))
+                            return
+                        }
+                        print("📊 [ProfileView] Fallback received \(snap2.documents.count) documents")
+                        if snap2.documents.isEmpty {
+                            print("⚠️ [ProfileView] No documents found for userID: '\(uid)'")
+                        } else {
+                            print("✅ [ProfileView] Found \(snap2.documents.count) documents, mapping to Post objects...")
+                        }
+                        let posts = Self.mapPosts(from: snap2)
+                        print("✅ [ProfileView] Fallback mapped \(posts.count) posts")
+                        cont.resume(returning: PostsPage(posts: posts, lastDoc: snap2.documents.last))
+                    }
                     return
                 }
                 guard let snap = snap else {
+                    print("⚠️ [ProfileView] No snapshot returned")
                     cont.resume(returning: PostsPage(posts: [], lastDoc: nil))
                     return
                 }
+                print("📊 [ProfileView] Received \(snap.documents.count) documents from Firebase")
+                if snap.documents.isEmpty {
+                    print("⚠️ [ProfileView] No documents found for userID: '\(uid)'")
+                    print("💡 [ProfileView] This could mean:")
+                    print("   - User has not created any posts yet")
+                    print("   - UserID field in Firebase uses different casing (userId vs userID)")
+                    print("   - Posts are stored under a different collection")
+                } else {
+                    print("✅ [ProfileView] Found \(snap.documents.count) documents, mapping to Post objects...")
+                }
                 let posts = Self.mapPosts(from: snap)
+                print("✅ [ProfileView] Successfully mapped \(posts.count) posts")
+                if posts.count != snap.documents.count {
+                    print("⚠️ [ProfileView] Some documents failed to map. Raw count: \(snap.documents.count), Mapped: \(posts.count)")
+                    // Debug: print first failed document
+                    for doc in snap.documents {
+                        let data = doc.data()
+                        if !posts.contains(where: { $0.id == doc.documentID }) {
+                            print("❌ [ProfileView] Failed to map document \(doc.documentID):")
+                            print("   - mediaURL: \(data["mediaURL"] as? String ?? "missing")")
+                            print("   - latitude: \(data["latitude"] ?? "missing")")
+                            print("   - longitude: \(data["longitude"] ?? "missing")")
+                            print("   - radius: \(data["radius"] ?? "missing")")
+                            print("   - userID: \(data["userID"] as? String ?? "missing")")
+                        }
+                    }
+                }
                 let lastDoc = snap.documents.last
                 cont.resume(returning: PostsPage(posts: posts, lastDoc: lastDoc))
             }
@@ -717,7 +869,8 @@ struct ProfileView: View {
             let radius = (data["radius"] as? Int) ?? (data["radius"] as? NSNumber)?.intValue ?? 5000
             let viewCount = (data["viewCount"] as? Int) ?? (data["viewCount"] as? NSNumber)?.intValue ?? 0
             let userID = data["userID"] as? String ?? "unknown"
-            return Post(id: doc.documentID, latitude: lat, longitude: lon, mediaURL: mediaURL, radius: radius, viewCount: viewCount, userID: userID)
+            let posterURL = data["posterURL"] as? String
+            return Post(id: doc.documentID, latitude: lat, longitude: lon, mediaURL: mediaURL, radius: radius, viewCount: viewCount, userID: userID, posterURL: posterURL)
         }
     }
 
@@ -734,7 +887,8 @@ struct ProfileView: View {
             let radius = (data["radius"] as? Int) ?? (data["radius"] as? NSNumber)?.intValue ?? 5000
             let viewCount = (data["viewCount"] as? Int) ?? (data["viewCount"] as? NSNumber)?.intValue ?? 0
             let userID = data["userID"] as? String ?? "unknown"
-            return Post(id: doc.documentID, latitude: lat, longitude: lon, mediaURL: mediaURL, radius: radius, viewCount: viewCount, userID: userID)
+            let posterURL = data["posterURL"] as? String
+            return Post(id: doc.documentID, latitude: lat, longitude: lon, mediaURL: mediaURL, radius: radius, viewCount: viewCount, userID: userID, posterURL: posterURL)
         }
     }
 
@@ -792,10 +946,10 @@ struct ProfileView: View {
     }
     
     private func averagePostRadius() -> Int {
-        if myPosts.isEmpty { return 5000 }
+        if myPosts.isEmpty { return 0 }
+        // Changed to total accumulated radius instead of average
         let total = myPosts.reduce(0) { $0 + $1.radius }
-        let avg = total / max(1, myPosts.count)
-        return max(1, avg)
+        return total
     }
     
     private func deletePost(_ post: Post?) async {

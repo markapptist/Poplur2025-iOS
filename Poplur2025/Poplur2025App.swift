@@ -1,12 +1,10 @@
 import SwiftUI
 
-// Only import heavy frameworks when NOT in preview mode
-#if !DEBUG || !targetEnvironment(simulator)
+// Only import heavy frameworks in release on real device
 import FirebaseCore
 import FirebaseFirestore
 #if canImport(GoogleMobileAds)
 import GoogleMobileAds
-#endif
 #endif
 
 import AVFoundation
@@ -25,20 +23,21 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         if !PreviewEnv.isPreview {
-            #if !DEBUG || !targetEnvironment(simulator)
+            // Always configure Firebase (needed for Auth)
             if FirebaseApp.app() == nil {
                 FirebaseApp.configure()
                 
-                // Disable Firestore offline persistence to avoid disk space issues in simulator
+                // Disable Firestore offline persistence in simulator to avoid disk space issues
                 #if targetEnvironment(simulator)
                 let settings = FirestoreSettings()
                 settings.isPersistenceEnabled = false
                 Firestore.firestore().settings = settings
                 #endif
             }
-            #if canImport(GoogleMobileAds)
+            
+            // Only start ads in release builds on real devices
+            #if !DEBUG && !targetEnvironment(simulator) && canImport(GoogleMobileAds)
             MobileAds.shared.start(completionHandler: nil)
-            #endif
             #endif
             
             #if !targetEnvironment(simulator)

@@ -1,10 +1,18 @@
 import Foundation
 import CoreLocation
 import Combine
+import SwiftUI
+import MapKit
 
 @MainActor
 final class LocationProvider: NSObject, ObservableObject {
     @Published var coordinate: CLLocationCoordinate2D?
+    
+    /// Compatibility property for MapView - converts coordinate to CLLocation
+    var location: CLLocation? {
+        guard let coordinate = coordinate else { return nil }
+        return CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+    }
 
     private let manager = CLLocationManager()
     private var didRequest = false
@@ -19,6 +27,18 @@ final class LocationProvider: NSObject, ObservableObject {
         if let loc = manager.location?.coordinate {
             self.coordinate = loc
         }
+    }
+    
+    /// Returns a MapCameraPosition centered on the user's current location
+    func getCenteredCamera() -> MapCameraPosition? {
+        guard let coord = coordinate else { return nil }
+        return .camera(MapCamera(centerCoordinate: coord, distance: 300, heading: 0, pitch: 60))
+    }
+    
+    /// Centers the map camera on the user's current location (mutating version)
+    func centerOnUser(_ camera: Binding<MapCameraPosition>) {
+        guard let coord = coordinate else { return }
+        camera.wrappedValue = .camera(MapCamera(centerCoordinate: coord, distance: 300, heading: 0, pitch: 60))
     }
 
     func request() {

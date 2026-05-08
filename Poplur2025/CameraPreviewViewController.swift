@@ -6,12 +6,6 @@ import SceneKit
 import SpriteKit
 import CoreMedia
 
-extension Notification.Name {
-    static let cameraCubeTabViewTapped = Notification.Name("Camera_CubeTabViewTappedNotification")
-    static let cameraCubeHoldBegan = Notification.Name("Camera_CubeHoldBegan")
-    static let cameraCubeHoldEnded = Notification.Name("Camera_CubeHoldEnded")
-}
-
 /// Hosts an AVCaptureVideoPreviewLayer for a provided AVCaptureSession.
 final class CameraPreviewViewController: UIViewController {
 
@@ -118,6 +112,8 @@ final class CameraPreviewViewController: UIViewController {
         spriteScene = overlay
         spriteView.presentScene(overlay)
 
+        // REMOVED: Torch and flip sprite icons - now controlled by gestures only
+        /*
         // Configure sprites
         let torchImage = UIImage(systemName: "flashlight.off.fill")?.withTintColor(.white, renderingMode: .alwaysOriginal)
         let torchTex = torchImage != nil ? SKTexture(image: torchImage!) : nil
@@ -150,8 +146,9 @@ final class CameraPreviewViewController: UIViewController {
         
         flipSprite.blendMode = .alpha
         torchSprite.blendMode = .alpha
+        */
 
-        // Setup UIKit buttons
+        // Setup UIKit buttons (now hidden - kept for compatibility)
         setupButtons()
         torchButton.isHidden = true
         flipButton.isHidden = true
@@ -240,6 +237,8 @@ final class CameraPreviewViewController: UIViewController {
         
         updateTorchAvailability()
 
+        // REMOVED: Sprite positioning code (sprites no longer used)
+        /*
         // Position SpriteKit sprites near top corners
         let topInset = view.safeAreaInsets.top
         let sideInset: CGFloat = 20
@@ -249,6 +248,7 @@ final class CameraPreviewViewController: UIViewController {
         let flipPoint = scenePoint(CGPoint(x: view.bounds.width - sideInset - 26, y: topInset + 26))
         torchSprite.position = torchPoint
         flipSprite.position = flipPoint
+        */
     }
     
     override func viewWillAppear(_ animated: Bool) {
@@ -522,10 +522,28 @@ final class CameraPreviewViewController: UIViewController {
         longPress.minimumPressDuration = 0.25
         view.addGestureRecognizer(longPress)
 
-        // Horizontal pan = swipe navigation
+        // Horizontal pan = swipe navigation (existing)
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
         pan.maximumNumberOfTouches = 1
         view.addGestureRecognizer(pan)
+        
+        // NEW: Vertical swipe for torch control
+        let swipeUp = UISwipeGestureRecognizer(target: self, action: #selector(handleSwipeUp))
+        swipeUp.direction = .up
+        view.addGestureRecognizer(swipeUp)
+        
+        let swipeDown = UISwipeGestureRecognizer(target: self, action: #selector(handleSwipeDown))
+        swipeDown.direction = .down
+        view.addGestureRecognizer(swipeDown)
+        
+        // NEW: Double tap to flip camera
+        let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap))
+        doubleTap.numberOfTapsRequired = 2
+        view.addGestureRecognizer(doubleTap)
+        
+        // Ensure pan doesn't conflict with swipe gestures
+        pan.require(toFail: swipeUp)
+        pan.require(toFail: swipeDown)
     }
 
     // MARK: - Gesture Handlers
@@ -560,6 +578,56 @@ final class CameraPreviewViewController: UIViewController {
             }
         }
     }
+    
+    // NEW: Swipe up to turn torch ON
+    @objc private func handleSwipeUp() {
+        print("[CameraPreviewVC] Swipe up detected - turning torch ON")
+        setTorch(on: true)
+    }
+    
+    // NEW: Swipe down to turn torch OFF
+    @objc private func handleSwipeDown() {
+        print("[CameraPreviewVC] Swipe down detected - turning torch OFF")
+        setTorch(on: false)
+    }
+    
+    // NEW: Double tap to flip camera
+    @objc private func handleDoubleTap() {
+        print("[CameraPreviewVC] Double tap detected - flipping camera")
+        flipTapped()
+    }
+    
+    // Helper method to set torch state
+    private func setTorch(on: Bool) {
+        guard session.inputs.first != nil else { return }
+        guard let device = activeDevice(), device.hasTorch else {
+            print("[CameraPreviewVC] Torch not available on this device")
+            return
+        }
+        
+        do {
+            try device.lockForConfiguration()
+            if on {
+                if !device.isTorchActive {
+                    try device.setTorchModeOn(level: AVCaptureDevice.maxAvailableTorchLevel)
+                    isTorchOn = true
+                    print("[CameraPreviewVC] Torch turned ON")
+                }
+            } else {
+                if device.isTorchActive {
+                    device.torchMode = .off
+                    isTorchOn = false
+                    print("[CameraPreviewVC] Torch turned OFF")
+                }
+            }
+            device.unlockForConfiguration()
+        } catch {
+            print("[CameraPreviewVC] Torch error:", error)
+            isTorchOn = false
+        }
+        
+        updateTorchAvailability()
+    }
 
     // MARK: - Torch / Flip
     private func activeDevice() -> AVCaptureDevice? {
@@ -568,21 +636,20 @@ final class CameraPreviewViewController: UIViewController {
 
     private func updateTorchAvailability() {
         guard let device = activeDevice() else {
-            // Keep icon white, but dim to indicate unavailable
-            torchSprite.alpha = 0.4
+            // No device available
             return
         }
         let supported = device.hasTorch
-        // Removed UIKit button alpha and isEnabled updates because buttons are hidden
+        isTorchOn = device.isTorchActive
+        
+        // REMOVED: Sprite and button UI updates (no longer used)
+        /*
         // torchButton.isEnabled = supported
         // torchButton.alpha = supported ? 1.0 : 0.5
-        isTorchOn = device.isTorchActive
-        torchSprite.alpha = 0.95
-        // Removed UIKit button image update because button is hidden
         // let icon = isTorchOn ? "flashlight.on.circle.fill" : "flashlight.slash.circle.fill"
         // torchButton.setImage(UIImage(systemName: icon), for: .normal)
-
-        // Do not override icon color here; low-light detection controls icon colorization.
+        // torchSprite.alpha = 0.95
+        */
     }
 
     @objc func torchTapped() {
@@ -657,16 +724,22 @@ final class CameraPreviewViewController: UIViewController {
     
     // Immediate visual feedback when recording starts/stops
     private func animateRecordingUI(started: Bool) {
+        // REMOVED: Sprite alpha animations (sprites no longer used)
+        /*
         let targetAlpha: CGFloat = started ? 0.6 : 1.0
         UIView.animate(withDuration: 0.12, delay: 0, options: [.curveEaseOut]) {
             self.torchSprite.alpha = targetAlpha
             self.flipSprite.alpha = targetAlpha
         }
+        */
     }
 }
 
 class CameraOverlayScene: SKScene {
     weak var owner: CameraPreviewViewController?
+    
+    // REMOVED: Touch handling for sprites (sprites no longer used - gestures handle camera controls)
+    /*
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let touch = touches.first, let owner = owner else { return }
         let location = touch.location(in: self)
@@ -681,6 +754,7 @@ class CameraOverlayScene: SKScene {
             }
         }
     }
+    */
 }
 
 private final class CameraPlaceholderView: UIView {

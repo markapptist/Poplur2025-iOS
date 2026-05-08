@@ -242,6 +242,10 @@ struct HomeView: View {
         ZStack {
             HomeCameraPreviewHost(controller: cameraController)
                 .ignoresSafeArea()
+            
+            // Animated instructional text overlay
+            CameraInstructionsOverlay()
+                .allowsHitTesting(false)
         }
         .onAppear {
             Task { @MainActor in
@@ -474,24 +478,27 @@ struct HomeView: View {
             // 3D Cube tab control overlay
             VStack {
                 Spacer()
-                CubeTabView(selectedTab: $selectedTab, tintColor: .indigo, onSwipeUp: {
-                    if selectedTab == .record {
-                        NotificationCenter.default.post(name: Notification.Name("TriggerCameraCapture"), object: nil)
-                    } else {
-                        NotificationCenter.default.post(name: Notification.Name("ShowRecordCaptureUI"), object: nil)
+                CubeTabView(
+                    selectedTab: $selectedTab,
+                    tintColor: .indigo,
+                    onSwipeUp: {
+                        if selectedTab == .record {
+                            NotificationCenter.default.post(name: Notification.Name("TriggerCameraCapture"), object: nil)
+                        } else {
+                            NotificationCenter.default.post(name: Notification.Name("ShowRecordCaptureUI"), object: nil)
+                        }
+                    },
+                    onCubeTap: {
+                        if selectedTab == .map {
+                            print("[HomeView] Cube tapped on map tab - centering on user")
+                            NotificationCenter.default.post(name: .CenterMapOnUser, object: nil)
+                        }
                     }
-                })
+                )
                 .tint(.white)
                 .frame(height: 230)
                 .padding(.bottom, 8)
                 .padding(.trailing, 8)
-                // Only activate this tap gesture when map tab is selected to center the map on the user.
-                // This prevents interference with other tabs' gestures or overlays.
-                .onTapGesture {
-                    if selectedTab == .map {
-                        NotificationCenter.default.post(name: .CenterMapOnUser, object: nil)
-                    }
-                }
             }
             .padding(.bottom, 24)
             .ignoresSafeArea(edges: .bottom)
@@ -559,9 +566,6 @@ struct HomeView: View {
                                         NotificationCenter.default.post(name: Notification.Name("CubeGlobalTap"), object: nil)
                                     }
                             )
-                            .onTapGesture {
-                                NotificationCenter.default.post(name: .CenterMapOnUser, object: nil)
-                            }
                             .ignoresSafeArea(edges: .bottom)
                     }
                     .frame(height: 1) // GeometryReader expands; constrain with container
@@ -652,12 +656,21 @@ struct HomeView: View {
             
             print("[HomeView] onAppear work took \(CFAbsoluteTimeGetCurrent() - appearT0)s")
         }
-        .onChange(of: selectedTab) { _ in
+        .onChange(of: selectedTab) { newTab in
             animateYaw(to: yawForTab(selectedTab), duration: 0.45, direction: nil)
 
             if !([AppTab.map, .record, .feed, .profile].contains(selectedTab)) {
                 selectedTab = .feed
             }
+            
+            // Animate radius bar to 0 when switching tabs
+            // Exception: when switching TO profile, don't reset (will be set by profile view)
+            if newTab != .profile {
+                withAnimation(.easeInOut(duration: 0.6)) {
+                    isometricBarModel.radius = 0
+                }
+            }
+            
             // Pause/resume feed audio based on visibility
             if selectedTab == .feed {
                 NotificationCenter.default.post(name: .ResumeFeedAudio, object: nil)
@@ -728,40 +741,6 @@ struct HomeView: View {
                 isometricBarModel.radius = min(value, 3_323_000.0)
             }
         }
-        // Added new onReceive for post-driven radius changes to animate bar in sync with preview/demo conventions
-        .onReceive(NotificationCenter.default.publisher(for: .currentPostRadiusDidChange)) { note in
-            if let value = note.userInfo?["radius"] as? Double {
-                // Clamp to app cap
-                let clampedValue = min(value, 3_323_000.0)
-                // Only run the full up+down animation sequence if radius > 0
-                if clampedValue > 0 {
-                    // Animate radius up
-                    withAnimation(.interpolatingSpring(mass: 1.0, stiffness: 180, damping: 18, initialVelocity: 0)) {
-                        isometricBarModel.radius = clampedValue
-                    }
-                    // After 1 second delay, animate back down to zero
-                    Task { @MainActor in
-                        try? await Task.sleep(nanoseconds: 1_000_000_000)
-                        withAnimation(.easeOut(duration: 0.6)) {
-                            isometricBarModel.radius = 0
-                        }
-                    }
-                } else {
-                    // If radius is zero or less, just animate radius up then down in sequence
-                    withAnimation(.interpolatingSpring(mass: 1.0, stiffness: 180, damping: 18, initialVelocity: 0)) {
-                        isometricBarModel.radius = clampedValue
-                    }
-                    Task { @MainActor in
-                        try? await Task.sleep(nanoseconds: 1_000_000_000)
-                        withAnimation(.easeOut(duration: 0.6)) {
-                            isometricBarModel.radius = 0
-                        }
-                    }
-                }
-                // This matches the preview's trained interaction:
-                // bar animates up to radius, then gently back down to zero after a short hold
-            }
-        }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("InlinePreviewDismissRequested"))) { _ in
             // Reset the radius bar so the user can capture again
             isometricBarModel.radius = 0
@@ -776,6 +755,89 @@ struct HomeView: View {
         .onReceive(NotificationCenter.default.publisher(for: .cameraCubeHoldEnded)) { _ in
             isRecordHolding = false
             stopRecordHoldRamp(reset: true)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("OpenCameraAtCoordinate"))) { notification in
+            // Handle long press on map - switch to camera tab and set coordinate
+            guard let userInfo = notification.userInfo,
+                  let latitude = userInfo["latitude"] as? Double,
+                  let longitude = userInfo["longitude"] as? Double else {
+                return
+            }
+            
+            print("📍 [HomeView] Received map long-press coordinate: \(latitude), \(longitude)")
+            
+            // Switch to camera/record tab
+            selectedTab = .record
+            
+            // Post notification with coordinate for CameraKitController to use
+            NotificationCenter.default.post(
+                name: Notification.Name("SetCameraCoordinate"),
+                object: nil,
+                userInfo: [
+                    "latitude": latitude,
+                    "longitude": longitude
+                ]
+            )
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("OpenMapToSelectPostLocation"))) { notification in
+            // Handle request to select location for captured media - switch to map tab
+            print("🗺️ [HomeView] Opening map to select post location")
+            
+            // Switch to map tab
+            selectedTab = .map
+            
+            // Forward the notification to MapView (it will enter post placement mode)
+            // The notification already contains the image/videoURL in userInfo
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ShowLocationOnMap"))) { notification in
+            // Handle request to show post location on map (from long-press)
+            guard let userInfo = notification.userInfo,
+                  let coordinate = userInfo["coordinate"] as? CLLocationCoordinate2D else { return }
+            
+            print("📍 [HomeView] Showing location on map: \(coordinate.latitude), \(coordinate.longitude)")
+            
+            // Switch to map tab
+            selectedTab = .map
+            
+            // The notification is already posted to MapView which will center the camera
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("UploadPostToCoordinate"))) { notification in
+            // Handle post upload after user selected location on map
+            guard let userInfo = notification.userInfo,
+                  let latitude = userInfo["latitude"] as? Double,
+                  let longitude = userInfo["longitude"] as? Double else {
+                return
+            }
+            
+            print("📤 [HomeView] Uploading post to coordinate: \(latitude), \(longitude)")
+            
+            // Send to CameraKitController to handle the upload
+            NotificationCenter.default.post(
+                name: Notification.Name("SetCameraCoordinate"),
+                object: nil,
+                userInfo: [
+                    "latitude": latitude,
+                    "longitude": longitude
+                ]
+            )
+            
+            // Trigger the upload with the media from userInfo
+            if let image = userInfo["image"] as? UIImage {
+                // Upload image
+                NotificationCenter.default.post(
+                    name: Notification.Name("UploadImageToCurrentCoordinate"),
+                    object: image
+                )
+            } else if let videoURL = userInfo["videoURL"] as? URL {
+                // Upload video
+                NotificationCenter.default.post(
+                    name: Notification.Name("UploadVideoToCurrentCoordinate"),
+                    object: videoURL
+                )
+            }
+            
+            // Switch back to profile or feed tab
+            selectedTab = .profile
         }
         .onChange(of: isPreviewRuntime) { isPreview in
             if isPreview {
@@ -813,11 +875,29 @@ struct HomeView: View {
                 print("[HomeView] Updated isometricBarModel.radius to: \(Int(clampedValue))m")
             }
         }
-        // Added the requested .onChange for isometricBarModel.radius:
-        .onChange(of: isometricBarModel.radius) { newValue in
-            // Force update of SceneKit bar via notification (used by IsometricRadiusBar internally)
-            NotificationCenter.default.post(name: Notification.Name("ForceRadiusBarUpdate"), object: nil, userInfo: ["radius": newValue])
+        .onReceive(NotificationCenter.default.publisher(for: .currentPostRadiusDidChange)) { note in
+            if let value = note.userInfo?["radius"] as? Double {
+                print("[HomeView] Received currentPostRadiusDidChange: \(Int(value))m")
+                let duration = (note.userInfo?["duration"] as? Double) ?? 0.8
+                let clampedValue = min(value, 3_323_000.0)
+                withAnimation(.easeInOut(duration: duration)) {
+                    isometricBarModel.radius = clampedValue
+                }
+                print("[HomeView] Updated isometricBarModel.radius to: \(Int(clampedValue))m (from feed)")
+            }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .animateRadiusBarToValue)) { note in
+            if let value = note.userInfo?["radius"] as? Double {
+                print("[HomeView] Received animateRadiusBarToValue: \(Int(value))m")
+                let duration = (note.userInfo?["duration"] as? Double) ?? 0.8
+                let clampedValue = min(value, 3_323_000.0)
+                withAnimation(.easeInOut(duration: duration)) {
+                    isometricBarModel.radius = clampedValue
+                }
+                print("[HomeView] Updated isometricBarModel.radius to: \(Int(clampedValue))m (from animator)")
+            }
+        }
+        // Removed .onChange handler - the binding $isometricBarModel.radius automatically triggers updateUIView in RadiusBarSceneView
     }
     
     
@@ -1202,6 +1282,89 @@ private extension AppTab {
         case .record: self = .record
         case .feed: self = .feed
         case .profile: self = .profile
+        }
+    }
+}
+
+// MARK: - Camera Instructions Overlay
+
+private struct CameraInstructionsOverlay: View {
+    @State private var currentInstructionIndex = 0
+    @State private var instructionOpacity: Double = 1.0
+    
+    private let instructions: [(title: String, message: String)] = [
+        (
+            "Camera Controls",
+            "Tap cube to take photo • Hold cube to record video"
+        ),
+        (
+            "Torch Control",
+            "Swipe up to turn flashlight ON • Swipe down to turn flashlight OFF"
+        ),
+        (
+            "Flip Camera",
+            "Double tap anywhere on screen to switch between front and back camera"
+        ),
+        (
+            "Select Location",
+            "Long-press on the map to choose where you want to post your content"
+        )
+    ]
+    
+    var body: some View {
+        VStack {
+            Spacer().frame(height: 24)
+            
+            HStack {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(instructions[currentInstructionIndex].title)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                    
+                    Text(instructions[currentInstructionIndex].message)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+            }
+            .padding(.top, -4)
+            .padding(14)
+            .frame(minHeight: 90) // Increased height for longer messages
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .shadow(radius: 4)
+            .padding(.horizontal, 12)
+            .opacity(instructionOpacity)
+            
+            Spacer()
+        }
+        .task {
+            // Cycle through instructions every 6 seconds
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 6_000_000_000)
+                
+                // Fade out
+                await MainActor.run {
+                    withAnimation(.easeOut(duration: 0.3)) {
+                        instructionOpacity = 0.0
+                    }
+                }
+                
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                
+                // Change instruction
+                await MainActor.run {
+                    currentInstructionIndex = (currentInstructionIndex + 1) % instructions.count
+                }
+                
+                // Fade in
+                await MainActor.run {
+                    withAnimation(.easeIn(duration: 0.3)) {
+                        instructionOpacity = 1.0
+                    }
+                }
+            }
         }
     }
 }

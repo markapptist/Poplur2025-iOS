@@ -4,6 +4,11 @@ import CoreGraphics
 import UIKit
 import CoreImage
 
+private var isRunningInPreviews: Bool {
+    let env = ProcessInfo.processInfo.environment
+    return env["XCODE_RUNNING_FOR_PREVIEWS"] == "1" || env["XCODE_RUNNING_FOR_PLAYGROUNDS"] == "1"
+}
+
 private final class WelcomeScene: SKScene {
 
     // Coordinator to communicate with SwiftUI
@@ -95,11 +100,13 @@ private final class WelcomeScene: SKScene {
         layoutAll()
 
         // Warm up the pop sound once to avoid first-play hitch later
-        let warmUp = SKAction.sequence([
-            .wait(forDuration: 0.05),
-            .playSoundFileNamed("pop", waitForCompletion: false)
-        ])
-        run(warmUp, withKey: "warmUpPopSound")
+        if !isRunningInPreviews {
+            let warmUp = SKAction.sequence([
+                .wait(forDuration: 0.05),
+                .playSoundFileNamed("pop", waitForCompletion: false)
+            ])
+            run(warmUp, withKey: "warmUpPopSound")
+        }
     }
 
     private func setupPhysics() {
@@ -332,7 +339,9 @@ private final class WelcomeScene: SKScene {
                 emitter.run(cleanup)
             }
         ])
-        self.run(playPopThenConfetti, withKey: "popThenConfetti")
+        if !isRunningInPreviews {
+            self.run(playPopThenConfetti, withKey: "popThenConfetti")
+        }
     }
 
     // Floating helper: up-down forever with easing and optional phase offset start
@@ -744,13 +753,20 @@ struct WelcomeView: View {
             ZStack {
                 GeometryReader { geo in
                     let s = ensureScene(size: geo.size)
-                    SpriteView(scene: s)
-                        .background(Color.white)
-                        .ignoresSafeArea()
-                        .onChange(of: geo.size) { newSize in
-                            // Inform scene about size changes without recreating it
-                            s.resize(to: newSize)
+                    Group {
+                        if isRunningInPreviews {
+                            Color.white
+                                .overlay(Text("Welcome Preview").font(.headline))
+                        } else {
+                            SpriteView(scene: s)
                         }
+                    }
+                    .background(Color.white)
+                    .ignoresSafeArea()
+                    .onChange(of: geo.size) { newSize in
+                        // Inform scene about size changes without recreating it
+                        s.resize(to: newSize)
+                    }
                 }
             }
             .onReceive(coordinator.$didTapSignIn) { tapped in
@@ -760,8 +776,9 @@ struct WelcomeView: View {
                 }
             }
             .onAppear {
-                // Only replay confetti when WelcomeView appears again. Do not replay the intro.
-                scene?.startConfettiNow()
+                if !isRunningInPreviews {
+                    scene?.startConfettiNow()
+                }
             }
             .onChange(of: auth.isAuthenticated) { authed in
                 if authed {
@@ -778,3 +795,4 @@ struct WelcomeView: View {
         }
     }
 }
+

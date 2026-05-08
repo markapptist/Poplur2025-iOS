@@ -2,6 +2,7 @@ import SwiftUI
 import AVKit
 import AVFoundation
 import Foundation
+import CoreLocation
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -48,6 +49,8 @@ private struct InlineCapturePreview: View {
 //    @State private var autoDismissWorkItem: DispatchWorkItem?
     @State private var userInteracted: Bool = false
     @State private var appearedAt: Date = .distantPast
+    @State private var isFromMapLocation: Bool = false // Track if opened from map long-press
+    @State private var mapSelectedCoordinate: CLLocationCoordinate2D? = nil // Store map coordinate
 
     @Environment(\.dismiss) private var dismiss
 
@@ -69,7 +72,26 @@ private struct InlineCapturePreview: View {
 //                        autoDismissWorkItem?.cancel()
                         NotificationCenter.default.post(name: Notification.Name("InlinePreviewDismissRequested"), object: nil)
                     }
-                    .onAppear { print("[InlinePreview] appeared. image? \(image != nil), video? \(videoURL != nil)") }
+                    .onAppear { 
+                        appearedAt = Date()
+                        print("[InlinePreview] appeared. image? \(image != nil), video? \(videoURL != nil)")
+                        
+                        // Check if we have a coordinate override (from map long-press)
+                        // Listen for the coordinate info
+                        NotificationCenter.default.addObserver(
+                            forName: Notification.Name("CapturePreviewFromMapLocation"),
+                            object: nil,
+                            queue: .main
+                        ) { notification in
+                            if let userInfo = notification.userInfo,
+                               let latitude = userInfo["latitude"] as? Double,
+                               let longitude = userInfo["longitude"] as? Double {
+                                self.isFromMapLocation = true
+                                self.mapSelectedCoordinate = CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+                                print("[InlinePreview] Detected map-selected coordinate: \(latitude), \(longitude)")
+                            }
+                        }
+                    }
 //                    .onAppear {
 //                        appearedAt = Date()
 //                        let work = DispatchWorkItem {
@@ -184,62 +206,116 @@ private struct InlineCapturePreview: View {
                         .foregroundColor(.white)
                 }
 
+                // Contextual instruction text overlay (similar to map AI text)
+                VStack {
+                    Spacer().frame(height: 60) // Leave room for dismiss button
+                    
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            if isFromMapLocation {
+                                Text("Post at Selected Location")
+                                    .font(.headline)
+                                    .foregroundStyle(.primary)
+                                Text("Press Use to upload this post to the location you selected on the map")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                            } else {
+                                Text("Select Location on Map")
+                                    .font(.headline)
+                                    .foregroundStyle(.primary)
+                                Text("Press Use to choose where to place this post on the map")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                            }
+                        }
+                        Spacer()
+                    }
+                    .padding(.top, -4)
+                    .padding(12)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .shadow(radius: 4)
+                    .padding(.horizontal)
+                    
+                    Spacer()
+                }
+
+                // Fixed button layout with proper spacing
                 VStack {
                     Spacer()
-                    HStack(spacing: 16) {
-                        Button {
-                            let since = Date().timeIntervalSince(appearedAt)
-                            if since < 0.25 {
-                                print("[InlinePreview] Ignoring Retake tap during grace (\(since)s)")
-                                return
+                    
+                    VStack(spacing: 12) {
+                        // Tap anywhere hint
+                        Text("Tap anywhere to close")
+                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .foregroundColor(.white.opacity(0.9))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(Color.black.opacity(0.35), in: Capsule())
+                        
+                        // Action buttons
+                        HStack(spacing: 16) {
+                            Button {
+                                let since = Date().timeIntervalSince(appearedAt)
+                                if since < 0.25 {
+                                    print("[InlinePreview] Ignoring Retake tap during grace (\(since)s)")
+                                    return
+                                }
+                                userInteracted = true
+                                NotificationCenter.default.post(name: Notification.Name("InlinePreviewDismissRequested"), object: nil)
+                            } label: {
+                                Text("Retake")
+                                    .font(.system(size: 16, weight: .semibold, design: .rounded))
+                                    .foregroundColor(.white)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 14)
+                                    .background(Color.black.opacity(0.45), in: Capsule())
                             }
-                            userInteracted = true
-//                            autoDismissWorkItem?.cancel()
-                            NotificationCenter.default.post(name: Notification.Name("InlinePreviewDismissRequested"), object: nil)
-                        } label: {
-                            Text("Retake")
-                                .font(.system(size: 16, weight: .semibold, design: .rounded))
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 10)
-                                .background(Color.black.opacity(0.45), in: Capsule())
-                        }
-                        .buttonStyle(.plain)
+                            .buttonStyle(.plain)
 
-                        Button {
-                            let since = Date().timeIntervalSince(appearedAt)
-                            if since < 0.25 {
-                                print("[InlinePreview] Ignoring Use tap during grace (\(since)s)")
-                                return
+                            Button {
+                                let since = Date().timeIntervalSince(appearedAt)
+                                if since < 0.25 {
+                                    print("[InlinePreview] Ignoring Use tap during grace (\(since)s)")
+                                    return
+                                }
+                                userInteracted = true
+                                
+                                // Handle based on context
+                                if isFromMapLocation {
+                                    // Upload to map-selected location
+                                    NotificationCenter.default.post(name: Notification.Name("InlinePreviewUseRequested"), object: nil)
+                                    // Dismiss the preview
+                                    NotificationCenter.default.post(name: Notification.Name("InlinePreviewDismissRequested"), object: nil)
+                                } else {
+                                    // Open map to select location
+                                    NotificationCenter.default.post(
+                                        name: Notification.Name("OpenMapToSelectPostLocation"),
+                                        object: nil,
+                                        userInfo: [
+                                            "image": image as Any,
+                                            "videoURL": videoURL as Any
+                                        ]
+                                    )
+                                    // Dismiss the preview
+                                    NotificationCenter.default.post(name: Notification.Name("InlinePreviewDismissRequested"), object: nil)
+                                }
+                            } label: {
+                                Text("Use")
+                                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                                    .foregroundColor(.black)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 14)
+                                    .background(Color.white, in: Capsule())
                             }
-                            userInteracted = true
-//                            autoDismissWorkItem?.cancel()
-                            NotificationCenter.default.post(name: Notification.Name("InlinePreviewUseRequested"), object: nil)
-                        } label: {
-                            Text("Use")
-                                .font(.system(size: 16, weight: .bold, design: .rounded))
-                                .foregroundColor(.black)
-                                .padding(.horizontal, 20)
-                                .padding(.vertical, 10)
-                                .background(Color.white, in: Capsule())
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
+                        .padding(.horizontal, 20)
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.bottom, insets.bottom + 12)
+                    .padding(.bottom, insets.bottom + 16)
                 }
                 .ignoresSafeArea(.all)
-
-                VStack {
-                    Spacer()
-                    Text("Tap anywhere to close")
-                        .font(.system(size: 14, weight: .semibold, design: .rounded))
-                        .foregroundColor(.white.opacity(0.9))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 6)
-                        .background(Color.black.opacity(0.35), in: Capsule())
-                        .padding(.bottom, insets.bottom + 8)
-                }
 
                 // Dismiss button
                 VStack {

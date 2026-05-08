@@ -224,6 +224,17 @@ struct AppSettingsView: View {
                             .padding(.vertical, 12)
                             .background(Color.white, in: Capsule())
                     }
+                    
+                    Button {
+                        Task { await fixEmptyUserIDs() }
+                    } label: {
+                        Text("🔧 Fix Empty UserIDs")
+                            .font(.system(size: 16, weight: .heavy, design: .rounded))
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .background(Color.orange, in: Capsule())
+                    }
 
                     Button(role: .destructive) {
                         FakePostService.shared.stopWorldSimulator()
@@ -426,6 +437,38 @@ struct AppSettingsView: View {
         nf.numberStyle = .decimal
         nf.maximumFractionDigits = 0
         return (nf.string(from: NSNumber(value: km)) ?? "\(Int(km))") + " KM"
+    }
+    
+    /// DEBUG: Fix posts with empty userID - assigns them to current user
+    private func fixEmptyUserIDs() async {
+        guard let currentUID = Auth.auth().currentUser?.uid else {
+            print("❌ Cannot fix userIDs - not logged in")
+            return
+        }
+        
+        let db = Firestore.firestore()
+        
+        do {
+            // Find all posts with empty userID
+            let snapshot = try await db.collection("posts")
+                .whereField("userID", isEqualTo: "")
+                .getDocuments()
+            
+            print("🔧 Found \(snapshot.documents.count) posts with empty userID")
+            
+            // Update them to current user's UID
+            for doc in snapshot.documents {
+                try await doc.reference.updateData(["userID": currentUID])
+                print("✅ Updated post \(doc.documentID) with userID: \(currentUID)")
+            }
+            
+            print("🎉 Fixed all \(snapshot.documents.count) posts!")
+            
+            // Reload posts
+            await loadStats()
+        } catch {
+            print("❌ Error fixing userIDs: \(error)")
+        }
     }
 }
 

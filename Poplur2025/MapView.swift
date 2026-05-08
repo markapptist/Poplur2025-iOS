@@ -53,11 +53,19 @@ import Combine
 // Stub PreviewLocationManager if the real one isn't available to previews
 private class PreviewLocationManager: NSObject, ObservableObject {
     @Published var location: CLLocation? = CLLocation(latitude: 40.748339, longitude: -73.985912)
+    func request() {} // Compatibility with LocationProvider
     func requestAuthorizationIfNeeded() {}
-    func centerOnUser(_ camera: inout MapCameraPosition) {
-        if let coord = location?.coordinate {
-            camera = .camera(MapCamera(centerCoordinate: coord, distance: 700, heading: 0, pitch: 60))
-        }
+    
+    /// Returns a MapCameraPosition centered on the user's current location
+    func getCenteredCamera() -> MapCameraPosition? {
+        guard let coord = location?.coordinate else { return nil }
+        return .camera(MapCamera(centerCoordinate: coord, distance: 300, heading: 0, pitch: 60))
+    }
+    
+    /// Centers the map camera on the user's current location (mutating version)
+    func centerOnUser(_ camera: Binding<MapCameraPosition>) {
+        guard let coord = location?.coordinate else { return }
+        camera.wrappedValue = .camera(MapCamera(centerCoordinate: coord, distance: 300, heading: 0, pitch: 60))
     }
 }
 
@@ -633,30 +641,212 @@ private struct RotatingEarthGlobePreview: View {
     }
 }
 
+// MARK: - Cube Hold Search Overlay
+
+/// Search overlay that appears when cube is held down - similar styling to AI text window
+private struct CubeHoldSearchOverlay: View {
+    @Binding var query: String
+    @Binding var results: [MKMapItem]
+    @Binding var isSearching: Bool
+    @FocusState private var isSearchFieldFocused: Bool
+    
+    let tourPlaces: [(name: String, coordinate: CLLocationCoordinate2D, description: String)]
+    let onSelectPlace: ((name: String, coordinate: CLLocationCoordinate2D, description: String)) -> Void
+    let onSelectMapItem: (MKMapItem) -> Void
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // Search field
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                    .font(.system(size: 14))
+                
+                TextField("Search for a location", text: $query)
+                    .textFieldStyle(.plain)
+                    .disableAutocorrection(true)
+                    .textInputAutocapitalization(.never)
+                    .font(.subheadline)
+                    .focused($isSearchFieldFocused)
+                    .onChange(of: query) { _, newValue in
+                        // Trigger autocomplete search as user types
+                        if !newValue.trimmingCharacters(in: .whitespaces).isEmpty {
+                            performSearch()
+                        } else {
+                            results = []
+                        }
+                    }
+                    .onSubmit {
+                        performSearch()
+                    }
+                
+                if isSearching {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                } else if !query.isEmpty {
+                    Button(action: {
+                        query = ""
+                        results = []
+                    }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                            .font(.system(size: 14))
+                    }
+                }
+            }
+            .padding(10)
+            .background(Color(uiColor: .systemGray6), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            
+            // Show search results if searching, otherwise show favorites
+            if !query.isEmpty && !results.isEmpty {
+                // Search results with autocomplete
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(results.prefix(8), id: \.self) { item in
+                            Button(action: {
+                                onSelectMapItem(item)
+                            }) {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(item.name ?? "Unknown")
+                                            .font(.subheadline)
+                                            .fontWeight(.medium)
+                                            .foregroundStyle(.primary)
+                                        if let subtitle = item.placemark.title {
+                                            Text(subtitle)
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                                .lineLimit(1)
+                                        }
+                                    }
+                                    Spacer()
+                                    Image(systemName: "arrow.up.right")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .padding(.vertical, 8)
+                            }
+                            .buttonStyle(.plain)
+                            
+                            if item != results.prefix(8).last {
+                                Divider()
+                            }
+                        }
+                    }
+                }
+                .frame(maxHeight: 300)
+            } else if query.isEmpty {
+                // Favorites list - show top 10 tour places
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Favorites")
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.secondary)
+                            .padding(.bottom, 4)
+                        
+                        ForEach(tourPlaces.prefix(10).indices, id: \.self) { index in
+                            let place = tourPlaces[index]
+                            Button(action: {
+                                onSelectPlace(place)
+                            }) {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(place.name)
+                                            .font(.subheadline)
+                                            .fontWeight(.medium)
+                                            .foregroundStyle(.primary)
+                                        Text(place.description)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    Image(systemName: "arrow.up.right")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .padding(.vertical, 8)
+                            }
+                            .buttonStyle(.plain)
+                            
+                            if index < min(9, tourPlaces.count - 1) {
+                                Divider()
+                            }
+                        }
+                    }
+                }
+                .frame(maxHeight: 300)
+            } else if !query.isEmpty && !isSearching {
+                // No results found
+                HStack {
+                    Spacer()
+                    VStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.title2)
+                            .foregroundStyle(.secondary)
+                        Text("No results found")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 20)
+                    Spacer()
+                }
+            }
+        }
+        .padding(12)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .shadow(radius: 4)
+        .padding(.horizontal)
+        .padding(.top, 8)
+        .onAppear {
+            // Auto-focus search field when menu appears
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                isSearchFieldFocused = true
+            }
+        }
+    }
+    
+    private func performSearch() {
+        guard !query.trimmingCharacters(in: .whitespaces).isEmpty else {
+            results = []
+            return
+        }
+        
+        isSearching = true
+        
+        let request = MKLocalSearch.Request()
+        request.naturalLanguageQuery = query
+        
+        // Enable autocomplete by searching for partial matches
+        let search = MKLocalSearch(request: request)
+        search.start { response, _ in
+            self.results = response?.mapItems ?? []
+            self.isSearching = false
+        }
+    }
+}
+
 // MARK: - Production MapView (Clean - No Debug Controls)
 
 /// The main MapView used in the app - shows map with AI recommendations and navigation
 struct MapViewProduction: View {
-    #if DEBUG
-    @StateObject private var locationManager = IS_PREVIEW ? PreviewLocationManager.stubForPreviewInstance() : PreviewLocationManager()
-    #else
-    @StateObject private var locationManager = PreviewLocationManager()
-    #endif
+    @StateObject private var locationManager = LocationProvider()
     
-    @State private var fixedDistanceAlt: CLLocationDistance = 700 // Same as interactive preview
+    @State private var fixedDistanceAlt: CLLocationDistance = 300 // Closer zoom to avoid building obstruction
     @State private var camera: MapCameraPosition = .camera(
         MapCamera(
-            centerCoordinate: CLLocationCoordinate2D(latitude: 40.748339, longitude: -73.985912),
-            distance: 700,
-            heading: 52,
+            centerCoordinate: CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194), // SF default, will update to user location
+            distance: 300,
+            heading: 0,
             pitch: 60
         )
     )
     
-    @State private var currentCity: String = "New York"
-    @State private var aiRecommendation: String = "People nearby are posting street food finds and skyline shots — share your take!"
+    @State private var currentCity: String = "Your Location"
+    @State private var aiRecommendation: String = "Explore what's happening around you right now!"
     @State private var showPlacesList: Bool = false
     @State private var showAddressSearch: Bool = false
+    @State private var showCubeHoldSearch: Bool = false  // NEW: For long-press search
     @State private var searchQuery: String = ""
     @State private var searchResults: [MKMapItem] = []
     @State private var isSearching: Bool = false
@@ -670,6 +860,16 @@ struct MapViewProduction: View {
     @State private var currentTourIndex: Int = 0
     @State private var tourZoomOutDistance: CLLocationDistance = 25_000_000 // Distance for zoom out
     @State private var isZoomedOut: Bool = false
+    @State private var hasSetInitialLocation: Bool = false  // NEW: Track if we've set initial location
+    
+    @State private var longPressLocation: CGPoint? = nil  // Track long press location
+    @State private var selectedCoordinate: CLLocationCoordinate2D? = nil  // Track selected coordinate for long-press
+    
+    // Post placement mode - when user needs to select location for captured media
+    @State private var isPostPlacementMode: Bool = false
+    @State private var pendingPostImage: UIImage? = nil
+    @State private var pendingPostVideoURL: URL? = nil
+    @State private var postPlacementCoordinate: CLLocationCoordinate2D? = nil
     
     let tourPlaces: [(name: String, coordinate: CLLocationCoordinate2D, description: String)] = [
         ("New York", CLLocationCoordinate2D(latitude: 40.7128, longitude: -74.0060), "The city that never sleeps"),
@@ -714,6 +914,60 @@ struct MapViewProduction: View {
                     pitch: fixedPitchAlt
                 )
             )
+        }
+    }
+    
+    /// Navigate to a location using tour-style transitions (zoom out, move, zoom in)
+    private func navigateWithTourTransition(to coordinate: CLLocationCoordinate2D, cityName: String = "Selected Location") {
+        // Stop any active tour
+        isTourActive = false
+        
+        // Update city info
+        currentCity = cityName
+        aiRecommendation = "Explore what's happening here!"
+        
+        let currentCoord = camera.camera?.centerCoordinate ?? coordinate
+        
+        // Step 1: Zoom out from current location
+        withAnimation(.easeInOut(duration: 1.5)) {
+            camera = .camera(
+                MapCamera(
+                    centerCoordinate: currentCoord,
+                    distance: tourZoomOutDistance,
+                    heading: 0,
+                    pitch: 0
+                )
+            )
+        }
+        
+        // Step 2: Pan to new location while zoomed out
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            
+            withAnimation(.easeInOut(duration: 3.0)) {
+                camera = .camera(
+                    MapCamera(
+                        centerCoordinate: coordinate,
+                        distance: tourZoomOutDistance,
+                        heading: 0,
+                        pitch: 0
+                    )
+                )
+            }
+            
+            // Step 3: Zoom in to new location
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            
+            withAnimation(.easeInOut(duration: 2.0)) {
+                camera = .camera(
+                    MapCamera(
+                        centerCoordinate: coordinate,
+                        distance: fixedDistanceAlt,
+                        heading: 0,
+                        pitch: fixedPitchAlt
+                    )
+                )
+            }
         }
     }
     
@@ -762,6 +1016,13 @@ struct MapViewProduction: View {
         guard !isTourActive else { return }
         isTourActive = true
         currentTourIndex = 0
+        isZoomedOut = false  // Start fresh - not zoomed out
+        
+        // Immediately move to first place to avoid being stuck on user location
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 500_000_000)  // Brief delay
+            tourToNextPlace()
+        }
     }
     
     private func stopTour() {
@@ -779,18 +1040,47 @@ struct MapViewProduction: View {
         currentCity = "Your Location"
         aiRecommendation = "Explore what's happening around you right now!"
         
-        // Animate to user's location
-        let heading = camera.camera?.heading ?? 0
-        withAnimation(.easeInOut(duration: 1.2)) {
-            camera = .camera(
-                MapCamera(
-                    centerCoordinate: userCoordinate,
-                    distance: fixedDistanceAlt,
-                    heading: heading,
-                    pitch: fixedPitchAlt
-                )
-            )
+        // Use tour-style transition to go back to current location
+        navigateWithTourTransition(to: userCoordinate, cityName: "Your Location")
+    }
+    
+    private func uploadPostToSelectedLocation() {
+        guard let coordinate = postPlacementCoordinate else {
+            print("[MapView] No coordinate selected for post placement")
+            return
         }
+        
+        print("[MapView] Uploading post to coordinate: \(coordinate.latitude), \(coordinate.longitude)")
+        
+        // Post notification to upload the pending media to this location
+        var userInfo: [String: Any] = [
+            "latitude": coordinate.latitude,
+            "longitude": coordinate.longitude
+        ]
+        
+        if let image = pendingPostImage {
+            userInfo["image"] = image
+        }
+        
+        if let videoURL = pendingPostVideoURL {
+            userInfo["videoURL"] = videoURL
+        }
+        
+        NotificationCenter.default.post(
+            name: Notification.Name("UploadPostToCoordinate"),
+            object: nil,
+            userInfo: userInfo
+        )
+        
+        // Exit post placement mode
+        isPostPlacementMode = false
+        pendingPostImage = nil
+        pendingPostVideoURL = nil
+        postPlacementCoordinate = nil
+        
+        // Return to normal map state
+        currentCity = "Your Location"
+        aiRecommendation = "Explore what's happening around you right now!"
     }
     
     private func tourToNextPlace() {
@@ -865,21 +1155,55 @@ struct MapViewProduction: View {
         }
     }
     
-    var body: some View {
-        ZStack {
-            // Main Map Layer - Same settings as interactive preview
+    // MARK: - Computed Properties
+    
+    private var cameraBinding: Binding<MapCameraPosition> {
+        Binding(
+            get: { camera },
+            set: { camera = lockCamera($0) }
+        )
+    }
+    
+    private var dragGesture: some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { _ in noteInteraction() }
+    }
+    
+    private var tapGesture: some Gesture {
+        TapGesture()
+            .onEnded { 
+                // If menu is open, close it on map tap
+                if showCubeHoldSearch {
+                    showCubeHoldSearch = false
+                }
+                noteInteraction() 
+            }
+    }
+    
+    @ViewBuilder
+    private var mapView: some View {
+        MapReader { proxy in
             Map(
-                position: Binding(
-                    get: { camera },
-                    set: { camera = lockCamera($0) }
-                ),
+                position: cameraBinding,
                 interactionModes: [.pan, .rotate, .pitch, .zoom]
             ) {
-                // Only show user annotation when not in preview and location available
-                if !IS_PREVIEW {
-                    if locationManager.location != nil {
-                        UserAnnotation {
-                            Label("You", systemImage: "location.fill")
+                // Show user annotation when location is available
+                if locationManager.location != nil {
+                    UserAnnotation {
+                        Label("You", systemImage: "location.fill")
+                    }
+                }
+                
+                // Show placement marker when in post placement mode
+                if isPostPlacementMode, let coord = postPlacementCoordinate {
+                    Annotation("Post Location", coordinate: coord) {
+                        ZStack {
+                            Circle()
+                                .fill(Color.indigo.opacity(0.3))
+                                .frame(width: 50, height: 50)
+                            Image(systemName: "mappin.circle.fill")
+                                .font(.system(size: 36))
+                                .foregroundStyle(.indigo, .white)
                         }
                     }
                 }
@@ -909,150 +1233,365 @@ struct MapViewProduction: View {
 #else
             .mapStyle(.hybrid(elevation: .realistic, showsTraffic: false))
 #endif
-            .ignoresSafeArea()
-            .contentShape(Rectangle())
-            .simultaneousGesture(DragGesture(minimumDistance: 0).onChanged { _ in noteInteraction() })
-            .simultaneousGesture(TapGesture().onEnded { noteInteraction() })
+            .gesture(
+                SpatialTapGesture(coordinateSpace: .local)
+                    .onEnded { event in
+                        let screenCoordinate = event.location
+                        // Handle map tap
+                        if isPostPlacementMode {
+                            // Convert screen coordinate to map coordinate
+                            if let coordinate = proxy.convert(screenCoordinate, from: .local) {
+                                postPlacementCoordinate = coordinate
+                                print("[MapView] Post placement coordinate selected: \(coordinate.latitude), \(coordinate.longitude)")
+                            }
+                        } else {
+                            // Normal tap behavior
+                            if showCubeHoldSearch {
+                                showCubeHoldSearch = false
+                            }
+                            noteInteraction()
+                        }
+                    }
+            )
+            .gesture(
+                LongPressGesture(minimumDuration: 0.5)
+                    .sequenced(before: SpatialTapGesture(coordinateSpace: .local))
+                    .onEnded { value in
+                        // Only handle long press when NOT in post placement mode
+                        guard !isPostPlacementMode else { return }
+                        
+                        switch value {
+                        case .second(_, let tap?):
+                            let screenCoordinate = tap.location
+                            // Convert screen coordinate to map coordinate and open camera at that location
+                            if let coordinate = proxy.convert(screenCoordinate, from: .local) {
+                                print("[MapView] Long press at coordinate: \(coordinate.latitude), \(coordinate.longitude)")
+                                
+                                // Post notification to switch to camera tab and set the coordinate
+                                NotificationCenter.default.post(
+                                    name: Notification.Name("OpenCameraAtCoordinate"),
+                                    object: nil,
+                                    userInfo: [
+                                        "coordinate": coordinate,
+                                        "latitude": coordinate.latitude,
+                                        "longitude": coordinate.longitude
+                                    ]
+                                )
+                            }
+                        default:
+                            break
+                        }
+                    }
+            )
+        }
+    }
+    
+    // MARK: - Body Components (broken down to help compiler)
+    
+    @ViewBuilder
+    private var navigationButtons: some View {
+        VStack {
+            HStack {
+                // Hamburger menu button
+                Button(action: { showPlacesList.toggle() }) {
+                    Image(systemName: "line.3.horizontal")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .padding(12)
+                        .background(.ultraThinMaterial, in: Circle())
+                }
+                
+                Spacer()
+                
+                // Address search button
+                Button(action: { showAddressSearch.toggle() }) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .padding(12)
+                        .background(.ultraThinMaterial, in: Circle())
+                }
+            }
+            .padding(.top, 20)
+            .padding(.horizontal, 12)
+            
+            Spacer()
+        }
+    }
+    
+    @ViewBuilder
+    private var aiRecommendationOverlay: some View {
+        VStack {
+            Spacer().frame(height: 24)
+            
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(isPostPlacementMode ? "Select Post Location" : currentCity)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                    Text(isPostPlacementMode ? "Tap on the map to choose where to place your post" : aiRecommendation)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                Spacer()
+            }
+            .padding(.top, -4)
+            .padding(12)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .shadow(radius: 4)
+            .padding(.horizontal)
+            
+            // Post Here button - shows when in post placement mode and coordinate selected
+            if isPostPlacementMode, let _ = postPlacementCoordinate {
+                Button(action: {
+                    // Upload post to selected location
+                    uploadPostToSelectedLocation()
+                }) {
+                    HStack {
+                        Image(systemName: "mappin.and.ellipse")
+                            .font(.system(size: 16, weight: .semibold))
+                        Text("Post Here")
+                            .font(.system(size: 16, weight: .bold, design: .rounded))
+                    }
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(Color.indigo, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal)
+                .padding(.top, 8)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+            
+            // Cube Hold Search Overlay - appears below AI text
+            if showCubeHoldSearch {
+                CubeHoldSearchOverlay(
+                    query: $searchQuery,
+                    results: $searchResults,
+                    isSearching: $isSearching,
+                    tourPlaces: tourPlaces,
+                    onSelectPlace: { place in
+                        showCubeHoldSearch = false
+                        
+                        // If in post placement mode, set coordinate
+                        if isPostPlacementMode {
+                            postPlacementCoordinate = place.coordinate
+                            panTo(place.coordinate)
+                        } else {
+                            navigateWithTourTransition(to: place.coordinate, cityName: place.name)
+                        }
+                    },
+                    onSelectMapItem: { item in
+                        showCubeHoldSearch = false
+                        if let coord = item.placemark.location?.coordinate {
+                            // If in post placement mode, set coordinate
+                            if isPostPlacementMode {
+                                postPlacementCoordinate = coord
+                                panTo(coord)
+                            } else {
+                                let name = item.name ?? "Selected Location"
+                                navigateWithTourTransition(to: coord, cityName: name)
+                            }
+                        }
+                    }
+                )
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .animation(.spring(response: 0.4, dampingFraction: 0.8), value: showCubeHoldSearch)
+            }
+            
+            Spacer()
+        }
+    }
+    
+    @ViewBuilder
+    private var mapContentLayer: some View {
+        ZStack {
+            // Main Map Layer - Same settings as interactive preview
+            mapView
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .simultaneousGesture(dragGesture)
             
             // Top navigation buttons
-            VStack {
-                HStack {
-                    // Hamburger menu button
-                    Button(action: { showPlacesList.toggle() }) {
-                        Image(systemName: "line.3.horizontal")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(.primary)
-                            .padding(12)
-                            .background(.ultraThinMaterial, in: Circle())
-                    }
-                    
-                    Spacer()
-                    
-                    // Address search button
-                    Button(action: { showAddressSearch.toggle() }) {
-                        Image(systemName: "magnifyingglass")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(.primary)
-                            .padding(12)
-                            .background(.ultraThinMaterial, in: Circle())
-                    }
-                }
-                .padding(.top, 20)
-                .padding(.horizontal, 12)
-                
-                Spacer()
-            }
+            navigationButtons
             
             // AI Recommendation Overlay
-            VStack {
-                Spacer().frame(height: 24)
-                
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(currentCity)
-                            .font(.headline)
-                            .foregroundStyle(.primary)
-                        Text(aiRecommendation)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
-                    }
-                    Spacer()
-                }
-                .padding(.top, -4)
-                .padding(12)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .shadow(radius: 4)
-                .padding(.horizontal)
-                
-                Spacer()
-            }
+            aiRecommendationOverlay
         }
-        .toolbar(.hidden, for: .navigationBar)
-        .sheet(isPresented: $showPlacesList) {
-            PlacesListView(places: tourPlaces) { place in
-                showPlacesList = false
-                panTo(place.coordinate)
+    }
+    
+    var body: some View {
+        mapContentLayer
+            .toolbar(.hidden, for: .navigationBar)
+            .sheet(isPresented: $showPlacesList) {
+                placesListSheet
             }
-            .presentationDetents([.medium, .large])
-        }
-        .sheet(isPresented: $showAddressSearch) {
-            AddressSearchView(
-                query: $searchQuery,
-                results: $searchResults,
-                isSearching: $isSearching
-            ) { item in
-                showAddressSearch = false
-                if let coord = item.placemark.location?.coordinate {
-                    panTo(coord)
+            .sheet(isPresented: $showAddressSearch) {
+                addressSearchSheet
+            }
+            .onAppear {
+                handleOnAppear()
+            }
+            .onChange(of: locationManager.location) { _, newLocation in
+                handleLocationChange(newLocation)
+            }
+            .onChange(of: showCubeHoldSearch) { _, isShowing in
+                // Pause tour when menu is showing
+                if isShowing {
+                    isTourActive = false
+                } else {
+                    // Clear search when menu closes
+                    searchQuery = ""
+                    searchResults = []
                 }
             }
-            .presentationDetents([.medium, .large])
-        }
-        .onAppear {
-            #if DEBUG
-            if IS_PREVIEW {
-                if let current = camera.camera {
+            .onReceive(NotificationCenter.default.publisher(for: .CubeGlobalTap)) { _ in
+                // If menu is open, close it on tap; otherwise center on location
+                if showCubeHoldSearch {
+                    showCubeHoldSearch = false
+                } else {
+                    centerOnUserLocation()
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .cameraCubeHoldBegan)) { _ in
+                // Toggle menu - if already open, keep it open
+                // Pause tour when menu opens
+                showCubeHoldSearch = true
+                isTourActive = false
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .cameraCubeHoldEnded)) { _ in
+                // Don't auto-close on release - let user keep menu open
+                // Menu will close when:
+                // 1. User taps elsewhere (CubeGlobalTap)
+                // 2. User selects a location
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .CenterMapOnUser)) { _ in
+                centerOnUserLocation()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ShowLocationOnMap"))) { notification in
+                // Show a specific coordinate on the map (from long-press on post)
+                guard let userInfo = notification.userInfo,
+                      let coordinate = userInfo["coordinate"] as? CLLocationCoordinate2D else { return }
+                
+                print("📍 [MapView] Received ShowLocationOnMap notification - centering on: \(coordinate.latitude), \(coordinate.longitude)")
+                
+                // Stop any active tour
+                isTourActive = false
+                
+                // Center map on the coordinate with a nice camera angle
+                withAnimation(.easeInOut(duration: 1.2)) {
                     camera = .camera(
                         MapCamera(
-                            centerCoordinate: current.centerCoordinate,
-                            distance: fixedDistanceAlt,
-                            heading: current.heading,
-                            pitch: fixedPitchAlt
+                            centerCoordinate: coordinate,
+                            distance: 500, // Medium distance to see surrounding area
+                            heading: 0,
+                            pitch: 60 // Nice 3D angle
                         )
                     )
                 }
-                return
+                
+                // Update AI recommendation to show post location info
+                aiRecommendation = "📍 Viewing post location"
             }
-            #endif
-            
-            locationManager.requestAuthorizationIfNeeded()
-            if let current = camera.camera {
-                camera = .camera(
-                    MapCamera(
-                        centerCoordinate: current.centerCoordinate,
-                        distance: fixedDistanceAlt,
-                        heading: current.heading,
-                        pitch: fixedPitchAlt
-                    )
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("OpenMapToSelectPostLocation"))) { notification in
+                // Enter post placement mode when user wants to select location for captured media
+                guard let userInfo = notification.userInfo else { return }
+                
+                isPostPlacementMode = true
+                pendingPostImage = userInfo["image"] as? UIImage
+                pendingPostVideoURL = userInfo["videoURL"] as? URL
+                postPlacementCoordinate = nil // Reset coordinate
+                
+                // Stop tour and show instruction
+                isTourActive = false
+                currentCity = "Select Post Location"
+                aiRecommendation = "Tap on the map to choose where to place your post"
+                
+                print("[MapView] Entered post placement mode")
+            }
+            .task {
+                await runTourLoop()
+            }
+    }
+    
+    // MARK: - Sheet Views
+    
+    @ViewBuilder
+    private var placesListSheet: some View {
+        PlacesListView(places: tourPlaces) { place in
+            showPlacesList = false
+            panTo(place.coordinate)
+        }
+        .presentationDetents([.medium, .large])
+    }
+    
+    @ViewBuilder
+    private var addressSearchSheet: some View {
+        AddressSearchView(
+            query: $searchQuery,
+            results: $searchResults,
+            isSearching: $isSearching
+        ) { item in
+            showAddressSearch = false
+            if let coord = item.placemark.location?.coordinate {
+                panTo(coord)
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+    
+    // MARK: - Event Handlers
+    
+    private func handleOnAppear() {
+        locationManager.request()
+        if let current = camera.camera {
+            camera = .camera(
+                MapCamera(
+                    centerCoordinate: current.centerCoordinate,
+                    distance: fixedDistanceAlt,
+                    heading: current.heading,
+                    pitch: fixedPitchAlt
                 )
-            }
+            )
         }
-        .onChange(of: locationManager.location) { _, _ in
-            if !IS_PREVIEW, let _ = locationManager.location {
-                locationManager.centerOnUser(&camera)
-            }
+    }
+    
+    private func handleLocationChange(_ newLocation: CLLocation?) {
+        // Only update camera on first location - don't interfere with tour
+        guard !hasSetInitialLocation, let _ = newLocation else { return }
+        hasSetInitialLocation = true
+        
+        if let newCameraPosition = locationManager.getCenteredCamera() {
+            camera = newCameraPosition
         }
-        .onReceive(NotificationCenter.default.publisher(for: .CubeGlobalTap)) { _ in
-            // When cube is tapped while on map tab, center on user location
-            centerOnUserLocation()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .CenterMapOnUser)) { _ in
-            // Also respond to the standard center map notification
-            centerOnUserLocation()
-        }
-        .task {
-            // Start tour after 5 seconds
-            try? await Task.sleep(nanoseconds: 5_000_000_000)
-            startTour()
-            
-            // Tour loop - alternates between zoom out (3s) and zoom in (12s at location)
-            while !Task.isCancelled {
-                if isTourActive {
-                    tourToNextPlace()
-                    
-                    // Wait for animation duration based on zoom state
-                    if isZoomedOut {
-                        // Just zoomed out, wait 3 seconds before zooming in
-                        try? await Task.sleep(nanoseconds: 3_000_000_000)
-                    } else {
-                        // Just zoomed in, wait 12 seconds at this location before next transition
-                        try? await Task.sleep(nanoseconds: 12_000_000_000)
-                    }
+    }
+    
+    private func runTourLoop() async {
+        // Start tour after 5 seconds
+        try? await Task.sleep(nanoseconds: 5_000_000_000)
+        startTour()
+        
+        // Tour loop - alternates between zoom out (3s) and zoom in (12s at location)
+        // Initial delay before first cycle (startTour already triggered first transition)
+        try? await Task.sleep(nanoseconds: 3_000_000_000)
+        
+        while !Task.isCancelled {
+            if isTourActive {
+                tourToNextPlace()
+                
+                // Wait for animation duration based on zoom state
+                if isZoomedOut {
+                    // Just zoomed out, wait 3 seconds before zooming in
+                    try? await Task.sleep(nanoseconds: 3_000_000_000)
                 } else {
-                    // If tour is stopped, wait a bit before checking again
-                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    // Just zoomed in, wait 12 seconds at this location before next transition
+                    try? await Task.sleep(nanoseconds: 12_000_000_000)
                 }
+            } else {
+                // If tour is stopped, wait a bit before checking again
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
         }
     }

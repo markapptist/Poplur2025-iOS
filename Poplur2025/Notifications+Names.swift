@@ -18,6 +18,9 @@ extension Notification.Name {
     static let CubeGlobalTap = Notification.Name("CubeGlobalTap")
     static let cubeHoldBegan = Notification.Name("cubeHoldBegan")
     static let cubeHoldEnded = Notification.Name("cubeHoldEnded")
+    static let cameraCubeHoldBegan = Notification.Name("cameraCubeHoldBegan")
+    static let cameraCubeHoldEnded = Notification.Name("cameraCubeHoldEnded")
+    static let cameraCubeTabViewTapped = Notification.Name("cameraCubeTabViewTapped")
     
     // Feed and audio
     static let FeedReady = Notification.Name("FeedReady")

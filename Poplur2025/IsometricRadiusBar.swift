@@ -76,6 +76,7 @@ public struct IsometricRadiusBar: View {
                 pitchDegrees: pitchDegrees,
                 yawDegrees: yawDegrees,
                 maxSceneHeight: maxSceneHeight,
+                maxRuntimeRadius: maxRuntimeRadius,
                 useNormalMap: useNormalMap,
                 lightingModel: lightingModel,
                 autoLoop: autoLoop
@@ -107,25 +108,7 @@ public struct IsometricRadiusBar: View {
                     }
             }
         )
-        .onReceive(NotificationCenter.default.publisher(for: .currentPostRadiusDidChange)) { note in
-            if let r = note.userInfo?["radius"] as? Double {
-                print("🔵 [RadiusBar] Received currentPostRadiusDidChange: \(r)m")
-                let duration = (note.userInfo?["duration"] as? Double) ?? 0.8
-                animateToRadius(r, duration: duration)
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ForceRadiusBarUpdate"))) { note in
-            if let value = note.userInfo?["radius"] as? Double {
-                print("🔵 [RadiusBar] Received ForceRadiusBarUpdate: \(value)m")
-                let duration = (note.userInfo?["duration"] as? Double) ?? 0.6
-                if duration == 0.0 {
-                    // Instant update
-                    radius = min(max(0, value), maxRuntimeRadius)
-                } else {
-                    animateToRadius(value, duration: duration)
-                }
-            }
-        }
+        // Removed currentPostRadiusDidChange and ForceRadiusBarUpdate handlers - HomeView manages these via binding
         .onReceive(NotificationCenter.default.publisher(for: .radiusBarHoldBegan)) { _ in
             stopDrain()
             startHoldIncrease()
@@ -151,22 +134,14 @@ public struct IsometricRadiusBar: View {
         // Removed capturePreviewDidDismiss notification that resets radius to zero
         .onAppear {
             print("🟢 [RadiusBar] BAR IS NOW VISIBLE - onAppear called, autoLoop: \(autoLoop)")
-            // Visual confirmation - flash the bar white
-            withAnimation(.easeInOut(duration: 0.3).repeatCount(3, autoreverses: true)) {
-                // This will make it obvious the bar is there
-            }
+            print("🟢 [RadiusBar] Current radius: \(radius)m")
+            
             if autoLoop { startAutoLooping() }
         }
         .onDisappear {
             print("🔴 [RadiusBar] BAR IS NOW HIDDEN - onDisappear called")
             stopAutoLooping()
         }
-        .background(
-            // TEMPORARY DEBUG: Red border to see if bar exists
-            Rectangle()
-                .strokeBorder(Color.red, lineWidth: 3)
-                .allowsHitTesting(false)
-        )
     }
 }
 
@@ -302,7 +277,7 @@ private extension IsometricRadiusBar {
     func springStiffnessAuto() -> Double { max(10, 1.0 / max(0.05, 0.35 * 0.35)) }
     func springDampingCoefAuto() -> Double { max(1.0, 10.0 * 0.85) }
     
-    /// Smoothly animates the radius to a target value
+    /// Smoothly animates the radius to a target value using frame-by-frame interpolation
     func animateToRadius(_ target: Double, duration: Double = 0.8) {
         print("🎬 [RadiusBar] animateToRadius called: \(target)m over \(duration)s (current: \(radius)m)")
         
@@ -325,11 +300,42 @@ private extension IsometricRadiusBar {
             return
         }
         
-        // Use SwiftUI animation on the binding instead of manual frame-by-frame
-        withAnimation(.easeInOut(duration: duration)) {
-            radius = clampedTarget
+        // Manual frame-by-frame animation for smooth SceneKit updates
+        let fps: Double = 60.0
+        let frameDuration: Double = 1.0 / fps
+        let startTime = CACurrentMediaTime()
+        
+        animationTask = Task { @MainActor in
+            while !Task.isCancelled {
+                let elapsed = CACurrentMediaTime() - startTime
+                let t = min(1.0, elapsed / duration)
+                
+                // Ease in-out interpolation (cubic)
+                let eased = easeInOutCubic(t)
+                let interpolated = startValue + (clampedTarget - startValue) * eased
+                
+                radius = interpolated
+                
+                if t >= 1.0 {
+                    radius = clampedTarget
+                    print("✅ [RadiusBar] Animation completed at \(clampedTarget)m")
+                    break
+                }
+                
+                try? await Task.sleep(nanoseconds: UInt64(frameDuration * 1_000_000_000))
+            }
         }
-        print("✅ [RadiusBar] Animation started with SwiftUI animation")
+        print("✅ [RadiusBar] Frame-by-frame animation started")
+    }
+    
+    /// Cubic ease-in-out interpolation for smooth animations
+    private func easeInOutCubic(_ t: Double) -> Double {
+        if t < 0.5 {
+            return 4 * t * t * t
+        } else {
+            let f = (2 * t) - 2
+            return 0.5 * f * f * f + 1
+        }
     }
 }
 
@@ -342,6 +348,7 @@ private struct RadiusBarSceneView: UIViewRepresentable {
     var pitchDegrees: Double
     var yawDegrees: Double
     var maxSceneHeight: Double
+    var maxRuntimeRadius: Double
 
     var useNormalMap: Bool
     var lightingModel: SCNMaterial.LightingModel
@@ -364,6 +371,8 @@ private struct RadiusBarSceneView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: SCNView, context: Context) {
+        // Force update on every radius change to ensure animations happen
+        print("🔄 [RadiusBarSceneView] updateUIView called with radius=\(radius)m")
         context.coordinator.updateHeight(from: radius)
         context.coordinator.updateMaterials(baseColor: baseColor, tintColor: tintColor, useNormalMap: useNormalMap, lightingModel: lightingModel)
         context.coordinator.setAutoLoopingEnabled(autoLoop)
@@ -699,12 +708,22 @@ private struct RadiusBarSceneView: UIViewRepresentable {
         }
 
         func updateHeight(from radius: Double, isInitial: Bool) {
+            print("🔧 [Coordinator] updateHeight START - radius=\(radius)m isInitial=\(isInitial)")
+            
             guard let scnView = view,
                   let root = scnView.scene?.rootNode,
                   let bar = root.childNode(withName: "bar", recursively: true),
-                  let box = bar.geometry as? SCNBox else { return }
+                  let box = bar.geometry as? SCNBox else {
+                print("⚠️ [Coordinator] updateHeight FAILED - missing scene components")
+                return
+            }
             
-            if loopLink != nil { return }
+            print("🔧 [Coordinator] Current box.height = \(box.height)")
+            
+            if loopLink != nil {
+                print("⚠️ [Coordinator] updateHeight SKIPPED - loopLink is active")
+                return
+            }
 
             // Removed early return for active growYLoop animation so manual height updates always apply
 
@@ -712,24 +731,42 @@ private struct RadiusBarSceneView: UIViewRepresentable {
             // Hard cap to ensure we never exceed 75% of the visible scene height
             let hardMaxH: Double = parent.maxSceneHeight * 0.75
             let appliedH = min(targetH, hardMaxH)
+            
+            print("🎯 [Coordinator] Height calculation: radius=\(radius)m → targetH=\(targetH) → appliedH=\(appliedH)")
+            print("🎯 [Coordinator] Applying animation: \(box.height) → \(appliedH)")
 
+            // Allow implicit animations to work - don't disable actions
             CATransaction.begin()
-            CATransaction.setDisableActions(true)
+            CATransaction.setAnimationDuration(0.8)
+            CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeInEaseOut))
             box.height = CGFloat(appliedH)
             bar.position.y = Float(appliedH / 2.0)
-            
             CATransaction.commit()
+            
+            print("✅ [Coordinator] Bar height command sent: \(appliedH) (animation should be running)")
         }
 
         private func clampedHeight(_ radius: Double) -> Double {
             let r = max(0, radius)
-            // Earth radius in meters based on locale (imperial uses miles)
-            let usesImperial = Locale.current.usesMetricSystem == false
-            let earthMeters: Double = usesImperial ? 3958.8 * 1609.34 : 6371.0 * 1000.0
-            let minH: Double = 0.0
+            // Use a logarithmic scale for better visual representation across the huge range
+            // Most posts are 0-100km, but we support up to 3,323km
+            let minH: Double = 0.05  // Minimum visible height (5cm) so bar is never invisible
             let maxH: Double = parent.maxSceneHeight
-            let t = min(1.0, max(0.0, r / earthMeters))
+            
+            if r <= 1.0 {
+                // Below 1m, stay at minimum height
+                return minH
+            }
+            
+            // Logarithmic scaling for better visual distribution
+            // Reference points: 100m = ~10%, 1km = ~25%, 10km = ~50%, 100km = ~75%, 1000km = 100%
+            let logMin = log10(100.0)  // 100m is our baseline
+            let logMax = log10(1_000_000.0)  // 1000km is full height
+            let logR = log10(r)
+            let t = min(1.0, max(0.0, (logR - logMin) / (logMax - logMin)))
+            
             let result = minH + (maxH - minH) * t
+            print("📏 [clampedHeight] radius=\(r)m → log(\(logR)) → t=\(t) → height=\(result)")
             return min(result, maxH)
         }
         
@@ -996,6 +1033,9 @@ private struct RadiusBarOnlyPreview: View {
     @State private var isHoldingRecord: Bool = false
     @State private var feedSimValue: Double = 0
     @State private var feedAnimTask: Task<Void, Never>? = nil
+    
+    @State private var isIncreasing: Bool = false
+    @State private var increaseTask: Task<Void, Never>? = nil
 
     @EnvironmentObject private var isometricBarSettings: IsometricBarSettings
 
@@ -1081,6 +1121,13 @@ private struct RadiusBarOnlyPreview: View {
                                 .buttonStyle(.borderedProminent)
                                 .tint(.orange)
                             }
+                        }
+                        HStack(spacing: 12) {
+                            Button(isIncreasing ? "Stop Increasing" : "Start Increasing") {
+                                toggleIncreasing()
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(isIncreasing ? .red : .green)
                         }
                         HStack {
                             Text("Width \(Int(barWidth))")
@@ -1199,6 +1246,7 @@ private struct RadiusBarOnlyPreview: View {
                     radius = 0
                 }
             }
+            .onDisappear { stopIncreasingLoop() }
         }
     }
 
@@ -1337,6 +1385,42 @@ private struct RadiusBarOnlyPreview: View {
                 try? await Task.sleep(nanoseconds: UInt64(dt * 1_000_000_000))
             }
         }
+    }
+    
+    private func toggleIncreasing() {
+        isIncreasing.toggle()
+        if isIncreasing {
+            startIncreasingLoop()
+        } else {
+            stopIncreasingLoop()
+        }
+    }
+
+    private func startIncreasingLoop() {
+        stopIncreasingLoop()
+        let maxVal: Double = 3_323_000.0
+        increaseTask = Task { @MainActor in
+            let fps: Double = 60.0
+            let dt: Double = 1.0 / fps
+            while !Task.isCancelled && isIncreasing {
+                // Increase toward max at a steady rate; wrap to 0 when reaching cap
+                let stepPerSecond = maxVal / 6.0 // reach cap in ~6s
+                let next = min(maxVal, radius + stepPerSecond * dt)
+                withAnimation(.easeInOut(duration: dt)) {
+                    radius = next
+                }
+                if abs(next - maxVal) < 1.0 {
+                    // wrap back to zero and continue increasing
+                    withAnimation(.easeInOut(duration: 0.3)) { radius = 0 }
+                }
+                try? await Task.sleep(nanoseconds: UInt64(dt * 1_000_000_000))
+            }
+        }
+    }
+
+    private func stopIncreasingLoop() {
+        increaseTask?.cancel()
+        increaseTask = nil
     }
 }
 
