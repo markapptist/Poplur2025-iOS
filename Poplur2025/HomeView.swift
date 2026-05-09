@@ -575,35 +575,33 @@ struct HomeView: View {
             }
 #endif
             
-            // Global isometric radius bar overlay (visible on all tabs) — safe-area aware
+            // Global radius number display overlay (visible on all tabs) — safe-area aware
             GeometryReader { proxy in
                 let safe = proxy.safeAreaInsets
-                let xOffset = isometricBarSettings.horizontalOffset
-                let yOffset = isometricBarSettings.bottomOffset
 
                 VStack {
                     Spacer()
                     HStack {
                         Spacer(minLength: 0)
-                        IsometricRadiusBar(
-                            radius: $isometricBarModel.radius,
-                            growthSpeed: 1.5,
-                            maxSceneHeight: 1.8,
-                            uiScale: 1.5,
-                            maxRuntimeRadius: 3_323_000.0
-                        )
-                        .frame(width: isometricBarSettings.barWidth, height: isometricBarSettings.barHeight)
-                        .rotation3DEffect(.degrees(isometricBarSettings.barTiltDegrees), axis: (x: 1, y: 0, z: 0), perspective: 0.65)
-                        .animation(isSceneKitReady ? .interpolatingSpring(stiffness: 180, damping: 18) : nil, value: isometricBarModel.radius)
+                        
+                        // Choose your preferred radius display style:
+                        // Option 1: Default card style (recommended)
+                        RadiusNumberDisplay(radiusMeters: $isometricBarModel.radius)
+                        
+                        // Option 2: Compact badge style
+                        // RadiusNumberBadge(radiusMeters: $isometricBarModel.radius)
+                        
+                        // Option 3: Corner badge style
+                        // RadiusCornerBadge(radiusMeters: $isometricBarModel.radius)
+                        
+                        // Option 4: Icon-centered style
+                        // RadiusDisplayWithIcon(radiusMeters: $isometricBarModel.radius)
                     }
-                    .allowsHitTesting(false)
-                    .padding(.trailing, safe.trailing)
-                    .padding(.bottom, safe.bottom)
+                    .padding(.trailing, safe.trailing + 16)
+                    .padding(.bottom, safe.bottom + 20)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-                .padding(.trailing, safe.trailing)
-                .padding(.bottom, safe.bottom)
-                .offset(x: xOffset, y: -yOffset)
+                .animation(.spring(response: 0.5, dampingFraction: 0.75), value: isometricBarModel.radius)
             }
             .ignoresSafeArea(.container, edges: [.bottom, .leading, .trailing])
             .zIndex(999)
@@ -611,7 +609,7 @@ struct HomeView: View {
             
         }
         
-        // Inject global settings for isometric radius bar positioning
+        // Inject global settings for radius display (kept for compatibility)
         .environment(\.isometricRadiusBarDistance, isometricBarSettings.horizontalOffset)
         // Removed `.environment(\.isometricBarSettings, isometricBarSettings)` per instructions
         .environment(\.isometricBarModel, isometricBarModel)
@@ -919,24 +917,18 @@ private struct CubeAndBarOverlay: View {
     var body: some View {
         GeometryReader { proxy in
             let safe = proxy.safeAreaInsets
-            let xOffset = isometricBarSettings.horizontalOffset
-            let yOffset = isometricBarSettings.bottomOffset
 
             VStack {
                 Spacer()
                 HStack {
                     Spacer()
-                    IsometricRadiusBar(radius: $radius, uiScale: 1.5)
-                        .frame(width: isometricBarSettings.barWidth, height: isometricBarSettings.barHeight)
-                        .rotation3DEffect(.degrees(isometricBarSettings.barTiltDegrees), axis: (x: 1, y: 0, z: 0), perspective: 0.65)
+                    // Use the new numeric display in preview
+                    RadiusNumberDisplay(radiusMeters: $radius)
                 }
-                .padding(.trailing, safe.trailing)
-                .padding(.bottom, safe.bottom)
+                .padding(.trailing, safe.trailing + 16)
+                .padding(.bottom, safe.bottom + 20)
             }
             .allowsHitTesting(false)
-            .padding(.trailing, safe.trailing)
-            .padding(.bottom, safe.bottom)
-            .offset(x: xOffset, y: -yOffset)
         }
     }
 }
