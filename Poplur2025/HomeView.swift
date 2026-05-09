@@ -192,6 +192,13 @@ struct HomeView: View {
     @State private var recordHoldTask: Task<Void, Never>? = nil
     @State private var isRecordHolding: Bool = false
     
+    // Recording countdown state
+    @State private var isRecording: Bool = false
+    @State private var recordingSecondsRemaining: Int = 10
+    @State private var recordingTimer: Timer? = nil
+    @State private var cubeFlashTimer: Timer? = nil
+    @State private var isCubeFlashing: Bool = false
+    
     // Added state for cube yaw angle
     @State private var cubeYawDegrees: Double = 0
     
@@ -325,6 +332,43 @@ struct HomeView: View {
         }
     }
     
+    // MARK: - Recording Countdown Functions
+    
+    /// Start the 10-second countdown timer and cube flashing
+    private func startRecordingCountdown() {
+        isRecording = true
+        recordingSecondsRemaining = 10
+        startCubeFlashing()
+        
+        recordingTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { timer in
+            DispatchQueue.main.async {
+                if self.recordingSecondsRemaining > 0 {
+                    self.recordingSecondsRemaining -= 1
+                } else {
+                    self.stopRecordingCountdown()
+                    NotificationCenter.default.post(name: .cameraCubeHoldEnded, object: nil)
+                }
+            }
+        }
+    }
+    
+    private func stopRecordingCountdown() {
+        isRecording = false
+        recordingTimer?.invalidate()
+        recordingTimer = nil
+        stopCubeFlashing()
+    }
+    
+    private func startCubeFlashing() {
+        isCubeFlashing = true
+        NotificationCenter.default.post(name: Notification.Name("CubeStartFlashing"), object: nil)
+    }
+    
+    private func stopCubeFlashing() {
+        isCubeFlashing = false
+        NotificationCenter.default.post(name: Notification.Name("CubeStopFlashing"), object: nil)
+    }
+    
     // MARK: - Helper rotation logic for cube yaw and tab switching
     
     private enum RotationDirection { case left, right }
@@ -336,7 +380,7 @@ struct HomeView: View {
         case .feed: return 90
         case .profile: return 180
         case .map: return 270
-        @unknown default: return 0
+        case .settings: return 0 // Settings not currently in rotation
         }
     }
     
@@ -370,7 +414,7 @@ struct HomeView: View {
         case .record: return .feed
         case .feed: return .profile
         case .profile: return .map
-        @unknown default: return .feed
+        case .settings: return .feed // Settings not in rotation, default to feed
         }
     }
     
@@ -380,7 +424,7 @@ struct HomeView: View {
         case .record: return .map
         case .feed: return .record
         case .profile: return .feed
-        @unknown default: return .feed
+        case .settings: return .feed // Settings not in rotation, default to feed
         }
     }
     
@@ -491,7 +535,11 @@ struct HomeView: View {
                     onCubeTap: {
                         if selectedTab == .map {
                             print("[HomeView] Cube tapped on map tab - centering on user")
-                            NotificationCenter.default.post(name: .CenterMapOnUser, object: nil)
+                            NotificationCenter.default.post(
+                                name: Notification.Name("CenterMapOnUser"),
+                                object: nil,
+                                userInfo: nil
+                            )
                         }
                     }
                 )
@@ -605,6 +653,14 @@ struct HomeView: View {
             }
             .ignoresSafeArea(.container, edges: [.bottom, .leading, .trailing])
             .zIndex(999)
+            .allowsHitTesting(false)
+            
+            // Recording countdown overlay (bottom-left)
+            RecordingCountdownView(
+                isRecording: $isRecording,
+                secondsRemaining: $recordingSecondsRemaining
+            )
+            .zIndex(1000)
             .allowsHitTesting(false)
             
         }
@@ -749,10 +805,12 @@ struct HomeView: View {
             isRecordHolding = true
             ensureCameraRunningIfNeeded()
             startRecordHoldRamp()
+            startRecordingCountdown() // Start 10-second countdown
         }
         .onReceive(NotificationCenter.default.publisher(for: .cameraCubeHoldEnded)) { _ in
             isRecordHolding = false
             stopRecordHoldRamp(reset: true)
+            stopRecordingCountdown() // Stop countdown
         }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("OpenCameraAtCoordinate"))) { notification in
             // Handle long press on map - switch to camera tab and set coordinate
@@ -1002,7 +1060,7 @@ private struct HomeBarPlacementPreview: View {
         case .feed: return 90
         case .profile: return 180
         case .map: return 270
-        @unknown default: return 0
+        case .settings: return 0 // Settings not currently in rotation
         }
     }
     
@@ -1030,7 +1088,7 @@ private struct HomeBarPlacementPreview: View {
         case .record: return .feed
         case .feed: return .profile
         case .profile: return .map
-        @unknown default: return .feed
+        case .settings: return .feed // Settings not in rotation, default to feed
         }
     }
     
@@ -1040,7 +1098,7 @@ private struct HomeBarPlacementPreview: View {
         case .record: return .map
         case .feed: return .record
         case .profile: return .feed
-        @unknown default: return .feed
+        case .settings: return .feed // Settings not in rotation, default to feed
         }
     }
     

@@ -123,8 +123,7 @@ struct SearchView: View {
 
 // MARK: - Notification names used for routing and preloading
 extension Notification.Name {
-    // LoadFeedNow, LoadMapNow, LoadProfileNow, ShowUserProfile moved to Notifications+Names.swift
-    static let CenterMapOnUser = Notification.Name("CenterMapOnUser")
+    // LoadFeedNow, LoadMapNow, LoadProfileNow, ShowUserProfile, CenterMapOnUser moved to Notifications+Names.swift
     static let startDominanceTour = Notification.Name("startDominanceTour")
     static let stopDominanceTour = Notification.Name("stopDominanceTour")
     static let setTourSpeedMultiplier = Notification.Name("setTourSpeedMultiplier")

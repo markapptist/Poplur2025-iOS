@@ -21,6 +21,9 @@ extension Notification.Name {
     static let cameraCubeHoldBegan = Notification.Name("cameraCubeHoldBegan")
     static let cameraCubeHoldEnded = Notification.Name("cameraCubeHoldEnded")
     static let cameraCubeTabViewTapped = Notification.Name("cameraCubeTabViewTapped")
+    static let CubeStartFlashing = Notification.Name("CubeStartFlashing")
+    static let CubeStopFlashing = Notification.Name("CubeStopFlashing")
+    static let CenterMapOnUser = Notification.Name("CenterMapOnUser")
     
     // Feed and audio
     static let FeedReady = Notification.Name("FeedReady")
