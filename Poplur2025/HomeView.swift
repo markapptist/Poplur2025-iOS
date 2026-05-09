@@ -839,6 +839,11 @@ struct HomeView: View {
             // Switch back to profile or feed tab
             selectedTab = .profile
         }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("SwitchToFeedTab"))) { _ in
+            // Switch to feed tab (used after successful upload in Camera -> Map flow)
+            print("🔄 [HomeView] Switching to feed tab after upload")
+            selectedTab = .feed
+        }
         .onChange(of: isPreviewRuntime) { isPreview in
             if isPreview {
                 if let mapped = AppTab(fromPreview: previewSelectedTab) {

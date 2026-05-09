@@ -831,6 +831,7 @@ private struct CubeHoldSearchOverlay: View {
 /// The main MapView used in the app - shows map with AI recommendations and navigation
 struct MapViewProduction: View {
     @StateObject private var locationManager = LocationProvider()
+    @StateObject private var flowManager = CaptureFlowManager.shared
     
     @State private var fixedDistanceAlt: CLLocationDistance = 300 // Closer zoom to avoid building obstruction
     @State private var camera: MapCameraPosition = .camera(
@@ -850,6 +851,8 @@ struct MapViewProduction: View {
     @State private var searchQuery: String = ""
     @State private var searchResults: [MKMapItem] = []
     @State private var isSearching: Bool = false
+    @State private var clickedCoordinate: CLLocationCoordinate2D? = nil  // Track clicked coordinate
+    @State private var showPostPrompt: Bool = false  // Show "Post Here?" prompt
     
     @State private var posts: [PreviewMapAnnotationPost] = []
     @State private var dominance: [PreviewCityDominance] = []
@@ -1194,6 +1197,30 @@ struct MapViewProduction: View {
                     }
                 }
                 
+                // Show marker when user clicks a coordinate
+                if showPostPrompt, let coord = clickedCoordinate {
+                    Annotation("Selected Location", coordinate: coord) {
+                        ZStack {
+                            Circle()
+                                .fill(Color.indigo.opacity(0.3))
+                                .frame(width: 50, height: 50)
+                            
+                            // Show different icon based on flow
+                            if flowManager.currentFlow?.isCameraFirst ?? false {
+                                // Camera -> Map: Show upload/checkmark icon
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.system(size: 36))
+                                    .foregroundStyle(.indigo, .white)
+                            } else {
+                                // Map -> Camera: Show camera icon
+                                Image(systemName: "camera.circle.fill")
+                                    .font(.system(size: 36))
+                                    .foregroundStyle(.indigo, .white)
+                            }
+                        }
+                    }
+                }
+                
                 // Show placement marker when in post placement mode
                 if isPostPlacementMode, let coord = postPlacementCoordinate {
                     Annotation("Post Location", coordinate: coord) {
@@ -1237,17 +1264,34 @@ struct MapViewProduction: View {
                 SpatialTapGesture(coordinateSpace: .local)
                     .onEnded { event in
                         let screenCoordinate = event.location
-                        // Handle map tap
-                        if isPostPlacementMode {
-                            // Convert screen coordinate to map coordinate
+                        // Handle map tap based on current flow
+                        if let flow = flowManager.currentFlow, flow.isCameraFirst {
+                            // Flow 2: Camera -> Map - User already captured, now selecting location
                             if let coordinate = proxy.convert(screenCoordinate, from: .local) {
-                                postPlacementCoordinate = coordinate
-                                print("[MapView] Post placement coordinate selected: \(coordinate.latitude), \(coordinate.longitude)")
+                                clickedCoordinate = coordinate
+                                showPostPrompt = true
+                                
+                                currentCity = "Location Selected"
+                                aiRecommendation = String(format: "📍 %.4f°, %.4f° — Post your capture here?", 
+                                                         coordinate.latitude, 
+                                                         coordinate.longitude)
+                                print("[MapView] Camera -> Map flow: Selected coordinate \(coordinate.latitude), \(coordinate.longitude)")
                             }
                         } else {
-                            // Normal tap behavior
+                            // Flow 1: Map -> Camera OR normal browsing
                             if showCubeHoldSearch {
                                 showCubeHoldSearch = false
+                            } else if let coordinate = proxy.convert(screenCoordinate, from: .local) {
+                                // Store clicked coordinate and show prompt
+                                clickedCoordinate = coordinate
+                                showPostPrompt = true
+                                
+                                // Update AI text to show coordinate
+                                currentCity = "Location Selected"
+                                aiRecommendation = String(format: "📍 %.4f°, %.4f° — Want to post here?", 
+                                                         coordinate.latitude, 
+                                                         coordinate.longitude)
+                                print("[MapView] Normal tap: Showing post prompt at \(coordinate.latitude), \(coordinate.longitude)")
                             }
                             noteInteraction()
                         }
@@ -1326,15 +1370,54 @@ struct MapViewProduction: View {
             
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(isPostPlacementMode ? "Select Post Location" : currentCity)
+                    // Update title based on flow
+                    let titleText: String = {
+                        if let flow = flowManager.currentFlow, flow.isCameraFirst {
+                            return "Select Post Location"
+                        } else if isPostPlacementMode {
+                            return "Select Post Location"
+                        } else {
+                            return currentCity
+                        }
+                    }()
+                    
+                    let recommendationText: String = {
+                        if let flow = flowManager.currentFlow, flow.isCameraFirst {
+                            return "Tap where you want to post your capture"
+                        } else if isPostPlacementMode {
+                            return "Tap on the map to choose where to place your post"
+                        } else {
+                            return aiRecommendation
+                        }
+                    }()
+                    
+                    Text(titleText)
                         .font(.headline)
                         .foregroundStyle(.primary)
-                    Text(isPostPlacementMode ? "Tap on the map to choose where to place your post" : aiRecommendation)
+                    Text(recommendationText)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                 }
                 Spacer()
+                
+                // Dismiss button when showing post prompt or in camera->map flow
+                if showPostPrompt || (flowManager.currentFlow?.isCameraFirst ?? false) {
+                    Button(action: {
+                        // Cancel the flow
+                        if flowManager.currentFlow?.isCameraFirst ?? false {
+                            flowManager.cancelFlow()
+                        }
+                        showPostPrompt = false
+                        clickedCoordinate = nil
+                        currentCity = "Your Location"
+                        aiRecommendation = "Explore what's happening around you right now!"
+                    }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.title2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
             .padding(.top, -4)
             .padding(12)
@@ -1342,8 +1425,73 @@ struct MapViewProduction: View {
             .shadow(radius: 4)
             .padding(.horizontal)
             
-            // Post Here button - shows when in post placement mode and coordinate selected
-            if isPostPlacementMode, let _ = postPlacementCoordinate {
+            // Post Here button - shows when coordinate is clicked OR in post placement mode
+            if showPostPrompt, let coordinate = clickedCoordinate {
+                Button(action: {
+                    // Check which flow we're in
+                    if let flow = flowManager.currentFlow, flow.isCameraFirst {
+                        // Flow 2: Camera -> Map -> Complete upload
+                        print("📸 [MapView] Completing Camera -> Map flow, uploading to: \(coordinate.latitude), \(coordinate.longitude)")
+                        flowManager.completeFlow(finalCoordinate: coordinate)
+                        
+                        // Reset UI
+                        showPostPrompt = false
+                        clickedCoordinate = nil
+                        currentCity = "Your Location"
+                        aiRecommendation = "Post uploaded successfully!"
+                        
+                        // Return to feed or profile after a delay
+                        Task { @MainActor in
+                            try? await Task.sleep(nanoseconds: 1_500_000_000)
+                            NotificationCenter.default.post(name: Notification.Name("SwitchToFeedTab"), object: nil)
+                        }
+                    } else {
+                        // Flow 1: Map -> Camera -> Open camera at this location
+                        print("📍 [MapView] Starting Map -> Camera flow at: \(coordinate.latitude), \(coordinate.longitude)")
+                        flowManager.startMapToCameraFlow(coordinate: coordinate)
+                        
+                        // Open camera at this location
+                        NotificationCenter.default.post(
+                            name: Notification.Name("OpenCameraAtCoordinate"),
+                            object: nil,
+                            userInfo: [
+                                "coordinate": coordinate,
+                                "latitude": coordinate.latitude,
+                                "longitude": coordinate.longitude
+                            ]
+                        )
+                        
+                        // Reset prompt
+                        showPostPrompt = false
+                        clickedCoordinate = nil
+                        currentCity = "Your Location"
+                        aiRecommendation = "Explore what's happening around you right now!"
+                    }
+                }) {
+                    HStack {
+                        if let flow = flowManager.currentFlow, flow.isCameraFirst {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 16, weight: .semibold))
+                            Text("Confirm & Post")
+                                .font(.system(size: 16, weight: .bold, design: .rounded))
+                        } else {
+                            Image(systemName: "camera.fill")
+                                .font(.system(size: 16, weight: .semibold))
+                            Text("Post Here")
+                                .font(.system(size: 16, weight: .bold, design: .rounded))
+                        }
+                    }
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(Color.indigo, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal)
+                .padding(.top, 8)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            } else if isPostPlacementMode, let _ = postPlacementCoordinate {
+                // Original post placement button
                 Button(action: {
                     // Upload post to selected location
                     uploadPostToSelectedLocation()
@@ -1452,6 +1600,9 @@ struct MapViewProduction: View {
                 if showCubeHoldSearch {
                     showCubeHoldSearch = false
                 } else {
+                    // Clear post prompt when centering on user
+                    showPostPrompt = false
+                    clickedCoordinate = nil
                     centerOnUserLocation()
                 }
             }
@@ -1499,17 +1650,42 @@ struct MapViewProduction: View {
                 // Enter post placement mode when user wants to select location for captured media
                 guard let userInfo = notification.userInfo else { return }
                 
-                isPostPlacementMode = true
-                pendingPostImage = userInfo["image"] as? UIImage
-                pendingPostVideoURL = userInfo["videoURL"] as? URL
-                postPlacementCoordinate = nil // Reset coordinate
+                let image = userInfo["image"] as? UIImage
+                let videoURL = userInfo["videoURL"] as? URL
                 
-                // Stop tour and show instruction
-                isTourActive = false
+                // Start Camera -> Map flow
+                flowManager.startCameraToMapFlow(image: image, videoURL: videoURL)
+                
+                // Show UI prompts
                 currentCity = "Select Post Location"
-                aiRecommendation = "Tap on the map to choose where to place your post"
+                aiRecommendation = "Tap where you want to post your capture"
                 
-                print("[MapView] Entered post placement mode")
+                print("[MapView] Entered Camera -> Map flow mode")
+            }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("CaptureComplete"))) { notification in
+                // Handle when a capture completes in camera tab
+                guard let userInfo = notification.userInfo else { return }
+                
+                // Check if we're in Map -> Camera flow
+                if let flow = flowManager.currentFlow, flow.isMapFirst, 
+                   let coordinate = flow.preselectedCoordinate {
+                    // Flow 1: Map -> Camera -> Auto-post to preselected coordinate
+                    print("📍 [MapView] Capture complete in Map -> Camera flow, uploading to preselected coordinate")
+                    
+                    let image = userInfo["image"] as? UIImage
+                    let videoURL = userInfo["videoURL"] as? URL
+                    
+                    // Store the captured media in flow manager
+                    flowManager.capturedImage = image
+                    flowManager.capturedVideoURL = videoURL
+                    
+                    // Complete the flow automatically
+                    flowManager.completeFlow(finalCoordinate: coordinate)
+                    
+                    // Show success message
+                    currentCity = "Post Uploaded"
+                    aiRecommendation = "Your post has been shared at the selected location!"
+                }
             }
             .task {
                 await runTourLoop()
