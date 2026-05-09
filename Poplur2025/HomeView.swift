@@ -1,7 +1,7 @@
 import SwiftUI
 import CoreLocation
 import AVFoundation
-import SceneKit
+@preconcurrency import SceneKit
 import CoreMotion
 import Combine
 import AudioToolbox

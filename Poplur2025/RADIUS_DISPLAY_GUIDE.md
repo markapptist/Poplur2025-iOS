@@ -1,6 +1,6 @@
 # Radius Display Replacement Guide
 
-This document explains the replacement of the 3D isometric radius bar with simple numeric displays showing exact radius values in miles.
+This document explains the replacement of the 3D isometric radius bar with fraction displays showing exact radius values as **Post Radius / Earth Radius**.
 
 ## What Changed
 
@@ -11,10 +11,29 @@ This document explains the replacement of the 3D isometric radius bar with simpl
 - Performance overhead from 3D graphics
 
 **After:**
-- Clean numeric display showing exact miles
+- Clean fraction display: **Post Radius / Earth Radius**
+- Shows exact values (e.g., `5.2 / 3959 mi`)
 - Multiple style options to choose from
 - Smooth number transitions using `.contentTransition(.numericText())`
 - Lightweight and performant
+
+## Fraction Concept
+
+The radius is displayed as a **fraction**:
+
+```
+  Post Radius (numerator)
+  ―――――――――――――――――――――――
+  Earth Radius (denominator)
+```
+
+**Example Values:**
+- Earth's radius: **3,959 miles** (or 6,371 km)
+- Post with 5-mile radius: **5 / 3959 mi**
+- Post with 100-mile radius: **100 / 3959 mi**
+- Post with 1000-mile radius: **1000 / 3959 mi**
+
+This gives users immediate context: they can see how their post's reach compares to the size of Earth!
 
 ## Display Options
 
@@ -23,15 +42,19 @@ This document explains the replacement of the 3D isometric radius bar with simpl
 **Appearance:**
 ```
 ┌─────────────────┐
-│  RADIUS         │
-│  5.2 mi         │
+│     RADIUS      │
+│      5.2        │
+│     ――――        │
+│     3959        │
+│      mi         │
 └─────────────────┘
 ```
 
 **Features:**
 - Card-style layout with glassmorphic background
-- Clear label and large numeric display
-- Monospaced digits for smooth transitions
+- Vertical fraction with horizontal bar separator
+- Clear label above, unit below
+- Numerator animates, denominator stays constant
 - Best readability
 
 **Usage in HomeView.swift:**
@@ -45,13 +68,14 @@ RadiusNumberDisplay(radiusMeters: $isometricBarModel.radius)
 
 **Appearance:**
 ```
-┌──────────────┐
-│ ◎  5.2 mi    │
-└──────────────┘
+┌──────────────────────┐
+│ ◎  5.2 / 3959 mi     │
+└──────────────────────┘
 ```
 
 **Features:**
 - Compact pill/capsule shape
+- Inline fraction format
 - Scope icon prefix
 - Minimal screen real estate
 - Good for crowded UIs
@@ -67,13 +91,14 @@ RadiusNumberBadge(radiusMeters: $isometricBarModel.radius)
 
 **Appearance:**
 ```
-┌──────────┐
-│ 5.2 mi   │
-└──────────┘
+┌────────────────┐
+│ 5.2 / 3959 mi  │
+└────────────────┘
 ```
 
 **Features:**
 - Ultra-compact design
+- Inline fraction format
 - Dark semi-transparent background
 - White text for high contrast
 - Perfect for video overlays
@@ -91,13 +116,16 @@ RadiusCornerBadge(radiusMeters: $isometricBarModel.radius)
 ```
 ┌─────────────┐
 │      ◯      │
-│   5.2 mi    │
+│    5.2      │
+│    ――――     │
+│  3959 mi    │
 │   RADIUS    │
 └─────────────┘
 ```
 
 **Features:**
 - Icon-centered design
+- Vertical fraction with unit next to denominator
 - Most visual interest
 - Larger footprint
 - Best for prominence
@@ -111,24 +139,50 @@ RadiusDisplayWithIcon(radiusMeters: $isometricBarModel.radius)
 
 ## Number Formatting
 
-All displays use smart formatting based on distance:
+### Numerator (Post Radius) Formatting:
 
-| Distance Range | Format | Example |
-|----------------|--------|---------|
-| < 0.1 miles | Feet | `328 ft` |
-| 0.1 - 1 mile | 1 decimal | `0.5 mi` |
-| 1 - 10 miles | 1 decimal | `5.2 mi` |
-| 10 - 100 miles | Whole number | `52 mi` |
-| 100 - 1000 miles | Whole number | `520 mi` |
-| 1000+ miles | Thousands | `5.2k mi` |
+The post radius uses smart formatting based on magnitude:
 
-### Examples:
-- `100 meters` → `328 ft`
-- `804.67 meters` → `0.5 mi`
-- `1,609.34 meters` → `1.0 mi`
-- `8,046.7 meters` → `5.0 mi`
-- `160,934 meters` → `100 mi`
-- `1,609,340 meters` → `1.0k mi`
+| Post Radius Range | Format | Example |
+|-------------------|--------|---------|
+| < 0.1 units | Zero | `0` |
+| 0.1 - 10 units | 1 decimal | `5.2` |
+| 10 - 100 units | Whole number | `52` |
+| 100+ units | Whole number | `520` |
+
+### Denominator (Earth Radius):
+
+Always displays as a constant whole number:
+- **Miles (imperial):** `3959`
+- **Kilometers (metric):** `6371`
+
+### Complete Examples:
+- `0 meters` → `0 / 3959 mi`
+- `8,046.7 meters` (5 mi) → `5.0 / 3959 mi`
+- `160,934 meters` (100 mi) → `100 / 3959 mi`
+- `1,609,340 meters` (1000 mi) → `1000 / 3959 mi`
+
+---
+
+## Unit Selection
+
+You can toggle between imperial (miles) and metric (kilometers) by changing the `useMetric` flag:
+
+**In RadiusNumberDisplay.swift:**
+```swift
+// Use imperial (miles) by default - set to true for metric (km)
+private let useMetric: Bool = false
+```
+
+**Imperial Mode (default):**
+- Earth radius: 3,959 miles
+- Example: `5.2 / 3959 mi`
+
+**Metric Mode:**
+- Earth radius: 6,371 km
+- Example: `8.4 / 6371 km`
+
+Simply change `false` to `true` to use kilometers!
 
 ---
 
@@ -142,22 +196,57 @@ Contains four different view styles, all accepting the same binding:
 ```
 
 **Key Features:**
-1. **Automatic Unit Conversion**: Meters → Miles (or feet for small distances)
-2. **Smart Formatting**: Format changes based on distance magnitude
-3. **Smooth Transitions**: Uses `.contentTransition(.numericText(value:))` for animated number changes
-4. **Monospaced Digits**: Prevents layout jumps during updates
-5. **Glassmorphic Design**: `.ultraThinMaterial` background for modern look
+1. **Fraction Display**: Shows `Post Radius / Earth Radius`
+2. **Automatic Unit Conversion**: Meters → Miles (or km for metric)
+3. **Smart Formatting**: Numerator format changes based on magnitude
+4. **Smooth Transitions**: Uses `.contentTransition(.numericText(value:))` for animated number changes
+5. **Monospaced Digits**: Prevents layout jumps during updates
+6. **Glassmorphic Design**: `.ultraThinMaterial` background for modern look
 
-### Conversion Formula:
+### Conversion Formulas:
+
+**Imperial (Miles):**
 ```swift
-var radiusMiles: Double {
-    radiusMeters / 1609.34 // 1 mile = 1609.34 meters
+// Convert meters to miles
+var postRadius: Double {
+    radiusMeters / 1609.34
 }
 
-var radiusFeet: Double {
-    radiusMeters * 3.28084 // 1 meter = 3.28084 feet
+// Earth's radius in miles
+var earthRadius: Double {
+    3958.8
 }
 ```
+
+**Metric (Kilometers):**
+```swift
+// Convert meters to km
+var postRadius: Double {
+    radiusMeters / 1000.0
+}
+
+// Earth's radius in km
+var earthRadius: Double {
+    6371.0
+}
+```
+
+---
+
+## Why Use a Fraction?
+
+**Benefits of Fraction Display:**
+
+1. **Instant Context**: Users immediately understand scale relative to Earth
+2. **Educational**: Shows how far a post can reach vs. planet size
+3. **Consistent Denominator**: Earth radius never changes, easy mental reference
+4. **Compact**: Shows two pieces of information in small space
+5. **Mathematically Intuitive**: Fractions are universally understood
+
+**Example Interpretations:**
+- `5 / 3959 mi` - "My post reaches 5 miles out of Earth's 3,959-mile radius"
+- `100 / 3959 mi` - "My post covers 100 miles, about 2.5% of Earth's radius"
+- `1000 / 3959 mi` - "My post reaches 1,000 miles, over 25% of Earth's radius!"
 
 ---
 
@@ -409,10 +498,13 @@ For most use cases, we recommend **Option 1: RadiusNumberDisplay**
 
 ## Questions & Answers
 
-**Q: Why replace the 3D bar?**
-A: Performance, simplicity, and exact numeric values are more useful than visual approximation.
+**Q: Why replace the 3D bar with a fraction?**
+A: Performance, simplicity, and exact numeric values are more useful than visual approximation. The fraction also provides instant context by comparing to Earth's radius.
 
-**Q: Can I have both?**
+**Q: Why show it as a fraction instead of just the post radius?**
+A: The fraction gives immediate scale context. Seeing "100 / 3959 mi" tells users they're covering about 2.5% of Earth's radius, which is more meaningful than just "100 mi".
+
+**Q: Can I have both the 3D bar and fraction?**
 A: Not recommended. Choose one to avoid UI clutter.
 
 **Q: Does this work with existing animations?**
@@ -422,4 +514,15 @@ A: Yes! All existing radius animations (feed scroll, recording, etc.) work ident
 A: All displays are responsive and scale appropriately.
 
 **Q: Can I use metric (km)?**
-A: Yes! Modify the `formattedRadius` computed property to use kilometers instead of miles.
+A: Yes! In `RadiusNumberDisplay.swift`, change `private let useMetric: Bool = false` to `true`. This will show kilometers with Earth's radius as 6,371 km.
+
+**Q: What is Earth's radius exactly?**
+A: 
+- **Imperial:** 3,958.8 miles (displayed as `3959` for simplicity)
+- **Metric:** 6,371 km (Earth's mean radius)
+
+**Q: Can I change the denominator to something else?**
+A: Yes! Modify the `earthRadius` property to use any reference value you want. For example, you could use the maximum allowed post radius instead of Earth's radius.
+
+**Q: Why does the numerator animate but the denominator doesn't?**
+A: The denominator (Earth's radius) is constant, so it doesn't need to animate. Only the numerator (post radius) changes, creating a smooth counting effect.
