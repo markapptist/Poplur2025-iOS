@@ -5,6 +5,12 @@ import FirebaseFirestore
 import UserNotifications
 import ARKit
 
+// ProfileView listens for:
+// - OpenUserDetailForUser: ["userID": String, "currentPostID": String] to show a specific user's profile
+// - LastTappedUserChanged: ["userID": String, "radius": Double, "currentPostID": String] to reflect current feed context (radius bar)
+// - PostCreated: ["id": String, "userID": String, "latitude": Double, "longitude": Double, "mediaURL": String, "radius": Double, "viewCount": Int] to insert newly published posts immediately
+// Long-press on a post will emit OpenCameraAtCoordinate with both coordinate and lat/lon for map navigation.
+
 private var isRunningInPreviews: Bool {
     let env = ProcessInfo.processInfo.environment
     return env["XCODE_RUNNING_FOR_PREVIEWS"] == "1" || env["XCODE_RUNNING_FOR_PLAYGROUNDS"] == "1"
@@ -15,16 +21,31 @@ struct ProfileView: View {
     @GestureState private var isInteractingWithCube: Bool = false
     @State private var isScrollDisabled = false
     
+    // Injected userID from tab bar when navigating from feed
+    @Environment(\.routedUserID) private var routedUserID
+    
     // Track if we're viewing own profile or another user's
     private var isOwnProfile: Bool {
-        if let userID = userID, !userID.isEmpty {
-            let currentUID = Auth.auth().currentUser?.uid
-            let result = currentUID == userID
-            print("🔍 [ProfileView] isOwnProfile check - currentUID: \(currentUID ?? "nil"), userID: \(userID), result: \(result)")
+        let targetUserID = effectiveUserID
+        if let currentUID = Auth.auth().currentUser?.uid {
+            let result = currentUID == targetUserID
+            print("🔍 [ProfileView] isOwnProfile check - currentUID: \(currentUID), targetUserID: \(targetUserID ?? "nil"), result: \(result)")
             return result
         }
-        print("🔍 [ProfileView] isOwnProfile check - no userID or empty string, assuming own profile")
-        return true // If no userID provided or empty string, assume own profile
+        print("🔍 [ProfileView] isOwnProfile check - no current user, assuming own profile")
+        return true
+    }
+    
+    // The effective userID to display: routedUserID takes precedence over userID parameter, then falls back to current user
+    private var effectiveUserID: String? {
+        if let routed = routedUserID, !routed.isEmpty {
+            return routed
+        }
+        if let param = userID, !param.isEmpty {
+            return param
+        }
+        // Fall back to current logged-in user
+        return Auth.auth().currentUser?.uid
     }
 
     @State private var editing = false
@@ -75,7 +96,10 @@ struct ProfileView: View {
     
     // Use a stable ID to force view recreation when userID changes
     private var viewID: String {
-        userID ?? "own-profile"
+        let id = effectiveUserID ?? "own-profile"
+        // Debug logging to verify view recreation
+        print("🆔 [ProfileView] viewID computed as: '\(id)'")
+        return id
     }
 
     init(userID: String? = nil, initialMode: DisplayMode = .grid) {
@@ -125,29 +149,28 @@ struct ProfileView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                Color.white.ignoresSafeArea()
+        ZStack {
+            Color.white.ignoresSafeArea()
 
-                VStack(spacing: 0) {
-                    // Explanatory text box at the top
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(isOwnProfile ? "Your Profile" : "User Profile")
-                            .font(.system(size: 16, weight: .bold, design: .rounded))
-                            .foregroundColor(.primary)
-                        
-                        Text(isOwnProfile ? "View all your posts in grid or list mode. Tap any post to view fullscreen. Tap the cube to access settings, or long-press for messages." : "View this user's posts in grid or list mode. Tap any post to view fullscreen.")
-                            .font(.system(size: 13, weight: .regular, design: .rounded))
-                            .foregroundColor(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(14)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
-                    .padding(.horizontal, 16)
-                    .padding(.top, 12)
-                    .padding(.bottom, 8)
+            VStack(spacing: 0) {
+                // Explanatory text box at the top
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(isOwnProfile ? "Your Profile" : "User Profile")
+                        .font(.system(size: 16, weight: .bold, design: .rounded))
+                        .foregroundColor(.primary)
+                    
+                    Text(isOwnProfile ? "View all your posts in grid or list mode. Tap any post to view fullscreen. Tap the cube to access settings, or long-press for messages." : "View this user's posts in grid or list mode. Tap any post to view fullscreen.")
+                        .font(.system(size: 13, weight: .regular, design: .rounded))
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(14)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .padding(.bottom, 8)
 
                     VStack(spacing: 10) {
                         avatarRow
@@ -190,13 +213,16 @@ struct ProfileView: View {
                                                             }
                                                         }
                                                         .onLongPressGesture(minimumDuration: 0.5) {
-                                                            // Long press to show post location on map
+                                                            // Long press to show post location on map (changed from OpenCameraAtCoordinate to ShowLocationOnMapFromPost)
                                                             let coordinate = CLLocationCoordinate2D(latitude: post.latitude, longitude: post.longitude)
                                                             print("📍 [ProfileView] Long press - showing post location on map: \(coordinate.latitude), \(coordinate.longitude)")
                                                             NotificationCenter.default.post(
-                                                                name: Notification.Name("ShowLocationOnMap"),
+                                                                name: Notification.Name("ShowLocationOnMapFromPost"),
                                                                 object: nil,
-                                                                userInfo: ["coordinate": coordinate]
+                                                                userInfo: [
+                                                                    "latitude": coordinate.latitude,
+                                                                    "longitude": coordinate.longitude
+                                                                ]
                                                             )
                                                             // Haptic feedback
                                                             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
@@ -233,13 +259,16 @@ struct ProfileView: View {
                                                             }
                                                         }
                                                         .onLongPressGesture(minimumDuration: 0.5) {
-                                                            // Long press to show post location on map
+                                                            // Long press to show post location on map (changed from OpenCameraAtCoordinate to ShowLocationOnMapFromPost)
                                                             let coordinate = CLLocationCoordinate2D(latitude: post.latitude, longitude: post.longitude)
                                                             print("📍 [ProfileView] Long press - showing post location on map: \(coordinate.latitude), \(coordinate.longitude)")
                                                             NotificationCenter.default.post(
-                                                                name: Notification.Name("ShowLocationOnMap"),
+                                                                name: Notification.Name("ShowLocationOnMapFromPost"),
                                                                 object: nil,
-                                                                userInfo: ["coordinate": coordinate]
+                                                                userInfo: [
+                                                                    "latitude": coordinate.latitude,
+                                                                    "longitude": coordinate.longitude
+                                                                ]
                                                             )
                                                             // Haptic feedback
                                                             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
@@ -264,7 +293,7 @@ struct ProfileView: View {
                                 }
                             }
                         }
-                        .onReceive(NotificationCenter.default.publisher(for: .ResetTabToTop)) { _ in
+                        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ResetTabToTop"))) { _ in
                             withAnimation(.easeInOut(duration: 0.25)) {
                                 proxy.scrollTo("top", anchor: .top)
                             }
@@ -428,19 +457,30 @@ struct ProfileView: View {
                 }
             }
             .onAppear {
+                print("👀 [ProfileView] onAppear isOwnProfile=\(isOwnProfile) effectiveUserID=\(effectiveUserID ?? "nil")")
                 NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
                 
                 // Immediately set radius to 0 when profile appears (before posts load)
                 print("📊 [ProfileView] onAppear - setting radius to 0")
                 RadiusBarAnimator.animate(to: 0, duration: 0.3)
                 
-                // Don't load posts here if we're already loading in .task
-                // This prevents double-loading
-                
-                // Animate radius bar to show total accumulated radius (only if already loaded)
-                if hasLoadedOnce && averageRadius > 0 {
-                    print("📊 [ProfileView] Animating radius bar to total: \(averageRadius)m")
-                    RadiusBarAnimator.animate(to: averageRadius, duration: 1.0)
+                // ALWAYS reload posts when appearing to ensure we show the correct user's posts
+                print("📊 [ProfileView] onAppear - reloading posts for userID: \(effectiveUserID ?? "nil")")
+                Task {
+                    await loadMyPosts()
+                    
+                    // Update radius bar after posts load
+                    await MainActor.run {
+                        self.averageRadius = Double(self.averagePostRadius())
+                        if self.averageRadius > 0 {
+                            print("📊 [ProfileView] onAppear - posts loaded, animating radius bar to: \(self.averageRadius)m")
+                            RadiusBarAnimator.animate(to: self.averageRadius, duration: 1.2)
+                        } else {
+                            print("📊 [ProfileView] onAppear - no posts, keeping radius at 0")
+                            // Ensure radius stays at 0 if no posts
+                            RadiusBarAnimator.animate(to: 0, duration: 0.3)
+                        }
+                    }
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ProfileRemovePost"))) { notif in
@@ -448,6 +488,128 @@ struct ProfileView: View {
                     myPosts.removeAll { $0.id == id }
                     self.averageRadius = Double(self.averagePostRadius())
                 }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("OpenUserDetailForUser"))) { notif in
+                guard let userInfo = notif.userInfo, let uid = userInfo["userID"] as? String else { return }
+                // If our routedUserID environment isn't handling this, reload locally for the requested user
+                if uid != effectiveUserID {
+                    print("👤 [ProfileView] OpenUserDetailForUser received for uid=\(uid). Reloading profile locally.")
+                    // Clear and reload for the specified user
+                    displayUsername = nil
+                    userProfile = nil
+                    profileImage = nil
+                    profileImageURL = nil
+                    myPosts = []
+                    loadedImages = [:]
+                    hasLoadedOnce = false
+                    averageRadius = 0
+                    RadiusBarAnimator.animate(to: 0, duration: 0.3)
+                    Task {
+                        // Temporarily override by using the parameter initializer path
+                        // We can't change routedUserID here, so load posts for uid directly
+                        await loadPostsForSpecificUser(uid)
+                    }
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("LastTappedUserChanged"))) { notif in
+                guard let info = notif.userInfo,
+                      let uid = info["userID"] as? String,
+                      let radius = info["radius"] as? Double else { return }
+                if uid == effectiveUserID {
+                    print("📏 [ProfileView] Updating radius bar for current user to \(radius)m from feed context")
+                    RadiusBarAnimator.animate(to: radius, duration: 0.6)
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ProfileShowUserContext"))) { notif in
+                guard let info = notif.userInfo,
+                      let uid = info["userID"] as? String else { return }
+                let radius = info["radius"] as? Double
+                let currentPostID = info["currentPostID"] as? String
+
+                print("👤 [ProfileView] ProfileShowUserContext for uid=\(uid) radius=\(radius.map{String($0)} ?? "nil") currentPostID=\(currentPostID ?? "nil")")
+
+                // If this context refers to a different user, reload for that user immediately
+                if uid != effectiveUserID {
+                    displayUsername = nil
+                    userProfile = nil
+                    profileImage = nil
+                    profileImageURL = nil
+                    myPosts = []
+                    loadedImages = [:]
+                    hasLoadedOnce = false
+                    averageRadius = 0
+                    RadiusBarAnimator.animate(to: 0, duration: 0.3)
+                    Task { await loadPostsForSpecificUser(uid) }
+                }
+
+                // Apply incoming radius to the global bar if provided and matches the viewed user
+                if let r = radius, uid == effectiveUserID {
+                    RadiusBarAnimator.animate(to: r, duration: 0.6)
+                }
+
+                // If a current post was specified, try to bring it into view after posts are loaded
+                if let pid = currentPostID {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                        if let match = myPosts.first(where: { $0.id == pid }) {
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                                expandedPost = match
+                                NotificationCenter.default.post(name: Notification.Name("currentPostRadiusDidChange"), object: nil, userInfo: ["radius": Double(match.radius)])
+                            }
+                        }
+                    }
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("RefreshProfileAfterUpload"))) { _ in
+                print("🔄 [ProfileView] RefreshProfileAfterUpload received - reloading posts")
+                Task {
+                    await loadMyPosts()
+                    // After reload, scroll to top and open the newest post if available
+                    await MainActor.run {
+                        if let newest = myPosts.first {
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                                expandedPost = newest
+                                NotificationCenter.default.post(name: Notification.Name("currentPostRadiusDidChange"), object: nil, userInfo: ["radius": Double(newest.radius)])
+                            }
+                        }
+                    }
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("PostCreated"))) { notif in
+                guard let info = notif.userInfo,
+                      let id = info["id"] as? String,
+                      let uid = info["userID"] as? String,
+                      let lat = info["latitude"] as? Double,
+                      let lon = info["longitude"] as? Double,
+                      let mediaURL = info["mediaURL"] as? String,
+                      let rawRadiusDouble = info["radius"] as? Double ?? (info["radius"] as? Int).map(Double.init) else {
+                    print("⚠️ [ProfileView] PostCreated missing fields; ignoring")
+                    return
+                }
+                let radius = rawRadiusDouble
+                let viewCount = (info["viewCount"] as? Int) ?? 0
+                // Only insert if the post belongs to the user currently displayed
+                guard uid == effectiveUserID else { return }
+                let newPost = Post(
+                    id: id,
+                    latitude: lat,
+                    longitude: lon,
+                    mediaURL: mediaURL,
+                    radius: Int(radius),
+                    viewCount: viewCount,
+                    userID: uid,
+                    posterURL: nil
+                )
+                // Avoid duplicates
+                if myPosts.contains(where: { $0.id == id }) { return }
+                // Prepend for recency
+                myPosts.insert(newPost, at: 0)
+                // Persist cache
+                savePostsToCache(myPosts, for: uid)
+                // Prefetch image
+                Task.detached { await prefetchImages(for: [newPost]) }
+                // Update radius bar to reflect new total
+                averageRadius = Double(averagePostRadius())
+                RadiusBarAnimator.animate(to: averageRadius, duration: 0.8)
             }
             .onReceive(NotificationCenter.default.publisher(for: .cubeHoldBegan)) { _ in
                 print("🎯 [ProfileView] Received cubeHoldBegan - isOwnProfile: \(isOwnProfile)")
@@ -506,9 +668,77 @@ struct ProfileView: View {
                 print("📊 [ProfileView] onDisappear - notifying to restore feed radius")
                 NotificationCenter.default.post(name: Notification.Name("ProfileViewDismissed"), object: nil)
             }
+            .onChange(of: routedUserID) { newUserID in
+                print("🔄 [ProfileView] routedUserID changed to: \(newUserID ?? "nil")")
+                // Clear all state and reload everything when viewing a different user
+                displayUsername = nil
+                userProfile = nil
+                profileImage = nil
+                profileImageURL = nil
+                myPosts = []
+                loadedImages = [:]
+                hasLoadedOnce = false
+                averageRadius = 0  // Reset average radius to 0 when switching users
+                
+                // Reset radius bar to 0 when switching users
+                RadiusBarAnimator.animate(to: 0, duration: 0.3)
+                
+                Task {
+                    // Reload posts for the new user
+                    await loadMyPosts()
+                    
+                    // Fetch username for the new user
+                    if let uid = effectiveUserID {
+                        displayUsername = await UsernameCache.shared.username(for: uid)
+                    }
+                    
+                    // Only load profile image for own profile
+                    if isOwnProfile {
+                        await loadPersistedProfileImageIfNeeded()
+                    }
+                    
+                    // Update radius bar with new user's total radius
+                    await MainActor.run {
+                        self.averageRadius = Double(self.averagePostRadius())
+                        if self.averageRadius > 0 {
+                            print("📊 [ProfileView] User switched, animating radius bar to: \(self.averageRadius)m")
+                            RadiusBarAnimator.animate(to: self.averageRadius, duration: 1.2)
+                        } else {
+                            print("📊 [ProfileView] User switched, no posts - keeping radius at 0")
+                            // Ensure radius stays at 0 if no posts
+                            RadiusBarAnimator.animate(to: 0, duration: 0.3)
+                        }
+                    }
+                }
+            }
+            .navigationTitle(isOwnProfile ? "Your Profile" : (displayUsername ?? "Profile"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                if !isOwnProfile {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        Button {
+                            NotificationCenter.default.post(name: Notification.Name("SwitchToFeedTab"), object: nil)
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "chevron.left")
+                                Text("Feed")
+                            }
+                        }
+                    }
+                }
+                if isOwnProfile {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button {
+                            print("➕ [ProfileView] New Post tapped (toolbar)")
+                            createDemoPostForCurrentUser()
+                        } label: {
+                            Label("New Post", systemImage: "plus")
+                        }
+                    }
+                }
+            }
+            .id(viewID) // Force recreation when viewing different user
         }
-        .id(viewID) // Force recreation when viewing different user
-    }
 
     private var avatarRow: some View {
         Group {
@@ -591,16 +821,34 @@ struct ProfileView: View {
     }
 
     private var usernameRow: some View {
-        Text(displayUsername ?? (isOwnProfile ? (auth.currentUser?.email?.components(separatedBy: "@").first?.uppercased() ?? "USERNAME") : "USER"))
+        Text(displayUsername ?? (isOwnProfile ? (auth.currentUser?.email?.components(separatedBy: "@").first?.uppercased() ?? "USERNAME") : usernameForDemoUser()))
             .font(.system(size: 22, weight: .heavy, design: .rounded))
             .foregroundColor(.black.opacity(0.95))
             .padding(.top, 4)
-            .task {
-                // Fetch username for the profile being viewed
-                if let uid = userID ?? Auth.auth().currentUser?.uid {
+            .task(id: effectiveUserID) {
+                // Fetch username for the profile being viewed (re-runs when effectiveUserID changes)
+                if let uid = effectiveUserID ?? Auth.auth().currentUser?.uid {
                     displayUsername = await UsernameCache.shared.username(for: uid)
                 }
             }
+    }
+    
+    // Helper to generate readable username for demo users
+    private func usernameForDemoUser() -> String {
+        guard let uid = effectiveUserID else { return "USER" }
+        
+        // Check if this is a demo user
+        if uid.contains("_user_") {
+            // Extract the channel name from the userID (e.g., "food_user_0" -> "FOOD USER 0")
+            let components = uid.split(separator: "_")
+            if components.count >= 2 {
+                let channelName = String(components[0]).uppercased()
+                let userNum = components.count > 2 ? String(components[2]) : "0"
+                return "\(channelName) USER \(userNum)"
+            }
+        }
+        
+        return "USER"
     }
 
     private var modeSwitcher: some View {
@@ -643,9 +891,9 @@ struct ProfileView: View {
         }
 
         let targetUID: String
-        if let provided = userID, !provided.isEmpty {
-            targetUID = provided
-            print("🔑 [ProfileView] Using provided userID: \(targetUID) (viewing \(isOwnProfile ? "own" : "other") profile)")
+        if let effective = effectiveUserID, !effective.isEmpty {
+            targetUID = effective
+            print("🔑 [ProfileView] Using effectiveUserID: \(targetUID) (viewing \(isOwnProfile ? "own" : "other") profile)")
         } else if let current = Auth.auth().currentUser?.uid {
             targetUID = current
             print("🔑 [ProfileView] Using current user's UID: \(targetUID) (own profile)")
@@ -664,6 +912,45 @@ struct ProfileView: View {
         print("🔍 [ProfileView] About to query posts for userID: '\(targetUID)'")
         print("📊 [ProfileView] isOwnProfile: \(isOwnProfile)")
         
+        // Check if this is a demo user (userID contains "user_" pattern)
+        let isDemoUser = targetUID.contains("_user_") || targetUID.hasPrefix("food_") || targetUID.hasPrefix("fitness_") || targetUID.hasPrefix("beauty_") || targetUID.hasPrefix("sports_") || targetUID.hasPrefix("modelling_") || targetUID.hasPrefix("fashion_") || targetUID.hasPrefix("music_") || targetUID.hasPrefix("tech_") || targetUID.hasPrefix("news_")
+        
+        if isDemoUser {
+            print("🎭 [ProfileView] Demo user detected, loading from DemoPostStore")
+            let demoPosts = DemoPostStore.shared.posts(for: targetUID)
+            print("🎭 [ProfileView] Found \(demoPosts.count) demo posts for userID: '\(targetUID)'")
+            print("🎭 [ProfileView] Total posts in DemoPostStore: \(DemoPostStore.shared.allPosts().count)")
+            
+            // Debug: Print all userIDs in the store
+            let allUserIDs = Set(DemoPostStore.shared.allPosts().map { $0.userID })
+            print("🎭 [ProfileView] Unique userIDs in store: \(allUserIDs.sorted())")
+            
+            // Convert FeedPost to Post
+            let convertedPosts = demoPosts.map { feedPost in
+                Post(
+                    id: feedPost.id,
+                    latitude: feedPost.latitude,
+                    longitude: feedPost.longitude,
+                    mediaURL: feedPost.mediaURL,
+                    radius: Int(feedPost.radius),
+                    viewCount: feedPost.viewCount,
+                    userID: feedPost.userID,
+                    posterURL: nil
+                )
+            }
+            
+            await MainActor.run {
+                self.myPosts = convertedPosts
+                self.hasLoadedOnce = true
+                self.canLoadMore = false
+                self.averageRadius = Double(self.averagePostRadius())
+                self.isLoading = false
+            }
+            
+            Task.detached { await prefetchImages(for: convertedPosts) }
+            return
+        }
+        
         // Try to show cached posts immediately for better perceived performance
         if let cached = loadPostsFromCache(for: targetUID), !cached.isEmpty {
             await MainActor.run {
@@ -673,6 +960,11 @@ struct ProfileView: View {
             }
             // Prefetch images for cached posts
             Task.detached { await prefetchImages(for: cached) }
+        } else {
+            await MainActor.run {
+                self.averageRadius = 0
+            }
+            RadiusBarAnimator.animate(to: 0, duration: 0.3)
         }
 
         await MainActor.run {
@@ -696,6 +988,13 @@ struct ProfileView: View {
             // Persist latest posts to cache
             savePostsToCache(page.posts, for: targetUID)
             Task.detached { await prefetchImages(for: page.posts) }
+            
+            if page.posts.isEmpty {
+                await MainActor.run {
+                    self.averageRadius = 0
+                    RadiusBarAnimator.animate(to: 0, duration: 0.3)
+                }
+            }
         } catch {
             print("Profile: failed to load posts -> \(error.localizedDescription)")
             // Fall back to cache if available
@@ -714,7 +1013,95 @@ struct ProfileView: View {
                     self.loadedImages = [:]
                     self.hasLoadedOnce = true
                     self.canLoadMore = false
+                    self.averageRadius = 0
                 }
+                RadiusBarAnimator.animate(to: 0, duration: 0.3)
+            }
+        }
+    }
+
+    private func loadPostsForSpecificUser(_ uid: String) async {
+        print("🔑 [ProfileView] Forcing load for specific uid: \(uid)")
+        // Demo users: load from DemoPostStore
+        let isDemoUser = uid.contains("_user_") || uid.hasPrefix("food_") || uid.hasPrefix("fitness_") || uid.hasPrefix("beauty_") || uid.hasPrefix("sports_") || uid.hasPrefix("modelling_") || uid.hasPrefix("fashion_") || uid.hasPrefix("music_") || uid.hasPrefix("tech_") || uid.hasPrefix("news_")
+        if isDemoUser {
+            let demoPosts = DemoPostStore.shared.posts(for: uid)
+            let converted = demoPosts.map { feedPost in
+                Post(id: feedPost.id, latitude: feedPost.latitude, longitude: feedPost.longitude, mediaURL: feedPost.mediaURL, radius: Int(feedPost.radius), viewCount: feedPost.viewCount, userID: feedPost.userID, posterURL: nil)
+            }
+            await MainActor.run {
+                self.myPosts = converted
+                self.hasLoadedOnce = true
+                self.canLoadMore = false
+                self.averageRadius = Double(self.averagePostRadius())
+                self.isLoading = false
+            }
+            Task.detached { await prefetchImages(for: converted) }
+            return
+        }
+
+        // Cached posts first
+        if let cached = loadPostsFromCache(for: uid), !cached.isEmpty {
+            await MainActor.run {
+                self.myPosts = cached
+                self.hasLoadedOnce = true
+                self.averageRadius = Double(self.averagePostRadius())
+            }
+            Task.detached { await prefetchImages(for: cached) }
+        } else {
+            await MainActor.run {
+                self.averageRadius = 0
+            }
+            RadiusBarAnimator.animate(to: 0, duration: 0.3)
+        }
+
+        await MainActor.run {
+            isLoading = true
+            canLoadMore = true
+            lastDocument = nil
+            myPosts = []
+            loadedImages = [:]
+        }
+        defer { Task { @MainActor in isLoading = false } }
+
+        do {
+            let page = try await fetchPostsPage(for: uid, after: nil, limit: pageSize)
+            await MainActor.run {
+                self.myPosts = page.posts
+                self.lastDocument = page.lastDoc
+                self.canLoadMore = page.posts.count >= pageSize && page.lastDoc != nil
+                self.averageRadius = Double(self.averagePostRadius())
+                self.hasLoadedOnce = true
+            }
+            savePostsToCache(page.posts, for: uid)
+            Task.detached { await prefetchImages(for: page.posts) }
+            
+            if page.posts.isEmpty {
+                await MainActor.run {
+                    self.averageRadius = 0
+                    RadiusBarAnimator.animate(to: 0, duration: 0.3)
+                }
+            }
+        } catch {
+            print("Profile: forced load failed -> \(error.localizedDescription)")
+            if let cached = loadPostsFromCache(for: uid), !cached.isEmpty {
+                await MainActor.run {
+                    self.myPosts = cached
+                    self.loadedImages = [:]
+                    self.hasLoadedOnce = true
+                    self.canLoadMore = false
+                    self.averageRadius = Double(self.averagePostRadius())
+                }
+                Task.detached { await prefetchImages(for: cached) }
+            } else {
+                await MainActor.run {
+                    self.myPosts = []
+                    self.loadedImages = [:]
+                    self.hasLoadedOnce = true
+                    self.canLoadMore = false
+                    self.averageRadius = 0
+                }
+                RadiusBarAnimator.animate(to: 0, duration: 0.3)
             }
         }
     }
@@ -734,8 +1121,8 @@ struct ProfileView: View {
         await MainActor.run { isLoadingMore = true }
         defer { Task { @MainActor in isLoadingMore = false } }
         let targetUID: String
-        if let provided = userID, !provided.isEmpty {
-            targetUID = provided
+        if let effective = effectiveUserID, !effective.isEmpty {
+            targetUID = effective
         } else if let current = Auth.auth().currentUser?.uid {
             targetUID = current
         } else { return }
@@ -764,17 +1151,25 @@ struct ProfileView: View {
     private func fetchPostsPage(for uid: String, after last: QueryDocumentSnapshot?, limit: Int) async throws -> PostsPage {
         print("🔍 [ProfileView] Fetching posts for userID: \(uid)")
         print("📄 [ProfileView] Query params - limit: \(limit), after: \(last?.documentID ?? "start")")
+        
+        // Guard against empty userID
+        guard !uid.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            print("⚠️ [ProfileView] Empty userID provided, returning empty result")
+            return PostsPage(posts: [], lastDoc: nil)
+        }
+        
         return try await withCheckedThrowingContinuation { (cont: CheckedContinuation<PostsPage, Error>) in
             let db = Firestore.firestore()
-            // Try query with createdAt first, fall back to query without if it fails
+            
+            // Start with a simple query that should work for all posts
             var query: Query = db.collection("posts")
                 .whereField("userID", isEqualTo: uid)
             
             print("🔎 [ProfileView] Executing Firestore query: posts where userID == '\(uid)'")
             
-            // Only order by createdAt if we're not starting from a cursor
-            // This helps with posts that might not have createdAt field
+            // Try to order by createdAt if available, but don't require it
             if last == nil {
+                // For the first page, try ordering by createdAt
                 query = query.order(by: "createdAt", descending: true)
                 print("🔎 [ProfileView] Adding order by createdAt (descending)")
             }
@@ -791,9 +1186,13 @@ struct ProfileView: View {
                     print("❌ [ProfileView] Error fetching posts: \(err.localizedDescription)")
                     // Try fallback query without createdAt ordering
                     print("🔄 [ProfileView] Trying fallback query without createdAt ordering...")
-                    let fallbackQuery = db.collection("posts")
+                    var fallbackQuery: Query = db.collection("posts")
                         .whereField("userID", isEqualTo: uid)
                         .limit(to: limit)
+                    
+                    if let last = last {
+                        fallbackQuery = fallbackQuery.start(afterDocument: last)
+                    }
                     
                     fallbackQuery.getDocuments { snap2, err2 in
                         if let err2 = err2 {
@@ -809,8 +1208,19 @@ struct ProfileView: View {
                         print("📊 [ProfileView] Fallback received \(snap2.documents.count) documents")
                         if snap2.documents.isEmpty {
                             print("⚠️ [ProfileView] No documents found for userID: '\(uid)'")
+                            print("💡 [ProfileView] Debug info:")
+                            print("   - Make sure the post's userID field matches exactly: '\(uid)'")
+                            print("   - Check Firestore console to verify field name (userID vs userId)")
                         } else {
                             print("✅ [ProfileView] Found \(snap2.documents.count) documents, mapping to Post objects...")
+                            // Debug: Show first post's userID
+                            if let firstDoc = snap2.documents.first {
+                                let data = firstDoc.data()
+                                let firstUserID = data["userID"] as? String ?? "missing"
+                                print("   - First post userID: '\(firstUserID)'")
+                                print("   - Searching for: '\(uid)'")
+                                print("   - Match: \(firstUserID == uid)")
+                            }
                         }
                         let posts = Self.mapPosts(from: snap2)
                         print("✅ [ProfileView] Fallback mapped \(posts.count) posts")
@@ -830,8 +1240,17 @@ struct ProfileView: View {
                     print("   - User has not created any posts yet")
                     print("   - UserID field in Firebase uses different casing (userId vs userID)")
                     print("   - Posts are stored under a different collection")
+                    print("   - The userID value doesn't match what's stored ('\(uid)')")
                 } else {
                     print("✅ [ProfileView] Found \(snap.documents.count) documents, mapping to Post objects...")
+                    // Debug: Show first post's details
+                    if let firstDoc = snap.documents.first {
+                        let data = firstDoc.data()
+                        print("   - Sample post ID: \(firstDoc.documentID)")
+                        print("   - Sample userID: '\(data["userID"] as? String ?? "missing")'")
+                        print("   - Has mediaURL: \(data["mediaURL"] != nil)")
+                        print("   - Has coordinates: \(data["latitude"] != nil && data["longitude"] != nil)")
+                    }
                 }
                 let posts = Self.mapPosts(from: snap)
                 print("✅ [ProfileView] Successfully mapped \(posts.count) posts")
@@ -842,11 +1261,12 @@ struct ProfileView: View {
                         let data = doc.data()
                         if !posts.contains(where: { $0.id == doc.documentID }) {
                             print("❌ [ProfileView] Failed to map document \(doc.documentID):")
-                            print("   - mediaURL: \(data["mediaURL"] as? String ?? "missing")")
+                            print("   - mediaURL: '\(data["mediaURL"] as? String ?? "missing")'")
                             print("   - latitude: \(data["latitude"] ?? "missing")")
                             print("   - longitude: \(data["longitude"] ?? "missing")")
                             print("   - radius: \(data["radius"] ?? "missing")")
-                            print("   - userID: \(data["userID"] as? String ?? "missing")")
+                            print("   - userID: '\(data["userID"] as? String ?? "missing")'")
+                            break // Only show first failure to avoid log spam
                         }
                     }
                 }
@@ -988,6 +1408,56 @@ struct ProfileView: View {
             }
         }
         NotificationCenter.default.post(name: Notification.Name("ProfilePhotoUpdated"), object: nil)
+    }
+    
+    // Creates a quick demo post for the current user and emits PostCreated so the UI updates immediately.
+    private func createDemoPostForCurrentUser() {
+        guard let uid = Auth.auth().currentUser?.uid else {
+            print("⚠️ [ProfileView] Cannot create demo post: no current user")
+            return
+        }
+        // Generate simple demo content
+        let id = UUID().uuidString
+        let latitude = 37.7749
+        let longitude = -122.4194
+        let mediaURL = "https://picsum.photos/seed/\(id)/800/800"
+        let radius = 5000
+        let viewCount = 0
+
+        // Emit PostCreated so ProfileView inserts it immediately
+        NotificationCenter.default.post(
+            name: Notification.Name("PostCreated"),
+            object: nil,
+            userInfo: [
+                "id": id,
+                "userID": uid,
+                "latitude": latitude,
+                "longitude": longitude,
+                "mediaURL": mediaURL,
+                "radius": radius,
+                "viewCount": viewCount
+            ]
+        )
+
+        // Optionally persist a lightweight Firestore document if desired.
+        // This is best-effort; the UI already updated via notification above.
+        let db = Firestore.firestore()
+        let doc: [String: Any] = [
+            "userID": uid,
+            "latitude": latitude,
+            "longitude": longitude,
+            "mediaURL": mediaURL,
+            "radius": radius,
+            "viewCount": viewCount,
+            "createdAt": FieldValue.serverTimestamp()
+        ]
+        db.collection("posts").document(id).setData(doc) { err in
+            if let err = err {
+                print("❌ [ProfileView] Failed to persist demo post: \(err.localizedDescription)")
+            } else {
+                print("✅ [ProfileView] Demo post persisted with id=\(id)")
+            }
+        }
     }
 }
 

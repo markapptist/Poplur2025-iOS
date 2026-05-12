@@ -52,45 +52,93 @@ struct TabBarControllerHost<MapContent: View, RecordContent: View, FeedContent: 
     }
 
     var body: some View {
+        tabView
+            .onReceive(showUserProfilePublisher, perform: handleShowUserProfile)
+            .onChange(of: selection, perform: handleSelectionChange)
+            .onAppear(perform: triggerBackgroundPreloading)
+    }
+    
+    // MARK: - View Components
+    
+    private var tabView: some View {
         TabView(selection: $selection) {
-            map()
-                .tabItem { Label(AppTab.map.title, systemImage: AppTab.map.systemImage) }
-                .tag(AppTab.map)
-
-            record()
-                .tabItem { Label(AppTab.record.title, systemImage: AppTab.record.systemImage) }
-                .tag(AppTab.record)
-
-            feed()
-                .tabItem { Label(AppTab.feed.title, systemImage: AppTab.feed.systemImage) }
-                .tag(AppTab.feed)
-
-            // Inject routedUserID into the environment so Profile can consume it.
-            profile()
-                .environment(\.routedUserID, routedUserID)
-                .tabItem { Label(AppTab.profile.title, systemImage: AppTab.profile.systemImage) }
-                .tag(AppTab.profile)
-
-            settings()
-                .tabItem { Label(AppTab.settings.title, systemImage: AppTab.settings.systemImage) }
-                .tag(AppTab.settings)
+            mapTab
+            recordTab
+            feedTab
+            profileTab
+            settingsTab
         }
-        // Listen for Feed’s “show profile” requests
-        .onReceive(NotificationCenter.default.publisher(for: .ShowUserProfile)) { note in
-            if let uid = note.object as? String {
-                routedUserID = uid
-                selection = .profile
-            }
+    }
+    
+    private var mapTab: some View {
+        map()
+            .tabItem { Label(AppTab.map.title, systemImage: AppTab.map.systemImage) }
+            .tag(AppTab.map)
+    }
+    
+    private var recordTab: some View {
+        record()
+            .tabItem { Label(AppTab.record.title, systemImage: AppTab.record.systemImage) }
+            .tag(AppTab.record)
+    }
+    
+    private var feedTab: some View {
+        feed()
+            .tabItem { Label(AppTab.feed.title, systemImage: AppTab.feed.systemImage) }
+            .tag(AppTab.feed)
+    }
+    
+    private var profileTab: some View {
+        // Inject routedUserID into the environment so Profile can consume it.
+        profile()
+            .environment(\.routedUserID, routedUserID)
+            .tabItem { Label(AppTab.profile.title, systemImage: AppTab.profile.systemImage) }
+            .tag(AppTab.profile)
+    }
+    
+    private var settingsTab: some View {
+        settings()
+            .tabItem { Label(AppTab.settings.title, systemImage: AppTab.settings.systemImage) }
+            .tag(AppTab.settings)
+    }
+    
+    // MARK: - Helper Properties
+    
+    private var showUserProfilePublisher: NotificationCenter.Publisher {
+        let name: Notification.Name = .ShowUserProfile
+        return NotificationCenter.default.publisher(for: name)
+    }
+    
+    // MARK: - Helper Methods
+    
+    private func handleShowUserProfile(_ note: Notification) {
+        // Listen for Feed's "show profile" requests
+        if let uid = note.object as? String {
+            print("🔔 [TabBarController] Received ShowUserProfile for userID: '\(uid)'")
+            routedUserID = uid
+            selection = .profile
         }
+    }
+    
+    private func handleSelectionChange(_ newTab: AppTab) {
+        if newTab != .profile && routedUserID != nil {
+            print("🔔 [TabBarController] Clearing routedUserID (switched from profile to \(newTab.title))")
+            routedUserID = nil
+        }
+    }
+    
+    private func triggerBackgroundPreloading() {
         // Kick background preloading when the tab bar first appears
-        .onAppear {
-            // If you added AppPreloader, you can call:
-            // AppPreloader.shared.primeAll()
-
-            // Or just post the notifications directly:
-            NotificationCenter.default.post(name: .LoadFeedNow, object: nil)
-            NotificationCenter.default.post(name: .LoadMapNow, object: nil)
-            NotificationCenter.default.post(name: .LoadProfileNow, object: nil)
-        }
+        // If you added AppPreloader, you can call:
+        // AppPreloader.shared.primeAll()
+        
+        // Or just post the notifications directly:
+        let feedName: Notification.Name = .LoadFeedNow
+        let mapName: Notification.Name = .LoadMapNow
+        let profileName: Notification.Name = .LoadProfileNow
+        
+        NotificationCenter.default.post(name: feedName, object: nil)
+        NotificationCenter.default.post(name: mapName, object: nil)
+        NotificationCenter.default.post(name: profileName, object: nil)
     }
 }

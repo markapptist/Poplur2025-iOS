@@ -39,4 +39,11 @@ extension Notification.Name {
     // Settings and UI
     static let OpenSettingsRequested = Notification.Name("OpenSettingsRequested")
     static let OpenDMsRequested = Notification.Name("OpenDMsRequested")
+    
+    // User stats
+    static let UserPostCountDidChange = Notification.Name("UserPostCountDidChange")
+    
+    // Camera roll
+    static let CameraRollImageSelected = Notification.Name("CameraRollImageSelected")
+    static let CameraRollVideoSelected = Notification.Name("CameraRollVideoSelected")
 }

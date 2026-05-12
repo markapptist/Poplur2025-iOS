@@ -93,6 +93,16 @@ final class CaptureFlowManager: ObservableObject {
             userInfo: userInfo
         )
         
+        // Show success notification
+        NotificationCenter.default.post(
+            name: Notification.Name("PostUploadStarted"),
+            object: nil,
+            userInfo: [
+                "message": "Uploading your post...",
+                "coordinate": finalCoordinate
+            ]
+        )
+        
         // Reset flow
         reset()
     }
@@ -121,4 +131,13 @@ extension Notification.Name {
     
     /// Posted when capture is complete in camera and needs location selection
     static let captureNeedsLocation = Notification.Name("CaptureNeedsLocation")
+    
+    /// Posted when a post upload has started
+    static let postUploadStarted = Notification.Name("PostUploadStarted")
+    
+    /// Posted when a post upload completes successfully
+    static let postUploadSuccess = Notification.Name("PostUploadSuccess")
+    
+    /// Posted when a post upload fails
+    static let postUploadFailed = Notification.Name("PostUploadFailed")
 }

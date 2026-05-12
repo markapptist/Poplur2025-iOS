@@ -15,6 +15,29 @@ struct CameraPreviewHost: View {
     var body: some View {
         ControllerPreviewView(controller: controller)
             .id(controller.isReady)
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("OpenCameraAtCoordinate"))) { note in
+                if let coord = note.userInfo?["coordinate"] as? CLLocationCoordinate2D {
+                    NotificationCenter.default.post(
+                        name: Notification.Name("SetCameraCoordinate"),
+                        object: nil,
+                        userInfo: [
+                            "latitude": coord.latitude,
+                            "longitude": coord.longitude
+                        ]
+                    )
+                } else if
+                    let lat = note.userInfo?["latitude"] as? Double,
+                    let lon = note.userInfo?["longitude"] as? Double {
+                    NotificationCenter.default.post(
+                        name: Notification.Name("SetCameraCoordinate"),
+                        object: nil,
+                        userInfo: [
+                            "latitude": lat,
+                            "longitude": lon
+                        ]
+                    )
+                }
+            }
     }
 }
 

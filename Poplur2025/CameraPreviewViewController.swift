@@ -514,12 +514,12 @@ final class CameraPreviewViewController: UIViewController {
     }
 
     private func setupGestures() {
-        // Long press = video record
+        // Long press = video record (2-second minimum)
         let longPress = UILongPressGestureRecognizer(
             target: self,
             action: #selector(handleLongPress(_:))
         )
-        longPress.minimumPressDuration = 0.25
+        longPress.minimumPressDuration = 2.0 // Changed to 2 seconds
         view.addGestureRecognizer(longPress)
 
         // Horizontal pan = swipe navigation (existing)

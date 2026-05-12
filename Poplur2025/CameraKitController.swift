@@ -13,7 +13,7 @@ private var isRunningInPreviews: Bool {
     return env["XCODE_RUNNING_FOR_PREVIEWS"] == "1" || env["XCODE_RUNNING_FOR_PLAYGROUNDS"] == "1" || ProcessInfo.processInfo.arguments.contains("-XcodePreviews")
 }
 
-class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDelegate, RecordPreviewViewControllerProviding, PreviewViewControllerProviding {
+class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDelegate, RecordPreviewViewControllerProviding, PreviewViewControllerProviding, AVCaptureFileOutputRecordingDelegate, CLLocationManagerDelegate {
     // MARK: - Properties
     let sessionQueue = DispatchQueue(label: "camera.session.queue")
     let captureSession = AVCaptureSession()
@@ -40,7 +40,7 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
         super.init()
         
         // Listen for coordinate override from map long-press
-        NotificationCenter.default.addObserver(
+        Foundation.NotificationCenter.default.addObserver(
             forName: Notification.Name("SetCameraCoordinate"),
             object: nil,
             queue: .main
@@ -59,7 +59,7 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
         }
         
         // Listen for image upload request from map placement
-        NotificationCenter.default.addObserver(
+        Foundation.NotificationCenter.default.addObserver(
             forName: Notification.Name("UploadImageToCurrentCoordinate"),
             object: nil,
             queue: .main
@@ -72,14 +72,14 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
             Task { @MainActor in
                 self.requestLocationAuthorizationIfNeeded()
                 let loc = await self.currentLocation()
-                let coord = loc?.coordinate
+                let coord = self.overrideCoordinate ?? loc?.coordinate
                 await self.postImage(image, at: coord)
                 print("📤 [CameraKit] Uploaded image to coordinate: \(String(describing: coord))")
             }
         }
         
         // Listen for video upload request from map placement
-        NotificationCenter.default.addObserver(
+        Foundation.NotificationCenter.default.addObserver(
             forName: Notification.Name("UploadVideoToCurrentCoordinate"),
             object: nil,
             queue: .main
@@ -92,13 +92,64 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
             Task { @MainActor in
                 self.requestLocationAuthorizationIfNeeded()
                 let loc = await self.currentLocation()
-                let coord = loc?.coordinate
+                let coord = self.overrideCoordinate ?? loc?.coordinate
                 let processedURL = await self.exportCroppedPortrait9x16(inputURL: videoURL) ?? videoURL
                 if let url = await self.uploadVideoToStorage(fileURL: processedURL) {
                     await self.writePostDocument(mediaURL: url, coordinate: coord, mediaType: "video")
                     print("📤 [CameraKit] Uploaded video to coordinate: \(String(describing: coord))")
                 } else {
                     print("❌ [CameraKit] Failed to upload video")
+                }
+            }
+        }
+        
+        // Listen for image upload request to profile (no coordinate required)
+        Foundation.NotificationCenter.default.addObserver(
+            forName: Notification.Name("UploadImageToProfile"),
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self = self,
+                  let image = notification.object as? UIImage else {
+                return
+            }
+            Task { @MainActor in
+                Foundation.NotificationCenter.default.post(name: Notification.Name("PostUploadStarted"), object: nil)
+                if let url = await self.uploadImageToStorage(image) {
+                    await self.writePostDocument(mediaURL: url, coordinate: nil, mediaType: "photo_profile")
+                } else {
+                    print("[CK][Post] Skipping profile post; image upload failed")
+                    Foundation.NotificationCenter.default.post(
+                        name: Notification.Name("PostUploadFailed"),
+                        object: nil,
+                        userInfo: ["error": "Image upload failed"]
+                    )
+                }
+            }
+        }
+        
+        // Listen for video upload request to profile (no coordinate required)
+        Foundation.NotificationCenter.default.addObserver(
+            forName: Notification.Name("UploadVideoToProfile"),
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self = self,
+                  let videoURL = notification.object as? URL else {
+                return
+            }
+            Task { @MainActor in
+                Foundation.NotificationCenter.default.post(name: Notification.Name("PostUploadStarted"), object: nil)
+                let processedURL = await self.exportCroppedPortrait9x16(inputURL: videoURL) ?? videoURL
+                if let url = await self.uploadVideoToStorage(fileURL: processedURL) {
+                    await self.writePostDocument(mediaURL: url, coordinate: nil, mediaType: "video_profile")
+                } else {
+                    print("[CK][Post] Skipping profile post; video upload failed")
+                    Foundation.NotificationCenter.default.post(
+                        name: Notification.Name("PostUploadFailed"),
+                        object: nil,
+                        userInfo: ["error": "Video upload failed"]
+                    )
                 }
             }
         }
@@ -254,7 +305,6 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
         if let override = overrideCoordinate {
             print("📍 [CameraKit] Using override coordinate: \(override.latitude), \(override.longitude)")
             let location = CLLocation(latitude: override.latitude, longitude: override.longitude)
-            overrideCoordinate = nil // Clear after use
             return location
         }
         
@@ -280,6 +330,11 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
         
         guard let uid = Auth.auth().currentUser?.uid else {
             print("[CK][Post] No authenticated user; cannot write post")
+            Foundation.NotificationCenter.default.post(
+                name: Notification.Name("PostUploadFailed"),
+                object: nil,
+                userInfo: ["error": "Not authenticated"]
+            )
             return
         }
         let db = Firestore.firestore()
@@ -292,6 +347,10 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
             "radius": 5000,
             "mediaType": mediaType
         ]
+        // Mark profile posts
+        if mediaType.hasSuffix("_profile") {
+            data["isProfile"] = true
+        }
         if let c = coordinate {
             data["latitude"] = c.latitude
             data["longitude"] = c.longitude
@@ -299,12 +358,31 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
         do {
             try await docRef.setData(data)
             print("[CK][Post] Wrote post doc: \(docRef.documentID)")
-            NotificationCenter.default.post(name: .LoadProfileNow, object: nil)
-            NotificationCenter.default.post(name: .LoadMapNow, object: nil)
+            
+            self.overrideCoordinate = nil
+            
+            // Post success notification
+            Foundation.NotificationCenter.default.post(
+                name: Notification.Name("PostUploadSuccess"),
+                object: nil,
+                userInfo: ["docID": docRef.documentID]
+            )
+            
+            // Trigger profile and map reload
+            Foundation.NotificationCenter.default.post(name: .LoadProfileNow, object: nil)
+            Foundation.NotificationCenter.default.post(name: .LoadMapNow, object: nil)
         } catch {
-            print("[CK][Post] Failed to write post doc: \(error)")
+            print("[CK][Post] Error writing post: \(error)")
+            
+            // Post failure notification
+            Foundation.NotificationCenter.default.post(
+                name: Notification.Name("PostUploadFailed"),
+                object: nil,
+                userInfo: ["error": error.localizedDescription]
+            )
         }
     }
+    
     
     private func uploadImageToStorage(_ image: UIImage) async -> URL? {
         #if DEBUG
@@ -646,6 +724,7 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
 
     @MainActor
     private func postImage(_ image: UIImage, at coordinate: CLLocationCoordinate2D?) {
+        Foundation.NotificationCenter.default.post(name: Notification.Name("PostUploadStarted"), object: nil)
         Task {
             if let url = await uploadImageToStorage(image) {
                 await writePostDocument(mediaURL: url, coordinate: coordinate, mediaType: "photo")
@@ -697,8 +776,12 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
                         Task { @MainActor in
                             self.requestLocationAuthorizationIfNeeded()
                             let loc = await self.currentLocation()
-                            let coord = loc?.coordinate
-                            self.postImage(image, at: coord)
+                            let coord = self.overrideCoordinate ?? loc?.coordinate
+                            if let url = await self.uploadImageToStorage(image) {
+                                await self.writePostDocument(mediaURL: url, coordinate: coord, mediaType: "photo")
+                            } else {
+                                print("[CK][Post] Skipping post; image upload failed")
+                            }
                             host?.dismiss(animated: true)
                         }
                         if let dismissObserver { NotificationCenter.default.removeObserver(dismissObserver) }
@@ -832,7 +915,9 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
     }
 }
 
-extension CameraKitController: AVCaptureFileOutputRecordingDelegate {
+// MARK: - AVCaptureFileOutputRecordingDelegate
+
+extension CameraKitController {
     func fileOutput(_ output: AVCaptureFileOutput, didFinishRecordingTo outputFileURL: URL, from connections: [AVCaptureConnection], error: Error?) {
         if let error = error {
             print("[CK][Video] Recording error: \(error)")
@@ -851,7 +936,7 @@ extension CameraKitController: AVCaptureFileOutputRecordingDelegate {
             
             // Notify preview if we have a map-selected coordinate
             if let coord = self.overrideCoordinate {
-                NotificationCenter.default.post(
+                Foundation.NotificationCenter.default.post(
                     name: Notification.Name("CapturePreviewFromMapLocation"),
                     object: nil,
                     userInfo: [
@@ -885,7 +970,7 @@ extension CameraKitController: AVCaptureFileOutputRecordingDelegate {
                     // Proceed with crop -> upload -> post
                     self.requestLocationAuthorizationIfNeeded()
                     let loc = await self.currentLocation()
-                    let coord = loc?.coordinate
+                    let coord = self.overrideCoordinate ?? loc?.coordinate
                     let processedURL = await self.exportCroppedPortrait9x16(inputURL: outputFileURL) ?? outputFileURL
                     if let url = await self.uploadVideoToStorage(fileURL: processedURL) {
                         await self.writePostDocument(mediaURL: url, coordinate: coord, mediaType: "video")
@@ -904,9 +989,19 @@ extension CameraKitController: AVCaptureFileOutputRecordingDelegate {
         #else
         // If UIKit not available, fallback to immediate processing
         Task { @MainActor in
+            if let coord = self.overrideCoordinate {
+                Foundation.NotificationCenter.default.post(
+                    name: Notification.Name("CapturePreviewFromMapLocation"),
+                    object: nil,
+                    userInfo: [
+                        "latitude": coord.latitude,
+                        "longitude": coord.longitude
+                    ]
+                )
+            }
             self.requestLocationAuthorizationIfNeeded()
             let loc = await self.currentLocation()
-            let coord = loc?.coordinate
+            let coord = self.overrideCoordinate ?? loc?.coordinate
             let processedURL = await self.exportCroppedPortrait9x16(inputURL: outputFileURL) ?? outputFileURL
             if let url = await self.uploadVideoToStorage(fileURL: processedURL) {
                 await self.writePostDocument(mediaURL: url, coordinate: coord, mediaType: "video")
@@ -918,7 +1013,9 @@ extension CameraKitController: AVCaptureFileOutputRecordingDelegate {
     }
 }
 
-extension CameraKitController: CLLocationManagerDelegate {
+// MARK: - CLLocationManagerDelegate
+
+extension CameraKitController {
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         // Choose the most recent location with good accuracy
         let now = Date()

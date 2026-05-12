@@ -28,6 +28,9 @@ import SceneKit
  ═══════════════════════════════════════════════════════════════════════════════
 */
 
+// MapView listens for:
+// - SetCameraCoordinate: ["latitude": Double, "longitude": Double] to navigate to a post's location
+
 /*
  POP_PREVIEW_LIGHT compile-time flag enables a lighter preview mode that excludes heavy dependencies
  like FirebaseFirestore and SceneKit. Use it to speed up SwiftUI previews in complex projects.
@@ -832,6 +835,7 @@ private struct CubeHoldSearchOverlay: View {
 struct MapViewProduction: View {
     @StateObject private var locationManager = LocationProvider()
     @StateObject private var flowManager = CaptureFlowManager.shared
+    @StateObject private var mapState = MapStateManager.shared
     
     @State private var fixedDistanceAlt: CLLocationDistance = 300 // Closer zoom to avoid building obstruction
     @State private var camera: MapCameraPosition = .camera(
@@ -858,12 +862,10 @@ struct MapViewProduction: View {
     @State private var dominance: [PreviewCityDominance] = []
     @State private var radiusMeters: Double = 5_000
     
-    @State private var lastInteractionAt: Date = Date()
-    @State private var isTourActive: Bool = false
     @State private var currentTourIndex: Int = 0
     @State private var tourZoomOutDistance: CLLocationDistance = 25_000_000 // Distance for zoom out
     @State private var isZoomedOut: Bool = false
-    @State private var hasSetInitialLocation: Bool = false  // NEW: Track if we've set initial location
+    @State private var hasSetInitialLocation: Bool = false  // Track if we've set initial location
     
     @State private var longPressLocation: CGPoint? = nil  // Track long press location
     @State private var selectedCoordinate: CLLocationCoordinate2D? = nil  // Track selected coordinate for long-press
@@ -922,16 +924,23 @@ struct MapViewProduction: View {
     
     /// Navigate to a location using tour-style transitions (zoom out, move, zoom in)
     private func navigateWithTourTransition(to coordinate: CLLocationCoordinate2D, cityName: String = "Selected Location") {
+        print("🎯 [navigateWithTourTransition] Starting transition")
+        print("   Target: \(coordinate.latitude), \(coordinate.longitude)")
+        print("   City: \(cityName)")
+        
         // Stop any active tour
-        isTourActive = false
+        mapState.stopTour()
         
         // Update city info
         currentCity = cityName
         aiRecommendation = "Explore what's happening here!"
         
         let currentCoord = camera.camera?.centerCoordinate ?? coordinate
+        print("   Current camera: \(currentCoord.latitude), \(currentCoord.longitude)")
+        print("   Zoom out distance: \(tourZoomOutDistance)m")
         
         // Step 1: Zoom out from current location
+        print("🔍 [Step 1] Zooming out from current location (1.5s)")
         withAnimation(.easeInOut(duration: 1.5)) {
             camera = .camera(
                 MapCamera(
@@ -947,6 +956,7 @@ struct MapViewProduction: View {
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 1_500_000_000)
             
+            print("➡️ [Step 2] Panning to target location (3.0s)")
             withAnimation(.easeInOut(duration: 3.0)) {
                 camera = .camera(
                     MapCamera(
@@ -961,6 +971,7 @@ struct MapViewProduction: View {
             // Step 3: Zoom in to new location
             try? await Task.sleep(nanoseconds: 3_000_000_000)
             
+            print("🔎 [Step 3] Zooming in to target location (2.0s)")
             withAnimation(.easeInOut(duration: 2.0)) {
                 camera = .camera(
                     MapCamera(
@@ -971,8 +982,11 @@ struct MapViewProduction: View {
                     )
                 )
             }
+            
+            print("✅ [navigateWithTourTransition] Animation sequence complete")
         }
     }
+    
     
     private func zoomOut(to coordinate: CLLocationCoordinate2D) {
         let heading = camera.camera?.heading ?? 0
@@ -1010,36 +1024,25 @@ struct MapViewProduction: View {
     }
     
     private func noteInteraction() {
-        lastInteractionAt = Date()
-        // Stop tour when user interacts with map
-        isTourActive = false
+        // Delegate to state manager
+        mapState.noteUserInteraction()
     }
     
     private func startTour() {
-        guard !isTourActive else { return }
-        isTourActive = true
-        currentTourIndex = 0
-        isZoomedOut = false  // Start fresh - not zoomed out
-        
-        // Immediately move to first place to avoid being stuck on user location
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 500_000_000)  // Brief delay
-            tourToNextPlace()
-        }
+        mapState.startTour()
     }
     
     private func stopTour() {
-        isTourActive = false
+        mapState.stopTour()
     }
     
     private func centerOnUserLocation() {
         guard let userCoordinate = locationManager.location?.coordinate else { return }
         
-        // Stop any active tour
-        isTourActive = false
-        isZoomedOut = false
+        // Stop any active operations and return to browsing
+        mapState.cancelCurrentOperation()
         
-        // Update city and recommendation based on location (default to current city name)
+        // Update city and recommendation
         currentCity = "Your Location"
         aiRecommendation = "Explore what's happening around you right now!"
         
@@ -1087,7 +1090,7 @@ struct MapViewProduction: View {
     }
     
     private func tourToNextPlace() {
-        guard isTourActive, !tourPlaces.isEmpty else { return }
+        guard mapState.isInTourMode, !tourPlaces.isEmpty else { return }
         
         let place = tourPlaces[currentTourIndex]
         
@@ -1163,7 +1166,16 @@ struct MapViewProduction: View {
     private var cameraBinding: Binding<MapCameraPosition> {
         Binding(
             get: { camera },
-            set: { camera = lockCamera($0) }
+            set: { newValue in
+                // Don't lock camera when navigating from feed posts or in selection modes
+                // Only lock during tour mode
+                if mapState.isInTourMode {
+                    camera = lockCamera(newValue)
+                } else {
+                    // Allow free camera movement
+                    camera = newValue
+                }
+            }
         )
     }
     
@@ -1588,7 +1600,7 @@ struct MapViewProduction: View {
             .onChange(of: showCubeHoldSearch) { _, isShowing in
                 // Pause tour when menu is showing
                 if isShowing {
-                    isTourActive = false
+                    mapState.stopTour()
                 } else {
                     // Clear search when menu closes
                     searchQuery = ""
@@ -1610,7 +1622,7 @@ struct MapViewProduction: View {
                 // Toggle menu - if already open, keep it open
                 // Pause tour when menu opens
                 showCubeHoldSearch = true
-                isTourActive = false
+                mapState.stopTour()
             }
             .onReceive(NotificationCenter.default.publisher(for: .cameraCubeHoldEnded)) { _ in
                 // Don't auto-close on release - let user keep menu open
@@ -1624,27 +1636,60 @@ struct MapViewProduction: View {
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ShowLocationOnMap"))) { notification in
                 // Show a specific coordinate on the map (from long-press on post)
                 guard let userInfo = notification.userInfo,
-                      let coordinate = userInfo["coordinate"] as? CLLocationCoordinate2D else { return }
-                
-                print("📍 [MapView] Received ShowLocationOnMap notification - centering on: \(coordinate.latitude), \(coordinate.longitude)")
-                
-                // Stop any active tour
-                isTourActive = false
-                
-                // Center map on the coordinate with a nice camera angle
-                withAnimation(.easeInOut(duration: 1.2)) {
-                    camera = .camera(
-                        MapCamera(
-                            centerCoordinate: coordinate,
-                            distance: 500, // Medium distance to see surrounding area
-                            heading: 0,
-                            pitch: 60 // Nice 3D angle
-                        )
-                    )
+                      let coordinate = userInfo["coordinate"] as? CLLocationCoordinate2D else { 
+                    print("❌ [MapView] ShowLocationOnMap: Missing coordinate in userInfo")
+                    return 
                 }
                 
-                // Update AI recommendation to show post location info
-                aiRecommendation = "📍 Viewing post location"
+                print("📍 [MapView] Received ShowLocationOnMap notification")
+                print("   Target coordinate: \(coordinate.latitude), \(coordinate.longitude)")
+                print("   Current camera: \(camera.camera?.centerCoordinate.latitude ?? 0), \(camera.camera?.centerCoordinate.longitude ?? 0)")
+                print("   Tour active: \(mapState.isInTourMode)")
+                
+                // Stop any active tour or operation
+                mapState.stopTour()
+                
+                // Enter "showing post location" mode - this prevents auto-centering on user
+                mapState.showPostLocation(coordinate)
+                
+                // Update UI immediately
+                self.currentCity = "Post Location"
+                self.aiRecommendation = "📍 Navigating to post location..."
+                
+                // Use the tour-style transition for smooth navigation
+                self.navigateWithTourTransition(to: coordinate, cityName: "Post Location")
+                
+                // Update recommendation after navigation completes
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 7_000_000_000) // Wait for transition (1.5 + 3.0 + 2.0 = 6.5s)
+                    self.aiRecommendation = "📍 This is where the post was created!"
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("SetCameraCoordinate"))) { notification in
+                guard let userInfo = notification.userInfo,
+                      let lat = userInfo["latitude"] as? Double,
+                      let lon = userInfo["longitude"] as? Double else {
+                    print("❌ [MapView] SetCameraCoordinate: Missing latitude/longitude in userInfo")
+                    return
+                }
+                let coordinate = CLLocationCoordinate2D(latitude: lat, longitude: lon)
+                print("📍 [MapView] Received SetCameraCoordinate: \(lat), \(lon)")
+
+                // Stop any active tour or operation
+                mapState.stopTour()
+
+                // Enter showing post location mode
+                mapState.showPostLocation(coordinate)
+
+                // Update UI and navigate
+                self.currentCity = "Post Location"
+                self.aiRecommendation = "📍 Navigating to post location..."
+                self.navigateWithTourTransition(to: coordinate, cityName: "Post Location")
+
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 7_000_000_000)
+                    self.aiRecommendation = "📍 This is where the post was created!"
+                }
             }
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("OpenMapToSelectPostLocation"))) { notification in
                 // Enter post placement mode when user wants to select location for captured media
@@ -1745,16 +1790,22 @@ struct MapViewProduction: View {
     }
     
     private func runTourLoop() async {
-        // Start tour after 5 seconds
-        try? await Task.sleep(nanoseconds: 5_000_000_000)
-        startTour()
+        // Note initial user interaction - this starts the idle timer internally
+        await MainActor.run {
+            mapState.noteUserInteraction()
+        }
         
         // Tour loop - alternates between zoom out (3s) and zoom in (12s at location)
-        // Initial delay before first cycle (startTour already triggered first transition)
-        try? await Task.sleep(nanoseconds: 3_000_000_000)
-        
         while !Task.isCancelled {
-            if isTourActive {
+            if mapState.isInTourMode {
+                // Initialize tour if just started
+                if currentTourIndex == 0 && !isZoomedOut {
+                    currentTourIndex = 0
+                    isZoomedOut = false
+                    // Brief delay before first transition
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                }
+                
                 tourToNextPlace()
                 
                 // Wait for animation duration based on zoom state
@@ -1766,7 +1817,7 @@ struct MapViewProduction: View {
                     try? await Task.sleep(nanoseconds: 12_000_000_000)
                 }
             } else {
-                // If tour is stopped, wait a bit before checking again
+                // If tour is not active, wait a bit before checking again
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
         }
@@ -1798,3 +1849,4 @@ struct MapViewProduction: View {
         }
 }
 #endif
+

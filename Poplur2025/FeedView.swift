@@ -74,6 +74,33 @@ private struct PoleOverlay: View {
     }
 }
 
+// MARK: - Demo Post Store (shared in-memory database for demo users)
+
+/// Singleton that stores all generated demo posts so they can be queried by userID
+final class DemoPostStore {
+    static let shared = DemoPostStore()
+    private init() {}
+    
+    private var posts: [FeedPost] = []
+    
+    func store(_ posts: [FeedPost]) {
+        // Add new posts, avoiding duplicates by ID
+        for post in posts {
+            if !self.posts.contains(where: { $0.id == post.id }) {
+                self.posts.append(post)
+            }
+        }
+    }
+    
+    func posts(for userID: String) -> [FeedPost] {
+        return posts.filter { $0.userID == userID }
+    }
+    
+    func allPosts() -> [FeedPost] {
+        return posts
+    }
+}
+
 struct FeedView: View {
     @StateObject private var fallbackLocationProvider = LocationProvider()
     @StateObject private var poleModel = PolePositionModel()
@@ -84,6 +111,7 @@ struct FeedView: View {
     @State private var didSeedIfEmpty = false
     @State private var didBootstrap = false
     @State private var isFeedReady = false  // Added as per instruction
+    @State private var isVideoLoading = false  // Track video loading state for logo indicator
 
     // Pagination
     private let pageSize = 5
@@ -94,9 +122,7 @@ struct FeedView: View {
     // Current page
     @State private var currentIndex: Int = 0
 
-    // Navigation to profile
-    @State private var selectedUserID: String? = nil
-    @State private var navigateToProfile = false
+    // Removed navigation state - now using tab-based navigation via notification
 
     // Username resolution cache (per-view state that consults the global actor)
     @State private var usernames: [String: String] = [:] // uid -> username
@@ -192,19 +218,15 @@ struct FeedView: View {
         GeometryReader { geo in
             ZStack {
                 Color.black.ignoresSafeArea()
-                Group {
-                    feedContent(in: geo.size)
-                    profileNavigationLink
-                }
-                .opacity(1)
-                .zIndex(5)
-                .background(Color.black)
+                feedContent(in: geo.size)
+                    .opacity(1)
+                    .zIndex(5)
+                    .background(Color.black)
 
-                if isFeedReady == false {
-                    LoadingOverlayView(isPresented: true, background: Color.clear, logoName: "logo")
-                        .zIndex(30)
-                        .transition(.opacity)
-                }
+                // Video loading indicator - shown during transitions (visible on all tabs)
+                VideoLoadingIndicator(isLoading: $isVideoLoading, logoName: "logo")
+                    .zIndex(30)
+                    .transition(.opacity)
             }
             .background(Color.black)
         }
@@ -343,6 +365,7 @@ struct FeedView: View {
         // Ensure loading overlay is visible immediately
         await MainActor.run {
             isFeedReady = false
+            isVideoLoading = true  // Show video loading indicator
             showStatic = true
             print("[Feed] bootstrap start: showStatic=\(showStatic)")
         }
@@ -383,6 +406,7 @@ struct FeedView: View {
         await MainActor.run {
             print("[Feed] bootstrap hiding static")
             withAnimation { showStatic = false }
+            isVideoLoading = false  // Hide video loading indicator
         }
         stopStaticSound()
         print("[Feed] bootstrap stopped static sound")
@@ -704,7 +728,7 @@ struct FeedView: View {
                             }
                     )
                     .onTapGesture(count: 2) {
-                        if var post = posts[safe: currentIndex] {
+                        if let post = posts[safe: currentIndex] {
                             // Like action (log for now)
                             // Increase radius by 5000 meters, clamp to max 10000
                             let newRadius = min(10_000, post.radius + 5000)
@@ -809,8 +833,11 @@ struct FeedView: View {
                             print("⚠️ [FeedView] Cannot navigate to profile - userID is empty")
                             return
                         }
-                        selectedUserID = uid
-                        navigateToProfile = true
+                        // Post notification to switch to profile tab with this userID
+                        NotificationCenter.default.post(
+                            name: .ShowUserProfile,
+                            object: uid
+                        )
                     }
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -838,8 +865,11 @@ struct FeedView: View {
                                     print("⚠️ [FeedView] Cannot navigate to profile - userID is empty")
                                     return
                                 }
-                                selectedUserID = post.userID
-                                navigateToProfile = true
+                                // Post notification to switch to profile tab with this userID
+                                NotificationCenter.default.post(
+                                    name: .ShowUserProfile,
+                                    object: post.userID
+                                )
                             } label: {
                                 Text(displayName(for: post))
                                     .font(.subheadline)
@@ -875,28 +905,6 @@ struct FeedView: View {
         StaticView(size: size, isVisible: showStatic)
             .allowsHitTesting(false)
     }
-
-    private var profileNavigationLink: some View {
-        NavigationLink(
-            isActive: $navigateToProfile,
-            destination: {
-                if let userId = selectedUserID {
-                    AnyView(
-                        ProfileView(userID: userId)
-                            .id(userId) // Force view recreation when userID changes
-                    )
-                } else {
-                    AnyView(Text("No user selected"))
-                }
-            },
-            label: {
-                EmptyView()
-            }
-        )
-        .hidden()
-    }
-
-    // Removed pagesToDisplay property since no pager is used anymore
 
     private var overlayChrome: some View {
         GeometryReader { geo in
@@ -977,6 +985,33 @@ struct FeedView: View {
         // Prefetch username only for currentIndex since we show one post at a time
         if let uid = posts[safe: currentIndex]?.userID {
             maybeResolveUsername(for: uid)
+        }
+        
+        // Also prefetch next and previous posts for smooth navigation
+        if let nextUID = posts[safe: currentIndex + 1]?.userID {
+            maybeResolveUsername(for: nextUID)
+        }
+        if currentIndex > 0, let prevUID = posts[safe: currentIndex - 1]?.userID {
+            maybeResolveUsername(for: prevUID)
+        }
+        
+        // Background prefetch ALL usernames for loaded posts
+        Task {
+            let allUIDs = posts.map { $0.userID }
+            await UsernameCache.shared.prefetch(uids: allUIDs)
+            
+            // Refresh display after prefetch completes
+            await MainActor.run {
+                // Trigger a state update to refresh displayed names
+                if let uid = posts[safe: currentIndex]?.userID {
+                    Task {
+                        let name = await UsernameCache.shared.username(for: uid)
+                        if let name {
+                            usernames[uid] = name
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -1113,6 +1148,9 @@ struct FeedView: View {
             isFeedReady = !posts.isEmpty
             print("[Feed] reload set ready=\(isFeedReady)")
             
+            // Store demo posts in shared store
+            DemoPostStore.shared.store(mixed)
+            
             // Trigger radius bar update for the first post
             if !posts.isEmpty {
                 let firstPost = posts[0]
@@ -1129,6 +1167,7 @@ struct FeedView: View {
     private func reloadForCountry() async {
         await MainActor.run {
             isLoading = true
+            isVideoLoading = true  // Show loading indicator during transition
             reachedEnd = false
             lastDocument = nil
             posts.removeAll()
@@ -1148,10 +1187,14 @@ struct FeedView: View {
             print("[Feed] reloadForCountry posts loaded: \(mixed.count) country=\(countries[selectedCountryIndex].code) channel=\(channels[selectedChannelIndex].id)")
             posts = mixed
             isLoading = false
+            isVideoLoading = false  // Hide loading indicator
             reachedEnd = mixed.isEmpty
             prefetchVisibleUsernames()
             isFeedReady = !posts.isEmpty
             print("[Feed] reloadForCountry set ready=\(isFeedReady)")
+            
+            // Store demo posts in shared store
+            DemoPostStore.shared.store(mixed)
             
             // Trigger radius bar update for the first post
             if !posts.isEmpty {
@@ -1165,6 +1208,7 @@ struct FeedView: View {
     private func reloadForChannel() async {
         await MainActor.run {
             isLoading = true
+            isVideoLoading = true  // Show loading indicator during transition
             reachedEnd = false
             lastDocument = nil
             posts.removeAll()
@@ -1184,10 +1228,14 @@ struct FeedView: View {
             print("[Feed] reloadForChannel posts loaded: \(mixed.count) country=\(countries[selectedCountryIndex].code) channel=\(channels[selectedChannelIndex].id)")
             posts = mixed
             isLoading = false
+            isVideoLoading = false  // Hide loading indicator
             reachedEnd = mixed.isEmpty
             prefetchVisibleUsernames()
             isFeedReady = !posts.isEmpty
             print("[Feed] reloadForChannel set ready=\(isFeedReady)")
+            
+            // Store demo posts in shared store
+            DemoPostStore.shared.store(mixed)
             
             // Trigger radius bar update for the first post
             if !posts.isEmpty {
@@ -1218,7 +1266,7 @@ struct FeedView: View {
             // Simulate network delay
             try? await Task.sleep(nanoseconds: 250_000_000)
 
-            var newPage = Self.generateDemoPostsForCountryAndChannel(
+            let newPage = Self.generateDemoPostsForCountryAndChannel(
                 country: countries[selectedCountryIndex].code,
                 channel: channels[selectedChannelIndex].id,
                 start: posts.count,
@@ -1303,9 +1351,23 @@ struct FeedView: View {
         let end = min(start + count, totalCap)
         guard start < end else { return [] }
         var result: [FeedPost] = []
+        
+        // Create consistent userIDs per post index to ensure same user gets same posts
+        var userIDForIndex: [Int: String] = [:]
+        
         for i in start..<end {
             let id = "\(country.lowercased())_\(channel)_demo_\(i)"
-            let userID = i % 3 == 0 ? "\(channel)_user_\(i)" : String(format: "%@_user_%06d", channel, i)
+            
+            // Create a stable userID based on index (every 3 posts gets a unique user)
+            let userIndex = i / 3  // This ensures posts 0,1,2 share user, 3,4,5 share user, etc.
+            let userID: String
+            if let existing = userIDForIndex[userIndex] {
+                userID = existing
+            } else {
+                userID = "\(channel)_user_\(userIndex)"
+                userIDForIndex[userIndex] = userID
+            }
+            
             // Force the first post to be a guaranteed playable HLS stream
             let hlsSample = "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_4x3/gear1/prog_index.m3u8"
             let sampleVideos: [String] = [
@@ -1349,6 +1411,57 @@ struct FeedView: View {
             let radius = [50, 100, 250, 500, 1000, 5000].randomElement() ?? 250
             result.append(FeedPost(id: id, latitude: latitude, longitude: longitude, mediaURL: mediaURL, radius: Double(radius), viewCount: radius, userID: userID))
         }
+        
+        // CRITICAL: Pre-generate additional posts for each unique user so they have a full profile
+        // This ensures when you click on a user, they have multiple posts in their profile
+        var postsPerUser: [String: [FeedPost]] = [:]
+        for post in result {
+            postsPerUser[post.userID, default: []].append(post)
+        }
+        
+        // Generate 5-10 additional posts per user for their profile
+        for (userID, existingPosts) in postsPerUser {
+            let additionalCount = Int.random(in: 5...10)
+            for j in 0..<additionalCount {
+                let additionalID = "\(country.lowercased())_\(channel)_\(userID)_profile_\(j)"
+                let mediaURL: String
+                if j % 2 == 0 {
+                    let w = [640, 720, 800, 1080].randomElement() ?? 800
+                    let h = [960, 1280, 1400, 1440, 1920].randomElement() ?? 1400
+                    mediaURL = "https://picsum.photos/\(w)/\(h)?random=\(Int.random(in: 1...10_000))"
+                } else {
+                    let sampleVideos = [
+                        "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_4x3/gear1/prog_index.m3u8",
+                        "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
+                        "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
+                    ]
+                    mediaURL = sampleVideos.randomElement() ?? "https://picsum.photos/800/1400"
+                }
+                
+                // Use similar coordinates to existing posts for this user
+                let baseLat = existingPosts.first?.latitude ?? 37.3349
+                let baseLon = existingPosts.first?.longitude ?? -122.0090
+                let latitude = baseLat + Double(j % 5) * 0.01
+                let longitude = baseLon - Double(j % 7) * 0.01
+                let radius = [50, 100, 250, 500, 1000, 5000].randomElement() ?? 250
+                
+                let additionalPost = FeedPost(
+                    id: additionalID,
+                    latitude: latitude,
+                    longitude: longitude,
+                    mediaURL: mediaURL,
+                    radius: Double(radius),
+                    viewCount: radius,
+                    userID: userID
+                )
+                
+                // Store in DemoPostStore immediately so it's available for profile queries
+                DemoPostStore.shared.store([additionalPost])
+            }
+        }
+        
+        print("📊 [FeedView] Generated \(result.count) feed posts with \(postsPerUser.count) unique users, pre-generated profile posts")
+        
         return result
     }
     
@@ -1481,7 +1594,7 @@ private struct FeedFullscreenPageView: View {
             if isMP4 {
                 // Use AVQueuePlayer + AVPlayerLooper for seamless mp4 looping
                 let asset = AVURLAsset(url: url)
-                let requiredKeys = ["playable"]
+                _ = ["playable"]
                 asset.resourceLoader.preloadsEligibleContentKeys = true
 
                 let q = AVQueuePlayer()
@@ -1548,7 +1661,7 @@ private struct FeedFullscreenPageView: View {
             } else {
                 // HLS or other stream types: standard AVPlayer with end observer
                 let asset = AVURLAsset(url: url)
-                let requiredKeys = ["playable"]
+                _ = ["playable"]
                 asset.resourceLoader.preloadsEligibleContentKeys = true
 
                 // Load required key using modern async API

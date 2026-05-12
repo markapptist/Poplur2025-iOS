@@ -243,7 +243,7 @@ private struct CubeSceneView: UIViewRepresentable {
         let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap(_:)))
 
         let longPress = UILongPressGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleLongPress(_:)))
-        longPress.minimumPressDuration = 0.25
+        longPress.minimumPressDuration = 2.0 // 2 seconds required before recording starts
 
         // Set delegates
         pan.delegate = context.coordinator

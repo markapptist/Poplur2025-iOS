@@ -166,6 +166,9 @@ struct HomeView: View {
     // Start on feed tab instead of record tab
     @State private var selectedTab: AppTab = .feed
     
+    // Routed user ID when tapping on a username in Feed
+    @State private var routedUserID: String? = nil
+    
     // Location only when needed
     @StateObject private var locationProvider = LocationProvider()
     
@@ -199,11 +202,20 @@ struct HomeView: View {
     @State private var cubeFlashTimer: Timer? = nil
     @State private var isCubeFlashing: Bool = false
     
+    // Post count state (for displaying user's total posts)
+    @State private var userPostCount: Int = 0
+    
     // Added state for cube yaw angle
     @State private var cubeYawDegrees: Double = 0
     
     // Added per instruction to gate animations
     @State private var isSceneKitReady: Bool = false
+    
+    // Upload status state
+    @State private var showUploadStatus: Bool = false
+    @State private var uploadStatusMessage: String = ""
+    @State private var uploadStatusIcon: String = "arrow.up.circle.fill"
+    @State private var uploadStatusColor: Color = .blue
 
     private let launchGate = LaunchGate.shared
     
@@ -311,7 +323,8 @@ struct HomeView: View {
         let start = isometricBarModel.radius
         let t0 = CACurrentMediaTime()
         recordHoldTask = Task { @MainActor in
-            while !Task.isCancelled && isRecordHolding && selectedTab == .record {
+            // Continue ramping as long as recording is active (even after user releases)
+            while !Task.isCancelled && (isRecordHolding || isRecording) && selectedTab == .record {
                 let t = min(1.0, (CACurrentMediaTime() - t0) / duration)
                 let eased = t * t * (3 - 2 * t) // smoothstep ease-in-out
                 let next = start + (maxMeters - start) * eased
@@ -335,6 +348,7 @@ struct HomeView: View {
     // MARK: - Recording Countdown Functions
     
     /// Start the 10-second countdown timer and cube flashing
+    /// Recording will continue even after user releases the hold (after 2 seconds)
     private func startRecordingCountdown() {
         isRecording = true
         recordingSecondsRemaining = 10
@@ -345,7 +359,10 @@ struct HomeView: View {
                 if self.recordingSecondsRemaining > 0 {
                     self.recordingSecondsRemaining -= 1
                 } else {
+                    // Recording complete - stop everything
                     self.stopRecordingCountdown()
+                    self.stopRecordHoldRamp(reset: true)
+                    // Force stop the actual recording
                     NotificationCenter.default.post(name: .cameraCubeHoldEnded, object: nil)
                 }
             }
@@ -485,20 +502,24 @@ struct HomeView: View {
             // 3) Give up and return empty string
             return ""
         }()
-        ProfileView(userID: resolvedUserID)
-            .task {
-                if selectedTab == .profile, !didTriggerProfileInitialLoad {
-                    deferUntilAfterLaunch {
-                        await MainActor.run {
-                            didTriggerProfileInitialLoad = true
-                            NotificationCenter.default.post(name: .LoadProfileNow, object: nil)
+        
+        NavigationStack {
+            ProfileView(userID: resolvedUserID)
+                .environment(\.routedUserID, routedUserID)
+                .task {
+                    if selectedTab == .profile, !didTriggerProfileInitialLoad {
+                        deferUntilAfterLaunch {
+                            await MainActor.run {
+                                didTriggerProfileInitialLoad = true
+                                NotificationCenter.default.post(name: .LoadProfileNow, object: nil)
+                            }
                         }
                     }
                 }
-            }
-            .onDisappear {
-                NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
-            }
+                .onDisappear {
+                    NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
+                }
+        }
     }
     
     var body: some View {
@@ -519,6 +540,32 @@ struct HomeView: View {
                     feedTabContent
                 }
             }
+            
+            // Upload Status Overlay
+            if showUploadStatus {
+                VStack {
+                    HStack(spacing: 12) {
+                        Image(systemName: uploadStatusIcon)
+                            .font(.title2)
+                            .foregroundStyle(uploadStatusColor)
+                        
+                        Text(uploadStatusMessage)
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                            .foregroundStyle(.primary)
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 14)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .shadow(radius: 8)
+                    .padding(.top, 60)
+                    
+                    Spacer()
+                }
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .zIndex(999)
+            }
+            
             // 3D Cube tab control overlay
             VStack {
                 Spacer()
@@ -658,7 +705,9 @@ struct HomeView: View {
             // Recording countdown overlay (bottom-left)
             RecordingCountdownView(
                 isRecording: $isRecording,
-                secondsRemaining: $recordingSecondsRemaining
+                secondsRemaining: $recordingSecondsRemaining,
+                postCount: $userPostCount,
+                selectedTab: $selectedTab
             )
             .zIndex(1000)
             .allowsHitTesting(false)
@@ -808,9 +857,15 @@ struct HomeView: View {
             startRecordingCountdown() // Start 10-second countdown
         }
         .onReceive(NotificationCenter.default.publisher(for: .cameraCubeHoldEnded)) { _ in
+            // Only stop if recording hasn't started yet (user released before 2 seconds)
+            // If recording is in progress, let the countdown timer handle the stop
+            if !isRecording {
+                isRecordHolding = false
+                stopRecordHoldRamp(reset: true)
+                stopRecordingCountdown()
+            }
+            // If recording is active, isRecordHolding is set to false but recording continues
             isRecordHolding = false
-            stopRecordHoldRamp(reset: true)
-            stopRecordingCountdown() // Stop countdown
         }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("OpenCameraAtCoordinate"))) { notification in
             // Handle long press on map - switch to camera tab and set coordinate
@@ -857,6 +912,16 @@ struct HomeView: View {
             
             // The notification is already posted to MapView which will center the camera
         }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ShowLocationOnMapFromPost"))) { note in
+            // Expect userInfo: ["latitude": Double, "longitude": Double]
+            guard let userInfo = note.userInfo,
+                  let latitude = userInfo["latitude"] as? Double,
+                  let longitude = userInfo["longitude"] as? Double else { return }
+            selectedTab = .map
+            NotificationCenter.default.post(name: Notification.Name("ShowLocationOnMap"), object: nil, userInfo: [
+                "coordinate": CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+            ])
+        }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("UploadPostToCoordinate"))) { notification in
             // Handle post upload after user selected location on map
             guard let userInfo = notification.userInfo,
@@ -866,6 +931,14 @@ struct HomeView: View {
             }
             
             print("📤 [HomeView] Uploading post to coordinate: \(latitude), \(longitude)")
+            
+            // Show upload starting status
+            uploadStatusMessage = "Uploading your post..."
+            uploadStatusIcon = "arrow.up.circle.fill"
+            uploadStatusColor = .blue
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                showUploadStatus = true
+            }
             
             // Send to CameraKitController to handle the upload
             NotificationCenter.default.post(
@@ -892,13 +965,102 @@ struct HomeView: View {
                 )
             }
             
-            // Switch back to profile or feed tab
+            // Switch to profile tab to show the post once uploaded
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second delay
+                selectedTab = .profile
+                NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("PostUploadStarted"))) { notification in
+            // Show upload started status
+            uploadStatusMessage = notification.userInfo?["message"] as? String ?? "Uploading..."
+            uploadStatusIcon = "arrow.up.circle.fill"
+            uploadStatusColor = .blue
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                showUploadStatus = true
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("PostUploadSuccess"))) { _ in
+            // Show success status
+            uploadStatusMessage = "Post uploaded successfully!"
+            uploadStatusIcon = "checkmark.circle.fill"
+            uploadStatusColor = .green
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                showUploadStatus = true
+            }
+            
+            // Ask profile to refresh its content and scroll to the new post if provided
+            NotificationCenter.default.post(name: Notification.Name("RefreshProfileAfterUpload"), object: nil)
+            
+            // Ensure we land on profile to see the new post
             selectedTab = .profile
+            
+            NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
+            
+            // Hide after 2 seconds
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                    showUploadStatus = false
+                }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("PostUploadFailed"))) { notification in
+            // Show failure status
+            let error = notification.userInfo?["error"] as? String ?? "Upload failed"
+            uploadStatusMessage = error
+            uploadStatusIcon = "xmark.circle.fill"
+            uploadStatusColor = .red
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                showUploadStatus = true
+            }
+            
+            // Hide after 3 seconds
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                    showUploadStatus = false
+                }
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("SwitchToFeedTab"))) { _ in
             // Switch to feed tab (used after successful upload in Camera -> Map flow)
             print("🔄 [HomeView] Switching to feed tab after upload")
             selectedTab = .feed
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("SwitchToMapTab"))) { _ in
+            // Switch to map tab (used when long-pressing on post in feed/profile)
+            print("🔄 [HomeView] Switching to map tab to show post location")
+            selectedTab = .map
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .ShowUserProfile)) { note in
+            if let uid = note.object as? String {
+                print("🔔 [HomeView] Received ShowUserProfile for userID: '\(uid)'")
+                routedUserID = uid
+                selectedTab = .profile
+                NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ShowUserProfileContext"))) { note in
+            // Expect userInfo: ["userID": String, "radius": Double?, "currentPostID": String?]
+            if let userInfo = note.userInfo,
+               let uid = userInfo["userID"] as? String {
+                routedUserID = uid
+                // Forward radius/currentPostID to profile via Notification so ProfileView can reflect the tapped user's context
+                var forwardInfo: [String: Any] = ["userID": uid]
+                if let r = userInfo["radius"] as? Double { forwardInfo["radius"] = r }
+                if let pid = userInfo["currentPostID"] as? String { forwardInfo["currentPostID"] = pid }
+                NotificationCenter.default.post(name: Notification.Name("ProfileShowUserContext"), object: nil, userInfo: forwardInfo)
+                selectedTab = .profile
+                NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("FeedCurrentPostContext"))) { note in
+            // Keep track of the last tapped user's context to be used by profile if needed
+            if let userInfo = note.userInfo, let uid = userInfo["userID"] as? String {
+                routedUserID = uid
+            }
         }
         .onChange(of: isPreviewRuntime) { isPreview in
             if isPreview {
@@ -956,6 +1118,26 @@ struct HomeView: View {
                     isometricBarModel.radius = clampedValue
                 }
                 print("[HomeView] Updated isometricBarModel.radius to: \(Int(clampedValue))m (from animator)")
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("UserPostCountDidChange"))) { note in
+            if let count = note.userInfo?["count"] as? Int {
+                print("[HomeView] Received UserPostCountDidChange: \(count)")
+                userPostCount = count
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .ShowUserProfile)) { note in
+            if let uid = note.object as? String {
+                print("🔔 [HomeView] Received ShowUserProfile for userID: '\(uid)'")
+                routedUserID = uid
+                selectedTab = .profile
+                NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
+            }
+        }
+        .onChange(of: selectedTab) { newTab in
+            if newTab != .profile && routedUserID != nil {
+                print("🔔 [HomeView] Clearing routedUserID (switched from profile to \(newTab.title))")
+                routedUserID = nil
             }
         }
         // Removed .onChange handler - the binding $isometricBarModel.radius automatically triggers updateUIView in RadiusBarSceneView
