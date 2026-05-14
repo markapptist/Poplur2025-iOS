@@ -85,21 +85,37 @@ final class DemoPostStore {
     
     func store(_ posts: [FeedPost]) {
         // Add new posts, avoiding duplicates by ID
+        var addedCount = 0
         for post in posts {
             if !self.posts.contains(where: { $0.id == post.id }) {
                 self.posts.append(post)
+                addedCount += 1
             }
         }
+        print("📦 [DemoPostStore] Stored \(addedCount) new posts (total: \(self.posts.count))")
     }
     
     func posts(for userID: String) -> [FeedPost] {
-        return posts.filter { $0.userID == userID }
+        let userPosts = posts.filter { $0.userID == userID }
+        print("👤 [DemoPostStore] Found \(userPosts.count) posts for userID: \(userID)")
+        return userPosts
     }
     
     func allPosts() -> [FeedPost] {
+        print("📚 [DemoPostStore] Total posts: \(posts.count)")
         return posts
     }
+    
+    // Add method to get all unique users
+    func allUsers() -> Set<String> {
+        let users = Set(posts.map { $0.userID })
+        print("👥 [DemoPostStore] Total unique users: \(users.count)")
+        return users
+    }
 }
+
+// MARK: - FeedPost Model
+// Note: FeedPost is defined in FeedFullscreenPage.swift to avoid duplication
 
 struct FeedView: View {
     @StateObject private var fallbackLocationProvider = LocationProvider()
@@ -739,7 +755,10 @@ struct FeedView: View {
                                 mediaURL: post.mediaURL,
                                 radius: newRadius,
                                 viewCount: post.viewCount,
-                                userID: post.userID
+                                userID: post.userID,
+                                cityName: post.cityName,
+                                countryName: post.countryName,
+                                countryFlag: post.countryFlag
                             )
                             posts[currentIndex] = updated
                             // Haptic feedback for like
@@ -761,17 +780,99 @@ struct FeedView: View {
                         }
                     }
                     .onLongPressGesture(minimumDuration: 0.5) {
-                        // Long press to show post location on map
+                        // Long press to show post location on map with user annotation
                         if let post = posts[safe: currentIndex] {
                             let coordinate = CLLocationCoordinate2D(latitude: post.latitude, longitude: post.longitude)
-                            print("📍 [FeedView] Long press - showing post location on map: \(coordinate.latitude), \(coordinate.longitude)")
-                            NotificationCenter.default.post(
-                                name: Notification.Name("ShowLocationOnMap"),
-                                object: nil,
-                                userInfo: ["coordinate": coordinate]
-                            )
+                            print("📍 [FeedView] Long press - showing post location: \(coordinate.latitude), \(coordinate.longitude)")
+                            if let city = post.cityName, let country = post.countryName {
+                                print("   Location: \(city), \(country) \(post.countryFlag ?? "")")
+                            }
+                            print("   Radius: \(Int(post.radius))m")
+                            
                             // Haptic feedback
                             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                            
+                            // Get username and profile image URL, then prepare notification
+                            Task {
+                                let username = await UsernameCache.shared.username(for: post.userID)
+                                
+                                // Get profile image URL if available
+                                var profileImageURL: String? = nil
+                                #if !POP_PREVIEW_LIGHT
+                                #if canImport(FirebaseFirestore)
+                                do {
+                                    let db = Firestore.firestore()
+                                    let userDoc = try await db.collection("users").document(post.userID).getDocument()
+                                    if let data = userDoc.data(),
+                                       let urlString = data["profilePictureURL"] as? String {
+                                        profileImageURL = urlString
+                                    }
+                                } catch {
+                                    print("⚠️ [FeedView] Failed to fetch profile image: \(error.localizedDescription)")
+                                }
+                                #endif
+                                #endif
+                                
+                                // Prepare user info with coordinate as CLLocationCoordinate2D
+                                var userInfo: [String: Any] = [
+                                    "coordinate": coordinate,  // Use coordinate object
+                                    "userID": post.userID,
+                                    "username": username ?? displayName(for: post),
+                                    "radius": Double(post.radius)
+                                ]
+                                
+                                // Add profile image URL if available
+                                if let profileURL = profileImageURL {
+                                    userInfo["profileImageURL"] = profileURL
+                                }
+                                
+                                // Add location metadata if available
+                                if let cityName = post.cityName {
+                                    userInfo["cityName"] = cityName
+                                }
+                                if let countryName = post.countryName {
+                                    userInfo["countryName"] = countryName
+                                }
+                                if let countryFlag = post.countryFlag {
+                                    userInfo["countryFlag"] = countryFlag
+                                }
+                                
+                                print("📍 [FeedView] Posting ShowLocationOnMap with coordinate: \(coordinate.latitude), \(coordinate.longitude)")
+                                print("   Username: \(username ?? displayName(for: post)), Profile URL: \(profileImageURL ?? "nil")")
+                                
+                                // ALSO store in MapStateManager for when MapView isn't loaded yet
+                                print("📍 [FeedView] Setting pending post location in MapStateManager")
+                                MapStateManager.shared.setPendingPostLocation(
+                                    coordinate,
+                                    userID: post.userID,
+                                    username: username ?? displayName(for: post),
+                                    profileImageURL: profileImageURL,
+                                    radius: Double(post.radius),
+                                    cityName: post.cityName,
+                                    countryName: post.countryName,
+                                    countryFlag: post.countryFlag
+                                )
+                                
+                                await MainActor.run {
+                                    // First, send location to map
+                                    NotificationCenter.default.post(
+                                        name: Notification.Name("ShowLocationOnMap"),
+                                        object: nil,
+                                        userInfo: userInfo
+                                    )
+                                }
+                                
+                                // Wait a moment for map to process location
+                                try? await Task.sleep(nanoseconds: 150_000_000) // 0.15 seconds
+                                
+                                await MainActor.run {
+                                    // Then switch to map tab
+                                    NotificationCenter.default.post(
+                                        name: Notification.Name("SwitchToMapTab"),
+                                        object: nil
+                                    )
+                                }
+                            }
                         }
                     }
             }
@@ -1139,17 +1240,29 @@ struct FeedView: View {
         let mixed = newPosts
 
         await MainActor.run {
-            print("[Feed] reload posts loaded: \(mixed.count) country=\(countries[selectedCountryIndex].code) channel=\(channels[selectedChannelIndex].id)")
+            print("📡 [Feed] reload completed:")
+            print("   - Posts loaded: \(mixed.count)")
+            print("   - Country: \(countries[selectedCountryIndex].code)")
+            print("   - Channel: \(channels[selectedChannelIndex].id)")
+            
+            // Log first post details for debugging
+            if let firstPost = mixed.first {
+                print("   - First post ID: \(firstPost.id)")
+                print("   - First post mediaURL: \(firstPost.mediaURL)")
+                print("   - First post userID: \(firstPost.userID)")
+            }
+            
             posts = mixed
             isLoading = false
             // If we couldn't load anything, mark as reached end to stop paginating.
             reachedEnd = mixed.isEmpty
             prefetchVisibleUsernames()
             isFeedReady = !posts.isEmpty
-            print("[Feed] reload set ready=\(isFeedReady)")
+            print("   - Feed ready: \(isFeedReady)")
             
             // Store demo posts in shared store
             DemoPostStore.shared.store(mixed)
+            print("   - Stored \(mixed.count) posts in DemoPostStore")
             
             // Trigger radius bar update for the first post
             if !posts.isEmpty {
@@ -1338,7 +1451,10 @@ struct FeedView: View {
                 mediaURL: mediaURL,
                 radius: Double(radius),
                 viewCount: radius,
-                userID: userID
+                userID: userID,
+                cityName: nil,
+                countryName: nil,
+                countryFlag: nil
             )
             result.append(post)
         }
@@ -1351,6 +1467,64 @@ struct FeedView: View {
         let end = min(start + count, totalCap)
         guard start < end else { return [] }
         var result: [FeedPost] = []
+        
+        // Global cities for diverse locations - EXPANDED FOR VARIETY
+        let globalCities: [(name: String, lat: Double, lon: Double, country: String, flag: String)] = [
+            // Asia
+            ("Tokyo", 35.6762, 139.6503, "Japan", "🇯🇵"),
+            ("Seoul", 37.5665, 126.9780, "South Korea", "🇰🇷"),
+            ("Shanghai", 31.2304, 121.4737, "China", "🇨🇳"),
+            ("Hong Kong", 22.3193, 114.1694, "Hong Kong", "🇭🇰"),
+            ("Singapore", 1.3521, 103.8198, "Singapore", "🇸🇬"),
+            ("Bangkok", 13.7563, 100.5018, "Thailand", "🇹🇭"),
+            ("Mumbai", 19.0760, 72.8777, "India", "🇮🇳"),
+            ("Dubai", 25.2048, 55.2708, "UAE", "🇦🇪"),
+            ("Delhi", 28.6139, 77.2090, "India", "🇮🇳"),
+            ("Osaka", 34.6937, 135.5023, "Japan", "🇯🇵"),
+            
+            // Europe
+            ("London", 51.5074, -0.1278, "United Kingdom", "🇬🇧"),
+            ("Paris", 48.8566, 2.3522, "France", "🇫🇷"),
+            ("Rome", 41.9028, 12.4964, "Italy", "🇮🇹"),
+            ("Barcelona", 41.3874, 2.1686, "Spain", "🇪🇸"),
+            ("Amsterdam", 52.3676, 4.9041, "Netherlands", "🇳🇱"),
+            ("Berlin", 52.5200, 13.4050, "Germany", "🇩🇪"),
+            ("Prague", 50.0755, 14.4378, "Czech Republic", "🇨🇿"),
+            ("Istanbul", 41.0082, 28.9784, "Turkey", "🇹🇷"),
+            ("Madrid", 40.4168, -3.7038, "Spain", "🇪🇸"),
+            ("Vienna", 48.2082, 16.3738, "Austria", "🇦🇹"),
+            
+            // North America
+            ("New York", 40.7128, -74.0060, "USA", "🇺🇸"),
+            ("San Francisco", 37.7749, -122.4194, "USA", "🇺🇸"),
+            ("Los Angeles", 34.0522, -118.2437, "USA", "🇺🇸"),
+            ("Chicago", 41.8781, -87.6298, "USA", "🇺🇸"),
+            ("Miami", 25.7617, -80.1918, "USA", "🇺🇸"),
+            ("Toronto", 43.6532, -79.3832, "Canada", "🇨🇦"),
+            ("Vancouver", 49.2827, -123.1207, "Canada", "🇨🇦"),
+            ("Mexico City", 19.4326, -99.1332, "Mexico", "🇲🇽"),
+            ("Seattle", 47.6062, -122.3321, "USA", "🇺🇸"),
+            ("Austin", 30.2672, -97.7431, "USA", "🇺🇸"),
+            
+            // South America
+            ("São Paulo", -23.5505, -46.6333, "Brazil", "🇧🇷"),
+            ("Rio de Janeiro", -22.9068, -43.1729, "Brazil", "🇧🇷"),
+            ("Buenos Aires", -34.6037, -58.3816, "Argentina", "🇦🇷"),
+            ("Lima", -12.0464, -77.0428, "Peru", "🇵🇪"),
+            ("Bogotá", 4.7110, -74.0721, "Colombia", "🇨🇴"),
+            
+            // Oceania
+            ("Sydney", -33.8688, 151.2093, "Australia", "🇦🇺"),
+            ("Melbourne", -37.8136, 144.9631, "Australia", "🇦🇺"),
+            ("Auckland", -36.8485, 174.7633, "New Zealand", "🇳🇿"),
+            
+            // Africa
+            ("Cape Town", -33.9249, 18.4241, "South Africa", "🇿🇦"),
+            ("Cairo", 30.0444, 31.2357, "Egypt", "🇪🇬"),
+            ("Lagos", 6.5244, 3.3792, "Nigeria", "🇳🇬"),
+            ("Nairobi", -1.2864, 36.8172, "Kenya", "🇰🇪"),
+            ("Marrakech", 31.6295, -7.9811, "Morocco", "🇲🇦")
+        ]
         
         // Create consistent userIDs per post index to ensure same user gets same posts
         var userIDForIndex: [Int: String] = [:]
@@ -1403,13 +1577,55 @@ struct FeedView: View {
                 // Odd index -> random video from sampleVideos
                 mediaURL = sampleVideos.randomElement() ?? hlsSample
             }
-            // Shift coordinates slightly by country and channel hash to vary positions
-            let baseLat = 37.3349 + Double(abs(country.hashValue % 20)) * 0.01 + Double(abs(channel.hashValue % 10)) * 0.005
-            let baseLon = -122.0090 - Double(abs(country.hashValue % 20)) * 0.01 - Double(abs(channel.hashValue % 10)) * 0.005
-            let latitude = baseLat + Double(i % 5) * 0.01
-            let longitude = baseLon - Double(i % 7) * 0.01
-            let radius = [50, 100, 250, 500, 1000, 5000].randomElement() ?? 250
-            result.append(FeedPost(id: id, latitude: latitude, longitude: longitude, mediaURL: mediaURL, radius: Double(radius), viewCount: radius, userID: userID))
+            
+            // ✅ USE GLOBAL CITIES for coordinates - posts now come from all over the world!
+            let city = globalCities[i % globalCities.count]
+            
+            // Add slight variation to coordinates so posts aren't exactly on top of each other
+            let latVariation = Double.random(in: -0.05...0.05)
+            let lonVariation = Double.random(in: -0.05...0.05)
+            let latitude = city.lat + latVariation
+            let longitude = city.lon + lonVariation
+            
+            // ✅ EXPANDED RADIUS RANGE - from 100m to 20,000km (close to world radius!)
+            // Distribution: More local posts, but some truly global ones
+            let radiusOptions: [Double] = [
+                100, 250, 500, 1_000,           // Local (neighborhood)
+                2_500, 5_000, 10_000,           // City/region
+                25_000, 50_000, 100_000,        // Country
+                250_000, 500_000, 1_000_000,    // Continental
+                2_500_000, 5_000_000, 10_000_000,  // Multi-continental
+                15_000_000, 20_000_000          // Near-global (Earth's radius is ~6,371km, diameter ~12,742km)
+            ]
+            
+            // Weight towards smaller radii but include variety
+            let radius: Double
+            let roll = Double.random(in: 0...1)
+            if roll < 0.5 {
+                // 50% chance: local to city-level (100m - 10km)
+                radius = radiusOptions.prefix(7).randomElement() ?? 5_000
+            } else if roll < 0.85 {
+                // 35% chance: regional to country (25km - 1000km)
+                radius = Array(radiusOptions[7...12]).randomElement() ?? 100_000
+            } else {
+                // 15% chance: continental to near-global (2.5M - 20M)
+                radius = Array(radiusOptions[13...]).randomElement() ?? 5_000_000
+            }
+            
+            // Store city info in post metadata for map display (we'll add this to FeedPost)
+            let post = FeedPost(
+                id: id,
+                latitude: latitude,
+                longitude: longitude,
+                mediaURL: mediaURL,
+                radius: radius,
+                viewCount: Int(radius / 100), // Scale view count with radius
+                userID: userID,
+                cityName: city.name,
+                countryName: city.country,
+                countryFlag: city.flag
+            )
+            result.append(post)
         }
         
         // CRITICAL: Pre-generate additional posts for each unique user so they have a full profile
@@ -1438,21 +1654,26 @@ struct FeedView: View {
                     mediaURL = sampleVideos.randomElement() ?? "https://picsum.photos/800/1400"
                 }
                 
-                // Use similar coordinates to existing posts for this user
-                let baseLat = existingPosts.first?.latitude ?? 37.3349
-                let baseLon = existingPosts.first?.longitude ?? -122.0090
-                let latitude = baseLat + Double(j % 5) * 0.01
-                let longitude = baseLon - Double(j % 7) * 0.01
-                let radius = [50, 100, 250, 500, 1000, 5000].randomElement() ?? 250
+                // Use random global city for variety
+                let city = globalCities.randomElement() ?? globalCities[0]
+                let latitude = city.lat + Double.random(in: -0.05...0.05)
+                let longitude = city.lon + Double.random(in: -0.05...0.05)
+                
+                // Varied radius for profile posts too
+                let radiusOptions: [Double] = [100, 500, 1_000, 5_000, 10_000, 50_000, 100_000, 500_000, 2_000_000, 10_000_000]
+                let radius = radiusOptions.randomElement() ?? 5_000
                 
                 let additionalPost = FeedPost(
                     id: additionalID,
                     latitude: latitude,
                     longitude: longitude,
                     mediaURL: mediaURL,
-                    radius: Double(radius),
-                    viewCount: radius,
-                    userID: userID
+                    radius: radius,
+                    viewCount: Int(radius / 100),
+                    userID: userID,
+                    cityName: city.name,
+                    countryName: city.country,
+                    countryFlag: city.flag
                 )
                 
                 // Store in DemoPostStore immediately so it's available for profile queries
@@ -1460,7 +1681,18 @@ struct FeedView: View {
             }
         }
         
-        print("📊 [FeedView] Generated \(result.count) feed posts with \(postsPerUser.count) unique users, pre-generated profile posts")
+        print("🌍 [FeedView] Generated \(result.count) GLOBAL feed posts from \(globalCities.count) cities!")
+        print("   - Country: \(country), Channel: \(channel)")
+        print("   - User IDs: \(postsPerUser.keys.sorted())")
+        print("   - Radius range: 100m to 20,000km (near-global coverage)")
+        
+        // Log sample of generated posts
+        if let firstPost = result.first {
+            print("   - Sample post: \(firstPost.id)")
+            print("     Location: \(firstPost.cityName ?? "Unknown"), \(firstPost.countryName ?? "Unknown") \(firstPost.countryFlag ?? "")")
+            print("     Radius: \(Int(firstPost.radius))m")
+            print("     userID: \(firstPost.userID)")
+        }
         
         return result
     }
@@ -1515,7 +1747,18 @@ struct FeedView: View {
             let latitude = baseLat + Double(i % 5) * 0.01
             let longitude = baseLon - Double(i % 7) * 0.01
             let radius = [50, 100, 250, 500, 1000, 5000].randomElement() ?? 250
-            result.append(FeedPost(id: id, latitude: latitude, longitude: longitude, mediaURL: mediaURL, radius: Double(radius), viewCount: radius, userID: userID))
+            result.append(FeedPost(
+                id: id,
+                latitude: latitude,
+                longitude: longitude,
+                mediaURL: mediaURL,
+                radius: Double(radius),
+                viewCount: radius,
+                userID: userID,
+                cityName: nil,
+                countryName: nil,
+                countryFlag: nil
+            ))
         }
         return result
     }
@@ -1866,6 +2109,100 @@ private struct FeedFullscreenPageView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color.black)
                 //.ignoresSafeArea() // removed as per instructions
+                .contentShape(Rectangle())
+                .onLongPressGesture(minimumDuration: 0.5) {
+                    // Long press to show post location on map with user annotation
+                    let coordinate = CLLocationCoordinate2D(latitude: post.latitude, longitude: post.longitude)
+                    print("📍 [FeedFullscreenPageView] Long press - showing post location: \(coordinate.latitude), \(coordinate.longitude)")
+                    
+                    // Haptic feedback
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    
+                    // Fetch user profile info asynchronously
+                    Task {
+                        // Get username
+                        let username = await UsernameCache.shared.username(for: post.userID)
+                        
+                        // Get profile image URL if available (from Firestore user document)
+                        var profileImageURL: String? = nil
+                        #if !POP_PREVIEW_LIGHT
+                        #if canImport(FirebaseFirestore)
+                        do {
+                            let db = Firestore.firestore()
+                            let userDoc = try await db.collection("users").document(post.userID).getDocument()
+                            if let data = userDoc.data(),
+                               let urlString = data["profilePictureURL"] as? String {
+                                profileImageURL = urlString
+                            }
+                        } catch {
+                            print("⚠️ [FeedFullscreenPageView] Failed to fetch profile image: \(error.localizedDescription)")
+                        }
+                        #endif
+                        #endif
+                        
+                        await MainActor.run {
+                            // Prepare user info with coordinate as CLLocationCoordinate2D object
+                            var userInfo: [String: Any] = [
+                                "coordinate": coordinate,  // Use coordinate object
+                                "userID": post.userID,
+                                "username": username ?? displayName,
+                                "radius": Double(post.radius)
+                            ]
+                            
+                            // Add profile image URL if available
+                            if let profileURL = profileImageURL {
+                                userInfo["profileImageURL"] = profileURL
+                            }
+                            
+                            // Add location metadata if available
+                            if let cityName = post.cityName {
+                                userInfo["cityName"] = cityName
+                            }
+                            if let countryName = post.countryName {
+                                userInfo["countryName"] = countryName
+                            }
+                            if let countryFlag = post.countryFlag {
+                                userInfo["countryFlag"] = countryFlag
+                            }
+                            
+                            print("📍 [FeedFullscreenPageView] Posting ShowLocationOnMap with coordinate: \(coordinate.latitude), \(coordinate.longitude)")
+                            print("   Username: \(username ?? displayName), Profile URL: \(profileImageURL ?? "nil")")
+                            if let city = post.cityName, let country = post.countryName {
+                                print("   Location: \(city), \(country) \(post.countryFlag ?? "")")
+                            }
+                            print("   Radius: \(Int(post.radius))m")
+                            
+                            // ALSO store in MapStateManager for when MapView isn't loaded yet
+                            print("📍 [FeedFullscreenPageView] Setting pending post location in MapStateManager")
+                            MapStateManager.shared.setPendingPostLocation(
+                                coordinate,
+                                userID: post.userID,
+                                username: username ?? displayName,
+                                profileImageURL: profileImageURL,
+                                radius: Double(post.radius),
+                                cityName: post.cityName,
+                                countryName: post.countryName,
+                                countryFlag: post.countryFlag
+                            )
+                            
+                            // Post notification to show location on map
+                            NotificationCenter.default.post(
+                                name: Notification.Name("ShowLocationOnMap"),
+                                object: nil,
+                                userInfo: userInfo
+                            )
+                            
+                            // Wait a moment before switching tabs
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                                // Switch to map tab
+                                NotificationCenter.default.post(
+                                    name: Notification.Name("SwitchToMapTab"),
+                                    object: nil
+                                )
+                            }
+                        }
+                    }
+                }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black)
@@ -1874,6 +2211,13 @@ private struct FeedFullscreenPageView: View {
     @ViewBuilder
     private func contentView(size: CGSize) -> some View {
         let isVideo = (directVideoURL != nil)
+        
+        // Debug logging
+        let _ = print("🎬 [FeedFullscreenPageView] Rendering post \(post.id)")
+        let _ = print("   mediaURL: \(post.mediaURL)")
+        let _ = print("   isVideo: \(isVideo)")
+        let _ = print("   directVideoURL: \(directVideoURL?.absoluteString ?? "nil")")
+        
         ZStack {
             Color.black
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1882,10 +2226,30 @@ private struct FeedFullscreenPageView: View {
 
             if isVideo, let videoURL = directVideoURL {
                 videoContent(size: size, videoURL: videoURL)
+                    .onAppear {
+                        print("🎥 [FeedFullscreenPageView] Showing video: \(videoURL.absoluteString)")
+                    }
             } else if let url = URL(string: post.mediaURL) {
                 imageContent(size: size, url: url)
+                    .onAppear {
+                        print("🖼️ [FeedFullscreenPageView] Showing image: \(url.absoluteString)")
+                    }
             } else {
-                Color.black
+                VStack(spacing: 16) {
+                    Image(systemName: "photo.fill")
+                        .font(.system(size: 60))
+                        .foregroundColor(.white.opacity(0.5))
+                    Text("Invalid media URL")
+                        .foregroundColor(.white.opacity(0.7))
+                    Text(post.mediaURL)
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.5))
+                        .multilineTextAlignment(.center)
+                        .padding()
+                }
+                .onAppear {
+                    print("⚠️ [FeedFullscreenPageView] Invalid URL for post \(post.id): \(post.mediaURL)")
+                }
             }
         }
     }
@@ -1902,52 +2266,57 @@ private struct FeedFullscreenPageView: View {
         AsyncImage(url: url, transaction: Transaction(animation: .none)) { phase in
             switch phase {
             case .empty:
-                Color.black
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .ignoresSafeArea()
-                    .onAppear {
-                        imagePhaseDebug = "empty"
-                        print("[Feed] image phase: empty for URL: \(post.mediaURL)")
-                    }
+                ZStack {
+                    Color.black
+                    ProgressView()
+                        .tint(.white)
+                        .scaleEffect(1.5)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .ignoresSafeArea()
+                .onAppear {
+                    imagePhaseDebug = "empty"
+                    print("📸 [Feed] Loading image: \(url.absoluteString)")
+                }
             case .success(let img):
                 img
                     .resizable()
-                    .aspectRatio(contentMode: .fit)  // changed from scaledToFill to aspectRatio fit
-                    .frame(width: size.width, height: size.height)  // set explicit frame to size
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: size.width, height: size.height)
                     .background(Color.black)
-                    //.ignoresSafeArea() removed
-                    //.clipped() removed
                     .onAppear {
                         imagePhaseDebug = "success"
-                        print("[Feed] Using image: \(post.mediaURL)")
+                        print("✅ [Feed] Image loaded successfully: \(url.absoluteString)")
                     }
-            case .failure:
+            case .failure(let error):
                 ZStack {
-                    if UIImage(named: "placeholder") != nil {
-                        Image("placeholder")
-                            .resizable()
-                            .scaledToFill()
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .ignoresSafeArea()
-                            .clipped()
-                    } else {
-                        LinearGradient(colors: [.black, .gray.opacity(0.4), .black], startPoint: .top, endPoint: .bottom)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .ignoresSafeArea()
-                            .clipped()
+                    Color.black
+                    VStack(spacing: 12) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 40))
+                            .foregroundColor(.yellow)
+                        Text("Image failed to load")
+                            .foregroundColor(.white)
+                        Text(url.lastPathComponent)
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.7))
                     }
                 }
-                .background(Color.black)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .ignoresSafeArea()
                 .onAppear {
                     imagePhaseDebug = "failure"
-                    print("[Feed] image phase: failure for URL: \(post.mediaURL)")
+                    print("❌ [Feed] Image load failed: \(url.absoluteString), error: \(error.localizedDescription)")
                 }
             @unknown default:
-                Color.black.onAppear { imagePhaseDebug = "unknown" }
+                Color.black
+                    .onAppear {
+                        imagePhaseDebug = "unknown"
+                        print("⚠️ [Feed] Unknown image phase for: \(url.absoluteString)")
+                    }
             }
         }
-        .id("image_\(post.id)_\(post.mediaURL)")
+        .id("image_\(post.id)_\(url.absoluteString)")
     }
 
     private var playerHUD: some View {

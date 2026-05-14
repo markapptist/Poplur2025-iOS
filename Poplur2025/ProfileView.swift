@@ -213,19 +213,57 @@ struct ProfileView: View {
                                                             }
                                                         }
                                                         .onLongPressGesture(minimumDuration: 0.5) {
-                                                            // Long press to show post location on map (changed from OpenCameraAtCoordinate to ShowLocationOnMapFromPost)
+                                                            // Long press to show post location on map with user annotation
                                                             let coordinate = CLLocationCoordinate2D(latitude: post.latitude, longitude: post.longitude)
-                                                            print("📍 [ProfileView] Long press - showing post location on map: \(coordinate.latitude), \(coordinate.longitude)")
-                                                            NotificationCenter.default.post(
-                                                                name: Notification.Name("ShowLocationOnMapFromPost"),
-                                                                object: nil,
-                                                                userInfo: [
-                                                                    "latitude": coordinate.latitude,
-                                                                    "longitude": coordinate.longitude
-                                                                ]
-                                                            )
+                                                            print("📍 [ProfileView Grid] Long press - showing post location: \(coordinate.latitude), \(coordinate.longitude)")
+                                                            print("   Post radius: \(post.radius)m")
+                                                            
                                                             // Haptic feedback
                                                             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                                                            
+                                                            // Get profile image URL
+                                                            let profileURL: String? = post.posterURL ?? userProfile?.profilePictureURL?.absoluteString
+                                                            
+                                                            print("📍 [ProfileView Grid] Setting pending post location in MapStateManager")
+                                                            
+                                                            // Store in shared state manager - this persists even when MapView isn't loaded
+                                                            MapStateManager.shared.setPendingPostLocation(
+                                                                coordinate,
+                                                                userID: post.userID,
+                                                                username: displayUsername,
+                                                                profileImageURL: profileURL,
+                                                                radius: Double(post.radius)
+                                                            )
+                                                            
+                                                            // Also post notification for already-loaded MapView instances
+                                                            var userInfo: [String: Any] = [
+                                                                "coordinate": coordinate,
+                                                                "userID": post.userID,
+                                                                "radius": Double(post.radius)
+                                                            ]
+                                                            
+                                                            if let username = displayUsername {
+                                                                userInfo["username"] = username
+                                                            }
+                                                            
+                                                            if let profileURL = profileURL {
+                                                                userInfo["profileImageURL"] = profileURL
+                                                            }
+                                                            
+                                                            NotificationCenter.default.post(
+                                                                name: Notification.Name("ShowLocationOnMap"),
+                                                                object: nil,
+                                                                userInfo: userInfo
+                                                            )
+                                                            
+                                                            // Wait a moment for map to process location before switching tabs
+                                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                                                                // Then switch to map tab
+                                                                NotificationCenter.default.post(
+                                                                    name: Notification.Name("SwitchToMapTab"),
+                                                                    object: nil
+                                                                )
+                                                            }
                                                         }
                                                 }
                                                 Color.clear.frame(height: 1).onAppear {
@@ -259,19 +297,62 @@ struct ProfileView: View {
                                                             }
                                                         }
                                                         .onLongPressGesture(minimumDuration: 0.5) {
-                                                            // Long press to show post location on map (changed from OpenCameraAtCoordinate to ShowLocationOnMapFromPost)
+                                                            // Long press to show post location on map with user annotation
                                                             let coordinate = CLLocationCoordinate2D(latitude: post.latitude, longitude: post.longitude)
-                                                            print("📍 [ProfileView] Long press - showing post location on map: \(coordinate.latitude), \(coordinate.longitude)")
-                                                            NotificationCenter.default.post(
-                                                                name: Notification.Name("ShowLocationOnMapFromPost"),
-                                                                object: nil,
-                                                                userInfo: [
-                                                                    "latitude": coordinate.latitude,
-                                                                    "longitude": coordinate.longitude
-                                                                ]
-                                                            )
+                                                            print("📍 [ProfileView List] Long press - showing post location: \(coordinate.latitude), \(coordinate.longitude)")
+                                                            print("   Post radius: \(post.radius)m")
+                                                            
                                                             // Haptic feedback
                                                             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                                                            
+                                                            // Get profile image URL
+                                                            let profileURL: String? = post.posterURL ?? userProfile?.profilePictureURL?.absoluteString
+                                                            
+                                                            print("📍 [ProfileView List] Setting pending post location in MapStateManager")
+                                                            
+                                                            // Store in shared state manager - this persists even when MapView isn't loaded
+                                                            MapStateManager.shared.setPendingPostLocation(
+                                                                coordinate,
+                                                                userID: post.userID,
+                                                                username: displayUsername,
+                                                                profileImageURL: profileURL,
+                                                                radius: Double(post.radius)
+                                                            )
+                                                            
+                                                            // Prepare user info with coordinate as CLLocationCoordinate2D object
+                                                            var userInfo: [String: Any] = [
+                                                                "coordinate": coordinate,  // Use coordinate object, not separate lat/lon
+                                                                "userID": post.userID,
+                                                                "radius": Double(post.radius)
+                                                            ]
+                                                            
+                                                            // Add username if available
+                                                            if let username = displayUsername {
+                                                                userInfo["username"] = username
+                                                            }
+                                                            
+                                                            // Add profile image URL if available
+                                                            if let profileURL = profileURL {
+                                                                userInfo["profileImageURL"] = profileURL
+                                                            }
+                                                            
+                                                            print("📍 [ProfileView List] Posting ShowLocationOnMap notification")
+                                                            
+                                                            // First, send location to map
+                                                            NotificationCenter.default.post(
+                                                                name: Notification.Name("ShowLocationOnMap"),
+                                                                object: nil,
+                                                                userInfo: userInfo
+                                                            )
+                                                            
+                                                            // Wait a moment for map to process location before switching tabs
+                                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                                                                // Then switch to map tab
+                                                                NotificationCenter.default.post(
+                                                                    name: Notification.Name("SwitchToMapTab"),
+                                                                    object: nil
+                                                                )
+                                                            }
                                                         }
                                                 }
                                                 Color.clear.frame(height: 1).onAppear {
@@ -319,7 +400,10 @@ struct ProfileView: View {
                                 mediaURL: post.mediaURL,
                                 radius: Double(post.radius),
                                 viewCount: post.viewCount,
-                                userID: post.userID
+                                userID: post.userID,
+                                cityName: nil,
+                                countryName: nil,
+                                countryFlag: nil
                             ),
                             displayName: "",
                             onUserTapped: { _ in }

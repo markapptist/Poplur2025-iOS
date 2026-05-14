@@ -876,6 +876,18 @@ struct MapViewProduction: View {
     @State private var pendingPostVideoURL: URL? = nil
     @State private var postPlacementCoordinate: CLLocationCoordinate2D? = nil
     
+    @State private var suppressUserCenteringUntil: Date? = nil
+    
+    @State private var lockToPostUntil: Date? = nil // Added state for hard lock on post
+    
+    // Shown post location (for displaying pin and radius)
+    @State private var shownPostCoordinate: CLLocationCoordinate2D? = nil
+    @State private var shownPostRadius: Double? = nil
+    @State private var shownPostUsername: String? = nil
+    @State private var shownPostCityName: String? = nil
+    @State private var shownPostCountryName: String? = nil
+    @State private var shownPostCountryFlag: String? = nil
+    
     let tourPlaces: [(name: String, coordinate: CLLocationCoordinate2D, description: String)] = [
         ("New York", CLLocationCoordinate2D(latitude: 40.7128, longitude: -74.0060), "The city that never sleeps"),
         ("San Francisco", CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194), "The Golden Gate City"),
@@ -923,10 +935,11 @@ struct MapViewProduction: View {
     }
     
     /// Navigate to a location using tour-style transitions (zoom out, move, zoom in)
-    private func navigateWithTourTransition(to coordinate: CLLocationCoordinate2D, cityName: String = "Selected Location") {
+    private func navigateWithTourTransition(to coordinate: CLLocationCoordinate2D, cityName: String = "Selected Location", postRadius: Double? = nil) {
         print("🎯 [navigateWithTourTransition] Starting transition")
         print("   Target: \(coordinate.latitude), \(coordinate.longitude)")
         print("   City: \(cityName)")
+        print("   Post radius: \(postRadius ?? 0)m")
         
         // Stop any active tour
         mapState.stopTour()
@@ -939,9 +952,9 @@ struct MapViewProduction: View {
         print("   Current camera: \(currentCoord.latitude), \(currentCoord.longitude)")
         print("   Zoom out distance: \(tourZoomOutDistance)m")
         
-        // Step 1: Zoom out from current location
-        print("🔍 [Step 1] Zooming out from current location (1.5s)")
-        withAnimation(.easeInOut(duration: 1.5)) {
+        // Step 1: Zoom out from current location (FASTER - 0.8s instead of 1.5s)
+        print("🔍 [Step 1] Zooming out from current location (0.8s)")
+        withAnimation(.easeInOut(duration: 0.8)) {
             camera = .camera(
                 MapCamera(
                     centerCoordinate: currentCoord,
@@ -952,12 +965,12 @@ struct MapViewProduction: View {
             )
         }
         
-        // Step 2: Pan to new location while zoomed out
+        // Step 2: Pan to new location while zoomed out (FASTER - 1.5s instead of 3.0s)
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            try? await Task.sleep(nanoseconds: 800_000_000)
             
-            print("➡️ [Step 2] Panning to target location (3.0s)")
-            withAnimation(.easeInOut(duration: 3.0)) {
+            print("➡️ [Step 2] Panning to target location (1.5s)")
+            withAnimation(.easeInOut(duration: 1.5)) {
                 camera = .camera(
                     MapCamera(
                         centerCoordinate: coordinate,
@@ -968,11 +981,11 @@ struct MapViewProduction: View {
                 )
             }
             
-            // Step 3: Zoom in to new location
-            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            // Step 3: Zoom in to new location (FASTER - 1.2s instead of 2.0s)
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
             
-            print("🔎 [Step 3] Zooming in to target location (2.0s)")
-            withAnimation(.easeInOut(duration: 2.0)) {
+            print("🔎 [Step 3] Zooming in to target location (1.2s)")
+            withAnimation(.easeInOut(duration: 1.2)) {
                 camera = .camera(
                     MapCamera(
                         centerCoordinate: coordinate,
@@ -980,6 +993,23 @@ struct MapViewProduction: View {
                         heading: 0,
                         pitch: fixedPitchAlt
                     )
+                )
+            }
+            
+            // Update radius display if post radius is provided
+            if let radius = postRadius {
+                try? await Task.sleep(nanoseconds: 300_000_000) // Small delay for smooth transition
+                
+                print("📏 [Step 4] Updating radius display to \(Int(radius))m")
+                withAnimation(.easeInOut(duration: 0.8)) {
+                    radiusMeters = radius
+                }
+                
+                // Notify HomeView to update the radius bar
+                NotificationCenter.default.post(
+                    name: .MapSuggestedRadius,
+                    object: nil,
+                    userInfo: ["radius": radius]
                 )
             }
             
@@ -1037,6 +1067,12 @@ struct MapViewProduction: View {
     }
     
     private func centerOnUserLocation() {
+        // Respect lockToPost window
+        if let until = lockToPostUntil, until > Date() {
+            print("⛔️ [MapView] centerOnUserLocation ignored during lockToPost window")
+            return
+        }
+        
         guard let userCoordinate = locationManager.location?.coordinate else { return }
         
         // Stop any active operations and return to browsing
@@ -1243,6 +1279,121 @@ struct MapViewProduction: View {
                             Image(systemName: "mappin.circle.fill")
                                 .font(.system(size: 36))
                                 .foregroundStyle(.indigo, .white)
+                        }
+                    }
+                }
+                
+                // Show pin for post location being viewed
+                if let coord = shownPostCoordinate {
+                    // Show radius circle if available
+                    if let radius = shownPostRadius {
+                        MapCircle(center: coord, radius: radius)
+                            .foregroundStyle(Color.purple.opacity(0.15))
+                            .stroke(Color.purple.opacity(0.5), lineWidth: 2)
+                    }
+                    
+                    // Show detailed pin annotation with callout
+                    Annotation(shownPostUsername ?? "Post Location", coordinate: coord) {
+                        VStack(spacing: 8) {
+                            // Information card above the pin
+                            VStack(spacing: 8) {
+                                // Username
+                                if let username = shownPostUsername {
+                                    Text(username)
+                                        .font(.system(size: 16, weight: .bold, design: .rounded))
+                                        .foregroundStyle(.primary)
+                                }
+                                
+                                // Coordinates
+                                Text(String(format: "%.4f, %.4f", coord.latitude, coord.longitude))
+                                    .font(.system(size: 13, weight: .medium, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                                
+                                // City and country
+                                if let cityName = shownPostCityName, let countryName = shownPostCountryName {
+                                    HStack(spacing: 6) {
+                                        if let flag = shownPostCountryFlag {
+                                            Text(flag)
+                                                .font(.system(size: 18))
+                                        }
+                                        Text("\(cityName), \(countryName)")
+                                            .font(.system(size: 13, weight: .medium))
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                
+                                // Radius
+                                if let radius = shownPostRadius {
+                                    let radiusText = radius >= 1000 
+                                        ? String(format: "%.1f km", radius / 1000) 
+                                        : String(format: "%.0f m", radius)
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "circle.dotted")
+                                            .font(.system(size: 12))
+                                        Text("Radius: \(radiusText)")
+                                            .font(.system(size: 13, weight: .medium))
+                                    }
+                                    .foregroundStyle(.purple)
+                                }
+                                
+                                // Back to Feed button
+                                Button {
+                                    print("📱 [MapView] Back to Feed tapped - clearing post location")
+                                    withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                                        shownPostCoordinate = nil
+                                        shownPostRadius = nil
+                                        shownPostUsername = nil
+                                        shownPostCityName = nil
+                                        shownPostCountryName = nil
+                                        shownPostCountryFlag = nil
+                                    }
+                                    
+                                    // Return to browsing mode
+                                    mapState.cancelCurrentOperation()
+                                    
+                                    // Switch back to feed tab
+                                    NotificationCenter.default.post(
+                                        name: Notification.Name("SwitchToFeedTab"),
+                                        object: nil
+                                    )
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "arrow.left")
+                                            .font(.system(size: 13, weight: .semibold))
+                                        Text("Back to Feed")
+                                            .font(.system(size: 14, weight: .semibold))
+                                    }
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 8)
+                                    .background(Color.purple, in: Capsule())
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            .padding(12)
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                            .shadow(color: .black.opacity(0.2), radius: 8, x: 0, y: 4)
+                            .onAppear {
+                                print("📋 [MapView] Annotation card rendered with:")
+                                print("   Username: \(shownPostUsername ?? "nil")")
+                                print("   Coordinates: \(coord.latitude), \(coord.longitude)")
+                                print("   City: \(shownPostCityName ?? "nil")")
+                                print("   Country: \(shownPostCountryName ?? "nil")")
+                                print("   Flag: \(shownPostCountryFlag ?? "nil")")
+                                print("   Radius: \(shownPostRadius ?? 0)")
+                            }
+                            
+                            // Pin marker
+                            ZStack {
+                                Circle()
+                                    .fill(Color.purple.opacity(0.3))
+                                    .frame(width: 60, height: 60)
+                                
+                                Image(systemName: "mappin.circle.fill")
+                                    .font(.system(size: 44))
+                                    .foregroundStyle(.purple, .white)
+                                    .shadow(radius: 3)
+                            }
                         }
                     }
                 }
@@ -1612,6 +1763,15 @@ struct MapViewProduction: View {
                 if showCubeHoldSearch {
                     showCubeHoldSearch = false
                 } else {
+                    // Respect lock/suppression windows after jumping to a post location
+                    if let until = lockToPostUntil, until > Date() {
+                        print("⛔️ [MapView] CubeGlobalTap centering ignored during lockToPost window")
+                        return
+                    }
+                    if let until = suppressUserCenteringUntil, until > Date() {
+                        print("⛔️ [MapView] CubeGlobalTap centering ignored during suppression window")
+                        return
+                    }
                     // Clear post prompt when centering on user
                     showPostPrompt = false
                     clickedCoordinate = nil
@@ -1630,39 +1790,227 @@ struct MapViewProduction: View {
                 // 1. User taps elsewhere (CubeGlobalTap)
                 // 2. User selects a location
             }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("SwitchToMapTab"))) { _ in
+                print("🔔 [MapView] SwitchToMapTab notification received!")
+                
+                // CHECK FOR PENDING POST LOCATION FIRST!
+                if let pendingCoordinate = mapState.pendingPostLocation {
+                    print("✨ [MapView] Found pending post location in SwitchToMapTab - navigating to it!")
+                    
+                    // Set locks FIRST with longer duration
+                    suppressUserCenteringUntil = Date().addingTimeInterval(15)
+                    lockToPostUntil = Date().addingTimeInterval(15)
+                    hasSetInitialLocation = true
+                    
+                    print("🔒 [MapView] Set 15-second locks for pending navigation")
+                    
+                    // Store post information for display
+                    shownPostCoordinate = pendingCoordinate
+                    shownPostRadius = mapState.pendingPostRadius
+                    shownPostUsername = mapState.pendingPostUsername
+                    shownPostCityName = mapState.pendingPostCityName
+                    shownPostCountryName = mapState.pendingPostCountryName
+                    shownPostCountryFlag = mapState.pendingPostCountryFlag
+                    
+                    // Stop tour and enter showing post location mode
+                    mapState.stopTour()
+                    mapState.showPostLocation(pendingCoordinate)
+                    
+                    // Update UI
+                    currentCity = "Post Location"
+                    if let username = mapState.pendingPostUsername {
+                        aiRecommendation = "📍 \(username)'s post location"
+                    } else {
+                        aiRecommendation = "📍 Navigating to post location..."
+                    }
+                    
+                    // Snap to coordinate immediately
+                    withAnimation(.none) {
+                        camera = .camera(
+                            MapCamera(
+                                centerCoordinate: pendingCoordinate,
+                                distance: fixedDistanceAlt,
+                                heading: 0,
+                                pitch: fixedPitchAlt
+                            )
+                        )
+                    }
+                    
+                    print("📸 [MapView] Camera snapped to pending coordinate")
+                    
+                    // Start tour-style transition with post radius
+                    navigateWithTourTransition(to: pendingCoordinate, cityName: "Post Location", postRadius: mapState.pendingPostRadius)
+                    
+                    // Clear pending location
+                    mapState.clearPendingPostLocation()
+                    
+                    return // Exit early - don't set shorter locks below
+                }
+                
+                // Normal tab switch behavior (no pending location)
+                // When switching to map, DON'T override existing locks if they're already set
+                // This allows ShowLocationOnMap to set longer locks that won't be overridden
+                mapState.stopTour()
+                hasSetInitialLocation = true // prevent onAppear/location from snapping back
+                
+                let now = Date()
+                
+                // Only set suppression if not already set or if existing one has expired
+                if let existingUntil = suppressUserCenteringUntil, existingUntil > now {
+                    let remaining = existingUntil.timeIntervalSince(now)
+                    print("🗺️ [MapView] SwitchToMapTab: keeping existing suppression window (expires in \(String(format: "%.1f", remaining))s)")
+                } else {
+                    suppressUserCenteringUntil = now.addingTimeInterval(10)
+                    print("🗺️ [MapView] SwitchToMapTab: setting new suppression window (10s)")
+                }
+                
+                // Only set lock if not already set or if existing one has expired
+                if let existingUntil = lockToPostUntil, existingUntil > now {
+                    let remaining = existingUntil.timeIntervalSince(now)
+                    print("🗺️ [MapView] SwitchToMapTab: keeping existing lock window (expires in \(String(format: "%.1f", remaining))s)")
+                } else {
+                    lockToPostUntil = now.addingTimeInterval(10)
+                    print("🗺️ [MapView] SwitchToMapTab: setting new lock window (10s)")
+                }
+            }
             .onReceive(NotificationCenter.default.publisher(for: .CenterMapOnUser)) { _ in
+                // Respect suppression/lock windows after jumping to a post location
+                if let until = lockToPostUntil, until > Date() {
+                    print("⛔️ [MapView] CenterMapOnUser ignored during lockToPost window")
+                    return
+                }
+                if let until = suppressUserCenteringUntil, until > Date() {
+                    print("⛔️ [MapView] CenterMapOnUser ignored during suppression window")
+                    return
+                }
                 centerOnUserLocation()
             }
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ShowLocationOnMap"))) { notification in
+                print("🔔 [MapView] ShowLocationOnMap notification received!")
+                
                 // Show a specific coordinate on the map (from long-press on post)
-                guard let userInfo = notification.userInfo,
-                      let coordinate = userInfo["coordinate"] as? CLLocationCoordinate2D else { 
-                    print("❌ [MapView] ShowLocationOnMap: Missing coordinate in userInfo")
-                    return 
+                guard let userInfo = notification.userInfo else {
+                    print("❌ [MapView] ShowLocationOnMap: Missing userInfo")
+                    return
+                }
+
+                var target: CLLocationCoordinate2D? = nil
+                var sourceKeyUsed: String = "(none)"
+                if let tc = userInfo["targetCoordinate"] as? CLLocationCoordinate2D {
+                    target = tc
+                    sourceKeyUsed = "targetCoordinate (CLLocationCoordinate2D)"
+                } else if let coord = userInfo["coordinate"] as? CLLocationCoordinate2D {
+                    target = coord
+                    sourceKeyUsed = "coordinate (CLLocationCoordinate2D)"
+                } else if let lat = userInfo["latitude"] as? Double, let lon = userInfo["longitude"] as? Double {
+                    target = CLLocationCoordinate2D(latitude: lat, longitude: lon)
+                    sourceKeyUsed = "latitude/longitude (Double)"
+                }
+
+                guard let coordinate = target else {
+                    print("❌ [MapView] ShowLocationOnMap: No usable coordinate (targetCoordinate/coordinate or latitude/longitude)")
+                    return
                 }
                 
+                // ✅ Extract radius, username, and location information
+                let postRadius = userInfo["radius"] as? Double
+                let postUsername = userInfo["username"] as? String
+                let cityName = userInfo["cityName"] as? String
+                let countryName = userInfo["countryName"] as? String
+                let countryFlag = userInfo["countryFlag"] as? String
+
+                print("✅ [MapView] ShowLocationOnMap: Using key -> \(sourceKeyUsed)")
                 print("📍 [MapView] Received ShowLocationOnMap notification")
                 print("   Target coordinate: \(coordinate.latitude), \(coordinate.longitude)")
+                if let radius = postRadius {
+                    print("   Radius: \(Int(radius))m")
+                }
+                if let username = postUsername {
+                    print("   Username: \(username)")
+                }
+                if let city = cityName, let country = countryName {
+                    print("   Location: \(countryFlag ?? "") \(city), \(country)")
+                }
                 print("   Current camera: \(camera.camera?.centerCoordinate.latitude ?? 0), \(camera.camera?.centerCoordinate.longitude ?? 0)")
                 print("   Tour active: \(mapState.isInTourMode)")
+
+                // FIRST: Set locks BEFORE doing anything else
+                // This ensures no other operation can interfere
+                suppressUserCenteringUntil = Date().addingTimeInterval(15)
+                lockToPostUntil = Date().addingTimeInterval(15)
+                hasSetInitialLocation = true
                 
+                print("🔒 [MapView] Set 15-second lock/suppression windows IMMEDIATELY")
+                print("   Lock expires at: \(lockToPostUntil!)")
+                print("   Suppression expires at: \(suppressUserCenteringUntil!)")
+
                 // Stop any active tour or operation
                 mapState.stopTour()
+
+                // Set display values for annotation and radius
+                shownPostCoordinate = coordinate
+                shownPostRadius = postRadius
+                shownPostUsername = postUsername
+                shownPostCityName = cityName
+                shownPostCountryName = countryName
+                shownPostCountryFlag = countryFlag
                 
+                print("💾 [MapView] Stored post location state:")
+                print("   shownPostCoordinate: \(String(describing: shownPostCoordinate))")
+                print("   shownPostRadius: \(String(describing: shownPostRadius))")
+                print("   shownPostUsername: \(String(describing: shownPostUsername))")
+                print("   shownPostCityName: \(String(describing: shownPostCityName))")
+                print("   shownPostCountryName: \(String(describing: shownPostCountryName))")
+                print("   shownPostCountryFlag: \(String(describing: shownPostCountryFlag))")
+
                 // Enter "showing post location" mode - this prevents auto-centering on user
                 mapState.showPostLocation(coordinate)
+
+                // ✅ Update UI with enhanced location info
+                if let flag = countryFlag, let city = cityName, let country = countryName {
+                    self.currentCity = "\(flag) \(city), \(country)"
+                } else if let city = cityName {
+                    self.currentCity = city
+                } else {
+                    self.currentCity = "Post Location"
+                }
                 
-                // Update UI immediately
-                self.currentCity = "Post Location"
-                self.aiRecommendation = "📍 Navigating to post location..."
+                // Format coordinates nicely
+                let latStr = String(format: "%.4f", coordinate.latitude)
+                let lonStr = String(format: "%.4f", coordinate.longitude)
                 
-                // Use the tour-style transition for smooth navigation
-                self.navigateWithTourTransition(to: coordinate, cityName: "Post Location")
+                if let username = postUsername {
+                    self.aiRecommendation = "📍 \(latStr)°, \(lonStr)° — \(username)'s post"
+                } else {
+                    self.aiRecommendation = "📍 \(latStr)°, \(lonStr)°"
+                }
+
+                // Immediately snap camera to target once to verify we use the post coordinate
+                withAnimation(.none) {
+                    camera = .camera(
+                        MapCamera(
+                            centerCoordinate: coordinate,
+                            distance: fixedDistanceAlt,
+                            heading: 0,
+                            pitch: fixedPitchAlt
+                        )
+                    )
+                }
                 
-                // Update recommendation after navigation completes
+                print("📸 [MapView] Camera snapped to target coordinate immediately")
+
+                // Use the tour-style transition for smooth navigation with radius
+                self.navigateWithTourTransition(to: coordinate, cityName: "Post Location", postRadius: postRadius)
+
+                // Update recommendation after navigation completes to show radius
                 Task { @MainActor in
-                    try? await Task.sleep(nanoseconds: 7_000_000_000) // Wait for transition (1.5 + 3.0 + 2.0 = 6.5s)
-                    self.aiRecommendation = "📍 This is where the post was created!"
+                    try? await Task.sleep(nanoseconds: 7_000_000_000) // 6.5s sequence + buffer
+                    if let radius = postRadius {
+                        let radiusKm = radius >= 1000 ? String(format: "%.1fkm", radius / 1000) : "\(Int(radius))m"
+                        self.aiRecommendation = "📍 \(latStr)°, \(lonStr)° • Radius: \(radiusKm)"
+                    } else {
+                        self.aiRecommendation = "📍 This is where the post was created!"
+                    }
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("SetCameraCoordinate"))) { notification in
@@ -1766,6 +2114,71 @@ struct MapViewProduction: View {
     // MARK: - Event Handlers
     
     private func handleOnAppear() {
+        print("👀 [MapView] handleOnAppear called")
+        print("   lockToPostUntil: \(lockToPostUntil?.description ?? "nil")")
+        print("   mapState.mode: \(mapState.mode)")
+        print("   pendingPostLocation: \(mapState.pendingPostLocation?.latitude ?? 0), \(mapState.pendingPostLocation?.longitude ?? 0)")
+        
+        // Check if there's a pending post location to navigate to
+        if let pendingCoordinate = mapState.pendingPostLocation {
+            print("✨ [MapView] Found pending post location - navigating to it!")
+            
+            // Set locks FIRST
+            suppressUserCenteringUntil = Date().addingTimeInterval(15)
+            lockToPostUntil = Date().addingTimeInterval(15)
+            hasSetInitialLocation = true
+            
+            print("🔒 [MapView] Set 15-second locks for pending navigation")
+            
+            // Enter showing post location mode
+            mapState.showPostLocation(pendingCoordinate)
+            
+            // Update UI
+            currentCity = "Post Location"
+            if let username = mapState.pendingPostUsername {
+                aiRecommendation = "📍 \(username)'s post location"
+            } else {
+                aiRecommendation = "📍 Navigating to post location..."
+            }
+            
+            // Snap to coordinate immediately
+            withAnimation(.none) {
+                camera = .camera(
+                    MapCamera(
+                        centerCoordinate: pendingCoordinate,
+                        distance: fixedDistanceAlt,
+                        heading: 0,
+                        pitch: fixedPitchAlt
+                    )
+                )
+            }
+            
+            print("📸 [MapView] Camera snapped to pending coordinate")
+            
+            // Start tour-style transition
+            navigateWithTourTransition(to: pendingCoordinate, cityName: "Post Location")
+            
+            // Clear pending location
+            mapState.clearPendingPostLocation()
+            
+            return
+        }
+        
+        // Respect the lock - don't reset camera when navigating to a post location
+        if let until = lockToPostUntil, until > Date() {
+            let remaining = until.timeIntervalSince(Date())
+            print("⛔️ [MapView] handleOnAppear ignored during lockToPost window (remaining: \(String(format: "%.1f", remaining))s)")
+            return
+        }
+        
+        // Also don't reset if we're showing a post location (even if lock has expired)
+        if case .showingPostLocation = mapState.mode {
+            print("⛔️ [MapView] handleOnAppear ignored - currently showing post location")
+            return
+        }
+        
+        print("✅ [MapView] handleOnAppear proceeding - no locks active")
+        
         locationManager.request()
         if let current = camera.camera {
             camera = .camera(
@@ -1780,11 +2193,26 @@ struct MapViewProduction: View {
     }
     
     private func handleLocationChange(_ newLocation: CLLocation?) {
+        // If we're locked to a post, ignore location changes entirely
+        if let until = lockToPostUntil, until > Date() {
+            let remaining = until.timeIntervalSince(Date())
+            print("⛔️ [MapView] handleLocationChange ignored during lockToPost window (remaining: \(String(format: "%.1f", remaining))s)")
+            return
+        }
+        
         // Only update camera on first location - don't interfere with tour
-        guard !hasSetInitialLocation, let _ = newLocation else { return }
+        guard !hasSetInitialLocation, let _ = newLocation else { 
+            if hasSetInitialLocation {
+                print("⏭️ [MapView] handleLocationChange skipped - initial location already set")
+            }
+            return 
+        }
+        
+        print("📍 [MapView] handleLocationChange - setting initial location")
         hasSetInitialLocation = true
         
         if let newCameraPosition = locationManager.getCenteredCamera() {
+            print("   Moving camera to user location: \(newLocation?.coordinate.latitude ?? 0), \(newLocation?.coordinate.longitude ?? 0)")
             camera = newCameraPosition
         }
     }
@@ -1849,4 +2277,7 @@ struct MapViewProduction: View {
         }
 }
 #endif
+
+
+
 

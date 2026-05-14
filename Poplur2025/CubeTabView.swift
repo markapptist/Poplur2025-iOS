@@ -695,6 +695,17 @@ private struct CubeSceneView: UIViewRepresentable {
     // MARK: - Glow Particle System Helper
     private func attachOrUpdateGlow(to cube: SCNNode) {
         let glowName = "cubeGlow"
+        
+        // PARTICLE EFFECTS DISABLED - Remove existing particles if present
+        if let existing = cube.childNode(withName: glowName, recursively: false) {
+            existing.removeFromParentNode()
+            print("🔥 [CubeTabView] Particle effects disabled - glow node removed")
+        }
+        
+        // Early return - don't create new particles
+        return
+        
+        /* ORIGINAL PARTICLE CODE - DISABLED
         let glowNode: SCNNode
         if let existing = cube.childNode(withName: glowName, recursively: false) {
             glowNode = existing
@@ -727,6 +738,7 @@ private struct CubeSceneView: UIViewRepresentable {
             ps.particleColor = ui.withAlphaComponent(glowOpacity)
             ps.particleColorVariation = SCNVector4(0.03, 0.03, 0.03, 0.1)
         }
+        */
     }
 
     // MARK: - Coordinator

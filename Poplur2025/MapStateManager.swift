@@ -102,6 +102,19 @@ final class MapStateManager: ObservableObject {
     @Published var lastInteractionTime: Date = Date()
     @Published var idleTimerTask: Task<Void, Never>?
     
+    // MARK: - Pending Navigation
+    
+    /// Stores a coordinate that should be shown when MapView appears
+    /// This solves the timing issue where ShowLocationOnMap notification fires before MapView is loaded
+    @Published var pendingPostLocation: CLLocationCoordinate2D? = nil
+    @Published var pendingPostUserID: String? = nil
+    @Published var pendingPostUsername: String? = nil
+    @Published var pendingPostProfileImageURL: String? = nil
+    @Published var pendingPostRadius: Double? = nil
+    @Published var pendingPostCityName: String? = nil
+    @Published var pendingPostCountryName: String? = nil
+    @Published var pendingPostCountryFlag: String? = nil
+    
     // MARK: - Configuration
     
     /// How long to wait before starting auto-tour (30 seconds)
@@ -151,6 +164,38 @@ final class MapStateManager: ObservableObject {
         print("🗺️ [MapState] Showing post location: \(coordinate.latitude), \(coordinate.longitude)")
         mode = .showingPostLocation(coordinate: coordinate)
         cancelIdleTimer() // Don't start tour while showing post
+    }
+    
+    /// Set a pending post location to navigate to (used when MapView isn't loaded yet)
+    func setPendingPostLocation(_ coordinate: CLLocationCoordinate2D, userID: String? = nil, username: String? = nil, profileImageURL: String? = nil, radius: Double? = nil, cityName: String? = nil, countryName: String? = nil, countryFlag: String? = nil) {
+        print("🗺️ [MapState] Setting pending post location: \(coordinate.latitude), \(coordinate.longitude)")
+        if let radius = radius {
+            print("   Post radius: \(Int(radius))m")
+        }
+        if let city = cityName, let country = countryName {
+            print("   Location: \(city), \(country)")
+        }
+        pendingPostLocation = coordinate
+        pendingPostUserID = userID
+        pendingPostUsername = username
+        pendingPostProfileImageURL = profileImageURL
+        pendingPostRadius = radius
+        pendingPostCityName = cityName
+        pendingPostCountryName = countryName
+        pendingPostCountryFlag = countryFlag
+    }
+    
+    /// Clear pending post location after navigation completes
+    func clearPendingPostLocation() {
+        print("🗺️ [MapState] Clearing pending post location")
+        pendingPostLocation = nil
+        pendingPostUserID = nil
+        pendingPostUsername = nil
+        pendingPostProfileImageURL = nil
+        pendingPostRadius = nil
+        pendingPostCityName = nil
+        pendingPostCountryName = nil
+        pendingPostCountryFlag = nil
     }
     
     /// Start auto-tour mode

@@ -1029,6 +1029,11 @@ struct HomeView: View {
             print("🔄 [HomeView] Switching to feed tab after upload")
             selectedTab = .feed
         }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("SwitchToProfileTab"))) { _ in
+            // Switch to profile tab (used after successful upload in Map -> Camera flow)
+            print("🔄 [HomeView] Switching to profile tab after upload")
+            selectedTab = .profile
+        }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("SwitchToMapTab"))) { _ in
             // Switch to map tab (used when long-pressing on post in feed/profile)
             print("🔄 [HomeView] Switching to map tab to show post location")

@@ -45,6 +45,69 @@ struct DominancePin: View {
     }
 }
 
+struct UserProfileAnnotation: View {
+    var username: String?
+    var profileImageURL: String?
+    
+    var body: some View {
+        VStack(spacing: 4) {
+            // Profile image or placeholder
+            if let urlString = profileImageURL, let url = URL(string: urlString) {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .empty:
+                        Circle()
+                            .fill(Color.gray.opacity(0.3))
+                            .frame(width: 40, height: 40)
+                            .overlay(ProgressView().tint(.white))
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 40, height: 40)
+                            .clipShape(Circle())
+                    case .failure:
+                        Circle()
+                            .fill(Color.blue.opacity(0.8))
+                            .frame(width: 40, height: 40)
+                            .overlay(
+                                Image(systemName: "person.fill")
+                                    .foregroundColor(.white)
+                                    .font(.system(size: 20))
+                            )
+                    @unknown default:
+                        Circle()
+                            .fill(Color.gray.opacity(0.3))
+                            .frame(width: 40, height: 40)
+                    }
+                }
+            } else {
+                // Default profile icon
+                Circle()
+                    .fill(Color.blue.opacity(0.8))
+                    .frame(width: 40, height: 40)
+                    .overlay(
+                        Image(systemName: "person.fill")
+                            .foregroundColor(.white)
+                            .font(.system(size: 20))
+                    )
+            }
+            
+            // Username label
+            if let username = username {
+                Text(username)
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.black.opacity(0.7))
+                    .clipShape(Capsule())
+            }
+        }
+        .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 2)
+    }
+}
+
 struct RecommendationOverlay: View {
     @Binding var message: String?
     var body: some View {
@@ -137,6 +200,7 @@ struct MapView: View {
     var coordinate: CLLocationCoordinate2D
     
     @StateObject private var locationManager = LocationManager()
+    @StateObject private var flowManager = CaptureFlowManager.shared
     @State private var camera: MapCameraPosition
     @State private var posts: [MapAnnotationPost] = []
     @State private var selectedIndex: Int?
@@ -153,6 +217,23 @@ struct MapView: View {
     @State private var searchResults: [MKMapItem] = []
     @State private var idleTask: Task<Void, Never>? = nil
     @State private var lastInteractionAt: Date = Date()
+    
+    // Post flow state
+    @State private var clickedCoordinate: CLLocationCoordinate2D? = nil
+    @State private var showPostPrompt: Bool = false
+    @State private var aiMessage: String? = nil
+    
+    // User annotation state (for showing post location with user profile)
+    @State private var userAnnotation: UserAnnotationData? = nil
+    
+    // Data model for user annotation
+    private struct UserAnnotationData: Identifiable {
+        let id = UUID()
+        let coordinate: CLLocationCoordinate2D
+        let userID: String
+        let username: String?
+        let profileImageURL: String?
+    }
     
     init(coordinate: CLLocationCoordinate2D) {
         self.coordinate = coordinate
@@ -204,6 +285,28 @@ struct MapView: View {
         lastInteractionAt = Date()
         stopDominanceTour()
         scheduleIdleCheck()
+    }
+    
+    private func handleMapTap(at location: CGPoint) {
+        // Get the map's center coordinate (since we can't easily convert tap to coordinate in SwiftUI MapKit)
+        // We'll use the camera's center as an approximation for taps near center
+        guard let centerCoord = camera.camera?.centerCoordinate else { return }
+        
+        clickedCoordinate = centerCoord
+        showPostPrompt = true
+        
+        // Update AI message based on current flow
+        if let flow = flowManager.currentFlow {
+            if flow.isCameraFirst {
+                aiMessage = "📍 \(String(format: "%.4f", centerCoord.latitude))°, \(String(format: "%.4f", centerCoord.longitude))° — Post your capture here?"
+            } else {
+                aiMessage = "📍 \(String(format: "%.4f", centerCoord.latitude))°, \(String(format: "%.4f", centerCoord.longitude))° — Want to post here?"
+            }
+        } else {
+            aiMessage = "📍 \(String(format: "%.4f", centerCoord.latitude))°, \(String(format: "%.4f", centerCoord.longitude))° — Want to post here?"
+        }
+        
+        print("📍 [MapView] Map tapped at: \(centerCoord.latitude), \(centerCoord.longitude)")
     }
     
     private func scheduleIdleCheck() {
@@ -299,6 +402,16 @@ struct MapView: View {
                 }
             }
         }
+        
+        // User annotation for post location (shown when long-pressing a post)
+        if let annotation = userAnnotation {
+            Annotation(annotation.username ?? "User", coordinate: annotation.coordinate) {
+                UserProfileAnnotation(
+                    username: annotation.username,
+                    profileImageURL: annotation.profileImageURL
+                )
+            }
+        }
     }
     
     var body: some View {
@@ -316,7 +429,11 @@ struct MapView: View {
             .ignoresSafeArea()
             .contentShape(Rectangle())
             .simultaneousGesture(DragGesture(minimumDistance: 0).onChanged { _ in noteInteraction() })
-            .simultaneousGesture(TapGesture().onEnded { noteInteraction() })
+            .onTapGesture { location in
+                // Convert tap location to coordinate
+                handleMapTap(at: location)
+                noteInteraction()
+            }
             
             VStack {
                 HStack {
@@ -328,6 +445,23 @@ struct MapView: View {
                             .background(.ultraThinMaterial, in: Circle())
                     }
                     Spacer()
+                    
+                    // Cancel button when in camera-to-map flow
+                    if flowManager.currentFlow?.isCameraFirst == true {
+                        Button(action: {
+                            flowManager.cancelFlow()
+                            clickedCoordinate = nil
+                            showPostPrompt = false
+                            aiMessage = nil
+                        }) {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundStyle(.primary)
+                                .padding(10)
+                                .background(.ultraThinMaterial, in: Circle())
+                        }
+                    }
+                    
                     Button(action: { showFavorites.toggle() }) {
                         Image(systemName: "line.3.horizontal")
                             .font(.system(size: 18, weight: .semibold))
@@ -337,7 +471,116 @@ struct MapView: View {
                     }
                 }
                 .padding([.top, .horizontal])
+                
+                // AI Message Display
+                if let message = aiMessage {
+                    Text(message)
+                        .font(.system(size: 14, weight: .medium, design: .rounded))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .padding(.top, 8)
+                }
+                
                 Spacer()
+                
+                // Post Prompt Buttons
+                if showPostPrompt, let coord = clickedCoordinate {
+                    VStack(spacing: 12) {
+                        if let flow = flowManager.currentFlow {
+                            if flow.isMapFirst {
+                                // Flow 1: Map -> Camera flow - "Post Here" button
+                                Button {
+                                    flowManager.startMapToCameraFlow(coordinate: coord)
+                                    NotificationCenter.default.post(
+                                        name: Notification.Name("OpenCameraAtCoordinate"),
+                                        object: nil,
+                                        userInfo: [
+                                            "latitude": coord.latitude,
+                                            "longitude": coord.longitude
+                                        ]
+                                    )
+                                    // Clear prompt after opening camera
+                                    showPostPrompt = false
+                                    clickedCoordinate = nil
+                                    aiMessage = nil
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "camera.fill")
+                                        Text("Post Here")
+                                            .font(.system(size: 16, weight: .bold, design: .rounded))
+                                    }
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 24)
+                                    .padding(.vertical, 14)
+                                    .background(
+                                        Capsule().fill(Color.blue)
+                                    )
+                                }
+                            } else if flow.isCameraFirst {
+                                // Flow 2: Camera -> Map flow - "Confirm & Post" button
+                                Button {
+                                    flowManager.completeFlow(finalCoordinate: coord)
+                                    showPostPrompt = false
+                                    clickedCoordinate = nil
+                                    aiMessage = "Uploading your post..."
+                                    
+                                    // Return to feed after upload starts
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                                        NotificationCenter.default.post(
+                                            name: Notification.Name("SwitchToFeedTab"),
+                                            object: nil
+                                        )
+                                        aiMessage = nil
+                                    }
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "checkmark.circle.fill")
+                                        Text("Confirm & Post")
+                                            .font(.system(size: 16, weight: .bold, design: .rounded))
+                                    }
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 24)
+                                    .padding(.vertical, 14)
+                                    .background(
+                                        Capsule().fill(Color.green)
+                                    )
+                                }
+                            }
+                        } else {
+                            // No active flow - show "Post Here" to start map-first flow
+                            Button {
+                                flowManager.startMapToCameraFlow(coordinate: coord)
+                                NotificationCenter.default.post(
+                                    name: Notification.Name("OpenCameraAtCoordinate"),
+                                    object: nil,
+                                    userInfo: [
+                                        "latitude": coord.latitude,
+                                        "longitude": coord.longitude
+                                    ]
+                                )
+                                showPostPrompt = false
+                                clickedCoordinate = nil
+                                aiMessage = nil
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "camera.fill")
+                                    Text("Post Here")
+                                        .font(.system(size: 16, weight: .bold, design: .rounded))
+                                }
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 24)
+                                .padding(.vertical, 14)
+                                .background(
+                                    Capsule().fill(Color.blue)
+                                )
+                            }
+                        }
+                    }
+                    .padding(.bottom, 24)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
             }
             .sheet(isPresented: $showFavorites) {
                 FavoritesListView(
@@ -381,6 +624,49 @@ struct MapView: View {
             if locationManager.location != nil {
                 locationManager.centerOnUser(&camera)
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("OpenMapToSelectPostLocation"))) { notification in
+            print("🗺️ [MapView] Received OpenMapToSelectPostLocation")
+            guard let userInfo = notification.userInfo else { return }
+            
+            let image = userInfo["image"] as? UIImage
+            let videoURL = userInfo["videoURL"] as? URL
+            
+            // Start camera-to-map flow
+            flowManager.startCameraToMapFlow(image: image, videoURL: videoURL)
+            
+            // Update AI message
+            aiMessage = "📍 Tap where you want to post your capture"
+            
+            print("📸 [MapView] Started Camera -> Map flow, waiting for coordinate selection")
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ShowLocationOnMapFromPost"))) { notification in
+            // Handle showing post location from profile long-press with user annotation
+            guard let userInfo = notification.userInfo,
+                  let latitude = userInfo["latitude"] as? Double,
+                  let longitude = userInfo["longitude"] as? Double else { return }
+            
+            let coordinate = CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+            let userID = userInfo["userID"] as? String ?? "unknown"
+            let username = userInfo["username"] as? String
+            let profileImageURL = userInfo["profileImageURL"] as? String
+            
+            // Create user annotation
+            userAnnotation = UserAnnotationData(
+                coordinate: coordinate,
+                userID: userID,
+                username: username,
+                profileImageURL: profileImageURL
+            )
+            
+            // Pan to coordinate
+            panTo(coordinate)
+            
+            // Show marker at this location
+            clickedCoordinate = coordinate
+            aiMessage = "📍 \(username ?? "User")'s post at \(String(format: "%.4f", latitude))°, \(String(format: "%.4f", longitude))°"
+            
+            print("📍 [MapView] Showing post location with user annotation: \(latitude), \(longitude), user: \(username ?? userID)")
         }
         .onReceive(NotificationCenter.default.publisher(for: .CenterMapOnUser)) { _ in
             stopDominanceTour()

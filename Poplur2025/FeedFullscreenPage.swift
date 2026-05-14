@@ -1,7 +1,7 @@
 import SwiftUI
 import Foundation
 
-struct FeedPost: Identifiable {
+struct FeedPost: Identifiable, Hashable {
     let id: String
     let latitude: Double
     let longitude: Double
@@ -9,6 +9,21 @@ struct FeedPost: Identifiable {
     let radius: Double
     let viewCount: Int
     let userID: String
+    
+    // Location metadata for enhanced map display
+    var cityName: String? = nil
+    var countryName: String? = nil
+    var countryFlag: String? = nil
+    
+    // Hashable conformance
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+    
+    // Equatable conformance
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.id == rhs.id
+    }
 }
 
 struct FeedFullscreenPage: View {
@@ -85,7 +100,10 @@ struct FeedFullscreenPage: View {
         mediaURL: "https://picsum.photos/800/1200",
         radius: 3000,
         viewCount: 42,
-        userID: "user_123"
+        userID: "user_123",
+        cityName: "San Jose",
+        countryName: "USA",
+        countryFlag: "🇺🇸"
     )
     return FeedFullscreenPage(post: sample, displayName: "Sample User") { _ in }
 }
