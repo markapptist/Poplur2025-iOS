@@ -228,23 +228,8 @@ struct FeedView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ToggleTimelineView"))) { _ in
-            // Toggle timeline view
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                showTimelineView.toggle()
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .cubeHoldBegan)) { _ in
-            // Show timeline view when cube is held
-            guard !posts.isEmpty else { return }
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                showTimelineView = true
-            }
-            // Haptic feedback
-            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .cubeHoldEnded)) { _ in
-            // Optionally hide timeline when cube hold ends (or keep it visible)
-            // For now, we'll keep it visible and let user tap a post to dismiss
+            // Timeline feature disabled per user preference
+            // Fullscreen feed only
         }
         .onChange(of: currentIndex) { newIndex in
             guard newIndex >= 0, newIndex < posts.count else {

@@ -1,70 +1,125 @@
 //
 //  FeedTimelineView.swift
-//  Instagram Stories-style Timeline View
+//  Instagram Feed-style Timeline View
 //
 
 import SwiftUI
 import AVKit
 
-// MARK: - Instagram Stories-style Timeline View
+// MARK: - Instagram Feed-style Timeline View
 
 struct FeedTimelineView: View {
     let posts: [FeedPost]
     let displayNameProvider: (FeedPost) -> String
     var onPostTapped: (Int) -> Void
     
-    @State private var currentIndex: Int = 0
-    @State private var dragOffset: CGFloat = 0
+    @State private var visiblePosts: [FeedPost] = []
+    @State private var isLoadingMore = false
+    @State private var currentPage = 0
+    private let postsPerPage = 5  // Show 5 posts at a time (Instagram-like)
     
     var body: some View {
-        GeometryReader { geo in
-            ZStack {
-                Color.black.ignoresSafeArea()
-                
-                // Paging carousel of posts
-                TabView(selection: $currentIndex) {
-                    ForEach(Array(posts.enumerated()), id: \.element.id) { index, post in
-                        StoriesStylePostView(
-                            post: post,
-                            displayName: displayNameProvider(post),
-                            currentIndex: index,
-                            totalPosts: posts.count,
-                            onDismiss: {
-                                onPostTapped(index)
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                ForEach(Array(visiblePosts.enumerated()), id: \.element.id) { index, post in
+                    FeedStylePostView(
+                        post: post,
+                        displayName: displayNameProvider(post),
+                        postIndex: index,
+                        onDismiss: {
+                            // Find the original index in the full posts array
+                            if let originalIndex = posts.firstIndex(where: { $0.id == post.id }) {
+                                onPostTapped(originalIndex)
                             }
-                        )
-                        .tag(index)
-                    }
-                }
-                .tabViewStyle(.page(indexDisplayMode: .never))
-                .ignoresSafeArea()
-                
-                // Top progress indicators (Instagram-style)
-                VStack(spacing: 0) {
-                    HStack(spacing: 4) {
-                        ForEach(0..<posts.count, id: \.self) { index in
-                            Capsule()
-                                .fill(index == currentIndex ? Color.white : Color.white.opacity(0.3))
-                                .frame(height: 3)
+                        }
+                    )
+                    .id(post.id)
+                    .onAppear {
+                        // Load more when approaching end
+                        if index == visiblePosts.count - 2 {
+                            loadMorePosts()
                         }
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.top, 12)
                     
-                    Spacer()
+                    // Divider between posts
+                    if index < visiblePosts.count - 1 {
+                        Divider()
+                            .background(Color.gray.opacity(0.3))
+                            .padding(.vertical, 16)
+                    }
+                }
+                
+                // Loading indicator at bottom
+                if isLoadingMore && visiblePosts.count < posts.count {
+                    HStack {
+                        Spacer()
+                        ProgressView()
+                            .padding()
+                        Spacer()
+                    }
+                }
+                
+                // End of feed indicator
+                if visiblePosts.count >= posts.count && posts.count > 0 {
+                    HStack {
+                        Spacer()
+                        VStack(spacing: 8) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 24))
+                                .foregroundColor(.gray.opacity(0.5))
+                            Text("You're all caught up!")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(.gray)
+                        }
+                        .padding(.vertical, 32)
+                        Spacer()
+                    }
                 }
             }
+        }
+        .background(Color.white)
+        .onAppear {
+            // Load initial batch
+            if visiblePosts.isEmpty {
+                loadInitialPosts()
+            }
+        }
+    }
+    
+    private func loadInitialPosts() {
+        let endIndex = min(postsPerPage, posts.count)
+        visiblePosts = Array(posts[0..<endIndex])
+        currentPage = 1
+    }
+    
+    private func loadMorePosts() {
+        guard !isLoadingMore else { return }
+        guard visiblePosts.count < posts.count else { return }
+        
+        isLoadingMore = true
+        
+        // Simulate network delay (like real Instagram)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            let startIndex = currentPage * postsPerPage
+            let endIndex = min(startIndex + postsPerPage, posts.count)
+            
+            if startIndex < posts.count {
+                let newPosts = Array(posts[startIndex..<endIndex])
+                visiblePosts.append(contentsOf: newPosts)
+                currentPage += 1
+            }
+            
+            isLoadingMore = false
         }
     }
 }
 
-// MARK: - Stories-Style Single Post View
+// MARK: - Feed-Style Single Post View
 
-struct StoriesStylePostView: View {
+struct FeedStylePostView: View {
     let post: FeedPost
     let displayName: String
-    let currentIndex: Int
-    let totalPosts: Int
+    let postIndex: Int
     var onDismiss: () -> Void
     
     @State private var player: AVPlayer?
@@ -75,237 +130,211 @@ struct StoriesStylePostView: View {
     }
     
     var body: some View {
-        GeometryReader { geo in
-            ZStack {
-                // Background media (fullscreen)
-                if isVideo {
-                    if let player = player {
-                        VideoPlayer(player: player)
-                            .ignoresSafeArea()
-                            .disabled(true)  // Disable controls
-                    } else {
-                        Color.black
-                    }
-                } else {
-                    // Image
-                    AsyncImage(url: URL(string: post.mediaURL)) { phase in
-                        switch phase {
-                        case .empty:
-                            Color.black
-                                .overlay(ProgressView().tint(.white))
-                        case .success(let image):
-                            image
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                                .frame(width: geo.size.width, height: geo.size.height)
-                                .clipped()
-                        case .failure:
-                            Color.black
-                                .overlay(
-                                    Image(systemName: "photo")
-                                        .font(.system(size: 60))
-                                        .foregroundColor(.white.opacity(0.3))
-                                )
-                        @unknown default:
-                            Color.black
-                        }
-                    }
-                }
-                
-                // Gradient overlays for readability
-                VStack(spacing: 0) {
-                    // Top gradient
-                    LinearGradient(
-                        colors: [Color.black.opacity(0.7), Color.black.opacity(0.3), .clear],
-                        startPoint: .top,
-                        endPoint: .bottom
+        VStack(spacing: 0) {
+            // Profile header
+            HStack(spacing: 12) {
+                // Profile circle (gradient ring)
+                Circle()
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [.purple, .pink, .orange],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 2
                     )
-                    .frame(height: 200)
-                    
-                    Spacer()
-                    
-                    // Bottom gradient
-                    LinearGradient(
-                        colors: [.clear, Color.black.opacity(0.3), Color.black.opacity(0.8)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                    .frame(height: 300)
-                }
-                .ignoresSafeArea()
-                
-                // Content overlay
-                VStack(spacing: 0) {
-                    // Top header (profile info)
-                    HStack(spacing: 12) {
-                        // Profile circle (gradient ring)
+                    .frame(width: 40, height: 40)
+                    .overlay(
                         Circle()
-                            .strokeBorder(
-                                LinearGradient(
-                                    colors: [.purple, .pink, .orange],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                ),
-                                lineWidth: 2
-                            )
-                            .frame(width: 40, height: 40)
+                            .fill(Color.gray.opacity(0.3))
+                            .frame(width: 36, height: 36)
                             .overlay(
-                                Circle()
-                                    .fill(Color.gray.opacity(0.5))
-                                    .frame(width: 36, height: 36)
-                                    .overlay(
-                                        Image(systemName: "person.fill")
-                                            .font(.system(size: 16))
-                                            .foregroundColor(.white.opacity(0.7))
-                                    )
+                                Image(systemName: "person.fill")
+                                    .font(.system(size: 16))
+                                    .foregroundColor(.gray)
                             )
+                    )
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 4) {
+                        Text(displayName)
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(.black)
                         
-                        VStack(alignment: .leading, spacing: 2) {
-                            HStack(spacing: 4) {
-                                Text(displayName)
-                                    .font(.system(size: 15, weight: .semibold))
-                                    .foregroundColor(.white)
-                                
-                                // Verified badge
-                                Image(systemName: "checkmark.seal.fill")
-                                    .font(.system(size: 12))
-                                    .foregroundColor(.blue)
-                            }
-                            
-                            // Location
-                            if let city = post.cityName, let country = post.countryName {
-                                Text("\(city), \(country)")
-                                    .font(.system(size: 13))
-                                    .foregroundColor(.white.opacity(0.9))
-                            } else {
-                                Text(String(format: "%.2f, %.2f", post.latitude, post.longitude))
-                                    .font(.system(size: 11, design: .monospaced))
-                                    .foregroundColor(.white.opacity(0.8))
-                            }
-                        }
-                        
-                        Spacer()
-                        
-                        // Follow button
-                        Button {
-                            // Follow action
-                        } label: {
-                            Text("Follow")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 8)
-                                .background(Color.white.opacity(0.2))
-                                .cornerRadius(8)
-                        }
-                        
-                        // More menu
-                        Button {
-                            // More options
-                        } label: {
-                            Image(systemName: "ellipsis")
-                                .font(.system(size: 18))
-                                .foregroundColor(.white)
-                        }
+                        // Verified badge
+                        Image(systemName: "checkmark.seal.fill")
+                            .font(.system(size: 12))
+                            .foregroundColor(.blue)
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 60)
                     
-                    Spacer()
-                    
-                    // Bottom engagement bar
-                    VStack(spacing: 16) {
-                        // Engagement metrics
-                        HStack(spacing: 24) {
-                            // Like
-                            HStack(spacing: 6) {
-                                Image(systemName: "heart")
-                                    .font(.system(size: 26, weight: .regular))
-                                Text(formatCount(7264))
-                                    .font(.system(size: 14, weight: .semibold))
-                            }
-                            
-                            // Comment
-                            HStack(spacing: 6) {
-                                Image(systemName: "message")
-                                    .font(.system(size: 26, weight: .regular))
-                                Text(formatCount(255))
-                                    .font(.system(size: 14, weight: .semibold))
-                            }
-                            
-                            // Share
-                            HStack(spacing: 6) {
-                                Image(systemName: "paperplane")
-                                    .font(.system(size: 26, weight: .regular))
-                                Text(formatCount(35))
-                                    .font(.system(size: 14, weight: .semibold))
-                            }
-                            
-                            // Send
-                            HStack(spacing: 6) {
-                                Image(systemName: "location")
-                                    .font(.system(size: 26, weight: .regular))
-                                Text(formatCount(127))
-                                    .font(.system(size: 14, weight: .semibold))
-                            }
-                            
-                            Spacer()
-                            
-                            // Bookmark
-                            Image(systemName: "bookmark")
-                                .font(.system(size: 26, weight: .regular))
-                        }
-                        .foregroundColor(.white)
-                        
-                        // Caption
-                        HStack(alignment: .top, spacing: 6) {
-                            Text(displayName)
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(.white)
-                            
-                            Text("Which is your... ")
-                                .font(.system(size: 14))
-                                .foregroundColor(.white.opacity(0.9))
-                            +
-                            Text("more")
-                                .font(.system(size: 14))
-                                .foregroundColor(.white.opacity(0.5))
-                            
-                            Spacer()
-                        }
-                        
-                        // Timestamp and radius
-                        HStack {
-                            Text("7 hours ago")
-                                .font(.system(size: 12))
-                                .foregroundColor(.white.opacity(0.5))
-                            
-                            Spacer()
-                            
-                            // Radius indicator
-                            HStack(spacing: 4) {
-                                Image(systemName: "circle.fill")
-                                    .font(.system(size: 8))
-                                    .foregroundColor(.blue)
-                                
-                                Text(formatRadius(post.radius))
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundColor(.white.opacity(0.8))
-                            }
-                        }
+                    // Location
+                    if let city = post.cityName, let country = post.countryName {
+                        Text("\(city), \(country)")
+                            .font(.system(size: 13))
+                            .foregroundColor(.black.opacity(0.6))
+                    } else {
+                        Text(String(format: "%.2f, %.2f", post.latitude, post.longitude))
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(.black.opacity(0.5))
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 100)
                 }
                 
-                // Tap to dismiss gesture
-                Color.clear
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        onDismiss()
-                    }
+                Spacer()
+                
+                // More menu
+                Button {
+                    // More options
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 18))
+                        .foregroundColor(.black)
+                }
             }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            
+            // Media container (square)
+            GeometryReader { geo in
+                ZStack {
+                    if isVideo {
+                        if let player = player {
+                            VideoPlayer(player: player)
+                                .disabled(true)
+                                .frame(width: geo.size.width, height: geo.size.width)
+                                .clipped()
+                        } else {
+                            Color.black
+                                .frame(width: geo.size.width, height: geo.size.width)
+                        }
+                    } else {
+                        AsyncImage(url: URL(string: post.mediaURL)) { phase in
+                            switch phase {
+                            case .empty:
+                                Color.gray.opacity(0.2)
+                                    .overlay(ProgressView())
+                            case .success(let image):
+                                image
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fill)
+                                    .frame(width: geo.size.width, height: geo.size.width)
+                                    .clipped()
+                            case .failure:
+                                Color.gray.opacity(0.2)
+                                    .overlay(
+                                        Image(systemName: "photo")
+                                            .font(.system(size: 40))
+                                            .foregroundColor(.gray)
+                                    )
+                            @unknown default:
+                                Color.gray.opacity(0.2)
+                            }
+                        }
+                        .frame(width: geo.size.width, height: geo.size.width)
+                    }
+                }
+            }
+            .aspectRatio(1, contentMode: .fit)
+            
+            // Action buttons
+            HStack(spacing: 16) {
+                // Like
+                Button {
+                    // Like action
+                } label: {
+                    Image(systemName: "heart")
+                        .font(.system(size: 26, weight: .regular))
+                        .foregroundColor(.black)
+                }
+                
+                // Comment
+                Button {
+                    // Comment action
+                } label: {
+                    Image(systemName: "message")
+                        .font(.system(size: 26, weight: .regular))
+                        .foregroundColor(.black)
+                }
+                
+                // Share
+                Button {
+                    // Share action
+                } label: {
+                    Image(systemName: "paperplane")
+                        .font(.system(size: 26, weight: .regular))
+                        .foregroundColor(.black)
+                }
+                
+                Spacer()
+                
+                // Bookmark
+                Button {
+                    // Bookmark action
+                } label: {
+                    Image(systemName: "bookmark")
+                        .font(.system(size: 26, weight: .regular))
+                        .foregroundColor(.black)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            
+            // Radius count (instead of likes)
+            HStack {
+                HStack(spacing: 4) {
+                    Image(systemName: "circle.fill")
+                        .font(.system(size: 8))
+                        .foregroundColor(.blue)
+                    
+                    Text(formatRadiusCount(post.radius))
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.black)
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            
+            // Caption
+            HStack(alignment: .top, spacing: 6) {
+                Text(displayName)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.black)
+                
+                Text("Which is your favorite? ")
+                    .font(.system(size: 14))
+                    .foregroundColor(.black)
+                +
+                Text("more")
+                    .font(.system(size: 14))
+                    .foregroundColor(.gray)
+                
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 4)
+            
+            // View all comments
+            HStack {
+                Text("View all 255 comments")
+                    .font(.system(size: 14))
+                    .foregroundColor(.gray)
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 4)
+            
+            // Timestamp
+            HStack {
+                Text("7 hours ago")
+                    .font(.system(size: 12))
+                    .foregroundColor(.gray)
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 4)
+            .padding(.bottom, 12)
         }
+        .background(Color.white)
         .onAppear {
             if isVideo {
                 setupVideoPlayer()
@@ -315,12 +344,15 @@ struct StoriesStylePostView: View {
             player?.pause()
             player = nil
         }
+        .onTapGesture {
+            onDismiss()
+        }
     }
     
     private func setupVideoPlayer() {
         guard let url = URL(string: post.mediaURL) else { return }
         let player = AVPlayer(url: url)
-        player.isMuted = true  // Start muted like Instagram
+        player.isMuted = true
         self.player = player
         player.play()
         
@@ -335,6 +367,17 @@ struct StoriesStylePostView: View {
         }
     }
     
+    private func formatRadiusCount(_ radius: Double) -> String {
+        // Format like "100.0k m" similar to "7,264 likes"
+        if radius >= 1_000_000 {
+            return String(format: "%.1fM m", radius / 1_000_000)
+        } else if radius >= 1_000 {
+            return String(format: "%.1fk m", radius / 1_000)
+        } else {
+            return String(format: "%.0f m", radius)
+        }
+    }
+    
     private func formatCount(_ count: Int) -> String {
         if count >= 1_000_000 {
             return String(format: "%.1fM", Double(count) / 1_000_000)
@@ -344,39 +387,28 @@ struct StoriesStylePostView: View {
             return "\(count)"
         }
     }
+    // MARK: - Preview
     
-    private func formatRadius(_ radius: Double) -> String {
-        if radius >= 1_000_000 {
-            return String(format: "%.1fM m", radius / 1_000_000)
-        } else if radius >= 1_000 {
-            return String(format: "%.1fk m", radius / 1_000)
-        } else {
-            return String(format: "%.0f m", radius)
-        }
-    }
-}
-
-// MARK: - Preview
-
-#Preview {
-    let samplePosts = [
-        FeedPost(
-            id: "1",
-            latitude: 25.7617,
-            longitude: -80.1918,
-            mediaURL: "https://picsum.photos/1080/1920",
-            radius: 5000,
-            viewCount: 7264,
-            userID: "user1",
-            cityName: "South Beach",
-            countryName: "Miami",
-            countryFlag: "🇺🇸"
+    #Preview {
+        let samplePosts = [
+            FeedPost(
+                id: "1",
+                latitude: 25.7617,
+                longitude: -80.1918,
+                mediaURL: "https://picsum.photos/1080/1920",
+                radius: 100_000,
+                viewCount: 7264,
+                userID: "user1",
+                cityName: "Tokyo",
+                countryName: "Japan",
+                countryFlag: "🇯🇵"
+            )
+        ]
+        
+        FeedTimelineView(
+            posts: samplePosts,
+            displayNameProvider: { _ in "User food_u" },
+            onPostTapped: { _ in }
         )
-    ]
-    
-    FeedTimelineView(
-        posts: samplePosts,
-        displayNameProvider: { _ in "alexisfawxlive" },
-        onPostTapped: { _ in }
-    )
+    }
 }
