@@ -243,7 +243,7 @@ private struct CubeSceneView: UIViewRepresentable {
         let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap(_:)))
 
         let longPress = UILongPressGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleLongPress(_:)))
-        longPress.minimumPressDuration = 2.0 // 2 seconds required before recording starts
+        longPress.minimumPressDuration = 0.5 // 0.5 seconds for timeline/general interactions (recording countdown handles the 2s delay)
 
         // Set delegates
         pan.delegate = context.coordinator
@@ -929,7 +929,10 @@ private struct CubeSceneView: UIViewRepresentable {
         @objc func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
             switch gesture.state {
             case .began:
-                print("[CubeTabView] Long press began -> .cubeHoldBegan")
+                print("[CubeTabView] Long press began -> .cubeHoldBegan + .cameraCubeHoldBegan")
+                // Post general cube hold notification for all tabs
+                NotificationCenter.default.post(name: .cubeHoldBegan, object: nil)
+                // Also post camera-specific notification for record tab
                 NotificationCenter.default.post(name: .cameraCubeHoldBegan, object: nil)
                 // Also send profile-specific notification if on profile tab
                 if parent.selectedTab == .profile {
@@ -937,7 +940,10 @@ private struct CubeSceneView: UIViewRepresentable {
                     NotificationCenter.default.post(name: Notification.Name("CubeLongPressed"), object: nil)
                 }
             case .ended, .cancelled, .failed:
-                print("[CubeTabView] Long press ended -> .cubeHoldEnded")
+                print("[CubeTabView] Long press ended -> .cubeHoldEnded + .cameraCubeHoldEnded")
+                // Post general cube hold ended notification
+                NotificationCenter.default.post(name: .cubeHoldEnded, object: nil)
+                // Also post camera-specific notification
                 NotificationCenter.default.post(name: .cameraCubeHoldEnded, object: nil)
             default:
                 break

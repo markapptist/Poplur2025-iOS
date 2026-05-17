@@ -2,27 +2,10 @@ import SwiftUI
 import SceneKit
 import ObjectiveC
 
-extension Notification.Name {
-    static let currentPostRadiusDidChange = Notification.Name("CurrentPostRadiusDidChange")
-    static let showCapturedPreviewRequested = Notification.Name("ShowCapturedPreviewRequested")
-}
-
-extension Notification.Name {
-    static let capturePreviewDidDismiss = Notification.Name("CapturePreviewDidDismiss")
-}
-
-extension Notification.Name {
-    static let radiusBarGlobeTap = Notification.Name("RadiusBarGlobeTap")
-}
-
-extension Notification.Name {
-    static let radiusBarHoldBegan = Notification.Name("RadiusBarHoldBegan")
-    static let radiusBarHoldEnded = Notification.Name("RadiusBarHoldEnded")
-}
-
-extension Notification.Name {
-    static let animateRadiusBarToValue = Notification.Name("AnimateRadiusBarToValue")
-}
+// MARK: - Notification names are now centralized in Notifications+Names.swift
+// All radius bar notification names (currentPostRadiusDidChange, showCapturedPreviewRequested, 
+// capturePreviewDidDismiss, radiusBarGlobeTap, radiusBarHoldBegan, radiusBarHoldEnded, 
+// animateRadiusBarToValue) are defined there to avoid ambiguity.
 
 public struct IsometricRadiusBar: View {
     @Binding public var radius: Double

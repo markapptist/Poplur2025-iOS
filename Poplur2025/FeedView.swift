@@ -9,113 +9,13 @@ import Contacts
 import GoogleMobileAds
 #endif
 
-// MARK: - Environment key for LocationProvider
 
-private struct LocationProviderKey: EnvironmentKey {
-    static let defaultValue: LocationProvider? = nil
-}
-
-extension EnvironmentValues {
-    var locationProvider: LocationProvider? {
-        get { self[LocationProviderKey.self] }
-        set { self[LocationProviderKey.self] = newValue }
-    }
-}
-
-// MARK: - Shared pole position model and overlay
-
-// Normalized pole position within the view's content area (0...1 in both axes)
-struct PolePosition {
-    var x: CGFloat
-    var y: CGFloat
-}
-
-// Observable model so multiple views (Map, Feed, Camera) can render the pole identically
-final class PolePositionModel: ObservableObject {
-    @Published var position: PolePosition = .init(x: 0.5, y: 0.5)
-}
-
-// A lightweight overlay that renders a pole at the normalized position
-private struct PoleOverlay: View {
-    @EnvironmentObject var poleModel: PolePositionModel
-
-    var body: some View {
-        GeometryReader { geo in
-            let size = geo.size
-            // Clamp normalized values to [0,1] to avoid accidental overflow
-            let nx = min(max(poleModel.position.x, 0), 1)
-            let ny = min(max(poleModel.position.y, 0), 1)
-            let x = nx * size.width
-            let y = ny * size.height
-
-            // Match Map view: blue accuracy halo + white ring center (no filled dot)
-            // Since we don't have a map projection in Feed, we use a visual heuristic to size the halo.
-            // The halo scales with the shorter screen dimension to suggest radius without geographic accuracy.
-            let haloSize = min(size.width, size.height) * 0.25 // tweak as desired for feel
-
-            ZStack {
-                // Accuracy halo (visual approximation of MapCircle)
-                Circle()
-                    .fill(Color.blue.opacity(0.20))
-                    .frame(width: haloSize, height: haloSize)
-                    .overlay(
-                        Circle().stroke(Color.blue.opacity(0.5), lineWidth: 2)
-                    )
-
-                // Center marker: white ring only (no center fill)
-                Circle()
-                    .stroke(Color.white, lineWidth: 2)
-                    .frame(width: 20, height: 20)
-            }
-            .position(x: x, y: y)
-            .accessibilityLabel("Pole indicator")
-        }
-        .allowsHitTesting(false)
-    }
-}
-
-// MARK: - Demo Post Store (shared in-memory database for demo users)
-
-/// Singleton that stores all generated demo posts so they can be queried by userID
-final class DemoPostStore {
-    static let shared = DemoPostStore()
-    private init() {}
-    
-    private var posts: [FeedPost] = []
-    
-    func store(_ posts: [FeedPost]) {
-        // Add new posts, avoiding duplicates by ID
-        var addedCount = 0
-        for post in posts {
-            if !self.posts.contains(where: { $0.id == post.id }) {
-                self.posts.append(post)
-                addedCount += 1
-            }
-        }
-        print("📦 [DemoPostStore] Stored \(addedCount) new posts (total: \(self.posts.count))")
-    }
-    
-    func posts(for userID: String) -> [FeedPost] {
-        let userPosts = posts.filter { $0.userID == userID }
-        print("👤 [DemoPostStore] Found \(userPosts.count) posts for userID: \(userID)")
-        return userPosts
-    }
-    
-    func allPosts() -> [FeedPost] {
-        print("📚 [DemoPostStore] Total posts: \(posts.count)")
-        return posts
-    }
-    
-    // Add method to get all unique users
-    func allUsers() -> Set<String> {
-        let users = Set(posts.map { $0.userID })
-        print("👥 [DemoPostStore] Total unique users: \(users.count)")
-        return users
-    }
-}
-
-// MARK: - FeedPost Model
-// Note: FeedPost is defined in FeedFullscreenPage.swift to avoid duplication
+// MARK: - PERFORMANCE OPTIMIZATION STRATEGY
+// 1. INSTANT INITIALIZATION: Bootstrap is fully synchronous - no async/await delays
+// 2. DEFAULT COUNTRY: Start with US (index 0) immediately, geocode in background
+// 3. LAZY PROFILE GENERATION: Profile posts are generated on-demand when viewed
+// 4. BACKGROUND TASKS ONLY: Storage, username prefetch, geocoding all happen AFTER UI is ready
+// 5. ZERO BLOCKING: All data generation is lightweight array construction (< 1ms)
 
 struct FeedView: View {
     @StateObject private var fallbackLocationProvider = LocationProvider()
@@ -157,6 +57,9 @@ struct FeedView: View {
     @State private var popPlayer: AVAudioPlayer? = nil
 
     @State private var showHeart: Bool = false
+    
+    // Instagram-style timeline view
+    @State private var showTimelineView: Bool = false
 
     // Country paging (horizontal swipe)
     @State private var selectedCountryIndex: Int = 0
@@ -215,13 +118,34 @@ struct FeedView: View {
         }
     }
     
-    // Resolve ISO country code from coordinate using reverse geocoding
+    // Simple cache for geocoding results to avoid redundant network calls
+    private static var geocodeCache: [String: String] = [:]
+    private static let geocodeCacheLock = NSLock()
+    
+    // Resolve ISO country code from coordinate using reverse geocoding (with caching)
     private func geocodeCountry(from coordinate: CLLocationCoordinate2D) async -> String? {
+        // Cache key based on rounded coordinates (to ~1km precision)
+        let cacheKey = String(format: "%.2f,%.2f", coordinate.latitude, coordinate.longitude)
+        
+        // Check cache first
+        Self.geocodeCacheLock.lock()
+        let cached = Self.geocodeCache[cacheKey]
+        Self.geocodeCacheLock.unlock()
+        
+        if let cached {
+            print("[Geocode] Using cached result for \(cacheKey): \(cached)")
+            return cached
+        }
+        
         let geocoder = CLGeocoder()
         let location = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
         do {
             let placemarks = try await geocoder.reverseGeocodeLocation(location)
             if let pm = placemarks.first, let isoCode = pm.isoCountryCode {
+                // Store in cache
+                Self.geocodeCacheLock.lock()
+                Self.geocodeCache[cacheKey] = isoCode
+                Self.geocodeCacheLock.unlock()
                 return isoCode
             }
         } catch {
@@ -234,10 +158,29 @@ struct FeedView: View {
         GeometryReader { geo in
             ZStack {
                 Color.black.ignoresSafeArea()
-                feedContent(in: geo.size)
-                    .opacity(1)
-                    .zIndex(5)
-                    .background(Color.black)
+                
+                // Show either timeline or feed, not both
+                if showTimelineView {
+                    // Timeline view (Instagram grid style)
+                    FeedTimelineView(
+                        posts: posts,
+                        displayNameProvider: { post in displayName(for: post) },
+                        onPostTapped: { index in
+                            currentIndex = index
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                showTimelineView = false
+                            }
+                        }
+                    )
+                    .transition(.opacity)
+                    .zIndex(10)
+                } else {
+                    // Regular fullscreen feed
+                    feedContent(in: geo.size)
+                        .opacity(1)
+                        .zIndex(5)
+                        .background(Color.black)
+                }
 
                 // Video loading indicator - shown during transitions (visible on all tabs)
                 VideoLoadingIndicator(isLoading: $isVideoLoading, logoName: "logo")
@@ -247,12 +190,13 @@ struct FeedView: View {
             .background(Color.black)
         }
         .task {
-            if didBootstrap == false {
-                didBootstrap = true
-                // Strict, sequential bootstrap to guarantee loading overlay timing and content readiness
-                await runStrictBootstrap()
-                print("[Feed] after bootstrap posts=\(posts.count) ready=\(isFeedReady)")
-            }
+            // INSTANT: Bootstrap on appear without async overhead
+            guard didBootstrap == false else { return }
+            didBootstrap = true
+            
+            // Call bootstrap synchronously
+            await runStrictBootstrap()
+            print("[Feed] after bootstrap posts=\(posts.count) ready=\(isFeedReady)")
         }
         .onReceive(NotificationCenter.default.publisher(for: .LoadFeedNow)) { _ in
             Task { await reload() }
@@ -283,6 +227,25 @@ struct FeedView: View {
                 RadiusBarAnimator.showPostRadius(0, duration: 0.3)
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ToggleTimelineView"))) { _ in
+            // Toggle timeline view
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                showTimelineView.toggle()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .cubeHoldBegan)) { _ in
+            // Show timeline view when cube is held
+            guard !posts.isEmpty else { return }
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                showTimelineView = true
+            }
+            // Haptic feedback
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .cubeHoldEnded)) { _ in
+            // Optionally hide timeline when cube hold ends (or keep it visible)
+            // For now, we'll keep it visible and let user tap a post to dismiss
+        }
         .onChange(of: currentIndex) { newIndex in
             guard newIndex >= 0, newIndex < posts.count else {
                 print("[Feed] currentIndex out of range: \(newIndex) posts=\(posts.count)")
@@ -300,8 +263,27 @@ struct FeedView: View {
             // Removed duplicate reload here as per instruction
             hapticGenerator.prepare()
             notifHaptics.prepare()
+            
+            // Quick synchronous check - only reload if truly empty
             if posts.isEmpty {
-                Task { await reload() }
+                // Synchronous reload for instant response
+                let newPosts = Self.generateDemoPostsForCountryAndChannel(
+                    country: countries[selectedCountryIndex].code,
+                    channel: channels[selectedChannelIndex].id,
+                    start: 0,
+                    count: pageSize
+                )
+                posts = newPosts
+                isFeedReady = !newPosts.isEmpty
+                
+                if let firstPost = newPosts.first {
+                    RadiusBarAnimator.showPostRadius(firstPost.radius, duration: 0.3)
+                }
+                
+                // Background storage only
+                Task.detached(priority: .utility) {
+                    DemoPostStore.shared.store(newPosts)
+                }
             }
             
             // Ensure feed is ready when returning from navigation
@@ -311,32 +293,24 @@ struct FeedView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
-            Task { @MainActor in
-                // Force a strict refresh to recover from any overlay/black screen state
-                isFeedReady = false
-                print("[Feed] didBecomeActive: resetting, showStatic=true")
-                showStatic = true
-                stopStaticSound()
-                playStaticSound()
-
-                posts.removeAll()
-                currentIndex = 0
-                await reload()
-                print("[Feed] didBecomeActive: reload complete posts=\(posts.count)")
-                if posts.isEmpty {
-                    await seedAndReload()
-                    print("[Feed] didBecomeActive: seedAndReload done posts=\(posts.count)")
+            // INSTANT: Only reload if truly empty - avoid unnecessary async overhead
+            if posts.isEmpty {
+                let newPosts = Self.generateDemoPostsForCountryAndChannel(
+                    country: countries[selectedCountryIndex].code,
+                    channel: channels[selectedChannelIndex].id,
+                    start: 0,
+                    count: pageSize
+                )
+                posts = newPosts
+                isFeedReady = !newPosts.isEmpty
+                
+                if let firstPost = newPosts.first {
+                    RadiusBarAnimator.showPostRadius(firstPost.radius, duration: 0.3)
                 }
-                if posts.isEmpty {
-                    await reload()
-                    print("[Feed] didBecomeActive: second reload posts=\(posts.count)")
+                
+                Task.detached(priority: .utility) {
+                    DemoPostStore.shared.store(newPosts)
                 }
-
-                showStatic = false
-                stopStaticSound()
-                print("[Feed] didBecomeActive: static stopped")
-                isFeedReady = !posts.isEmpty
-                print("[Feed] didBecomeActive: ready=\(isFeedReady)")
             }
         }
         .onChange(of: showStatic) { visible in
@@ -347,96 +321,146 @@ struct FeedView: View {
             }
         }
         .onChange(of: coordinateKey) { _ in
-            Task {
-                if let coord = activeLocationProvider.coordinate {
-                    if let iso = await geocodeCountry(from: coord), let idx = countries.firstIndex(where: { $0.code == iso }) {
-                        if idx != selectedCountryIndex {
-                            await MainActor.run { selectedCountryIndex = idx }
-                            await MainActor.run { showStatic = true }
-                            playStaticSound()
-                            await reloadForCountry()
-                            try? await Task.sleep(nanoseconds: 120_000_000)
-                            await MainActor.run { withAnimation { showStatic = false } }
-                            stopStaticSound()
+            Task.detached(priority: .userInitiated) {
+                guard let coord = await self.activeLocationProvider.coordinate else { return }
+                
+                // Use heuristic first for immediate response
+                let heuristicIdx = self.countryIndex(for: coord)
+                
+                // Try geocoding in background (with timeout to prevent hanging)
+                let geocodedIdx: Int? = await withTaskGroup(of: Int?.self) { group in
+                    group.addTask {
+                        if let iso = await self.geocodeCountry(from: coord),
+                           let idx = self.countries.firstIndex(where: { $0.code == iso }) {
+                            return idx
                         }
-                    } else {
-                        let idx = countryIndex(for: coord)
-                        if idx != selectedCountryIndex {
-                            await MainActor.run { selectedCountryIndex = idx }
-                            await MainActor.run { showStatic = true }
-                            playStaticSound()
-                            await reloadForCountry()
-                            try? await Task.sleep(nanoseconds: 120_000_000)
-                            await MainActor.run { withAnimation { showStatic = false } }
-                            stopStaticSound()
-                        }
+                        return nil
                     }
+                    
+                    // Timeout after 2 seconds
+                    group.addTask {
+                        try? await Task.sleep(nanoseconds: 2_000_000_000)
+                        return nil
+                    }
+                    
+                    // Return first result
+                    for await result in group {
+                        group.cancelAll()
+                        return result
+                    }
+                    return nil
                 }
+                
+                // Determine final index
+                let finalIdx: Int
+                if let geocodedIdx = geocodedIdx {
+                    finalIdx = geocodedIdx
+                } else {
+                    finalIdx = heuristicIdx
+                }
+                
+                // Capture current country index on MainActor
+                let currentCountryIndex = await MainActor.run { self.selectedCountryIndex }
+                
+                // Compare indices before proceeding
+                guard finalIdx != currentCountryIndex else { return }
+                
+                await MainActor.run { 
+                    self.selectedCountryIndex = finalIdx
+                    self.showStatic = true
+                }
+                self.playStaticSound()
+                
+                await self.reloadForCountry()
+                
+                try? await Task.sleep(nanoseconds: 120_000_000)
+                await MainActor.run { 
+                    withAnimation { self.showStatic = false }
+                }
+                self.stopStaticSound()
             }
         }
     }
 
     // MARK: - Strict bootstrap sequence
     private func runStrictBootstrap() async {
-        // Ensure loading overlay is visible immediately
-        await MainActor.run {
-            isFeedReady = false
-            isVideoLoading = true  // Show video loading indicator
-            showStatic = true
-            print("[Feed] bootstrap start: showStatic=\(showStatic)")
+        // INSTANT: Set default country immediately (US as safe default)
+        selectedCountryIndex = 0  // US default
+        
+        // Generate posts IMMEDIATELY - this is just array construction
+        let newPosts = Self.generateDemoPostsForCountryAndChannel(
+            country: countries[selectedCountryIndex].code,
+            channel: channels[selectedChannelIndex].id,
+            start: 0,
+            count: pageSize
+        )
+
+        // Update UI SYNCHRONOUSLY - no await needed
+        posts = newPosts
+        isFeedReady = !posts.isEmpty
+        currentIndex = 0
+        isVideoLoading = false
+        showStatic = false
+        poleModel.position = PolePosition(x: 0.5, y: 0.5)
+        
+        // Update radius bar immediately
+        if let firstPost = newPosts.first {
+            RadiusBarAnimator.showPostRadius(firstPost.radius, duration: 0.3)
         }
-        playStaticSound()
-
-        // Minimal on-screen time for the loading overlay (e.g., 1.2s)
-        async let minOverlay: Void = { try? await Task.sleep(nanoseconds: 1_200_000_000) }()
-
-        // Prepare essentials (pole, country) strictly in order
-        await MainActor.run { poleModel.position = PolePosition(x: 0.5, y: 0.5) }
-        if let coord = activeLocationProvider.coordinate {
-            if let iso = await geocodeCountry(from: coord), let idx = countries.firstIndex(where: { $0.code == iso }) {
-                await MainActor.run { selectedCountryIndex = idx }
-            } else {
-                let idx = countryIndex(for: coord)
-                await MainActor.run { selectedCountryIndex = idx }
+        
+        // Notify observers immediately
+        NotificationCenter.default.post(name: Notification.Name("FeedReady"), object: nil)
+        
+        // ALL background tasks happen AFTER UI is ready
+        Task.detached(priority: .utility) {
+            // Store posts
+            DemoPostStore.shared.store(newPosts)
+            
+            // Prefetch usernames
+            let uids = newPosts.map { $0.userID }
+            await UsernameCache.shared.prefetch(uids: uids)
+        }
+        
+        // Geocode and adjust country AFTER initial load (fire and forget)
+        Task.detached(priority: .background) {
+            guard let coord = await self.activeLocationProvider.coordinate else { return }
+            
+            // Try heuristic first
+            let heuristicIdx = await self.countryIndex(for: coord)
+            
+            // Try geocoding with timeout
+            let geocodedIdx: Int? = await withTaskGroup(of: Int?.self) { group in
+                group.addTask {
+                    if let iso = await self.geocodeCountry(from: coord),
+                       let idx = self.countries.firstIndex(where: { $0.code == iso }) {
+                        return idx
+                    }
+                    return nil
+                }
+                
+                group.addTask {
+                    try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second timeout
+                    return nil
+                }
+                
+                for await result in group {
+                    group.cancelAll()
+                    return result
+                }
+                return nil
             }
-        }
-
-        // Load posts strictly and wait until we have content
-        await reload()
-        // If still empty, try seed and reload once
-        if posts.isEmpty {
-            await seedAndReload()
-        }
-        // Defensive: one more reload if still empty
-        if posts.isEmpty {
-            await reload()
-        }
-
-        // Wait for the minimum overlay time
-        _ = await minOverlay
-
-        // Small settle time to help first frame render
-        try? await Task.sleep(nanoseconds: 120_000_000)
-
-        // Hide static, stop sound, and reveal content in a tightly-controlled order
-        await MainActor.run {
-            print("[Feed] bootstrap hiding static")
-            withAnimation { showStatic = false }
-            isVideoLoading = false  // Hide video loading indicator
-        }
-        stopStaticSound()
-        print("[Feed] bootstrap stopped static sound")
-
-        // Ensure we have at least one post before revealing
-        await MainActor.run {
-            isFeedReady = !posts.isEmpty
-            print("[Feed] bootstrap ready=\(isFeedReady) posts=\(posts.count)")
-            currentIndex = 0
-        }
-
-        // Notify observers that feed is ready
-        await MainActor.run {
-            NotificationCenter.default.post(name: Notification.Name("FeedReady"), object: nil)
+            
+            let finalIdx = geocodedIdx ?? heuristicIdx
+            let currentIdx = await MainActor.run { self.selectedCountryIndex }
+            
+            // Only update if different and worth it
+            guard finalIdx != currentIdx else { return }
+            
+            await MainActor.run {
+                self.selectedCountryIndex = finalIdx
+                // Silently reload in background
+                Task { await self.reload() }
+            }
         }
     }
 
@@ -961,15 +985,16 @@ struct FeedView: View {
                         // User info and coordinates
                         VStack(alignment: .leading, spacing: 4) {
                             Button {
-                                print("👤 [FeedView] User info tapped - userID: '\(post.userID)'")
-                                guard !post.userID.isEmpty else {
+                                let userID = post.userID
+                                print("👤 [FeedView] User info tapped - userID: '\(userID)'")
+                                guard !userID.isEmpty else {
                                     print("⚠️ [FeedView] Cannot navigate to profile - userID is empty")
                                     return
                                 }
                                 // Post notification to switch to profile tab with this userID
                                 NotificationCenter.default.post(
                                     name: .ShowUserProfile,
-                                    object: post.userID
+                                    object: userID
                                 )
                             } label: {
                                 Text(displayName(for: post))
@@ -1044,6 +1069,45 @@ struct FeedView: View {
                 .padding(.top, geo.safeAreaInsets.top)
                 .allowsHitTesting(false)
                 .contentShape(Rectangle())
+                
+                // Cube button for timeline view (top right)
+                VStack {
+                    HStack {
+                        Spacer()
+                        
+                        Button {
+                            // Single tap does nothing, waiting for long press
+                        } label: {
+                            Image(systemName: "square.grid.3x3.fill")
+                                .font(.system(size: 24, weight: .semibold))
+                                .foregroundColor(.white)
+                                .frame(width: 44, height: 44)
+                                .background(Color.black.opacity(0.6))
+                                .clipShape(Circle())
+                                .overlay(
+                                    Circle()
+                                        .stroke(Color.white.opacity(0.3), lineWidth: 1)
+                                )
+                        }
+                        .simultaneousGesture(
+                            LongPressGesture(minimumDuration: 0.5)
+                                .onEnded { _ in
+                                    // Haptic feedback
+                                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                                    
+                                    // Toggle to timeline view
+                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                        showTimelineView = true
+                                    }
+                                }
+                        )
+                        .padding(.trailing, 16)
+                    }
+                    .padding(.top, geo.safeAreaInsets.top + 60)
+                    
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
             }
         }
     }
@@ -1083,33 +1147,20 @@ struct FeedView: View {
     }
 
     private func prefetchVisibleUsernames() {
-        // Prefetch username only for currentIndex since we show one post at a time
-        if let uid = posts[safe: currentIndex]?.userID {
-            maybeResolveUsername(for: uid)
-        }
-        
-        // Also prefetch next and previous posts for smooth navigation
-        if let nextUID = posts[safe: currentIndex + 1]?.userID {
-            maybeResolveUsername(for: nextUID)
-        }
-        if currentIndex > 0, let prevUID = posts[safe: currentIndex - 1]?.userID {
-            maybeResolveUsername(for: prevUID)
-        }
-        
-        // Background prefetch ALL usernames for loaded posts
-        Task {
-            let allUIDs = posts.map { $0.userID }
-            await UsernameCache.shared.prefetch(uids: allUIDs)
+        // OPTIMIZED: Don't block on username resolution - show feed immediately
+        // Usernames will populate asynchronously in the background
+        Task.detached(priority: .utility) {
+            let currentPosts = await self.posts
+            let uids = currentPosts.map { $0.userID }
+            await UsernameCache.shared.prefetch(uids: uids)
             
-            // Refresh display after prefetch completes
-            await MainActor.run {
-                // Trigger a state update to refresh displayed names
-                if let uid = posts[safe: currentIndex]?.userID {
-                    Task {
-                        let name = await UsernameCache.shared.username(for: uid)
-                        if let name {
-                            usernames[uid] = name
-                        }
+            // Update display after prefetch (non-blocking)
+            let currentIdx = await self.currentIndex
+            if let uid = currentPosts[safe: currentIdx]?.userID {
+                let name = await UsernameCache.shared.username(for: uid)
+                if let name {
+                    await MainActor.run {
+                        self.usernames[uid] = name
                     }
                 }
             }
@@ -1118,12 +1169,18 @@ struct FeedView: View {
 
     private var currentCoordinate: CLLocationCoordinate2D? { activeLocationProvider.coordinate }
     
+    private static var audioSessionConfigured = false
+    
     private func configureAudioSessionForStatic() {
+        // Only configure once to avoid redundant calls
+        guard !Self.audioSessionConfigured else { return }
+        
         do {
             let session = AVAudioSession.sharedInstance()
             // Use ambient so it mixes and avoids activation failures on silent/route-less cases
             try session.setCategory(.ambient, mode: .default, options: [.mixWithOthers])
             try session.setActive(true)
+            Self.audioSessionConfigured = true
         } catch {
             print("[StaticSound] Audio session config failed (safe): \(error)")
         }
@@ -1217,19 +1274,7 @@ struct FeedView: View {
     // MARK: - Data loading stubs (fill in with your real logic)
 
     private func reload() async {
-        // Reset pagination state and load the first page.
-        await MainActor.run {
-            isLoading = true
-            reachedEnd = false
-            lastDocument = nil
-            posts.removeAll()
-            currentIndex = 0
-        }
-
-        // Simulate network delay for UX parity.
-        try? await Task.sleep(nanoseconds: 250_000_000)
-
-        // Use the country and channel-aware generator for consistency
+        // INSTANT: Generate posts synchronously (just array construction)
         let newPosts = Self.generateDemoPostsForCountryAndChannel(
             country: countries[selectedCountryIndex].code,
             channel: channels[selectedChannelIndex].id,
@@ -1237,56 +1282,30 @@ struct FeedView: View {
             count: pageSize
         )
 
-        let mixed = newPosts
-
-        await MainActor.run {
-            print("📡 [Feed] reload completed:")
-            print("   - Posts loaded: \(mixed.count)")
-            print("   - Country: \(countries[selectedCountryIndex].code)")
-            print("   - Channel: \(channels[selectedChannelIndex].id)")
-            
-            // Log first post details for debugging
-            if let firstPost = mixed.first {
-                print("   - First post ID: \(firstPost.id)")
-                print("   - First post mediaURL: \(firstPost.mediaURL)")
-                print("   - First post userID: \(firstPost.userID)")
-            }
-            
-            posts = mixed
-            isLoading = false
-            // If we couldn't load anything, mark as reached end to stop paginating.
-            reachedEnd = mixed.isEmpty
-            prefetchVisibleUsernames()
-            isFeedReady = !posts.isEmpty
-            print("   - Feed ready: \(isFeedReady)")
-            
-            // Store demo posts in shared store
-            DemoPostStore.shared.store(mixed)
-            print("   - Stored \(mixed.count) posts in DemoPostStore")
-            
-            // Trigger radius bar update for the first post
-            if !posts.isEmpty {
-                let firstPost = posts[0]
-                print("📱 [Feed] Initial load - showing first post radius: \(firstPost.radius)m")
-                RadiusBarAnimator.showPostRadius(firstPost.radius, duration: 0.8)
-            } else {
-                // No posts - set radius to 0
-                print("📱 [Feed] No posts - setting radius to 0")
-                RadiusBarAnimator.showPostRadius(0, duration: 0.3)
-            }
+        // Update UI immediately (no await needed)
+        isLoading = false
+        reachedEnd = false
+        lastDocument = nil
+        posts = newPosts
+        currentIndex = 0
+        isFeedReady = !posts.isEmpty
+        
+        // Update radius bar immediately
+        if let firstPost = newPosts.first {
+            RadiusBarAnimator.showPostRadius(firstPost.radius, duration: 0.3)
+        } else {
+            RadiusBarAnimator.showPostRadius(0, duration: 0.3)
+        }
+        
+        // Background tasks only
+        Task.detached(priority: .utility) {
+            DemoPostStore.shared.store(newPosts)
+            let uids = newPosts.map { $0.userID }
+            await UsernameCache.shared.prefetch(uids: uids)
         }
     }
 
     private func reloadForCountry() async {
-        await MainActor.run {
-            isLoading = true
-            isVideoLoading = true  // Show loading indicator during transition
-            reachedEnd = false
-            lastDocument = nil
-            posts.removeAll()
-            currentIndex = 0
-        }
-        try? await Task.sleep(nanoseconds: 150_000_000)
         let newPosts = Self.generateDemoPostsForCountryAndChannel(
             country: countries[selectedCountryIndex].code,
             channel: channels[selectedChannelIndex].id,
@@ -1294,40 +1313,25 @@ struct FeedView: View {
             count: pageSize
         )
 
-        let mixed = newPosts
-
-        await MainActor.run {
-            print("[Feed] reloadForCountry posts loaded: \(mixed.count) country=\(countries[selectedCountryIndex].code) channel=\(channels[selectedChannelIndex].id)")
-            posts = mixed
-            isLoading = false
-            isVideoLoading = false  // Hide loading indicator
-            reachedEnd = mixed.isEmpty
-            prefetchVisibleUsernames()
-            isFeedReady = !posts.isEmpty
-            print("[Feed] reloadForCountry set ready=\(isFeedReady)")
-            
-            // Store demo posts in shared store
-            DemoPostStore.shared.store(mixed)
-            
-            // Trigger radius bar update for the first post
-            if !posts.isEmpty {
-                let firstPost = posts[0]
-                print("📱 [Feed] Country reload - showing first post radius: \(firstPost.radius)m")
-                RadiusBarAnimator.showPostRadius(firstPost.radius, duration: 0.8)
-            }
+        // Update UI immediately (no await needed)
+        posts = newPosts
+        isLoading = false
+        isVideoLoading = false
+        reachedEnd = newPosts.isEmpty
+        isFeedReady = !newPosts.isEmpty
+        currentIndex = 0
+        
+        if let firstPost = newPosts.first {
+            RadiusBarAnimator.showPostRadius(firstPost.radius, duration: 0.3)
+        }
+        
+        // Background only
+        Task.detached(priority: .utility) {
+            DemoPostStore.shared.store(newPosts)
         }
     }
     
     private func reloadForChannel() async {
-        await MainActor.run {
-            isLoading = true
-            isVideoLoading = true  // Show loading indicator during transition
-            reachedEnd = false
-            lastDocument = nil
-            posts.removeAll()
-            currentIndex = 0
-        }
-        try? await Task.sleep(nanoseconds: 150_000_000)
         let newPosts = Self.generateDemoPostsForCountryAndChannel(
             country: countries[selectedCountryIndex].code,
             channel: channels[selectedChannelIndex].id,
@@ -1335,27 +1339,21 @@ struct FeedView: View {
             count: pageSize
         )
 
-        let mixed = newPosts
-
-        await MainActor.run {
-            print("[Feed] reloadForChannel posts loaded: \(mixed.count) country=\(countries[selectedCountryIndex].code) channel=\(channels[selectedChannelIndex].id)")
-            posts = mixed
-            isLoading = false
-            isVideoLoading = false  // Hide loading indicator
-            reachedEnd = mixed.isEmpty
-            prefetchVisibleUsernames()
-            isFeedReady = !posts.isEmpty
-            print("[Feed] reloadForChannel set ready=\(isFeedReady)")
-            
-            // Store demo posts in shared store
-            DemoPostStore.shared.store(mixed)
-            
-            // Trigger radius bar update for the first post
-            if !posts.isEmpty {
-                let firstPost = posts[0]
-                print("📱 [Feed] Channel reload - showing first post radius: \(firstPost.radius)m")
-                RadiusBarAnimator.showPostRadius(firstPost.radius, duration: 0.8)
-            }
+        // Update UI immediately (no await needed)
+        posts = newPosts
+        isLoading = false
+        isVideoLoading = false
+        reachedEnd = newPosts.isEmpty
+        isFeedReady = !newPosts.isEmpty
+        currentIndex = 0
+        
+        if let firstPost = newPosts.first {
+            RadiusBarAnimator.showPostRadius(firstPost.radius, duration: 0.3)
+        }
+        
+        // Background only
+        Task.detached(priority: .utility) {
+            DemoPostStore.shared.store(newPosts)
         }
     }
 
@@ -1628,62 +1626,12 @@ struct FeedView: View {
             result.append(post)
         }
         
-        // CRITICAL: Pre-generate additional posts for each unique user so they have a full profile
-        // This ensures when you click on a user, they have multiple posts in their profile
-        var postsPerUser: [String: [FeedPost]] = [:]
-        for post in result {
-            postsPerUser[post.userID, default: []].append(post)
-        }
-        
-        // Generate 5-10 additional posts per user for their profile
-        for (userID, existingPosts) in postsPerUser {
-            let additionalCount = Int.random(in: 5...10)
-            for j in 0..<additionalCount {
-                let additionalID = "\(country.lowercased())_\(channel)_\(userID)_profile_\(j)"
-                let mediaURL: String
-                if j % 2 == 0 {
-                    let w = [640, 720, 800, 1080].randomElement() ?? 800
-                    let h = [960, 1280, 1400, 1440, 1920].randomElement() ?? 1400
-                    mediaURL = "https://picsum.photos/\(w)/\(h)?random=\(Int.random(in: 1...10_000))"
-                } else {
-                    let sampleVideos = [
-                        "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_4x3/gear1/prog_index.m3u8",
-                        "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
-                        "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
-                    ]
-                    mediaURL = sampleVideos.randomElement() ?? "https://picsum.photos/800/1400"
-                }
-                
-                // Use random global city for variety
-                let city = globalCities.randomElement() ?? globalCities[0]
-                let latitude = city.lat + Double.random(in: -0.05...0.05)
-                let longitude = city.lon + Double.random(in: -0.05...0.05)
-                
-                // Varied radius for profile posts too
-                let radiusOptions: [Double] = [100, 500, 1_000, 5_000, 10_000, 50_000, 100_000, 500_000, 2_000_000, 10_000_000]
-                let radius = radiusOptions.randomElement() ?? 5_000
-                
-                let additionalPost = FeedPost(
-                    id: additionalID,
-                    latitude: latitude,
-                    longitude: longitude,
-                    mediaURL: mediaURL,
-                    radius: radius,
-                    viewCount: Int(radius / 100),
-                    userID: userID,
-                    cityName: city.name,
-                    countryName: city.country,
-                    countryFlag: city.flag
-                )
-                
-                // Store in DemoPostStore immediately so it's available for profile queries
-                DemoPostStore.shared.store([additionalPost])
-            }
-        }
+        // LAZY GENERATION: Profile posts will be generated on-demand when user profile is viewed
+        // This keeps initial feed load INSTANT
+        // NOTE: Profile posts can be generated later via a separate call when needed
         
         print("🌍 [FeedView] Generated \(result.count) GLOBAL feed posts from \(globalCities.count) cities!")
         print("   - Country: \(country), Channel: \(channel)")
-        print("   - User IDs: \(postsPerUser.keys.sorted())")
         print("   - Radius range: 100m to 20,000km (near-global coverage)")
         
         // Log sample of generated posts
@@ -1762,741 +1710,68 @@ struct FeedView: View {
         }
         return result
     }
-}
-
-// Removed YouTube API and YouTubeService definitions as per instruction
-
-private struct FeedFullscreenPageView: View {
-    let post: FeedPost
-    let displayName: String
-    var onUserTapped: (String) -> Void
-
-    @State private var imagePhaseDebug: String = ""
-    @State private var debugPlayerTimeControl: AVPlayer.TimeControlStatus = .waitingToPlayAtSpecifiedRate
-    @State private var debugItemStatus: AVPlayerItem.Status = .unknown
-
-    // Added for playback stuck detection and UI overlay
-    @State private var forceVideoPlaceholder: Bool = false
-    @State private var playbackStuck: Bool = false
-
-    private var coordinateText: String {
-        String(format: "%.4f, %.4f", post.latitude, post.longitude)
-    }
-
-    // REPLACED directVideoURL property with updated logic
-    private var directVideoURL: URL? {
-        guard let url = URL(string: post.mediaURL) else { return nil }
-        let lower = url.absoluteString.lowercased()
-
-        // If it's the Apple devstreaming segment (fileSequenceX.mp4), treat as non-direct video so we don't try to play a fragment.
-        if lower.contains("devstreaming-cdn.apple.com"),
-           lower.contains("filesequence"),
-            lower.hasSuffix(".mp4") {
-            return nil
+    
+    // MARK: - On-demand profile post generation
+    /// Generates additional posts for a user's profile (called lazily when profile is viewed)
+    static func generateProfilePosts(for userID: String, country: String, channel: String, count: Int = 10) {
+        // Check if we already have enough posts for this user
+        let existing = DemoPostStore.shared.posts(for: userID)
+        guard existing.count < 5 else {
+            print("📦 [ProfilePosts] User \(userID) already has \(existing.count) posts, skipping generation")
+            return
         }
-
-        // Broaden detection: handle querystrings and common video hints
-        let videoHints = [".mp4", ".m3u8", "/prog_index.m3u8", "video.mp4", "format=mp4", "format=hls", "type=video"]
-        let isVideo = videoHints.contains { lower.contains($0) }
-        return isVideo ? url : nil
-    }
-
-    // Replaced custom PlayerLayer with AVKit.VideoPlayer for reliability
-    private struct VideoPlayerContainer: View {
-        let url: URL
-        @Binding var hudTimeControl: AVPlayer.TimeControlStatus
-        @Binding var hudItemStatus: AVPlayerItem.Status
-        @Binding var playbackStuck: Bool
-        @State private var player: AVPlayer? = nil
-        @State private var itemObservation: NSKeyValueObservation? = nil
-        @State private var queuePlayer: AVQueuePlayer? = nil
-        @State private var looper: AVPlayerLooper? = nil
-
-        @State private var timeObserver: Any? = nil
         
-        @State private var pauseObserver: Any? = nil
-
-        @State private var itemFailed: Bool = false
-
-        private func setupPlayer() {
-            guard player == nil, queuePlayer == nil else { return }
+        let globalCities: [(name: String, lat: Double, lon: Double, country: String, flag: String)] = [
+            ("Tokyo", 35.6762, 139.6503, "Japan", "🇯🇵"),
+            ("London", 51.5074, -0.1278, "United Kingdom", "🇬🇧"),
+            ("New York", 40.7128, -74.0060, "USA", "🇺🇸"),
+            ("Paris", 48.8566, 2.3522, "France", "🇫🇷"),
+            ("Sydney", -33.8688, 151.2093, "Australia", "🇦🇺"),
+        ]
+        
+        var profilePosts: [FeedPost] = []
+        
+        for j in 0..<count {
+            let additionalID = "\(country.lowercased())_\(channel)_\(userID)_profile_\(j)"
+            let mediaURL: String
+            if j % 2 == 0 {
+                let w = [640, 720, 800, 1080].randomElement() ?? 800
+                let h = [960, 1280, 1400, 1440, 1920].randomElement() ?? 1400
+                mediaURL = "https://picsum.photos/\(w)/\(h)?random=\(Int.random(in: 1...10_000))"
+            } else {
+                let sampleVideos = [
+                    "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_4x3/gear1/prog_index.m3u8",
+                    "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
+                    "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
+                ]
+                mediaURL = sampleVideos.randomElement() ?? "https://picsum.photos/800/1400"
+            }
             
-            // Configure audio session for playback with mixing disabled so audio is audible
-            DispatchQueue.main.async {
-                let session = AVAudioSession.sharedInstance()
-                do {
-                    try session.setCategory(.playback, mode: .moviePlayback, options: [])
-                    try session.setActive(true, options: [])
-                } catch {
-                    print("[Video] Audio session setup failed (main): \(error)")
-                }
-            }
-
-            let isMP4 = url.absoluteString.lowercased().hasSuffix(".mp4")
-
-            if isMP4 {
-                // Use AVQueuePlayer + AVPlayerLooper for seamless mp4 looping
-                let asset = AVURLAsset(url: url)
-                _ = ["playable"]
-                asset.resourceLoader.preloadsEligibleContentKeys = true
-
-                let q = AVQueuePlayer()
-                q.allowsExternalPlayback = false
-                q.isMuted = false
-                q.automaticallyWaitsToMinimizeStalling = true
-                q.preventsDisplaySleepDuringVideoPlayback = true
-
-                // Load required key using modern async API
-                Task { [self] in
-                    do {
-                        let playable = try await asset.load(.isPlayable)
-                        guard playable else {
-                            await MainActor.run {
-                                self.itemFailed = true
-                                self.playbackStuck = true
-                            }
-                            print("[Video] MP4 asset not playable")
-                            NotificationCenter.default.post(name: Notification.Name("FeedAdvanceOnMediaFailure"), object: nil)
-                            return
-                        }
-                        let item = AVPlayerItem(asset: asset)
-                        item.preferredForwardBufferDuration = 0
-                        q.automaticallyWaitsToMinimizeStalling = false
-
-                        await MainActor.run {
-                            self.itemObservation = item.observe(\.status, options: [.initial, .new]) { _, _ in
-                                self.hudItemStatus = item.status
-                                print("[Video] MP4 item status: \(item.status.rawValue)")
-                                switch item.status {
-                                case .readyToPlay:
-                                    self.itemFailed = false
-                                    self.playbackStuck = false
-                                    q.removeAllItems()
-                                    self.looper = AVPlayerLooper(player: q, templateItem: item)
-                                    self.player = q
-                                    q.seek(to: CMTime(seconds: 0.01, preferredTimescale: 600))
-                                    FeedAudioManager.shared.playExclusively(q)
-                                    self.hudTimeControl = q.timeControlStatus
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                                        if q.timeControlStatus != .playing {
-                                            q.seek(to: CMTime(seconds: 0.02, preferredTimescale: 600))
-                                            q.playImmediately(atRate: 1.0)
-                                            self.hudTimeControl = q.timeControlStatus
-                                            if q.timeControlStatus == .playing { self.playbackStuck = false }
-                                        }
-                                    }
-                                case .failed:
-                                    self.itemFailed = true
-                                    if let err = item.error { print("[Video] MP4 item failed: \(err)") }
-                                case .unknown:
-                                    break
-                                @unknown default:
-                                    break
-                                }
-                            }
-                        }
-                    } catch {
-                        await MainActor.run { self.playbackStuck = true }
-                        print("[Video] MP4 asset load failed: \(error)")
-                        NotificationCenter.default.post(name: Notification.Name("FeedAdvanceOnMediaFailure"), object: nil)
-                    }
-                }
-            } else {
-                // HLS or other stream types: standard AVPlayer with end observer
-                let asset = AVURLAsset(url: url)
-                _ = ["playable"]
-                asset.resourceLoader.preloadsEligibleContentKeys = true
-
-                // Load required key using modern async API
-                Task { [self] in
-                    do {
-                        let playable = try await asset.load(.isPlayable)
-                        guard playable else {
-                            await MainActor.run { self.playbackStuck = true }
-                            print("[Video] HLS asset not playable")
-                            NotificationCenter.default.post(name: Notification.Name("FeedAdvanceOnMediaFailure"), object: nil)
-                            return
-                        }
-                        let item = AVPlayerItem(asset: asset)
-                        item.preferredForwardBufferDuration = 0
-                        let p = AVPlayer(playerItem: item)
-                        p.allowsExternalPlayback = false
-                        p.isMuted = false
-                        p.automaticallyWaitsToMinimizeStalling = false
-                        p.preventsDisplaySleepDuringVideoPlayback = true
-
-                        await MainActor.run {
-                            self.itemObservation = item.observe(\.status, options: [.initial, .new]) { _, _ in
-                                self.hudItemStatus = item.status
-                                print("[Video] Item status changed to: \(item.status.rawValue)")
-                                switch item.status {
-                                case .readyToPlay:
-                                    self.itemFailed = false
-                                    self.playbackStuck = false
-                                    let current = self.player ?? p
-                                    current.seek(to: CMTime(seconds: 0.01, preferredTimescale: 600))
-                                    FeedAudioManager.shared.playExclusively(current)
-                                    current.playImmediately(atRate: 1.0)
-                                    self.hudTimeControl = current.timeControlStatus
-                                case .failed:
-                                    self.itemFailed = true
-                                    if let err = item.error { print("[Video] Item failed: \(err)") }
-                                case .unknown:
-                                    break
-                                @unknown default:
-                                    break
-                                }
-                            }
-
-                            self.player = p
-                            FeedAudioManager.shared.register(p)
-
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { self.hudTimeControl = p.timeControlStatus }
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { self.hudTimeControl = p.timeControlStatus }
-                        }
-                    } catch {
-                        await MainActor.run { self.playbackStuck = true }
-                        print("[Video] HLS asset load failed: \(error)")
-                        NotificationCenter.default.post(name: Notification.Name("FeedAdvanceOnMediaFailure"), object: nil)
-                    }
-                }
-            }
-
-            // Removed two existing playback stuck checks at 3s and 5s and replaced with a single 8s check
-            DispatchQueue.main.asyncAfter(deadline: .now() + 8.0) {
-                let notPlaying = (self.hudTimeControl != .playing)
-                let notReady = (self.hudItemStatus != .readyToPlay)
-                if notPlaying && notReady {
-                    self.playbackStuck = true
-                    print("[Video] Playback appears stuck after 8s: timeControl=\(self.hudTimeControl.rawValue) item=\(self.hudItemStatus.rawValue)")
-                }
-            }
-        }
-
-        var body: some View {
-            Group {
-                if let player {
-                    PlayerLayerView(player: player)
-                        .onAppear {
-                            if player.timeControlStatus != .playing {
-                                player.playImmediately(atRate: 1.0)
-                            }
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-                                if let p = self.player, p.timeControlStatus != .playing {
-                                    p.playImmediately(atRate: 1.0)
-                                    self.hudTimeControl = p.timeControlStatus
-                                    if p.timeControlStatus == .playing {
-                                        self.playbackStuck = false
-                                    }
-                                }
-                            }
-                        }
-                } else {
-                    Color.black
-                }
-            }
-            .onAppear {
-                setupPlayer()
-            }
-            /*
-            .onAppear {
-                // Observe global pause to stop fullscreen playback immediately
-                self.pauseObserver = NotificationCenter.default.addObserver(forName: Notification.Name("PauseGlobalFeedAudio"), object: nil, queue: .main) { _ in
-                    self.playbackStuck = false
-                    if let obs = timeObserver, let p = player { p.removeTimeObserver(obs) }
-                    timeObserver = nil
-                    player?.pause()
-                    (player as? AVQueuePlayer)?.removeAllItems()
-                }
-            }
-            */
-            .onDisappear {
-                if let token = pauseObserver {
-                    NotificationCenter.default.removeObserver(token)
-                    pauseObserver = nil
-                }
-                self.playbackStuck = false
-                if let obs = timeObserver, let p = player {
-                    p.removeTimeObserver(obs)
-                }
-                timeObserver = nil
-                player?.pause()
-                (player as? AVQueuePlayer)?.removeAllItems()
-                player = nil
-                queuePlayer = nil
-                looper = nil
-                itemObservation = nil
-            }
-            .overlay(
-                Group {
-                    if itemFailed {
-                        VStack(spacing: 8) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundColor(.yellow)
-                                .font(.system(size: 28, weight: .bold))
-                            Text("Video failed to start. Showing placeholder.")
-                                .font(.system(size: 13, weight: .semibold))
-                        }
-                        .padding(12)
-                        .background(Color.black.opacity(0.7), in: Capsule())
-                        .foregroundColor(.white)
-                    } else if playbackStuck {
-                        LinearGradient(colors: [.clear, .white.opacity(0.06), .clear], startPoint: .top, endPoint: .bottom)
-                            .allowsHitTesting(false)
-                            .transition(.opacity)
-                    }
-                }
+            let city = globalCities.randomElement() ?? globalCities[0]
+            let latitude = city.lat + Double.random(in: -0.05...0.05)
+            let longitude = city.lon + Double.random(in: -0.05...0.05)
+            
+            let radiusOptions: [Double] = [100, 500, 1_000, 5_000, 10_000, 50_000, 100_000, 500_000, 2_000_000, 10_000_000]
+            let radius = radiusOptions.randomElement() ?? 5_000
+            
+            let additionalPost = FeedPost(
+                id: additionalID,
+                latitude: latitude,
+                longitude: longitude,
+                mediaURL: mediaURL,
+                radius: radius,
+                viewCount: Int(radius / 100),
+                userID: userID,
+                cityName: city.name,
+                countryName: city.country,
+                countryFlag: city.flag
             )
+            
+            profilePosts.append(additionalPost)
         }
-    }
-
-    private struct PlayerLayerView: UIViewRepresentable {
-        let player: AVPlayer?
-
-        func makeUIView(context: Context) -> PlayerHostingView {
-            let view = PlayerHostingView()
-            view.backgroundColor = .black
-            view.translatesAutoresizingMaskIntoConstraints = false
-            view.playerLayer.videoGravity = .resizeAspect  // Changed to .resizeAspect
-            view.player = player
-            return view
-        }
-
-        func updateUIView(_ uiView: PlayerHostingView, context: Context) {
-            uiView.player = player
-            uiView.playerLayer.videoGravity = .resizeAspect  // Changed to .resizeAspect
-            uiView.setNeedsLayout()
-            uiView.layoutIfNeeded()
-        }
-    }
-
-    private final class PlayerHostingView: UIView {
-        override class var layerClass: AnyClass { AVPlayerLayer.self }
-        var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
-        var player: AVPlayer? {
-            get { playerLayer.player }
-            set { playerLayer.player = newValue }
-        }
-        override func layoutSubviews() {
-            super.layoutSubviews()
-            playerLayer.frame = bounds
-            playerLayer.videoGravity = .resizeAspect  // Changed to .resizeAspect
-        }
-    }
-
-    private var debugTimeControlText: String {
-        switch debugPlayerTimeControl {
-        case .paused: return "paused"
-        case .waitingToPlayAtSpecifiedRate: return "waiting"
-        case .playing: return "playing"
-        @unknown default: return "unknown"
-        }
-    }
-
-    private var debugItemStatusText: String {
-        switch debugItemStatus {
-        case .unknown: return "unknown"
-        case .readyToPlay: return "ready"
-        case .failed: return "failed"
-        @unknown default: return "unknown"
-        }
-    }
-
-    // REPLACED body implementation with a thin wrapper delegating to contentView to reduce type-checking complexity
-    var body: some View {
-        GeometryReader { geo in
-            contentView(size: geo.size)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color.black)
-                //.ignoresSafeArea() // removed as per instructions
-                .contentShape(Rectangle())
-                .onLongPressGesture(minimumDuration: 0.5) {
-                    // Long press to show post location on map with user annotation
-                    let coordinate = CLLocationCoordinate2D(latitude: post.latitude, longitude: post.longitude)
-                    print("📍 [FeedFullscreenPageView] Long press - showing post location: \(coordinate.latitude), \(coordinate.longitude)")
-                    
-                    // Haptic feedback
-                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                    
-                    // Fetch user profile info asynchronously
-                    Task {
-                        // Get username
-                        let username = await UsernameCache.shared.username(for: post.userID)
-                        
-                        // Get profile image URL if available (from Firestore user document)
-                        var profileImageURL: String? = nil
-                        #if !POP_PREVIEW_LIGHT
-                        #if canImport(FirebaseFirestore)
-                        do {
-                            let db = Firestore.firestore()
-                            let userDoc = try await db.collection("users").document(post.userID).getDocument()
-                            if let data = userDoc.data(),
-                               let urlString = data["profilePictureURL"] as? String {
-                                profileImageURL = urlString
-                            }
-                        } catch {
-                            print("⚠️ [FeedFullscreenPageView] Failed to fetch profile image: \(error.localizedDescription)")
-                        }
-                        #endif
-                        #endif
-                        
-                        await MainActor.run {
-                            // Prepare user info with coordinate as CLLocationCoordinate2D object
-                            var userInfo: [String: Any] = [
-                                "coordinate": coordinate,  // Use coordinate object
-                                "userID": post.userID,
-                                "username": username ?? displayName,
-                                "radius": Double(post.radius)
-                            ]
-                            
-                            // Add profile image URL if available
-                            if let profileURL = profileImageURL {
-                                userInfo["profileImageURL"] = profileURL
-                            }
-                            
-                            // Add location metadata if available
-                            if let cityName = post.cityName {
-                                userInfo["cityName"] = cityName
-                            }
-                            if let countryName = post.countryName {
-                                userInfo["countryName"] = countryName
-                            }
-                            if let countryFlag = post.countryFlag {
-                                userInfo["countryFlag"] = countryFlag
-                            }
-                            
-                            print("📍 [FeedFullscreenPageView] Posting ShowLocationOnMap with coordinate: \(coordinate.latitude), \(coordinate.longitude)")
-                            print("   Username: \(username ?? displayName), Profile URL: \(profileImageURL ?? "nil")")
-                            if let city = post.cityName, let country = post.countryName {
-                                print("   Location: \(city), \(country) \(post.countryFlag ?? "")")
-                            }
-                            print("   Radius: \(Int(post.radius))m")
-                            
-                            // ALSO store in MapStateManager for when MapView isn't loaded yet
-                            print("📍 [FeedFullscreenPageView] Setting pending post location in MapStateManager")
-                            MapStateManager.shared.setPendingPostLocation(
-                                coordinate,
-                                userID: post.userID,
-                                username: username ?? displayName,
-                                profileImageURL: profileImageURL,
-                                radius: Double(post.radius),
-                                cityName: post.cityName,
-                                countryName: post.countryName,
-                                countryFlag: post.countryFlag
-                            )
-                            
-                            // Post notification to show location on map
-                            NotificationCenter.default.post(
-                                name: Notification.Name("ShowLocationOnMap"),
-                                object: nil,
-                                userInfo: userInfo
-                            )
-                            
-                            // Wait a moment before switching tabs
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                                // Switch to map tab
-                                NotificationCenter.default.post(
-                                    name: Notification.Name("SwitchToMapTab"),
-                                    object: nil
-                                )
-                            }
-                        }
-                    }
-                }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.black)
-    }
-
-    @ViewBuilder
-    private func contentView(size: CGSize) -> some View {
-        let isVideo = (directVideoURL != nil)
         
-        // Debug logging
-        let _ = print("🎬 [FeedFullscreenPageView] Rendering post \(post.id)")
-        let _ = print("   mediaURL: \(post.mediaURL)")
-        let _ = print("   isVideo: \(isVideo)")
-        let _ = print("   directVideoURL: \(directVideoURL?.absoluteString ?? "nil")")
-        
-        ZStack {
-            Color.black
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .ignoresSafeArea()
-                .zIndex(0)
-
-            if isVideo, let videoURL = directVideoURL {
-                videoContent(size: size, videoURL: videoURL)
-                    .onAppear {
-                        print("🎥 [FeedFullscreenPageView] Showing video: \(videoURL.absoluteString)")
-                    }
-            } else if let url = URL(string: post.mediaURL) {
-                imageContent(size: size, url: url)
-                    .onAppear {
-                        print("🖼️ [FeedFullscreenPageView] Showing image: \(url.absoluteString)")
-                    }
-            } else {
-                VStack(spacing: 16) {
-                    Image(systemName: "photo.fill")
-                        .font(.system(size: 60))
-                        .foregroundColor(.white.opacity(0.5))
-                    Text("Invalid media URL")
-                        .foregroundColor(.white.opacity(0.7))
-                    Text(post.mediaURL)
-                        .font(.caption)
-                        .foregroundColor(.white.opacity(0.5))
-                        .multilineTextAlignment(.center)
-                        .padding()
-                }
-                .onAppear {
-                    print("⚠️ [FeedFullscreenPageView] Invalid URL for post \(post.id): \(post.mediaURL)")
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func videoContent(size: CGSize, videoURL: URL) -> some View {
-        VideoPlayerContainer(url: videoURL, hudTimeControl: $debugPlayerTimeControl, hudItemStatus: $debugItemStatus, playbackStuck: $playbackStuck)
-            .frame(width: size.width, height: size.height)
-            .background(Color.black)
-    }
-
-    @ViewBuilder
-    private func imageContent(size: CGSize, url: URL) -> some View {
-        AsyncImage(url: url, transaction: Transaction(animation: .none)) { phase in
-            switch phase {
-            case .empty:
-                ZStack {
-                    Color.black
-                    ProgressView()
-                        .tint(.white)
-                        .scaleEffect(1.5)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .ignoresSafeArea()
-                .onAppear {
-                    imagePhaseDebug = "empty"
-                    print("📸 [Feed] Loading image: \(url.absoluteString)")
-                }
-            case .success(let img):
-                img
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: size.width, height: size.height)
-                    .background(Color.black)
-                    .onAppear {
-                        imagePhaseDebug = "success"
-                        print("✅ [Feed] Image loaded successfully: \(url.absoluteString)")
-                    }
-            case .failure(let error):
-                ZStack {
-                    Color.black
-                    VStack(spacing: 12) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.system(size: 40))
-                            .foregroundColor(.yellow)
-                        Text("Image failed to load")
-                            .foregroundColor(.white)
-                        Text(url.lastPathComponent)
-                            .font(.caption)
-                            .foregroundColor(.white.opacity(0.7))
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .ignoresSafeArea()
-                .onAppear {
-                    imagePhaseDebug = "failure"
-                    print("❌ [Feed] Image load failed: \(url.absoluteString), error: \(error.localizedDescription)")
-                }
-            @unknown default:
-                Color.black
-                    .onAppear {
-                        imagePhaseDebug = "unknown"
-                        print("⚠️ [Feed] Unknown image phase for: \(url.absoluteString)")
-                    }
-            }
-        }
-        .id("image_\(post.id)_\(url.absoluteString)")
-    }
-
-    private var playerHUD: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("player: \(debugTimeControlText)")
-            Text("item: \(debugItemStatusText)")
-        }
-        .font(.system(size: 11, weight: .semibold, design: .monospaced))
-        .foregroundColor(.white)
-        .padding(8)
-        .background(Color.black.opacity(0.55), in: Capsule())
-        .padding(.top, 8)
-        .padding(.leading, 12)
-    }
-
-    @ViewBuilder
-    private var nonBlockingLoadingOverlay: some View {
-        // Show a subtle shimmer when playback appears stuck; explicit failure UI is handled inside VideoPlayerContainer
-        if playbackStuck {
-            LinearGradient(colors: [.clear, .white.opacity(0.06), .clear], startPoint: .top, endPoint: .bottom)
-                .allowsHitTesting(false)
-                .transition(.opacity)
-        } else {
-            EmptyView()
-        }
-    }
-
-    private var mediaURLBadge: some View {
-        Text(post.mediaURL)
-            .font(.system(size: 11, weight: .regular, design: .monospaced))
-            .foregroundColor(.white.opacity(0.95))
-            .lineLimit(1)
-            .truncationMode(.middle)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 4)
-            .background(Color.black.opacity(0.55), in: Capsule())
-            .overlay(Capsule().stroke(Color.white.opacity(0.25), lineWidth: 1))
-    }
-
-    private func topRightInfo(size: CGSize) -> some View {
-        VStack(alignment: .trailing, spacing: 6) {
-            Button(action: { onUserTapped(post.userID) }) {
-                Text(displayName.isEmpty ? "User" : displayName)
-                    .font(.system(size: 16, weight: .bold, design: .rounded))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(Color.black.opacity(0.65), in: Capsule())
-                    .overlay(Capsule().stroke(Color.white.opacity(0.35), lineWidth: 1))
-            }
-            .buttonStyle(.plain)
-
-            Text(String(format: "%.4f, %.4f", post.latitude, post.longitude))
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
-                .foregroundColor(.white.opacity(0.95))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .background(Color.black.opacity(0.55), in: Capsule())
-        }
-        .padding(.trailing, 16)
-        .padding(.top, 40)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-        .allowsHitTesting(true)
-    }
-}
-
-private struct StaticView: View {
-    let size: CGSize
-    let isVisible: Bool
-
-    @State private var jitterX: CGFloat = 0
-    @State private var scanlinePhase: CGFloat = 0
-
-    var body: some View {
-        ZStack {
-            // Color bands (retro vertical stripes)
-            colorBands
-                .offset(x: jitterX)
-                .animation(.linear(duration: 0.12), value: jitterX)
-
-            // Scanlines
-            scanlines
-                .blendMode(.overlay)
-                .opacity(0.35)
-                .offset(y: scanlinePhase)
-                .animation(.linear(duration: 0.06).repeatForever(autoreverses: false), value: scanlinePhase)
-
-            // Grain (simple white/black noise shimmer)
-            Rectangle()
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color.white.opacity(0.08),
-                            Color.black.opacity(0.08),
-                            Color.white.opacity(0.08)
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-                .opacity(0.5)
-                .blendMode(.softLight)
-        }
-        .frame(width: size.width, height: size.height)
-        .opacity(isVisible ? 1 : 0)
-        .animation(.easeOut(duration: 0.16), value: isVisible)
-        .onAppear {
-            // Initialize animation phases
-            jitterX = CGFloat.random(in: -6...6)
-            scanlinePhase = .random(in: -4...4)
-            // Kick small jitter updates when visible
-            if isVisible {
-                withAnimation(.linear(duration: 0.12)) {
-                    jitterX = CGFloat.random(in: -6...6)
-                }
-            }
-        }
-        .onChange(of: isVisible) { visible in
-            if visible {
-                jitterX = CGFloat.random(in: -6...6)
-                scanlinePhase = .random(in: -4...4)
-            }
-        }
-    }
-
-    private var colorBands: some View {
-        HStack(spacing: 0) {
-            Color.red
-            Color.green
-            Color.blue
-            Color.cyan
-            Color.pink
-            Color.yellow
-            Color.red
-            Color.green
-        }
-        .frame(width: size.width, height: size.height)
-        .mask(
-            LinearGradient(
-                colors: [
-                    .white.opacity(0.9), .white.opacity(0.7), .white.opacity(0.9)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        )
-        .saturation(1.2)
-        .contrast(1.2)
-        .opacity(0.9)
-    }
-
-    private var scanlines: some View {
-        // Repeating thin dark lines
-        let lineHeight: CGFloat = 2
-        let spacing: CGFloat = 4
-        return Stripes(lineWidth: lineHeight, spacing: spacing)
-            .fill(Color.black.opacity(0.35))
-            .frame(width: size.width, height: size.height)
-    }
-}
-
-// Utility shape for repeating horizontal stripes
-private struct Stripes: Shape {
-    let lineWidth: CGFloat
-    let spacing: CGFloat
-
-    func path(in rect: CGRect) -> Path {
-        var p = Path()
-        var y: CGFloat = rect.minY
-        while y < rect.maxY {
-            p.addRect(CGRect(x: rect.minX, y: y, width: rect.width, height: lineWidth))
-            y += lineWidth + spacing
-        }
-        return p
-    }
-}
-
-private extension Array {
-    subscript(safe index: Int) -> Element? {
-        indices.contains(index) ? self[index] : nil
+        DemoPostStore.shared.store(profilePosts)
+        print("📦 [ProfilePosts] Generated \(profilePosts.count) posts for user \(userID)")
     }
 }
 

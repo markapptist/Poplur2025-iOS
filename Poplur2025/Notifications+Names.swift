@@ -46,4 +46,13 @@ extension Notification.Name {
     // Camera roll
     static let CameraRollImageSelected = Notification.Name("CameraRollImageSelected")
     static let CameraRollVideoSelected = Notification.Name("CameraRollVideoSelected")
+    
+    // Radius bar and capture
+    static let currentPostRadiusDidChange = Notification.Name("CurrentPostRadiusDidChange")
+    static let showCapturedPreviewRequested = Notification.Name("ShowCapturedPreviewRequested")
+    static let capturePreviewDidDismiss = Notification.Name("CapturePreviewDidDismiss")
+    static let radiusBarGlobeTap = Notification.Name("RadiusBarGlobeTap")
+    static let radiusBarHoldBegan = Notification.Name("RadiusBarHoldBegan")
+    static let radiusBarHoldEnded = Notification.Name("RadiusBarHoldEnded")
+    static let animateRadiusBarToValue = Notification.Name("AnimateRadiusBarToValue")
 }

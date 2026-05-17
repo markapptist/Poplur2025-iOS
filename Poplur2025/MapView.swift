@@ -940,13 +940,24 @@ struct MapViewProduction: View {
         print("   Target: \(coordinate.latitude), \(coordinate.longitude)")
         print("   City: \(cityName)")
         print("   Post radius: \(postRadius ?? 0)m")
+        print("   shownPostCoordinate: \(String(describing: shownPostCoordinate))")
+        print("   CURRENT currentCity: '\(currentCity)'")
+        print("   CURRENT aiRecommendation: '\(aiRecommendation)'")
         
         // Stop any active tour
         mapState.stopTour()
         
-        // Update city info
-        currentCity = cityName
-        aiRecommendation = "Explore what's happening here!"
+        // Only update UI text if we're NOT showing a post location
+        // (showing post location sets comprehensive text that shouldn't be overridden)
+        if shownPostCoordinate == nil {
+            print("   ⚠️ shownPostCoordinate is nil - UPDATING UI text")
+            currentCity = cityName
+            aiRecommendation = "Explore what's happening here!"
+        } else {
+            print("   ✅ shownPostCoordinate is SET - PRESERVING existing UI text")
+            print("      Keeping currentCity: '\(currentCity)'")
+            print("      Keeping aiRecommendation: '\(aiRecommendation)'")
+        }
         
         let currentCoord = camera.camera?.centerCoordinate ?? coordinate
         print("   Current camera: \(currentCoord.latitude), \(currentCoord.longitude)")
@@ -1238,6 +1249,7 @@ struct MapViewProduction: View {
                 position: cameraBinding,
                 interactionModes: [.pan, .rotate, .pitch, .zoom]
             ) {
+                let _ = print("🗺️ [MapView] Map body re-evaluating, shownPostCoordinate: \(String(describing: shownPostCoordinate))")
                 // Show user annotation when location is available
                 if locationManager.location != nil {
                     UserAnnotation {
@@ -1285,6 +1297,11 @@ struct MapViewProduction: View {
                 
                 // Show pin for post location being viewed
                 if let coord = shownPostCoordinate {
+                    // Debug: Log that we're rendering the annotation
+                    let _ = print("🗺️ [MapView] Rendering post annotation at: \(coord.latitude), \(coord.longitude)")
+                    let _ = print("   Radius: \(shownPostRadius ?? 0)m")
+                    let _ = print("   Username: \(shownPostUsername ?? "nil")")
+                    
                     // Show radius circle if available
                     if let radius = shownPostRadius {
                         MapCircle(center: coord, radius: radius)
@@ -1292,8 +1309,31 @@ struct MapViewProduction: View {
                             .stroke(Color.purple.opacity(0.5), lineWidth: 2)
                     }
                     
-                    // Show detailed pin annotation with callout
-                    Annotation(shownPostUsername ?? "Post Location", coordinate: coord) {
+                    // Build comprehensive annotation label showing all key info
+                    let annotationLabel: String = {
+                        var components: [String] = []
+                        
+                        // Username
+                        if let username = shownPostUsername {
+                            components.append(username)
+                        }
+                        
+                        // Coordinates
+                        let coordText = String(format: "%.4f, %.4f", coord.latitude, coord.longitude)
+                        components.append(coordText)
+                        
+                        // Location (flag + city)
+                        if let cityName = shownPostCityName {
+                            let flag = shownPostCountryFlag ?? ""
+                            let cityText = flag.isEmpty ? cityName : "\(flag) \(cityName)"
+                            components.append(cityText)
+                        }
+                        
+                        return components.joined(separator: " • ")
+                    }()
+                    
+                    // Show detailed pin annotation with comprehensive label
+                    Annotation(annotationLabel, coordinate: coord) {
                         VStack(spacing: 8) {
                             // Information card above the pin
                             VStack(spacing: 8) {
@@ -1792,6 +1832,33 @@ struct MapViewProduction: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("SwitchToMapTab"))) { _ in
                 print("🔔 [MapView] SwitchToMapTab notification received!")
+                print("   ❌❌❌ CRITICAL: pendingPostLocation is nil!")
+                print("   ❌❌❌ This means FeedView long-press handler DID NOT RUN!")
+                print("   ❌❌❌ Check FeedView.swift - the .onLongPressGesture is NOT firing!")
+                print("   mapState.pendingPostLocation: \(String(describing: mapState.pendingPostLocation))")
+                print("   mapState.pendingPostUsername: \(mapState.pendingPostUsername ?? "nil")")
+                print("   mapState.pendingPostRadius: \(mapState.pendingPostRadius ?? 0)")
+                
+                // Add assertion to make this VERY visible
+                if mapState.pendingPostLocation == nil {
+                    print("")
+                    print("════════════════════════════════════════════════════════════")
+                    print("⛔️ DIAGNOSIS: FEEDVIEW LONG-PRESS GESTURE IS NOT WORKING ⛔️")
+                    print("════════════════════════════════════════════════════════════")
+                    print("Expected flow:")
+                    print("1. User long-presses post in FeedView")
+                    print("2. FeedView calls MapStateManager.setPendingPostLocation(...)")
+                    print("3. FeedView posts ShowLocationOnMap notification")
+                    print("4. FeedView posts SwitchToMapTab notification")
+                    print("")
+                    print("What's happening:")
+                    print("❌ Steps 2-3 are SKIPPED - gesture not firing!")
+                    print("✅ Only step 4 happens - tab switches with no data")
+                    print("")
+                    print("Fix: Check FeedView.swift for gesture conflicts!")
+                    print("════════════════════════════════════════════════════════════")
+                    print("")
+                }
                 
                 // CHECK FOR PENDING POST LOCATION FIRST!
                 if let pendingCoordinate = mapState.pendingPostLocation {
@@ -1804,7 +1871,7 @@ struct MapViewProduction: View {
                     
                     print("🔒 [MapView] Set 15-second locks for pending navigation")
                     
-                    // Store post information for display
+                    // CRITICAL: Set shownPostCoordinate IMMEDIATELY
                     shownPostCoordinate = pendingCoordinate
                     shownPostRadius = mapState.pendingPostRadius
                     shownPostUsername = mapState.pendingPostUsername
@@ -1812,40 +1879,79 @@ struct MapViewProduction: View {
                     shownPostCountryName = mapState.pendingPostCountryName
                     shownPostCountryFlag = mapState.pendingPostCountryFlag
                     
+                    print("💾 [MapView] Set shownPostCoordinate from pending:")
+                    print("   Coordinate: \(pendingCoordinate.latitude), \(pendingCoordinate.longitude)")
+                    print("   Username: \(shownPostUsername ?? "nil")")
+                    print("   Radius: \(shownPostRadius ?? 0)m")
+                    print("   City: \(shownPostCityName ?? "nil")")
+                    print("   Country: \(shownPostCountryName ?? "nil")")
+                    
                     // Stop tour and enter showing post location mode
                     mapState.stopTour()
                     mapState.showPostLocation(pendingCoordinate)
                     
-                    // Update UI
-                    currentCity = "Post Location"
+                    // Update UI with comprehensive location info
+                    let latStr = String(format: "%.4f", pendingCoordinate.latitude)
+                    let lonStr = String(format: "%.4f", pendingCoordinate.longitude)
+                    
+                    var cityComponents: [String] = []
                     if let username = mapState.pendingPostUsername {
-                        aiRecommendation = "📍 \(username)'s post location"
+                        cityComponents.append(username)
+                    }
+                    cityComponents.append("\(latStr), \(lonStr)")
+                    if let flag = mapState.pendingPostCountryFlag, let city = mapState.pendingPostCityName {
+                        cityComponents.append("\(flag) \(city)")
+                    } else if let city = mapState.pendingPostCityName {
+                        cityComponents.append(city)
+                    }
+                    
+                    currentCity = cityComponents.joined(separator: " • ")
+                    
+                    if let radius = mapState.pendingPostRadius {
+                        let radiusText = radius >= 1000 
+                            ? String(format: "%.1f km", radius / 1000) 
+                            : String(format: "%.0f m", radius)
+                        aiRecommendation = "Post radius: \(radiusText)"
                     } else {
-                        aiRecommendation = "📍 Navigating to post location..."
+                        aiRecommendation = "Viewing post location"
                     }
                     
-                    // Snap to coordinate immediately
-                    withAnimation(.none) {
-                        camera = .camera(
-                            MapCamera(
-                                centerCoordinate: pendingCoordinate,
-                                distance: fixedDistanceAlt,
-                                heading: 0,
-                                pitch: fixedPitchAlt
+                    print("✅ [MapView] Set UI text:")
+                    print("   currentCity: '\(currentCity)'")
+                    print("   aiRecommendation: '\(aiRecommendation)'")
+                    
+                    // Small delay to ensure SwiftUI processes the state changes
+                    Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 100_000_000)
+                        
+                        print("📸 [MapView] Now snapping camera to coordinate")
+                        
+                        // Snap to coordinate immediately
+                        withAnimation(.none) {
+                            camera = .camera(
+                                MapCamera(
+                                    centerCoordinate: pendingCoordinate,
+                                    distance: fixedDistanceAlt,
+                                    heading: 0,
+                                    pitch: fixedPitchAlt
+                                )
                             )
-                        )
+                        }
+                        
+                        print("🎬 [MapView] Starting tour-style transition")
+                        
+                        // Start tour-style transition with post radius
+                        navigateWithTourTransition(to: pendingCoordinate, cityName: "Post Location", postRadius: mapState.pendingPostRadius)
+                        
+                        // Clear pending location AFTER navigation starts
+                        try? await Task.sleep(nanoseconds: 500_000_000)
+                        mapState.clearPendingPostLocation()
                     }
-                    
-                    print("📸 [MapView] Camera snapped to pending coordinate")
-                    
-                    // Start tour-style transition with post radius
-                    navigateWithTourTransition(to: pendingCoordinate, cityName: "Post Location", postRadius: mapState.pendingPostRadius)
-                    
-                    // Clear pending location
-                    mapState.clearPendingPostLocation()
                     
                     return // Exit early - don't set shorter locks below
                 }
+                
+                print("ℹ️ [MapView] No pending post location - normal tab switch")
                 
                 // Normal tab switch behavior (no pending location)
                 // When switching to map, DON'T override existing locks if they're already set
@@ -1887,6 +1993,7 @@ struct MapViewProduction: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ShowLocationOnMap"))) { notification in
                 print("🔔 [MapView] ShowLocationOnMap notification received!")
+                print("   ⚠️ THIS NOTIFICATION SHOULD HAVE POST DATA!")
                 
                 // Show a specific coordinate on the map (from long-press on post)
                 guard let userInfo = notification.userInfo else {
@@ -1934,6 +2041,19 @@ struct MapViewProduction: View {
                 print("   Current camera: \(camera.camera?.centerCoordinate.latitude ?? 0), \(camera.camera?.centerCoordinate.longitude ?? 0)")
                 print("   Tour active: \(mapState.isInTourMode)")
 
+                // ALSO store in MapStateManager for when tab switches
+                print("💾 [MapView] ALSO storing in MapStateManager.pending for tab switch")
+                mapState.setPendingPostLocation(
+                    coordinate,
+                    userID: nil,
+                    username: postUsername,
+                    profileImageURL: nil,
+                    radius: postRadius,
+                    cityName: cityName,
+                    countryName: countryName,
+                    countryFlag: countryFlag
+                )
+
                 // FIRST: Set locks BEFORE doing anything else
                 // This ensures no other operation can interfere
                 suppressUserCenteringUntil = Date().addingTimeInterval(15)
@@ -1947,7 +2067,8 @@ struct MapViewProduction: View {
                 // Stop any active tour or operation
                 mapState.stopTour()
 
-                // Set display values for annotation and radius
+                // CRITICAL: Set shownPostCoordinate FIRST before doing anything else
+                // This ensures navigateWithTourTransition knows we're showing a post location
                 shownPostCoordinate = coordinate
                 shownPostRadius = postRadius
                 shownPostUsername = postUsername
@@ -1955,62 +2076,83 @@ struct MapViewProduction: View {
                 shownPostCountryName = countryName
                 shownPostCountryFlag = countryFlag
                 
-                print("💾 [MapView] Stored post location state:")
+                print("💾 [MapView] Stored post location state IN MapView:")
                 print("   shownPostCoordinate: \(String(describing: shownPostCoordinate))")
                 print("   shownPostRadius: \(String(describing: shownPostRadius))")
                 print("   shownPostUsername: \(String(describing: shownPostUsername))")
                 print("   shownPostCityName: \(String(describing: shownPostCityName))")
                 print("   shownPostCountryName: \(String(describing: shownPostCountryName))")
                 print("   shownPostCountryFlag: \(String(describing: shownPostCountryFlag))")
+                
+                // Force view update by touching a dummy state variable
+                // This ensures SwiftUI re-evaluates the Map body
+                self.radiusMeters = self.radiusMeters
 
                 // Enter "showing post location" mode - this prevents auto-centering on user
                 mapState.showPostLocation(coordinate)
 
-                // ✅ Update UI with enhanced location info
-                if let flag = countryFlag, let city = cityName, let country = countryName {
-                    self.currentCity = "\(flag) \(city), \(country)"
-                } else if let city = cityName {
-                    self.currentCity = city
-                } else {
-                    self.currentCity = "Post Location"
-                }
-                
-                // Format coordinates nicely
+                // Format coordinates
                 let latStr = String(format: "%.4f", coordinate.latitude)
                 let lonStr = String(format: "%.4f", coordinate.longitude)
                 
+                // Build currentCity with all available info
+                var cityComponents: [String] = []
                 if let username = postUsername {
-                    self.aiRecommendation = "📍 \(latStr)°, \(lonStr)° — \(username)'s post"
-                } else {
-                    self.aiRecommendation = "📍 \(latStr)°, \(lonStr)°"
+                    cityComponents.append(username)
                 }
-
-                // Immediately snap camera to target once to verify we use the post coordinate
-                withAnimation(.none) {
-                    camera = .camera(
-                        MapCamera(
-                            centerCoordinate: coordinate,
-                            distance: fixedDistanceAlt,
-                            heading: 0,
-                            pitch: fixedPitchAlt
-                        )
-                    )
+                cityComponents.append("\(latStr), \(lonStr)")
+                if let flag = countryFlag, let city = cityName {
+                    cityComponents.append("\(flag) \(city)")
+                } else if let city = cityName {
+                    cityComponents.append(city)
                 }
                 
-                print("📸 [MapView] Camera snapped to target coordinate immediately")
+                currentCity = cityComponents.joined(separator: " • ")
+                
+                // Build aiRecommendation with radius info if available
+                if let radius = postRadius {
+                    let radiusText = radius >= 1000 
+                        ? String(format: "%.1f km", radius / 1000) 
+                        : String(format: "%.0f m", radius)
+                    aiRecommendation = "Post radius: \(radiusText)"
+                } else {
+                    aiRecommendation = "Viewing post location"
+                }
+                
+                print("✅ [MapView] Set comprehensive UI text:")
+                print("   currentCity: '\(currentCity)'")
+                print("   aiRecommendation: '\(aiRecommendation)'")
 
-                // Use the tour-style transition for smooth navigation with radius
-                self.navigateWithTourTransition(to: coordinate, cityName: "Post Location", postRadius: postRadius)
-
-                // Update recommendation after navigation completes to show radius
+                // DON'T snap camera or call navigateWithTourTransition yet
+                // Instead, use a small delay to ensure SwiftUI has processed the state changes
+                print("⏱️ [MapView] Waiting 100ms for SwiftUI to process state changes...")
+                
                 Task { @MainActor in
-                    try? await Task.sleep(nanoseconds: 7_000_000_000) // 6.5s sequence + buffer
-                    if let radius = postRadius {
-                        let radiusKm = radius >= 1000 ? String(format: "%.1fkm", radius / 1000) : "\(Int(radius))m"
-                        self.aiRecommendation = "📍 \(latStr)°, \(lonStr)° • Radius: \(radiusKm)"
-                    } else {
-                        self.aiRecommendation = "📍 This is where the post was created!"
+                    try? await Task.sleep(nanoseconds: 100_000_000) // 100ms delay
+                    
+                    print("🎬 [MapView] Now starting navigation animation")
+                    print("   Current shownPostCoordinate: \(String(describing: shownPostCoordinate))")
+                    print("   Current currentCity: '\(currentCity)'")
+                    
+                    // Immediately snap camera to target
+                    withAnimation(.none) {
+                        camera = .camera(
+                            MapCamera(
+                                centerCoordinate: coordinate,
+                                distance: fixedDistanceAlt,
+                                heading: 0,
+                                pitch: fixedPitchAlt
+                            )
+                        )
                     }
+                    
+                    print("📸 [MapView] Camera snapped to target coordinate")
+
+                    // Use the tour-style transition for smooth navigation with radius
+                    // This should NOT override the UI text because shownPostCoordinate is now set
+                    navigateWithTourTransition(to: coordinate, cityName: "Post Location", postRadius: postRadius)
+                    
+                    print("✅ [MapView] Navigation transition started")
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("SetCameraCoordinate"))) { notification in
@@ -2133,12 +2275,30 @@ struct MapViewProduction: View {
             // Enter showing post location mode
             mapState.showPostLocation(pendingCoordinate)
             
-            // Update UI
-            currentCity = "Post Location"
+            // Update UI with comprehensive location info
+            let latStr = String(format: "%.4f", pendingCoordinate.latitude)
+            let lonStr = String(format: "%.4f", pendingCoordinate.longitude)
+            
+            var cityComponents: [String] = []
             if let username = mapState.pendingPostUsername {
-                aiRecommendation = "📍 \(username)'s post location"
+                cityComponents.append(username)
+            }
+            cityComponents.append("\(latStr), \(lonStr)")
+            if let flag = mapState.pendingPostCountryFlag, let city = mapState.pendingPostCityName {
+                cityComponents.append("\(flag) \(city)")
+            } else if let city = mapState.pendingPostCityName {
+                cityComponents.append(city)
+            }
+            
+            currentCity = cityComponents.joined(separator: " • ")
+            
+            if let radius = mapState.pendingPostRadius {
+                let radiusText = radius >= 1000 
+                    ? String(format: "%.1f km", radius / 1000) 
+                    : String(format: "%.0f m", radius)
+                aiRecommendation = "Post radius: \(radiusText)"
             } else {
-                aiRecommendation = "📍 Navigating to post location..."
+                aiRecommendation = "Viewing post location"
             }
             
             // Snap to coordinate immediately
