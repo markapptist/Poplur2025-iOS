@@ -463,6 +463,10 @@ struct FeedFullscreenPageView: View {
                         .foregroundColor(.white.opacity(0.7))
                 }
             }
+            
+            // Username overlay in top-right corner
+            topRightInfo(size: size)
+                .zIndex(10)
         }
     }
 
@@ -550,28 +554,37 @@ struct FeedFullscreenPageView: View {
     }
 
     private func topRightInfo(size: CGSize) -> some View {
-        VStack(alignment: .trailing, spacing: 6) {
-            Button(action: { onUserTapped(post.userID) }) {
-                Text(displayName.isEmpty ? "User" : displayName)
-                    .font(.system(size: 16, weight: .bold, design: .rounded))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(Color.black.opacity(0.65), in: Capsule())
-                    .overlay(Capsule().stroke(Color.white.opacity(0.35), lineWidth: 1))
+        HStack(spacing: 12) {
+            // Left side: Flag + Channel emoji
+            HStack(spacing: 8) {
+                if let flag = post.countryFlag {
+                    Text(flag)
+                        .font(.system(size: 32))
+                }
+                // Channel emoji placeholder (you can pass this from FeedPost or derive from category)
+                Text("🍔")  // This should come from the post's channel/category
+                    .font(.system(size: 32))
             }
-            .buttonStyle(.plain)
-
-            Text(String(format: "%.4f, %.4f", post.latitude, post.longitude))
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
-                .foregroundColor(.white.opacity(0.95))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .background(Color.black.opacity(0.55), in: Capsule())
+            
+            // Right side: Username and coordinates
+            VStack(alignment: .leading, spacing: 4) {
+                Button(action: { onUserTapped(post.userID) }) {
+                    Text(displayName.isEmpty ? "User" : displayName)
+                        .font(.system(size: 20, weight: .bold, design: .default))
+                        .foregroundColor(.white)
+                }
+                .buttonStyle(.plain)
+                
+                Text(String(format: "%.4f, %.4f", post.latitude, post.longitude))
+                    .font(.system(size: 16, weight: .regular, design: .default))
+                    .foregroundColor(.white.opacity(0.9))
+            }
+            
+            Spacer()
         }
-        .padding(.trailing, 16)
-        .padding(.top, 40)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+        .padding(.leading, 16)
+        .padding(.top, 60)  // ✅ Increased from 40 to 60 to push label down
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .allowsHitTesting(true)
     }
 }

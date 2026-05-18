@@ -8,15 +8,8 @@ struct VideoLoadingIndicator: View {
     var logoName: String? = "logo"
     
     var body: some View {
-        ZStack {
-            if isLoading {
-                // Small centered logo sprite
-                SpriteView(scene: makeLogoScene(), options: [.allowsTransparency])
-                    .frame(width: 100, height: 100)
-                    .transition(.move(edge: .top).combined(with: .opacity))
-            }
-        }
-        .animation(.spring(response: 0.4, dampingFraction: 0.75), value: isLoading)
+        // Disabled globally - no loading spinner shown
+        EmptyView()
     }
     
     private func makeLogoScene() -> SKScene {
@@ -25,6 +18,58 @@ struct VideoLoadingIndicator: View {
         scene.backgroundColor = .clear
         scene.logoName = logoName
         return scene
+    }
+}
+
+/// Radius trend indicator showing if radius increased or decreased
+struct RadiusTrendIndicator: View {
+    enum Trend {
+        case up, down, neutral
+        
+        var color: Color {
+            switch self {
+            case .up: return .green
+            case .down: return .red
+            case .neutral: return .gray
+            }
+        }
+        
+        var symbol: String {
+            switch self {
+            case .up: return "arrow.up"
+            case .down: return "arrow.down"
+            case .neutral: return "minus"
+            }
+        }
+    }
+    
+    let trend: Trend
+    let radiusDelta: Double // Change in meters
+    
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: trend.symbol)
+                .font(.system(size: 16, weight: .bold))
+                .foregroundColor(trend.color)
+            
+            if abs(radiusDelta) > 0 {
+                Text(formatDelta(radiusDelta))
+                    .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                    .foregroundColor(trend.color.opacity(0.9))
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(.ultraThinMaterial, in: Capsule())
+    }
+    
+    private func formatDelta(_ delta: Double) -> String {
+        let absDelta = abs(delta)
+        if absDelta >= 1000 {
+            return String(format: "%.1fkm", absDelta / 1000)
+        } else {
+            return String(format: "%.0fm", absDelta)
+        }
     }
 }
 
@@ -180,5 +225,31 @@ struct LoadingOverlayView: View {
     }
     
     return AutoPreviewHost()
+}
+#Preview("Radius Trend Indicators") {
+    VStack(spacing: 20) {
+        Text("Radius Trend Indicators")
+            .font(.title2)
+            .fontWeight(.bold)
+        
+        VStack(spacing: 16) {
+            RadiusTrendIndicator(trend: .up, radiusDelta: 5000)
+            RadiusTrendIndicator(trend: .up, radiusDelta: 250)
+            RadiusTrendIndicator(trend: .down, radiusDelta: -3500)
+            RadiusTrendIndicator(trend: .down, radiusDelta: -150)
+            RadiusTrendIndicator(trend: .neutral, radiusDelta: 0)
+        }
+        .padding()
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+    }
+    .padding()
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .background(
+        LinearGradient(
+            colors: [.purple, .blue, .teal],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    )
 }
 

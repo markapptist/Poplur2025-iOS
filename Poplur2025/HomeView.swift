@@ -205,6 +205,14 @@ struct HomeView: View {
     // Post count state (for displaying user's total posts)
     @State private var userPostCount: Int = 0
     
+    // Radius trend tracking for post count display
+    @State private var previousRadius: Double? = nil
+    @State private var radiusTrend: RadiusTrend = .neutral
+    
+    enum RadiusTrend {
+        case up, down, neutral
+    }
+    
     // Added state for cube yaw angle
     @State private var cubeYawDegrees: Double = 0
     
@@ -548,16 +556,16 @@ struct HomeView: View {
                         Image(systemName: uploadStatusIcon)
                             .font(.title2)
                             .foregroundStyle(uploadStatusColor)
+                            .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
                         
                         Text(uploadStatusMessage)
                             .font(.subheadline)
                             .fontWeight(.medium)
-                            .foregroundStyle(.primary)
+                            .foregroundStyle(.white)
+                            .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
                     }
                     .padding(.horizontal, 20)
                     .padding(.vertical, 14)
-                    .background(.ultraThinMaterial, in: Capsule())
-                    .shadow(radius: 8)
                     .padding(.top, 60)
                     
                     Spacer()
@@ -702,13 +710,29 @@ struct HomeView: View {
             .zIndex(999)
             .allowsHitTesting(false)
             
-            // Recording countdown overlay (bottom-left)
-            RecordingCountdownView(
-                isRecording: $isRecording,
-                secondsRemaining: $recordingSecondsRemaining,
-                postCount: $userPostCount,
-                selectedTab: $selectedTab
-            )
+            // Recording countdown overlay (bottom-left) — mirrors radius display positioning
+            GeometryReader { proxy in
+                let safe = proxy.safeAreaInsets
+
+                VStack {
+                    Spacer()
+                    HStack {
+                        RecordingCountdownView(
+                            isRecording: $isRecording,
+                            secondsRemaining: $recordingSecondsRemaining,
+                            postCount: $userPostCount,
+                            selectedTab: $selectedTab,
+                            radiusTrend: $radiusTrend
+                        )
+                        
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.leading, safe.leading + 16)
+                    .padding(.bottom, safe.bottom + 20)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+            }
+            .ignoresSafeArea(.container, edges: [.bottom, .leading, .trailing])
             .zIndex(1000)
             .allowsHitTesting(false)
             
@@ -1108,10 +1132,34 @@ struct HomeView: View {
                 print("[HomeView] Received currentPostRadiusDidChange: \(Int(value))m")
                 let duration = (note.userInfo?["duration"] as? Double) ?? 0.8
                 let clampedValue = min(value, 3_323_000.0)
+                
+                // Track radius trend
+                let oldTrend = radiusTrend
+                if let prev = previousRadius {
+                    if clampedValue > prev {
+                        radiusTrend = .up
+                        print("📈 [HomeView] Radius INCREASED: \(Int(prev))m → \(Int(clampedValue))m (trend: UP)")
+                    } else if clampedValue < prev {
+                        radiusTrend = .down
+                        print("📉 [HomeView] Radius DECREASED: \(Int(prev))m → \(Int(clampedValue))m (trend: DOWN)")
+                    } else {
+                        radiusTrend = .neutral
+                        print("➖ [HomeView] Radius UNCHANGED: \(Int(clampedValue))m (trend: NEUTRAL)")
+                    }
+                } else {
+                    radiusTrend = .neutral
+                    print("🔵 [HomeView] First radius update: \(Int(clampedValue))m (trend: NEUTRAL, no previous)")
+                }
+                previousRadius = clampedValue
+                
+                if oldTrend != radiusTrend {
+                    print("🔄 [HomeView] Trend changed from \(oldTrend) to \(radiusTrend)")
+                }
+                
                 withAnimation(.easeInOut(duration: duration)) {
                     isometricBarModel.radius = clampedValue
                 }
-                print("[HomeView] Updated isometricBarModel.radius to: \(Int(clampedValue))m (from feed)")
+                print("[HomeView] Updated isometricBarModel.radius to: \(Int(clampedValue))m (from feed, trend: \(radiusTrend))")
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .animateRadiusBarToValue)) { note in
@@ -1561,11 +1609,13 @@ private struct CameraInstructionsOverlay: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(instructions[currentInstructionIndex].title)
                         .font(.headline)
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(.white)
+                        .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
                     
                     Text(instructions[currentInstructionIndex].message)
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.white.opacity(0.9))
+                        .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
                         .lineLimit(3)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -1574,8 +1624,6 @@ private struct CameraInstructionsOverlay: View {
             .padding(.top, -4)
             .padding(14)
             .frame(minHeight: 90) // Increased height for longer messages
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .shadow(radius: 4)
             .padding(.horizontal, 12)
             .opacity(instructionOpacity)
             

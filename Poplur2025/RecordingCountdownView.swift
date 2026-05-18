@@ -11,17 +11,19 @@ import Photos
 /// Multi-purpose counter shown in bottom-left corner (level with radius bar)
 /// - On Record tab: Shows camera roll button with preview thumbnail (when not recording)
 /// - On Record tab (recording): Shows recording countdown timer (10s → 0s)
-/// - On other tabs: Shows user's current post count
+/// - On other tabs: Shows user's current post count with radius trend indicator
 /// This view is visible across ALL tabs
 struct RecordingCountdownView: View {
     @Binding var isRecording: Bool
     @Binding var secondsRemaining: Int
     @Binding var postCount: Int
     @Binding var selectedTab: AppTab
+    @Binding var radiusTrend: HomeView.RadiusTrend
     
     @State private var pulseAnimation: Bool = false
     @State private var latestPhoto: UIImage? = nil
     @State private var showPhotoPicker: Bool = false
+    @State private var arrowAnimation: Bool = false
     
     private var shouldShowRecording: Bool {
         isRecording && selectedTab == .record
@@ -36,48 +38,20 @@ struct RecordingCountdownView: View {
     }
     
     var body: some View {
-        VStack {
-            Spacer()
-            HStack {
-                // Counter badge (bottom-left, level with radius bar)
-                Group {
-                    if shouldShowRecording {
-                        // Recording countdown mode
-                        recordingCountdownBadge
-                            .allowsHitTesting(false)
-                    } else if shouldShowCameraRoll {
-                        // Camera roll button mode
-                        cameraRollButton
-                            .allowsHitTesting(true)
-                    } else if shouldShowPostCount {
-                        // Post count mode
-                        postCountBadge
-                            .allowsHitTesting(false)
-                    }
-                }
-                .padding(.horizontal, shouldShowCameraRoll ? 0 : 16)
-                .padding(.vertical, shouldShowCameraRoll ? 0 : 12)
-                .background(
-                    Group {
-                        if !shouldShowCameraRoll {
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .fill(.black.opacity(0.6))
-                        }
-                    }
-                )
-                .overlay(
-                    Group {
-                        if !shouldShowCameraRoll {
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .strokeBorder(.white.opacity(0.3), lineWidth: 1)
-                        }
-                    }
-                )
-                
-                Spacer()
+        Group {
+            if shouldShowRecording {
+                // Recording countdown mode
+                recordingCountdownBadge
+                    .allowsHitTesting(false)
+            } else if shouldShowCameraRoll {
+                // Camera roll button mode
+                cameraRollButton
+                    .allowsHitTesting(true)
+            } else if shouldShowPostCount {
+                // Post count mode - align baseline with radius display
+                postCountBadge
+                    .allowsHitTesting(false)
             }
-            .padding(.leading, 20)
-            .padding(.bottom, 20) // Level with the radius bar position (bottom + 20)
         }
         .opacity((shouldShowRecording || shouldShowPostCount || shouldShowCameraRoll) ? 1.0 : 0.0)
         .animation(.easeInOut(duration: 0.3), value: shouldShowRecording)
@@ -85,6 +59,7 @@ struct RecordingCountdownView: View {
         .animation(.easeInOut(duration: 0.3), value: shouldShowCameraRoll)
         .onAppear {
             pulseAnimation = true
+            arrowAnimation = true
             if shouldShowCameraRoll {
                 fetchLatestPhoto()
             }
@@ -92,6 +67,14 @@ struct RecordingCountdownView: View {
         .onChange(of: selectedTab) { newTab in
             if newTab == .record && !isRecording {
                 fetchLatestPhoto()
+            }
+        }
+        .onChange(of: radiusTrend) { newTrend in
+            // Restart animation when trend changes
+            print("🎯 [RecordingCountdownView] Radius trend changed to: \(newTrend)")
+            arrowAnimation = false
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                arrowAnimation = true
             }
         }
         .sheet(isPresented: $showPhotoPicker) {
@@ -148,23 +131,72 @@ struct RecordingCountdownView: View {
     
     @ViewBuilder
     private var postCountBadge: some View {
-        HStack(spacing: 8) {
-            // Post icon
-            Image(systemName: "photo.stack.fill")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.9))
+        VStack(alignment: .leading, spacing: 4) {
+            // "TRENDING" label (matches "RADIUS" label style)
+            Group {
+                if radiusTrend != .neutral {
+                    Text("TRENDING")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.6))
+                        .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
+                        .kerning(1.2)
+                } else {
+                    // Empty space when neutral (matches label height)
+                    Text("")
+                        .font(.system(size: 12, weight: .semibold))
+                        .kerning(1.2)
+                }
+            }
             
-            // Post count
-            Text("\(postCount)")
-                .font(.system(size: 28, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
-                .monospacedDigit()
-                .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 2)
+            // Fraction display structure (matches radius display exactly)
+            VStack(alignment: .leading, spacing: 2) {
+                // Numerator: Trend arrow (above line, left-aligned like radius number)
+                Group {
+                    if radiusTrend != .neutral {
+                        // Animated arrow as numerator
+                        Image(systemName: radiusTrend == .up ? "arrow.up" : "arrow.down")
+                            .font(.system(size: 40, weight: .bold))
+                            .foregroundStyle(radiusTrend == .up ? Color.green : Color.red)
+                            .scaleEffect(arrowAnimation ? 1.0 : 0.85)
+                            .opacity(arrowAnimation ? 1.0 : 0.7)
+                            .animation(
+                                .easeInOut(duration: 0.6)
+                                .repeatForever(autoreverses: true),
+                                value: arrowAnimation
+                            )
+                            .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
+                    } else {
+                        // Empty space when neutral (matches numerator height)
+                        Text("")
+                            .font(.system(size: 40, weight: .bold))
+                    }
+                }
+                
+                // Fraction bar (divider line) - matches radius display exactly
+                HStack {
+                    Rectangle()
+                        .fill(.white)
+                        .frame(width: 90, height: 2)
+                        .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 1)
+                    Spacer()
+                }
+                
+                // Denominator: Post count number only (matches "3959" style)
+                Text("\(postCount)")
+                    .font(.system(size: 28, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.9))
+                    .monospacedDigit()
+                    .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
+            }
             
+            // Unit label: "posts" (matches "mi" style)
             Text(postCount == 1 ? "post" : "posts")
-                .font(.system(size: 14, weight: .semibold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.8))
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(.white.opacity(0.7))
+                .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
         }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 16) // Exact match to RadiusNumberDisplay padding
     }
     
     // MARK: - Camera Roll Button
@@ -322,7 +354,8 @@ struct RecordingCountdownView_Previews: PreviewProvider {
                     isRecording: .constant(false),
                     secondsRemaining: .constant(10),
                     postCount: .constant(42),
-                    selectedTab: .constant(.record)
+                    selectedTab: .constant(.record),
+                    radiusTrend: .constant(.neutral)
                 )
             }
             .previewDisplayName("Camera Roll Button")
@@ -334,7 +367,8 @@ struct RecordingCountdownView_Previews: PreviewProvider {
                     isRecording: .constant(true),
                     secondsRemaining: .constant(7),
                     postCount: .constant(42),
-                    selectedTab: .constant(.record)
+                    selectedTab: .constant(.record),
+                    radiusTrend: .constant(.neutral)
                 )
             }
             .previewDisplayName("Recording Countdown")
@@ -346,46 +380,50 @@ struct RecordingCountdownView_Previews: PreviewProvider {
                     isRecording: .constant(true),
                     secondsRemaining: .constant(0),
                     postCount: .constant(42),
-                    selectedTab: .constant(.record)
+                    selectedTab: .constant(.record),
+                    radiusTrend: .constant(.neutral)
                 )
             }
             .previewDisplayName("Recording Complete")
             
-            // Post count preview (Map tab)
+            // Post count preview with upward trend (Map tab)
             ZStack {
                 Color.black.ignoresSafeArea()
                 RecordingCountdownView(
                     isRecording: .constant(false),
                     secondsRemaining: .constant(10),
                     postCount: .constant(42),
-                    selectedTab: .constant(.map)
+                    selectedTab: .constant(.map),
+                    radiusTrend: .constant(.up)
                 )
             }
-            .previewDisplayName("Post Count - Map")
+            .previewDisplayName("Post Count - Radius Up ⬆️")
             
-            // Post count preview (Feed tab)
+            // Post count preview with downward trend (Feed tab)
             ZStack {
                 Color.black.ignoresSafeArea()
                 RecordingCountdownView(
                     isRecording: .constant(false),
                     secondsRemaining: .constant(10),
                     postCount: .constant(128),
-                    selectedTab: .constant(.feed)
+                    selectedTab: .constant(.feed),
+                    radiusTrend: .constant(.down)
                 )
             }
-            .previewDisplayName("Post Count - Feed")
+            .previewDisplayName("Post Count - Radius Down ⬇️")
             
-            // Single post preview
+            // Single post preview (neutral)
             ZStack {
                 Color.black.ignoresSafeArea()
                 RecordingCountdownView(
                     isRecording: .constant(false),
                     secondsRemaining: .constant(10),
                     postCount: .constant(1),
-                    selectedTab: .constant(.profile)
+                    selectedTab: .constant(.profile),
+                    radiusTrend: .constant(.neutral)
                 )
             }
-            .previewDisplayName("Post Count - Single Post")
+            .previewDisplayName("Post Count - Neutral")
         }
     }
 }

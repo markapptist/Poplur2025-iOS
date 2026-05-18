@@ -60,6 +60,9 @@ struct FeedView: View {
     
     // Instagram-style timeline view
     @State private var showTimelineView: Bool = false
+    
+    // Comment section overlay
+    @State private var showCommentSection: Bool = false
 
     // Country paging (horizontal swipe)
     @State private var selectedCountryIndex: Int = 0
@@ -186,6 +189,20 @@ struct FeedView: View {
                 VideoLoadingIndicator(isLoading: $isVideoLoading, logoName: "logo")
                     .zIndex(30)
                     .transition(.opacity)
+                
+                // Comment section overlay
+                if showCommentSection, let currentPost = posts[safe: currentIndex] {
+                    CommentSectionView(
+                        postID: currentPost.id,
+                        onDismiss: {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                showCommentSection = false
+                            }
+                        }
+                    )
+                    .zIndex(40)
+                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                }
             }
             .background(Color.black)
         }
@@ -228,8 +245,19 @@ struct FeedView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ToggleTimelineView"))) { _ in
-            // Timeline feature disabled per user preference
-            // Fullscreen feed only
+            // Toggle timeline view
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                showTimelineView.toggle()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .cubeHoldBegan)) { _ in
+            // Show comment section when cube is held on Feed tab
+            guard !posts.isEmpty, !showTimelineView else { return }
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                showCommentSection = true
+            }
+            // Haptic feedback
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         }
         .onChange(of: currentIndex) { newIndex in
             guard newIndex >= 0, newIndex < posts.count else {
@@ -954,57 +982,6 @@ struct FeedView: View {
                 .ignoresSafeArea()
                 .clipped()
                 .background(Color.black)
-                
-                // Post info overlay
-                VStack {
-                    HStack(spacing: 12) {
-                        // Country flag and channel emoji
-                        HStack(spacing: 6) {
-                            Text(countries[selectedCountryIndex].flag)
-                                .font(.system(size: 32))
-                            
-                            Text(channels[selectedChannelIndex].emoji)
-                                .font(.system(size: 32))
-                        }
-                        
-                        // User info and coordinates
-                        VStack(alignment: .leading, spacing: 4) {
-                            Button {
-                                let userID = post.userID
-                                print("👤 [FeedView] User info tapped - userID: '\(userID)'")
-                                guard !userID.isEmpty else {
-                                    print("⚠️ [FeedView] Cannot navigate to profile - userID is empty")
-                                    return
-                                }
-                                // Post notification to switch to profile tab with this userID
-                                NotificationCenter.default.post(
-                                    name: .ShowUserProfile,
-                                    object: userID
-                                )
-                            } label: {
-                                Text(displayName(for: post))
-                                    .font(.subheadline)
-                                    .foregroundStyle(.primary)
-                            }
-                            .buttonStyle(.plain)
-                            
-                            Text(String(format: "%.4f, %.4f", post.latitude, post.longitude))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .monospacedDigit()
-                        }
-                        
-                        Spacer()
-                    }
-                    .padding(12)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .shadow(radius: 4)
-                    .padding(.horizontal)
-                    .padding(.top, 60)
-                    
-                    Spacer()
-                }
-                .allowsHitTesting(true)
             } else {
                 Color.black
             }
@@ -1018,83 +995,9 @@ struct FeedView: View {
     }
 
     private var overlayChrome: some View {
-        GeometryReader { geo in
-            ZStack {
-                VStack {
-                    // REMOVED: Debug label showing posts count and ready state
-                    
-                    // REMOVED: Country flag and channel emoji badges (now shown in post info overlay)
-                    /*
-                    HStack(spacing: 8) {
-                        // Country flag (horizontal swipe)
-                        Text(countries[selectedCountryIndex].flag)
-                            .font(.system(size: 28))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(Color.black.opacity(0.55), in: Capsule())
-                            .overlay(Capsule().stroke(Color.white.opacity(0.25), lineWidth: 1))
-                        
-                        // Channel emoji (vertical swipe)
-                        Text(channels[selectedChannelIndex].emoji)
-                            .font(.system(size: 28))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(Color.black.opacity(0.55), in: Capsule())
-                            .overlay(Capsule().stroke(Color.white.opacity(0.25), lineWidth: 1))
-                        
-                        Spacer()
-                    }
-                    .padding(.leading, 12)
-                    .padding(.top, geo.safeAreaInsets.top + 8)
-                    */
-                    
-                    Spacer(minLength: 0)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .padding(.top, geo.safeAreaInsets.top)
-                .allowsHitTesting(false)
-                .contentShape(Rectangle())
-                
-                // Cube button for timeline view (top right)
-                VStack {
-                    HStack {
-                        Spacer()
-                        
-                        Button {
-                            // Single tap does nothing, waiting for long press
-                        } label: {
-                            Image(systemName: "square.grid.3x3.fill")
-                                .font(.system(size: 24, weight: .semibold))
-                                .foregroundColor(.white)
-                                .frame(width: 44, height: 44)
-                                .background(Color.black.opacity(0.6))
-                                .clipShape(Circle())
-                                .overlay(
-                                    Circle()
-                                        .stroke(Color.white.opacity(0.3), lineWidth: 1)
-                                )
-                        }
-                        .simultaneousGesture(
-                            LongPressGesture(minimumDuration: 0.5)
-                                .onEnded { _ in
-                                    // Haptic feedback
-                                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                                    
-                                    // Toggle to timeline view
-                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                                        showTimelineView = true
-                                    }
-                                }
-                        )
-                        .padding(.trailing, 16)
-                    }
-                    .padding(.top, geo.safeAreaInsets.top + 60)
-                    
-                    Spacer()
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-            }
-        }
+        // REMOVED: Grid icon button and all other chrome elements
+        // Overlay is now completely clean - only post info labels remain
+        EmptyView()
     }
 
     // MARK: - Username helpers
