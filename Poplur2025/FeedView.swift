@@ -1322,19 +1322,16 @@ struct FeedView: View {
                 "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4"
             ]
             let mediaURL: String
-            if i < 2 {
-                // Force images early so the first page shows a mix
-                let w = [640, 720, 800, 1080].randomElement() ?? 800
-                let h = [960, 1280, 1400, 1440, 1920].randomElement() ?? 1400
-                mediaURL = "https://picsum.photos/\(w)/\(h)?random=\(Int.random(in: 1...10_000))"
-            } else if i % 2 == 0 {
-                // Even index -> image
-                let w = [640, 720, 800, 1080].randomElement() ?? 800
-                let h = [960, 1280, 1400, 1440, 1920].randomElement() ?? 1400
-                mediaURL = "https://picsum.photos/\(w)/\(h)?random=\(Int.random(in: 1...10_000))"
-            } else {
-                // Odd index -> random video from sampleVideos
+            // 70% videos, 30% images for more video content
+            let randomValue = Int.random(in: 0..<10)
+            if randomValue < 7 {
+                // 70% chance -> video
                 mediaURL = sampleVideos.randomElement() ?? hlsSample
+            } else {
+                // 30% chance -> image
+                let w = [640, 720, 800, 1080].randomElement() ?? 800
+                let h = [960, 1280, 1400, 1440, 1920].randomElement() ?? 1400
+                mediaURL = "https://picsum.photos/\(w)/\(h)?random=\(Int.random(in: 1...10_000))"
             }
             let latitude = 37.3349 + Double(i % 5) * 0.01
             let longitude = -122.0090 - Double(i % 7) * 0.01

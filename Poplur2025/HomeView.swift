@@ -727,7 +727,7 @@ struct HomeView: View {
                         Spacer()
                     }
                     .padding(.leading, safe.leading + 16)
-                    .padding(.bottom, safe.bottom + 20)
+                    .padding(.bottom, safe.bottom - 55) // Match RadiusDisplayView baseline alignment
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
             }

@@ -146,18 +146,18 @@ struct RecordingCountdownView: View {
                 .kerning(1.2)
                 .transition(.opacity.combined(with: .scale(scale: 0.8)))
             
-            // Arrow or likes number (large, directly below label)
+            // Arrow or likes number (directly below label)
             Group {
                 if showLikesMode {
                     Text("\(likesCount)")
-                        .font(.system(size: 40, weight: .bold))
+                        .font(.system(size: 28, weight: .bold))
                         .foregroundStyle(.red)
                         .monospacedDigit()
                         .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
                         .transition(.opacity.combined(with: .scale(scale: 0.8)))
                 } else if radiusTrend != .neutral {
                     Image(systemName: radiusTrend == .up ? "arrow.up" : "arrow.down")
-                        .font(.system(size: 60, weight: .bold))
+                        .font(.system(size: 40, weight: .bold))
                         .foregroundStyle(radiusTrend == .up ? Color.green : Color.red)
                         .scaleEffect(arrowAnimation ? 1.0 : 0.85)
                         .opacity(arrowAnimation ? 1.0 : 0.7)
@@ -170,7 +170,7 @@ struct RecordingCountdownView: View {
                         .transition(.opacity.combined(with: .scale(scale: 0.8)))
                 } else {
                     Text("")
-                        .font(.system(size: 60, weight: .bold))
+                        .font(.system(size: 40, weight: .bold))
                 }
             }
             
@@ -182,7 +182,7 @@ struct RecordingCountdownView: View {
             
             // Post count number
             Text("\(postCount)")
-                .font(.system(size: 48, weight: .bold))
+                .font(.system(size: 36, weight: .bold))
                 .foregroundStyle(.white)
                 .monospacedDigit()
                 .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
@@ -194,7 +194,6 @@ struct RecordingCountdownView: View {
                 .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
         }
         .padding(.horizontal, 20)
-        .padding(.bottom, 16)
     }
     
     // MARK: - Camera Roll Button

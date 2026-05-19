@@ -2,27 +2,52 @@ import SwiftUI
 import SpriteKit
 
 /// Lightweight logo sprite for quick video loading states in the feed
-/// Shows a large animated logo in the center of the screen during transitions
+/// Shows a large animated logo in the center of the screen occasionally (not every transition)
+/// Note: Logo appears only every N transitions to avoid visual fatigue
 struct VideoLoadingIndicator: View {
     @Binding var isLoading: Bool
     var logoName: String? = "logo"
+    var showEveryNTransitions: Int = 4 // Show logo every 4th transition by default
+    
+    @State private var scene: CompactLogoScene?
+    @State private var transitionCount: Int = 0
+    @State private var shouldShowLogo: Bool = false
     
     var body: some View {
-        // Show large popping logo with SpriteKit during transitions
-        if isLoading {
-            SpriteView(scene: makeLogoScene(), options: [.allowsTransparency])
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .allowsHitTesting(false)
-                .transition(.opacity)
+        // Only show occasionally (every N transitions)
+        Group {
+            if isLoading && shouldShowLogo, let scene = scene {
+                SpriteView(scene: scene, options: [.allowsTransparency])
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+            }
         }
-    }
-    
-    private func makeLogoScene() -> SKScene {
-        let scene = CompactLogoScene(size: CGSize(width: 300, height: 300))
-        scene.scaleMode = .aspectFit
-        scene.backgroundColor = .clear
-        scene.logoName = logoName
-        return scene
+        .onChange(of: isLoading) { newValue in
+            if newValue {
+                // Increment counter on each loading event
+                transitionCount += 1
+                
+                // Only show logo every N transitions
+                shouldShowLogo = (transitionCount % showEveryNTransitions == 0)
+                
+                if shouldShowLogo {
+                    // Create scene only when needed
+                    let newScene = CompactLogoScene(size: CGSize(width: 300, height: 300))
+                    newScene.scaleMode = .aspectFit
+                    newScene.backgroundColor = .clear
+                    newScene.logoName = logoName
+                    scene = newScene
+                    print("[VideoLoadingIndicator] Showing logo (transition #\(transitionCount))")
+                } else {
+                    print("[VideoLoadingIndicator] Skipping logo display (transition #\(transitionCount))")
+                }
+            } else {
+                // Clean up scene when done
+                scene = nil
+                shouldShowLogo = false
+            }
+        }
     }
 }
 
@@ -149,57 +174,62 @@ final class CompactLogoScene: SKScene {
     private func runAnimation() {
         guard let node = logoNode, let glow = glowNode else { return }
         
-        // Remove any existing actions
+        // Remove any existing actions (including any potential rotation)
         node.removeAllActions()
         glow.removeAllActions()
         
-        // Start from above the screen with zero scale
-        node.position.y = size.height + 100
+        // Ensure no rotation is set
+        node.zRotation = 0
+        glow.zRotation = 0
+        
+        // Position logo at center (stays centered, no movement)
+        node.position = CGPoint(x: size.width/2, y: size.height/2)
+        glow.position = CGPoint(x: size.width/2, y: size.height/2)
+        
+        // Start invisible and small
+        node.alpha = 0
         node.setScale(0.0)
-        glow.position.y = size.height + 100
+        glow.alpha = 0
         glow.setScale(0.0)
         
-        // POP animation: Scale from 0 to 1.2 (overshoot) then settle to 1.0
-        let scaleUp = SKAction.scale(to: 1.3, duration: 0.25)
+        // Smooth fade in
+        let fadeIn = SKAction.fadeAlpha(to: 1.0, duration: 0.5)
+        fadeIn.timingMode = .easeInEaseOut
+        
+        // POP animation: Scale from 0 to 1.15 (gentle overshoot) then settle to 1.0
+        let scaleUp = SKAction.scale(to: 1.15, duration: 0.4)
         scaleUp.timingMode = .easeOut
         
-        let scaleSettle = SKAction.scale(to: 1.0, duration: 0.15)
+        let scaleSettle = SKAction.scale(to: 1.0, duration: 0.3)
         scaleSettle.timingMode = .easeInEaseOut
         
         let popSequence = SKAction.sequence([scaleUp, scaleSettle])
         
-        // Drop down animation
-        let moveDown = SKAction.moveTo(y: size.height/2, duration: 0.3)
-        moveDown.timingMode = .easeOut
+        // Initial POP animation (fade in + scale) - NO ROTATION
+        let initial = SKAction.group([fadeIn, popSequence])
         
-        // Fade in
-        node.alpha = 0
-        glow.alpha = 0
-        let fadeIn = SKAction.fadeAlpha(to: 1.0, duration: 0.2)
-        
-        // Initial POP + DROP animation
-        let initial = SKAction.group([moveDown, fadeIn, popSequence])
-        
-        // Continuous gentle pulse while loading
-        let pulseUp = SKAction.scale(to: 1.08, duration: 0.6)
+        // Continuous gentle pulse while loading (very subtle breathing)
+        let pulseUp = SKAction.scale(to: 1.03, duration: 1.2)
         pulseUp.timingMode = .easeInEaseOut
-        let pulseDown = SKAction.scale(to: 1.0, duration: 0.6)
+        let pulseDown = SKAction.scale(to: 1.0, duration: 1.2)
         pulseDown.timingMode = .easeInEaseOut
         let pulse = SKAction.sequence([pulseUp, pulseDown])
         
-        // Glow pulse (make glow stronger and weaker)
-        let glowStrong = SKAction.fadeAlpha(to: 1.0, duration: 0.8)
+        // Glow pulse (subtle glow intensity change)
+        let glowFadeIn = SKAction.fadeAlpha(to: 0.75, duration: 0.5)
+        glowFadeIn.timingMode = .easeInEaseOut
+        let glowStrong = SKAction.fadeAlpha(to: 0.9, duration: 1.2)
         glowStrong.timingMode = .easeInEaseOut
-        let glowWeak = SKAction.fadeAlpha(to: 0.6, duration: 0.8)
+        let glowWeak = SKAction.fadeAlpha(to: 0.6, duration: 1.2)
         glowWeak.timingMode = .easeInEaseOut
         let glowPulse = SKAction.sequence([glowStrong, glowWeak])
         
-        // Run animations
+        // Run animations - NO ROTATION AT ALL
         node.run(initial) {
             node.run(SKAction.repeatForever(pulse), withKey: "pulse")
         }
         
-        glow.run(initial) {
+        glow.run(SKAction.group([glowFadeIn, popSequence])) {
             glow.run(SKAction.repeatForever(glowPulse), withKey: "glowPulse")
         }
     }
@@ -265,18 +295,44 @@ struct LoadingOverlayView: View {
 
 #Preview("Auto Toggle") {
     struct AutoPreviewHost: View {
-        @State private var isLoading: Bool = true
+        @State private var isLoading: Bool = false
+        @State private var transitionNumber: Int = 0
         
         var body: some View {
             ZStack {
                 Color.black.ignoresSafeArea()
                 
-                VideoLoadingIndicator(isLoading: $isLoading, logoName: "logo")
+                // Show every 3rd transition in preview for faster demonstration
+                VideoLoadingIndicator(
+                    isLoading: $isLoading, 
+                    logoName: "logo",
+                    showEveryNTransitions: 3
+                )
+                
+                VStack {
+                    Text("Transition #\(transitionNumber)")
+                        .font(.title)
+                        .foregroundColor(.white)
+                        .padding()
+                    
+                    Text(isLoading ? "Loading..." : "Ready")
+                        .font(.headline)
+                        .foregroundColor(.white.opacity(0.7))
+                    
+                    Text("Logo shows every 3rd transition")
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.5))
+                        .padding(.top, 8)
+                }
             }
             .task {
                 while !Task.isCancelled {
                     try? await Task.sleep(nanoseconds: 2_000_000_000)
-                    isLoading.toggle()
+                    transitionNumber += 1
+                    isLoading = true
+                    
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    isLoading = false
                 }
             }
         }
