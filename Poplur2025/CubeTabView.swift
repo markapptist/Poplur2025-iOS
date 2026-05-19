@@ -918,6 +918,9 @@ private struct CubeSceneView: UIViewRepresentable {
             } else if parent.selectedTab == .map {
                 print("[CubeTabView] Tap -> handled by onCubeTap callback (map tab)")
                 // Map centering is handled by onCubeTap callback in HomeView
+            } else if parent.selectedTab == .feed {
+                print("[CubeTabView] Tap -> posting CubeTapped for feed")
+                NotificationCenter.default.post(name: Notification.Name("CubeTapped"), object: nil)
             } else if parent.selectedTab == .profile {
                 print("[CubeTabView] Tap -> posting CubeTapped for profile")
                 NotificationCenter.default.post(name: Notification.Name("CubeTapped"), object: nil)

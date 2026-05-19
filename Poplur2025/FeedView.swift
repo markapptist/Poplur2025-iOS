@@ -164,8 +164,8 @@ struct FeedView: View {
                 
                 // Show either timeline or feed, not both
                 if showTimelineView {
-                    // Timeline view (Instagram grid style)
-                    FeedTimelineView(
+                    // Twitter-style timeline (vertical scrolling with infinite feed)
+                    FeedTwitterTimelineView(
                         posts: posts,
                         displayNameProvider: { post in displayName(for: post) },
                         onPostTapped: { index in
@@ -186,7 +186,8 @@ struct FeedView: View {
                 }
 
                 // Video loading indicator - shown during transitions (visible on all tabs)
-                VideoLoadingIndicator(isLoading: $isVideoLoading, logoName: "logo")
+                // ALWAYS show logo during any transition (static overlay, video loading, or channel/country swipes)
+                VideoLoadingIndicator(isLoading: .constant(isVideoLoading || showStatic), logoName: "logo")
                     .zIndex(30)
                     .transition(.opacity)
                 
@@ -200,8 +201,8 @@ struct FeedView: View {
                             }
                         }
                     )
-                    .zIndex(40)
-                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                    .zIndex(999999) // Extremely high z-index to ensure it's in front of absolutely everything
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
             .background(Color.black)
@@ -251,7 +252,16 @@ struct FeedView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .cubeHoldBegan)) { _ in
-            // Show comment section when cube is held on Feed tab
+            // Hold cube to toggle between timeline and feed view
+            guard !posts.isEmpty else { return }
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                showTimelineView.toggle()
+            }
+            // Haptic feedback
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("CubeTapped"))) { _ in
+            // Tap cube to show comment section (only when NOT in timeline view)
             guard !posts.isEmpty, !showTimelineView else { return }
             withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                 showCommentSection = true

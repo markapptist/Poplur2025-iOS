@@ -2,18 +2,23 @@ import SwiftUI
 import SpriteKit
 
 /// Lightweight logo sprite for quick video loading states in the feed
-/// Shows a small animated logo in the center of the screen during transitions
+/// Shows a large animated logo in the center of the screen during transitions
 struct VideoLoadingIndicator: View {
     @Binding var isLoading: Bool
     var logoName: String? = "logo"
     
     var body: some View {
-        // Disabled globally - no loading spinner shown
-        EmptyView()
+        // Show large popping logo with SpriteKit during transitions
+        if isLoading {
+            SpriteView(scene: makeLogoScene(), options: [.allowsTransparency])
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .allowsHitTesting(false)
+                .transition(.opacity)
+        }
     }
     
     private func makeLogoScene() -> SKScene {
-        let scene = CompactLogoScene(size: CGSize(width: 100, height: 100))
+        let scene = CompactLogoScene(size: CGSize(width: 300, height: 300))
         scene.scaleMode = .aspectFit
         scene.backgroundColor = .clear
         scene.logoName = logoName
@@ -77,6 +82,7 @@ struct RadiusTrendIndicator: View {
 final class CompactLogoScene: SKScene {
     var logoName: String? = nil
     private var logoNode: SKSpriteNode?
+    private var glowNode: SKEffectNode?
     
     override func didMove(to view: SKView) {
         backgroundColor = .clear
@@ -97,9 +103,9 @@ final class CompactLogoScene: SKScene {
         } else {
             print("[CompactLogoScene] ⚠️ Failed to load logo '\(logoName ?? "nil")' - using fallback sparkles")
             // Fallback to a system-like sparkles image
-            let size = CGSize(width: 100, height: 100)
+            let size = CGSize(width: 200, height: 200)
             UIGraphicsBeginImageContextWithOptions(size, false, 0)
-            let cfg = UIImage.SymbolConfiguration(pointSize: 60, weight: .bold)
+            let cfg = UIImage.SymbolConfiguration(pointSize: 120, weight: .bold)
             let img = UIImage(systemName: "sparkles", withConfiguration: cfg)?.withTintColor(.white, renderingMode: .alwaysOriginal)
             img?.draw(in: CGRect(origin: .zero, size: size))
             let rendered = UIGraphicsGetImageFromCurrentImageContext() ?? UIImage()
@@ -107,42 +113,94 @@ final class CompactLogoScene: SKScene {
             texture = SKTexture(image: rendered)
         }
         
+        // Create glow effect container
+        let effectNode = SKEffectNode()
+        effectNode.shouldEnableEffects = true
+        effectNode.shouldRasterize = false
+        
+        // Create the logo sprite - TWICE AS LARGE (160pt instead of 80pt)
         let node = SKSpriteNode(texture: texture)
-        node.size = CGSize(width: 80, height: 80)
-        node.position = CGPoint(x: size.width/2, y: size.height/2)
+        node.size = CGSize(width: 160, height: 160)
+        node.position = .zero // Position relative to effect node
         node.zPosition = 10
-        logoNode = node
-        addChild(node)
+        
+        // Add glow filter for glowing effect
+        let blur = CIFilter(name: "CIGaussianBlur", parameters: ["inputRadius": 15.0])
+        effectNode.filter = blur
+        effectNode.addChild(node)
+        
+        // Position effect node at center
+        effectNode.position = CGPoint(x: size.width/2, y: size.height/2)
+        addChild(effectNode)
+        
+        // Also add a non-glowing version on top for clarity
+        let clearNode = SKSpriteNode(texture: texture)
+        clearNode.size = CGSize(width: 160, height: 160)
+        clearNode.position = CGPoint(x: size.width/2, y: size.height/2)
+        clearNode.zPosition = 20
+        addChild(clearNode)
+        
+        logoNode = clearNode
+        glowNode = effectNode
         
         print("[CompactLogoScene] Logo node created with size: \(node.size), texture size: \(texture.size())")
     }
     
     private func runAnimation() {
-        guard let node = logoNode else { return }
+        guard let node = logoNode, let glow = glowNode else { return }
+        
+        // Remove any existing actions
         node.removeAllActions()
+        glow.removeAllActions()
         
-        // Start from above the screen
-        node.position.y = size.height + 50
+        // Start from above the screen with zero scale
+        node.position.y = size.height + 100
+        node.setScale(0.0)
+        glow.position.y = size.height + 100
+        glow.setScale(0.0)
         
-        // Animate down to center
+        // POP animation: Scale from 0 to 1.2 (overshoot) then settle to 1.0
+        let scaleUp = SKAction.scale(to: 1.3, duration: 0.25)
+        scaleUp.timingMode = .easeOut
+        
+        let scaleSettle = SKAction.scale(to: 1.0, duration: 0.15)
+        scaleSettle.timingMode = .easeInEaseOut
+        
+        let popSequence = SKAction.sequence([scaleUp, scaleSettle])
+        
+        // Drop down animation
         let moveDown = SKAction.moveTo(y: size.height/2, duration: 0.3)
         moveDown.timingMode = .easeOut
         
-        // Gentle pulse while loading
-        let scaleUp = SKAction.scale(to: 1.1, duration: 0.5)
-        let scaleDown = SKAction.scale(to: 1.0, duration: 0.5)
-        let pulse = SKAction.sequence([scaleUp, scaleDown])
-        pulse.timingMode = .easeInEaseOut
-        
         // Fade in
+        node.alpha = 0
+        glow.alpha = 0
         let fadeIn = SKAction.fadeAlpha(to: 1.0, duration: 0.2)
         
-        // Initial drop + fade
-        let initial = SKAction.group([moveDown, fadeIn])
+        // Initial POP + DROP animation
+        let initial = SKAction.group([moveDown, fadeIn, popSequence])
         
-        // Run initial animation then loop pulse
+        // Continuous gentle pulse while loading
+        let pulseUp = SKAction.scale(to: 1.08, duration: 0.6)
+        pulseUp.timingMode = .easeInEaseOut
+        let pulseDown = SKAction.scale(to: 1.0, duration: 0.6)
+        pulseDown.timingMode = .easeInEaseOut
+        let pulse = SKAction.sequence([pulseUp, pulseDown])
+        
+        // Glow pulse (make glow stronger and weaker)
+        let glowStrong = SKAction.fadeAlpha(to: 1.0, duration: 0.8)
+        glowStrong.timingMode = .easeInEaseOut
+        let glowWeak = SKAction.fadeAlpha(to: 0.6, duration: 0.8)
+        glowWeak.timingMode = .easeInEaseOut
+        let glowPulse = SKAction.sequence([glowStrong, glowWeak])
+        
+        // Run animations
         node.run(initial) {
             node.run(SKAction.repeatForever(pulse), withKey: "pulse")
+        }
+        
+        glow.run(initial) {
+            glow.run(SKAction.repeatForever(glowPulse), withKey: "glowPulse")
         }
     }
 }

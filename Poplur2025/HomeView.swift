@@ -710,10 +710,10 @@ struct HomeView: View {
             .zIndex(999)
             .allowsHitTesting(false)
             
-            // Recording countdown overlay (bottom-left) — mirrors radius display positioning
+            // Recording countdown overlay (bottom-left) - wrapped in GeometryReader for safe area
             GeometryReader { proxy in
                 let safe = proxy.safeAreaInsets
-
+                
                 VStack {
                     Spacer()
                     HStack {
@@ -724,15 +724,13 @@ struct HomeView: View {
                             selectedTab: $selectedTab,
                             radiusTrend: $radiusTrend
                         )
-                        
-                        Spacer(minLength: 0)
+                        Spacer()
                     }
                     .padding(.leading, safe.leading + 16)
                     .padding(.bottom, safe.bottom + 20)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
             }
-            .ignoresSafeArea(.container, edges: [.bottom, .leading, .trailing])
             .zIndex(1000)
             .allowsHitTesting(false)
             

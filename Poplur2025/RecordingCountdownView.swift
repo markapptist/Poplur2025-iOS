@@ -25,6 +25,10 @@ struct RecordingCountdownView: View {
     @State private var showPhotoPicker: Bool = false
     @State private var arrowAnimation: Bool = false
     
+    // Animation state for toggling between TRENDING/arrow and LIKES/number
+    @State private var showLikesMode: Bool = false
+    @State private var likesCount: Int = 0
+    
     private var shouldShowRecording: Bool {
         isRecording && selectedTab == .record
     }
@@ -63,6 +67,8 @@ struct RecordingCountdownView: View {
             if shouldShowCameraRoll {
                 fetchLatestPhoto()
             }
+            // Start animation timer for likes/trending toggle
+            startLikesAnimation()
         }
         .onChange(of: selectedTab) { newTab in
             if newTab == .record && !isRecording {
@@ -132,71 +138,63 @@ struct RecordingCountdownView: View {
     @ViewBuilder
     private var postCountBadge: some View {
         VStack(alignment: .leading, spacing: 4) {
-            // "TRENDING" label (matches "RADIUS" label style)
+            // "TRENDING" or "LIKES" label at the top
+            Text(showLikesMode ? "LIKES" : "TRENDING")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.6))
+                .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
+                .kerning(1.2)
+                .transition(.opacity.combined(with: .scale(scale: 0.8)))
+            
+            // Arrow or likes number (large, directly below label)
             Group {
-                if radiusTrend != .neutral {
-                    Text("TRENDING")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.6))
+                if showLikesMode {
+                    Text("\(likesCount)")
+                        .font(.system(size: 40, weight: .bold))
+                        .foregroundStyle(.red)
+                        .monospacedDigit()
                         .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
-                        .kerning(1.2)
+                        .transition(.opacity.combined(with: .scale(scale: 0.8)))
+                } else if radiusTrend != .neutral {
+                    Image(systemName: radiusTrend == .up ? "arrow.up" : "arrow.down")
+                        .font(.system(size: 60, weight: .bold))
+                        .foregroundStyle(radiusTrend == .up ? Color.green : Color.red)
+                        .scaleEffect(arrowAnimation ? 1.0 : 0.85)
+                        .opacity(arrowAnimation ? 1.0 : 0.7)
+                        .animation(
+                            .easeInOut(duration: 0.6)
+                            .repeatForever(autoreverses: true),
+                            value: arrowAnimation
+                        )
+                        .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
+                        .transition(.opacity.combined(with: .scale(scale: 0.8)))
                 } else {
-                    // Empty space when neutral (matches label height)
                     Text("")
-                        .font(.system(size: 12, weight: .semibold))
-                        .kerning(1.2)
+                        .font(.system(size: 60, weight: .bold))
                 }
             }
             
-            // Fraction display structure (matches radius display exactly)
-            VStack(alignment: .leading, spacing: 2) {
-                // Numerator: Trend arrow (above line, left-aligned like radius number)
-                Group {
-                    if radiusTrend != .neutral {
-                        // Animated arrow as numerator
-                        Image(systemName: radiusTrend == .up ? "arrow.up" : "arrow.down")
-                            .font(.system(size: 40, weight: .bold))
-                            .foregroundStyle(radiusTrend == .up ? Color.green : Color.red)
-                            .scaleEffect(arrowAnimation ? 1.0 : 0.85)
-                            .opacity(arrowAnimation ? 1.0 : 0.7)
-                            .animation(
-                                .easeInOut(duration: 0.6)
-                                .repeatForever(autoreverses: true),
-                                value: arrowAnimation
-                            )
-                            .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
-                    } else {
-                        // Empty space when neutral (matches numerator height)
-                        Text("")
-                            .font(.system(size: 40, weight: .bold))
-                    }
-                }
-                
-                // Fraction bar (divider line) - matches radius display exactly
-                HStack {
-                    Rectangle()
-                        .fill(.white)
-                        .frame(width: 90, height: 2)
-                        .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 1)
-                    Spacer()
-                }
-                
-                // Denominator: Post count number only (matches "3959" style)
-                Text("\(postCount)")
-                    .font(.system(size: 28, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.9))
-                    .monospacedDigit()
-                    .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
-            }
+            // White line separator
+            Rectangle()
+                .fill(.white)
+                .frame(width: 100, height: 2)
+                .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 1)
             
-            // Unit label: "posts" (matches "mi" style)
+            // Post count number
+            Text("\(postCount)")
+                .font(.system(size: 48, weight: .bold))
+                .foregroundStyle(.white)
+                .monospacedDigit()
+                .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
+            
+            // "posts" label
             Text(postCount == 1 ? "post" : "posts")
-                .font(.system(size: 14, weight: .medium))
+                .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(.white.opacity(0.7))
                 .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
         }
         .padding(.horizontal, 20)
-        .padding(.vertical, 16) // Exact match to RadiusNumberDisplay padding
+        .padding(.bottom, 16)
     }
     
     // MARK: - Camera Roll Button
@@ -277,6 +275,25 @@ struct RecordingCountdownView: View {
             name: Notification.Name("CameraRollVideoSelected"),
             object: url
         )
+    }
+    
+    // MARK: - Likes Animation
+    
+    private func startLikesAnimation() {
+        // Generate random likes count
+        likesCount = Int.random(in: 50...500)
+        
+        // Animate between TRENDING/arrow and LIKES/number every 3 seconds
+        Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { _ in
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) {
+                showLikesMode.toggle()
+            }
+            
+            // Generate new likes count when switching to likes mode
+            if showLikesMode {
+                likesCount = Int.random(in: 50...500)
+            }
+        }
     }
 }
 

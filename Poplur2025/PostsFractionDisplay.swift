@@ -11,8 +11,8 @@ struct PostsFractionDisplay: View {
     enum ChangeDirection { case up, down, none }
 
     var body: some View {
-        VStack(alignment: .trailing, spacing: 2) {
-            // Numerator: change arrow
+        VStack(alignment: .center, spacing: 6) {
+            // Numerator: change arrow (centered above the line)
             Group {
                 switch changeDirection {
                 case .up:
@@ -31,21 +31,20 @@ struct PostsFractionDisplay: View {
                         .opacity(0)
                 }
             }
+            .frame(width: 90) // Match the line width so arrow is centered
 
-            // Bar
-            HStack {
-                Spacer()
-                Rectangle()
-                    .fill(.white)
-                    .frame(width: 90, height: 2)
-                    .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 1)
-            }
+            // Bar (aligned parallel to radius display line)
+            Rectangle()
+                .fill(.white)
+                .frame(width: 90, height: 2)
+                .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 1)
 
-            // Denominator: posts count
+            // Denominator: posts count (centered below the line)
             Text("\(postsCount) posts")
                 .font(.system(size: 16, weight: .bold))
                 .foregroundStyle(.white.opacity(0.9))
                 .shadow(color: .black.opacity(0.6), radius: 4, x: 0, y: 2)
+                .frame(width: 90) // Match the line width so text is centered
         }
     }
 }

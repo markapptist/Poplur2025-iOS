@@ -82,11 +82,17 @@ struct CommentSectionView: View {
             Color.black.opacity(0.4)
                 .ignoresSafeArea()
                 .onTapGesture {
+                    // Haptic feedback on dismiss
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     onDismiss()
                 }
             
-            // Comment section card
-            VStack(spacing: 0) {
+            // Position card at bottom, then animate to center
+            VStack {
+                Spacer()
+                
+                // Comment section card
+                VStack(spacing: 0) {
                 // Header
                 HStack {
                     Text("Comments")
@@ -176,16 +182,23 @@ struct CommentSectionView: View {
                 }
                 .padding()
                 .background(.ultraThinMaterial)
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: 500)
+                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                .shadow(color: .black.opacity(0.5), radius: 20, x: 0, y: 10)
+                .padding(.horizontal, 24)
+                .padding(.bottom, 60) // Position near bottom with some padding
+                
+                Spacer()
+                    .frame(height: 40)
             }
-            .frame(maxWidth: .infinity)
-            .frame(height: 500)
-            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-            .shadow(color: .black.opacity(0.5), radius: 20, x: 0, y: 10)
-            .padding(.horizontal, 24)
         }
-        .transition(.opacity.combined(with: .scale(scale: 0.95)))
+        .transition(.move(edge: .bottom).combined(with: .opacity))
         .onAppear {
             generateFakeComments()
+            // Haptic feedback when appearing
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         }
     }
     
