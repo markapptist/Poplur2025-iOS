@@ -6,25 +6,9 @@
 	<string>eyJhbGciOiJIUzI1NiIsImtpZCI6IkNhbnZhc1MyU0hNQUNQcm9kIiwidHlwIjoiSldUIn0.eyJhdWQiOiJjYW52YXMtY2FudmFzYXBpIiwiaXNzIjoiY2FudmFzLXMyc3Rva2VuIiwibmJmIjoxNzYxODQyNjU3LCJzdWIiOiJhYjZkMzcyYi04MzExLTRkNTYtOGE2Mi1iMDIyMjcxMGQwYzd-U1RBR0lOR342NWFhNWIzZS1iZmRhLTRjNWUtYWY0NC1jYjFkYzNkOTUwMTUifQ.DReaXlVW-ESjBwrFvMYgmqajaNNIDi4RoiM3BJF1z8M</string>
 	<key>CameraKitLensGroupID</key>
 	<string>1c2c1a05-a2f8-4bd4-a547-0e42cafaa43a</string>
+	<key>GADApplicationIdentifier</key>
+	<string>ca-app-pub-2086359936541081~4441297400</string>
 	<key>SCSDKClientId</key>
 	<string>e03c56c8-814b-480b-b910-a99bcd825d04</string>
-    <key>CFBundleDevelopmentRegion</key>
-    <string>en</string>
-    <key>CFBundleExecutable</key>
-    <string>$(EXECUTABLE_NAME)</string>
-    <key>CFBundleIdentifier</key>
-    <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
-    <key>CFBundleInfoDictionaryVersion</key>
-    <string>6.0</string>
-    <key>CFBundleName</key>
-    <string>$(PRODUCT_NAME)</string>
-    <key>CFBundlePackageType</key>
-    <string>APPL</string>
-    <key>CFBundleShortVersionString</key>
-    <string>1.0</string>
-    <key>CFBundleVersion</key>
-    <string>1</string>
-    <key>GADApplicationIdentifier</key>
-    <string>ca-app-pub-2086359936541081~4441297400</string>
 </dict>
 </plist>

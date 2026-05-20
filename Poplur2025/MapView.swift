@@ -2,6 +2,7 @@ import SwiftUI
 import MapKit
 import CoreLocation
 import SceneKit
+import Foundation
 
 /*
  ═══════════════════════════════════════════════════════════════════════════════
@@ -103,14 +104,27 @@ private struct PreviewCityDominance: Identifiable, Hashable, Equatable {
     }
 }
 
-// Stub annotation views
+// Stub annotation views - Now using enhanced beacon markers
 private struct PreviewDominancePin: View {
     let profileURL: URL
-    var body: some View { Image(systemName: "person.crop.circle").padding(4).background(.ultraThinMaterial, in: Circle()) }
+    var body: some View { 
+        Enhanced3DBeaconMarker(color: .purple, intensity: 0.9)
+            .frame(width: 100, height: 120)
+    }
 }
 
 private struct PreviewGoogleStylePin: View {
-    var body: some View { Image(systemName: "mappin.circle.fill").symbolRenderingMode(.palette).foregroundStyle(.red, .white) }
+    var body: some View { 
+        Enhanced3DBeaconMarker(color: .red, intensity: 0.7)
+            .frame(width: 90, height: 110)
+    }
+}
+
+// Extension for clamping values
+private extension Double {
+    func clamped(to range: ClosedRange<Double>) -> Double {
+        return min(max(self, range.lowerBound), range.upperBound)
+    }
 }
 
 // Notification names used in this file
@@ -606,6 +620,477 @@ private struct SceneKitRotatingBarView: UIViewRepresentable {
 }
 #endif
 
+// MARK: - SceneKit 3D Marker View
+
+/// Blue 3D marker for user location - cone pin with sphere head
+private struct UserLocation3DMarker: UIViewRepresentable {
+    func makeUIView(context: Context) -> SCNView {
+        let view = SCNView()
+        view.allowsCameraControl = false
+        view.autoenablesDefaultLighting = true
+        view.backgroundColor = .clear
+        
+        let scene = SCNScene()
+        view.scene = scene
+        
+        // Add ambient light for better visibility
+        let ambientLight = SCNNode()
+        ambientLight.light = SCNLight()
+        ambientLight.light?.type = .ambient
+        ambientLight.light?.color = UIColor.white
+        ambientLight.light?.intensity = 400
+        scene.rootNode.addChildNode(ambientLight)
+        
+        // Add directional light for depth
+        let directionalLight = SCNNode()
+        directionalLight.light = SCNLight()
+        directionalLight.light?.type = .directional
+        directionalLight.light?.color = UIColor.white
+        directionalLight.light?.intensity = 800
+        directionalLight.eulerAngles = SCNVector3(-Float.pi / 4, Float.pi / 4, 0)
+        scene.rootNode.addChildNode(directionalLight)
+        
+        // Camera - positioned to see the 3D depth
+        let cameraNode = SCNNode()
+        cameraNode.camera = SCNCamera()
+        cameraNode.position = SCNVector3(1.5, 1.0, 3.5)
+        cameraNode.look(at: SCNVector3(0, 0, 0))
+        scene.rootNode.addChildNode(cameraNode)
+        
+        // 3D Pin geometry - cone (pole) + sphere (head) in blue
+        let cone = SCNCone(topRadius: 0.08, bottomRadius: 0.12, height: 1.8)
+        let sphere = SCNSphere(radius: 0.4)
+        
+        let coneMaterial = SCNMaterial()
+        coneMaterial.diffuse.contents = UIColor.systemBlue
+        coneMaterial.lightingModel = .physicallyBased
+        coneMaterial.metalness.contents = 0.4
+        coneMaterial.roughness.contents = 0.3
+        cone.materials = [coneMaterial]
+        
+        let sphereMaterial = SCNMaterial()
+        sphereMaterial.diffuse.contents = UIColor.systemBlue
+        sphereMaterial.emission.contents = UIColor.systemBlue.withAlphaComponent(0.3)
+        sphereMaterial.lightingModel = .physicallyBased
+        sphereMaterial.metalness.contents = 0.7
+        sphereMaterial.roughness.contents = 0.15
+        sphere.materials = [sphereMaterial]
+        
+        let coneNode = SCNNode(geometry: cone)
+        coneNode.position = SCNVector3(0, -0.9, 0)
+        
+        let sphereNode = SCNNode(geometry: sphere)
+        sphereNode.position = SCNVector3(0, 0.4, 0)
+        
+        let pinNode = SCNNode()
+        pinNode.addChildNode(coneNode)
+        pinNode.addChildNode(sphereNode)
+        scene.rootNode.addChildNode(pinNode)
+        
+        // Continuous rotation animation for 3D effect
+        let rotation = CABasicAnimation(keyPath: "rotation")
+        rotation.toValue = NSValue(scnVector4: SCNVector4(0, 1, 0, Float.pi * 2))
+        rotation.duration = 4
+        rotation.repeatCount = .infinity
+        pinNode.addAnimation(rotation, forKey: "rotation")
+        
+        // Gentle bobbing animation
+        let bob = CABasicAnimation(keyPath: "position.y")
+        bob.fromValue = 0
+        bob.toValue = 0.15
+        bob.duration = 1.8
+        bob.autoreverses = true
+        bob.repeatCount = .infinity
+        pinNode.addAnimation(bob, forKey: "bob")
+        
+        return view
+    }
+    
+    func updateUIView(_ uiView: SCNView, context: Context) {
+        uiView.backgroundColor = .clear
+    }
+}
+
+/// Enhanced 3D marker with pulsing glow and more complex geometry
+private struct SceneKit3DEnhancedMarker: UIViewRepresentable {
+    let text: String
+    let color: Color
+    
+    func makeUIView(context: Context) -> SCNView {
+        let view = SCNView()
+        view.allowsCameraControl = false
+        view.autoenablesDefaultLighting = true
+        view.backgroundColor = .clear
+        
+        let scene = SCNScene()
+        view.scene = scene
+        
+        // Add enhanced lighting for VIP marker
+        let ambientLight = SCNNode()
+        ambientLight.light = SCNLight()
+        ambientLight.light?.type = .ambient
+        ambientLight.light?.color = UIColor.white
+        ambientLight.light?.intensity = 500
+        scene.rootNode.addChildNode(ambientLight)
+        
+        let spotLight = SCNNode()
+        spotLight.light = SCNLight()
+        spotLight.light?.type = .spot
+        spotLight.light?.color = UIColor(color)
+        spotLight.light?.intensity = 1000
+        spotLight.position = SCNVector3(0, 3, 2)
+        spotLight.look(at: SCNVector3(0, 0, 0))
+        scene.rootNode.addChildNode(spotLight)
+        
+        // Camera - angled to show 3D depth
+        let cameraNode = SCNNode()
+        cameraNode.camera = SCNCamera()
+        cameraNode.position = SCNVector3(2.0, 1.5, 4.0) // More dramatic angle
+        cameraNode.look(at: SCNVector3(0, 0, 0))
+        scene.rootNode.addChildNode(cameraNode)
+        
+        // Create compound pin geometry
+        // Base: larger sphere
+        let baseSphere = SCNSphere(radius: 0.5)
+        let baseMaterial = SCNMaterial()
+        baseMaterial.diffuse.contents = UIColor(color)
+        baseMaterial.emission.contents = UIColor(color.opacity(0.5))
+        baseMaterial.lightingModel = .physicallyBased
+        baseMaterial.metalness.contents = 0.9
+        baseMaterial.roughness.contents = 0.05
+        baseSphere.materials = [baseMaterial]
+        
+        let baseSphereNode = SCNNode(geometry: baseSphere)
+        baseSphereNode.position = SCNVector3(0, 0.6, 0)
+        
+        // Pole: cylinder
+        let cylinder = SCNCylinder(radius: 0.1, height: 2.0)
+        let cylinderMaterial = SCNMaterial()
+        cylinderMaterial.diffuse.contents = UIColor(color.opacity(0.9))
+        cylinderMaterial.lightingModel = .physicallyBased
+        cylinderMaterial.metalness.contents = 0.6
+        cylinder.materials = [cylinderMaterial]
+        
+        let cylinderNode = SCNNode(geometry: cylinder)
+        cylinderNode.position = SCNVector3(0, -0.4, 0)
+        
+        // Glow ring - larger and more visible
+        let torus = SCNTorus(ringRadius: 0.6, pipeRadius: 0.06)
+        let torusMaterial = SCNMaterial()
+        torusMaterial.diffuse.contents = UIColor(color.opacity(0.4))
+        torusMaterial.emission.contents = UIColor(color)
+        torusMaterial.lightingModel = .constant
+        torus.materials = [torusMaterial]
+        
+        let torusNode = SCNNode(geometry: torus)
+        torusNode.position = SCNVector3(0, 0.6, 0)
+        torusNode.eulerAngles = SCNVector3(Float.pi / 2, 0, 0)
+        
+        let pinNode = SCNNode()
+        pinNode.addChildNode(baseSphereNode)
+        pinNode.addChildNode(cylinderNode)
+        pinNode.addChildNode(torusNode)
+        scene.rootNode.addChildNode(pinNode)
+        
+        // Faster rotation for VIP effect
+        let rotation = CABasicAnimation(keyPath: "rotation")
+        rotation.toValue = NSValue(scnVector4: SCNVector4(0, 1, 0, Float.pi * 2))
+        rotation.duration = 3
+        rotation.repeatCount = .infinity
+        pinNode.addAnimation(rotation, forKey: "rotation")
+        
+        // More dramatic pulsing glow on torus
+        let pulseScale = CABasicAnimation(keyPath: "scale")
+        pulseScale.fromValue = NSValue(scnVector3: SCNVector3(0.9, 0.9, 0.9))
+        pulseScale.toValue = NSValue(scnVector3: SCNVector3(1.4, 1.4, 1.4))
+        pulseScale.duration = 1.2
+        pulseScale.autoreverses = true
+        pulseScale.repeatCount = .infinity
+        torusNode.addAnimation(pulseScale, forKey: "pulse")
+        
+        // Bobbing animation
+        let bob = CABasicAnimation(keyPath: "position.y")
+        bob.fromValue = 0
+        bob.toValue = 0.2
+        bob.duration = 2.0
+        bob.autoreverses = true
+        bob.repeatCount = .infinity
+        pinNode.addAnimation(bob, forKey: "bob")
+        
+        return view
+    }
+    
+    func updateUIView(_ uiView: SCNView, context: Context) {
+        uiView.backgroundColor = .clear
+    }
+}
+
+// MARK: - Floating 3D Beacon (Overlay on map)
+
+/// Floating 3D beacon that hovers over map coordinates - like the reference image
+private struct Floating3DBeacon: UIViewRepresentable {
+    let color: Color
+    let pulseSpeed: Double
+    
+    func makeUIView(context: Context) -> SCNView {
+        let view = SCNView()
+        view.allowsCameraControl = false
+        view.autoenablesDefaultLighting = false
+        view.backgroundColor = .clear
+        
+        let scene = SCNScene()
+        view.scene = scene
+        
+        // Camera - top-down perspective to match map view
+        let cameraNode = SCNNode()
+        cameraNode.camera = SCNCamera()
+        cameraNode.position = SCNVector3(0, 8, 0)
+        cameraNode.eulerAngles = SCNVector3(-Float.pi / 2, 0, 0)
+        scene.rootNode.addChildNode(cameraNode)
+        
+        // Lighting
+        let omniLight = SCNNode()
+        omniLight.light = SCNLight()
+        omniLight.light?.type = .omni
+        omniLight.light?.color = UIColor.white
+        omniLight.light?.intensity = 2000
+        omniLight.position = SCNVector3(0, 5, 0)
+        scene.rootNode.addChildNode(omniLight)
+        
+        // Create floating beacon
+        let beaconContainer = SCNNode()
+        
+        // Base platform - glowing ring
+        let baseTorus = SCNTorus(ringRadius: 0.8, pipeRadius: 0.08)
+        let baseMaterial = SCNMaterial()
+        baseMaterial.diffuse.contents = UIColor(color.opacity(0.3))
+        baseMaterial.emission.contents = UIColor(color)
+        baseMaterial.lightingModel = .constant
+        baseTorus.materials = [baseMaterial]
+        
+        let baseNode = SCNNode(geometry: baseTorus)
+        baseNode.position = SCNVector3(0, 0, 0)
+        beaconContainer.addChildNode(baseNode)
+        
+        // Center crystal/diamond shape
+        let pyramid = SCNPyramid(width: 0.4, height: 1.2, length: 0.4)
+        let pyramidMaterial = SCNMaterial()
+        pyramidMaterial.diffuse.contents = UIColor(color.opacity(0.6))
+        pyramidMaterial.emission.contents = UIColor(color.opacity(0.8))
+        pyramidMaterial.lightingModel = .constant
+        pyramidMaterial.transparency = 0.8
+        pyramid.materials = [pyramidMaterial]
+        
+        let pyramidNode = SCNNode(geometry: pyramid)
+        pyramidNode.position = SCNVector3(0, 0.8, 0)
+        beaconContainer.addChildNode(pyramidNode)
+        
+        // Vertical light beam
+        let beam = SCNCylinder(radius: 0.15, height: 2.5)
+        let beamMaterial = SCNMaterial()
+        beamMaterial.diffuse.contents = UIColor(color.opacity(0.2))
+        beamMaterial.emission.contents = UIColor(color.opacity(0.6))
+        beamMaterial.lightingModel = .constant
+        beamMaterial.transparency = 0.4
+        beam.materials = [beamMaterial]
+        
+        let beamNode = SCNNode(geometry: beam)
+        beamNode.position = SCNVector3(0, 1.5, 0)
+        beaconContainer.addChildNode(beamNode)
+        
+        scene.rootNode.addChildNode(beaconContainer)
+        
+        // Rotation animation
+        let rotation = CABasicAnimation(keyPath: "rotation")
+        rotation.toValue = NSValue(scnVector4: SCNVector4(0, 1, 0, Float.pi * 2))
+        rotation.duration = 4.0 / pulseSpeed
+        rotation.repeatCount = .infinity
+        beaconContainer.addAnimation(rotation, forKey: "rotation")
+        
+        // Pulsing scale animation
+        let pulse = CABasicAnimation(keyPath: "scale")
+        pulse.fromValue = NSValue(scnVector3: SCNVector3(1.0, 1.0, 1.0))
+        pulse.toValue = NSValue(scnVector3: SCNVector3(1.2, 1.2, 1.2))
+        pulse.duration = 1.5 / pulseSpeed
+        pulse.autoreverses = true
+        pulse.repeatCount = .infinity
+        baseNode.addAnimation(pulse, forKey: "pulse")
+        
+        // Floating animation
+        let float = CABasicAnimation(keyPath: "position.y")
+        float.fromValue = 0.0
+        float.toValue = 0.3
+        float.duration = 2.0
+        float.autoreverses = true
+        float.repeatCount = .infinity
+        beaconContainer.addAnimation(float, forKey: "float")
+        
+        return view
+    }
+    
+    func updateUIView(_ uiView: SCNView, context: Context) {
+        uiView.backgroundColor = .clear
+    }
+}
+
+// MARK: - Enhanced 3D Beacon Marker
+
+/// Enhanced 3D beacon marker - matches Google Maps hybrid style with glowing effects
+private struct Enhanced3DBeaconMarker: UIViewRepresentable {
+    let color: Color
+    let intensity: Double // 0.0 to 1.0 for heat/activity level
+    
+    func makeUIView(context: Context) -> SCNView {
+        let view = SCNView()
+        view.allowsCameraControl = false
+        view.autoenablesDefaultLighting = false
+        view.backgroundColor = .clear
+        view.antialiasingMode = .multisampling4X
+        
+        let scene = SCNScene()
+        view.scene = scene
+        
+        // Camera - angled view to show 3D depth
+        let cameraNode = SCNNode()
+        cameraNode.camera = SCNCamera()
+        cameraNode.camera?.fieldOfView = 50
+        cameraNode.position = SCNVector3(0, 3, 5)
+        cameraNode.look(at: SCNVector3(0, 0, 0))
+        scene.rootNode.addChildNode(cameraNode)
+        
+        // Omni light for overall illumination
+        let omniLight = SCNNode()
+        omniLight.light = SCNLight()
+        omniLight.light?.type = .omni
+        omniLight.light?.color = UIColor.white
+        omniLight.light?.intensity = 1500
+        omniLight.position = SCNVector3(0, 5, 2)
+        scene.rootNode.addChildNode(omniLight)
+        
+        // Spotlight for dramatic glow
+        let spotlight = SCNNode()
+        spotlight.light = SCNLight()
+        spotlight.light?.type = .spot
+        spotlight.light?.color = UIColor(color)
+        spotlight.light?.intensity = 2000 * intensity
+        spotlight.light?.spotInnerAngle = 30
+        spotlight.light?.spotOuterAngle = 60
+        spotlight.position = SCNVector3(0, 6, 0)
+        spotlight.look(at: SCNVector3(0, 0, 0))
+        scene.rootNode.addChildNode(spotlight)
+        
+        let beaconContainer = SCNNode()
+        
+        // Ground glow ring - pulsing base
+        let groundRing = SCNTorus(ringRadius: 1.2, pipeRadius: 0.15)
+        let groundMaterial = SCNMaterial()
+        groundMaterial.diffuse.contents = UIColor(color.opacity(0.2))
+        groundMaterial.emission.contents = UIColor(color.opacity(0.8 * intensity))
+        groundMaterial.lightingModel = .constant
+        groundMaterial.transparency = 0.6
+        groundRing.materials = [groundMaterial]
+        
+        let groundRingNode = SCNNode(geometry: groundRing)
+        groundRingNode.position = SCNVector3(0, 0.1, 0)
+        groundRingNode.eulerAngles = SCNVector3(Float.pi / 2, 0, 0)
+        beaconContainer.addChildNode(groundRingNode)
+        
+        // Middle ring - smaller, brighter
+        let midRing = SCNTorus(ringRadius: 0.8, pipeRadius: 0.1)
+        let midMaterial = SCNMaterial()
+        midMaterial.diffuse.contents = UIColor(color.opacity(0.3))
+        midMaterial.emission.contents = UIColor(color)
+        midMaterial.lightingModel = .constant
+        midMaterial.transparency = 0.7
+        midRing.materials = [midMaterial]
+        
+        let midRingNode = SCNNode(geometry: midRing)
+        midRingNode.position = SCNVector3(0, 0.3, 0)
+        midRingNode.eulerAngles = SCNVector3(Float.pi / 2, 0, 0)
+        beaconContainer.addChildNode(midRingNode)
+        
+        // Central crystal/diamond
+        let crystal = SCNPyramid(width: 0.6, height: 2.0, length: 0.6)
+        let crystalMaterial = SCNMaterial()
+        crystalMaterial.diffuse.contents = UIColor(color.opacity(0.4))
+        crystalMaterial.emission.contents = UIColor(color.opacity(intensity))
+        crystalMaterial.lightingModel = .physicallyBased
+        crystalMaterial.metalness.contents = 0.9
+        crystalMaterial.roughness.contents = 0.1
+        crystalMaterial.transparency = 0.7
+        crystal.materials = [crystalMaterial]
+        
+        let crystalNode = SCNNode(geometry: crystal)
+        crystalNode.position = SCNVector3(0, 1.2, 0)
+        beaconContainer.addChildNode(crystalNode)
+        
+        // Vertical light beam
+        let beam = SCNCylinder(radius: 0.25, height: 3.5)
+        let beamMaterial = SCNMaterial()
+        beamMaterial.diffuse.contents = UIColor(color.opacity(0.1))
+        beamMaterial.emission.contents = UIColor(color.opacity(0.5 * intensity))
+        beamMaterial.lightingModel = .constant
+        beamMaterial.transparency = 0.3
+        beam.materials = [beamMaterial]
+        
+        let beamNode = SCNNode(geometry: beam)
+        beamNode.position = SCNVector3(0, 2.0, 0)
+        beaconContainer.addChildNode(beamNode)
+        
+        // Particle ring at top
+        let particleRing = SCNTorus(ringRadius: 0.4, pipeRadius: 0.05)
+        let particleMaterial = SCNMaterial()
+        particleMaterial.emission.contents = UIColor(color)
+        particleMaterial.lightingModel = .constant
+        particleRing.materials = [particleMaterial]
+        
+        let particleRingNode = SCNNode(geometry: particleRing)
+        particleRingNode.position = SCNVector3(0, 2.8, 0)
+        particleRingNode.eulerAngles = SCNVector3(Float.pi / 2, 0, 0)
+        beaconContainer.addChildNode(particleRingNode)
+        
+        scene.rootNode.addChildNode(beaconContainer)
+        
+        // Continuous rotation
+        let rotation = CABasicAnimation(keyPath: "rotation")
+        rotation.toValue = NSValue(scnVector4: SCNVector4(0, 1, 0, Float.pi * 2))
+        rotation.duration = 6.0 / intensity.clamped(to: 0.3...1.0)
+        rotation.repeatCount = .infinity
+        beaconContainer.addAnimation(rotation, forKey: "rotation")
+        
+        // Pulsing ground ring
+        let pulse = CABasicAnimation(keyPath: "scale")
+        pulse.fromValue = NSValue(scnVector3: SCNVector3(1.0, 1.0, 1.0))
+        pulse.toValue = NSValue(scnVector3: SCNVector3(1.3, 1.0, 1.3))
+        pulse.duration = 2.0
+        pulse.autoreverses = true
+        pulse.repeatCount = .infinity
+        groundRingNode.addAnimation(pulse, forKey: "pulse")
+        
+        // Floating animation
+        let float = CABasicAnimation(keyPath: "position.y")
+        float.fromValue = 0.0
+        float.toValue = 0.4
+        float.duration = 2.5
+        float.autoreverses = true
+        float.repeatCount = .infinity
+        beaconContainer.addAnimation(float, forKey: "float")
+        
+        // Spinning particle ring
+        let particleSpin = CABasicAnimation(keyPath: "rotation")
+        particleSpin.toValue = NSValue(scnVector4: SCNVector4(1, 0, 0, Float.pi * 2))
+        particleSpin.duration = 3.0
+        particleSpin.repeatCount = .infinity
+        particleRingNode.addAnimation(particleSpin, forKey: "particleSpin")
+        
+        return view
+    }
+    
+    func updateUIView(_ uiView: SCNView, context: Context) {
+        uiView.backgroundColor = .clear
+    }
+}
+
 // MARK: - Rotating Earth Globe Preview replaced with Rotating Bar and AI text
 
 private struct RotatingEarthGlobePreview: View {
@@ -837,11 +1322,11 @@ struct MapViewProduction: View {
     @StateObject private var flowManager = CaptureFlowManager.shared
     @StateObject private var mapState = MapStateManager.shared
     
-    @State private var fixedDistanceAlt: CLLocationDistance = 300 // Closer zoom to avoid building obstruction
+    @State private var fixedDistanceAlt: CLLocationDistance = 700 // Start at optimal viewing distance (700m)
     @State private var camera: MapCameraPosition = .camera(
         MapCamera(
             centerCoordinate: CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194), // SF default, will update to user location
-            distance: 300,
+            distance: 700,  // Start at 700m (optimal viewing distance)
             heading: 0,
             pitch: 60
         )
@@ -888,6 +1373,11 @@ struct MapViewProduction: View {
     @State private var shownPostCountryName: String? = nil
     @State private var shownPostCountryFlag: String? = nil
     
+    // Zoom slider state
+    @State private var zoomLevel: Double = 700 // Initial distance in meters (700 = optimal viewing distance)
+    @State private var cubeHoldStartY: CGFloat? = nil // Track cube hold drag start position
+    @State private var initialZoomLevel: Double = 700 // Store zoom level when cube hold starts
+    
     let tourPlaces: [(name: String, coordinate: CLLocationCoordinate2D, description: String)] = [
         ("New York", CLLocationCoordinate2D(latitude: 40.7128, longitude: -74.0060), "The city that never sleeps"),
         ("San Francisco", CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194), "The Golden Gate City"),
@@ -900,12 +1390,22 @@ struct MapViewProduction: View {
     ]
     
     init() {
-        // Initialize with demo cities synchronously to avoid crash
+        // Initialize with demo cities and posts synchronously to avoid crash
         _dominance = State(initialValue: [
             PreviewCityDominance(city: "San Francisco", coordinate: CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194), profileURL: nil),
-            PreviewCityDominance(city: "New York", coordinate: CLLocationCoordinate2D(latitude: 40.7128, longitude: -74.0060), profileURL: nil)
+            PreviewCityDominance(city: "New York", coordinate: CLLocationCoordinate2D(latitude: 40.7128, longitude: -74.0060), profileURL: nil),
+            PreviewCityDominance(city: "Los Angeles", coordinate: CLLocationCoordinate2D(latitude: 34.0522, longitude: -118.2437), profileURL: nil)
+        ])
+        
+        // Add demo posts near SF for visualization
+        _posts = State(initialValue: [
+            PreviewMapAnnotationPost(title: "Golden Gate", coordinate: CLLocationCoordinate2D(latitude: 37.8199, longitude: -122.4783), radius: 500),
+            PreviewMapAnnotationPost(title: "Fisherman's Wharf", coordinate: CLLocationCoordinate2D(latitude: 37.8080, longitude: -122.4177), radius: 400),
+            PreviewMapAnnotationPost(title: "Alcatraz", coordinate: CLLocationCoordinate2D(latitude: 37.8267, longitude: -122.4230), radius: 600)
         ])
     }
+    
+    // MARK: - Helper Methods
     
     private func lockCamera(_ pos: MapCameraPosition) -> MapCameraPosition {
         return pos.camera.map {
@@ -1214,14 +1714,16 @@ struct MapViewProduction: View {
         Binding(
             get: { camera },
             set: { newValue in
-                // Don't lock camera when navigating from feed posts or in selection modes
-                // Only lock during tour mode
-                if mapState.isInTourMode {
-                    camera = lockCamera(newValue)
-                } else {
-                    // Allow free camera movement
-                    camera = newValue
+                // Always sync zoom level with camera distance
+                if let distance = newValue.camera?.distance {
+                    // Update zoom level to match camera distance
+                    // Remove threshold to ensure smooth tracking
+                    zoomLevel = distance
+                    fixedDistanceAlt = distance
                 }
+                
+                // Allow free camera movement - user can pan/zoom anywhere
+                camera = newValue
             }
         )
     }
@@ -1245,10 +1747,12 @@ struct MapViewProduction: View {
     @ViewBuilder
     private var mapView: some View {
         MapReader { proxy in
-            Map(
-                position: cameraBinding,
-                interactionModes: [.pan, .rotate, .pitch, .zoom]
-            ) {
+            ZStack {
+                Map(
+                    position: cameraBinding,
+                    interactionModes: [.pan, .rotate, .pitch, .zoom]
+                ) {
+                let _ = print("🗺️ [MapView] Map body evaluating - showPostPrompt: \(showPostPrompt), clickedCoordinate: \(String(describing: clickedCoordinate))")
                 let _ = print("🗺️ [MapView] Map body re-evaluating, shownPostCoordinate: \(String(describing: shownPostCoordinate))")
                 // Show user annotation when location is available
                 if locationManager.location != nil {
@@ -1259,31 +1763,41 @@ struct MapViewProduction: View {
                 
                 // Show marker when user clicks a coordinate
                 if showPostPrompt, let coord = clickedCoordinate {
+                    let _ = print("🎯 [MapView] Rendering clicked coordinate marker at: \(coord.latitude), \(coord.longitude)")
                     Annotation("Selected Location", coordinate: coord) {
                         ZStack {
+                            // Outer glow ring
                             Circle()
-                                .fill(Color.indigo.opacity(0.3))
-                                .frame(width: 50, height: 50)
+                                .fill(Color.indigo.opacity(0.2))
+                                .frame(width: 80, height: 80)
                             
-                            // Show different icon based on flow
+                            // Inner circle
+                            Circle()
+                                .fill(Color.indigo.opacity(0.5))
+                                .frame(width: 60, height: 60)
+                            
+                            // Icon
                             if flowManager.currentFlow?.isCameraFirst ?? false {
                                 // Camera -> Map: Show upload/checkmark icon
                                 Image(systemName: "checkmark.circle.fill")
-                                    .font(.system(size: 36))
-                                    .foregroundStyle(.indigo, .white)
+                                    .font(.system(size: 40))
+                                    .foregroundStyle(.white, .indigo)
+                                    .shadow(color: .black.opacity(0.3), radius: 2)
                             } else {
                                 // Map -> Camera: Show camera icon
                                 Image(systemName: "camera.circle.fill")
-                                    .font(.system(size: 36))
-                                    .foregroundStyle(.indigo, .white)
+                                    .font(.system(size: 40))
+                                    .foregroundStyle(.white, .indigo)
+                                    .shadow(color: .black.opacity(0.3), radius: 2)
                             }
                         }
+                        .animation(.easeInOut(duration: 0.3), value: showPostPrompt)
                     }
                 }
                 
                 // Show placement marker when in post placement mode
                 if isPostPlacementMode, let coord = postPlacementCoordinate {
-                    Annotation("Post Location", coordinate: coord) {
+                    Annotation("", coordinate: coord) {
                         ZStack {
                             Circle()
                                 .fill(Color.indigo.opacity(0.3))
@@ -1332,128 +1846,45 @@ struct MapViewProduction: View {
                         return components.joined(separator: " • ")
                     }()
                     
-                    // Show detailed pin annotation with comprehensive label
-                    Annotation(annotationLabel, coordinate: coord) {
-                        VStack(spacing: 8) {
-                            // Information card above the pin
-                            VStack(spacing: 8) {
-                                // Username
-                                if let username = shownPostUsername {
-                                    Text(username)
-                                        .font(.system(size: 16, weight: .bold, design: .rounded))
-                                        .foregroundStyle(.primary)
-                                }
-                                
-                                // Coordinates
-                                Text(String(format: "%.4f, %.4f", coord.latitude, coord.longitude))
-                                    .font(.system(size: 13, weight: .medium, design: .monospaced))
-                                    .foregroundStyle(.secondary)
-                                
-                                // City and country
-                                if let cityName = shownPostCityName, let countryName = shownPostCountryName {
-                                    HStack(spacing: 6) {
-                                        if let flag = shownPostCountryFlag {
-                                            Text(flag)
-                                                .font(.system(size: 18))
-                                        }
-                                        Text("\(cityName), \(countryName)")
-                                            .font(.system(size: 13, weight: .medium))
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                                
-                                // Radius
-                                if let radius = shownPostRadius {
-                                    let radiusText = radius >= 1000 
-                                        ? String(format: "%.1f km", radius / 1000) 
-                                        : String(format: "%.0f m", radius)
-                                    HStack(spacing: 4) {
-                                        Image(systemName: "circle.dotted")
-                                            .font(.system(size: 12))
-                                        Text("Radius: \(radiusText)")
-                                            .font(.system(size: 13, weight: .medium))
-                                    }
-                                    .foregroundStyle(.purple)
-                                }
-                                
-                                // Back to Feed button
-                                Button {
-                                    print("📱 [MapView] Back to Feed tapped - clearing post location")
-                                    withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
-                                        shownPostCoordinate = nil
-                                        shownPostRadius = nil
-                                        shownPostUsername = nil
-                                        shownPostCityName = nil
-                                        shownPostCountryName = nil
-                                        shownPostCountryFlag = nil
-                                    }
-                                    
-                                    // Return to browsing mode
-                                    mapState.cancelCurrentOperation()
-                                    
-                                    // Switch back to feed tab
-                                    NotificationCenter.default.post(
-                                        name: Notification.Name("SwitchToFeedTab"),
-                                        object: nil
-                                    )
-                                } label: {
-                                    HStack(spacing: 6) {
-                                        Image(systemName: "arrow.left")
-                                            .font(.system(size: 13, weight: .semibold))
-                                        Text("Back to Feed")
-                                            .font(.system(size: 14, weight: .semibold))
-                                    }
-                                    .foregroundStyle(.white)
-                                    .padding(.horizontal, 14)
-                                    .padding(.vertical, 8)
-                                    .background(Color.purple, in: Capsule())
-                                }
-                                .buttonStyle(.plain)
-                            }
-                            .padding(12)
-                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                            .shadow(color: .black.opacity(0.2), radius: 8, x: 0, y: 4)
-                            .onAppear {
-                                print("📋 [MapView] Annotation card rendered with:")
-                                print("   Username: \(shownPostUsername ?? "nil")")
-                                print("   Coordinates: \(coord.latitude), \(coord.longitude)")
-                                print("   City: \(shownPostCityName ?? "nil")")
-                                print("   Country: \(shownPostCountryName ?? "nil")")
-                                print("   Flag: \(shownPostCountryFlag ?? "nil")")
-                                print("   Radius: \(shownPostRadius ?? 0)")
-                            }
+                    // Show detailed pin annotation - no background, text only
+                    Annotation("", coordinate: coord) {
+                        // Pin marker only - no information card
+                        ZStack {
+                            Circle()
+                                .fill(Color.purple.opacity(0.3))
+                                .frame(width: 60, height: 60)
                             
-                            // Pin marker
-                            ZStack {
-                                Circle()
-                                    .fill(Color.purple.opacity(0.3))
-                                    .frame(width: 60, height: 60)
-                                
-                                Image(systemName: "mappin.circle.fill")
-                                    .font(.system(size: 44))
-                                    .foregroundStyle(.purple, .white)
-                                    .shadow(radius: 3)
-                            }
+                            Image(systemName: "mappin.circle.fill")
+                                .font(.system(size: 44))
+                                .foregroundStyle(.purple, .white)
+                                .shadow(radius: 3)
                         }
                     }
                 }
                 
                 ForEach(filteredPosts()) { post in
-                    Annotation(post.title, coordinate: post.coordinate) {
-                        PreviewGoogleStylePin()
+                    Annotation("", coordinate: post.coordinate) {
+                        // Use different colors for variety
+                        let colors: [Color] = [.orange, .blue, .green, .yellow, .pink]
+                        let colorIndex = abs(post.title.hashValue) % colors.count
+                        Enhanced3DBeaconMarker(color: colors[colorIndex], intensity: 0.6)
+                            .frame(width: 80, height: 100)
                     }
                     
+                    // Glowing circle with vibrant colors
                     MapCircle(center: post.coordinate, radius: post.radius)
-                        .foregroundStyle(Color.white.opacity(0.08))
-                        .stroke(Color.white.opacity(0.25), lineWidth: 1)
+                        .foregroundStyle(Color.orange.opacity(0.15))
+                        .stroke(Color.orange.opacity(0.6), lineWidth: 2)
                 }
                 
                 ForEach(dominance) { dom in
-                    Annotation(dom.city, coordinate: dom.coordinate) {
+                    Annotation("", coordinate: dom.coordinate) {
                         if let url = dom.profileURL {
                             PreviewDominancePin(profileURL: url)
                         } else {
-                            PreviewGoogleStylePin()
+                            // High-intensity purple beacons for dominance locations
+                            Enhanced3DBeaconMarker(color: .purple, intensity: 1.0)
+                                .frame(width: 110, height: 130)
                         }
                     }
                 }
@@ -1463,73 +1894,87 @@ struct MapViewProduction: View {
 #else
             .mapStyle(.hybrid(elevation: .realistic, showsTraffic: false))
 #endif
-            .gesture(
-                SpatialTapGesture(coordinateSpace: .local)
-                    .onEnded { event in
-                        let screenCoordinate = event.location
-                        // Handle map tap based on current flow
-                        if let flow = flowManager.currentFlow, flow.isCameraFirst {
-                            // Flow 2: Camera -> Map - User already captured, now selecting location
-                            if let coordinate = proxy.convert(screenCoordinate, from: .local) {
-                                clickedCoordinate = coordinate
-                                showPostPrompt = true
-                                
-                                currentCity = "Location Selected"
-                                aiRecommendation = String(format: "📍 %.4f°, %.4f° — Post your capture here?", 
-                                                         coordinate.latitude, 
-                                                         coordinate.longitude)
-                                print("[MapView] Camera -> Map flow: Selected coordinate \(coordinate.latitude), \(coordinate.longitude)")
-                            }
+            .onTapGesture { location in
+                // Handle map tap based on current flow
+                if let coordinate = proxy.convert(location, from: .local) {
+                    print("🗺️ [MapView] Map tapped at screen: \(location), converted to: \(coordinate.latitude), \(coordinate.longitude)")
+                    
+                    if let flow = flowManager.currentFlow, flow.isCameraFirst {
+                        // Flow 2: Camera -> Map - User already captured, now selecting location
+                        clickedCoordinate = coordinate
+                        showPostPrompt = true
+                        
+                        currentCity = "Location Selected"
+                        aiRecommendation = String(format: "📍 %.4f°, %.4f° — Post your capture here?", 
+                                                 coordinate.latitude, 
+                                                 coordinate.longitude)
+                        print("[MapView] Camera -> Map flow: Selected coordinate \(coordinate.latitude), \(coordinate.longitude)")
+                    } else {
+                        // Flow 1: Map -> Camera OR normal browsing
+                        if showCubeHoldSearch {
+                            showCubeHoldSearch = false
                         } else {
-                            // Flow 1: Map -> Camera OR normal browsing
-                            if showCubeHoldSearch {
-                                showCubeHoldSearch = false
-                            } else if let coordinate = proxy.convert(screenCoordinate, from: .local) {
-                                // Store clicked coordinate and show prompt
-                                clickedCoordinate = coordinate
-                                showPostPrompt = true
-                                
-                                // Update AI text to show coordinate
-                                currentCity = "Location Selected"
-                                aiRecommendation = String(format: "📍 %.4f°, %.4f° — Want to post here?", 
-                                                         coordinate.latitude, 
-                                                         coordinate.longitude)
-                                print("[MapView] Normal tap: Showing post prompt at \(coordinate.latitude), \(coordinate.longitude)")
-                            }
-                            noteInteraction()
+                            // Store clicked coordinate and show prompt
+                            clickedCoordinate = coordinate
+                            showPostPrompt = true
+                            
+                            // Update AI text to show coordinate
+                            currentCity = "Location Selected"
+                            aiRecommendation = String(format: "📍 %.4f°, %.4f° — Want to post here?", 
+                                                     coordinate.latitude, 
+                                                     coordinate.longitude)
+                            print("✅ [MapView] Set clickedCoordinate: \(coordinate.latitude), \(coordinate.longitude)")
+                            print("   showPostPrompt: \(showPostPrompt)")
                         }
+                        noteInteraction()
                     }
-            )
+                } else {
+                    print("❌ [MapView] Failed to convert screen location to coordinate")
+                }
+            }
             .gesture(
                 LongPressGesture(minimumDuration: 0.5)
-                    .sequenced(before: SpatialTapGesture(coordinateSpace: .local))
-                    .onEnded { value in
-                        // Only handle long press when NOT in post placement mode
-                        guard !isPostPlacementMode else { return }
-                        
-                        switch value {
-                        case .second(_, let tap?):
-                            let screenCoordinate = tap.location
-                            // Convert screen coordinate to map coordinate and open camera at that location
-                            if let coordinate = proxy.convert(screenCoordinate, from: .local) {
-                                print("[MapView] Long press at coordinate: \(coordinate.latitude), \(coordinate.longitude)")
-                                
-                                // Post notification to switch to camera tab and set the coordinate
-                                NotificationCenter.default.post(
-                                    name: Notification.Name("OpenCameraAtCoordinate"),
-                                    object: nil,
-                                    userInfo: [
-                                        "coordinate": coordinate,
-                                        "latitude": coordinate.latitude,
-                                        "longitude": coordinate.longitude
-                                    ]
-                                )
-                            }
-                        default:
-                            break
-                        }
+                    .onEnded { _ in
+                        // Long press on map - no action (removed)
+                        noteInteraction()
                     }
             )
+                
+                // 3D SceneKit Overlay Layer - Floating beacons over map
+                // Note: This layer is separate from the Map to avoid gesture conflicts
+                // Commented out due to coordinate conversion issues - can be re-enabled after fixing
+                /*
+                GeometryReader { geometry in
+                    MapReader { beaconProxy in
+                        ForEach(dominance) { dom in
+                            if let screenPoint = beaconProxy.convert(dom.coordinate, from: .global) {
+                                Floating3DBeacon(color: .purple, pulseSpeed: 2.0)
+                                    .frame(width: 120, height: 200)
+                                    .position(screenPoint)
+                            }
+                        }
+                        
+                        // Show 3D beacon for post location
+                        if let coord = shownPostCoordinate,
+                           let screenPoint = beaconProxy.convert(coord, from: .global) {
+                            Floating3DBeacon(color: .purple, pulseSpeed: 1.5)
+                                .frame(width: 150, height: 220)
+                                .position(screenPoint)
+                        }
+                        
+                        // Show 3D beacons for filtered posts
+                        ForEach(filteredPosts()) { post in
+                            if let screenPoint = beaconProxy.convert(post.coordinate, from: .global) {
+                                Floating3DBeacon(color: .red, pulseSpeed: 2.5)
+                                    .frame(width: 100, height: 180)
+                                    .position(screenPoint)
+                            }
+                        }
+                    }
+                }
+                .allowsHitTesting(false) // Let touches pass through to map
+                */
+            }
         }
     }
     
@@ -1538,30 +1983,6 @@ struct MapViewProduction: View {
     @ViewBuilder
     private var navigationButtons: some View {
         VStack {
-            HStack {
-                // Hamburger menu button
-                Button(action: { showPlacesList.toggle() }) {
-                    Image(systemName: "line.3.horizontal")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(.primary)
-                        .padding(12)
-                        .background(.ultraThinMaterial, in: Circle())
-                }
-                
-                Spacer()
-                
-                // Address search button
-                Button(action: { showAddressSearch.toggle() }) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(.primary)
-                        .padding(12)
-                        .background(.ultraThinMaterial, in: Circle())
-                }
-            }
-            .padding(.top, 20)
-            .padding(.horizontal, 12)
-            
             Spacer()
         }
     }
@@ -1571,6 +1992,7 @@ struct MapViewProduction: View {
         VStack {
             Spacer().frame(height: 24)
             
+            // AI Text at top - no background
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     // Update title based on flow
@@ -1597,10 +2019,12 @@ struct MapViewProduction: View {
                     Text(titleText)
                         .font(.headline)
                         .foregroundStyle(.primary)
+                        .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
                     Text(recommendationText)
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.primary)
                         .lineLimit(2)
+                        .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
                 }
                 Spacer()
                 
@@ -1618,15 +2042,47 @@ struct MapViewProduction: View {
                     }) {
                         Image(systemName: "xmark.circle.fill")
                             .font(.title2)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.white)
+                            .shadow(color: .black.opacity(0.5), radius: 3, x: 0, y: 2)
                     }
                 }
             }
-            .padding(.top, -4)
-            .padding(12)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .shadow(radius: 4)
             .padding(.horizontal)
+            
+            Spacer()
+            
+            // Animated Zoom Slider - positioned on left side
+            HStack {
+                AnimatedZoomSlider(zoomLevel: $zoomLevel) { newZoom in
+                    // Update camera when slider changes - zoom from CURRENT camera position
+                    // This allows zooming in/out from anywhere on the map
+                    guard let currentCoord = camera.camera?.centerCoordinate else { return }
+                    let heading = camera.camera?.heading ?? 0
+                    
+                    let clampedZoom = newZoom.clamped(to: 10...40_000_000)
+                    
+                    // Smoothly animate zoom change
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        camera = .camera(
+                            MapCamera(
+                                centerCoordinate: currentCoord, // Keep current view position
+                                distance: clampedZoom,
+                                heading: heading,
+                                pitch: fixedPitchAlt
+                            )
+                        )
+                    }
+                    
+                    fixedDistanceAlt = clampedZoom
+                }
+                .frame(width: 60, height: 400)
+                .padding(.leading, 12)
+                .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 2)
+                
+                Spacer()
+            }
+            .padding(.bottom, 120) // Positioned above bottom UI
+            .zIndex(1000) // Ensure slider appears above map
             
             // Post Here button - shows when coordinate is clicked OR in post placement mode
             if showPostPrompt, let coordinate = clickedCoordinate {
@@ -1768,7 +2224,7 @@ struct MapViewProduction: View {
             // Top navigation buttons
             navigationButtons
             
-            // AI Recommendation Overlay
+            // AI Recommendation Overlay (now includes zoom slider above it)
             aiRecommendationOverlay
         }
     }
@@ -1818,17 +2274,17 @@ struct MapViewProduction: View {
                     centerOnUserLocation()
                 }
             }
-            .onReceive(NotificationCenter.default.publisher(for: .cameraCubeHoldBegan)) { _ in
-                // Toggle menu - if already open, keep it open
-                // Pause tour when menu opens
+            .onReceive(NotificationCenter.default.publisher(for: .cameraCubeHoldBegan)) { notification in
+                // Long press cube shows favorites/search overlay
+                print("[MapView] Cube hold began - showing favorites overlay")
                 showCubeHoldSearch = true
                 mapState.stopTour()
             }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("CameraCubeHoldMoved"))) { notification in
+                // No action during drag - slider handles zoom now
+            }
             .onReceive(NotificationCenter.default.publisher(for: .cameraCubeHoldEnded)) { _ in
-                // Don't auto-close on release - let user keep menu open
-                // Menu will close when:
-                // 1. User taps elsewhere (CubeGlobalTap)
-                // 2. User selects a location
+                // No action on end - menu stays open
             }
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("SwitchToMapTab"))) { _ in
                 print("🔔 [MapView] SwitchToMapTab notification received!")

@@ -5,12 +5,9 @@
       location = "self:">
    </FileRef>
    <FileRef
-      location = "group:PreviewSupportPreviewModels.swift">
+      location = "group:WeatherManager.swift">
    </FileRef>
    <FileRef
-      location = "group:PreviewSupportPreviewViews.swift">
-   </FileRef>
-   <FileRef
-      location = "group:PreviewSupportPreviewHarness.swift">
+      location = "group:WeatherOverlay.swift">
    </FileRef>
 </Workspace>

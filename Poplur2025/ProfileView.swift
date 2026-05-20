@@ -77,11 +77,11 @@ struct ProfileView: View {
     private let pageSize = 18
 
     enum DisplayMode: String, CaseIterable, Identifiable {
-        case list
-        case grid
+        case media // Changed from 'list'
+        case messages // Changed from 'grid'
         var id: String { rawValue }
     }
-    @State private var mode: DisplayMode = .grid
+    @State private var mode: DisplayMode = .media
 
     private let gridCols = [
         GridItem(.flexible(), spacing: 12),
@@ -102,7 +102,7 @@ struct ProfileView: View {
         return id
     }
 
-    init(userID: String? = nil, initialMode: DisplayMode = .grid) {
+    init(userID: String? = nil, initialMode: DisplayMode = .media) {
         self.userID = userID
         _mode = State(initialValue: initialMode)
         print("🏗️ [ProfileView] Initialized with userID: \(userID ?? "nil")")
@@ -153,32 +153,42 @@ struct ProfileView: View {
             Color.white.ignoresSafeArea()
 
             VStack(spacing: 0) {
-                // Explanatory text box at the top
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(isOwnProfile ? "Your Profile" : "User Profile")
-                        .font(.system(size: 16, weight: .bold, design: .rounded))
-                        .foregroundColor(.primary)
-                    
-                    Text(isOwnProfile ? "View all your posts in grid or list mode. Tap any post to view fullscreen. Tap the cube to access settings, or long-press for messages." : "View this user's posts in grid or list mode. Tap any post to view fullscreen.")
-                        .font(.system(size: 13, weight: .regular, design: .rounded))
-                        .foregroundColor(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(14)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
-                .padding(.horizontal, 16)
-                .padding(.top, 12)
-                .padding(.bottom, 8)
-
+                    // Top buttons row
+                    if isOwnProfile {
+                        HStack {
+                            Button {
+                                navigateToMessages = true
+                            } label: {
+                                Image(systemName: "message.fill")
+                                    .font(.system(size: 20, weight: .semibold))
+                                    .foregroundColor(.black.opacity(0.7))
+                                    .frame(width: 44, height: 44)
+                            }
+                            .buttonStyle(.plain)
+                            
+                            Spacer()
+                            
+                            Button {
+                                showSettings = true
+                            } label: {
+                                Image(systemName: "gearshape.fill")
+                                    .font(.system(size: 20, weight: .semibold))
+                                    .foregroundColor(.black.opacity(0.7))
+                                    .frame(width: 44, height: 44)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.top, 8)
+                    }
+                
                     VStack(spacing: 10) {
                         avatarRow
                         usernameRow
                         modeSwitcher
                     }
-                    .padding(.top, 8)
-                    .padding(.bottom, 8)
+                    .padding(.top, 4)
+                    .padding(.bottom, 4)
 
                     // Scrollable content with readers for "scroll to top"
                     ScrollViewReader { proxy in
@@ -198,7 +208,7 @@ struct ProfileView: View {
                                 .id("top")
                             } else {
                                 switch mode {
-                                case .grid:
+                                case .media:
                                     ScrollView {
                                         VStack(spacing: 0) {
                                             Color.clear.frame(height: 0).id("top")
@@ -282,85 +292,26 @@ struct ProfileView: View {
                                     .refreshable {
                                         await loadMyPosts()
                                     }
-                                case .list:
+                                case .messages:
                                     ScrollView {
                                         VStack(spacing: 0) {
                                             Color.clear.frame(height: 0).id("top")
                                             VStack(spacing: 18) {
-                                                ForEach(myPosts.filter { loadedImages[$0.id] != nil }) { post in
-                                                    ProfileListCard(post: post, preloadedImage: loadedImages[post.id]!)
-                                                        .onTapGesture {
-                                                            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                                                                expandedPost = post
-                                                                // Notify radius change for global radius bar sync
-                                                                NotificationCenter.default.post(name: Notification.Name("currentPostRadiusDidChange"), object: nil, userInfo: ["radius": Double(post.radius)])
-                                                            }
-                                                        }
-                                                        .onLongPressGesture(minimumDuration: 0.5) {
-                                                            // Long press to show post location on map with user annotation
-                                                            let coordinate = CLLocationCoordinate2D(latitude: post.latitude, longitude: post.longitude)
-                                                            print("📍 [ProfileView List] Long press - showing post location: \(coordinate.latitude), \(coordinate.longitude)")
-                                                            print("   Post radius: \(post.radius)m")
-                                                            
-                                                            // Haptic feedback
-                                                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                                                            
-                                                            // Get profile image URL
-                                                            let profileURL: String? = post.posterURL ?? userProfile?.profilePictureURL?.absoluteString
-                                                            
-                                                            print("📍 [ProfileView List] Setting pending post location in MapStateManager")
-                                                            
-                                                            // Store in shared state manager - this persists even when MapView isn't loaded
-                                                            MapStateManager.shared.setPendingPostLocation(
-                                                                coordinate,
-                                                                userID: post.userID,
-                                                                username: displayUsername,
-                                                                profileImageURL: profileURL,
-                                                                radius: Double(post.radius)
-                                                            )
-                                                            
-                                                            // Prepare user info with coordinate as CLLocationCoordinate2D object
-                                                            var userInfo: [String: Any] = [
-                                                                "coordinate": coordinate,  // Use coordinate object, not separate lat/lon
-                                                                "userID": post.userID,
-                                                                "radius": Double(post.radius)
-                                                            ]
-                                                            
-                                                            // Add username if available
-                                                            if let username = displayUsername {
-                                                                userInfo["username"] = username
-                                                            }
-                                                            
-                                                            // Add profile image URL if available
-                                                            if let profileURL = profileURL {
-                                                                userInfo["profileImageURL"] = profileURL
-                                                            }
-                                                            
-                                                            print("📍 [ProfileView List] Posting ShowLocationOnMap notification")
-                                                            
-                                                            // First, send location to map
-                                                            NotificationCenter.default.post(
-                                                                name: Notification.Name("ShowLocationOnMap"),
-                                                                object: nil,
-                                                                userInfo: userInfo
-                                                            )
-                                                            
-                                                            // Wait a moment for map to process location before switching tabs
-                                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                                                                // Then switch to map tab
-                                                                NotificationCenter.default.post(
-                                                                    name: Notification.Name("SwitchToMapTab"),
-                                                                    object: nil
-                                                                )
-                                                            }
-                                                        }
+                                                // Messages view - placeholder for now
+                                                VStack(spacing: 12) {
+                                                    Image(systemName: "message.fill")
+                                                        .font(.system(size: 48, weight: .semibold))
+                                                        .foregroundColor(.secondary)
+                                                    Text("Messages")
+                                                        .font(.headline)
+                                                        .foregroundColor(.primary)
+                                                    Text("Your uploaded messages will appear here")
+                                                        .font(.subheadline)
+                                                        .foregroundColor(.secondary)
+                                                        .multilineTextAlignment(.center)
                                                 }
-                                                Color.clear.frame(height: 1).onAppear {
-                                                    loadMoreIfNeeded(currentItem: myPosts.last)
-                                                }
-                                            }
-                                            if isLoadingMore {
-                                                ProgressView().padding(.vertical, 12)
+                                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                                .padding(.top, 60)
                                             }
                                         }
                                         .padding(.horizontal, 16)
@@ -700,15 +651,15 @@ struct ProfileView: View {
                 if !isRunningInPreviews { 
                     isHoldingCube = true
                     
-                    // Navigate to messages if viewing own profile (after brief delay to allow hold gesture to complete)
+                    // Navigate to settings if viewing own profile (after brief delay to allow hold gesture to complete)
                     if isOwnProfile {
-                        print("✅ [ProfileView] Navigating to messages in 0.1s")
+                        print("✅ [ProfileView] Navigating to settings in 0.1s")
                         Task { @MainActor in
                             try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 second
-                            navigateToMessages = true
+                            showSettings = true
                         }
                     } else {
-                        print("⚠️ [ProfileView] Not navigating to messages - not own profile")
+                        print("⚠️ [ProfileView] Not navigating to settings - not own profile")
                     }
                 }
             }
@@ -744,8 +695,8 @@ struct ProfileView: View {
                     print("⚠️ [ProfileView] Ignoring CubeGlobalTap - not own profile")
                     return 
                 }
-                print("✅ [ProfileView] Opening settings")
-                showSettings = true
+                print("✅ [ProfileView] Opening messages")
+                navigateToMessages = true
             }
             .onDisappear {
                 // Reset radius bar when leaving profile view
@@ -807,16 +758,6 @@ struct ProfileView: View {
                                 Image(systemName: "chevron.left")
                                 Text("Feed")
                             }
-                        }
-                    }
-                }
-                if isOwnProfile {
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        Button {
-                            print("➕ [ProfileView] New Post tapped (toolbar)")
-                            createDemoPostForCurrentUser()
-                        } label: {
-                            Label("New Post", systemImage: "plus")
                         }
                     }
                 }
@@ -937,21 +878,21 @@ struct ProfileView: View {
 
     private var modeSwitcher: some View {
         HStack(spacing: 36) {
-            modeButton(icon: "list.bullet", isSelected: mode == .list) {
-                mode = .list
+            modeButton(title: "Media", isSelected: mode == .media) {
+                mode = .media
             }
-            modeButton(icon: "square.grid.2x2.fill", isSelected: mode == .grid) {
-                mode = .grid
+            modeButton(title: "Messages", isSelected: mode == .messages) {
+                mode = .messages
             }
         }
         .padding(.top, 2)
     }
 
-    private func modeButton(icon: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+    private func modeButton(title: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
         VStack(spacing: 6) {
             Button(action: action) {
-                Image(systemName: icon)
-                    .font(.system(size: 18, weight: .bold))
+                Text(title)
+                    .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(.black.opacity(0.85))
                     .padding(8)
             }
@@ -959,7 +900,7 @@ struct ProfileView: View {
 
             Capsule()
                 .fill(isSelected ? Color.indigo : Color.clear)
-                .frame(width: 24, height: 3)
+                .frame(width: 48, height: 3)
         }
     }
 
@@ -1609,7 +1550,7 @@ private struct QuerySnapshotProxy {
 import SwiftUI
 
 #Preview("ProfileView") {
-    ProfileView(userID: "preview-user-123", initialMode: .grid)
+    ProfileView(userID: "preview-user-123", initialMode: .media)
         .environmentObject(AuthViewModel())
 }
 #endif

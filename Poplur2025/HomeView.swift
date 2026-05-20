@@ -218,6 +218,9 @@ struct HomeView: View {
     
     // Added per instruction to gate animations
     @State private var isSceneKitReady: Bool = false
+
+    // Added per instructions to control initial yaw set once
+    @State private var didSetInitialCubeYaw: Bool = false
     
     // Upload status state
     @State private var showUploadStatus: Bool = false
@@ -595,6 +598,12 @@ struct HomeView: View {
                                 object: nil,
                                 userInfo: nil
                             )
+                        } else if selectedTab == .profile {
+                            print("[HomeView] Cube tapped on profile tab - opening messages")
+                            NotificationCenter.default.post(
+                                name: .CubeGlobalTap,
+                                object: nil
+                            )
                         }
                     }
                 )
@@ -717,13 +726,19 @@ struct HomeView: View {
                 VStack {
                     Spacer()
                     HStack {
-                        RecordingCountdownView(
-                            isRecording: $isRecording,
-                            secondsRemaining: $recordingSecondsRemaining,
-                            postCount: $userPostCount,
-                            selectedTab: $selectedTab,
-                            radiusTrend: $radiusTrend
-                        )
+                        // Show camera roll button when on record tab and not recording
+                        if selectedTab == .record && !isRecording {
+                            CameraRollButton()
+                        } else {
+                            // Show countdown when recording or post count on other tabs
+                            RecordingCountdownView(
+                                isRecording: $isRecording,
+                                secondsRemaining: $recordingSecondsRemaining,
+                                postCount: $userPostCount,
+                                selectedTab: $selectedTab,
+                                radiusTrend: $radiusTrend
+                            )
+                        }
                         Spacer()
                     }
                     .padding(.leading, safe.leading + 16)
@@ -732,7 +747,7 @@ struct HomeView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
             }
             .zIndex(1000)
-            .allowsHitTesting(false)
+            .allowsHitTesting(true) // Changed to true to allow camera roll button interaction
             
         }
         
@@ -761,6 +776,14 @@ struct HomeView: View {
             if selectedTab == .profile {
                 NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
             }
+
+            // Insert initial cube yaw set on first appear
+            if !didSetInitialCubeYaw {
+                didSetInitialCubeYaw = true
+                // Start cube on Feed face (90°) without animation
+                cubeYawDegrees = yawForTab(.feed)
+            }
+
             Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 120_000_000)
                 await Task.yield()
@@ -782,7 +805,12 @@ struct HomeView: View {
             print("[HomeView] onAppear work took \(CFAbsoluteTimeGetCurrent() - appearT0)s")
         }
         .onChange(of: selectedTab) { newTab in
-            animateYaw(to: yawForTab(selectedTab), duration: 0.45, direction: nil)
+            if !didSetInitialCubeYaw {
+                didSetInitialCubeYaw = true
+                cubeYawDegrees = yawForTab(selectedTab)
+            } else {
+                animateYaw(to: yawForTab(selectedTab), duration: 0.45, direction: nil)
+            }
 
             if !([AppTab.map, .record, .feed, .profile].contains(selectedTab)) {
                 selectedTab = .feed
