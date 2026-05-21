@@ -21,6 +21,14 @@
 		3936CD8F2EB649E8006502D5 /* SCSDKCameraKitReferenceSwiftUI in Frameworks */ = {isa = PBXBuildFile; productRef = 3936CD8E2EB649E8006502D5 /* SCSDKCameraKitReferenceSwiftUI */; };
 		3937AF562EB3C67300A8F548 /* SnapSDK in Frameworks */ = {isa = PBXBuildFile; productRef = 3937AF552EB3C67300A8F548 /* SnapSDK */; };
 		3970144F2EBA4B04001FBC4C /* SCSDKCameraKitReferenceUI in Frameworks */ = {isa = PBXBuildFile; productRef = 3936CD902EB649E8006502D5 /* SCSDKCameraKitReferenceUI */; };
+		66C9BC672FBED350000B0008 /* CameraViewWithML.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66C9BC662FBED350000B0008 /* CameraViewWithML.swift */; };
+		66C9BC692FBED37E000B0008 /* MLDetectionUseCases.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66C9BC682FBED37E000B0008 /* MLDetectionUseCases.swift */; };
+		66C9BC6B2FBED3BB000B0008 /* ML_DETECTION_SUMMARY.md in Resources */ = {isa = PBXBuildFile; fileRef = 66C9BC6A2FBED3BB000B0008 /* ML_DETECTION_SUMMARY.md */; };
+		66C9BC6D2FBED3CC000B0008 /* ML_QUICK_REFERENCE.md in Resources */ = {isa = PBXBuildFile; fileRef = 66C9BC6C2FBED3CC000B0008 /* ML_QUICK_REFERENCE.md */; };
+		66C9BC6F2FBED401000B0008 /* MapView+MLIntegration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66C9BC6E2FBED401000B0008 /* MapView+MLIntegration.swift */; };
+		66C9BC712FBED445000B0008 /* ML_ARCHITECTURE.md in Resources */ = {isa = PBXBuildFile; fileRef = 66C9BC702FBED445000B0008 /* ML_ARCHITECTURE.md */; };
+		66C9BC732FBED47F000B0008 /* ML_CHECKLIST.md in Resources */ = {isa = PBXBuildFile; fileRef = 66C9BC722FBED47F000B0008 /* ML_CHECKLIST.md */; };
+		66C9BC7F2FBEDEBD000B0008 /* FIX_CAMERAVIEW_ERRORS.md in Resources */ = {isa = PBXBuildFile; fileRef = 66C9BC7E2FBEDEBD000B0008 /* FIX_CAMERAVIEW_ERRORS.md */; };
 		F0640B822F3521FC0093A1F4 /* GoogleMaps3D in Frameworks */ = {isa = PBXBuildFile; productRef = F0640B812F3521FC0093A1F4 /* GoogleMaps3D */; };
 		F070D53D2F33B192006F44C8 /* GoogleMobileAds in Frameworks */ = {isa = PBXBuildFile; productRef = F070D53C2F33B192006F44C8 /* GoogleMobileAds */; };
 /* End PBXBuildFile section */
@@ -46,6 +54,14 @@
 		391605C12E3F48FF000ACB3E /* Poplur2025.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Poplur2025.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		391605CE2E3F4902000ACB3E /* Poplur2025Tests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = Poplur2025Tests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		391605D82E3F4902000ACB3E /* Poplur2025UITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = Poplur2025UITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		66C9BC662FBED350000B0008 /* CameraViewWithML.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraViewWithML.swift; sourceTree = "<group>"; };
+		66C9BC682FBED37E000B0008 /* MLDetectionUseCases.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MLDetectionUseCases.swift; sourceTree = "<group>"; };
+		66C9BC6A2FBED3BB000B0008 /* ML_DETECTION_SUMMARY.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = ML_DETECTION_SUMMARY.md; sourceTree = "<group>"; };
+		66C9BC6C2FBED3CC000B0008 /* ML_QUICK_REFERENCE.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = ML_QUICK_REFERENCE.md; sourceTree = "<group>"; };
+		66C9BC6E2FBED401000B0008 /* MapView+MLIntegration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MapView+MLIntegration.swift"; sourceTree = "<group>"; };
+		66C9BC702FBED445000B0008 /* ML_ARCHITECTURE.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = ML_ARCHITECTURE.md; sourceTree = "<group>"; };
+		66C9BC722FBED47F000B0008 /* ML_CHECKLIST.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = ML_CHECKLIST.md; sourceTree = "<group>"; };
+		66C9BC7E2FBEDEBD000B0008 /* FIX_CAMERAVIEW_ERRORS.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = FIX_CAMERAVIEW_ERRORS.md; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -128,6 +144,14 @@
 				391605DB2E3F4902000ACB3E /* Poplur2025UITests */,
 				F070D53B2F33B192006F44C8 /* Frameworks */,
 				391605C22E3F48FF000ACB3E /* Products */,
+				66C9BC662FBED350000B0008 /* CameraViewWithML.swift */,
+				66C9BC682FBED37E000B0008 /* MLDetectionUseCases.swift */,
+				66C9BC6A2FBED3BB000B0008 /* ML_DETECTION_SUMMARY.md */,
+				66C9BC6C2FBED3CC000B0008 /* ML_QUICK_REFERENCE.md */,
+				66C9BC6E2FBED401000B0008 /* MapView+MLIntegration.swift */,
+				66C9BC702FBED445000B0008 /* ML_ARCHITECTURE.md */,
+				66C9BC722FBED47F000B0008 /* ML_CHECKLIST.md */,
+				66C9BC7E2FBEDEBD000B0008 /* FIX_CAMERAVIEW_ERRORS.md */,
 			);
 			sourceTree = "<group>";
 		};
@@ -291,6 +315,11 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				66C9BC732FBED47F000B0008 /* ML_CHECKLIST.md in Resources */,
+				66C9BC712FBED445000B0008 /* ML_ARCHITECTURE.md in Resources */,
+				66C9BC6B2FBED3BB000B0008 /* ML_DETECTION_SUMMARY.md in Resources */,
+				66C9BC6D2FBED3CC000B0008 /* ML_QUICK_REFERENCE.md in Resources */,
+				66C9BC7F2FBEDEBD000B0008 /* FIX_CAMERAVIEW_ERRORS.md in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -315,6 +344,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				66C9BC6F2FBED401000B0008 /* MapView+MLIntegration.swift in Sources */,
+				66C9BC692FBED37E000B0008 /* MLDetectionUseCases.swift in Sources */,
+				66C9BC672FBED350000B0008 /* CameraViewWithML.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -3,6 +3,315 @@ import MapKit
 import CoreLocation
 import SceneKit
 import Foundation
+import AVFoundation
+
+// MARK: - Weather Overlay Types
+
+import SpriteKit
+
+struct WeatherVisualizationState {
+    enum Kind { case rain, thunderstorms, cloudy, snow }
+    var kind: Kind
+    var intensity: Double // 0..1
+    var lightningFrequency: Double // 0..1
+}
+
+struct WeatherParticleOverlay: UIViewRepresentable {
+    @Binding var weatherState: WeatherVisualizationState
+
+    func makeUIView(context: Context) -> SKView {
+        let view = SKView()
+        view.backgroundColor = .clear
+        view.allowsTransparency = true
+        view.ignoresSiblingOrder = true
+        
+        let scene = SKScene()
+        scene.backgroundColor = .clear
+        scene.scaleMode = .resizeFill
+        
+        context.coordinator.skView = view
+        context.coordinator.skScene = scene
+        view.presentScene(scene)
+        
+        context.coordinator.configureScene(for: weatherState)
+        return view
+    }
+
+    func updateUIView(_ uiView: SKView, context: Context) {
+        context.coordinator.configureScene(for: weatherState)
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    final class Coordinator {
+        weak var skView: SKView?
+        weak var skScene: SKScene?
+        private var currentEmitter: SKEmitterNode?
+        private var lightningNode: SKSpriteNode?
+        private var lightningTimer: Timer?
+
+        func configureScene(for state: WeatherVisualizationState) {
+            guard let scene = skScene else { return }
+            
+            // Remove previous effects
+            currentEmitter?.removeFromParent()
+            currentEmitter = nil
+            lightningNode?.removeFromParent()
+            lightningNode = nil
+            lightningTimer?.invalidate()
+            lightningTimer = nil
+
+            switch state.kind {
+            case .rain:
+                addRain(to: scene, intensity: state.intensity)
+            case .thunderstorms:
+                addRain(to: scene, intensity: state.intensity)
+                addLightning(to: scene, frequency: state.lightningFrequency)
+            case .cloudy:
+                addCloudHaze(to: scene, density: state.intensity)
+            case .snow:
+                addSnow(to: scene, intensity: state.intensity)
+            }
+        }
+
+        private func addRain(to scene: SKScene, intensity: Double) {
+            let emitter = SKEmitterNode()
+            
+            // Position at top of screen
+            emitter.position = CGPoint(x: scene.frame.midX, y: scene.frame.maxY)
+            emitter.particlePositionRange = CGVector(dx: scene.frame.width, dy: 0)
+            
+            // Rain appearance
+            emitter.particleTexture = SKTexture(image: createRaindropImage())
+            emitter.particleBirthRate = CGFloat(300 * max(0.1, intensity))
+            emitter.particleLifetime = 2.0
+            emitter.particleLifetimeRange = 0.5
+            
+            // Fall straight down
+            emitter.particleSpeed = 800
+            emitter.particleSpeedRange = 200
+            emitter.emissionAngle = -CGFloat.pi / 2 // Point down
+            emitter.emissionAngleRange = 0.1
+            
+            // Size and appearance
+            emitter.particleScale = 0.3
+            emitter.particleScaleRange = 0.1
+            emitter.particleScaleSpeed = -0.1
+            emitter.particleAlpha = 0.6
+            emitter.particleAlphaRange = 0.2
+            emitter.particleAlphaSpeed = -0.3
+            
+            // Blend mode for rain
+            emitter.particleBlendMode = .alpha
+            
+            scene.addChild(emitter)
+            currentEmitter = emitter
+        }
+
+        private func addLightning(to scene: SKScene, frequency: Double) {
+            // Create a white flash overlay
+            let flash = SKSpriteNode(color: .white, size: scene.size)
+            flash.alpha = 0
+            flash.position = CGPoint(x: scene.frame.midX, y: scene.frame.midY)
+            flash.zPosition = 100
+            scene.addChild(flash)
+            lightningNode = flash
+            
+            // Calculate flash interval based on frequency
+            let interval = max(0.5, 3.0 - frequency * 2.5)
+            
+            lightningTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak flash] _ in
+                guard let flash = flash else { return }
+                
+                // Quick flash
+                let fadeIn = SKAction.fadeAlpha(to: 0.3, duration: 0.05)
+                let fadeOut = SKAction.fadeAlpha(to: 0, duration: 0.1)
+                let sequence = SKAction.sequence([fadeIn, fadeOut])
+                flash.run(sequence)
+            }
+        }
+
+        private func addSunnyMotes(to scene: SKScene, intensity: Double) {
+            let emitter = SKEmitterNode()
+            
+            // Position in center
+            emitter.position = CGPoint(x: scene.frame.midX, y: scene.frame.midY)
+            emitter.particlePositionRange = CGVector(dx: scene.frame.width, dy: scene.frame.height)
+            
+            // Sunny particles
+            emitter.particleTexture = SKTexture(image: createSunMoteImage())
+            emitter.particleBirthRate = CGFloat(30 * max(0.1, intensity))
+            emitter.particleLifetime = 4.0
+            emitter.particleLifetimeRange = 2.0
+            
+            // Gentle floating
+            emitter.particleSpeed = 20
+            emitter.particleSpeedRange = 10
+            emitter.emissionAngle = CGFloat.pi / 2 // Up
+            emitter.emissionAngleRange = CGFloat.pi * 2
+            
+            // Appearance
+            emitter.particleScale = 0.5
+            emitter.particleScaleRange = 0.3
+            emitter.particleAlpha = 0.4
+            emitter.particleAlphaRange = 0.2
+            emitter.particleBlendMode = .add
+            
+            scene.addChild(emitter)
+            currentEmitter = emitter
+        }
+
+        private func addCloudHaze(to scene: SKScene, density: Double) {
+            let emitter = SKEmitterNode()
+            
+            // Position at top, drifting down slowly
+            emitter.position = CGPoint(x: scene.frame.midX, y: scene.frame.maxY)
+            emitter.particlePositionRange = CGVector(dx: scene.frame.width, dy: 0)
+            
+            // Cloud particles
+            emitter.particleTexture = SKTexture(image: createCloudImage())
+            emitter.particleBirthRate = CGFloat(15 * max(0.1, density))
+            emitter.particleLifetime = 8.0
+            emitter.particleLifetimeRange = 2.0
+            
+            // Slow drift
+            emitter.particleSpeed = 30
+            emitter.particleSpeedRange = 10
+            emitter.emissionAngle = -CGFloat.pi / 2
+            emitter.emissionAngleRange = 0.3
+            
+            // Large, soft clouds
+            emitter.particleScale = 2.0
+            emitter.particleScaleRange = 1.0
+            emitter.particleAlpha = 0.15
+            emitter.particleAlphaRange = 0.1
+            emitter.particleBlendMode = .alpha
+            
+            scene.addChild(emitter)
+            currentEmitter = emitter
+        }
+        
+        private func addSnow(to scene: SKScene, intensity: Double) {
+            let emitter = SKEmitterNode()
+            
+            // Position at top of screen
+            emitter.position = CGPoint(x: scene.frame.midX, y: scene.frame.maxY)
+            emitter.particlePositionRange = CGVector(dx: scene.frame.width, dy: 0)
+            
+            // Snow appearance
+            emitter.particleTexture = SKTexture(image: createSnowflakeImage())
+            emitter.particleBirthRate = CGFloat(150 * max(0.1, intensity))
+            emitter.particleLifetime = 10.0
+            emitter.particleLifetimeRange = 3.0
+            
+            // Fall straight down
+            emitter.particleSpeed = 60
+            emitter.particleSpeedRange = 20
+            emitter.emissionAngle = -CGFloat.pi / 2 // Point straight down
+            emitter.emissionAngleRange = 0.05 // Very slight variation for realism
+            
+            // No horizontal drift - fall straight down
+            emitter.xAcceleration = 0
+            emitter.yAcceleration = 0
+            
+            // Size and appearance
+            emitter.particleScale = 0.3
+            emitter.particleScaleRange = 0.2
+            emitter.particleAlpha = 0.9
+            emitter.particleAlphaRange = 0.2
+            emitter.particleAlphaSpeed = -0.1
+            
+            // Gentle rotation
+            emitter.particleRotation = 0
+            emitter.particleRotationRange = CGFloat.pi * 2
+            emitter.particleRotationSpeed = 0.5
+            
+            // Blend mode for snow
+            emitter.particleBlendMode = .alpha
+            
+            scene.addChild(emitter)
+            currentEmitter = emitter
+        }
+        
+        // MARK: - Particle Textures
+        
+        private func createRaindropImage() -> UIImage {
+            let size = CGSize(width: 4, height: 20)
+            let renderer = UIGraphicsImageRenderer(size: size)
+            return renderer.image { context in
+                UIColor.white.withAlphaComponent(0.8).setFill()
+                let rect = CGRect(origin: .zero, size: size)
+                UIBezierPath(roundedRect: rect, cornerRadius: 2).fill()
+            }
+        }
+        
+        private func createSunMoteImage() -> UIImage {
+            let size = CGSize(width: 20, height: 20)
+            let renderer = UIGraphicsImageRenderer(size: size)
+            return renderer.image { context in
+                UIColor.yellow.withAlphaComponent(0.6).setFill()
+                UIBezierPath(ovalIn: CGRect(origin: .zero, size: size)).fill()
+            }
+        }
+        
+        private func createCloudImage() -> UIImage {
+            let size = CGSize(width: 100, height: 60)
+            let renderer = UIGraphicsImageRenderer(size: size)
+            return renderer.image { context in
+                UIColor.white.withAlphaComponent(0.3).setFill()
+                UIBezierPath(ovalIn: CGRect(origin: .zero, size: size)).fill()
+            }
+        }
+        
+        private func createSnowflakeImage() -> UIImage {
+            let size = CGSize(width: 20, height: 20)
+            let renderer = UIGraphicsImageRenderer(size: size)
+            return renderer.image { context in
+                let ctx = context.cgContext
+                
+                // Draw a simple snowflake
+                UIColor.white.setStroke()
+                ctx.setLineWidth(1.5)
+                ctx.setLineCap(.round)
+                
+                let center = CGPoint(x: size.width / 2, y: size.height / 2)
+                let radius: CGFloat = 8
+                
+                // Draw 6 lines radiating from center
+                for i in 0..<6 {
+                    let angle = CGFloat(i) * .pi / 3.0
+                    let endX = center.x + radius * cos(angle)
+                    let endY = center.y + radius * sin(angle)
+                    
+                    ctx.move(to: center)
+                    ctx.addLine(to: CGPoint(x: endX, y: endY))
+                    
+                    // Add small branches
+                    let branchLength: CGFloat = 3
+                    let branchAngle1 = angle + .pi / 6
+                    let branchAngle2 = angle - .pi / 6
+                    
+                    let branchX = center.x + (radius * 0.6) * cos(angle)
+                    let branchY = center.y + (radius * 0.6) * sin(angle)
+                    
+                    ctx.move(to: CGPoint(x: branchX, y: branchY))
+                    ctx.addLine(to: CGPoint(
+                        x: branchX + branchLength * cos(branchAngle1),
+                        y: branchY + branchLength * sin(branchAngle1)
+                    ))
+                    
+                    ctx.move(to: CGPoint(x: branchX, y: branchY))
+                    ctx.addLine(to: CGPoint(
+                        x: branchX + branchLength * cos(branchAngle2),
+                        y: branchY + branchLength * sin(branchAngle2)
+                    ))
+                }
+                
+                ctx.strokePath()
+            }
+        }
+    }
+}
 
 /*
  ═══════════════════════════════════════════════════════════════════════════════
@@ -1375,8 +1684,19 @@ struct MapViewProduction: View {
     
     // Zoom slider state
     @State private var zoomLevel: Double = 700 // Initial distance in meters (700 = optimal viewing distance)
+    
+    // Confetti system for trending pins
+    @StateObject private var trendingTracker = PinTrendingTracker()
+    @State private var showConfetti: Bool = true // Toggle confetti on/off
     @State private var cubeHoldStartY: CGFloat? = nil // Track cube hold drag start position
     @State private var initialZoomLevel: Double = 700 // Store zoom level when cube hold starts
+    
+    // Weather overlay state
+    @State private var weatherState = WeatherVisualizationState(
+        kind: .rain,
+        intensity: 0.5,
+        lightningFrequency: 0.3
+    )
     
     let tourPlaces: [(name: String, coordinate: CLLocationCoordinate2D, description: String)] = [
         ("New York", CLLocationCoordinate2D(latitude: 40.7128, longitude: -74.0060), "The city that never sleeps"),
@@ -1676,6 +1996,11 @@ struct MapViewProduction: View {
             currentCity = place.name
             aiRecommendation = cityRecommendations[place.name] ?? "Explore what's happening here!"
             
+            // Fetch weather for new location
+            Task {
+                await fetchWeatherForCurrentLocation()
+            }
+            
             // Zoom in to the new place
             zoomIn(to: place.coordinate)
             isZoomedOut = false
@@ -1724,6 +2049,18 @@ struct MapViewProduction: View {
                 
                 // Allow free camera movement - user can pan/zoom anywhere
                 camera = newValue
+                
+                // Fetch weather when camera moves significantly
+                if let newCoord = newValue.camera?.centerCoordinate,
+                   let oldCoord = self.camera.camera?.centerCoordinate {
+                    let distance = MKMapPoint(newCoord).distance(to: MKMapPoint(oldCoord))
+                    // Only fetch if moved more than 50km
+                    if distance > 50_000 {
+                        Task {
+                            await fetchWeatherForCurrentLocation()
+                        }
+                    }
+                }
             }
         )
     }
@@ -1754,10 +2091,11 @@ struct MapViewProduction: View {
                 ) {
                 let _ = print("🗺️ [MapView] Map body evaluating - showPostPrompt: \(showPostPrompt), clickedCoordinate: \(String(describing: clickedCoordinate))")
                 let _ = print("🗺️ [MapView] Map body re-evaluating, shownPostCoordinate: \(String(describing: shownPostCoordinate))")
-                // Show user annotation when location is available
-                if locationManager.location != nil {
-                    UserAnnotation {
-                        Label("You", systemImage: "location.fill")
+                // Show user annotation with 3D blue pin when location is available
+                if let userCoord = locationManager.location?.coordinate {
+                    Annotation("", coordinate: userCoord) {
+                        Enhanced3DBeaconMarker(color: .blue, intensity: 0.9)
+                            .frame(width: 100, height: 120)
                     }
                 }
                 
@@ -1939,6 +2277,47 @@ struct MapViewProduction: View {
                         noteInteraction()
                     }
             )
+                
+                // Weather particle overlay
+                WeatherParticleOverlay(weatherState: $weatherState)
+                    .allowsHitTesting(false) // Let touches pass through to map
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                
+                // Confetti overlay for trending pins
+                if showConfetti {
+                    GeometryReader { geometry in
+                        ConfettiOverlay(
+                            trendingPins: $trendingTracker.trendingPins,
+                            coordinateConverter: { coordinate -> CGPoint? in
+                                // Convert map coordinate to screen point
+                                // Note: MapReader doesn't provide direct coordinate->point conversion
+                                // We need to implement this based on current camera position
+                                guard let camera = camera.camera else { return nil }
+                                
+                                // Use MKMapView's conversion (approximation for demo)
+                                // In production, you'd want a more precise conversion
+                                let centerCoord = camera.centerCoordinate
+                                let latDelta = coordinate.latitude - centerCoord.latitude
+                                let lonDelta = coordinate.longitude - centerCoord.longitude
+                                
+                                // Rough pixel conversion (will vary with zoom)
+                                let pixelsPerDegree = geometry.size.width / 0.5 // Approximate
+                                let x = geometry.size.width / 2 + CGFloat(lonDelta) * pixelsPerDegree
+                                let y = geometry.size.height / 2 - CGFloat(latDelta) * pixelsPerDegree
+                                
+                                // Check if point is within bounds
+                                guard x >= 0, x <= geometry.size.width,
+                                      y >= 0, y <= geometry.size.height else {
+                                    return nil
+                                }
+                                
+                                return CGPoint(x: x, y: y)
+                            }
+                        )
+                        .allowsHitTesting(false) // Let touches pass through
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                }
                 
                 // 3D SceneKit Overlay Layer - Floating beacons over map
                 // Note: This layer is separate from the Map to avoid gesture conflicts
@@ -2213,6 +2592,150 @@ struct MapViewProduction: View {
     }
     
     @ViewBuilder
+    private var weatherControlsOverlay: some View {
+        VStack {
+            Spacer()
+            
+            HStack {
+                Spacer()
+                
+                VStack(spacing: 12) {
+                    // Current weather display
+                    VStack(spacing: 4) {
+                        weatherIcon(for: weatherState.kind)
+                            .font(.system(size: 32))
+                            .foregroundStyle(.white)
+                            .shadow(color: .black.opacity(0.5), radius: 2)
+                        
+                        Text(weatherName(for: weatherState.kind))
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.white)
+                            .shadow(color: .black.opacity(0.5), radius: 2)
+                    }
+                    .padding(12)
+                    .background(.ultraThinMaterial.opacity(0.6), in: RoundedRectangle(cornerRadius: 12))
+                    
+                    Divider()
+                        .frame(width: 30)
+                        .background(.white.opacity(0.3))
+                    
+                    // Confetti toggle
+                    Button(action: {
+                        showConfetti.toggle()
+                    }) {
+                        Image(systemName: showConfetti ? "party.popper.fill" : "party.popper")
+                            .font(.system(size: 20))
+                            .foregroundStyle(.white)
+                            .frame(width: 44, height: 44)
+                            .background(.ultraThinMaterial.opacity(0.6), in: Circle())
+                            .shadow(color: .black.opacity(0.3), radius: 2)
+                    }
+                    
+                    // Simulate trending button
+                    Button(action: {
+                        simulateTrendingBurst()
+                    }) {
+                        Image(systemName: "chart.line.uptrend.xyaxis")
+                            .font(.system(size: 20))
+                            .foregroundStyle(.white)
+                            .frame(width: 44, height: 44)
+                            .background(.ultraThinMaterial.opacity(0.6), in: Circle())
+                            .shadow(color: .black.opacity(0.3), radius: 2)
+                    }
+                }
+                .padding(.trailing, 16)
+                .padding(.bottom, 200)
+            }
+        }
+    }
+    
+    /// Get icon for weather type
+    private func weatherIcon(for kind: WeatherVisualizationState.Kind) -> Image {
+        switch kind {
+        case .rain:
+            return Image(systemName: "cloud.rain.fill")
+        case .thunderstorms:
+            return Image(systemName: "cloud.bolt.rain.fill")
+        case .cloudy:
+            return Image(systemName: "cloud.fill")
+        case .snow:
+            return Image(systemName: "snowflake")
+        }
+    }
+    
+    /// Get name for weather type
+    private func weatherName(for kind: WeatherVisualizationState.Kind) -> String {
+        switch kind {
+        case .rain:
+            return "Rain"
+        case .thunderstorms:
+            return "Storms"
+        case .cloudy:
+            return "Cloudy"
+        case .snow:
+            return "Snow"
+        }
+    }
+    
+    /// Fetch weather for current map center
+    private func fetchWeatherForCurrentLocation() async {
+        guard let centerCoord = camera.camera?.centerCoordinate else { return }
+        
+        // In production, you would call a real weather API here
+        // For now, we'll simulate based on location
+        await MainActor.run {
+            // Simple mock based on latitude/season
+            let latitude = centerCoord.latitude
+            
+            if latitude > 45 {
+                // Northern regions - snow
+                weatherState.kind = .snow
+                weatherState.intensity = 0.6
+            } else if latitude > 30 {
+                // Temperate - rain
+                weatherState.kind = .rain
+                weatherState.intensity = 0.5
+            } else {
+                // Tropical - thunderstorms
+                weatherState.kind = .thunderstorms
+                weatherState.intensity = 0.7
+                weatherState.lightningFrequency = 0.4
+            }
+            
+            print("🌦 Weather updated for location: \(latitude), \(centerCoord.longitude)")
+            print("   Weather: \(weatherName(for: weatherState.kind))")
+        }
+    }
+    
+    /// Simulate a trending burst for demo purposes
+    private func simulateTrendingBurst() {
+        guard let randomPost = posts.randomElement() else { return }
+        
+        // Dramatically increase radius to trigger confetti
+        let newRadius = randomPost.radius * 1.5
+        
+        if let index = posts.firstIndex(where: { $0.id == randomPost.id }) {
+            // Update post with new radius
+            posts[index] = PreviewMapAnnotationPost(
+                title: randomPost.title,
+                coordinate: randomPost.coordinate,
+                radius: newRadius
+            )
+            
+            // Force trending update
+            trendingTracker.updatePin(
+                id: posts[index].id,
+                coordinate: posts[index].coordinate,
+                radius: newRadius,
+                activityCount: 100 // High activity = high trending score
+            )
+            
+            print("🎉 Simulated trending burst for \(randomPost.title) - radius: \(Int(randomPost.radius))m → \(Int(newRadius))m")
+        }
+    }
+    
+    @ViewBuilder
     private var mapContentLayer: some View {
         ZStack {
             // Main Map Layer - Same settings as interactive preview
@@ -2226,6 +2749,9 @@ struct MapViewProduction: View {
             
             // AI Recommendation Overlay (now includes zoom slider above it)
             aiRecommendationOverlay
+            
+            // Weather controls (DEBUG - can be removed for production)
+            weatherControlsOverlay
         }
     }
     
@@ -2717,6 +3243,11 @@ struct MapViewProduction: View {
         print("   mapState.mode: \(mapState.mode)")
         print("   pendingPostLocation: \(mapState.pendingPostLocation?.latitude ?? 0), \(mapState.pendingPostLocation?.longitude ?? 0)")
         
+        // Fetch initial weather
+        Task {
+            await fetchWeatherForCurrentLocation()
+        }
+        
         // Check if there's a pending post location to navigate to
         if let pendingCoordinate = mapState.pendingPostLocation {
             print("✨ [MapView] Found pending post location - navigating to it!")
@@ -2864,6 +3395,51 @@ struct MapViewProduction: View {
                 // If tour is not active, wait a bit before checking again
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
+            
+            // Update trending pins periodically
+            await updateTrendingPins()
+        }
+    }
+    
+    /// Update trending pin tracking (called periodically)
+    private func updateTrendingPins() async {
+        await MainActor.run {
+            // Update all visible posts as trending pins
+            for post in filteredPosts() {
+                trendingTracker.updatePin(
+                    id: post.id,
+                    coordinate: post.coordinate,
+                    radius: post.radius,
+                    activityCount: Int.random(in: 1...10) // Replace with real activity count
+                )
+            }
+            
+            // Simulate radius growth for demo (remove in production)
+            // In production, this would come from your real-time database
+            if posts.count > 0, Bool.random() && Double.random(in: 0...1) > 0.7 {
+                let randomPost = posts.randomElement()!
+                let newRadius = min(randomPost.radius * Double.random(in: 1.1...1.3), 10000)
+                
+                // Update the post radius (this triggers confetti if growing significantly)
+                if let index = posts.firstIndex(where: { $0.id == randomPost.id }) {
+                    posts[index] = PreviewMapAnnotationPost(
+                        title: randomPost.title,
+                        coordinate: randomPost.coordinate,
+                        radius: newRadius
+                    )
+                    
+                    // Update trending tracker
+                    trendingTracker.updatePin(
+                        id: posts[index].id,
+                        coordinate: posts[index].coordinate,
+                        radius: newRadius,
+                        activityCount: Int.random(in: 1...10)
+                    )
+                }
+            }
+            
+            // Clean old tracking data
+            trendingTracker.cleanAllOldHistory()
         }
     }
 }

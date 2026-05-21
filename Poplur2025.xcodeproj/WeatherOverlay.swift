@@ -1,17 +1,27 @@
 import SwiftUI
 import SceneKit
 
-struct WeatherVisualizationState {
-    enum Kind { case clear, rain, thunderstorms, cloudy }
-    var kind: Kind
-    var intensity: Double // 0..1
-    var lightningFrequency: Double // 0..1
+public struct WeatherVisualizationState {
+    public enum Kind { case clear, rain, thunderstorms, cloudy }
+    public var kind: Kind
+    public var intensity: Double // 0..1
+    public var lightningFrequency: Double // 0..1
+    
+    public init(kind: Kind, intensity: Double, lightningFrequency: Double) {
+        self.kind = kind
+        self.intensity = intensity
+        self.lightningFrequency = lightningFrequency
+    }
 }
 
-struct WeatherParticleOverlay: UIViewRepresentable {
-    @Binding var weatherState: WeatherVisualizationState
+public struct WeatherParticleOverlay: UIViewRepresentable {
+    @Binding public var weatherState: WeatherVisualizationState
+    
+    public init(weatherState: Binding<WeatherVisualizationState>) {
+        self._weatherState = weatherState
+    }
 
-    func makeUIView(context: Context) -> SCNView {
+    public func makeUIView(context: Context) -> SCNView {
         let view = SCNView()
         view.allowsCameraControl = false
         view.autoenablesDefaultLighting = true
@@ -32,13 +42,13 @@ struct WeatherParticleOverlay: UIViewRepresentable {
         return view
     }
 
-    func updateUIView(_ uiView: SCNView, context: Context) {
+    public func updateUIView(_ uiView: SCNView, context: Context) {
         context.coordinator.configureScene(for: weatherState)
     }
 
-    func makeCoordinator() -> Coordinator { Coordinator() }
+    public func makeCoordinator() -> Coordinator { Coordinator() }
 
-    final class Coordinator {
+    public final class Coordinator {
         weak var view: SCNView?
 
         func configureScene(for state: WeatherVisualizationState) {

@@ -189,6 +189,9 @@ struct HomeView: View {
     // Shared radius model controlling the global isometric bar value across all tabs
     @StateObject private var isometricBarModel = IsometricBarModel(radius: 0)
     
+    // User recognition manager for face detection
+    @StateObject private var userRecognitionManager = UserRecognitionManager()
+    
     @StateObject private var motionController = SceneMotionController()
     @StateObject private var cubeTouchConfig = CubeTouchConfiguration()
     
@@ -273,6 +276,13 @@ struct HomeView: View {
             HomeCameraPreviewHost(controller: cameraController)
                 .ignoresSafeArea()
             
+            // ML Detection Overlay
+            LiveMLDetectionOverlay(
+                controller: cameraController,
+                userRecognitionManager: userRecognitionManager
+            )
+            .allowsHitTesting(false)
+            
             // Animated instructional text overlay
             CameraInstructionsOverlay()
                 .allowsHitTesting(false)
@@ -287,6 +297,13 @@ struct HomeView: View {
                     if !cameraController.isReady {
                         await cameraController.startPreview()
                     }
+                    // Enable ML detection with user recognition
+                    $cameraController.enableMLDetection
+                    
+                    // Setup user recognition callback
+                    cameraController.mlDetectionManager?.onFrameProcessed = { [weak userRecognitionManager] pixelBuffer, objects in
+                        userRecognitionManager?.processDetectedObjects(objects, from: pixelBuffer)
+                    }
                 case .notDetermined:
                     // Do not prompt on appear; let user interaction trigger request
                     break
@@ -294,6 +311,11 @@ struct HomeView: View {
                     break
                 }
             }
+        }
+        .onDisappear {
+            // Disable ML detection when leaving camera tab
+            $cameraController.disableMLDetection
+            userRecognitionManager.clearRecognition()
         }
     }
     
@@ -547,7 +569,9 @@ struct HomeView: View {
                     feedTabContent
                 case .profile:
                     profileTabContent
-                @unknown default:
+                case .settings:
+                    <#code#>
+@unknown default:
                     feedTabContent
                 }
             }
@@ -1684,4 +1708,239 @@ private struct CameraInstructionsOverlay: View {
         }
     }
 }
+
+// MARK: - Live ML Detection Overlay
+
+/// Displays live ML object detection results and recognized users at the top of the camera view
+private struct LiveMLDetectionOverlay: View {
+    @ObservedObject var controller: CameraKitController
+    @ObservedObject var userRecognitionManager: UserRecognitionManager
+    @State private var detectedObjects: [DetectedObject] = []
+    @State private var isDetecting: Bool = false
+    
+    var body: some View {
+        VStack {
+            // Show user recognition if available
+            if let recognizedUser = userRecognitionManager.recognizedUser, recognizedUser.isRecent {
+                RecognizedUserCard(user: recognizedUser)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .animation(.spring(response: 0.4, dampingFraction: 0.75), value: recognizedUser.id)
+            } else if !detectedObjects.isEmpty {
+                // Show generic detections if no user recognized
+                VStack(spacing: 8) {
+                    // Primary detection (largest, most confident)
+                    if let primary = detectedObjects.first {
+                        HStack(spacing: 12) {
+                            // Icon
+                            Text(getIcon(for: primary.identifier))
+                                .font(.system(size: 32))
+                            
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(primary.identifier.capitalized)
+                                    .font(.headline)
+                                    .foregroundStyle(.white)
+                                
+                                Text("\(primary.confidencePercentage)% confidence")
+                                    .font(.caption)
+                                    .foregroundStyle(.white.opacity(0.8))
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                        .background(.ultraThinMaterial)
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .shadow(color: .black.opacity(0.2), radius: 8, x: 0, y: 4)
+                    }
+                    
+                    // Additional detections (compact)
+                    if detectedObjects.count > 1 {
+                        HStack(spacing: 8) {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.caption)
+                                .foregroundStyle(.white.opacity(0.7))
+                            
+                            Text("Also seeing: \(detectedObjects.dropFirst().map { $0.identifier.capitalized }.joined(separator: ", "))")
+                                .font(.caption)
+                                .foregroundStyle(.white.opacity(0.9))
+                                .lineLimit(1)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(.ultraThinMaterial)
+                        .clipShape(Capsule())
+                        .shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 2)
+                    }
+                }
+                .padding(.top, 60)
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .animation(.spring(response: 0.4, dampingFraction: 0.75), value: detectedObjects.count)
+            } else if isDetecting {
+                // Scanning indicator
+                HStack(spacing: 10) {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                        .scaleEffect(0.8)
+                    
+                    Text("Scanning...")
+                        .font(.subheadline)
+                        .foregroundStyle(.white)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(.ultraThinMaterial)
+                .clipShape(Capsule())
+                .padding(.top, 60)
+                .transition(.opacity)
+            }
+            
+            Spacer()
+        }
+        .onAppear {
+            isDetecting = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("MLObjectsDetected"))) { notification in
+            if let objects = notification.userInfo?["objects"] as? [DetectedObject] {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                    detectedObjects = objects
+                    isDetecting = !objects.isEmpty
+                }
+                
+                // Clear detections after 2 seconds of no updates
+                clearDetectionsAfterDelay()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("UserRecognizedInCamera"))) { notification in
+            // When user is recognized, update the global radius display
+            if let radiusMeters = notification.userInfo?["radius"] as? Double {
+                NotificationCenter.default.post(
+                    name: .SharedRadiusDidChange,
+                    object: nil,
+                    userInfo: ["radius": radiusMeters]
+                )
+            }
+        }
+    }
+    
+    private func clearDetectionsAfterDelay() {
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            if !detectedObjects.isEmpty {
+                withAnimation(.easeOut(duration: 0.3)) {
+                    detectedObjects = []
+                    isDetecting = true
+                }
+            }
+        }
+    }
+    
+    private func getIcon(for identifier: String) -> String {
+        let lowercased = identifier.lowercased()
+        
+        // Map identifiers to emojis
+        if lowercased.contains("person") || lowercased.contains("face") || lowercased.contains("human") {
+            return "👤"
+        }
+        if lowercased.contains("dog") { return "🐕" }
+        if lowercased.contains("cat") { return "🐈" }
+        if lowercased.contains("bird") { return "🐦" }
+        if lowercased.contains("car") || lowercased.contains("vehicle") { return "🚗" }
+        if lowercased.contains("phone") || lowercased.contains("mobile") { return "📱" }
+        if lowercased.contains("food") || lowercased.contains("pizza") || lowercased.contains("burger") { return "🍔" }
+        if lowercased.contains("drink") || lowercased.contains("coffee") || lowercased.contains("cup") { return "☕️" }
+        if lowercased.contains("tree") || lowercased.contains("plant") { return "🌳" }
+        if lowercased.contains("flower") { return "🌸" }
+        if lowercased.contains("building") || lowercased.contains("house") { return "🏢" }
+        if lowercased.contains("book") { return "📚" }
+        if lowercased.contains("computer") || lowercased.contains("laptop") { return "💻" }
+        if lowercased.contains("beach") || lowercased.contains("ocean") { return "🏖" }
+        if lowercased.contains("mountain") { return "⛰" }
+        if lowercased.contains("sky") || lowercased.contains("cloud") { return "☁️" }
+        
+        return "🔍" // Default search icon
+    }
+}
+
+// MARK: - Recognized User Card
+
+/// Card showing recognized user with their radius
+private struct RecognizedUserCard: View {
+    let user: RecognizedUser
+    
+    var body: some View {
+        VStack(spacing: 10) {
+            // User header
+            HStack(spacing: 12) {
+                // Profile icon/image
+                Circle()
+                    .fill(LinearGradient(
+                        colors: [.blue, .purple],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ))
+                    .frame(width: 44, height: 44)
+                    .overlay(
+                        Image(systemName: "person.fill")
+                            .font(.system(size: 20))
+                            .foregroundStyle(.white)
+                    )
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("@\(user.profile.username)")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                    
+                    Text("Tap to view profile")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.7))
+                }
+                
+                Spacer()
+                
+                // Confidence badge
+                Text("\(Int(user.confidence * 100))%")
+                    .font(.caption.bold())
+                    .foregroundStyle(.green)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.green.opacity(0.2))
+                    .clipShape(Capsule())
+            }
+            
+            // Radius display
+            HStack(spacing: 12) {
+                Image(systemName: "circle.dashed")
+                    .font(.title2)
+                    .foregroundStyle(.white.opacity(0.9))
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Radius")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.7))
+                    
+                    Text(user.profile.formattedRadius)
+                        .font(.title3.bold())
+                        .foregroundStyle(.white)
+                }
+                
+                Spacer()
+                
+                // Trend indicator (optional)
+                Image(systemName: "arrow.up.right")
+                    .font(.caption)
+                    .foregroundStyle(.green)
+                    .padding(8)
+                    .background(Color.green.opacity(0.2))
+                    .clipShape(Circle())
+            }
+            .padding(.top, 4)
+        }
+        .padding(16)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .shadow(color: .black.opacity(0.3), radius: 12, x: 0, y: 6)
+        .padding(.top, 60)
+        .padding(.horizontal, 16)
+    }
+}
+
 
