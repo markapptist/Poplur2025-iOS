@@ -11,9 +11,34 @@ import FirebaseFirestore
 import FirebaseStorage
 import UIKit
 
+protocol EditableUserProfile {
+    var username: String { get set }
+    var email: String { get set }
+    var profilePictureURL: URL? { get }
+}
+
+// Use a type-erased box to allow binding without referring to the ambiguous concrete type
+struct AnyEditableUserProfile: EditableUserProfile {
+    var getUsername: () -> String
+    var setUsername: (String) -> Void
+    var getEmail: () -> String
+    var setEmail: (String) -> Void
+    var getProfilePictureURL: () -> URL?
+
+    var username: String {
+        get { getUsername() }
+        set { setUsername(newValue) }
+    }
+    var email: String {
+        get { getEmail() }
+        set { setEmail(newValue) }
+    }
+    var profilePictureURL: URL? { get { getProfilePictureURL() } }
+}
+
 struct EditProfileView: View {
     @Environment(\.dismiss) private var dismiss
-    @Binding var user: UserProfile?  // Binding to the user profile from the parent view
+    @Binding var user: AnyEditableUserProfile?  // Binding to the user profile from the parent view
     @State private var newUsername: String
     @State private var newEmail: String
     @State private var selectedImage: UIImage?
@@ -22,7 +47,7 @@ struct EditProfileView: View {
     @State private var isImageChanged = false
     @State private var isSaving = false
 
-    init(user: Binding<UserProfile?>) {
+    init(user: Binding<AnyEditableUserProfile?>) {
         _user = user
         _newUsername = State(initialValue: user.wrappedValue?.username ?? "")
         _newEmail = State(initialValue: user.wrappedValue?.email ?? "")
@@ -175,7 +200,7 @@ struct EditProfileView: View {
 
 struct EditProfileView_Previews: PreviewProvider {
     static var previews: some View {
-        EditProfileView(user: .constant(UserProfile(id: "preview-user-id", username: "John Doe", email: "john.doe@example.com", profilePictureURL: nil)))
+        EditProfileView(user: .constant(nil))
             .previewLayout(.sizeThatFits)
             .padding()
     }

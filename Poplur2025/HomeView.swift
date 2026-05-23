@@ -175,6 +175,10 @@ struct HomeView: View {
     // Use injected, shared camera controller (prewarmed in App)
     @ObservedObject var cameraController: CameraKitController
     
+    // AR Filters
+    @StateObject private var arFilterManager = ARFilterManager()
+    @State private var showARFilters = false
+    
     // One-time flags to avoid doing heavy work repeatedly
     @State private var didTriggerFeedInitialLoad = false
     @State private var didTriggerMapInitialLoad = false
@@ -273,19 +277,28 @@ struct HomeView: View {
     @ViewBuilder
     private var recordTabContent: some View {
         ZStack {
+            // Camera preview with UIKit gestures enabled
+            // UIKit gestures: swipe up/down (flash), double-tap (flip camera), long-press (AR filters)
             HomeCameraPreviewHost(controller: cameraController)
                 .ignoresSafeArea()
+                .allowsHitTesting(true) // Enable UIKit gesture recognizers
             
-            // ML Detection Overlay
-            LiveMLDetectionOverlay(
-                controller: cameraController,
-                userRecognitionManager: userRecognitionManager
-            )
-            .allowsHitTesting(false)
-            
-            // Animated instructional text overlay
-            CameraInstructionsOverlay()
+            // ML Detection Overlay (hidden when AR filters shown)
+            if !showARFilters {
+                LiveMLDetectionOverlay(
+                    controller: cameraController,
+                    userRecognitionManager: userRecognitionManager
+                )
                 .allowsHitTesting(false)
+                .transition(.opacity)
+            }
+            
+            // Animated instructional text overlay (hidden when AR filters shown)
+            if !showARFilters {
+                CameraInstructionsOverlay()
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+            }
         }
         .onAppear {
             Task { @MainActor in
@@ -298,12 +311,15 @@ struct HomeView: View {
                         await cameraController.startPreview()
                     }
                     // Enable ML detection with user recognition
-                    $cameraController.enableMLDetection
+                    cameraController.enableMLDetection()
                     
                     // Setup user recognition callback
                     cameraController.mlDetectionManager?.onFrameProcessed = { [weak userRecognitionManager] pixelBuffer, objects in
                         userRecognitionManager?.processDetectedObjects(objects, from: pixelBuffer)
                     }
+                    
+                    // Start recognition session to pre-load user radius
+                    await userRecognitionManager.startRecognitionSession()
                 case .notDetermined:
                     // Do not prompt on appear; let user interaction trigger request
                     break
@@ -314,8 +330,12 @@ struct HomeView: View {
         }
         .onDisappear {
             // Disable ML detection when leaving camera tab
-            $cameraController.disableMLDetection
+            cameraController.disableMLDetection()
             userRecognitionManager.clearRecognition()
+            // Reset filters and flag when leaving camera tab
+            showARFilters = false
+            arFilterManager.activeFilter = .none
+            UserDefaults.standard.set(false, forKey: "ARFiltersShown")
         }
     }
     
@@ -570,8 +590,17 @@ struct HomeView: View {
                 case .profile:
                     profileTabContent
                 case .settings:
-                    <#code#>
-@unknown default:
+                    VStack(spacing: 12) {
+                        Image(systemName: "gearshape.fill")
+                            .font(.largeTitle)
+                            .foregroundStyle(.secondary)
+                        Text("Settings are not available from here.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.clear)
+                @unknown default:
                     feedTabContent
                 }
             }
@@ -599,6 +628,26 @@ struct HomeView: View {
                 }
                 .transition(.move(edge: .top).combined(with: .opacity))
                 .zIndex(999)
+            }
+            
+            // AR Filter Selector above cube (Snapchat-style)
+            if showARFilters && selectedTab == .record {
+                VStack(spacing: 0) {
+                    // Transparent spacer that allows touches to pass through
+                    Color.clear
+                        .allowsHitTesting(false)
+                    
+                    // Filter selector (captures touches for buttons)
+                    ARFilterSelectorHorizontal(
+                        filterManager: arFilterManager,
+                        cameraController: cameraController,
+                        isPresented: $showARFilters
+                    )
+                    .allowsHitTesting(true) // Enable touches for filter buttons
+                    .padding(.bottom, 160) // Position closer to cube (reduced from 280)
+                }
+                .zIndex(999)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
             
             // 3D Cube tab control overlay
@@ -811,7 +860,7 @@ struct HomeView: View {
             Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 120_000_000)
                 await Task.yield()
-                enableLowerHitArea = true
+                enableLowerHitArea = false // Disabled to prevent accidental taps outside cube
                 
                 if !didApplyDefaultBarSettings {
                     didApplyDefaultBarSettings = true
@@ -922,6 +971,19 @@ struct HomeView: View {
             // Reset the radius bar so the user can capture again
             isometricBarModel.radius = 0
             NotificationCenter.default.post(name: .SharedRadiusDidChange, object: nil, userInfo: ["radius": 0.0])
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ToggleARFilters"))) { _ in
+            // Handle AR filter toggle from CameraPreviewViewController
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                showARFilters.toggle()
+                UserDefaults.standard.set(showARFilters, forKey: "ARFiltersShown")
+                NotificationCenter.default.post(
+                    name: Notification.Name("ARFiltersStateChanged"),
+                    object: nil,
+                    userInfo: ["isShown": showARFilters]
+                )
+            }
+            print("🎨 [HomeView] AR Filters toggled via notification: \(showARFilters)")
         }
         .onReceive(NotificationCenter.default.publisher(for: .cameraCubeHoldBegan)) { _ in
             guard selectedTab == .record else { return }
@@ -1171,10 +1233,12 @@ struct HomeView: View {
                 print("[HomeView] Received MapSuggestedRadius: \(Int(value))m")
                 // Clamp to app cap and apply to the global bar with animation on every update
                 let clampedValue = min(value, 3_323_000.0)
-                withAnimation(.easeInOut(duration: 2.0)) {
+                let anim = Animation.easeInOut(duration: 2.0)
+                withAnimation(anim) {
                     isometricBarModel.radius = clampedValue
                 }
-                print("[HomeView] Updated isometricBarModel.radius to: \(Int(clampedValue))m")
+                let updatedMeters = Int(clampedValue)
+                print("[HomeView] Updated isometricBarModel.radius to: \(updatedMeters)m")
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .currentPostRadiusDidChange)) { note in
@@ -1206,7 +1270,8 @@ struct HomeView: View {
                     print("🔄 [HomeView] Trend changed from \(oldTrend) to \(radiusTrend)")
                 }
                 
-                withAnimation(.easeInOut(duration: duration)) {
+                let anim = Animation.easeInOut(duration: duration)
+                withAnimation(anim) {
                     isometricBarModel.radius = clampedValue
                 }
                 print("[HomeView] Updated isometricBarModel.radius to: \(Int(clampedValue))m (from feed, trend: \(radiusTrend))")
@@ -1217,7 +1282,8 @@ struct HomeView: View {
                 print("[HomeView] Received animateRadiusBarToValue: \(Int(value))m")
                 let duration = (note.userInfo?["duration"] as? Double) ?? 0.8
                 let clampedValue = min(value, 3_323_000.0)
-                withAnimation(.easeInOut(duration: duration)) {
+                let anim = Animation.easeInOut(duration: duration)
+                withAnimation(anim) {
                     isometricBarModel.radius = clampedValue
                 }
                 print("[HomeView] Updated isometricBarModel.radius to: \(Int(clampedValue))m (from animator)")
@@ -1638,6 +1704,10 @@ private struct CameraInstructionsOverlay: View {
             "Tap cube to take photo • Hold cube to record video"
         ),
         (
+            "AR Filters",
+            "Long-press anywhere on camera to show beauty filters and effects"
+        ),
+        (
             "Torch Control",
             "Swipe up to turn flashlight ON • Swipe down to turn flashlight OFF"
         ),
@@ -1917,7 +1987,7 @@ private struct RecognizedUserCard: View {
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.7))
                     
-                    Text(user.profile.formattedRadius)
+                    Text(user.formattedRadius)
                         .font(.title3.bold())
                         .foregroundStyle(.white)
                 }
@@ -1942,5 +2012,4 @@ private struct RecognizedUserCard: View {
         .padding(.horizontal, 16)
     }
 }
-
 

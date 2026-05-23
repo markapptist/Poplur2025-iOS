@@ -14,6 +14,13 @@ final class CameraPreviewViewController: UIViewController {
     private let previewLayer: AVCaptureVideoPreviewLayer
 
     private let sessionQueue = DispatchQueue(label: "camera.session.queue", qos: .userInitiated)
+    
+    // Gesture recognizers (stored so we can disable them when AR filters are shown)
+    private var longPressGesture: UILongPressGestureRecognizer?
+    private var panGesture: UIPanGestureRecognizer?
+    private var swipeUpGesture: UISwipeGestureRecognizer?
+    private var swipeDownGesture: UISwipeGestureRecognizer?
+    private var doubleTapGesture: UITapGestureRecognizer?
 
     /// Photo capture callback
     var onShutter: (() -> Void)?
@@ -177,6 +184,9 @@ final class CameraPreviewViewController: UIViewController {
         NotificationCenter.default.addObserver(self, selector: #selector(handleCubeHoldEnded), name: Notification.Name("cubeHoldEnded"), object: nil)
         
         NotificationCenter.default.addObserver(self, selector: #selector(handleShowCapturedPreviewRequested), name: Notification.Name("ShowCapturedPreviewRequested"), object: nil)
+        
+        // Listen for AR filters state changes
+        NotificationCenter.default.addObserver(self, selector: #selector(handleARFiltersStateChanged), name: Notification.Name("ARFiltersStateChanged"), object: nil)
         
         // Ensure initial layout/UI sync on first load
         view.setNeedsLayout()
@@ -455,7 +465,33 @@ final class CameraPreviewViewController: UIViewController {
     }
     
     @objc private func handleCubeTappedNotification() {
+        // Don't trigger camera capture if AR filters are shown
+        // Check if the filters UI is currently presented
+        let isARFiltersShown = UserDefaults.standard.bool(forKey: "ARFiltersShown")
+        if isARFiltersShown {
+            print("[CameraPreviewVC] 🎨 AR Filters active - ignoring cube tap for photo capture")
+            return
+        }
         cubePressed()
+    }
+    
+    @objc private func handleARFiltersStateChanged(_ notification: Notification) {
+        guard let isShown = notification.userInfo?["isShown"] as? Bool else { return }
+        print("[CameraPreviewVC] AR Filters state changed: \(isShown)")
+        setGesturesEnabled(!isShown)
+    }
+    
+    /// Enable or disable UIKit gesture recognizers
+    /// Used to prevent conflicts when AR filters UI is shown
+    /// NOTE: Double-tap and swipe gestures remain enabled for camera flip and flashlight
+    private func setGesturesEnabled(_ enabled: Bool) {
+        longPressGesture?.isEnabled = enabled  // Disable video recording when filters shown
+        panGesture?.isEnabled = enabled        // Disable navigation when filters shown
+        // Keep these ALWAYS enabled for camera controls:
+        // swipeUpGesture - flashlight ON
+        // swipeDownGesture - flashlight OFF
+        // doubleTapGesture - flip camera
+        print("[CameraPreviewVC] Recording/navigation gestures \(enabled ? "enabled" : "disabled"), camera controls remain active")
     }
     
     @objc private func handleCubeHoldBegan() {
@@ -521,25 +557,30 @@ final class CameraPreviewViewController: UIViewController {
         )
         longPress.minimumPressDuration = 2.0 // Changed to 2 seconds
         view.addGestureRecognizer(longPress)
+        self.longPressGesture = longPress
 
         // Horizontal pan = swipe navigation (existing)
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
         pan.maximumNumberOfTouches = 1
         view.addGestureRecognizer(pan)
+        self.panGesture = pan
         
         // NEW: Vertical swipe for torch control
         let swipeUp = UISwipeGestureRecognizer(target: self, action: #selector(handleSwipeUp))
         swipeUp.direction = .up
         view.addGestureRecognizer(swipeUp)
+        self.swipeUpGesture = swipeUp
         
         let swipeDown = UISwipeGestureRecognizer(target: self, action: #selector(handleSwipeDown))
         swipeDown.direction = .down
         view.addGestureRecognizer(swipeDown)
+        self.swipeDownGesture = swipeDown
         
         // NEW: Double tap to flip camera
         let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap))
         doubleTap.numberOfTapsRequired = 2
         view.addGestureRecognizer(doubleTap)
+        self.doubleTapGesture = doubleTap
         
         // Ensure pan doesn't conflict with swipe gestures
         pan.require(toFail: swipeUp)
@@ -612,12 +653,26 @@ final class CameraPreviewViewController: UIViewController {
                     try device.setTorchModeOn(level: AVCaptureDevice.maxAvailableTorchLevel)
                     isTorchOn = true
                     print("[CameraPreviewVC] Torch turned ON")
+                    
+                    // Notify cube to glow
+                    NotificationCenter.default.post(
+                        name: Notification.Name("TorchStateChanged"),
+                        object: nil,
+                        userInfo: ["isOn": true]
+                    )
                 }
             } else {
                 if device.isTorchActive {
                     device.torchMode = .off
                     isTorchOn = false
                     print("[CameraPreviewVC] Torch turned OFF")
+                    
+                    // Notify cube to stop glowing
+                    NotificationCenter.default.post(
+                        name: Notification.Name("TorchStateChanged"),
+                        object: nil,
+                        userInfo: ["isOn": false]
+                    )
                 }
             }
             device.unlockForConfiguration()

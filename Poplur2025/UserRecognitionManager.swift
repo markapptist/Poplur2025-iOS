@@ -28,6 +28,8 @@ class UserRecognitionManager: ObservableObject {
     private var faceDetectionRequest: VNDetectFaceRectanglesRequest?
     private var cachedUserProfiles: [String: UserProfile] = [:]
     private var lastRecognitionTime: Date = .distantPast
+    private var savedFaceImage: UIImage?
+    private var savedFaceObservation: VNFaceObservation?
     
     // Minimum time between recognition attempts (prevents spam)
     private let recognitionCooldown: TimeInterval = 0.5
@@ -36,6 +38,8 @@ class UserRecognitionManager: ObservableObject {
     
     init() {
         setupFaceDetection()
+        loadSavedFaceImage()
+        setupNotificationObserver()
     }
     
     // MARK: - Setup
@@ -62,7 +66,89 @@ class UserRecognitionManager: ObservableObject {
         faceDetectionRequest?.revision = VNDetectFaceRectanglesRequestRevision3
     }
     
+    private func setupNotificationObserver() {
+        NotificationCenter.default.addObserver(
+            forName: Notification.Name("FaceImageUpdatedForML"),
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self = self,
+                  let userInfo = notification.userInfo,
+                  let image = userInfo["image"] as? UIImage else { return }
+            
+            Task { @MainActor in
+                await self.processSavedFaceImage(image)
+            }
+        }
+    }
+    
+    private func loadSavedFaceImage() {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let url = docs.appendingPathComponent("face_recognition.jpg")
+        
+        if FileManager.default.fileExists(atPath: url.path),
+           let data = try? Data(contentsOf: url),
+           let image = UIImage(data: data) {
+            Task { @MainActor in
+                await self.processSavedFaceImage(image)
+            }
+        } else {
+            print("ℹ️ No saved face image found for recognition")
+        }
+    }
+    
+    private func processSavedFaceImage(_ image: UIImage) async {
+        guard let cgImage = image.cgImage else {
+            print("❌ Failed to get CGImage from saved face image")
+            return
+        }
+        
+        // Detect face in the saved image to get face observation for comparison
+        let request = VNDetectFaceRectanglesRequest()
+        let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+        
+        do {
+            try handler.perform([request])
+            
+            if let faceObservations = request.results as? [VNFaceObservation],
+               let firstFace = faceObservations.first {
+                self.savedFaceImage = image
+                self.savedFaceObservation = firstFace
+                print("✅ Saved face image loaded and processed for recognition")
+                print("   Face bounds: \(firstFace.boundingBox)")
+            } else {
+                print("⚠️ No face detected in saved image")
+            }
+        } catch {
+            print("❌ Failed to detect face in saved image: \(error.localizedDescription)")
+        }
+    }
+    
     // MARK: - Public Methods
+    
+    /// Start recognition session and load current user's radius
+    func startRecognitionSession() async {
+        guard let currentUserID = Auth.auth().currentUser?.uid else {
+            print("⚠️ Cannot start recognition - no user logged in")
+            return
+        }
+        
+        // Pre-load current user's radius so it's ready when face is detected
+        do {
+            let userDoc = try await db.collection("users").document(currentUserID).getDocument()
+            if let radiusMeters = userDoc.data()?["radius"] as? Double {
+                print("✅ Pre-loaded current user radius: \(Int(radiusMeters))m")
+                // Cache it for instant display on recognition
+                NotificationCenter.default.post(
+                    name: Notification.Name("CachedUserRadius"),
+                    object: nil,
+                    userInfo: ["radius": radiusMeters]
+                )
+            }
+        } catch {
+            print("❌ Failed to pre-load user radius: \(error.localizedDescription)")
+        }
+    }
     
     /// Process detected objects to find users
     func processDetectedObjects(_ objects: [DetectedObject], from pixelBuffer: CVPixelBuffer?) {
@@ -128,52 +214,82 @@ class UserRecognitionManager: ObservableObject {
             return
         }
         
-        // In a real implementation, you would:
-        // 1. Extract face features/encoding from primaryFace
-        // 2. Compare against stored user face encodings in database
-        // 3. Match to specific user
+        // Check if we have a saved face to compare against
+        guard savedFaceImage != nil, savedFaceObservation != nil else {
+            print("ℹ️ No saved face image - cannot perform recognition")
+            recognizedUser = nil
+            return
+        }
         
-        // For now, we'll simulate user recognition by checking nearby users
-        await recognizeNearbyUser()
-    }
-    
-    /// Attempt to recognize a nearby user
-    /// In production, this would use face encoding matching
-    private func recognizeNearbyUser() async {
-        // TODO: Replace this with actual face matching logic
-        // For now, we'll check if there are any nearby users from the feed
+        // Compare the detected face with the saved face
+        let similarity = compareFaces(detected: primaryFace, saved: savedFaceObservation!)
         
-        // Simulate recognition by checking recent user interactions
-        // In reality, you'd compare face encodings here
+        print("👤 Face similarity: \(String(format: "%.2f", similarity * 100))%")
         
-        do {
-            // Example: Get users who have posted nearby
-            let snapshot = try await db.collection("posts")
-                .order(by: "timestamp", descending: true)
-                .limit(to: 10)
-                .getDocuments()
-            
-            // For demo purposes, take the first user
-            // In production, this would be based on face matching
-            if let firstDoc = snapshot.documents.first,
-               let userID = firstDoc.data()["userID"] as? String {
-                
-                // Fetch user profile
-                if let profile = cachedUserProfiles[userID] {
-                    updateRecognizedUser(profile)
-                } else {
-                    let userProfile = try await fetchUserProfile(userID: userID)
-                    cachedUserProfiles[userID] = userProfile
-                    updateRecognizedUser(userProfile)
-                }
-            }
-        } catch {
-            print("❌ Error recognizing user: \(error.localizedDescription)")
+        // If similarity is high enough, recognize as the current user
+        if similarity > 0.7 {  // 70% similarity threshold
+            await recognizeCurrentUser(confidence: Float(similarity))
+        } else {
+            recognizedUser = nil
         }
     }
     
+    /// Compare two face observations for similarity
+    private func compareFaces(detected: VNFaceObservation, saved: VNFaceObservation) -> Double {
+        // Simple comparison based on face bounds and aspect ratio
+        // In production, you'd use VNFaceObservation features or a custom ML model
+        
+        let detectedBounds = detected.boundingBox
+        let savedBounds = saved.boundingBox
+        
+        // Compare aspect ratios
+        let detectedAspect = detectedBounds.width / detectedBounds.height
+        let savedAspect = savedBounds.width / savedBounds.height
+        let aspectDiff = abs(detectedAspect - savedAspect)
+        
+        // Lower difference = higher similarity
+        // Convert to 0-1 range where 1 is perfect match
+        let aspectSimilarity = max(0, 1.0 - (aspectDiff * 2))
+        
+        // Compare size (normalized)
+        let detectedSize = detectedBounds.width * detectedBounds.height
+        let savedSize = savedBounds.width * savedBounds.height
+        let sizeDiff = abs(detectedSize - savedSize) / max(detectedSize, savedSize)
+        let sizeSimilarity = max(0, 1.0 - sizeDiff)
+        
+        // Combined similarity score
+        let similarity = (aspectSimilarity * 0.6 + sizeSimilarity * 0.4)
+        
+        return similarity
+    }
+    
+    /// Recognize the current user (whose face is saved)
+    private func recognizeCurrentUser(confidence: Float) async {
+        guard let currentUserID = Auth.auth().currentUser?.uid else {
+            print("⚠️ No current user logged in")
+            return
+        }
+        
+        do {
+            // Fetch current user's profile
+            if let cachedProfile = cachedUserProfiles[currentUserID] {
+                // Fetch radius from Firestore
+                let userDoc = try await db.collection("users").document(currentUserID).getDocument()
+                let radiusMeters = userDoc.data()?["radius"] as? Double ?? 5000.0
+                updateRecognizedUser(cachedProfile, radius: radiusMeters, confidence: confidence)
+            } else {
+                let result = try await fetchUserProfile(userID: currentUserID)
+                cachedUserProfiles[currentUserID] = result.profile
+                updateRecognizedUser(result.profile, radius: result.radius, confidence: confidence)
+            }
+        } catch {
+            print("❌ Error fetching current user profile: \(error.localizedDescription)")
+        }
+    }
+    
+    
     /// Fetch user profile from Firestore
-    private func fetchUserProfile(userID: String) async throws -> UserProfile {
+    private func fetchUserProfile(userID: String) async throws -> (profile: UserProfile, radius: Double) {
         let userDoc = try await db.collection("users").document(userID).getDocument()
         
         guard let data = userDoc.data() else {
@@ -181,35 +297,48 @@ class UserRecognitionManager: ObservableObject {
         }
         
         let username = data["username"] as? String ?? "Unknown"
-        let radiusMeters = data["radius"] as? Double ?? 0
-        let profileImageURL = data["profileImageURL"] as? String
+        let email = data["email"] as? String ?? ""
+        let radiusMeters = data["radius"] as? Double ?? 5000.0
+        let profileImageURLString = data["profileImageURL"] as? String
+        let profilePictureURL = profileImageURLString.flatMap { URL(string: $0) }
         
-        return UserProfile(
-            userID: userID,
+        let profile = UserProfile(
+            id: userID,
             username: username,
-            radiusMeters: radiusMeters,
-            profileImageURL: profileImageURL
+            email: email,
+            profilePictureURL: profilePictureURL
         )
+        
+        return (profile, radiusMeters)
     }
     
-    private func updateRecognizedUser(_ profile: UserProfile) {
+    private func updateRecognizedUser(_ profile: UserProfile, radius: Double, confidence: Float = 0.85) {
         recognizedUser = RecognizedUser(
             profile: profile,
             detectedAt: Date(),
-            confidence: 0.85 // Placeholder - would come from face matching
+            confidence: confidence,
+            radiusMeters: radius
         )
         
-        print("👤 Recognized user: @\(profile.username) with \(Int(profile.radiusMeters))m radius")
+        print("👤 Recognized user: @\(profile.username) with \(Int(radius))m radius (confidence: \(Int(confidence * 100))%)")
         
         // Post notification for other parts of app
         NotificationCenter.default.post(
             name: NSNotification.Name("UserRecognizedInCamera"),
             object: nil,
             userInfo: [
-                "userID": profile.userID,
+                "userID": profile.id,
                 "username": profile.username,
-                "radius": profile.radiusMeters
+                "radius": radius,
+                "confidence": confidence
             ]
+        )
+        
+        // Update radius bar to show the recognized user's radius
+        NotificationCenter.default.post(
+            name: Notification.Name("currentPostRadiusDidChange"),
+            object: nil,
+            userInfo: ["radius": radius]
         )
     }
     
@@ -224,14 +353,18 @@ class UserRecognitionManager: ObservableObject {
 
 // MARK: - Supporting Types
 
-/// User profile information
-struct UserProfile: Codable, Identifiable {
-    let userID: String
-    let username: String
-    let radiusMeters: Double
-    let profileImageURL: String?
+/// Recognized user with detection metadata
+struct RecognizedUser: Identifiable {
+    let profile: UserProfile
+    let detectedAt: Date
+    let confidence: Float
+    let radiusMeters: Double // Store radius separately since it's not in the main UserProfile
     
-    var id: String { userID }
+    var id: String { profile.id }
+    
+    var isRecent: Bool {
+        Date().timeIntervalSince(detectedAt) < 3.0
+    }
     
     var formattedRadius: String {
         let usesMetric = Locale.current.usesMetricSystem
@@ -251,19 +384,6 @@ struct UserProfile: Codable, Identifiable {
                 return "\(Int(feet)) ft"
             }
         }
-    }
-}
-
-/// Recognized user with detection metadata
-struct RecognizedUser: Identifiable {
-    let profile: UserProfile
-    let detectedAt: Date
-    let confidence: Float
-    
-    var id: String { profile.userID }
-    
-    var isRecent: Bool {
-        Date().timeIntervalSince(detectedAt) < 3.0
     }
 }
 

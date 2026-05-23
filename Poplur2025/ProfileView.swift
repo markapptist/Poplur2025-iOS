@@ -1,7 +1,7 @@
 import SwiftUI
 import UIKit
 import FirebaseAuth
-import FirebaseFirestore
+@preconcurrency import FirebaseFirestore
 import UserNotifications
 import ARKit
 
@@ -63,6 +63,8 @@ struct ProfileView: View {
     @State private var navigateToMessages = false
     @State private var averageRadius: Double = 5000
     @State private var navigateToScanner = false
+    @State private var showImagePicker = false
+    @State private var showProfilePhotoOptions = false
     
     @State private var lastHeadModelURL: URL? = nil
 
@@ -75,6 +77,29 @@ struct ProfileView: View {
     @State private var canLoadMore = true
     @State private var lastDocument: QueryDocumentSnapshot? = nil
     private let pageSize = 18
+    
+    // Helper to create binding for EditProfileView
+    private var editableUserProfileBinding: Binding<AnyEditableUserProfile?> {
+        Binding(
+            get: {
+                guard let profile = userProfile else { return nil }
+                return AnyEditableUserProfile(
+                    getUsername: { profile.username },
+                    setUsername: { _ in }, // Will be handled in the setter
+                    getEmail: { profile.email },
+                    setEmail: { _ in }, // Will be handled in the setter
+                    getProfilePictureURL: { profile.profilePictureURL }
+                )
+            },
+            set: { newValue in
+                if let newValue = newValue, var profile = userProfile {
+                    profile.username = newValue.username
+                    profile.email = newValue.email
+                    userProfile = profile
+                }
+            }
+        )
+    }
 
     enum DisplayMode: String, CaseIterable, Identifiable {
         case media // Changed from 'list'
@@ -429,14 +454,17 @@ struct ProfileView: View {
                 HeadScannerView { result in
                     switch result {
                     case .success(let output):
-                        // For now, use a snapshot image if provided; otherwise ignore
+                        // Save snapshot image for ML face recognition
                         if let image = output.previewImage {
                             self.profileImage = image
                             if let url = try? saveProfileImage(image) {
                                 self.profileImageURL = url
+                                // Save for face recognition ML model
+                                saveFaceForRecognition(image: image)
                             }
                             NotificationCenter.default.post(name: Notification.Name("ProfilePhotoUpdated"), object: image)
                         }
+                        // Save 3D model URL if available
                         self.lastHeadModelURL = output.usdzURL
                         if output.usdzURL != nil {
                             self.navigateToViewer = true
@@ -447,6 +475,26 @@ struct ProfileView: View {
                 }
             } label: { EmptyView() }
             .hidden()
+            
+            .sheet(isPresented: $showImagePicker) {
+                ImagePickerView(
+                    selectedImage: Binding(
+                        get: { self.profileImage },
+                        set: { newImage in
+                            if let image = newImage {
+                                self.profileImage = image
+                                if let url = try? saveProfileImage(image) {
+                                    self.profileImageURL = url
+                                    // Save for face recognition ML model
+                                    saveFaceForRecognition(image: image)
+                                }
+                                NotificationCenter.default.post(name: Notification.Name("ProfilePhotoUpdated"), object: image)
+                            }
+                        }
+                    ),
+                    selectedVideoURL: .constant(nil)
+                )
+            }
 
             NavigationLink(isActive: $navigateToViewer) {
                 if let url = lastHeadModelURL {
@@ -458,7 +506,7 @@ struct ProfileView: View {
             .hidden()
 
             .sheet(isPresented: $editing) {
-                EditProfileView(user: $userProfile)
+                EditProfileView(user: editableUserProfileBinding)
             }
             .task {
                 if !isRunningInPreviews {
@@ -769,16 +817,23 @@ struct ProfileView: View {
         Group {
             if isOwnProfile {
                 Button {
-                    navigateToScanner = true
+                    showProfilePhotoOptions = true
                 } label: {
                     avatarContent
                 }
-                .contextMenu {
-                    Button(role: .destructive) {
-                        deleteProfilePhoto()
-                    } label: {
-                        Label("Delete Profile Photo", systemImage: "trash")
+                .confirmationDialog("Update Profile Photo", isPresented: $showProfilePhotoOptions, titleVisibility: .visible) {
+                    Button("Scan Face (AR)") {
+                        navigateToScanner = true
                     }
+                    Button("Take Photo") {
+                        showImagePicker = true
+                    }
+                    if profileImage != nil || profileImageURL != nil {
+                        Button("Delete Photo", role: .destructive) {
+                            deleteProfilePhoto()
+                        }
+                    }
+                    Button("Cancel", role: .cancel) {}
                 }
                 .buttonStyle(.plain)
             } else {
@@ -1432,7 +1487,51 @@ struct ProfileView: View {
                 print("Failed to remove profile photo: \(error.localizedDescription)")
             }
         }
+        // Also delete the face recognition image
+        let faceURL = faceRecognitionImageURL()
+        if FileManager.default.fileExists(atPath: faceURL.path) {
+            do { try FileManager.default.removeItem(at: faceURL) } catch {
+                print("Failed to remove face recognition image: \(error.localizedDescription)")
+            }
+        }
         NotificationCenter.default.post(name: Notification.Name("ProfilePhotoUpdated"), object: nil)
+    }
+    
+    // MARK: - Face Recognition ML Helpers
+    
+    /// Save face image for ML-based face recognition
+    private func saveFaceForRecognition(image: UIImage) {
+        let url = faceRecognitionImageURL()
+        
+        // Save full resolution image for better ML accuracy
+        guard let data = image.jpegData(compressionQuality: 0.95) else {
+            print("❌ Failed to convert face image to JPEG data")
+            return
+        }
+        
+        do {
+            try data.write(to: url, options: .atomic)
+            print("✅ Face image saved for ML recognition at: \(url.path)")
+            
+            // Notify the ML detection system that a new face is available
+            NotificationCenter.default.post(
+                name: Notification.Name("FaceImageUpdatedForML"),
+                object: nil,
+                userInfo: [
+                    "imageURL": url,
+                    "image": image,
+                    "userID": Auth.auth().currentUser?.uid ?? ""
+                ]
+            )
+        } catch {
+            print("❌ Failed to save face recognition image: \(error.localizedDescription)")
+        }
+    }
+    
+    /// Get the file URL for the face recognition image
+    private func faceRecognitionImageURL() -> URL {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        return docs.appendingPathComponent("face_recognition.jpg")
     }
     
     // Creates a quick demo post for the current user and emits PostCreated so the UI updates immediately.

@@ -14,6 +14,7 @@ import ObjectiveC
 // This ensures the extension below can see the class
 #if canImport(Poplur2025)
 import Poplur2025
+import SCSDKCameraKitReferenceUI
 #endif
 
 /// Simple ML detection manager using Vision's built-in image classification
@@ -402,10 +403,7 @@ extension CameraViewController {
     // MARK: - Private Helpers
     
     private func setupMLVideoOutput() {
-        guard let captureSession = cameraController.captureSession else {
-            print("❌ No capture session available")
-            return
-        }
+        let captureSession = cameraController.captureSession
         
         // Create delegate if needed
         if mlVideoDelegate == nil {
@@ -447,6 +445,108 @@ extension CameraViewController {
             object: nil,
             userInfo: ["objects": objects]
         )
+    }
+}
+
+// MARK: - CameraKitController Integration Extension
+
+extension CameraKitController {
+    
+    private static var mlDetectionManagerKey: UInt8 = 0
+    private static var mlVideoDelegateKey: UInt8 = 0
+    
+    /// Get or create the ML detection manager
+    public var mlDetectionManager: SimplifiedMLDetectionManager? {
+        get {
+            return objc_getAssociatedObject(self, &Self.mlDetectionManagerKey) as? SimplifiedMLDetectionManager
+        }
+        set {
+            objc_setAssociatedObject(self, &Self.mlDetectionManagerKey, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+        }
+    }
+    
+    /// Internal video delegate for ML processing
+    private var mlVideoDelegate: MLVideoDataOutputDelegate? {
+        get {
+            return objc_getAssociatedObject(self, &Self.mlVideoDelegateKey) as? MLVideoDataOutputDelegate
+        }
+        set {
+            objc_setAssociatedObject(self, &Self.mlVideoDelegateKey, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+        }
+    }
+    
+    /// Enable ML object detection for CameraKitController
+    public func enableMLDetection() {
+        // Create manager if needed
+        if mlDetectionManager == nil {
+            let manager = SimplifiedMLDetectionManager()
+            mlDetectionManager = manager
+            
+            // Setup callbacks
+            manager.onDetection = { objects in
+                // Post notification for UI updates
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("MLObjectsDetected"),
+                    object: nil,
+                    userInfo: ["objects": objects]
+                )
+            }
+            
+            manager.onError = { error in
+                print("❌ ML Detection Error: \(error.localizedDescription)")
+            }
+        }
+        
+        // Setup video output for frame capture
+        setupMLVideoOutput()
+        
+        print("✅ ML Object Detection enabled for CameraKitController!")
+    }
+    
+    /// Disable ML detection
+    public func disableMLDetection() {
+        mlDetectionManager?.isEnabled = false
+        print("🛑 ML Object Detection disabled")
+    }
+    
+    // MARK: - Private Helpers
+    
+    private func setupMLVideoOutput() {
+        sessionQueue.async { [weak self] in
+            guard let self = self else { return }
+            
+            let captureSession = self.captureSession
+            
+            // Create delegate if needed
+            if self.mlVideoDelegate == nil {
+                let delegate = MLVideoDataOutputDelegate()
+                delegate.mlManager = self.mlDetectionManager
+                self.mlVideoDelegate = delegate
+            }
+            
+            // Check if we already have a video output
+            let existingOutputs = captureSession.outputs.compactMap { $0 as? AVCaptureVideoDataOutput }
+            if let existingOutput = existingOutputs.first {
+                // Reuse existing output
+                existingOutput.setSampleBufferDelegate(self.mlVideoDelegate, queue: DispatchQueue(label: "ml-video-queue"))
+                print("✅ Reusing existing video output for ML")
+                return
+            }
+            
+            // Create new video output
+            let videoOutput = AVCaptureVideoDataOutput()
+            videoOutput.setSampleBufferDelegate(self.mlVideoDelegate, queue: DispatchQueue(label: "ml-video-queue"))
+            videoOutput.alwaysDiscardsLateVideoFrames = true
+            
+            captureSession.beginConfiguration()
+            if captureSession.canAddOutput(videoOutput) {
+                captureSession.addOutput(videoOutput)
+                print("✅ Added new video output for ML")
+            } else {
+                print("❌ Cannot add video output")
+            }
+            captureSession.commitConfiguration()
+        }
     }
 }
 
