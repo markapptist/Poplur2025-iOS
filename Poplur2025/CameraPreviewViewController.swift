@@ -6,6 +6,7 @@ final class CameraPreviewViewController: UIViewController {
     /// Layer used to display camera preview content.
     var displayLayer: AVSampleBufferDisplayLayer?
     private var previewLayer: AVCaptureVideoPreviewLayer?
+    private var singleTapRecognizer: UITapGestureRecognizer?
 
     /// Expose the AR display layer for external configuration (e.g., CameraKitController)
     public func getARDisplayLayer() -> AVSampleBufferDisplayLayer? {
@@ -91,6 +92,13 @@ final class CameraPreviewViewController: UIViewController {
         displayLayer?.opacity = 1.0
 
         installCameraGestures()
+        
+        NotificationCenter.default.addObserver(forName: Notification.Name("CubeInteractionDisabled"), object: nil, queue: .main) { [weak self] _ in
+            self?.singleTapRecognizer?.isEnabled = false
+        }
+        NotificationCenter.default.addObserver(forName: Notification.Name("CubeInteractionEnabled"), object: nil, queue: .main) { [weak self] _ in
+            self?.singleTapRecognizer?.isEnabled = true
+        }
     }
 
     override func viewDidLayoutSubviews() {
@@ -145,9 +153,9 @@ final class CameraPreviewViewController: UIViewController {
         let singleTap = UITapGestureRecognizer(target: self, action: #selector(handleSingleTap(_:)))
         singleTap.numberOfTapsRequired = 1
         singleTap.cancelsTouchesInView = false
-        // Ensure single tap waits for double tap to fail to avoid conflicts
         singleTap.require(toFail: doubleTap)
         view.addGestureRecognizer(singleTap)
+        self.singleTapRecognizer = singleTap
     }
 
     @objc private func handleSwipeUp(_ gesture: UISwipeGestureRecognizer) {
@@ -172,7 +180,7 @@ final class CameraPreviewViewController: UIViewController {
     }
 
     @objc private func handleSingleTap(_ gesture: UITapGestureRecognizer) {
-        NotificationCenter.default.post(name: Notification.Name("cubeTabViewTapped"), object: nil)
+        NotificationCenter.default.post(name: Notification.Name("cameraCubeTabViewTapped"), object: nil)
     }
 
     /// Minimal protocol to satisfy `currentCameraPosition` usage. Replace with your real controller if available.

@@ -32,10 +32,15 @@ struct CameraViewWithML: View {
     
     /// Called when objects are detected
     var onDetection: (([DetectedObject]) -> Void)?
+    /// Called when the primary detected object's name updates
+    var onNameUpdate: ((String) -> Void)?
     
     // MARK: - State
     
     @State private var detectedObjects: [DetectedObject] = []
+    @State private var lastDetectedName: String? = nil
+    @State private var isCubeEnabled: Bool = true
+    @State private var scannedUserName: String? = nil
     
     // MARK: - Initializer
     
@@ -45,7 +50,8 @@ struct CameraViewWithML: View {
         confidenceThreshold: Float = 0.2,
         frameSkipInterval: Int = 5,
         maxResults: Int = 3,
-        onDetection: (([DetectedObject]) -> Void)? = nil
+        onDetection: (([DetectedObject]) -> Void)? = nil,
+        onNameUpdate: ((String) -> Void)? = nil
     ) {
         self.controller = controller
         self.mlDetectionEnabled = mlDetectionEnabled
@@ -53,6 +59,7 @@ struct CameraViewWithML: View {
         self.frameSkipInterval = frameSkipInterval
         self.maxResults = maxResults
         self.onDetection = onDetection
+        self.onNameUpdate = onNameUpdate
     }
     
     // MARK: - Body
@@ -65,24 +72,66 @@ struct CameraViewWithML: View {
             // Overlay ML detection badge if enabled
             if mlDetectionEnabled && !detectedObjects.isEmpty {
                 VStack {
+                    if let name = lastDetectedName {
+                        Text(name.capitalized)
+                            .font(.subheadline.weight(.semibold))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(Color.black.opacity(0.7))
+                            .foregroundColor(.white)
+                            .clipShape(Capsule())
+                            .padding(.bottom, 6)
+                    }
                     MLDetectionBadgeViewWrapper(objects: detectedObjects)
                         .frame(maxWidth: 280)
                     Spacer()
                 }
                 .padding(.top, 16)
             }
+            
+            // Instructions / Scanned user name overlay (replaces scanning label)
+            VStack {
+                if let name = scannedUserName, !name.isEmpty {
+                    Text(name)
+                        .font(.headline)
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Color.black.opacity(0.6))
+                        .cornerRadius(10)
+                        .padding(.top, 12)
+                }
+                Spacer()
+            }
         }
         .onAppear {
             if mlDetectionEnabled {
                 setupMLDetection()
             }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("MLObjectsDetected"))) { notification in
-            if let objects = notification.userInfo?["objects"] as? [DetectedObject] {
-                detectedObjects = objects
-                onDetection?(objects)
+            NotificationCenter.default.addObserver(forName: Notification.Name("CubeInteractionDisabled"), object: nil, queue: .main) { _ in
+                isCubeEnabled = false
+            }
+            NotificationCenter.default.addObserver(forName: Notification.Name("CubeInteractionEnabled"), object: nil, queue: .main) { _ in
+                isCubeEnabled = true
+            }
+            NotificationCenter.default.addObserver(forName: Notification.Name("RegisteredUserNameUpdated"), object: nil, queue: .main) { note in
+                if let name = note.userInfo?["name"] as? String {
+                    scannedUserName = name
+                }
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("MLObjectsDetected"))) { notification in
+            guard let objects = notification.userInfo?["objects"] as? [DetectedObject] else { return }
+            detectedObjects = objects
+            onDetection?(objects)
+            if let primary = objects.first?.identifier {
+                lastDetectedName = primary
+                onNameUpdate?(primary)
+            } else {
+                lastDetectedName = nil
+            }
+        }
+        // Note: Bind any cube button in this view hierarchy to .disabled(!isCubeEnabled) to prevent taps during recording.
     }
     
     // MARK: - Private Helpers
@@ -100,6 +149,12 @@ struct CameraViewWithML: View {
         controller.mlDetectionManager?.onDetection = { objects in
             detectedObjects = objects
             onDetection?(objects)
+            if let primary = objects.first?.identifier {
+                lastDetectedName = primary
+                onNameUpdate?(primary)
+            } else {
+                lastDetectedName = nil
+            }
         }
     }
 }
@@ -148,6 +203,9 @@ struct CameraViewWithMLExample: View {
             ) { objects in
                 // Handle detected objects
                 detectedObjects = objects
+            } onNameUpdate: { name in
+                // Example: print or log the primary detected name
+                print("Primary detected: \(name)")
             }
             .ignoresSafeArea()
             

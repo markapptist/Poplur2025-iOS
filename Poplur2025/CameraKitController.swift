@@ -933,16 +933,20 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
 
     // MARK: - Photo Capture
     func takePhoto() {
+        print("[CameraKitController] takePhoto() called")
         // Block photo capture while recording (robust, main-thread check)
         if !self.allowPhotoCapture || self.isRecording || self.movieOutput.isRecording {
+            print("[CameraKitController] takePhoto() BLOCKED on main: allowPhotoCapture=\(self.allowPhotoCapture) isRecording=\(self.isRecording) movieRecording=\(self.movieOutput.isRecording)")
             NotificationCenter.default.post(name: Notification.Name("PhotoCaptureBlockedDuringRecording"), object: nil)
             return
         }
         sessionQueue.async { [weak self] in
             guard let self else { return }
+            print("[CameraKitController] takePhoto() executing on session queue")
             
             // Double-check on session queue to avoid races
             if !self.allowPhotoCapture || self.isRecording || self.movieOutput.isRecording {
+                print("[CameraKitController] takePhoto() BLOCKED on session queue: allowPhotoCapture=\(self.allowPhotoCapture) isRecording=\(self.isRecording) movieRecording=\(self.movieOutput.isRecording)")
                 return
             }
 
@@ -1004,8 +1008,10 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
     
     /// Handle cube tab tap: capture AR-filtered frame if available; otherwise take a photo
     private func handleCubeTapCapture() {
+        print("[CameraKitController] Cube tap received")
         // Block capturing while recording
         if !self.allowPhotoCapture || self.isRecording || self.movieOutput.isRecording {
+            print("[CameraKitController] Cube tap BLOCKED: allowPhotoCapture=\(self.allowPhotoCapture) isRecording=\(self.isRecording) movieRecording=\(self.movieOutput.isRecording)")
             NotificationCenter.default.post(name: Notification.Name("PhotoCaptureBlockedDuringRecording"), object: nil)
             return
         }
@@ -1043,6 +1049,7 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
                     self.allowPhotoCapture = false
                     NotificationCenter.default.post(name: Notification.Name("RecordingStarted"), object: nil)
                     NotificationCenter.default.post(name: Notification.Name("CubeInteractionDisabled"), object: nil)
+                    print("[CameraKitController] Recording STARTED: allowPhotoCapture=\(self.allowPhotoCapture)")
                 }
             }
         }
@@ -1060,6 +1067,7 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
                     self.allowPhotoCapture = true
                     NotificationCenter.default.post(name: Notification.Name("RecordingStopped"), object: nil)
                     NotificationCenter.default.post(name: Notification.Name("CubeInteractionEnabled"), object: nil)
+                    print("[CameraKitController] Recording STOPPED: allowPhotoCapture=\(self.allowPhotoCapture)")
                 }
             }
         }
@@ -1107,6 +1115,7 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
         } else {
             NotificationCenter.default.post(name: Notification.Name("CubeInteractionDisabled"), object: nil)
         }
+        print("[CameraKitController] preparePreviewIfNeeded cubeEnabled=\(self.allowPhotoCapture)")
     }
 
     @MainActor
@@ -1266,6 +1275,7 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
         } else {
             NotificationCenter.default.post(name: Notification.Name("CubeInteractionDisabled"), object: nil)
         }
+        print("[CameraKitController] start() cubeEnabled=\(self.allowPhotoCapture)")
 
         self.requestLocationAuthorizationIfNeeded()
     }
@@ -1346,6 +1356,7 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
         } else {
             NotificationCenter.default.post(name: Notification.Name("CubeInteractionDisabled"), object: nil)
         }
+        print("[CameraKitController] startPreview() cubeEnabled=\(self.allowPhotoCapture)")
     }
 }
 
@@ -1719,3 +1730,4 @@ extension UIImage {
     }
 }
 #endif
+
