@@ -21,6 +21,9 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
     let movieOutput = AVCaptureMovieFileOutput()
     private var isSessionConfigured = false
     
+    // Added private flag to allow photo capture
+    private var allowPhotoCapture: Bool = true
+    
     // MARK: - AR Filter Support
     private var videoDataOutput: AVCaptureVideoDataOutput?
     private let videoOutputQueue = DispatchQueue(label: "camera.video.filter", qos: .userInitiated)
@@ -931,7 +934,7 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
     // MARK: - Photo Capture
     func takePhoto() {
         // Block photo capture while recording (robust, main-thread check)
-        if self.isRecording || self.movieOutput.isRecording {
+        if !self.allowPhotoCapture || self.isRecording || self.movieOutput.isRecording {
             NotificationCenter.default.post(name: Notification.Name("PhotoCaptureBlockedDuringRecording"), object: nil)
             return
         }
@@ -939,7 +942,7 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
             guard let self else { return }
             
             // Double-check on session queue to avoid races
-            if self.isRecording || self.movieOutput.isRecording {
+            if !self.allowPhotoCapture || self.isRecording || self.movieOutput.isRecording {
                 return
             }
 
@@ -1002,7 +1005,7 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
     /// Handle cube tab tap: capture AR-filtered frame if available; otherwise take a photo
     private func handleCubeTapCapture() {
         // Block capturing while recording
-        if self.isRecording || self.movieOutput.isRecording {
+        if !self.allowPhotoCapture || self.isRecording || self.movieOutput.isRecording {
             NotificationCenter.default.post(name: Notification.Name("PhotoCaptureBlockedDuringRecording"), object: nil)
             return
         }
@@ -1037,6 +1040,7 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
                     self.isRecording = true
+                    self.allowPhotoCapture = false
                     NotificationCenter.default.post(name: Notification.Name("RecordingStarted"), object: nil)
                     NotificationCenter.default.post(name: Notification.Name("CubeInteractionDisabled"), object: nil)
                 }
@@ -1053,6 +1057,7 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
                     self.isRecording = false
+                    self.allowPhotoCapture = true
                     NotificationCenter.default.post(name: Notification.Name("RecordingStopped"), object: nil)
                     NotificationCenter.default.post(name: Notification.Name("CubeInteractionEnabled"), object: nil)
                 }
@@ -1096,11 +1101,11 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
         // Mark readiness based on either a record preview, a running session, or configured session
         self.isReady = self.hasRecordPreview || self.captureSession.isRunning || self.isSessionConfigured
 
-        // Reflect current recording state in cube interaction availability
-        if self.isRecording {
-            NotificationCenter.default.post(name: Notification.Name("CubeInteractionDisabled"), object: nil)
-        } else {
+        // Reflect cube interaction availability based on allowPhotoCapture
+        if self.allowPhotoCapture {
             NotificationCenter.default.post(name: Notification.Name("CubeInteractionEnabled"), object: nil)
+        } else {
+            NotificationCenter.default.post(name: Notification.Name("CubeInteractionDisabled"), object: nil)
         }
     }
 
@@ -1255,11 +1260,11 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
         self.ensurePreviewFallbackIfNeeded()
         self.isReady = self.hasRecordPreview || self.captureSession.isRunning || self.isSessionConfigured
 
-        // Reflect current recording state in cube interaction availability
-        if self.isRecording {
-            NotificationCenter.default.post(name: Notification.Name("CubeInteractionDisabled"), object: nil)
-        } else {
+        // Reflect cube interaction availability based on allowPhotoCapture
+        if self.allowPhotoCapture {
             NotificationCenter.default.post(name: Notification.Name("CubeInteractionEnabled"), object: nil)
+        } else {
+            NotificationCenter.default.post(name: Notification.Name("CubeInteractionDisabled"), object: nil)
         }
 
         self.requestLocationAuthorizationIfNeeded()
@@ -1335,11 +1340,11 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
         self.ensurePreviewFallbackIfNeeded()
         self.isReady = self.hasRecordPreview || self.captureSession.isRunning || self.isSessionConfigured
 
-        // Reflect current recording state in cube interaction availability
-        if self.isRecording {
-            NotificationCenter.default.post(name: Notification.Name("CubeInteractionDisabled"), object: nil)
-        } else {
+        // Reflect cube interaction availability based on allowPhotoCapture
+        if self.allowPhotoCapture {
             NotificationCenter.default.post(name: Notification.Name("CubeInteractionEnabled"), object: nil)
+        } else {
+            NotificationCenter.default.post(name: Notification.Name("CubeInteractionDisabled"), object: nil)
         }
     }
 }
@@ -1714,4 +1719,3 @@ extension UIImage {
     }
 }
 #endif
-
