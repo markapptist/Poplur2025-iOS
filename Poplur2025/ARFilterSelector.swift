@@ -98,9 +98,9 @@ struct ARFilterSelectorHorizontal: View {
     private func applyFilterToCamera(_ filter: ARFilterManager.ARFilter) {
         // Notify camera controller to apply the selected filter
         NotificationCenter.default.post(
-            name: Notification.Name("ApplyCameraFilter"),
+            name: Notification.Name("ARFilterChanged"),
             object: nil,
-            userInfo: ["filter": filter]
+            userInfo: ["filter": filter.rawValue]
         )
     }
 }

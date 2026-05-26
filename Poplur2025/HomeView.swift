@@ -310,6 +310,15 @@ struct HomeView: View {
                     if !cameraController.isReady {
                         await cameraController.startPreview()
                     }
+                    
+                    // 🆕 Setup AR filter support
+                    if let cameraVC = cameraController.recordPreviewViewController as? CameraPreviewViewController {
+                        cameraController.setupARFilterSupport(
+                            filterManager: arFilterManager,
+                            displayLayer: cameraVC.displayLayer as! AVSampleBufferDisplayLayer
+                        )
+                    }
+                    
                     // Enable ML detection with user recognition
                     cameraController.enableMLDetection()
                     
@@ -665,14 +674,12 @@ struct HomeView: View {
                     },
                     onCubeTap: {
                         if selectedTab == .map {
-                            print("[HomeView] Cube tapped on map tab - centering on user")
                             NotificationCenter.default.post(
                                 name: Notification.Name("CenterMapOnUser"),
                                 object: nil,
                                 userInfo: nil
                             )
                         } else if selectedTab == .profile {
-                            print("[HomeView] Cube tapped on profile tab - opening messages")
                             NotificationCenter.default.post(
                                 name: .CubeGlobalTap,
                                 object: nil
@@ -792,7 +799,7 @@ struct HomeView: View {
             .zIndex(999)
             .allowsHitTesting(false)
             
-            // Recording countdown overlay (bottom-left) - wrapped in GeometryReader for safe area
+            // Camera roll button overlay (bottom-left, aligned with radius display)
             GeometryReader { proxy in
                 let safe = proxy.safeAreaInsets
                 
@@ -802,25 +809,40 @@ struct HomeView: View {
                         // Show camera roll button when on record tab and not recording
                         if selectedTab == .record && !isRecording {
                             CameraRollButton()
-                        } else {
-                            // Show countdown when recording or post count on other tabs
-                            RecordingCountdownView(
-                                isRecording: $isRecording,
-                                secondsRemaining: $recordingSecondsRemaining,
-                                postCount: $userPostCount,
-                                selectedTab: $selectedTab,
-                                radiusTrend: $radiusTrend
-                            )
                         }
                         Spacer()
                     }
                     .padding(.leading, safe.leading + 16)
-                    .padding(.bottom, safe.bottom - 55) // Match RadiusDisplayView baseline alignment
+                    .padding(.bottom, safe.bottom + 20) // Align with RadiusNumberDisplay center line
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
             }
             .zIndex(1000)
-            .allowsHitTesting(true) // Changed to true to allow camera roll button interaction
+            .allowsHitTesting(true)
+            
+            // Recording countdown overlay (separate positioning, slightly above camera roll button)
+            GeometryReader { proxy in
+                let safe = proxy.safeAreaInsets
+                
+                VStack {
+                    Spacer()
+                    HStack {
+                        RecordingCountdownView(
+                            isRecording: $isRecording,
+                            secondsRemaining: $recordingSecondsRemaining,
+                            postCount: $userPostCount,
+                            selectedTab: $selectedTab,
+                            radiusTrend: $radiusTrend
+                        )
+                        Spacer()
+                    }
+                    .padding(.leading, safe.leading + 16)
+                    .padding(.bottom, safe.bottom + 85) // Position above camera roll button
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+            }
+            .zIndex(1001)
+            .allowsHitTesting(false)
             
         }
         
@@ -839,7 +861,6 @@ struct HomeView: View {
         .onAppear {
             launchGate.start()
             let appearT0 = CFAbsoluteTimeGetCurrent()
-            print("[HomeView] onAppear at t=\(appearT0)")
             // Removed cameraController.prewarm() and preparePreviewIfNeeded() here per instructions
             
             // Keep startup minimal; no immediate location or feed triggers here
@@ -874,8 +895,6 @@ struct HomeView: View {
             }
             
             // Removed entire SceneKit prewarm block per instructions
-            
-            print("[HomeView] onAppear work took \(CFAbsoluteTimeGetCurrent() - appearT0)s")
         }
         .onChange(of: selectedTab) { newTab in
             if !didSetInitialCubeYaw {
@@ -955,7 +974,6 @@ struct HomeView: View {
         .onReceive(NotificationCenter.default.publisher(for: .FeedReady)) { _ in
             DispatchQueue.main.async {
                 isFeedReady = true
-                print("[Feed] ready received at \(Date())")
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .CubeMotionUpdate)) { _ in
@@ -983,7 +1001,6 @@ struct HomeView: View {
                     userInfo: ["isShown": showARFilters]
                 )
             }
-            print("🎨 [HomeView] AR Filters toggled via notification: \(showARFilters)")
         }
         .onReceive(NotificationCenter.default.publisher(for: .cameraCubeHoldBegan)) { _ in
             guard selectedTab == .record else { return }
@@ -1011,8 +1028,6 @@ struct HomeView: View {
                 return
             }
             
-            print("📍 [HomeView] Received map long-press coordinate: \(latitude), \(longitude)")
-            
             // Switch to camera/record tab
             selectedTab = .record
             
@@ -1028,7 +1043,6 @@ struct HomeView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("OpenMapToSelectPostLocation"))) { notification in
             // Handle request to select location for captured media - switch to map tab
-            print("🗺️ [HomeView] Opening map to select post location")
             
             // Switch to map tab
             selectedTab = .map
@@ -1040,8 +1054,6 @@ struct HomeView: View {
             // Handle request to show post location on map (from long-press)
             guard let userInfo = notification.userInfo,
                   let coordinate = userInfo["coordinate"] as? CLLocationCoordinate2D else { return }
-            
-            print("📍 [HomeView] Showing location on map: \(coordinate.latitude), \(coordinate.longitude)")
             
             // Switch to map tab
             selectedTab = .map
@@ -1065,8 +1077,6 @@ struct HomeView: View {
                   let longitude = userInfo["longitude"] as? Double else {
                 return
             }
-            
-            print("📤 [HomeView] Uploading post to coordinate: \(latitude), \(longitude)")
             
             // Show upload starting status
             uploadStatusMessage = "Uploading your post..."
@@ -1162,22 +1172,15 @@ struct HomeView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("SwitchToFeedTab"))) { _ in
             // Switch to feed tab (used after successful upload in Camera -> Map flow)
-            print("🔄 [HomeView] Switching to feed tab after upload")
-            selectedTab = .feed
         }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("SwitchToProfileTab"))) { _ in
             // Switch to profile tab (used after successful upload in Map -> Camera flow)
-            print("🔄 [HomeView] Switching to profile tab after upload")
-            selectedTab = .profile
         }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("SwitchToMapTab"))) { _ in
             // Switch to map tab (used when long-pressing on post in feed/profile)
-            print("🔄 [HomeView] Switching to map tab to show post location")
-            selectedTab = .map
         }
         .onReceive(NotificationCenter.default.publisher(for: .ShowUserProfile)) { note in
             if let uid = note.object as? String {
-                print("🔔 [HomeView] Received ShowUserProfile for userID: '\(uid)'")
                 routedUserID = uid
                 selectedTab = .profile
                 NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
@@ -1226,24 +1229,19 @@ struct HomeView: View {
         }
         .task {
             try? await Task.sleep(nanoseconds: 5_000_000_000)
-            print("[Startup] Watchdog 5s: heavy work deferred until 10s gate; if UI is still slow, check synchronous work on main thread")
         }
         .onReceive(NotificationCenter.default.publisher(for: .MapSuggestedRadius)) { note in
             if let value = note.userInfo?["radius"] as? Double {
-                print("[HomeView] Received MapSuggestedRadius: \(Int(value))m")
                 // Clamp to app cap and apply to the global bar with animation on every update
                 let clampedValue = min(value, 3_323_000.0)
                 let anim = Animation.easeInOut(duration: 2.0)
                 withAnimation(anim) {
                     isometricBarModel.radius = clampedValue
                 }
-                let updatedMeters = Int(clampedValue)
-                print("[HomeView] Updated isometricBarModel.radius to: \(updatedMeters)m")
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .currentPostRadiusDidChange)) { note in
             if let value = note.userInfo?["radius"] as? Double {
-                print("[HomeView] Received currentPostRadiusDidChange: \(Int(value))m")
                 let duration = (note.userInfo?["duration"] as? Double) ?? 0.8
                 let clampedValue = min(value, 3_323_000.0)
                 
@@ -1252,52 +1250,42 @@ struct HomeView: View {
                 if let prev = previousRadius {
                     if clampedValue > prev {
                         radiusTrend = .up
-                        print("📈 [HomeView] Radius INCREASED: \(Int(prev))m → \(Int(clampedValue))m (trend: UP)")
                     } else if clampedValue < prev {
                         radiusTrend = .down
-                        print("📉 [HomeView] Radius DECREASED: \(Int(prev))m → \(Int(clampedValue))m (trend: DOWN)")
                     } else {
                         radiusTrend = .neutral
-                        print("➖ [HomeView] Radius UNCHANGED: \(Int(clampedValue))m (trend: NEUTRAL)")
                     }
                 } else {
                     radiusTrend = .neutral
-                    print("🔵 [HomeView] First radius update: \(Int(clampedValue))m (trend: NEUTRAL, no previous)")
                 }
                 previousRadius = clampedValue
                 
                 if oldTrend != radiusTrend {
-                    print("🔄 [HomeView] Trend changed from \(oldTrend) to \(radiusTrend)")
                 }
                 
                 let anim = Animation.easeInOut(duration: duration)
                 withAnimation(anim) {
                     isometricBarModel.radius = clampedValue
                 }
-                print("[HomeView] Updated isometricBarModel.radius to: \(Int(clampedValue))m (from feed, trend: \(radiusTrend))")
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .animateRadiusBarToValue)) { note in
             if let value = note.userInfo?["radius"] as? Double {
-                print("[HomeView] Received animateRadiusBarToValue: \(Int(value))m")
                 let duration = (note.userInfo?["duration"] as? Double) ?? 0.8
                 let clampedValue = min(value, 3_323_000.0)
                 let anim = Animation.easeInOut(duration: duration)
                 withAnimation(anim) {
                     isometricBarModel.radius = clampedValue
                 }
-                print("[HomeView] Updated isometricBarModel.radius to: \(Int(clampedValue))m (from animator)")
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("UserPostCountDidChange"))) { note in
             if let count = note.userInfo?["count"] as? Int {
-                print("[HomeView] Received UserPostCountDidChange: \(count)")
                 userPostCount = count
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .ShowUserProfile)) { note in
             if let uid = note.object as? String {
-                print("🔔 [HomeView] Received ShowUserProfile for userID: '\(uid)'")
                 routedUserID = uid
                 selectedTab = .profile
                 NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
@@ -1305,7 +1293,6 @@ struct HomeView: View {
         }
         .onChange(of: selectedTab) { newTab in
             if newTab != .profile && routedUserID != nil {
-                print("🔔 [HomeView] Clearing routedUserID (switched from profile to \(newTab.title))")
                 routedUserID = nil
             }
         }

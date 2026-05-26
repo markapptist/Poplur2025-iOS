@@ -21,6 +21,38 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
     let movieOutput = AVCaptureMovieFileOutput()
     private var isSessionConfigured = false
     
+    // MARK: - AR Filter Support
+    private var videoDataOutput: AVCaptureVideoDataOutput?
+    private let videoOutputQueue = DispatchQueue(label: "camera.video.filter", qos: .userInitiated)
+    private var arFilterManager: ARFilterManager?
+    private var displayLayer: AVSampleBufferDisplayLayer?
+    /// Keep display connection reference
+    private var previewConnection: AVCaptureConnection?
+    
+    /// Provide a default ARFilterManager if none is set
+    @MainActor private func ensureDefaultARFilterManager() {
+        if self.arFilterManager == nil {
+            self.arFilterManager = ARFilterManager()
+        }
+    }
+    
+    // MARK: - ML Detection Support
+    @Published var isMLDetectionEnabled: Bool = false
+    var mlDetectionManager: SimplifiedMLDetectionManager?
+    
+    // MARK: - User Recognition Support
+    var userRecognitionManager: UserRecognitionManager?
+    
+    // MARK: - Camera State
+    @Published var isTorchOn: Bool = false
+    @Published var isScreenFlashOn: Bool = false // For front camera "flash"
+    @Published var currentCameraPosition: AVCaptureDevice.Position = .back
+    @Published var isRecording: Bool = false
+    private var currentVideoInput: AVCaptureDeviceInput?
+
+    // Added published property for last recorded video URL
+    @Published var lastVideoURL: URL? = nil
+    
     // Snap Kit / Record-specific camera VC. Set this from your Snap setup code.
     var recordPreviewViewController: UIViewController?
 
@@ -54,7 +86,6 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
             
             Task { @MainActor in
                 self.overrideCoordinate = CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
-                print("📍 [CameraKit] Set override coordinate: \(latitude), \(longitude)")
             }
         }
         
@@ -74,7 +105,6 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
                 let loc = await self.currentLocation()
                 let coord = self.overrideCoordinate ?? loc?.coordinate
                 await self.postImage(image, at: coord)
-                print("📤 [CameraKit] Uploaded image to coordinate: \(String(describing: coord))")
             }
         }
         
@@ -96,9 +126,6 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
                 let processedURL = await self.exportCroppedPortrait9x16(inputURL: videoURL) ?? videoURL
                 if let url = await self.uploadVideoToStorage(fileURL: processedURL) {
                     await self.writePostDocument(mediaURL: url, coordinate: coord, mediaType: "video")
-                    print("📤 [CameraKit] Uploaded video to coordinate: \(String(describing: coord))")
-                } else {
-                    print("❌ [CameraKit] Failed to upload video")
                 }
             }
         }
@@ -118,7 +145,6 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
                 if let url = await self.uploadImageToStorage(image) {
                     await self.writePostDocument(mediaURL: url, coordinate: nil, mediaType: "photo_profile")
                 } else {
-                    print("[CK][Post] Skipping profile post; image upload failed")
                     Foundation.NotificationCenter.default.post(
                         name: Notification.Name("PostUploadFailed"),
                         object: nil,
@@ -144,7 +170,6 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
                 if let url = await self.uploadVideoToStorage(fileURL: processedURL) {
                     await self.writePostDocument(mediaURL: url, coordinate: nil, mediaType: "video_profile")
                 } else {
-                    print("[CK][Post] Skipping profile post; video upload failed")
                     Foundation.NotificationCenter.default.post(
                         name: Notification.Name("PostUploadFailed"),
                         object: nil,
@@ -152,6 +177,56 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
                     )
                 }
             }
+        }
+
+        // Gesture-driven camera controls
+        NotificationCenter.default.addObserver(
+            forName: Notification.Name("CameraToggleTorchOn"),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.toggleTorchOn()
+        }
+
+        NotificationCenter.default.addObserver(
+            forName: Notification.Name("CameraToggleTorchOff"),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.toggleTorchOff()
+        }
+
+        NotificationCenter.default.addObserver(
+            forName: Notification.Name("FlipCameraRequested"),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.flipCamera()
+        }
+        
+        NotificationCenter.default.addObserver(
+            forName: Notification.Name("ToggleARFilters"),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self = self else { return }
+            self.ensureDefaultARFilterManager()
+            if let previewVC = (self.recordPreviewViewController ?? self.previewViewController) as? CameraPreviewViewController,
+               let arLayer = previewVC.getARDisplayLayer(),
+               let mgr = self.arFilterManager {
+                self.sessionQueue.async { [weak self] in
+                    guard let self = self else { return }
+                    self.setupARFilterSupport(filterManager: mgr, displayLayer: arLayer)
+                }
+            }
+        }
+        
+        NotificationCenter.default.addObserver(
+            forName: .cameraCubeTabViewTapped,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.handleCubeTapCapture()
         }
         
         #if DEBUG
@@ -216,7 +291,6 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
 
     private func configureSessionIfNeeded() {
         guard !isSessionConfigured else { return }
-        print("[CK][Config] Begin configuration")
 
         captureSession.beginConfiguration()
 
@@ -228,7 +302,6 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
         } else if captureSession.canSetSessionPreset(.hd1920x1080) {
             captureSession.sessionPreset = .hd1920x1080
         }
-        print("[CK][Config] Session preset: \(captureSession.sessionPreset.rawValue)")
 
         // Input: back wide-angle camera
         if let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) {
@@ -236,15 +309,11 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
                 let input = try AVCaptureDeviceInput(device: device)
                 if captureSession.canAddInput(input) {
                     captureSession.addInput(input)
-                    print("[CK][Config] Added back camera input")
-                } else {
-                    print("[CK][Config] Cannot add camera input")
+                    currentVideoInput = input // Store reference
+                    currentCameraPosition = .back
                 }
             } catch {
-                print("[CK][Config] Error creating camera input: \(error)")
             }
-        } else {
-            print("[CK][Config] No back camera available")
         }
 
         // Output: photo output (if not already added)
@@ -252,9 +321,12 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
             if captureSession.canAddOutput(photoOutput) {
                 captureSession.addOutput(photoOutput)
                 photoOutput.isHighResolutionCaptureEnabled = true
-                print("[CK][Config] Added photo output")
-            } else {
-                print("[CK][Config] Cannot add photo output")
+                
+                // Set orientation to portrait
+                if let connection = photoOutput.connection(with: .video),
+                   connection.isVideoOrientationSupported {
+                    connection.videoOrientation = .portrait
+                }
             }
         }
 
@@ -262,9 +334,12 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
         if !captureSession.outputs.contains(movieOutput) {
             if captureSession.canAddOutput(movieOutput) {
                 captureSession.addOutput(movieOutput)
-                print("[CK][Config] Added movie output")
-            } else {
-                print("[CK][Config] Cannot add movie output")
+                
+                // Set orientation to portrait
+                if let connection = movieOutput.connection(with: .video),
+                   connection.isVideoOrientationSupported {
+                    connection.videoOrientation = .portrait
+                }
             }
         }
 
@@ -274,22 +349,275 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
                 let audioInput = try AVCaptureDeviceInput(device: audioDevice)
                 if captureSession.canAddInput(audioInput) {
                     captureSession.addInput(audioInput)
-                    print("[CK][Config] Added audio input")
-                } else {
-                    print("[CK][Config] Cannot add audio input")
                 }
             } catch {
-                print("[CK][Config] Error creating audio input: \(error)")
             }
-        } else {
-            print("[CK][Config] No audio device available")
         }
 
-        print("[CK][Config] Committing configuration")
         captureSession.commitConfiguration()
-        print("[CK][Config] Configuration committed")
 
         isSessionConfigured = true
+    }
+    
+    // MARK: - Camera Controls
+    
+    /// Flip between front and back camera
+    @objc func flipCamera() {
+        sessionQueue.async { [weak self] in
+            guard let self = self else { return }
+            
+            // Disable animations for instant flip
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            
+            self.captureSession.beginConfiguration()
+            
+            // Remove current video input
+            if let currentInput = self.currentVideoInput {
+                self.captureSession.removeInput(currentInput)
+            }
+            
+            // Determine new position
+            let newPosition: AVCaptureDevice.Position = self.currentCameraPosition == .back ? .front : .back
+            
+            // Get new device
+            guard let newDevice = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: newPosition) else {
+                // Re-add the old input
+                if let currentInput = self.currentVideoInput,
+                   self.captureSession.canAddInput(currentInput) {
+                    self.captureSession.addInput(currentInput)
+                }
+                self.captureSession.commitConfiguration()
+                CATransaction.commit()
+                return
+            }
+            
+            do {
+                let newInput = try AVCaptureDeviceInput(device: newDevice)
+                
+                if self.captureSession.canAddInput(newInput) {
+                    self.captureSession.addInput(newInput)
+                    self.currentVideoInput = newInput
+                    
+                    // IMPORTANT: Update position synchronously
+                    let oldPosition = self.currentCameraPosition
+                    self.currentCameraPosition = newPosition
+                    
+                    // Also update on MainActor for UI binding
+                    Task { @MainActor in
+                        self.currentCameraPosition = newPosition
+                    }
+                    
+                    // ⚡️ SET ORIENTATION IMMEDIATELY - don't wait for commit!
+                    self.setAllVideoConnectionsToPortrait()
+                    
+                    // Reattach videoDataOutput if missing from session outputs and refresh connection
+                    if let vdo = self.videoDataOutput, !self.captureSession.outputs.contains(where: { $0 == vdo }) {
+                        if self.captureSession.canAddOutput(vdo) {
+                            self.captureSession.addOutput(vdo)
+                        }
+                        if let connection = vdo.connection(with: .video) {
+                            connection.isEnabled = true
+                            if connection.isVideoOrientationSupported {
+                                connection.videoOrientation = .portrait
+                            }
+                            if connection.isVideoMirroringSupported {
+                                connection.isVideoMirrored = (self.currentCameraPosition == .front)
+                            }
+                            self.previewConnection = connection
+                        }
+                    }
+                    
+                } else {
+                    // Re-add the old input
+                    if let currentInput = self.currentVideoInput,
+                       self.captureSession.canAddInput(currentInput) {
+                        self.captureSession.addInput(currentInput)
+                    }
+                    self.captureSession.commitConfiguration()
+                    CATransaction.commit()
+                    return
+                }
+            } catch {
+                // Re-add the old input
+                if let currentInput = self.currentVideoInput,
+                   self.captureSession.canAddInput(currentInput) {
+                    self.captureSession.addInput(currentInput)
+                }
+                self.captureSession.commitConfiguration()
+                CATransaction.commit()
+                return
+            }
+            
+            // Commit configuration
+            self.captureSession.commitConfiguration()
+            CATransaction.commit()
+            
+            // After commit, set orientation again for previewConnection
+            if let connection = self.previewConnection {
+                if connection.isVideoOrientationSupported {
+                    connection.videoOrientation = .portrait
+                }
+                if connection.isVideoMirroringSupported {
+                    connection.isVideoMirrored = (self.currentCameraPosition == .front)
+                }
+            }
+            
+            // Update display layer transform on main thread without animation
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                
+                CATransaction.begin()
+                CATransaction.setDisableActions(true)
+                
+                // Update mirroring based on camera position
+                if self.currentCameraPosition == .front {
+                    self.displayLayer?.setAffineTransform(CGAffineTransform(scaleX: -1, y: 1))
+                } else {
+                    self.displayLayer?.setAffineTransform(.identity)
+                }
+                
+                CATransaction.commit()
+                
+                NotificationCenter.default.post(name: Notification.Name("CameraFlipped"), object: nil)
+            }
+        }
+    }
+    
+    /// Alternative name for flip camera
+    @objc func switchCamera() {
+        flipCamera()
+    }
+    
+    /// Toggle torch/flashlight
+    @objc func toggleTorch() {
+        sessionQueue.async { [weak self] in
+            guard let self = self,
+                  let device = self.currentVideoInput?.device else { return }
+            
+            guard device.hasTorch, device.isTorchAvailable else {
+                return
+            }
+            
+            do {
+                try device.lockForConfiguration()
+                
+                if device.torchMode == .on {
+                    device.torchMode = .off
+                    Task { @MainActor in
+                        self.isTorchOn = false
+                    }
+                } else {
+                    try device.setTorchModeOn(level: 1.0)
+                    Task { @MainActor in
+                        self.isTorchOn = true
+                    }
+                }
+                
+                device.unlockForConfiguration()
+            } catch {
+            }
+        }
+    }
+    
+    /// Alternative name for toggle torch
+    @objc func toggleFlash() {
+        toggleTorch()
+    }
+    
+    @MainActor
+    func toggleTorchOn() {
+        // Front camera uses screen flash
+        if currentCameraPosition == .front {
+            isScreenFlashOn = true
+            NotificationCenter.default.post(name: Notification.Name("ScreenFlashOn"), object: nil)
+            return
+        }
+        
+        // Back camera uses LED torch
+        sessionQueue.async { [weak self] in
+            guard let self, let device = self.currentVideoInput?.device, device.hasTorch else {
+                return
+            }
+            do {
+                try device.lockForConfiguration()
+                try device.setTorchModeOn(level: 1.0)
+                device.unlockForConfiguration()
+                Task { @MainActor in self.isTorchOn = true }
+            } catch {
+            }
+        }
+    }
+
+    @MainActor
+    func toggleTorchOff() {
+        // Front camera uses screen flash
+        if currentCameraPosition == .front {
+            isScreenFlashOn = false
+            NotificationCenter.default.post(name: Notification.Name("ScreenFlashOff"), object: nil)
+            return
+        }
+        
+        // Back camera uses LED torch
+        sessionQueue.async { [weak self] in
+            guard let self, let device = self.currentVideoInput?.device, device.hasTorch else {
+                return
+            }
+            do {
+                try device.lockForConfiguration()
+                device.torchMode = .off
+                device.unlockForConfiguration()
+                Task { @MainActor in self.isTorchOn = false }
+            } catch {
+            }
+        }
+    }
+    
+    /// Helper to set all video connections to portrait orientation
+    private func setAllVideoConnectionsToPortrait() {
+        
+        // Set photo output connection
+        if let photoConnection = photoOutput.connection(with: .video) {
+            if photoConnection.isVideoOrientationSupported {
+                photoConnection.videoOrientation = .portrait
+            }
+            // Don't mirror photo output - we want photos to be correct
+            if photoConnection.isVideoMirroringSupported {
+                photoConnection.isVideoMirrored = false
+            }
+        }
+        
+        // Set movie output connection
+        if let movieConnection = movieOutput.connection(with: .video) {
+            if movieConnection.isVideoOrientationSupported {
+                movieConnection.videoOrientation = .portrait
+            }
+            // Don't mirror video output - we want videos to be correct
+            if movieConnection.isVideoMirroringSupported {
+                movieConnection.isVideoMirrored = false
+            }
+        }
+        
+        // Set video data output connection (for AR filters / live preview)
+        if let videoDataConnection = videoDataOutput?.connection(with: .video) {
+            if videoDataConnection.isVideoOrientationSupported {
+                videoDataConnection.videoOrientation = .portrait
+            }
+            // Mirror for front camera preview only (display layer handles this)
+            if videoDataConnection.isVideoMirroringSupported {
+                videoDataConnection.isVideoMirrored = false
+            }
+        }
+        
+        // Update previewConnection if available
+        if let previewConnection = self.previewConnection {
+            if previewConnection.isVideoOrientationSupported {
+                previewConnection.videoOrientation = .portrait
+            }
+            if previewConnection.isVideoMirroringSupported {
+                previewConnection.isVideoMirrored = false
+            }
+        }
     }
     
     @MainActor
@@ -303,7 +631,6 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
     private func currentLocation() async -> CLLocation? {
         // If override coordinate is set (from map long-press), use it and clear
         if let override = overrideCoordinate {
-            print("📍 [CameraKit] Using override coordinate: \(override.latitude), \(override.longitude)")
             let location = CLLocation(latitude: override.latitude, longitude: override.longitude)
             return location
         }
@@ -329,7 +656,6 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
         #endif
         
         guard let uid = Auth.auth().currentUser?.uid else {
-            print("[CK][Post] No authenticated user; cannot write post")
             Foundation.NotificationCenter.default.post(
                 name: Notification.Name("PostUploadFailed"),
                 object: nil,
@@ -357,7 +683,6 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
         }
         do {
             try await docRef.setData(data)
-            print("[CK][Post] Wrote post doc: \(docRef.documentID)")
             
             self.overrideCoordinate = nil
             
@@ -372,7 +697,6 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
             Foundation.NotificationCenter.default.post(name: .LoadProfileNow, object: nil)
             Foundation.NotificationCenter.default.post(name: .LoadMapNow, object: nil)
         } catch {
-            print("[CK][Post] Error writing post: \(error)")
             
             // Post failure notification
             Foundation.NotificationCenter.default.post(
@@ -391,16 +715,13 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
         
         // Ensure user is authenticated if rules require auth
         guard let user = Auth.auth().currentUser else {
-            print("[CK][Upload] No authenticated user; Storage rules may require auth. Aborting image upload.")
             return nil
         }
         guard let data = image.jpegData(compressionQuality: 0.9) else {
-            print("[CK][Upload] Could not create JPEG data from image")
             return nil
         }
         let storage = Storage.storage()
         let bucketRef = storage.reference()
-        print("[CK][Upload] Using bucket: \(bucketRef.bucket), user: \(user.uid)")
 
         let path = "posts/\(UUID().uuidString).jpg"
         let ref = bucketRef.child(path)
@@ -411,10 +732,8 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
         do {
             _ = try await ref.putDataAsync(data, metadata: metadata)
             let url = try await ref.downloadURL()
-            print("[CK][Upload] Image uploaded to: \(url.absoluteString)")
             return url
         } catch {
-            print("[CK][Upload] Image upload failed: \(error)")
             return nil
         }
     }
@@ -426,12 +745,10 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
         
         // Ensure user is authenticated if rules require auth
         guard let user = Auth.auth().currentUser else {
-            print("[CK][Upload] No authenticated user; Storage rules may require auth. Aborting video upload.")
             return nil
         }
         let storage = Storage.storage()
         let bucketRef = storage.reference()
-        print("[CK][Upload] Using bucket: \(bucketRef.bucket), user: \(user.uid)")
 
         let path = "posts/\(UUID().uuidString).mp4"
         let ref = bucketRef.child(path)
@@ -442,10 +759,8 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
         do {
             _ = try await ref.putFileAsync(from: fileURL, metadata: metadata)
             let url = try await ref.downloadURL()
-            print("[CK][Upload] Video uploaded to: \(url.absoluteString)")
             return url
         } catch {
-            print("[CK][Upload] Video upload failed: \(error)")
             return nil
         }
     }
@@ -454,7 +769,6 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
     private func exportCroppedPortrait9x16(inputURL: URL) async -> URL? {
         let asset = AVAsset(url: inputURL)
         guard let videoTrack = asset.tracks(withMediaType: .video).first else {
-            print("[CK][Export] No video track found")
             return nil
         }
 
@@ -469,20 +783,17 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
         // If the input is already near 9:16 portrait, skip export
         let inputAspect = width / height
         if abs(inputAspect - targetAspect) < 0.01 && height >= width {
-            print("[CK][Export] Skipping crop — already near 9:16 portrait")
             return inputURL
         }
 
         // Build composition
         let composition = AVMutableComposition()
         guard let compVideo = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid) else {
-            print("[CK][Export] Failed to create composition track")
             return nil
         }
         do {
             try compVideo.insertTimeRange(CMTimeRange(start: .zero, duration: asset.duration), of: videoTrack, at: .zero)
         } catch {
-            print("[CK][Export] Insert time range failed: \(error)")
             return nil
         }
 
@@ -531,7 +842,6 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
         }
 
         guard let export = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetHighestQuality) else {
-            print("[CK][Export] Could not create export session")
             return nil
         }
         export.outputURL = outputURL
@@ -543,14 +853,10 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
             export.exportAsynchronously {
                 switch export.status {
                 case .completed:
-                    print("[CK][Export] Export completed: \(outputURL)")
                     cont.resume(returning: outputURL)
                 case .failed, .cancelled:
-                    print("[CK][Export] Export failed: \(String(describing: export.error))")
                     cont.resume(returning: nil)
                 default:
-                    // .waiting or .exporting ended unexpectedly
-                    print("[CK][Export] Export ended with status: \(export.status)")
                     cont.resume(returning: nil)
                 }
             }
@@ -561,9 +867,6 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
     private func verifySessionIntegrity(context: String) {
         let hasInputs = !captureSession.inputs.isEmpty
         let hasOutputs = !captureSession.outputs.isEmpty
-        print("[CK][Verify][\(context)] inputs: \(hasInputs ? captureSession.inputs.count : 0), outputs: \(hasOutputs ? captureSession.outputs.count : 0), isRunning: \(captureSession.isRunning)")
-        if !hasInputs { print("[CK][Verify][\(context)] WARNING: No inputs attached") }
-        if !hasOutputs { print("[CK][Verify][\(context)] WARNING: No outputs attached") }
     }
 
     // MARK: - Preview Fallback
@@ -571,15 +874,35 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
     private func ensurePreviewFallbackIfNeeded() {
         // If a Snap record VC is not provided, prepare a generic preview VC bound to our session.
         if recordPreviewViewController == nil {
-            // Only create once
+            // Only create once 
             if previewViewController == nil {
                 #if canImport(UIKit)
-                let preview = CameraPreviewViewController(session: captureSession)
-                preview.onShutter = { [weak self] in self?.takePhoto() }
-                preview.onStartVideo = { [weak self] in self?.startVideoRecording() }
-                preview.onStopVideo  = { [weak self] in self?.stopVideoRecording() }
-                self.previewViewController = preview
-                print("[CK][Preview] Created fallback CameraPreviewViewController")
+                let previewVC = CameraPreviewViewController()
+                // Attach current capture session to preview layer so raw camera shows
+                previewVC.setCaptureSession(self.captureSession)
+                
+                if let arLayer = previewVC.getARDisplayLayer() {
+                    self.ensureDefaultARFilterManager()
+                    if let mgr = self.arFilterManager {
+                        // Call on sessionQueue to avoid blocking main
+                        self.sessionQueue.async { [weak self] in
+                            guard let self = self else { return }
+                            self.setupARFilterSupport(filterManager: mgr, displayLayer: arLayer)
+                            
+                            // Auto-enable a default filter for live preview
+                            Task { @MainActor in
+                                mgr.activeFilter = .beautyFilter
+                            }
+                            
+                            // If ARFilterManager supports 3D face overlay, enable it
+                            if (mgr as AnyObject).responds(to: Selector(("enableFace3DOverlayIfAvailable"))) {
+                                _ = (mgr as AnyObject).perform(Selector(("enableFace3DOverlayIfAvailable")))
+                            }
+                        }
+                    }
+                }
+                
+                self.previewViewController = previewVC
                 // Mark ready since we now have a preview to display
                 self.isReady = true
                 #else
@@ -607,38 +930,42 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
 
     // MARK: - Photo Capture
     func takePhoto() {
+        // Block photo capture while recording (robust, main-thread check)
+        if self.isRecording || self.movieOutput.isRecording {
+            NotificationCenter.default.post(name: Notification.Name("PhotoCaptureBlockedDuringRecording"), object: nil)
+            return
+        }
         sessionQueue.async { [weak self] in
             guard let self else { return }
+            
+            // Double-check on session queue to avoid races
+            if self.isRecording || self.movieOutput.isRecording {
+                return
+            }
 
             // Ensure session is running
             if !self.captureSession.isRunning {
-                print("[CK][Photo] Session not running — attempting to start before capture")
                 self.captureSession.startRunning()
             }
 
             // Ensure photoOutput is attached
             if !self.captureSession.outputs.contains(self.photoOutput) {
-                print("[CK][Photo] photoOutput missing — attempting to attach")
                 self.captureSession.beginConfiguration()
                 if self.captureSession.canAddOutput(self.photoOutput) {
                     self.captureSession.addOutput(self.photoOutput)
                     self.photoOutput.isHighResolutionCaptureEnabled = true
-                } else {
-                    print("[CK][Photo] Cannot add photoOutput even after attempt")
                 }
                 self.captureSession.commitConfiguration()
             }
 
             // Verify running and connection
             guard self.captureSession.isRunning else {
-                print("[CK][Photo] Abort: session still not running")
                 return
             }
 
             // Fetch the video connection for photoOutput
             var connection = self.photoOutput.connection(with: .video)
             if connection == nil || (connection?.isEnabled == false) {
-                print("[CK][Photo] No active/enabled video connection — attempting to reconfigure")
                 self.captureSession.beginConfiguration()
                 // Try to re-add the output to refresh connections
                 if self.captureSession.outputs.contains(self.photoOutput) {
@@ -654,7 +981,6 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
             }
 
             guard let videoConnection = connection, videoConnection.isEnabled else {
-                print("[CK][Photo] Abort: No active and enabled video connection after reconfigure")
                 return
             }
 
@@ -665,8 +991,22 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
 
             let settings = AVCapturePhotoSettings()
             settings.isHighResolutionPhotoEnabled = true
+            
+            // NO AUTO FLASH - user controls flash manually with swipe gestures
+            settings.flashMode = .off
+            
             self.photoOutput.capturePhoto(with: settings, delegate: self)
         }
+    }
+    
+    /// Handle cube tab tap: capture AR-filtered frame if available; otherwise take a photo
+    private func handleCubeTapCapture() {
+        // Block capturing while recording
+        if self.isRecording || self.movieOutput.isRecording {
+            NotificationCenter.default.post(name: Notification.Name("PhotoCaptureBlockedDuringRecording"), object: nil)
+            return
+        }
+        self.takePhoto()
     }
 
     // MARK: - Video Recording
@@ -693,6 +1033,13 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
                 }
 
                 self.movieOutput.startRecording(to: tempURL, recordingDelegate: self)
+                
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    self.isRecording = true
+                    NotificationCenter.default.post(name: Notification.Name("RecordingStarted"), object: nil)
+                    NotificationCenter.default.post(name: Notification.Name("CubeInteractionDisabled"), object: nil)
+                }
             }
         }
     }
@@ -702,6 +1049,13 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
             guard let self else { return }
             if self.movieOutput.isRecording {
                 self.movieOutput.stopRecording()
+                
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    self.isRecording = false
+                    NotificationCenter.default.post(name: Notification.Name("RecordingStopped"), object: nil)
+                    NotificationCenter.default.post(name: Notification.Name("CubeInteractionEnabled"), object: nil)
+                }
             }
         }
     }
@@ -719,7 +1073,35 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
     @MainActor
     func preparePreviewIfNeeded() {
         self.ensurePreviewFallbackIfNeeded()
+        // Always (re)attach the running session to the preview layer in case the VC was recreated
+        if let previewVC = (self.recordPreviewViewController ?? self.previewViewController) as? CameraPreviewViewController {
+            previewVC.setCaptureSession(self.captureSession)
+            
+            if let arLayer = previewVC.getARDisplayLayer() {
+                self.ensureDefaultARFilterManager()
+                if let mgr = self.arFilterManager {
+                    // Call on sessionQueue to avoid blocking main
+                    self.sessionQueue.async { [weak self] in
+                        guard let self = self else { return }
+                        self.setupARFilterSupport(filterManager: mgr, displayLayer: arLayer)
+                        
+                        // If ARFilterManager supports 3D face overlay, enable it
+                        if (mgr as AnyObject).responds(to: Selector(("enableFace3DOverlayIfAvailable"))) {
+                            _ = (mgr as AnyObject).perform(Selector(("enableFace3DOverlayIfAvailable")))
+                        }
+                    }
+                }
+            }
+        }
+        // Mark readiness based on either a record preview, a running session, or configured session
         self.isReady = self.hasRecordPreview || self.captureSession.isRunning || self.isSessionConfigured
+
+        // Reflect current recording state in cube interaction availability
+        if self.isRecording {
+            NotificationCenter.default.post(name: Notification.Name("CubeInteractionDisabled"), object: nil)
+        } else {
+            NotificationCenter.default.post(name: Notification.Name("CubeInteractionEnabled"), object: nil)
+        }
     }
 
     @MainActor
@@ -728,21 +1110,40 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
         Task {
             if let url = await uploadImageToStorage(image) {
                 await writePostDocument(mediaURL: url, coordinate: coordinate, mediaType: "photo")
-            } else {
-                print("[CK][Post] Skipping post; image upload failed")
             }
         }
     }
 
     // MARK: - AVCapturePhotoCaptureDelegate
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
-        if let error = error {
-            print("[CK][Photo] Processing error: \(error)")
+        if let _ = error {
         } else {
             let data = photo.fileDataRepresentation() ?? Data()
-            print("[CK][Photo] Photo captured with \(data.count) bytes")
             #if canImport(UIKit)
-            if let image = UIImage(data: data) {
+            if var image = UIImage(data: data) {
+                
+                // CRITICAL FIX: Create correctly oriented image first
+                // The image from AVCapturePhoto has orientation metadata but SwiftUI doesn't respect it
+                if let cgImage = image.cgImage {
+                    // Draw the image in correct orientation to a new context
+                    let size = image.size
+                    UIGraphicsBeginImageContextWithOptions(size, false, image.scale)
+                    image.draw(in: CGRect(origin: .zero, size: size))
+                    let normalizedImage = UIGraphicsGetImageFromCurrentImageContext()
+                    UIGraphicsEndImageContext()
+                    
+                    if let normalized = normalizedImage {
+                        image = normalized
+                    }
+                }
+                
+                // Fix orientation - photos from front camera need to be mirrored horizontally
+                // and all photos need proper orientation applied
+                if currentCameraPosition == .front {
+                    // Front camera photos should be mirrored to match what user saw in preview
+                    image = image.withHorizontallyFlippedOrientation()
+                }
+                
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
                     // Present SwiftUI capture overlay full-screen
@@ -779,8 +1180,6 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
                             let coord = self.overrideCoordinate ?? loc?.coordinate
                             if let url = await self.uploadImageToStorage(image) {
                                 await self.writePostDocument(mediaURL: url, coordinate: coord, mediaType: "photo")
-                            } else {
-                                print("[CK][Post] Skipping post; image upload failed")
                             }
                             host?.dismiss(animated: true)
                         }
@@ -802,11 +1201,9 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
         if isRunningInPreviews { return }
         #endif
         
-        print("[CK][Start] Requesting camera access…")
         // Request access on main, then configure/start on sessionQueue
         let granted = await requestCameraAccessIfNeeded()
         guard granted else {
-            print("[CK][Start] Camera access not granted — ready: \(self.isReady)")
             self.isReady = self.hasRecordPreview // allow UI to show fallback if present
             return
         }
@@ -815,11 +1212,9 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
             sessionQueue.async { [weak self] in
                 guard let self else { cont.resume(); return }
                 self.configureSessionIfNeeded()
-                self.verifySessionIntegrity(context: "after configure")
                 if !self.captureSession.isRunning {
                     self.captureSession.startRunning()
                 }
-                print("[CK][Start] startRunning called; isRunning now: \(self.captureSession.isRunning)")
 
                 // Ramp preset after initial start for quality
                 if self.captureSession.canSetSessionPreset(.hd1920x1080) {
@@ -830,7 +1225,6 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
                             self.captureSession.beginConfiguration()
                             self.captureSession.sessionPreset = .hd1920x1080
                             self.captureSession.commitConfiguration()
-                            print("[CK][Start] Ramped preset to 1080p")
                         }
                     }
                 }
@@ -838,11 +1232,36 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
                 cont.resume()
             }
         }
+        await MainActor.run {
+            if let previewVC = (self.recordPreviewViewController ?? self.previewViewController) as? CameraPreviewViewController {
+                previewVC.setCaptureSession(self.captureSession)
+                if let arLayer = previewVC.getARDisplayLayer() {
+                    self.ensureDefaultARFilterManager()
+                    if let mgr = self.arFilterManager {
+                        self.sessionQueue.async { [weak self] in
+                            guard let self = self else { return }
+                            self.setupARFilterSupport(filterManager: mgr, displayLayer: arLayer)
+                            
+                            // If ARFilterManager supports 3D face overlay, enable it
+                            if (mgr as AnyObject).responds(to: Selector(("enableFace3DOverlayIfAvailable"))) {
+                                _ = (mgr as AnyObject).perform(Selector(("enableFace3DOverlayIfAvailable")))
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         self.ensurePreviewFallbackIfNeeded()
         self.isReady = self.hasRecordPreview || self.captureSession.isRunning || self.isSessionConfigured
-        self.verifySessionIntegrity(context: "post start")
-        print("[CK][Start] Ready: \(self.isReady), hasRecordPreview: \(self.hasRecordPreview), isRunning: \(self.captureSession.isRunning)")
+
+        // Reflect current recording state in cube interaction availability
+        if self.isRecording {
+            NotificationCenter.default.post(name: Notification.Name("CubeInteractionDisabled"), object: nil)
+        } else {
+            NotificationCenter.default.post(name: Notification.Name("CubeInteractionEnabled"), object: nil)
+        }
+
         self.requestLocationAuthorizationIfNeeded()
     }
 
@@ -854,7 +1273,6 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
             guard let self else { return }
             if self.captureSession.isRunning {
                 self.captureSession.stopRunning()
-                print("[CK][Stop] stopRunning called")
             }
         }
     }
@@ -902,7 +1320,6 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
                             self.captureSession.beginConfiguration()
                             self.captureSession.sessionPreset = .hd1920x1080
                             self.captureSession.commitConfiguration()
-                            print("[CK][Preview] Ramped preset to 1080p")
                         }
                     }
                 }
@@ -910,8 +1327,20 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
                 cont.resume()
             }
         }
+        await MainActor.run {
+            if let previewVC = (self.recordPreviewViewController ?? self.previewViewController) as? CameraPreviewViewController {
+                previewVC.setCaptureSession(self.captureSession)
+            }
+        }
         self.ensurePreviewFallbackIfNeeded()
         self.isReady = self.hasRecordPreview || self.captureSession.isRunning || self.isSessionConfigured
+
+        // Reflect current recording state in cube interaction availability
+        if self.isRecording {
+            NotificationCenter.default.post(name: Notification.Name("CubeInteractionDisabled"), object: nil)
+        } else {
+            NotificationCenter.default.post(name: Notification.Name("CubeInteractionEnabled"), object: nil)
+        }
     }
 }
 
@@ -919,11 +1348,22 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
 
 extension CameraKitController {
     func fileOutput(_ output: AVCaptureFileOutput, didFinishRecordingTo outputFileURL: URL, from connections: [AVCaptureConnection], error: Error?) {
-        if let error = error {
-            print("[CK][Video] Recording error: \(error)")
+        if let _ = error {
             return
         }
-        print("[CK][Video] Recorded video at: \(outputFileURL)")
+        
+        // Set lastVideoURL on main thread
+        DispatchQueue.main.async { [weak self] in
+            self?.lastVideoURL = outputFileURL
+        }
+
+        // Notify SwiftUI about recording output URL for thumbnail display
+        NotificationCenter.default.post(
+            name: Notification.Name("RecordingOutputReady"),
+            object: nil,
+            userInfo: ["url": outputFileURL]
+        )
+        NotificationCenter.default.post(name: Notification.Name("RecordingStopped"), object: nil)
 
         #if canImport(UIKit)
         DispatchQueue.main.async { [weak self] in
@@ -974,8 +1414,6 @@ extension CameraKitController {
                     let processedURL = await self.exportCroppedPortrait9x16(inputURL: outputFileURL) ?? outputFileURL
                     if let url = await self.uploadVideoToStorage(fileURL: processedURL) {
                         await self.writePostDocument(mediaURL: url, coordinate: coord, mediaType: "video")
-                    } else {
-                        print("[CK][Post] Skipping post; video upload failed")
                     }
                     host?.dismiss(animated: true)
                 }
@@ -1005,11 +1443,216 @@ extension CameraKitController {
             let processedURL = await self.exportCroppedPortrait9x16(inputURL: outputFileURL) ?? outputFileURL
             if let url = await self.uploadVideoToStorage(fileURL: processedURL) {
                 await self.writePostDocument(mediaURL: url, coordinate: coord, mediaType: "video")
-            } else {
-                print("[CK][Post] Skipping post; video upload failed")
             }
         }
         #endif
+    }
+}
+
+// MARK: - AR Filter Support & AVCaptureVideoDataOutputSampleBufferDelegate
+
+extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
+    
+    /// Setup AR filter video processing
+    func setupARFilterSupport(filterManager: ARFilterManager, displayLayer: AVSampleBufferDisplayLayer?) {
+        self.arFilterManager = filterManager
+        self.displayLayer = displayLayer
+        
+        // Enable default filter immediately on main actor
+        Task { @MainActor in
+            filterManager.activeFilter = .beautyFilter
+        }
+        
+        sessionQueue.async { [weak self] in
+            guard let self = self else { return }
+            
+            // Create video data output
+            let output = AVCaptureVideoDataOutput()
+            output.videoSettings = [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
+            ]
+            output.alwaysDiscardsLateVideoFrames = true
+            output.setSampleBufferDelegate(self, queue: self.videoOutputQueue)
+            
+            // Add to session
+            self.captureSession.beginConfiguration()
+            
+            // Remove existing video output if any
+            if let existingOutput = self.videoDataOutput {
+                self.captureSession.removeOutput(existingOutput)
+            }
+            
+            // Add new output
+            if self.captureSession.canAddOutput(output) {
+                self.captureSession.addOutput(output)
+                self.videoDataOutput = output
+                
+                // Configure video orientation
+                if let connection = output.connection(with: .video) {
+                    connection.isEnabled = true
+                    if connection.isVideoOrientationSupported {
+                        connection.videoOrientation = .portrait
+                    }
+                    if connection.isVideoMirroringSupported {
+                        connection.isVideoMirrored = (self.currentCameraPosition == .front)
+                    }
+                    self.previewConnection = connection
+                }
+            }
+            
+            self.captureSession.commitConfiguration()
+            
+            // Setup displayLayer videoGravity and transform
+            DispatchQueue.main.async {
+                self.displayLayer?.videoGravity = .resizeAspectFill
+                if self.currentCameraPosition == .front {
+                    self.displayLayer?.setAffineTransform(CGAffineTransform(scaleX: -1, y: 1))
+                } else {
+                    self.displayLayer?.setAffineTransform(.identity)
+                }
+            }
+        }
+    }
+    
+    // Centralized safe enqueue to suppress spurious errors and respect backpressure
+    private func safelyEnqueueSampleBuffer(_ sampleBuffer: CMSampleBuffer, to displayLayer: AVSampleBufferDisplayLayer) {
+        // Validate buffer
+        if !CMSampleBufferIsValid(sampleBuffer) { return }
+        if !CMSampleBufferDataIsReady(sampleBuffer) { return }
+
+        // Validate layer status
+        let status = displayLayer.status
+        if status == .failed {
+            displayLayer.flushAndRemoveImage()
+            return
+        }
+        if status == .unknown {
+            // Try flushing unknown state and wait for next frame
+            displayLayer.flushAndRemoveImage()
+            return
+        }
+
+        // Respect backpressure; drop frame if not ready
+        if !displayLayer.isReadyForMoreMediaData { return }
+
+        // Optionally ensure presentation time is monotonic
+        displayLayer.enqueue(sampleBuffer)
+    }
+    
+    // Broadcast radius updates for registered user recognition
+    @MainActor
+    func publishRegisteredUserRadius(_ radius: Int) {
+        NotificationCenter.default.post(name: Notification.Name("RegisteredUserRadiusUpdated"), object: nil, userInfo: ["radius": radius])
+    }
+    
+    // MARK: - Video Sample Buffer Delegate
+    
+    // CRITICAL: Do NOT use @MainActor here - video frames arrive at 30-60fps
+    // Running this on main thread will freeze the UI
+    @MainActor func captureOutput(
+        _ output: AVCaptureOutput,
+        didOutput sampleBuffer: CMSampleBuffer,
+        from connection: AVCaptureConnection
+    ) {
+        // Process ML detection if enabled
+        if isMLDetectionEnabled {
+            mlDetectionManager?.processFrame(sampleBuffer)
+        }
+        
+        // Process user recognition (face detection for registered users)
+        if let userRecognition = userRecognitionManager,
+           let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) {
+            userRecognition.detectFaces(in: pixelBuffer)
+        }
+        
+        // If user recognition manager exposes registered-user radius, publish it here
+        // Example:
+        // if let radius = userRecognition.currentRegisteredUserRadius { Task { @MainActor in self.publishRegisteredUserRadius(radius) } }
+        
+        // Process AR filters and display frames
+        guard let displayLayer = displayLayer else {
+            // No display layer setup - AR filters not configured
+            return
+        }
+        
+        // Check if we have a filter manager
+        guard let filterManager = arFilterManager else {
+            // No filter manager - just display raw frames
+            DispatchQueue.main.async {
+                // Ensure displayLayer transform is correct for front / back
+                if self.currentCameraPosition == .front {
+                    self.displayLayer?.setAffineTransform(CGAffineTransform(scaleX: -1, y: 1))
+                } else {
+                    self.displayLayer?.setAffineTransform(.identity)
+                }
+                // Recover display layer if it has failed or is unknown
+                let status = displayLayer.status
+                if status == .failed || status == .unknown {
+                    displayLayer.flushAndRemoveImage()
+                }
+                self.safelyEnqueueSampleBuffer(sampleBuffer, to: displayLayer)
+            }
+            return
+        }
+        
+        // Track filter processing start time for performance monitoring
+        let processingStartTime = CFAbsoluteTimeGetCurrent()
+        
+        // Process frame with AR filter (the method is nonisolated so it's safe to call from background thread)
+        filterManager.applyFilterToVideoFrame(sampleBuffer) { [weak self] filteredBuffer in
+            guard let self = self,
+                  let displayLayer = self.displayLayer else {
+                return
+            }
+            
+            // Calculate processing time
+            let processingTime = (CFAbsoluteTimeGetCurrent() - processingStartTime) * 1000 // ms
+            
+            // Log performance if it takes longer than expected (>33ms for 30fps)
+            if processingTime > 33 {
+            }
+            
+            // Display the filtered (or original if filtering failed) frame
+            let bufferToDisplay = filteredBuffer ?? sampleBuffer
+            
+            // Enqueue on main thread as CALayer operations must be on main thread
+            DispatchQueue.main.async {
+                // Ensure displayLayer transform is correct for front / back
+                if self.currentCameraPosition == .front {
+                    self.displayLayer?.setAffineTransform(CGAffineTransform(scaleX: -1, y: 1))
+                } else {
+                    self.displayLayer?.setAffineTransform(.identity)
+                }
+                
+                // Recover display layer if it has failed or is unknown
+                let status = displayLayer.status
+                if status == .failed || status == .unknown {
+                    displayLayer.flushAndRemoveImage()
+                }
+                
+                self.safelyEnqueueSampleBuffer(bufferToDisplay, to: displayLayer)
+            }
+        }
+    }
+    
+    // MARK: - ML Detection Helper
+    
+    /// Enable ML detection with optional callback
+    @MainActor
+    func enableMLDetection(onDetection: (([DetectedObject]) -> Void)? = nil) {
+        if mlDetectionManager == nil {
+            mlDetectionManager = SimplifiedMLDetectionManager()
+        }
+        mlDetectionManager?.isEnabled = true
+        mlDetectionManager?.onDetection = onDetection
+        isMLDetectionEnabled = true
+    }
+    
+    /// Disable ML detection
+    @MainActor
+    func disableMLDetection() {
+        mlDetectionManager?.isEnabled = false
+        isMLDetectionEnabled = false
     }
 }
 
@@ -1031,9 +1674,44 @@ extension CameraKitController {
         locationContinuation = nil
     }
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
-        print("[CK][Location] Failed: \(error)")
         locationContinuation?.resume(returning: nil)
         locationContinuation = nil
     }
 }
+
+// MARK: - UIImage Orientation Helpers
+
+#if canImport(UIKit)
+extension UIImage {
+    /// Returns a horizontally flipped version of the image
+    func withHorizontallyFlippedOrientation() -> UIImage {
+        guard let cgImage = self.cgImage else { return self }
+        
+        // Create a new image with flipped orientation
+        let flippedOrientation: UIImage.Orientation
+        switch imageOrientation {
+        case .up:
+            flippedOrientation = .upMirrored
+        case .down:
+            flippedOrientation = .downMirrored
+        case .left:
+            flippedOrientation = .leftMirrored
+        case .right:
+            flippedOrientation = .rightMirrored
+        case .upMirrored:
+            flippedOrientation = .up
+        case .downMirrored:
+            flippedOrientation = .down
+        case .leftMirrored:
+            flippedOrientation = .left
+        case .rightMirrored:
+            flippedOrientation = .right
+        @unknown default:
+            flippedOrientation = .up
+        }
+        
+        return UIImage(cgImage: cgImage, scale: scale, orientation: flippedOrientation)
+    }
+}
+#endif
 

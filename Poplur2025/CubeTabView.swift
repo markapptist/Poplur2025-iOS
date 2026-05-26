@@ -877,6 +877,19 @@ private struct CubeSceneView: UIViewRepresentable {
                 let fps = (notif.userInfo?["fps"] as? Int) ?? 120
                 scnView.preferredFramesPerSecond = fps
             }
+            
+            // Flash/torch notifications - illuminate cube when flashlight is ON
+            NotificationCenter.default.addObserver(forName: Notification.Name("CubeStartFlashing"), object: nil, queue: .main) { [weak self] _ in
+                guard let self = self else { return }
+                print("💡 [CubeTabView] Flash ON - illuminating cube")
+                self.startFlashing()
+            }
+            
+            NotificationCenter.default.addObserver(forName: Notification.Name("CubeStopFlashing"), object: nil, queue: .main) { [weak self] _ in
+                guard let self = self else { return }
+                print("🔦 [CubeTabView] Flash OFF - stopping cube illumination")
+                self.stopFlashing()
+            }
         }
 
         deinit {
@@ -1179,6 +1192,74 @@ private struct CubeSceneView: UIViewRepresentable {
             isBlinking = false
             cube.removeAction(forKey: "recordBlink")
             cube.scale = SCNVector3(1.0, 1.0, 1.0)
+        }
+        
+        // MARK: - Flash/Torch Illumination
+        
+        /// Start illuminating cube when flashlight is ON - makes icons glow from within
+        private func startFlashing() {
+            guard let scnView = view, let cube = scnView.scene?.rootNode.childNode(withName: "cube", recursively: true) else { return }
+            
+            // Stop any existing flash animation
+            cube.removeAction(forKey: "flashGlow")
+            
+            print("💡 [CubeTabView] Starting flash - boosting emission intensity")
+            
+            // IMPORTANT: Don't change emission.contents - it contains the mask image!
+            // Instead, just boost the intensity to make the EXISTING icons glow brighter
+            
+            // Warm flashlight color for emission tint
+            let flashColor = UIColor(red: 1.0, green: 0.95, blue: 0.85, alpha: 1.0)
+            
+            // Apply to all cube face materials
+            for material in cubeMaterials {
+                // Boost emission intensity dramatically to make icons glow
+                material.emission.intensity = 2.5 // Much brighter
+            }
+            
+            // Add subtle pulsing animation by varying the intensity
+            let brighten = SCNAction.customAction(duration: 1.2) { [weak self] node, elapsed in
+                guard let self = self else { return }
+                let progress = elapsed / 1.2
+                // Pulse intensity between 2.0 and 3.0
+                let baseIntensity: CGFloat = 2.5
+                let pulseAmount: CGFloat = 0.5
+                let intensity = baseIntensity + (sin(progress * .pi * 2) * pulseAmount)
+                
+                for material in self.cubeMaterials {
+                    material.emission.intensity = intensity
+                }
+            }
+            
+            let forever = SCNAction.repeatForever(brighten)
+            cube.runAction(forever, forKey: "flashGlow")
+            
+            print("✨ [CubeTabView] Cube icons glowing at intensity 2.5-3.0 (flash ON)")
+        }
+        
+        /// Stop illuminating cube when flashlight is OFF - return to normal
+        private func stopFlashing() {
+            guard let scnView = view, let cube = scnView.scene?.rootNode.childNode(withName: "cube", recursively: true) else { return }
+            
+            print("🔦 [CubeTabView] Stopping flash - restoring normal emission")
+            
+            // Stop glow animation
+            cube.removeAction(forKey: "flashGlow")
+            
+            // Restore original emission settings over 0.4 seconds
+            SCNTransaction.begin()
+            SCNTransaction.animationDuration = 0.4
+            SCNTransaction.animationTimingFunction = CAMediaTimingFunction(name: .easeOut)
+            
+            for material in cubeMaterials {
+                // DON'T change emission.contents - keep the mask!
+                // Just restore normal intensity
+                material.emission.intensity = 0.5
+            }
+            
+            SCNTransaction.commit()
+            
+            print("💤 [CubeTabView] Cube returned to normal emission intensity (flash OFF)")
         }
 
         private func applyCombinedRotation(to node: SCNNode) {

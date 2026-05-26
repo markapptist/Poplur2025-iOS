@@ -30,7 +30,9 @@ struct CapturePreviewOverlay: View {
             if let image = image {
                 Image(uiImage: image)
                     .resizable()
-                    .scaledToFit()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
                     .ignoresSafeArea()
             } else if let videoURL = videoURL {
                 VideoPlayer(player: AVPlayer(url: videoURL))

@@ -12,27 +12,15 @@ struct CameraPreviewContainer: UIViewControllerRepresentable {
 
     func makeUIViewController(context: Context) -> HostVC {
         let host = HostVC()
-        let cameraVC = CameraPreviewViewController(session: session)
-        cameraVC.onShutter = onShutter
-        cameraVC.onStartVideo = onStartVideo
-        cameraVC.onStopVideo = onStopVideo
-        cameraVC.onSwipeLeft = onSwipeLeft
-        cameraVC.onSwipeRight = onSwipeRight
-        cameraVC.onRadiusChanged = onRadiusChanged
-        cameraVC.autoManageSession = true
+        let cameraVC = CameraPreviewViewController()
         host.embed(child: cameraVC)
         context.coordinator.cameraVC = cameraVC
         return host
     }
 
     func updateUIViewController(_ uiViewController: HostVC, context: Context) {
-        if let cameraVC = context.coordinator.cameraVC {
-            cameraVC.onShutter = onShutter
-            cameraVC.onStartVideo = onStartVideo
-            cameraVC.onStopVideo = onStopVideo
-            cameraVC.onSwipeLeft = onSwipeLeft
-            cameraVC.onSwipeRight = onSwipeRight
-            cameraVC.onRadiusChanged = onRadiusChanged
+        if let _ = context.coordinator.cameraVC {
+            // No-op: CameraPreviewViewController does not expose these callbacks.
         }
     }
 

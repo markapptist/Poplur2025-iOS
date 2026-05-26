@@ -305,8 +305,6 @@ struct MapView: View {
         } else {
             aiMessage = "📍 \(String(format: "%.4f", centerCoord.latitude))°, \(String(format: "%.4f", centerCoord.longitude))° — Want to post here?"
         }
-        
-        print("📍 [MapView] Map tapped at: \(centerCoord.latitude), \(centerCoord.longitude)")
     }
     
     private func scheduleIdleCheck() {
@@ -626,7 +624,6 @@ struct MapView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("OpenMapToSelectPostLocation"))) { notification in
-            print("🗺️ [MapView] Received OpenMapToSelectPostLocation")
             guard let userInfo = notification.userInfo else { return }
             
             let image = userInfo["image"] as? UIImage
@@ -637,8 +634,6 @@ struct MapView: View {
             
             // Update AI message
             aiMessage = "📍 Tap where you want to post your capture"
-            
-            print("📸 [MapView] Started Camera -> Map flow, waiting for coordinate selection")
         }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ShowLocationOnMapFromPost"))) { notification in
             // Handle showing post location from profile long-press with user annotation
@@ -665,8 +660,6 @@ struct MapView: View {
             // Show marker at this location
             clickedCoordinate = coordinate
             aiMessage = "📍 \(username ?? "User")'s post at \(String(format: "%.4f", latitude))°, \(String(format: "%.4f", longitude))°"
-            
-            print("📍 [MapView] Showing post location with user annotation: \(latitude), \(longitude), user: \(username ?? userID)")
         }
         .onReceive(NotificationCenter.default.publisher(for: .CenterMapOnUser)) { _ in
             stopDominanceTour()
@@ -896,3 +889,4 @@ enum MockAIRecommender {
     MapViewStub()
 }
 #endif
+

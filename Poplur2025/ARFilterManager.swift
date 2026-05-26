@@ -8,6 +8,9 @@ import ARKit
 import SceneKit
 import CoreImage
 import Vision
+#if canImport(FirebaseAuth)
+import FirebaseAuth
+#endif
 
 /// Manages AR face filters and effects
 @MainActor
@@ -82,6 +85,9 @@ class ARFilterManager: NSObject, ObservableObject {
     
     override init() {
         super.init()
+        Task { @MainActor in
+            self.activeFilter = .beautyFilter
+        }
     }
     
     // MARK: - Public Methods
@@ -120,6 +126,7 @@ class ARFilterManager: NSObject, ObservableObject {
     /// Apply filter to image
     func applyFilter(to image: CIImage, faceObservation: VNFaceObservation?) -> CIImage? {
         guard activeFilter != .none else { return image }
+        // Whole-view mode: if no faceObservation or mask, filters apply to entire frame.
         
         var outputImage = image
         
@@ -164,14 +171,28 @@ class ARFilterManager: NSObject, ObservableObject {
     }
     
     /// Apply filter to a captured video frame (called from camera delegate)
-    func applyFilterToVideoFrame(_ sampleBuffer: CMSampleBuffer, completion: @escaping (CMSampleBuffer?) -> Void) {
-        guard activeFilter != .none else {
-            completion(sampleBuffer)
-            return
+    /// This method is nonisolated to allow calling from background video processing queue
+    nonisolated func applyFilterToVideoFrame(_ sampleBuffer: CMSampleBuffer, completion: @escaping (CMSampleBuffer?) -> Void) {
+        // Capture weak reference and current filter to avoid blocking
+        weak var weakSelf = self
+        DispatchQueue.main.async {
+            guard let self = weakSelf else {
+                completion(sampleBuffer)
+                return
+            }
+            let currentFilter = self.activeFilter
+            
+            guard currentFilter != .none else {
+                completion(sampleBuffer)
+                return
+            }
+            
+            self.processFrameWithFilter(sampleBuffer, filter: currentFilter, completion: completion)
         }
-        
-        print("🎨 [ARFilter] Processing frame with filter: \(activeFilter.rawValue)")
-        
+    }
+    
+    /// Internal method to process frame with a specific filter
+    private nonisolated func processFrameWithFilter(_ sampleBuffer: CMSampleBuffer, filter: ARFilter, completion: @escaping (CMSampleBuffer?) -> Void) {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
             print("❌ [ARFilter] Failed to get pixel buffer from sample buffer")
             completion(sampleBuffer)
@@ -181,70 +202,89 @@ class ARFilterManager: NSObject, ObservableObject {
         let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
         
         // Detect face in frame for better filter application
-        let request = VNDetectFaceRectanglesRequest { [weak self] request, error in
-            guard let self = self else {
-                completion(sampleBuffer)
-                return
-            }
-            
+        let request = VNDetectFaceRectanglesRequest { request, error in
             if let error = error {
                 print("❌ [ARFilter] Face detection error: \(error.localizedDescription)")
             }
             
             let faceObservation = (request.results as? [VNFaceObservation])?.first
             
-            if let face = faceObservation {
-                print("✅ [ARFilter] Face detected at bounds: \(face.boundingBox)")
-            } else {
-                print("⚠️ [ARFilter] No face detected in frame")
+            // Log face detection status occasionally (every 60 frames ~2 seconds at 30fps)
+            let shouldLog = Int.random(in: 0..<60) == 0
+            if shouldLog {
+                // Get current user info on main thread
+                Task { @MainActor in
+                    #if canImport(FirebaseAuth)
+                    if let user = Auth.auth().currentUser {
+                        let username = user.displayName ?? user.email ?? "Unknown"
+                        let uid = user.uid
+                        
+                        if let face = faceObservation {
+                            print("✅ [ARFilter] Face detected! User: \(username) (UID: \(uid))")
+                            print("   Bounds: \(face.boundingBox), confidence: \(face.confidence)")
+                        } else {
+                            print("⚠️ [ARFilter] No face detected - User: \(username) (UID: \(uid))")
+                            print("   Filter will apply to entire image")
+                        }
+                    } else {
+                        if let face = faceObservation {
+                            print("✅ [ARFilter] Face detected! User: Not authenticated")
+                            print("   Bounds: \(face.boundingBox), confidence: \(face.confidence)")
+                        } else {
+                            print("⚠️ [ARFilter] No face detected - User: Not authenticated")
+                        }
+                    }
+                    #else
+                    if let face = faceObservation {
+                        print("✅ [ARFilter] Face detected! Bounds: \(face.boundingBox), confidence: \(face.confidence)")
+                    } else {
+                        print("⚠️ [ARFilter] No face detected in frame - applying filter to entire image")
+                    }
+                    #endif
+                }
             }
             
-            // Apply filter with face observation
-            guard let filteredImage = self.applyFilter(to: ciImage, faceObservation: faceObservation) else {
-                print("❌ [ARFilter] Failed to apply filter")
-                completion(sampleBuffer)
-                return
-            }
-            
-            print("✅ [ARFilter] Filter applied successfully")
-            
-            // Render filtered image back to pixel buffer
-            if let outputPixelBuffer = self.createPixelBuffer(from: filteredImage) {
-                var timingInfo = CMSampleTimingInfo()
-                CMSampleBufferGetSampleTimingInfo(sampleBuffer, at: 0, timingInfoOut: &timingInfo)
-                
-                var formatDescription: CMFormatDescription?
-                CMVideoFormatDescriptionCreateForImageBuffer(
-                    allocator: kCFAllocatorDefault,
-                    imageBuffer: outputPixelBuffer,
-                    formatDescriptionOut: &formatDescription
-                )
-                
-                guard let formatDesc = formatDescription else {
-                    print("❌ [ARFilter] Failed to create format description")
+            // Access main actor isolated methods safely
+            Task { @MainActor in
+                // Apply filter with face observation
+                guard let filteredImage = self.applyFilter(to: ciImage, faceObservation: faceObservation) else {
+                    print("❌ [ARFilter] Failed to apply filter")
                     completion(sampleBuffer)
                     return
                 }
                 
-                var newSampleBuffer: CMSampleBuffer?
-                CMSampleBufferCreateReadyWithImageBuffer(
-                    allocator: kCFAllocatorDefault,
-                    imageBuffer: outputPixelBuffer,
-                    formatDescription: formatDesc,
-                    sampleTiming: &timingInfo,
-                    sampleBufferOut: &newSampleBuffer
-                )
-                
-                if newSampleBuffer != nil {
-                    print("✅ [ARFilter] Sample buffer created with filtered image")
+                // Render filtered image back to pixel buffer
+                if let outputPixelBuffer = self.createPixelBuffer(from: filteredImage) {
+                    var timingInfo = CMSampleTimingInfo()
+                    CMSampleBufferGetSampleTimingInfo(sampleBuffer, at: 0, timingInfoOut: &timingInfo)
+                    
+                    var formatDescription: CMFormatDescription?
+                    CMVideoFormatDescriptionCreateForImageBuffer(
+                        allocator: kCFAllocatorDefault,
+                        imageBuffer: outputPixelBuffer,
+                        formatDescriptionOut: &formatDescription
+                    )
+                    
+                    guard let formatDesc = formatDescription else {
+                        print("❌ [ARFilter] Failed to create format description")
+                        completion(sampleBuffer)
+                        return
+                    }
+                    
+                    var newSampleBuffer: CMSampleBuffer?
+                    CMSampleBufferCreateReadyWithImageBuffer(
+                        allocator: kCFAllocatorDefault,
+                        imageBuffer: outputPixelBuffer,
+                        formatDescription: formatDesc,
+                        sampleTiming: &timingInfo,
+                        sampleBufferOut: &newSampleBuffer
+                    )
+                    
+                    completion(newSampleBuffer)
                 } else {
-                    print("❌ [ARFilter] Failed to create sample buffer")
+                    print("❌ [ARFilter] Failed to create output pixel buffer")
+                    completion(sampleBuffer)
                 }
-                
-                completion(newSampleBuffer)
-            } else {
-                print("❌ [ARFilter] Failed to create output pixel buffer")
-                completion(sampleBuffer)
             }
         }
         
@@ -459,6 +499,23 @@ class ARFilterManager: NSObject, ObservableObject {
         
         let mask = gradientFilter.outputImage?.cropped(to: CGRect(origin: .zero, size: imageSize))
         return mask ?? CIImage(color: CIColor.white).cropped(to: CGRect(origin: .zero, size: imageSize))
+    }
+    
+    // MARK: - Additional Public Methods
+    
+    /// Set a simple live tint filter color for demo
+    public func setLiveTint(color: CIColor?) {
+        // When a color is provided, switch to vintage as base and adjust warmth/cool accordingly
+        if let color = color {
+            // Simple mapping: warm if red > blue, cool otherwise
+            if color.red > color.blue {
+                self.activeFilter = .warmth
+            } else {
+                self.activeFilter = .cool
+            }
+        } else {
+            self.activeFilter = .none
+        }
     }
 }
 

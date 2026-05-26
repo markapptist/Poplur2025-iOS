@@ -148,7 +148,6 @@ struct CameraViewWithMLExample: View {
             ) { objects in
                 // Handle detected objects
                 detectedObjects = objects
-                print("🔍 Detected: \(objects.map { $0.identifier }.joined(separator: ", "))")
             }
             .ignoresSafeArea()
             
@@ -298,3 +297,4 @@ struct MLSettingsView: View {
     }
 }
 #endif
+

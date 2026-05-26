@@ -449,21 +449,12 @@ extension CameraViewController {
 }
 
 // MARK: - CameraKitController Integration Extension
+// Note: CameraKitController already has mlDetectionManager property defined in its class
+// This extension only adds the helper methods and video delegate storage
 
 extension CameraKitController {
     
-    private static var mlDetectionManagerKey: UInt8 = 0
     private static var mlVideoDelegateKey: UInt8 = 0
-    
-    /// Get or create the ML detection manager
-    public var mlDetectionManager: SimplifiedMLDetectionManager? {
-        get {
-            return objc_getAssociatedObject(self, &Self.mlDetectionManagerKey) as? SimplifiedMLDetectionManager
-        }
-        set {
-            objc_setAssociatedObject(self, &Self.mlDetectionManagerKey, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
-        }
-    }
     
     /// Internal video delegate for ML processing
     private var mlVideoDelegate: MLVideoDataOutputDelegate? {
@@ -476,7 +467,7 @@ extension CameraKitController {
     }
     
     /// Enable ML object detection for CameraKitController
-    public func enableMLDetection() {
+    public func enableMLObjectDetection() {
         // Create manager if needed
         if mlDetectionManager == nil {
             let manager = SimplifiedMLDetectionManager()
@@ -500,12 +491,14 @@ extension CameraKitController {
         // Setup video output for frame capture
         setupMLVideoOutput()
         
+        isMLDetectionEnabled = true
         print("✅ ML Object Detection enabled for CameraKitController!")
     }
     
     /// Disable ML detection
-    public func disableMLDetection() {
+    public func disableMLObjectDetection() {
         mlDetectionManager?.isEnabled = false
+        isMLDetectionEnabled = false
         print("🛑 ML Object Detection disabled")
     }
     
