@@ -427,9 +427,10 @@ struct MapView: View {
             .ignoresSafeArea()
             .contentShape(Rectangle())
             .simultaneousGesture(DragGesture(minimumDistance: 0).onChanged { _ in noteInteraction() })
-            .onTapGesture { location in
-                // Convert tap location to coordinate
-                handleMapTap(at: location)
+            .onTapGesture {
+                // Use screen center as an approximation for tap-to-coordinate
+                let center = CGPoint(x: UIScreen.main.bounds.midX, y: UIScreen.main.bounds.midY)
+                handleMapTap(at: center)
                 noteInteraction()
             }
             

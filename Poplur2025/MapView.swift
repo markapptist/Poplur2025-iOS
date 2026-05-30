@@ -468,6 +468,7 @@ private extension PreviewLocationManager {
 // REMOVED: MapView_PreviewAlt - Not used in production. Use MapViewProduction instead.
 // REMOVED: Helper views (FavoritesListViewAlt, SearchViewAlt, etc.) - No longer needed since MapView_PreviewAlt was removed.
 
+#if DEBUG
 // MARK: - Interactive Tour Preview with Controls
 
 private struct MapTourPreviewWithControls: View {
@@ -846,7 +847,8 @@ private struct AddressSearchView: View {
 
 // MARK: - SceneKit Rotating Bar View (replaces Earth globe)
 
-#if !POP_PREVIEW_LIGHT && (!DEBUG || !IS_PREVIEW)
+// TEMPORARILY DISABLED FOR ARCHIVE TESTING
+#if false && !POP_PREVIEW_LIGHT && (!DEBUG || !IS_PREVIEW)
 private struct SceneKitRotatingBarView: UIViewRepresentable {
     @Binding var text: String
 
@@ -1623,6 +1625,8 @@ private struct CubeHoldSearchOverlay: View {
     }
 }
 
+#endif // End of DEBUG preview views
+
 // MARK: - Production MapView (Clean - No Debug Controls)
 
 /// The main MapView used in the app - shows map with AI recommendations and navigation
@@ -1643,17 +1647,19 @@ struct MapViewProduction: View {
     
     @State private var currentCity: String = "Your Location"
     @State private var aiRecommendation: String = "Explore what's happening around you right now!"
+    #if DEBUG
     @State private var showPlacesList: Bool = false
     @State private var showAddressSearch: Bool = false
     @State private var showCubeHoldSearch: Bool = false  // NEW: For long-press search
     @State private var searchQuery: String = ""
     @State private var searchResults: [MKMapItem] = []
     @State private var isSearching: Bool = false
+    #endif
     @State private var clickedCoordinate: CLLocationCoordinate2D? = nil  // Track clicked coordinate
     @State private var showPostPrompt: Bool = false  // Show "Post Here?" prompt
     
-    @State private var posts: [PreviewMapAnnotationPost] = []
-    @State private var dominance: [PreviewCityDominance] = []
+    @State private var posts: [MapAnnotationPost] = []
+    @State private var dominance: [CityDominance] = []
     @State private var radiusMeters: Double = 5_000
     
     @State private var currentTourIndex: Int = 0
@@ -1698,6 +1704,7 @@ struct MapViewProduction: View {
         lightningFrequency: 0.3
     )
     
+    // Available in both Debug and Release for tour functionality
     let tourPlaces: [(name: String, coordinate: CLLocationCoordinate2D, description: String)] = [
         ("New York", CLLocationCoordinate2D(latitude: 40.7128, longitude: -74.0060), "The city that never sleeps"),
         ("San Francisco", CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194), "The Golden Gate City"),
@@ -1712,16 +1719,16 @@ struct MapViewProduction: View {
     init() {
         // Initialize with demo cities and posts synchronously to avoid crash
         _dominance = State(initialValue: [
-            PreviewCityDominance(city: "San Francisco", coordinate: CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194), profileURL: nil),
-            PreviewCityDominance(city: "New York", coordinate: CLLocationCoordinate2D(latitude: 40.7128, longitude: -74.0060), profileURL: nil),
-            PreviewCityDominance(city: "Los Angeles", coordinate: CLLocationCoordinate2D(latitude: 34.0522, longitude: -118.2437), profileURL: nil)
+            CityDominance(city: "San Francisco", coordinate: CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194), profileURL: nil),
+            CityDominance(city: "New York", coordinate: CLLocationCoordinate2D(latitude: 40.7128, longitude: -74.0060), profileURL: nil),
+            CityDominance(city: "Los Angeles", coordinate: CLLocationCoordinate2D(latitude: 34.0522, longitude: -118.2437), profileURL: nil)
         ])
         
         // Add demo posts near SF for visualization
         _posts = State(initialValue: [
-            PreviewMapAnnotationPost(title: "Golden Gate", coordinate: CLLocationCoordinate2D(latitude: 37.8199, longitude: -122.4783), radius: 500),
-            PreviewMapAnnotationPost(title: "Fisherman's Wharf", coordinate: CLLocationCoordinate2D(latitude: 37.8080, longitude: -122.4177), radius: 400),
-            PreviewMapAnnotationPost(title: "Alcatraz", coordinate: CLLocationCoordinate2D(latitude: 37.8267, longitude: -122.4230), radius: 600)
+            MapAnnotationPost(title: "Golden Gate", coordinate: CLLocationCoordinate2D(latitude: 37.8199, longitude: -122.4783), radius: 500),
+            MapAnnotationPost(title: "Fisherman's Wharf", coordinate: CLLocationCoordinate2D(latitude: 37.8080, longitude: -122.4177), radius: 400),
+            MapAnnotationPost(title: "Alcatraz", coordinate: CLLocationCoordinate2D(latitude: 37.8267, longitude: -122.4230), radius: 600)
         ])
     }
     
@@ -1877,7 +1884,7 @@ struct MapViewProduction: View {
         }
     }
     
-    private func filteredPosts() -> [PreviewMapAnnotationPost] {
+    private func filteredPosts() -> [MapAnnotationPost] {
         guard let userLoc = locationManager.location else { return posts }
         return posts.filter {
             MKMapPoint(userLoc.coordinate).distance(to: MKMapPoint($0.coordinate)) <= radiusMeters
@@ -2089,8 +2096,6 @@ struct MapViewProduction: View {
                     position: cameraBinding,
                     interactionModes: [.pan, .rotate, .pitch, .zoom]
                 ) {
-                let _ = print("🗺️ [MapView] Map body evaluating - showPostPrompt: \(showPostPrompt), clickedCoordinate: \(String(describing: clickedCoordinate))")
-                let _ = print("🗺️ [MapView] Map body re-evaluating, shownPostCoordinate: \(String(describing: shownPostCoordinate))")
                 // Show user annotation with 3D blue pin when location is available
                 if let userCoord = locationManager.location?.coordinate {
                     Annotation("", coordinate: userCoord) {
@@ -2101,7 +2106,6 @@ struct MapViewProduction: View {
                 
                 // Show marker when user clicks a coordinate
                 if showPostPrompt, let coord = clickedCoordinate {
-                    let _ = print("🎯 [MapView] Rendering clicked coordinate marker at: \(coord.latitude), \(coord.longitude)")
                     Annotation("Selected Location", coordinate: coord) {
                         ZStack {
                             // Outer glow ring
@@ -2149,40 +2153,12 @@ struct MapViewProduction: View {
                 
                 // Show pin for post location being viewed
                 if let coord = shownPostCoordinate {
-                    // Debug: Log that we're rendering the annotation
-                    let _ = print("🗺️ [MapView] Rendering post annotation at: \(coord.latitude), \(coord.longitude)")
-                    let _ = print("   Radius: \(shownPostRadius ?? 0)m")
-                    let _ = print("   Username: \(shownPostUsername ?? "nil")")
-                    
                     // Show radius circle if available
                     if let radius = shownPostRadius {
                         MapCircle(center: coord, radius: radius)
                             .foregroundStyle(Color.purple.opacity(0.15))
                             .stroke(Color.purple.opacity(0.5), lineWidth: 2)
                     }
-                    
-                    // Build comprehensive annotation label showing all key info
-                    let annotationLabel: String = {
-                        var components: [String] = []
-                        
-                        // Username
-                        if let username = shownPostUsername {
-                            components.append(username)
-                        }
-                        
-                        // Coordinates
-                        let coordText = String(format: "%.4f, %.4f", coord.latitude, coord.longitude)
-                        components.append(coordText)
-                        
-                        // Location (flag + city)
-                        if let cityName = shownPostCityName {
-                            let flag = shownPostCountryFlag ?? ""
-                            let cityText = flag.isEmpty ? cityName : "\(flag) \(cityName)"
-                            components.append(cityText)
-                        }
-                        
-                        return components.joined(separator: " • ")
-                    }()
                     
                     // Show detailed pin annotation - no background, text only
                     Annotation("", coordinate: coord) {
@@ -2218,7 +2194,7 @@ struct MapViewProduction: View {
                 ForEach(dominance) { dom in
                     Annotation("", coordinate: dom.coordinate) {
                         if let url = dom.profileURL {
-                            PreviewDominancePin(profileURL: url)
+                            DominancePin(profileURL: url)
                         } else {
                             // High-intensity purple beacons for dominance locations
                             Enhanced3DBeaconMarker(color: .purple, intensity: 1.0)
@@ -2226,13 +2202,13 @@ struct MapViewProduction: View {
                         }
                     }
                 }
-            }
+                }
 #if POP_PREVIEW_LIGHT
-            .mapStyle(.standard)
+                .mapStyle(.standard)
 #else
-            .mapStyle(.hybrid(elevation: .realistic, showsTraffic: false))
+                .mapStyle(.hybrid(elevation: .realistic, showsTraffic: false))
 #endif
-            .onTapGesture { location in
+                .onTapGesture { location in
                 // Handle map tap based on current flow
                 if let coordinate = proxy.convert(location, from: .local) {
                     print("🗺️ [MapView] Map tapped at screen: \(location), converted to: \(coordinate.latitude), \(coordinate.longitude)")
@@ -2278,83 +2254,83 @@ struct MapViewProduction: View {
                     }
             )
                 
-                // Weather particle overlay
-                WeatherParticleOverlay(weatherState: $weatherState)
-                    .allowsHitTesting(false) // Let touches pass through to map
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                
-                // Confetti overlay for trending pins
-                if showConfetti {
-                    GeometryReader { geometry in
-                        ConfettiOverlay(
-                            trendingPins: $trendingTracker.trendingPins,
-                            coordinateConverter: { coordinate -> CGPoint? in
-                                // Convert map coordinate to screen point
-                                // Note: MapReader doesn't provide direct coordinate->point conversion
-                                // We need to implement this based on current camera position
-                                guard let camera = camera.camera else { return nil }
-                                
-                                // Use MKMapView's conversion (approximation for demo)
-                                // In production, you'd want a more precise conversion
-                                let centerCoord = camera.centerCoordinate
-                                let latDelta = coordinate.latitude - centerCoord.latitude
-                                let lonDelta = coordinate.longitude - centerCoord.longitude
-                                
-                                // Rough pixel conversion (will vary with zoom)
-                                let pixelsPerDegree = geometry.size.width / 0.5 // Approximate
-                                let x = geometry.size.width / 2 + CGFloat(lonDelta) * pixelsPerDegree
-                                let y = geometry.size.height / 2 - CGFloat(latDelta) * pixelsPerDegree
-                                
-                                // Check if point is within bounds
-                                guard x >= 0, x <= geometry.size.width,
-                                      y >= 0, y <= geometry.size.height else {
-                                    return nil
-                                }
-                                
-                                return CGPoint(x: x, y: y)
-                            }
-                        )
-                        .allowsHitTesting(false) // Let touches pass through
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    }
-                }
-                
-                // 3D SceneKit Overlay Layer - Floating beacons over map
-                // Note: This layer is separate from the Map to avoid gesture conflicts
-                // Commented out due to coordinate conversion issues - can be re-enabled after fixing
-                /*
+            // Weather particle overlay
+            WeatherParticleOverlay(weatherState: $weatherState)
+                .allowsHitTesting(false) // Let touches pass through to map
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            
+            // Confetti overlay for trending pins
+            if showConfetti {
                 GeometryReader { geometry in
-                    MapReader { beaconProxy in
-                        ForEach(dominance) { dom in
-                            if let screenPoint = beaconProxy.convert(dom.coordinate, from: .global) {
-                                Floating3DBeacon(color: .purple, pulseSpeed: 2.0)
-                                    .frame(width: 120, height: 200)
-                                    .position(screenPoint)
+                    ConfettiOverlay(
+                        trendingPins: $trendingTracker.trendingPins,
+                        coordinateConverter: { coordinate -> CGPoint? in
+                            // Convert map coordinate to screen point
+                            // Note: MapReader doesn't provide direct coordinate->point conversion
+                            // We need to implement this based on current camera position
+                            guard let camera = camera.camera else { return nil }
+                            
+                            // Use MKMapView's conversion (approximation for demo)
+                            // In production, you'd want a more precise conversion
+                            let centerCoord = camera.centerCoordinate
+                            let latDelta = coordinate.latitude - centerCoord.latitude
+                            let lonDelta = coordinate.longitude - centerCoord.longitude
+                            
+                            // Rough pixel conversion (will vary with zoom)
+                            let pixelsPerDegree = geometry.size.width / 0.5 // Approximate
+                            let x = geometry.size.width / 2 + CGFloat(lonDelta) * pixelsPerDegree
+                            let y = geometry.size.height / 2 - CGFloat(latDelta) * pixelsPerDegree
+                            
+                            // Check if point is within bounds
+                            guard x >= 0, x <= geometry.size.width,
+                                  y >= 0, y <= geometry.size.height else {
+                                return nil
                             }
+                            
+                            return CGPoint(x: x, y: y)
                         }
-                        
-                        // Show 3D beacon for post location
-                        if let coord = shownPostCoordinate,
-                           let screenPoint = beaconProxy.convert(coord, from: .global) {
-                            Floating3DBeacon(color: .purple, pulseSpeed: 1.5)
-                                .frame(width: 150, height: 220)
+                    )
+                    .allowsHitTesting(false) // Let touches pass through
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+            
+            // 3D SceneKit Overlay Layer - Floating beacons over map
+            // Note: This layer is separate from the Map to avoid gesture conflicts
+            // Commented out due to coordinate conversion issues - can be re-enabled after fixing
+            /*
+            GeometryReader { geometry in
+                MapReader { beaconProxy in
+                    ForEach(dominance) { dom in
+                        if let screenPoint = beaconProxy.convert(dom.coordinate, from: .global) {
+                            Floating3DBeacon(color: .purple, pulseSpeed: 2.0)
+                                .frame(width: 120, height: 200)
                                 .position(screenPoint)
                         }
-                        
-                        // Show 3D beacons for filtered posts
-                        ForEach(filteredPosts()) { post in
-                            if let screenPoint = beaconProxy.convert(post.coordinate, from: .global) {
-                                Floating3DBeacon(color: .red, pulseSpeed: 2.5)
-                                    .frame(width: 100, height: 180)
-                                    .position(screenPoint)
-                            }
+                    }
+                    
+                    // Show 3D beacon for post location
+                    if let coord = shownPostCoordinate,
+                       let screenPoint = beaconProxy.convert(coord, from: .global) {
+                        Floating3DBeacon(color: .purple, pulseSpeed: 1.5)
+                            .frame(width: 150, height: 220)
+                            .position(screenPoint)
+                    }
+                    
+                    // Show 3D beacons for filtered posts
+                    ForEach(filteredPosts()) { post in
+                        if let screenPoint = beaconProxy.convert(post.coordinate, from: .global) {
+                            Floating3DBeacon(color: .red, pulseSpeed: 2.5)
+                                .frame(width: 100, height: 180)
+                                .position(screenPoint)
                         }
                     }
                 }
-                .allowsHitTesting(false) // Let touches pass through to map
-                */
             }
-        }
+            .allowsHitTesting(false) // Let touches pass through to map
+            */
+        } // End ZStack
+        } // End MapReader
     }
     
     // MARK: - Body Components (broken down to help compiler)
@@ -2552,6 +2528,7 @@ struct MapViewProduction: View {
             }
             
             // Cube Hold Search Overlay - appears below AI text
+            #if DEBUG
             if showCubeHoldSearch {
                 CubeHoldSearchOverlay(
                     query: $searchQuery,
@@ -2586,6 +2563,7 @@ struct MapViewProduction: View {
                 .transition(.move(edge: .top).combined(with: .opacity))
                 .animation(.spring(response: 0.4, dampingFraction: 0.8), value: showCubeHoldSearch)
             }
+            #endif
             
             Spacer()
         }
@@ -2717,7 +2695,7 @@ struct MapViewProduction: View {
         
         if let index = posts.firstIndex(where: { $0.id == randomPost.id }) {
             // Update post with new radius
-            posts[index] = PreviewMapAnnotationPost(
+            posts[index] = MapAnnotationPost(
                 title: randomPost.title,
                 coordinate: randomPost.coordinate,
                 radius: newRadius
@@ -2758,18 +2736,21 @@ struct MapViewProduction: View {
     var body: some View {
         mapContentLayer
             .toolbar(.hidden, for: .navigationBar)
+            #if DEBUG
             .sheet(isPresented: $showPlacesList) {
                 placesListSheet
             }
             .sheet(isPresented: $showAddressSearch) {
                 addressSearchSheet
             }
+            #endif
             .onAppear {
                 handleOnAppear()
             }
             .onChange(of: locationManager.location) { _, newLocation in
                 handleLocationChange(newLocation)
             }
+            #if DEBUG
             .onChange(of: showCubeHoldSearch) { _, isShowing in
                 // Pause tour when menu is showing
                 if isShowing {
@@ -2780,7 +2761,9 @@ struct MapViewProduction: View {
                     searchResults = []
                 }
             }
+            #endif
             .onReceive(NotificationCenter.default.publisher(for: .CubeGlobalTap)) { _ in
+                #if DEBUG
                 // If menu is open, close it on tap; otherwise center on location
                 if showCubeHoldSearch {
                     showCubeHoldSearch = false
@@ -2799,11 +2782,28 @@ struct MapViewProduction: View {
                     clickedCoordinate = nil
                     centerOnUserLocation()
                 }
+                #else
+                // Respect lock/suppression windows after jumping to a post location
+                if let until = lockToPostUntil, until > Date() {
+                    print("⛔️ [MapView] CubeGlobalTap centering ignored during lockToPost window")
+                    return
+                }
+                if let until = suppressUserCenteringUntil, until > Date() {
+                    print("⛔️ [MapView] CubeGlobalTap centering ignored during suppression window")
+                    return
+                }
+                // Clear post prompt when centering on user
+                showPostPrompt = false
+                clickedCoordinate = nil
+                centerOnUserLocation()
+                #endif
             }
             .onReceive(NotificationCenter.default.publisher(for: .cameraCubeHoldBegan)) { notification in
                 // Long press cube shows favorites/search overlay
                 print("[MapView] Cube hold began - showing favorites overlay")
+                #if DEBUG
                 showCubeHoldSearch = true
+                #endif
                 mapState.stopTour()
             }
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("CameraCubeHoldMoved"))) { notification in
@@ -3209,6 +3209,7 @@ struct MapViewProduction: View {
             }
     }
     
+    #if DEBUG
     // MARK: - Sheet Views
     
     @ViewBuilder
@@ -3234,6 +3235,7 @@ struct MapViewProduction: View {
         }
         .presentationDetents([.medium, .large])
     }
+    #endif
     
     // MARK: - Event Handlers
     
@@ -3422,7 +3424,7 @@ struct MapViewProduction: View {
                 
                 // Update the post radius (this triggers confetti if growing significantly)
                 if let index = posts.firstIndex(where: { $0.id == randomPost.id }) {
-                    posts[index] = PreviewMapAnnotationPost(
+                    posts[index] = MapAnnotationPost(
                         title: randomPost.title,
                         coordinate: randomPost.coordinate,
                         radius: newRadius
@@ -3447,7 +3449,6 @@ struct MapViewProduction: View {
 // MARK: - Previews
 
 #if DEBUG
-// Full preview - WITH controls and globe
 #Preview("Interactive Tour with Controls") {
     MapTourPreviewWithControls()
         .onAppear {

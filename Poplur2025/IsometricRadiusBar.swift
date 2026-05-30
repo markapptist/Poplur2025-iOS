@@ -1419,20 +1419,18 @@ private struct WrapHStack<Content: View>: View {
 // Preview-only fallback declarations if the app target doesn’t import these types here.
 // Comment these out if the real types are available to this file.
 // IsometricBarSettings is now imported from IsometricBarSettings.swift
-private struct SharedPreviewSettings {
-    static let settings: IsometricBarSettings = {
-        let s = IsometricBarSettings()
-        s.horizontalOffset = 80
-        s.bottomOffset = 1
-        s.barWidth = 98
-        s.barHeight = 390
-        s.barTiltDegrees = -8
-        return s
-    }()
-}
+// Removed unused SharedPreviewSettings
+
 #endif
 
 #Preview("Radius Bar Properties") {
-    RadiusBarOnlyPreview()
-        .environmentObject(SharedPreviewSettings.settings)
+    let settings = IsometricBarSettings()
+    settings.horizontalOffset = 80
+    settings.bottomOffset = 1
+    settings.barWidth = 98
+    settings.barHeight = 390
+    settings.barTiltDegrees = -8
+    
+    return RadiusBarOnlyPreview()
+        .environmentObject(settings)
 }

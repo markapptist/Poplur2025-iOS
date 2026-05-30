@@ -176,10 +176,20 @@ private var previewSettings: PreviewIsometricBarSettings {
 #endif
 
 #Preview("Isometric Bar Animation Loop") {
-    Group {
+    // Create a local settings instance so previews always compile
+    let settings = {
+        let s = PreviewIsometricBarSettings()
+        s.horizontalOffset = 80
+        s.bottomOffset = 1
+        s.barWidth = 98
+        s.barHeight = 390
+        s.barTiltDegrees = -8
+        return s
+    }()
+
+    return Group {
         IsometricRadiusBarAnimationHarness()
-            .environmentObject(previewSettings)
+            .environmentObject(settings)
             .preferredColorScheme(.dark)
     }
 }
-

@@ -4,10 +4,4 @@
    <FileRef
       location = "self:">
    </FileRef>
-   <FileRef
-      location = "group:WeatherManager.swift">
-   </FileRef>
-   <FileRef
-      location = "group:WeatherOverlay.swift">
-   </FileRef>
 </Workspace>

@@ -1649,7 +1649,7 @@ private struct HomeBarPlacementPreview: View {
     }
 }
 
-private struct SharedPreviewSettings {
+private struct HomePreviewSettings {
     static let settings: IsometricBarSettings = {
         let s = IsometricBarSettings()
         s.horizontalOffset = 40
@@ -1665,7 +1665,7 @@ private struct SharedPreviewSettings {
     HomeBarPlacementPreview()
         .previewDevice("iPhone 15 Pro")
         .ignoresSafeArea(.container, edges: [.bottom, .leading, .trailing])
-        .environmentObject(SharedPreviewSettings.settings)
+        .environmentObject(HomePreviewSettings.settings)
 }
 
 private extension AppTab {

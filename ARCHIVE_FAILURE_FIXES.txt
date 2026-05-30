@@ -1,0 +1,15 @@
+Poplur2025 archive/export fixes applied:
+
+1. Removed WeatherKit entitlement from Poplur2025.entitlements.
+   This often causes export/upload failure unless the App ID/provisioning profile has WeatherKit enabled.
+
+2. Removed PNG alpha channels from all AppIcon PNGs.
+   App Store Connect commonly rejects 1024x1024 icons that contain an alpha channel, even if fully opaque.
+
+After opening in Xcode:
+- Product > Clean Build Folder
+- Xcode > Settings > Accounts > Download Manual Profiles
+- Target Poplur2025 > Signing & Capabilities: verify your Team and Bundle ID.
+- Archive again, then Distribute App.
+
+If it still fails, copy the first red error from Organizer/Distribution Logs.
