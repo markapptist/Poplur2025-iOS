@@ -6,7 +6,6 @@
 import SwiftUI
 import AVFoundation
 import UIKit
-import SCSDKCameraKit
 
 /// SwiftUI view that displays the camera with ML detection enabled
 struct CameraViewWithML: View {

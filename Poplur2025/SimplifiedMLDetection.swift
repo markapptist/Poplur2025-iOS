@@ -7,15 +7,7 @@ import Foundation
 import Vision
 import AVFoundation
 import UIKit
-import SCSDKCameraKit
 import ObjectiveC
-
-// Forward declaration to help Swift find CameraViewController
-// This ensures the extension below can see the class
-#if canImport(Poplur2025)
-import Poplur2025
-import SCSDKCameraKitReferenceUI
-#endif
 
 /// Simple ML detection manager using Vision's built-in image classification
 /// This works out-of-the-box without requiring additional CoreML models
@@ -318,135 +310,8 @@ public class MLDetectionBadgeView: UIView {
 }
 
 // MARK: - Easy Integration Extension
-
-extension CameraViewController {
-    
-    private static var mlDetectionManagerKey: UInt8 = 0
-    private static var mlDetectionBadgeKey: UInt8 = 0
-    private static var mlVideoDelegateKey: UInt8 = 0
-    
-    /// Get or create the ML detection manager
-    public var mlDetectionManager: SimplifiedMLDetectionManager? {
-        get {
-            return objc_getAssociatedObject(self, &Self.mlDetectionManagerKey) as? SimplifiedMLDetectionManager
-        }
-        set {
-            objc_setAssociatedObject(self, &Self.mlDetectionManagerKey, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
-        }
-    }
-    
-    /// Get or create the ML detection badge view
-    public var mlDetectionBadge: MLDetectionBadgeView? {
-        get {
-            return objc_getAssociatedObject(self, &Self.mlDetectionBadgeKey) as? MLDetectionBadgeView
-        }
-        set {
-            objc_setAssociatedObject(self, &Self.mlDetectionBadgeKey, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
-        }
-    }
-    
-    /// Internal video delegate for ML processing
-    private var mlVideoDelegate: MLVideoDataOutputDelegate? {
-        get {
-            return objc_getAssociatedObject(self, &Self.mlVideoDelegateKey) as? MLVideoDataOutputDelegate
-        }
-        set {
-            objc_setAssociatedObject(self, &Self.mlVideoDelegateKey, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
-        }
-    }
-    
-    /// Enable ML object detection with a simple one-liner
-    public func enableMLDetection() {
-        // Create manager if needed
-        if mlDetectionManager == nil {
-            let manager = SimplifiedMLDetectionManager()
-            mlDetectionManager = manager
-            
-            // Setup callbacks
-            manager.onDetection = { [weak self] objects in
-                self?.handleMLDetections(objects)
-            }
-            
-            manager.onError = { error in
-                print("❌ ML Detection Error: \(error.localizedDescription)")
-            }
-        }
-        
-        // Create and add badge view if needed
-        if mlDetectionBadge == nil {
-            let badge = MLDetectionBadgeView()
-            badge.translatesAutoresizingMaskIntoConstraints = false
-            cameraView.addSubview(badge)
-            
-            NSLayoutConstraint.activate([
-                badge.topAnchor.constraint(equalTo: cameraView.safeAreaLayoutGuide.topAnchor, constant: 16),
-                badge.centerXAnchor.constraint(equalTo: cameraView.centerXAnchor),
-                badge.widthAnchor.constraint(lessThanOrEqualToConstant: 280)
-            ])
-            
-            mlDetectionBadge = badge
-        }
-        
-        // Setup video output for frame capture
-        setupMLVideoOutput()
-        
-        print("✅ ML Object Detection enabled!")
-    }
-    
-    /// Disable ML detection
-    public func disableMLDetection() {
-        mlDetectionManager?.isEnabled = false
-        mlDetectionBadge?.clear()
-        print("🛑 ML Object Detection disabled")
-    }
-    
-    // MARK: - Private Helpers
-    
-    private func setupMLVideoOutput() {
-        let captureSession = cameraController.captureSession
-        
-        // Create delegate if needed
-        if mlVideoDelegate == nil {
-            let delegate = MLVideoDataOutputDelegate()
-            delegate.mlManager = mlDetectionManager
-            mlVideoDelegate = delegate
-        }
-        
-        // Check if we already have a video output
-        let existingOutputs = captureSession.outputs.compactMap { $0 as? AVCaptureVideoDataOutput }
-        if let existingOutput = existingOutputs.first {
-            // Reuse existing output
-            existingOutput.setSampleBufferDelegate(mlVideoDelegate, queue: DispatchQueue(label: "ml-video-queue"))
-            print("✅ Reusing existing video output for ML")
-            return
-        }
-        
-        // Create new video output
-        let videoOutput = AVCaptureVideoDataOutput()
-        videoOutput.setSampleBufferDelegate(mlVideoDelegate, queue: DispatchQueue(label: "ml-video-queue"))
-        videoOutput.alwaysDiscardsLateVideoFrames = true
-        
-        captureSession.beginConfiguration()
-        if captureSession.canAddOutput(videoOutput) {
-            captureSession.addOutput(videoOutput)
-            print("✅ Added new video output for ML")
-        } else {
-            print("❌ Cannot add video output")
-        }
-        captureSession.commitConfiguration()
-    }
-    
-    private func handleMLDetections(_ objects: [DetectedObject]) {
-        mlDetectionBadge?.updateDetections(objects)
-        
-        // Optional: Post notification for other parts of the app
-        NotificationCenter.default.post(
-            name: NSNotification.Name("MLObjectsDetected"),
-            object: nil,
-            userInfo: ["objects": objects]
-        )
-    }
-}
+// Note: CameraViewController extension removed - it was part of Snap Camera Kit SDK
+// If you need to integrate with a custom camera controller, create a similar extension for your own camera class
 
 // MARK: - CameraKitController Integration Extension
 // Note: CameraKitController already has mlDetectionManager property defined in its class

@@ -5,6 +5,29 @@ import SceneKit
 import Foundation
 import AVFoundation
 
+// MARK: - Required Dependencies
+/*
+ This file requires the following project files to compile:
+ - MapViewStubs.swift (MapAnnotationPost, CityDominance, DominancePin types)
+ - LocationProvider.swift (LocationProvider class)
+ - CaptureFlowManager.swift (CaptureFlowManager.shared)
+ - MapStateManager.swift (MapStateManager.shared)
+ - AnimatedZoomSlider.swift (AnimatedZoomSlider view)
+ - ConfettiSystem.swift (ConfettiOverlay, PinTrendingTracker)
+ - Notifications+Names.swift (Notification.Name extensions)
+ 
+ ARCHIVE-FRIENDLY CONFIGURATION:
+ This file is configured to compile cleanly in both DEBUG and RELEASE builds.
+ 
+ DEBUG-only features (excluded from production/archive builds):
+ - WeatherParticleOverlay: SpriteKit-based weather visualization
+ - Weather controls overlay: Debug UI for toggling weather/confetti
+ - Weather state updates and fetch methods
+ - Interactive tour preview controls
+ 
+ All core map functionality is available in both DEBUG and RELEASE builds.
+ */
+
 // MARK: - Weather Overlay Types
 
 import SpriteKit
@@ -16,6 +39,7 @@ struct WeatherVisualizationState {
     var lightningFrequency: Double // 0..1
 }
 
+#if DEBUG
 struct WeatherParticleOverlay: UIViewRepresentable {
     @Binding var weatherState: WeatherVisualizationState
 
@@ -312,6 +336,7 @@ struct WeatherParticleOverlay: UIViewRepresentable {
         }
     }
 }
+#endif // End WeatherParticleOverlay DEBUG block
 
 /*
  ═══════════════════════════════════════════════════════════════════════════════
@@ -429,15 +454,8 @@ private struct PreviewGoogleStylePin: View {
     }
 }
 
-// Extension for clamping values
-private extension Double {
-    func clamped(to range: ClosedRange<Double>) -> Double {
-        return min(max(self, range.lowerBound), range.upperBound)
-    }
-}
-
-// Notification names used in this file
-private extension Notification.Name {
+// Notification names used in this file (available in all builds)
+extension Notification.Name {
     static let preview_CenterMapOnUser = Notification.Name("Preview_CenterMapOnUser")
     static let preview_startDominanceTour = Notification.Name("Preview_startDominanceTour")
     static let preview_stopDominanceTour = Notification.Name("Preview_stopDominanceTour")
@@ -445,7 +463,173 @@ private extension Notification.Name {
     static let preview_setTourZoomOutDistance = Notification.Name("Preview_setTourZoomOutDistance")
     static let preview_setBuildingZoomDistance = Notification.Name("Preview_SetBuildingZoomDistance")
 }
-#endif
+
+#endif // End #if DEBUG block
+
+// Extension for clamping values (available everywhere, not just DEBUG)
+extension Double {
+    fileprivate func clamped(to range: ClosedRange<Double>) -> Double {
+        return min(max(self, range.lowerBound), range.upperBound)
+    }
+}
+
+// MARK: - Enhanced 3D Beacon Marker (Available in all builds)
+
+/// Enhanced 3D beacon marker - matches Google Maps hybrid style with glowing effects
+struct Enhanced3DBeaconMarker: UIViewRepresentable {
+    let color: Color
+    let intensity: Double // 0.0 to 1.0 for heat/activity level
+    
+    func makeUIView(context: Context) -> SCNView {
+        let view = SCNView()
+        view.allowsCameraControl = false
+        view.autoenablesDefaultLighting = false
+        view.backgroundColor = .clear
+        view.antialiasingMode = .multisampling4X
+        
+        let scene = SCNScene()
+        view.scene = scene
+        
+        // Camera - angled view to show 3D depth
+        let cameraNode = SCNNode()
+        cameraNode.camera = SCNCamera()
+        cameraNode.camera?.fieldOfView = 50
+        cameraNode.position = SCNVector3(0, 3, 5)
+        cameraNode.look(at: SCNVector3(0, 0, 0))
+        scene.rootNode.addChildNode(cameraNode)
+        
+        // Omni light for overall illumination
+        let omniLight = SCNNode()
+        omniLight.light = SCNLight()
+        omniLight.light?.type = .omni
+        omniLight.light?.color = UIColor.white
+        omniLight.light?.intensity = 1500
+        omniLight.position = SCNVector3(0, 5, 2)
+        scene.rootNode.addChildNode(omniLight)
+        
+        // Spotlight for dramatic glow
+        let spotlight = SCNNode()
+        spotlight.light = SCNLight()
+        spotlight.light?.type = .spot
+        spotlight.light?.color = UIColor(color)
+        spotlight.light?.intensity = 2000 * intensity
+        spotlight.light?.spotInnerAngle = 30
+        spotlight.light?.spotOuterAngle = 60
+        spotlight.position = SCNVector3(0, 6, 0)
+        spotlight.look(at: SCNVector3(0, 0, 0))
+        scene.rootNode.addChildNode(spotlight)
+        
+        let beaconContainer = SCNNode()
+        
+        // Ground glow ring - pulsing base
+        let groundRing = SCNTorus(ringRadius: 1.2, pipeRadius: 0.15)
+        let groundMaterial = SCNMaterial()
+        groundMaterial.diffuse.contents = UIColor(color.opacity(0.2))
+        groundMaterial.emission.contents = UIColor(color.opacity(0.8 * intensity))
+        groundMaterial.lightingModel = .constant
+        groundMaterial.transparency = 0.6
+        groundRing.materials = [groundMaterial]
+        
+        let groundRingNode = SCNNode(geometry: groundRing)
+        groundRingNode.position = SCNVector3(0, 0.1, 0)
+        groundRingNode.eulerAngles = SCNVector3(Float.pi / 2, 0, 0)
+        beaconContainer.addChildNode(groundRingNode)
+        
+        // Middle ring - smaller, brighter
+        let midRing = SCNTorus(ringRadius: 0.8, pipeRadius: 0.1)
+        let midMaterial = SCNMaterial()
+        midMaterial.diffuse.contents = UIColor(color.opacity(0.3))
+        midMaterial.emission.contents = UIColor(color)
+        midMaterial.lightingModel = .constant
+        midMaterial.transparency = 0.7
+        midRing.materials = [midMaterial]
+        
+        let midRingNode = SCNNode(geometry: midRing)
+        midRingNode.position = SCNVector3(0, 0.3, 0)
+        midRingNode.eulerAngles = SCNVector3(Float.pi / 2, 0, 0)
+        beaconContainer.addChildNode(midRingNode)
+        
+        // Central crystal/diamond
+        let crystal = SCNPyramid(width: 0.6, height: 2.0, length: 0.6)
+        let crystalMaterial = SCNMaterial()
+        crystalMaterial.diffuse.contents = UIColor(color.opacity(0.4))
+        crystalMaterial.emission.contents = UIColor(color.opacity(intensity))
+        crystalMaterial.lightingModel = .physicallyBased
+        crystalMaterial.metalness.contents = 0.9
+        crystalMaterial.roughness.contents = 0.1
+        crystalMaterial.transparency = 0.7
+        crystal.materials = [crystalMaterial]
+        
+        let crystalNode = SCNNode(geometry: crystal)
+        crystalNode.position = SCNVector3(0, 1.2, 0)
+        beaconContainer.addChildNode(crystalNode)
+        
+        // Vertical light beam
+        let beam = SCNCylinder(radius: 0.25, height: 3.5)
+        let beamMaterial = SCNMaterial()
+        beamMaterial.diffuse.contents = UIColor(color.opacity(0.1))
+        beamMaterial.emission.contents = UIColor(color.opacity(0.5 * intensity))
+        beamMaterial.lightingModel = .constant
+        beamMaterial.transparency = 0.3
+        beam.materials = [beamMaterial]
+        
+        let beamNode = SCNNode(geometry: beam)
+        beamNode.position = SCNVector3(0, 2.0, 0)
+        beaconContainer.addChildNode(beamNode)
+        
+        // Particle ring at top
+        let particleRing = SCNTorus(ringRadius: 0.4, pipeRadius: 0.05)
+        let particleMaterial = SCNMaterial()
+        particleMaterial.emission.contents = UIColor(color)
+        particleMaterial.lightingModel = .constant
+        particleRing.materials = [particleMaterial]
+        
+        let particleRingNode = SCNNode(geometry: particleRing)
+        particleRingNode.position = SCNVector3(0, 2.8, 0)
+        particleRingNode.eulerAngles = SCNVector3(Float.pi / 2, 0, 0)
+        beaconContainer.addChildNode(particleRingNode)
+        
+        scene.rootNode.addChildNode(beaconContainer)
+        
+        // Continuous rotation
+        let rotation = CABasicAnimation(keyPath: "rotation")
+        rotation.toValue = NSValue(scnVector4: SCNVector4(0, 1, 0, Float.pi * 2))
+        rotation.duration = 6.0 / intensity.clamped(to: 0.3...1.0)
+        rotation.repeatCount = .infinity
+        beaconContainer.addAnimation(rotation, forKey: "rotation")
+        
+        // Pulsing ground ring
+        let pulse = CABasicAnimation(keyPath: "scale")
+        pulse.fromValue = NSValue(scnVector3: SCNVector3(1.0, 1.0, 1.0))
+        pulse.toValue = NSValue(scnVector3: SCNVector3(1.3, 1.0, 1.3))
+        pulse.duration = 2.0
+        pulse.autoreverses = true
+        pulse.repeatCount = .infinity
+        groundRingNode.addAnimation(pulse, forKey: "pulse")
+        
+        // Floating animation
+        let float = CABasicAnimation(keyPath: "position.y")
+        float.fromValue = 0.0
+        float.toValue = 0.4
+        float.duration = 2.5
+        float.autoreverses = true
+        float.repeatCount = .infinity
+        beaconContainer.addAnimation(float, forKey: "float")
+        
+        // Spinning particle ring
+        let particleSpin = CABasicAnimation(keyPath: "rotation")
+        particleSpin.toValue = NSValue(scnVector4: SCNVector4(1, 0, 0, Float.pi * 2))
+        particleSpin.duration = 3.0
+        particleSpin.repeatCount = .infinity
+        particleRingNode.addAnimation(particleSpin, forKey: "particleSpin")
+        
+        return view
+    }
+    
+    func updateUIView(_ uiView: SCNView, context: Context) {
+        uiView.backgroundColor = .clear
+    }
+}
 
 #if DEBUG
 private let IS_PREVIEW: Bool = (ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1")
@@ -1244,163 +1428,7 @@ private struct Floating3DBeacon: UIViewRepresentable {
     }
 }
 
-// MARK: - Enhanced 3D Beacon Marker
 
-/// Enhanced 3D beacon marker - matches Google Maps hybrid style with glowing effects
-private struct Enhanced3DBeaconMarker: UIViewRepresentable {
-    let color: Color
-    let intensity: Double // 0.0 to 1.0 for heat/activity level
-    
-    func makeUIView(context: Context) -> SCNView {
-        let view = SCNView()
-        view.allowsCameraControl = false
-        view.autoenablesDefaultLighting = false
-        view.backgroundColor = .clear
-        view.antialiasingMode = .multisampling4X
-        
-        let scene = SCNScene()
-        view.scene = scene
-        
-        // Camera - angled view to show 3D depth
-        let cameraNode = SCNNode()
-        cameraNode.camera = SCNCamera()
-        cameraNode.camera?.fieldOfView = 50
-        cameraNode.position = SCNVector3(0, 3, 5)
-        cameraNode.look(at: SCNVector3(0, 0, 0))
-        scene.rootNode.addChildNode(cameraNode)
-        
-        // Omni light for overall illumination
-        let omniLight = SCNNode()
-        omniLight.light = SCNLight()
-        omniLight.light?.type = .omni
-        omniLight.light?.color = UIColor.white
-        omniLight.light?.intensity = 1500
-        omniLight.position = SCNVector3(0, 5, 2)
-        scene.rootNode.addChildNode(omniLight)
-        
-        // Spotlight for dramatic glow
-        let spotlight = SCNNode()
-        spotlight.light = SCNLight()
-        spotlight.light?.type = .spot
-        spotlight.light?.color = UIColor(color)
-        spotlight.light?.intensity = 2000 * intensity
-        spotlight.light?.spotInnerAngle = 30
-        spotlight.light?.spotOuterAngle = 60
-        spotlight.position = SCNVector3(0, 6, 0)
-        spotlight.look(at: SCNVector3(0, 0, 0))
-        scene.rootNode.addChildNode(spotlight)
-        
-        let beaconContainer = SCNNode()
-        
-        // Ground glow ring - pulsing base
-        let groundRing = SCNTorus(ringRadius: 1.2, pipeRadius: 0.15)
-        let groundMaterial = SCNMaterial()
-        groundMaterial.diffuse.contents = UIColor(color.opacity(0.2))
-        groundMaterial.emission.contents = UIColor(color.opacity(0.8 * intensity))
-        groundMaterial.lightingModel = .constant
-        groundMaterial.transparency = 0.6
-        groundRing.materials = [groundMaterial]
-        
-        let groundRingNode = SCNNode(geometry: groundRing)
-        groundRingNode.position = SCNVector3(0, 0.1, 0)
-        groundRingNode.eulerAngles = SCNVector3(Float.pi / 2, 0, 0)
-        beaconContainer.addChildNode(groundRingNode)
-        
-        // Middle ring - smaller, brighter
-        let midRing = SCNTorus(ringRadius: 0.8, pipeRadius: 0.1)
-        let midMaterial = SCNMaterial()
-        midMaterial.diffuse.contents = UIColor(color.opacity(0.3))
-        midMaterial.emission.contents = UIColor(color)
-        midMaterial.lightingModel = .constant
-        midMaterial.transparency = 0.7
-        midRing.materials = [midMaterial]
-        
-        let midRingNode = SCNNode(geometry: midRing)
-        midRingNode.position = SCNVector3(0, 0.3, 0)
-        midRingNode.eulerAngles = SCNVector3(Float.pi / 2, 0, 0)
-        beaconContainer.addChildNode(midRingNode)
-        
-        // Central crystal/diamond
-        let crystal = SCNPyramid(width: 0.6, height: 2.0, length: 0.6)
-        let crystalMaterial = SCNMaterial()
-        crystalMaterial.diffuse.contents = UIColor(color.opacity(0.4))
-        crystalMaterial.emission.contents = UIColor(color.opacity(intensity))
-        crystalMaterial.lightingModel = .physicallyBased
-        crystalMaterial.metalness.contents = 0.9
-        crystalMaterial.roughness.contents = 0.1
-        crystalMaterial.transparency = 0.7
-        crystal.materials = [crystalMaterial]
-        
-        let crystalNode = SCNNode(geometry: crystal)
-        crystalNode.position = SCNVector3(0, 1.2, 0)
-        beaconContainer.addChildNode(crystalNode)
-        
-        // Vertical light beam
-        let beam = SCNCylinder(radius: 0.25, height: 3.5)
-        let beamMaterial = SCNMaterial()
-        beamMaterial.diffuse.contents = UIColor(color.opacity(0.1))
-        beamMaterial.emission.contents = UIColor(color.opacity(0.5 * intensity))
-        beamMaterial.lightingModel = .constant
-        beamMaterial.transparency = 0.3
-        beam.materials = [beamMaterial]
-        
-        let beamNode = SCNNode(geometry: beam)
-        beamNode.position = SCNVector3(0, 2.0, 0)
-        beaconContainer.addChildNode(beamNode)
-        
-        // Particle ring at top
-        let particleRing = SCNTorus(ringRadius: 0.4, pipeRadius: 0.05)
-        let particleMaterial = SCNMaterial()
-        particleMaterial.emission.contents = UIColor(color)
-        particleMaterial.lightingModel = .constant
-        particleRing.materials = [particleMaterial]
-        
-        let particleRingNode = SCNNode(geometry: particleRing)
-        particleRingNode.position = SCNVector3(0, 2.8, 0)
-        particleRingNode.eulerAngles = SCNVector3(Float.pi / 2, 0, 0)
-        beaconContainer.addChildNode(particleRingNode)
-        
-        scene.rootNode.addChildNode(beaconContainer)
-        
-        // Continuous rotation
-        let rotation = CABasicAnimation(keyPath: "rotation")
-        rotation.toValue = NSValue(scnVector4: SCNVector4(0, 1, 0, Float.pi * 2))
-        rotation.duration = 6.0 / intensity.clamped(to: 0.3...1.0)
-        rotation.repeatCount = .infinity
-        beaconContainer.addAnimation(rotation, forKey: "rotation")
-        
-        // Pulsing ground ring
-        let pulse = CABasicAnimation(keyPath: "scale")
-        pulse.fromValue = NSValue(scnVector3: SCNVector3(1.0, 1.0, 1.0))
-        pulse.toValue = NSValue(scnVector3: SCNVector3(1.3, 1.0, 1.3))
-        pulse.duration = 2.0
-        pulse.autoreverses = true
-        pulse.repeatCount = .infinity
-        groundRingNode.addAnimation(pulse, forKey: "pulse")
-        
-        // Floating animation
-        let float = CABasicAnimation(keyPath: "position.y")
-        float.fromValue = 0.0
-        float.toValue = 0.4
-        float.duration = 2.5
-        float.autoreverses = true
-        float.repeatCount = .infinity
-        beaconContainer.addAnimation(float, forKey: "float")
-        
-        // Spinning particle ring
-        let particleSpin = CABasicAnimation(keyPath: "rotation")
-        particleSpin.toValue = NSValue(scnVector4: SCNVector4(1, 0, 0, Float.pi * 2))
-        particleSpin.duration = 3.0
-        particleSpin.repeatCount = .infinity
-        particleRingNode.addAnimation(particleSpin, forKey: "particleSpin")
-        
-        return view
-    }
-    
-    func updateUIView(_ uiView: SCNView, context: Context) {
-        uiView.backgroundColor = .clear
-    }
-}
 
 // MARK: - Rotating Earth Globe Preview replaced with Rotating Bar and AI text
 
@@ -1440,7 +1468,9 @@ private struct RotatingEarthGlobePreview: View {
     }
 }
 
-// MARK: - Cube Hold Search Overlay
+#endif // End of DEBUG preview views
+
+// MARK: - Cube Hold Search Overlay (Available in all builds)
 
 /// Search overlay that appears when cube is held down - similar styling to AI text window
 private struct CubeHoldSearchOverlay: View {
@@ -1625,8 +1655,6 @@ private struct CubeHoldSearchOverlay: View {
     }
 }
 
-#endif // End of DEBUG preview views
-
 // MARK: - Production MapView (Clean - No Debug Controls)
 
 /// The main MapView used in the app - shows map with AI recommendations and navigation
@@ -1647,14 +1675,12 @@ struct MapViewProduction: View {
     
     @State private var currentCity: String = "Your Location"
     @State private var aiRecommendation: String = "Explore what's happening around you right now!"
-    #if DEBUG
     @State private var showPlacesList: Bool = false
     @State private var showAddressSearch: Bool = false
     @State private var showCubeHoldSearch: Bool = false  // NEW: For long-press search
     @State private var searchQuery: String = ""
     @State private var searchResults: [MKMapItem] = []
     @State private var isSearching: Bool = false
-    #endif
     @State private var clickedCoordinate: CLLocationCoordinate2D? = nil  // Track clicked coordinate
     @State private var showPostPrompt: Bool = false  // Show "Post Here?" prompt
     
@@ -1697,12 +1723,14 @@ struct MapViewProduction: View {
     @State private var cubeHoldStartY: CGFloat? = nil // Track cube hold drag start position
     @State private var initialZoomLevel: Double = 700 // Store zoom level when cube hold starts
     
-    // Weather overlay state
+    // Weather overlay state (DEBUG ONLY)
+    #if DEBUG
     @State private var weatherState = WeatherVisualizationState(
         kind: .rain,
         intensity: 0.5,
         lightningFrequency: 0.3
     )
+    #endif
     
     // Available in both Debug and Release for tour functionality
     let tourPlaces: [(name: String, coordinate: CLLocationCoordinate2D, description: String)] = [
@@ -2003,10 +2031,12 @@ struct MapViewProduction: View {
             currentCity = place.name
             aiRecommendation = cityRecommendations[place.name] ?? "Explore what's happening here!"
             
-            // Fetch weather for new location
+            // Fetch weather for new location (DEBUG ONLY)
+            #if DEBUG
             Task {
                 await fetchWeatherForCurrentLocation()
             }
+            #endif
             
             // Zoom in to the new place
             zoomIn(to: place.coordinate)
@@ -2057,7 +2087,8 @@ struct MapViewProduction: View {
                 // Allow free camera movement - user can pan/zoom anywhere
                 camera = newValue
                 
-                // Fetch weather when camera moves significantly
+                // Fetch weather when camera moves significantly (DEBUG ONLY)
+                #if DEBUG
                 if let newCoord = newValue.camera?.centerCoordinate,
                    let oldCoord = self.camera.camera?.centerCoordinate {
                     let distance = MKMapPoint(newCoord).distance(to: MKMapPoint(oldCoord))
@@ -2068,6 +2099,7 @@ struct MapViewProduction: View {
                         }
                     }
                 }
+                #endif
             }
         )
     }
@@ -2099,7 +2131,7 @@ struct MapViewProduction: View {
                 // Show user annotation with 3D blue pin when location is available
                 if let userCoord = locationManager.location?.coordinate {
                     Annotation("", coordinate: userCoord) {
-                        Enhanced3DBeaconMarker(color: .blue, intensity: 0.9)
+                        Enhanced3DBeaconMarker(color: Color.blue, intensity: 0.9)
                             .frame(width: 100, height: 120)
                     }
                 }
@@ -2254,10 +2286,12 @@ struct MapViewProduction: View {
                     }
             )
                 
-            // Weather particle overlay
+            // Weather particle overlay (DEBUG ONLY)
+            #if DEBUG
             WeatherParticleOverlay(weatherState: $weatherState)
                 .allowsHitTesting(false) // Let touches pass through to map
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+            #endif
             
             // Confetti overlay for trending pins
             if showConfetti {
@@ -2503,7 +2537,7 @@ struct MapViewProduction: View {
                 .buttonStyle(.plain)
                 .padding(.horizontal)
                 .padding(.top, 8)
-                .transition(.move(edge: .top).combined(with: .opacity))
+                .transition(AnyTransition.move(edge: .top).combined(with: .opacity))
             } else if isPostPlacementMode, let _ = postPlacementCoordinate {
                 // Original post placement button
                 Button(action: {
@@ -2524,11 +2558,10 @@ struct MapViewProduction: View {
                 .buttonStyle(.plain)
                 .padding(.horizontal)
                 .padding(.top, 8)
-                .transition(.move(edge: .top).combined(with: .opacity))
+                .transition(AnyTransition.move(edge: .top).combined(with: .opacity))
             }
             
             // Cube Hold Search Overlay - appears below AI text
-            #if DEBUG
             if showCubeHoldSearch {
                 CubeHoldSearchOverlay(
                     query: $searchQuery,
@@ -2560,15 +2593,15 @@ struct MapViewProduction: View {
                         }
                     }
                 )
-                .transition(.move(edge: .top).combined(with: .opacity))
+                .transition(AnyTransition.move(edge: .top).combined(with: .opacity))
                 .animation(.spring(response: 0.4, dampingFraction: 0.8), value: showCubeHoldSearch)
             }
-            #endif
             
             Spacer()
         }
     }
     
+    #if DEBUG
     @ViewBuilder
     private var weatherControlsOverlay: some View {
         VStack {
@@ -2627,7 +2660,9 @@ struct MapViewProduction: View {
             }
         }
     }
+    #endif
     
+    #if DEBUG
     /// Get icon for weather type
     private func weatherIcon(for kind: WeatherVisualizationState.Kind) -> Image {
         switch kind {
@@ -2712,6 +2747,7 @@ struct MapViewProduction: View {
             print("🎉 Simulated trending burst for \(randomPost.title) - radius: \(Int(randomPost.radius))m → \(Int(newRadius))m")
         }
     }
+    #endif // End DEBUG weather methods
     
     @ViewBuilder
     private var mapContentLayer: some View {
@@ -2728,29 +2764,32 @@ struct MapViewProduction: View {
             // AI Recommendation Overlay (now includes zoom slider above it)
             aiRecommendationOverlay
             
-            // Weather controls (DEBUG - can be removed for production)
+            // Weather controls (DEBUG ONLY - removed in production builds)
+            #if DEBUG
             weatherControlsOverlay
+            #endif
         }
     }
     
     var body: some View {
         mapContentLayer
             .toolbar(.hidden, for: .navigationBar)
-            #if DEBUG
             .sheet(isPresented: $showPlacesList) {
+                #if DEBUG
                 placesListSheet
+                #endif
             }
             .sheet(isPresented: $showAddressSearch) {
+                #if DEBUG
                 addressSearchSheet
+                #endif
             }
-            #endif
             .onAppear {
                 handleOnAppear()
             }
             .onChange(of: locationManager.location) { _, newLocation in
                 handleLocationChange(newLocation)
             }
-            #if DEBUG
             .onChange(of: showCubeHoldSearch) { _, isShowing in
                 // Pause tour when menu is showing
                 if isShowing {
@@ -2761,9 +2800,7 @@ struct MapViewProduction: View {
                     searchResults = []
                 }
             }
-            #endif
             .onReceive(NotificationCenter.default.publisher(for: .CubeGlobalTap)) { _ in
-                #if DEBUG
                 // If menu is open, close it on tap; otherwise center on location
                 if showCubeHoldSearch {
                     showCubeHoldSearch = false
@@ -2782,28 +2819,11 @@ struct MapViewProduction: View {
                     clickedCoordinate = nil
                     centerOnUserLocation()
                 }
-                #else
-                // Respect lock/suppression windows after jumping to a post location
-                if let until = lockToPostUntil, until > Date() {
-                    print("⛔️ [MapView] CubeGlobalTap centering ignored during lockToPost window")
-                    return
-                }
-                if let until = suppressUserCenteringUntil, until > Date() {
-                    print("⛔️ [MapView] CubeGlobalTap centering ignored during suppression window")
-                    return
-                }
-                // Clear post prompt when centering on user
-                showPostPrompt = false
-                clickedCoordinate = nil
-                centerOnUserLocation()
-                #endif
             }
             .onReceive(NotificationCenter.default.publisher(for: .cameraCubeHoldBegan)) { notification in
                 // Long press cube shows favorites/search overlay
                 print("[MapView] Cube hold began - showing favorites overlay")
-                #if DEBUG
                 showCubeHoldSearch = true
-                #endif
                 mapState.stopTour()
             }
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("CameraCubeHoldMoved"))) { notification in
@@ -3245,10 +3265,12 @@ struct MapViewProduction: View {
         print("   mapState.mode: \(mapState.mode)")
         print("   pendingPostLocation: \(mapState.pendingPostLocation?.latitude ?? 0), \(mapState.pendingPostLocation?.longitude ?? 0)")
         
-        // Fetch initial weather
+        // Fetch initial weather (DEBUG ONLY)
+        #if DEBUG
         Task {
             await fetchWeatherForCurrentLocation()
         }
+        #endif
         
         // Check if there's a pending post location to navigate to
         if let pendingCoordinate = mapState.pendingPostLocation {
