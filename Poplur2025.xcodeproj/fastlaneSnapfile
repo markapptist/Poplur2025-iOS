@@ -1,0 +1,98 @@
+# Snapfile - Screenshot automation configuration for Poplur2025
+
+# A list of devices you want to take screenshots from
+devices([
+  "iPhone 15 Pro Max",
+  "iPhone 15 Pro",
+  "iPhone 15",
+  "iPhone SE (3rd generation)",
+  "iPad Pro (12.9-inch) (6th generation)",
+  "iPad Pro (11-inch) (4th generation)"
+])
+
+# A list of supported languages
+languages([
+  "en-US"
+  # Add more languages as needed:
+  # "es-ES",
+  # "fr-FR",
+  # "de-DE",
+  # "ja-JP",
+  # "pt-BR"
+])
+
+# The name of the scheme which contains the UI Tests
+scheme("Poplur2025")
+
+# Where should the resulting screenshots be stored?
+output_directory("./fastlane/screenshots")
+
+# Clear all previously generated screenshots before creating new ones
+clear_previous_screenshots(true)
+
+# Remove the '#' to clear all previously generated screenshots 
+# before creating new ones, just for the languages passed in the command
+# clear_previous_screenshots(true)
+
+# Remove the '#' to set the status bar to 9:41 AM, and show full battery and reception
+# override_status_bar(true)
+
+# Arguments to pass to the app on launch
+# launch_arguments(["-AppleLanguages (en)", "-AppleLocale en_US"])
+
+# For more information about all available options run
+# fastlane action snapshot
+
+# Stop creating screenshots after the first failing test
+stop_after_first_error(false)
+
+# Reinstall the app before running the tests
+reinstall_app(true)
+
+# Erase the simulator before running the tests
+erase_simulator(true)
+
+# Don't open the HTML summary after running snapshot
+skip_open_summary(false)
+
+# Skip comparing images from previous runs
+skip_compare_images(false)
+
+# Suppress the output of the xcodebuild command
+suppress_xcode_output(false)
+
+# Use the dark mode for the screenshots (iOS 13+)
+dark_mode(false)
+
+# Number of times to retry failed screenshots
+number_of_retries(2)
+
+# Disable showing the simulator window
+headless(false)
+
+# Don't add the simulator's frame to screenshots
+add_photos(false)
+
+# Don't add additional images to simulator's photo library
+add_videos(false)
+
+# Minimum iOS version to deploy
+# deployment_target("15.0")
+
+# Build Configuration (Debug or Release)
+# buildlog_path("./fastlane/logs")
+
+# Test without building the app
+# test_without_building(false)
+
+# Output simulator logs in case of failure
+# output_simulator_logs(false)
+
+# Disable slide to type on iOS 13+
+# disable_slide_to_type(true)
+
+# Clears the default status bar items such as time, battery, etc.
+# cloned_source_packages_path("./SourcePackages")
+
+# Concurrent simulator count
+# concurrent_simulators(4)
