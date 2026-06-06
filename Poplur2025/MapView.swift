@@ -667,7 +667,6 @@ private struct AiTourInsight: Identifiable, Equatable {
 private struct TrendPopObject: Identifiable {
     let id = UUID()
     let coordinate: CLLocationCoordinate2D
-    let emoji: String
     let scale: CGFloat
     let delay: Double
     let seed: Int
@@ -703,14 +702,25 @@ private enum TrendCategory: String, CaseIterable {
         }
     }
 
-    var emojis: [String] {
+    var lightTint: Color {
         switch self {
-        case .clothes: return ["👕", "👟", "🧢", "🕶️", "👜"]
-        case .sports: return ["🏀", "⚽", "🏈", "⚾", "🏆"]
-        case .food: return ["🍔", "🍕", "🍜", "🍣", "☕"]
-        case .nightlife: return ["🪩", "🍸", "🎉", "🌃", "✨"]
-        case .music: return ["🎤", "🎧", "🎸", "🎹", "🎵"]
-        case .travel: return ["✈️", "🗽", "🏙️", "📍", "🌍"]
+        case .clothes: return Color(red: 1.0, green: 0.55, blue: 0.85)
+        case .sports: return Color(red: 0.63, green: 1.0, blue: 0.69)
+        case .food: return Color(red: 1.0, green: 0.88, blue: 0.46)
+        case .nightlife: return Color(red: 0.80, green: 0.65, blue: 1.0)
+        case .music: return Color(red: 0.58, green: 0.96, blue: 1.0)
+        case .travel: return Color(red: 1.0, green: 0.62, blue: 0.56)
+        }
+    }
+
+    var darkTint: Color {
+        switch self {
+        case .clothes: return Color(red: 0.50, green: 0.11, blue: 0.38)
+        case .sports: return Color(red: 0.11, green: 0.50, blue: 0.22)
+        case .food: return Color(red: 0.61, green: 0.35, blue: 0.07)
+        case .nightlife: return Color(red: 0.32, green: 0.18, blue: 0.62)
+        case .music: return Color(red: 0.04, green: 0.36, blue: 0.62)
+        case .travel: return Color(red: 0.62, green: 0.12, blue: 0.10)
         }
     }
 }
@@ -846,13 +856,11 @@ private func buildTrendPopObjects(stop: PoplurTourStop, insight: AiTourInsight) 
     return (0..<count).map { index in
         let angle = 2.0 * Double.pi * Double(index) / Double(count) + Double(seed % 360) * Double.pi / 180.0
         let radius = 0.36 + Double((index * 29 + seed) % 100) / 145.0
-        let emojiChoices = insight.category.emojis
         return TrendPopObject(
             coordinate: CLLocationCoordinate2D(
                 latitude: stop.coordinate.latitude + sin(angle) * latScale * radius,
                 longitude: stop.coordinate.longitude + cos(angle) * lngScale * radius
             ),
-            emoji: emojiChoices[abs(seed + index) % emojiChoices.count],
             scale: 0.9 + CGFloat((index * 17 + seed) % 28) / 100.0,
             delay: Double(index) * 0.26,
             seed: seed + index * 97
@@ -868,6 +876,21 @@ private final class CityTourMusicPlayerService: ObservableObject {
     private var radioTrackCache: [String: [CityMusicTrack]] = [:]
     private var sportsRadioTrackCache: [String: [CityMusicTrack]] = [:]
     private var loadTask: Task<Void, Never>?
+    private var lastPlayerVolume: Float = 0.72
+
+    init() {
+        configureCallFriendlyAudioSession()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAudioSessionInterruption(_:)),
+            name: AVAudioSession.interruptionNotification,
+            object: AVAudioSession.sharedInstance()
+        )
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
 
     func play(for stop: PoplurTourStop, insight: AiTourInsight?) {
         loadTask?.cancel()
@@ -876,9 +899,10 @@ private final class CityTourMusicPlayerService: ObservableObject {
             let track = await self.resolveTrack(for: stop, insight: insight)
             guard !Task.isCancelled, let url = URL(string: track.assetURI) else { return }
             await MainActor.run {
+                self.configureCallFriendlyAudioSession()
                 let item = AVPlayerItem(url: url)
                 self.player = AVPlayer(playerItem: item)
-                self.player?.volume = 0.72
+                self.player?.volume = self.lastPlayerVolume
                 self.player?.play()
                 self.currentTrackTitle = track.artistSeed
             }
@@ -891,6 +915,39 @@ private final class CityTourMusicPlayerService: ObservableObject {
         player?.pause()
         player = nil
         currentTrackTitle = nil
+    }
+
+    private func configureCallFriendlyAudioSession() {
+        let session = AVAudioSession.sharedInstance()
+        do {
+            try session.setCategory(.ambient, mode: .default, options: [.mixWithOthers])
+            try session.setActive(true, options: [])
+        } catch {
+            print("[MapTourAudio] Call-friendly audio session setup failed: \(error)")
+        }
+    }
+
+    @objc private func handleAudioSessionInterruption(_ notification: Notification) {
+        guard
+            let userInfo = notification.userInfo,
+            let rawType = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
+            let type = AVAudioSession.InterruptionType(rawValue: rawType)
+        else { return }
+
+        switch type {
+        case .began:
+            player?.pause()
+        case .ended:
+            configureCallFriendlyAudioSession()
+            if let rawOptions = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt {
+                let options = AVAudioSession.InterruptionOptions(rawValue: rawOptions)
+                if options.contains(.shouldResume) {
+                    player?.play()
+                }
+            }
+        @unknown default:
+            break
+        }
     }
 
     private func resolveTrack(for stop: PoplurTourStop, insight: AiTourInsight?) async -> CityMusicTrack {
@@ -1074,23 +1131,205 @@ private struct ArcShape: Shape {
 private struct TrendPopMarker: View {
     let object: TrendPopObject
     let category: TrendCategory
-    @State private var isVisible = false
+    @State private var startDate = Date()
 
     var body: some View {
-        Text(object.emoji)
-            .font(.system(size: 30))
-            .frame(width: 54, height: 54)
-            .background(
-                Circle()
-                    .fill(.ultraThinMaterial)
-                    .overlay(Circle().stroke(category.tint.opacity(0.9), lineWidth: 2))
-                    .shadow(color: category.tint.opacity(0.85), radius: 12)
+        TimelineView(.animation) { timeline in
+            let elapsed = max(0, timeline.date.timeIntervalSince(startDate) - object.delay)
+            let popPhase = min(max(elapsed / 0.42, 0), 1)
+            let popScale = overshootScale(popPhase) * object.scale * (1 + CGFloat(object.seed % 7) * 0.01)
+            let bob = sin((timeline.date.timeIntervalSinceReferenceDate * 1000 + Double(object.seed * 157)) / 520.0) * 3.0
+
+            ZStack {
+                TrendObjectConfetti(seed: object.seed, elapsed: elapsed)
+                TrendObjectGlyph(category: category)
+                    .frame(width: 72, height: 72)
+                    .scaleEffect(popScale)
+                    .offset(y: bob)
+                    .opacity(popPhase <= 0 ? 0 : 1)
+            }
+            .frame(width: 132, height: 132)
+        }
+        .onAppear { startDate = Date() }
+        .accessibilityHidden(true)
+    }
+
+    private func overshootScale(_ phase: Double) -> CGFloat {
+        guard phase > 0 else { return 0 }
+        guard phase < 1 else { return 1 }
+        let eased = 1 - pow(1 - phase, 3)
+        return CGFloat(eased + sin(phase * .pi) * 0.18)
+    }
+}
+
+private struct TrendObjectConfetti: View {
+    let seed: Int
+    let elapsed: TimeInterval
+
+    private let duration: TimeInterval = 0.74
+
+    var body: some View {
+        let phase = min(max(elapsed / duration, 0), 1)
+        ZStack {
+            ForEach(0..<14, id: \.self) { index in
+                let angle = Double(seed) * 0.017 + Double(index) * 0.92
+                let distance = (34.0 + Double(index % 5) * 11.0) * phase
+                let x = cos(angle) * distance
+                let y = -34.0 + sin(angle) * distance + phase * phase * 44.0
+
+                RoundedRectangle(cornerRadius: 1.6, style: .continuous)
+                    .fill(confettiColor(index).opacity(phase < 1 ? 1 - phase : 0))
+                    .frame(width: 8, height: 14)
+                    .rotationEffect(.degrees(Double(index) * 31 + phase * 220))
+                    .offset(x: x, y: y)
+            }
+        }
+        .opacity(elapsed < duration ? 1 : 0)
+    }
+
+    private func confettiColor(_ index: Int) -> Color {
+        switch abs(seed + index) % 6 {
+        case 0: return Color(red: 1.0, green: 0.29, blue: 0.68)
+        case 1: return Color(red: 1.0, green: 0.83, blue: 0.27)
+        case 2: return Color(red: 0.35, green: 0.92, blue: 1.0)
+        case 3: return Color(red: 0.44, green: 1.0, blue: 0.56)
+        case 4: return Color(red: 0.67, green: 0.46, blue: 1.0)
+        default: return .white
+        }
+    }
+}
+
+private struct TrendObjectGlyph: View {
+    let category: TrendCategory
+
+    var body: some View {
+        Canvas { context, size in
+            let scale = min(size.width, size.height) / 144
+
+            context.fill(
+                Path(ellipseIn: CGRect(x: 22 * scale, y: 102 * scale, width: 100 * scale, height: 30 * scale)),
+                with: .color(.black.opacity(0.30))
             )
-            .scaleEffect((isVisible ? object.scale : 0.05) * (1 + CGFloat((object.seed % 7)) * 0.01))
-            .opacity(isVisible ? 1 : 0)
-            .animation(.spring(response: 0.42, dampingFraction: 0.54).delay(object.delay), value: isVisible)
-            .onAppear { isVisible = true }
-            .onDisappear { isVisible = false }
+
+            for depth in 0..<7 {
+                var depthContext = context
+                depthContext.translateBy(x: (CGFloat(depth) * 2.2 + 10) * scale, y: (CGFloat(depth) * 2.5 + 10) * scale)
+                drawTrendShape(in: &depthContext, size: size, category: category, fill: .color(Color(red: 0.09, green: 0.07, blue: 0.19).opacity(0.32)))
+            }
+
+            var glowContext = context
+            glowContext.translateBy(x: 5 * scale, y: 6 * scale)
+            drawTrendShape(in: &glowContext, size: size, category: category, fill: .color(Color(red: 0.28, green: 0.16, blue: 0.45).opacity(0.60)))
+
+            let gradient = GraphicsContext.Shading.linearGradient(
+                Gradient(colors: [.white, category.tint, category.darkTint]),
+                startPoint: CGPoint(x: 36 * scale, y: 22 * scale),
+                endPoint: CGPoint(x: 112 * scale, y: 112 * scale)
+            )
+            drawTrendShape(in: &context, size: size, category: category, fill: gradient)
+            drawTrendStroke(in: &context, size: size, category: category)
+        }
+        .shadow(color: .black.opacity(0.48), radius: 10, x: 0, y: 8)
+        .shadow(color: category.tint.opacity(0.50), radius: 14, x: 0, y: 0)
+    }
+}
+
+private func drawTrendShape(in context: inout GraphicsContext, size: CGSize, category: TrendCategory, fill: GraphicsContext.Shading) {
+    let scale = min(size.width, size.height) / 144
+    context.fill(trendPath(category: category, scale: scale), with: fill)
+
+    guard category == .sports else { return }
+    context.stroke(
+        Path { path in
+            path.move(to: CGPoint(x: 43 * scale, y: 47 * scale))
+            path.addLine(to: CGPoint(x: 101 * scale, y: 82 * scale))
+            path.addArc(center: CGPoint(x: 72 * scale, y: 64.5 * scale), radius: 34 * scale, startAngle: .degrees(-70), endAngle: .degrees(70), clockwise: false)
+            path.addArc(center: CGPoint(x: 77 * scale, y: 64 * scale), radius: 36 * scale, startAngle: .degrees(110), endAngle: .degrees(240), clockwise: false)
+        },
+        with: .color(Color(red: 0.12, green: 0.09, blue: 0.20).opacity(0.72)),
+        lineWidth: 4 * scale
+    )
+}
+
+private func drawTrendStroke(in context: inout GraphicsContext, size: CGSize, category: TrendCategory) {
+    let scale = min(size.width, size.height) / 144
+    let strokePath: Path
+    switch category {
+    case .sports:
+        strokePath = Path(ellipseIn: CGRect(x: 38 * scale, y: 30 * scale, width: 68 * scale, height: 68 * scale))
+    case .food:
+        strokePath = Path(roundedRect: CGRect(x: 38 * scale, y: 54 * scale, width: 68 * scale, height: 42 * scale), cornerRadius: 18 * scale)
+    default:
+        strokePath = trendPath(category: category, scale: scale)
+    }
+
+    context.stroke(strokePath, with: .color(.white.opacity(0.86)), lineWidth: 4 * scale)
+}
+
+private func trendPath(category: TrendCategory, scale: CGFloat) -> Path {
+    switch category {
+    case .clothes:
+        return Path { path in
+            path.move(to: CGPoint(x: 42 * scale, y: 38 * scale))
+            path.addLine(to: CGPoint(x: 57 * scale, y: 24 * scale))
+            path.addLine(to: CGPoint(x: 72 * scale, y: 34 * scale))
+            path.addLine(to: CGPoint(x: 87 * scale, y: 24 * scale))
+            path.addLine(to: CGPoint(x: 104 * scale, y: 39 * scale))
+            path.addLine(to: CGPoint(x: 118 * scale, y: 60 * scale))
+            path.addLine(to: CGPoint(x: 100 * scale, y: 72 * scale))
+            path.addLine(to: CGPoint(x: 94 * scale, y: 116 * scale))
+            path.addLine(to: CGPoint(x: 50 * scale, y: 116 * scale))
+            path.addLine(to: CGPoint(x: 44 * scale, y: 72 * scale))
+            path.addLine(to: CGPoint(x: 26 * scale, y: 60 * scale))
+            path.closeSubpath()
+        }
+    case .sports:
+        return Path(ellipseIn: CGRect(x: 38 * scale, y: 30 * scale, width: 68 * scale, height: 68 * scale))
+    case .food:
+        return Path { path in
+            path.addRoundedRect(in: CGRect(x: 38 * scale, y: 54 * scale, width: 68 * scale, height: 42 * scale), cornerSize: CGSize(width: 18 * scale, height: 18 * scale))
+            path.addEllipse(in: CGRect(x: 30 * scale, y: 42 * scale, width: 84 * scale, height: 24 * scale))
+            path.addRect(CGRect(x: 52 * scale, y: 96 * scale, width: 40 * scale, height: 16 * scale))
+        }
+    case .nightlife:
+        return Path { path in
+            path.move(to: CGPoint(x: 42 * scale, y: 30 * scale))
+            path.addLine(to: CGPoint(x: 104 * scale, y: 30 * scale))
+            path.addLine(to: CGPoint(x: 91 * scale, y: 74 * scale))
+            path.addLine(to: CGPoint(x: 78 * scale, y: 86 * scale))
+            path.addLine(to: CGPoint(x: 78 * scale, y: 112 * scale))
+            path.addLine(to: CGPoint(x: 102 * scale, y: 118 * scale))
+            path.addLine(to: CGPoint(x: 44 * scale, y: 118 * scale))
+            path.addLine(to: CGPoint(x: 68 * scale, y: 112 * scale))
+            path.addLine(to: CGPoint(x: 68 * scale, y: 86 * scale))
+            path.addLine(to: CGPoint(x: 55 * scale, y: 74 * scale))
+            path.closeSubpath()
+        }
+    case .music:
+        return Path { path in
+            path.move(to: CGPoint(x: 58 * scale, y: 28 * scale))
+            path.addLine(to: CGPoint(x: 98 * scale, y: 20 * scale))
+            path.addLine(to: CGPoint(x: 98 * scale, y: 86 * scale))
+            path.addLine(to: CGPoint(x: 88 * scale, y: 86 * scale))
+            path.addLine(to: CGPoint(x: 88 * scale, y: 42 * scale))
+            path.addLine(to: CGPoint(x: 66 * scale, y: 46 * scale))
+            path.addLine(to: CGPoint(x: 66 * scale, y: 94 * scale))
+            path.addLine(to: CGPoint(x: 56 * scale, y: 94 * scale))
+            path.closeSubpath()
+            path.addEllipse(in: CGRect(x: 38 * scale, y: 88 * scale, width: 28 * scale, height: 28 * scale))
+            path.addEllipse(in: CGRect(x: 78 * scale, y: 80 * scale, width: 28 * scale, height: 28 * scale))
+        }
+    case .travel:
+        return Path { path in
+            path.move(to: CGPoint(x: 24 * scale, y: 68 * scale))
+            path.addLine(to: CGPoint(x: 120 * scale, y: 30 * scale))
+            path.addLine(to: CGPoint(x: 92 * scale, y: 76 * scale))
+            path.addLine(to: CGPoint(x: 108 * scale, y: 108 * scale))
+            path.addLine(to: CGPoint(x: 78 * scale, y: 90 * scale))
+            path.addLine(to: CGPoint(x: 52 * scale, y: 118 * scale))
+            path.addLine(to: CGPoint(x: 56 * scale, y: 80 * scale))
+            path.closeSubpath()
+        }
     }
 }
 
@@ -2152,6 +2391,7 @@ struct MapViewProduction: View {
     @State private var activeTourInsight: AiTourInsight? = nil
     @State private var trendPopObjects: [TrendPopObject] = []
     @State private var musicWaveFrame: Int = 0
+    @State private var showTourNowPlayingText: Bool = true
     
     @State private var longPressLocation: CGPoint? = nil  // Track long press location
     @State private var selectedCoordinate: CLLocationCoordinate2D? = nil  // Track selected coordinate for long-press
@@ -2382,6 +2622,7 @@ struct MapViewProduction: View {
         activeTourStop = nil
         activeTourInsight = nil
         trendPopObjects = []
+        showTourNowPlayingText = true
         if stopAudio {
             musicPlayer.stop()
         }
@@ -2455,6 +2696,23 @@ struct MapViewProduction: View {
         currentCity = "Your Location"
         aiRecommendation = "Explore what's happening around you right now!"
     }
+
+    private func runTourSubtitleLoop() async {
+        while !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            guard !Task.isCancelled else { return }
+
+            await MainActor.run {
+                if mapState.isInTourMode, activeTourInsight != nil {
+                    withAnimation(.easeInOut(duration: 0.38)) {
+                        showTourNowPlayingText.toggle()
+                    }
+                } else if !showTourNowPlayingText {
+                    showTourNowPlayingText = true
+                }
+            }
+        }
+    }
     
     private func runExtendedTourStop(_ stop: PoplurTourStop) async {
         guard mapState.isInTourMode else { return }
@@ -2487,6 +2745,7 @@ struct MapViewProduction: View {
             activeTourInsight = insight
             currentCity = activeCityTitle(stop)
             aiRecommendation = insight.subtitle
+            showTourNowPlayingText = true
             musicPlayer.play(for: stop, insight: insight)
 
             #if DEBUG
@@ -2875,6 +3134,14 @@ struct MapViewProduction: View {
                             return "Tap where you want to post your capture"
                         } else if isPostPlacementMode {
                             return "Tap on the map to choose where to place your post"
+                        } else if mapState.isInTourMode, activeTourInsight != nil {
+                            if showTourNowPlayingText {
+                                let trackText = musicPlayer.currentTrackTitle?
+                                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                                return "Now playing - \((trackText?.isEmpty == false) ? trackText! : "Finding local station...")"
+                            } else {
+                                return aiRecommendation
+                            }
                         } else {
                             return aiRecommendation
                         }
@@ -2889,6 +3156,12 @@ struct MapViewProduction: View {
                         .foregroundStyle(.primary)
                         .lineLimit(2)
                         .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
+                        .id(recommendationText)
+                        .transition(.asymmetric(
+                            insertion: .move(edge: .bottom).combined(with: .opacity),
+                            removal: .move(edge: .top).combined(with: .opacity)
+                        ))
+                        .animation(.easeInOut(duration: 0.38), value: recommendationText)
                 }
                 Spacer()
                 
@@ -3704,6 +3977,9 @@ struct MapViewProduction: View {
             }
             .task {
                 await runTourLoop()
+            }
+            .task {
+                await runTourSubtitleLoop()
             }
     }
     
