@@ -1,28 +1,4 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Workspace
    version = "1.0">
-   <FileRef
-      location = "self:">
-   </FileRef>
-   <FileRef
-      location = "group:fastlaneSnapfile">
-   </FileRef>
-   <FileRef
-      location = "group:Poplur2025UITestsSnapshotUITests.swift">
-   </FileRef>
-   <FileRef
-      location = "group:Poplur2025UtilitiesScreenshotConfiguration.swift">
-   </FileRef>
-   <FileRef
-      location = "group:fastlaneFastfile">
-   </FileRef>
-   <FileRef
-      location = "group:SCREENSHOTS.md">
-   </FileRef>
-   <FileRef
-      location = "group:setup_screenshots.sh">
-   </FileRef>
-   <FileRef
-      location = "group:screenshots.sh">
-   </FileRef>
 </Workspace>

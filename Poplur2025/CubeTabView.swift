@@ -2,9 +2,15 @@ import SwiftUI
 import SceneKit
 import CoreMotion
 import AVFoundation
+import Photos
 
 private let isRunningInPreviews: Bool = {
     ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1"
+}()
+
+// Auto-export cube faces on file load
+private let _autoExport: Void = {
+    CubeFaceExporter.exportToProjectRoot()
 }()
 
 private enum CubeFaceImageCache {
@@ -14,6 +20,238 @@ private enum CubeFaceImageCache {
         let img = builder()
         cache[key] = img
         return img
+    }
+}
+
+// MARK: - Cube Face Exporter
+struct CubeFaceExporter {
+    
+    /// Export faces directly to project root - called automatically
+    static func exportToProjectRoot() {
+        let tabs: [AppTab] = [.map, .record, .feed, .profile]
+        let baseColor = Color(white: 0.2)
+        
+        for tab in tabs {
+            let faceImage = generateFaceImage(for: tab, baseColor: baseColor)
+            let emissionImage = generateEmissionMask(for: tab)
+            let backgroundImage = generateBackgroundOnly(for: tab, baseColor: baseColor)
+            
+            // Save to /repo directory
+            if let faceData = faceImage.pngData() {
+                let faceURL = URL(fileURLWithPath: "/repo/cube_face_\(tab.title).png")
+                try? faceData.write(to: faceURL)
+                print("✅ Exported: \(faceURL.path)")
+            }
+            
+            if let emissionData = emissionImage.pngData() {
+                let emissionURL = URL(fileURLWithPath: "/repo/cube_emission_\(tab.title).png")
+                try? emissionData.write(to: emissionURL)
+                print("✅ Exported: \(emissionURL.path)")
+            }
+            
+            if let bgData = backgroundImage.pngData() {
+                let bgURL = URL(fileURLWithPath: "/repo/cube_background_\(tab.title).png")
+                try? bgData.write(to: bgURL)
+                print("✅ Exported: \(bgURL.path)")
+            }
+        }
+        
+        print("🎉 All cube faces exported to /repo/")
+    }
+    
+    /// Export all cube faces to the photo library
+    static func exportToPhotos(baseColor: Color = Color(white: 0.2), completion: @escaping (Result<Int, Error>) -> Void) {
+        // Request photo library permission
+        PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+            guard status == .authorized else {
+                completion(.failure(ExportError.permissionDenied))
+                return
+            }
+            
+            let tabs: [AppTab] = [.map, .record, .feed, .profile]
+            var savedCount = 0
+            
+            PHPhotoLibrary.shared().performChanges {
+                for tab in tabs {
+                    let faceImage = CubeFaceExporter.generateFaceImage(for: tab, baseColor: baseColor)
+                    let emissionImage = CubeFaceExporter.generateEmissionMask(for: tab)
+                    let backgroundImage = CubeFaceExporter.generateBackgroundOnly(for: tab, baseColor: baseColor)
+                    
+                    // Save each variant
+                    PHAssetChangeRequest.creationRequestForAsset(from: faceImage)
+                    PHAssetChangeRequest.creationRequestForAsset(from: emissionImage)
+                    PHAssetChangeRequest.creationRequestForAsset(from: backgroundImage)
+                    savedCount += 3
+                }
+            } completionHandler: { success, error in
+                DispatchQueue.main.async {
+                    if success {
+                        completion(.success(savedCount))
+                    } else {
+                        completion(.failure(error ?? ExportError.saveFailed))
+                    }
+                }
+            }
+        }
+    }
+    
+    /// Export faces to a temporary directory and return URLs
+    static func exportToFiles(baseColor: Color = Color(white: 0.2)) -> [URL] {
+        let tabs: [AppTab] = [.map, .record, .feed, .profile]
+        var urls: [URL] = []
+        
+        let tempDir = FileManager.default.temporaryDirectory
+        
+        for tab in tabs {
+            let faceImage = generateFaceImage(for: tab, baseColor: baseColor)
+            let emissionImage = generateEmissionMask(for: tab)
+            let backgroundImage = generateBackgroundOnly(for: tab, baseColor: baseColor)
+            
+            // Save face image
+            if let faceData = faceImage.pngData() {
+                let faceURL = tempDir.appendingPathComponent("cube_face_\(tab.title).png")
+                try? faceData.write(to: faceURL)
+                urls.append(faceURL)
+                print("💾 Exported: \(faceURL.path)")
+            }
+            
+            // Save emission mask
+            if let emissionData = emissionImage.pngData() {
+                let emissionURL = tempDir.appendingPathComponent("cube_emission_\(tab.title).png")
+                try? emissionData.write(to: emissionURL)
+                urls.append(emissionURL)
+                print("💾 Exported: \(emissionURL.path)")
+            }
+            
+            // Save background only
+            if let bgData = backgroundImage.pngData() {
+                let bgURL = tempDir.appendingPathComponent("cube_background_\(tab.title).png")
+                try? bgData.write(to: bgURL)
+                urls.append(bgURL)
+                print("💾 Exported: \(bgURL.path)")
+            }
+        }
+        
+        return urls
+    }
+    
+    // MARK: - Image Generation
+    
+    private static func generateFaceImage(for tab: AppTab, baseColor: Color) -> UIImage {
+        let size = CGSize(width: 1024, height: 1024) // Higher resolution for export
+        let renderer = UIGraphicsImageRenderer(size: size)
+        return renderer.image { ctx in
+            let rect = CGRect(origin: .zero, size: size)
+            UIColor(white: 0.95, alpha: 1).setFill()
+            UIBezierPath(roundedRect: rect.insetBy(dx: 27, dy: 27), cornerRadius: 82).fill()
+            
+            // Icon
+            let symbolName = tab.systemImage
+            let pointSize: CGFloat = 273
+            let iconWidth: CGFloat = 307
+            let iconHeight: CGFloat = 307
+            let iconY: CGFloat = 239
+            let config = UIImage.SymbolConfiguration(pointSize: pointSize, weight: .bold)
+            
+            let imgRect = CGRect(x: (size.width - iconWidth) / 2, y: iconY, width: iconWidth, height: iconHeight)
+            
+            // Soft glow behind icon
+            let glowConfig = UIImage.SymbolConfiguration(pointSize: pointSize + 34, weight: .bold)
+            let glowImage = UIImage(systemName: symbolName, withConfiguration: glowConfig) ?? UIImage()
+            let glowRect = imgRect.insetBy(dx: -20, dy: -20)
+            UIColor.white.withAlphaComponent(0.25).setFill()
+            glowImage.withTintColor(.white, renderingMode: .alwaysOriginal).draw(in: glowRect, blendMode: .normal, alpha: 0.25)
+            
+            let image = UIImage(systemName: symbolName, withConfiguration: config) ?? UIImage()
+            image.withTintColor(.white, renderingMode: .alwaysOriginal).draw(in: imgRect)
+            
+            // Title
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.alignment = .center
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: 82, weight: .heavy),
+                .foregroundColor: UIColor.white,
+                .paragraphStyle: paragraph
+            ]
+            let title = tab.title as NSString
+            let titleRect = CGRect(x: 0, y: 614, width: size.width, height: 137)
+            // Outline
+            let outlineAttrs: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: 82, weight: .heavy),
+                .foregroundColor: UIColor.white.withAlphaComponent(0.35),
+                .strokeColor: UIColor.white.withAlphaComponent(0.35),
+                .strokeWidth: -3,
+                .paragraphStyle: paragraph
+            ]
+            title.draw(in: titleRect.offsetBy(dx: 1.7, dy: 1.7), withAttributes: outlineAttrs)
+            title.draw(in: titleRect, withAttributes: attrs)
+        }
+    }
+    
+    private static func generateEmissionMask(for tab: AppTab) -> UIImage {
+        let size = CGSize(width: 1024, height: 1024)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        return renderer.image { ctx in
+            UIColor.clear.setFill()
+            ctx.fill(CGRect(origin: .zero, size: size))
+            
+            let symbolName = tab.systemImage
+            let pointSize: CGFloat = 273
+            let iconWidth: CGFloat = 307
+            let iconHeight: CGFloat = 307
+            let iconY: CGFloat = 239
+            let config = UIImage.SymbolConfiguration(pointSize: pointSize, weight: .bold)
+            let imgRect = CGRect(x: (size.width - iconWidth) / 2, y: iconY, width: iconWidth, height: iconHeight)
+            
+            // Glow
+            let glowConfig = UIImage.SymbolConfiguration(pointSize: pointSize + 34, weight: .bold)
+            let glowImage = UIImage(systemName: symbolName, withConfiguration: glowConfig) ?? UIImage()
+            let glowRect = imgRect.insetBy(dx: -20, dy: -20)
+            glowImage.withTintColor(.white, renderingMode: .alwaysOriginal).draw(in: glowRect, blendMode: .normal, alpha: 0.55)
+            
+            let image = UIImage(systemName: symbolName, withConfiguration: config) ?? UIImage()
+            image.withTintColor(.white, renderingMode: .alwaysOriginal).draw(in: imgRect)
+            
+            // Title
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.alignment = .center
+            let title = tab.title as NSString
+            let titleRect = CGRect(x: 0, y: 614, width: size.width, height: 137)
+            let boldAttrs: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: 89, weight: .black),
+                .foregroundColor: UIColor.white,
+                .paragraphStyle: paragraph
+            ]
+            title.draw(in: titleRect, withAttributes: boldAttrs)
+            let regularAttrs: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: 82, weight: .heavy),
+                .foregroundColor: UIColor.white,
+                .paragraphStyle: paragraph
+            ]
+            title.draw(in: titleRect, withAttributes: regularAttrs)
+        }
+    }
+    
+    private static func generateBackgroundOnly(for tab: AppTab, baseColor: Color) -> UIImage {
+        let size = CGSize(width: 1024, height: 1024)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        return renderer.image { ctx in
+            UIColor(baseColor).setFill()
+            let rect = CGRect(origin: .zero, size: size)
+            UIBezierPath(roundedRect: rect.insetBy(dx: 27, dy: 27), cornerRadius: 82).fill()
+        }
+    }
+    
+    enum ExportError: LocalizedError {
+        case permissionDenied
+        case saveFailed
+        
+        var errorDescription: String? {
+            switch self {
+            case .permissionDenied: return "Photo library access denied"
+            case .saveFailed: return "Failed to save images"
+            }
+        }
     }
 }
 
@@ -216,7 +454,7 @@ private struct CubeSceneView: UIViewRepresentable {
             // Defer normal map and glow attachment one more pass in previews
             if isRunningInPreviews {
                 DispatchQueue.main.async {
-                    if let cube = v.scene?.rootNode.childNode(withName: "cube", recursively: true), let box = cube.geometry as? SCNBox {
+                    if let cube = v.scene?.rootNode.childNode(withName: "cube", recursively: true), let _ = cube.geometry as? SCNBox {
                         // Apply normal maps now if enabled
                         if self.useNormalMap, let normal = UIImage(named: "CubeNormalMap") {
                             for m in context.coordinator.cubeMaterials {
@@ -1043,7 +1281,7 @@ private struct CubeSceneView: UIViewRepresentable {
         }
 
         func syncToSelectedTab(_ tab: AppTab) {
-            guard let scnView = view, let cube = scnView.scene?.rootNode.childNode(withName: "cube", recursively: true) else { return }
+            guard let scnView = view, let _ = scnView.scene?.rootNode.childNode(withName: "cube", recursively: true) else { return }
             if let idx = tabs.firstIndex(of: tab), idx != currentIndex {
                 currentIndex = idx
                 currentYaw = Float(idx) * (-Float.pi / 2)
@@ -1209,7 +1447,7 @@ private struct CubeSceneView: UIViewRepresentable {
             // Instead, just boost the intensity to make the EXISTING icons glow brighter
             
             // Warm flashlight color for emission tint
-            let flashColor = UIColor(red: 1.0, green: 0.95, blue: 0.85, alpha: 1.0)
+            _ = UIColor(red: 1.0, green: 0.95, blue: 0.85, alpha: 1.0)
             
             // Apply to all cube face materials
             for material in cubeMaterials {
@@ -1449,6 +1687,9 @@ private struct CubeOnlyPreview: View {
     
     @State private var directPopPlayer: AVAudioPlayer? = nil
     @State private var lastDirectPopError: String? = nil
+    
+    @State private var exportMessage: String = ""
+    @State private var showExportAlert: Bool = false
 
     // Preview-only simulated motion controls
     @State private var simulateMotion: Bool = false
@@ -1538,6 +1779,46 @@ private struct CubeOnlyPreview: View {
                         if let err = lastDirectPopError {
                             Text(err).font(.footnote).foregroundStyle(.secondary)
                         }
+                    }
+                    
+                    Divider()
+                    
+                    // Export Controls
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Export Cube Faces").font(.headline)
+                        
+                        HStack(spacing: 10) {
+                            Button("Export to Photos") {
+                                CubeFaceExporter.exportToPhotos(baseColor: base) { result in
+                                    switch result {
+                                    case .success(let count):
+                                        exportMessage = "✅ Saved \(count) images to Photos"
+                                        showExportAlert = true
+                                    case .failure(let error):
+                                        exportMessage = "❌ Error: \(error.localizedDescription)"
+                                        showExportAlert = true
+                                    }
+                                }
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(.green)
+                            
+                            Button("Export to Files") {
+                                let urls = CubeFaceExporter.exportToFiles(baseColor: base)
+                                exportMessage = "✅ Saved \(urls.count) images\n\nPaths logged to console"
+                                showExportAlert = true
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                        
+                        Text("Exports 3 variants per tab:\n• Full Face\n• Emission Mask\n• Background Only")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .alert("Export Complete", isPresented: $showExportAlert) {
+                        Button("OK") { }
+                    } message: {
+                        Text(exportMessage)
                     }
 
                     Picker("Scale Mode", selection: $scaleMode) {
