@@ -4,6 +4,7 @@ import CoreLocation
 import SceneKit
 import Foundation
 import AVFoundation
+import AudioToolbox
 
 // MARK: - Required Dependencies
 /*
@@ -638,6 +639,460 @@ private let IS_PREVIEW: Bool = false
 #endif
 
 private let fixedPitchAlt: CGFloat = 60 // Changed to 60 degrees for 3D perspective
+
+// MARK: - Android Map Feature Parity Models
+
+private struct PoplurTourStop: Identifiable {
+    var id: String { cityName }
+    let cityName: String
+    let storefront: String
+    let coordinate: CLLocationCoordinate2D
+    let bearing: CLLocationDirection
+    let radiusMeters: Double
+    let distance: CLLocationDistance
+    let description: String
+}
+
+private struct CityMusicTrack: Hashable {
+    let assetURI: String
+    let artistSeed: String
+}
+
+private struct AiTourInsight: Identifiable, Equatable {
+    let id: String
+    let subtitle: String
+    let category: TrendCategory
+}
+
+private struct TrendPopObject: Identifiable {
+    let id = UUID()
+    let coordinate: CLLocationCoordinate2D
+    let emoji: String
+    let scale: CGFloat
+    let delay: Double
+    let seed: Int
+}
+
+private enum TrendCategory: String, CaseIterable {
+    case clothes
+    case sports
+    case food
+    case nightlife
+    case music
+    case travel
+
+    var symbolName: String {
+        switch self {
+        case .clothes: return "tshirt.fill"
+        case .sports: return "basketball.fill"
+        case .food: return "fork.knife.circle.fill"
+        case .nightlife: return "sparkles"
+        case .music: return "music.note"
+        case .travel: return "airplane"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .clothes: return Color(red: 1.0, green: 0.28, blue: 0.71)
+        case .sports: return Color(red: 0.38, green: 0.92, blue: 0.48)
+        case .food: return Color(red: 1.0, green: 0.72, blue: 0.22)
+        case .nightlife: return Color(red: 0.62, green: 0.42, blue: 1.0)
+        case .music: return Color(red: 0.32, green: 0.88, blue: 1.0)
+        case .travel: return Color(red: 1.0, green: 0.39, blue: 0.35)
+        }
+    }
+
+    var emojis: [String] {
+        switch self {
+        case .clothes: return ["👕", "👟", "🧢", "🕶️", "👜"]
+        case .sports: return ["🏀", "⚽", "🏈", "⚾", "🏆"]
+        case .food: return ["🍔", "🍕", "🍜", "🍣", "☕"]
+        case .nightlife: return ["🪩", "🍸", "🎉", "🌃", "✨"]
+        case .music: return ["🎤", "🎧", "🎸", "🎹", "🎵"]
+        case .travel: return ["✈️", "🗽", "🏙️", "📍", "🌍"]
+        }
+    }
+}
+
+private let tourStopDwellSeconds: UInt64 = 30
+private let trendPopStartDelaySeconds: UInt64 = 1
+private let trendPopCountMin = 10
+private let trendPopCountRange = 6
+private let musicLookupTimeout: TimeInterval = 5
+private let musicTopTrackChoices = 5
+
+private let PoplurTourStops: [PoplurTourStop] = [
+    PoplurTourStop(cityName: "Paris", storefront: "fr", coordinate: CLLocationCoordinate2D(latitude: 48.8584, longitude: 2.2945), bearing: 28, radiusMeters: 105_000, distance: 900, description: "Eiffel Tower energy"),
+    PoplurTourStop(cityName: "New York", storefront: "us", coordinate: CLLocationCoordinate2D(latitude: 40.7484, longitude: -73.9857), bearing: -24, radiusMeters: 132_000, distance: 780, description: "Skyline and street posts"),
+    PoplurTourStop(cityName: "Los Angeles", storefront: "us", coordinate: CLLocationCoordinate2D(latitude: 34.1016, longitude: -118.3267), bearing: 22, radiusMeters: 150_000, distance: 850, description: "Studios, murals, and sunset hills"),
+    PoplurTourStop(cityName: "Chicago", storefront: "us", coordinate: CLLocationCoordinate2D(latitude: 41.8819, longitude: -87.6233), bearing: -18, radiusMeters: 120_000, distance: 820, description: "Riverwalk and late plates"),
+    PoplurTourStop(cityName: "Miami", storefront: "us", coordinate: CLLocationCoordinate2D(latitude: 25.7617, longitude: -80.1918), bearing: 36, radiusMeters: 95_000, distance: 850, description: "Ocean, nightlife, and art deco"),
+    PoplurTourStop(cityName: "Las Vegas", storefront: "us", coordinate: CLLocationCoordinate2D(latitude: 36.1147, longitude: -115.1728), bearing: -34, radiusMeters: 115_000, distance: 850, description: "Neon strip moments"),
+    PoplurTourStop(cityName: "New Orleans", storefront: "us", coordinate: CLLocationCoordinate2D(latitude: 29.9584, longitude: -90.0659), bearing: 30, radiusMeters: 90_000, distance: 900, description: "Jazz streets and food posts"),
+    PoplurTourStop(cityName: "San Francisco", storefront: "us", coordinate: CLLocationCoordinate2D(latitude: 37.8199, longitude: -122.4783), bearing: 18, radiusMeters: 110_000, distance: 850, description: "Golden Gate viewpoints"),
+    PoplurTourStop(cityName: "Seattle", storefront: "us", coordinate: CLLocationCoordinate2D(latitude: 47.6205, longitude: -122.3493), bearing: -28, radiusMeters: 105_000, distance: 900, description: "Coffee, mist, and skyline"),
+    PoplurTourStop(cityName: "Washington DC", storefront: "us", coordinate: CLLocationCoordinate2D(latitude: 38.8977, longitude: -77.0365), bearing: 20, radiusMeters: 80_000, distance: 920, description: "Monuments and museum days"),
+    PoplurTourStop(cityName: "Toronto", storefront: "ca", coordinate: CLLocationCoordinate2D(latitude: 43.6426, longitude: -79.3871), bearing: 24, radiusMeters: 84_000, distance: 850, description: "CN Tower and city sound"),
+    PoplurTourStop(cityName: "Vancouver", storefront: "ca", coordinate: CLLocationCoordinate2D(latitude: 49.2827, longitude: -123.1119), bearing: -22, radiusMeters: 95_000, distance: 900, description: "Mountains and glass towers"),
+    PoplurTourStop(cityName: "Montreal", storefront: "ca", coordinate: CLLocationCoordinate2D(latitude: 45.5017, longitude: -73.5673), bearing: 30, radiusMeters: 88_000, distance: 900, description: "Old city and festival posts"),
+    PoplurTourStop(cityName: "Calgary", storefront: "ca", coordinate: CLLocationCoordinate2D(latitude: 51.0447, longitude: -114.0719), bearing: -18, radiusMeters: 100_000, distance: 950, description: "Prairie skyline"),
+    PoplurTourStop(cityName: "Mexico City", storefront: "mx", coordinate: CLLocationCoordinate2D(latitude: 19.4326, longitude: -99.1332), bearing: 26, radiusMeters: 130_000, distance: 850, description: "Plazas, plates, and murals"),
+    PoplurTourStop(cityName: "Rio de Janeiro", storefront: "br", coordinate: CLLocationCoordinate2D(latitude: -22.9519, longitude: -43.2105), bearing: -24, radiusMeters: 130_000, distance: 900, description: "Beach and mountain views"),
+    PoplurTourStop(cityName: "Sao Paulo", storefront: "br", coordinate: CLLocationCoordinate2D(latitude: -23.5505, longitude: -46.6333), bearing: 34, radiusMeters: 150_000, distance: 850, description: "Megacity culture"),
+    PoplurTourStop(cityName: "Tokyo", storefront: "jp", coordinate: CLLocationCoordinate2D(latitude: 35.6586, longitude: 139.7454), bearing: 34, radiusMeters: 148_000, distance: 780, description: "Crossings and tower lights"),
+    PoplurTourStop(cityName: "Seoul", storefront: "kr", coordinate: CLLocationCoordinate2D(latitude: 37.5665, longitude: 126.9780), bearing: -20, radiusMeters: 105_000, distance: 850, description: "Street style and food alleys"),
+    PoplurTourStop(cityName: "Singapore", storefront: "sg", coordinate: CLLocationCoordinate2D(latitude: 1.2834, longitude: 103.8518), bearing: 22, radiusMeters: 70_000, distance: 850, description: "Marina skyline"),
+    PoplurTourStop(cityName: "Bangkok", storefront: "th", coordinate: CLLocationCoordinate2D(latitude: 13.7563, longitude: 100.5018), bearing: -30, radiusMeters: 100_000, distance: 900, description: "Markets and night lights"),
+    PoplurTourStop(cityName: "Jakarta", storefront: "id", coordinate: CLLocationCoordinate2D(latitude: -6.1754, longitude: 106.8272), bearing: 28, radiusMeters: 135_000, distance: 900, description: "Urban heat and food posts"),
+    PoplurTourStop(cityName: "Manila", storefront: "ph", coordinate: CLLocationCoordinate2D(latitude: 14.5995, longitude: 120.9842), bearing: -26, radiusMeters: 110_000, distance: 900, description: "Bay and street scenes"),
+    PoplurTourStop(cityName: "London", storefront: "gb", coordinate: CLLocationCoordinate2D(latitude: 51.5007, longitude: -0.1246), bearing: -32, radiusMeters: 118_000, distance: 820, description: "Landmarks and radio"),
+    PoplurTourStop(cityName: "Dubai", storefront: "ae", coordinate: CLLocationCoordinate2D(latitude: 25.1972, longitude: 55.2744), bearing: 18, radiusMeters: 96_000, distance: 900, description: "Towers and desert glow"),
+    PoplurTourStop(cityName: "Doha", storefront: "qa", coordinate: CLLocationCoordinate2D(latitude: 25.2854, longitude: 51.5310), bearing: -24, radiusMeters: 80_000, distance: 950, description: "Corniche views"),
+    PoplurTourStop(cityName: "Riyadh", storefront: "sa", coordinate: CLLocationCoordinate2D(latitude: 24.7136, longitude: 46.6753), bearing: 30, radiusMeters: 115_000, distance: 900, description: "Boulevard nights"),
+    PoplurTourStop(cityName: "Istanbul", storefront: "tr", coordinate: CLLocationCoordinate2D(latitude: 41.0082, longitude: 28.9784), bearing: -28, radiusMeters: 125_000, distance: 850, description: "Two-continent views"),
+    PoplurTourStop(cityName: "Petra", storefront: "jo", coordinate: CLLocationCoordinate2D(latitude: 30.3285, longitude: 35.4444), bearing: 20, radiusMeters: 65_000, distance: 1_050, description: "Ancient landmark posts"),
+    PoplurTourStop(cityName: "Mumbai", storefront: "in", coordinate: CLLocationCoordinate2D(latitude: 19.0760, longitude: 72.8777), bearing: 26, radiusMeters: 145_000, distance: 850, description: "Bollywood and sea links"),
+    PoplurTourStop(cityName: "Delhi", storefront: "in", coordinate: CLLocationCoordinate2D(latitude: 28.6129, longitude: 77.2295), bearing: -24, radiusMeters: 155_000, distance: 850, description: "Markets and monuments"),
+    PoplurTourStop(cityName: "Jaipur", storefront: "in", coordinate: CLLocationCoordinate2D(latitude: 26.9239, longitude: 75.8235), bearing: 34, radiusMeters: 95_000, distance: 950, description: "Pink city travel posts"),
+    PoplurTourStop(cityName: "Bengaluru", storefront: "in", coordinate: CLLocationCoordinate2D(latitude: 12.9716, longitude: 77.5946), bearing: -18, radiusMeters: 120_000, distance: 900, description: "Tech and cafe scenes"),
+    PoplurTourStop(cityName: "Cairo", storefront: "eg", coordinate: CLLocationCoordinate2D(latitude: 29.9792, longitude: 31.1342), bearing: 26, radiusMeters: 120_000, distance: 1_050, description: "Pyramids and city haze"),
+    PoplurTourStop(cityName: "Lagos", storefront: "ng", coordinate: CLLocationCoordinate2D(latitude: 6.5244, longitude: 3.3792), bearing: -20, radiusMeters: 165_000, distance: 900, description: "Afrobeats and city life"),
+    PoplurTourStop(cityName: "Nairobi", storefront: "ke", coordinate: CLLocationCoordinate2D(latitude: -1.2921, longitude: 36.8219), bearing: 30, radiusMeters: 115_000, distance: 950, description: "Skyline and safari edges"),
+    PoplurTourStop(cityName: "Cape Town", storefront: "za", coordinate: CLLocationCoordinate2D(latitude: -33.9249, longitude: 18.4241), bearing: -26, radiusMeters: 105_000, distance: 950, description: "Table Mountain views"),
+    PoplurTourStop(cityName: "Marrakech", storefront: "ma", coordinate: CLLocationCoordinate2D(latitude: 31.6295, longitude: -7.9811), bearing: 22, radiusMeters: 85_000, distance: 950, description: "Market color and courtyards"),
+    PoplurTourStop(cityName: "Accra", storefront: "gh", coordinate: CLLocationCoordinate2D(latitude: 5.6037, longitude: -0.1869), bearing: -28, radiusMeters: 95_000, distance: 950, description: "Coastal culture"),
+    PoplurTourStop(cityName: "Sydney", storefront: "au", coordinate: CLLocationCoordinate2D(latitude: -33.8568, longitude: 151.2153), bearing: -28, radiusMeters: 110_000, distance: 900, description: "Harbor icons")
+]
+
+private let FallbackCityMusicTracks: [String: CityMusicTrack] = [
+    "Paris": CityMusicTrack(assetURI: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3", artistSeed: "Aya Nakamura, Daft Punk, DJ Snake"),
+    "New York": CityMusicTrack(assetURI: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3", artistSeed: "Jay-Z, Cardi B, A$AP Rocky"),
+    "Tokyo": CityMusicTrack(assetURI: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3", artistSeed: "YOASOBI, Hikaru Utada, Ryuichi Sakamoto"),
+    "London": CityMusicTrack(assetURI: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3", artistSeed: "Dua Lipa, Stormzy, Adele"),
+    "Dubai": CityMusicTrack(assetURI: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-5.mp3", artistSeed: "Balqees, Hussain Al Jassmi, Wegz"),
+    "Toronto": CityMusicTrack(assetURI: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-6.mp3", artistSeed: "Drake, The Weeknd, PARTYNEXTDOOR"),
+    "Sydney": CityMusicTrack(assetURI: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-7.mp3", artistSeed: "The Kid LAROI, Sia, Flume")
+]
+
+private let DefaultFallbackCityMusicTrack = CityMusicTrack(
+    assetURI: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
+    artistSeed: "Global pop and rap mix"
+)
+
+private let FallbackCityRadioTracks: [String: [CityMusicTrack]] = [
+    "New York": [
+        CityMusicTrack(assetURI: "https://playerservices.streamtheworld.com/api/livestream-redirect/WNYCFM.mp3", artistSeed: "WNYC live radio"),
+        CityMusicTrack(assetURI: "https://playerservices.streamtheworld.com/api/livestream-redirect/WQXRFM.mp3", artistSeed: "WQXR live radio")
+    ],
+    "Los Angeles": [CityMusicTrack(assetURI: "https://playerservices.streamtheworld.com/api/livestream-redirect/KUSCMP256.mp3", artistSeed: "KUSC live radio")],
+    "Chicago": [CityMusicTrack(assetURI: "https://playerservices.streamtheworld.com/api/livestream-redirect/WBEZFM.mp3", artistSeed: "WBEZ live radio")],
+    "London": [
+        CityMusicTrack(assetURI: "https://stream.live.vc.bbcmedia.co.uk/bbc_radio_fourfm", artistSeed: "BBC Radio 4 live"),
+        CityMusicTrack(assetURI: "https://stream.live.vc.bbcmedia.co.uk/bbc_radio_one", artistSeed: "BBC Radio 1 live")
+    ],
+    "Paris": [CityMusicTrack(assetURI: "https://icecast.radiofrance.fr/fip-midfi.mp3", artistSeed: "FIP live radio")],
+    "Toronto": [CityMusicTrack(assetURI: "https://playerservices.streamtheworld.com/api/livestream-redirect/CBC_R1_TOR_H.mp3", artistSeed: "CBC Radio One Toronto")],
+    "Sydney": [CityMusicTrack(assetURI: "https://live-radio01.mediahubaustralia.com/2TJW/mp3/", artistSeed: "triple j Sydney live")]
+]
+
+private let FallbackCitySportsRadioTracks: [String: [CityMusicTrack]] = [
+    "New York": [CityMusicTrack(assetURI: "https://playerservices.streamtheworld.com/api/livestream-redirect/WFANAM.mp3", artistSeed: "WFAN Sports Radio New York")],
+    "Los Angeles": [CityMusicTrack(assetURI: "https://playerservices.streamtheworld.com/api/livestream-redirect/KSPNAMAAC.aac", artistSeed: "ESPN LA live sports radio")],
+    "Chicago": [CityMusicTrack(assetURI: "https://playerservices.streamtheworld.com/api/livestream-redirect/WSCRAM.mp3", artistSeed: "670 The Score Chicago")],
+    "Toronto": [CityMusicTrack(assetURI: "https://playerservices.streamtheworld.com/api/livestream-redirect/CHUMAM.mp3", artistSeed: "TSN 1050 Toronto")],
+    "London": [CityMusicTrack(assetURI: "https://radio.talksport.com/stream", artistSeed: "talkSPORT London")]
+]
+
+private func countryFlagEmoji(_ countryCode: String) -> String {
+    let scalars = countryCode.uppercased().unicodeScalars
+    guard scalars.count == 2, scalars.allSatisfy({ $0.value >= 65 && $0.value <= 90 }) else { return "" }
+    return String(String.UnicodeScalarView(scalars.compactMap {
+        UnicodeScalar(127397 + $0.value)
+    }))
+}
+
+private func activeCityTitle(_ stop: PoplurTourStop) -> String {
+    "\(stop.cityName) \(countryFlagEmoji(stop.storefront))"
+}
+
+private func spoofAiTourInsight(for stop: PoplurTourStop) -> AiTourInsight {
+    let now = Int(Date().timeIntervalSince1970 * 1000)
+    let sportsCities: Set<String> = ["New York", "Los Angeles", "Chicago", "Toronto", "London", "Tokyo", "Sydney", "Miami"]
+    if sportsCities.contains(stop.cityName), abs(stop.cityName.hashValue + now) % 3 == 0 {
+        return AiTourInsight(
+            id: "\(stop.cityName)-sports-\(now)",
+            subtitle: "AI: sports posts are surging here. Tuning into a live local sports radio station.",
+            category: .sports
+        )
+    }
+
+    let options: [AiTourInsight] = [
+        AiTourInsight(id: "\(stop.cityName)-clothes-\(now)", subtitle: "AI: most posts nearby are fit checks, sneakers, and streetwear drops.", category: .clothes),
+        AiTourInsight(id: "\(stop.cityName)-food-\(now)", subtitle: "AI: food posts are spiking here: late plates, cafes, and table shots.", category: .food),
+        AiTourInsight(id: "\(stop.cityName)-nightlife-\(now)", subtitle: "AI: nightlife is trending now: clubs, rooftops, and after-dark clips.", category: .nightlife),
+        AiTourInsight(id: "\(stop.cityName)-music-\(now)", subtitle: "AI: music posts are leading here: concerts, street performers, and studio clips.", category: .music),
+        AiTourInsight(id: "\(stop.cityName)-travel-\(now)", subtitle: "AI: travel posts are highest here: landmarks, views, and arrival moments.", category: .travel)
+    ]
+    return options.randomElement() ?? options[0]
+}
+
+private func buildTrendPopObjects(stop: PoplurTourStop, insight: AiTourInsight) -> [TrendPopObject] {
+    let seed = abs(stop.cityName.hashValue ^ insight.id.hashValue ^ insight.category.rawValue.hashValue)
+    let count = trendPopCountMin + seed % trendPopCountRange
+    let lngScale = 0.0048
+    let latScale = 0.0036
+
+    return (0..<count).map { index in
+        let angle = 2.0 * Double.pi * Double(index) / Double(count) + Double(seed % 360) * Double.pi / 180.0
+        let radius = 0.36 + Double((index * 29 + seed) % 100) / 145.0
+        let emojiChoices = insight.category.emojis
+        return TrendPopObject(
+            coordinate: CLLocationCoordinate2D(
+                latitude: stop.coordinate.latitude + sin(angle) * latScale * radius,
+                longitude: stop.coordinate.longitude + cos(angle) * lngScale * radius
+            ),
+            emoji: emojiChoices[abs(seed + index) % emojiChoices.count],
+            scale: 0.9 + CGFloat((index * 17 + seed) % 28) / 100.0,
+            delay: Double(index) * 0.26,
+            seed: seed + index * 97
+        )
+    }
+}
+
+@MainActor
+private final class CityTourMusicPlayerService: ObservableObject {
+    @Published private(set) var currentTrackTitle: String?
+    private var player: AVPlayer?
+    private var chartTrackCache: [String: [CityMusicTrack]] = [:]
+    private var radioTrackCache: [String: [CityMusicTrack]] = [:]
+    private var sportsRadioTrackCache: [String: [CityMusicTrack]] = [:]
+    private var loadTask: Task<Void, Never>?
+
+    func play(for stop: PoplurTourStop, insight: AiTourInsight?) {
+        loadTask?.cancel()
+        loadTask = Task { [weak self] in
+            guard let self else { return }
+            let track = await self.resolveTrack(for: stop, insight: insight)
+            guard !Task.isCancelled, let url = URL(string: track.assetURI) else { return }
+            await MainActor.run {
+                let item = AVPlayerItem(url: url)
+                self.player = AVPlayer(playerItem: item)
+                self.player?.volume = 0.72
+                self.player?.play()
+                self.currentTrackTitle = track.artistSeed
+            }
+        }
+    }
+
+    func stop() {
+        loadTask?.cancel()
+        loadTask = nil
+        player?.pause()
+        player = nil
+        currentTrackTitle = nil
+    }
+
+    private func resolveTrack(for stop: PoplurTourStop, insight: AiTourInsight?) async -> CityMusicTrack {
+        async let chartTracks = cachedChartTracks(for: stop)
+        async let radioTracks = cachedRadioTracks(for: stop)
+        async let sportsTracks = cachedSportsTracks(for: stop)
+
+        let resolvedChartTracks = await chartTracks
+        let resolvedRadioTracks = await radioTracks
+        let resolvedSportsTracks = await sportsTracks
+
+        if insight?.category == .sports, let track = resolvedSportsTracks.randomElement() {
+            return track
+        }
+        if Bool.random(), let track = resolvedRadioTracks.randomElement() {
+            return track
+        }
+        return resolvedChartTracks.randomElement()
+            ?? FallbackCityMusicTracks[stop.cityName]
+            ?? DefaultFallbackCityMusicTrack
+    }
+
+    private func cachedChartTracks(for stop: PoplurTourStop) async -> [CityMusicTrack] {
+        if let cached = chartTrackCache[stop.cityName] { return cached }
+        let tracks = (try? await resolveTopCountryMusicTracks(stop: stop))
+            ?? [FallbackCityMusicTracks[stop.cityName] ?? DefaultFallbackCityMusicTrack]
+        chartTrackCache[stop.cityName] = tracks
+        return tracks
+    }
+
+    private func cachedRadioTracks(for stop: PoplurTourStop) async -> [CityMusicTrack] {
+        if let cached = radioTrackCache[stop.cityName] { return cached }
+        let tracks = (try? await resolveTopCityRadioTracks(stop: stop)) ?? FallbackCityRadioTracks[stop.cityName] ?? []
+        radioTrackCache[stop.cityName] = tracks
+        return tracks
+    }
+
+    private func cachedSportsTracks(for stop: PoplurTourStop) async -> [CityMusicTrack] {
+        if let cached = sportsRadioTrackCache[stop.cityName] { return cached }
+        let tracks = (try? await resolveTopCitySportsRadioTracks(stop: stop)) ?? FallbackCitySportsRadioTracks[stop.cityName] ?? []
+        sportsRadioTrackCache[stop.cityName] = tracks
+        return tracks
+    }
+}
+
+private func fetchText(from url: URL, userAgent: String? = nil) async throws -> String {
+    var request = URLRequest(url: url, timeoutInterval: musicLookupTimeout)
+    if let userAgent {
+        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+    }
+    let (data, _) = try await URLSession.shared.data(for: request)
+    return String(decoding: data, as: UTF8.self)
+}
+
+private func resolveTopCountryMusicTracks(stop: PoplurTourStop) async throws -> [CityMusicTrack] {
+    let chartURL = URL(string: "https://rss.applemarketingtools.com/api/v2/\(stop.storefront)/music/most-played/50/songs.json")!
+    let chartResponse = try await fetchText(from: chartURL)
+    guard
+        let data = chartResponse.data(using: .utf8),
+        let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+        let feed = root["feed"] as? [String: Any],
+        let results = feed["results"] as? [[String: Any]]
+    else { throw URLError(.cannotParseResponse) }
+
+    var tracks: [CityMusicTrack] = []
+    for item in results.prefix(24) {
+        let title = item["name"] as? String ?? ""
+        let artist = item["artistName"] as? String ?? ""
+        if let previewURL = try? await lookupITunesPreviewURL(title: title, artist: artist, storefront: stop.storefront) {
+            tracks.append(CityMusicTrack(assetURI: previewURL, artistSeed: "\(artist) - \(title)"))
+            if tracks.count == musicTopTrackChoices { return tracks }
+        }
+    }
+
+    if tracks.isEmpty { throw URLError(.resourceUnavailable) }
+    return tracks
+}
+
+private func resolveTopCityRadioTracks(stop: PoplurTourStop) async throws -> [CityMusicTrack] {
+    let city = stop.cityName.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? stop.cityName
+    let country = stop.storefront.uppercased()
+    let url = URL(string: "https://de1.api.radio-browser.info/json/stations/search?name=\(city)&countrycode=\(country)&hidebroken=true&order=clickcount&reverse=true&limit=24")!
+    return try await queryRadioTracks(url: url, suffix: "live radio")
+}
+
+private func resolveTopCitySportsRadioTracks(stop: PoplurTourStop) async throws -> [CityMusicTrack] {
+    let city = stop.cityName.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? stop.cityName
+    let country = stop.storefront.uppercased()
+    let cityURL = URL(string: "https://de1.api.radio-browser.info/json/stations/search?name=\(city)&tag=sports&countrycode=\(country)&hidebroken=true&order=clickcount&reverse=true&limit=36")!
+    let countryURL = URL(string: "https://de1.api.radio-browser.info/json/stations/search?name=&tag=sports&countrycode=\(country)&hidebroken=true&order=clickcount&reverse=true&limit=36")!
+    let cityTracks = (try? await queryRadioTracks(url: cityURL, suffix: "live sports radio", sportsOnly: true)) ?? []
+    let countryTracks = cityTracks.count < musicTopTrackChoices
+        ? ((try? await queryRadioTracks(url: countryURL, suffix: "live sports radio", sportsOnly: true)) ?? [])
+        : []
+    let tracks = Array((cityTracks + countryTracks).uniquedByAssetURI().prefix(musicTopTrackChoices))
+    if tracks.isEmpty { throw URLError(.resourceUnavailable) }
+    return tracks
+}
+
+private func queryRadioTracks(url: URL, suffix: String, sportsOnly: Bool = false) async throws -> [CityMusicTrack] {
+    let response = try await fetchText(from: url, userAgent: "Poplur2025-iOS/1.0")
+    guard
+        let data = response.data(using: .utf8),
+        let stations = try JSONSerialization.jsonObject(with: data) as? [[String: Any]]
+    else { throw URLError(.cannotParseResponse) }
+
+    let sportsSignals = ["sports", "sport", "espn", "fox sports", "tsn", "sportsnet", "talksport", "score", "fan"]
+    let tracks = stations.compactMap { station -> CityMusicTrack? in
+        let streamURL = (station["url_resolved"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? station["url"] as? String ?? ""
+        let name = station["name"] as? String ?? "Live radio"
+        let tags = station["tags"] as? String ?? ""
+        guard streamURL.lowercased().hasPrefix("http"), !name.isEmpty else { return nil }
+        if sportsOnly {
+            let searchable = "\(name) \(tags)".lowercased()
+            guard sportsSignals.contains(where: { searchable.contains($0) }) else { return nil }
+        }
+        return CityMusicTrack(assetURI: streamURL, artistSeed: "\(name) \(suffix)")
+    }
+
+    let unique = Array(tracks.uniquedByAssetURI().prefix(musicTopTrackChoices))
+    if unique.isEmpty { throw URLError(.resourceUnavailable) }
+    return unique
+}
+
+private func lookupITunesPreviewURL(title: String, artist: String, storefront: String) async throws -> String? {
+    let term = "\(artist) \(title)".addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? title
+    let country = storefront.uppercased()
+    let url = URL(string: "https://itunes.apple.com/search?term=\(term)&country=\(country)&media=music&entity=song&limit=5")!
+    let response = try await fetchText(from: url)
+    guard
+        let data = response.data(using: .utf8),
+        let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+        let results = root["results"] as? [[String: Any]]
+    else { return nil }
+    return results.compactMap { $0["previewUrl"] as? String }.first { !$0.isEmpty }
+}
+
+private extension Array where Element == CityMusicTrack {
+    func uniquedByAssetURI() -> [CityMusicTrack] {
+        var seen = Set<String>()
+        return filter { seen.insert($0.assetURI).inserted }
+    }
+}
+
+private struct MusicWaveMarker: View {
+    let frame: Int
+    let tint: Color
+
+    var body: some View {
+        ZStack {
+            ForEach(0..<3, id: \.self) { index in
+                ArcShape(startAngle: .degrees(-54), endAngle: .degrees(54))
+                    .stroke(index == frame % 3 ? Color.white : tint.opacity(0.75), style: StrokeStyle(lineWidth: CGFloat(5 + index * 2), lineCap: .round))
+                    .frame(width: CGFloat(30 + index * 22), height: CGFloat(42 + index * 24))
+                    .opacity(index == frame % 3 ? 1 : 0.55)
+                    .shadow(color: tint.opacity(0.75), radius: 8)
+            }
+        }
+        .frame(width: 96, height: 96)
+        .accessibilityHidden(true)
+    }
+}
+
+private struct ArcShape: Shape {
+    var startAngle: Angle
+    var endAngle: Angle
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.addArc(
+            center: CGPoint(x: rect.minX, y: rect.midY),
+            radius: min(rect.width, rect.height) / 2,
+            startAngle: startAngle,
+            endAngle: endAngle,
+            clockwise: false
+        )
+        return path
+    }
+}
+
+private struct TrendPopMarker: View {
+    let object: TrendPopObject
+    let category: TrendCategory
+    @State private var isVisible = false
+
+    var body: some View {
+        Text(object.emoji)
+            .font(.system(size: 30))
+            .frame(width: 54, height: 54)
+            .background(
+                Circle()
+                    .fill(.ultraThinMaterial)
+                    .overlay(Circle().stroke(category.tint.opacity(0.9), lineWidth: 2))
+                    .shadow(color: category.tint.opacity(0.85), radius: 12)
+            )
+            .scaleEffect((isVisible ? object.scale : 0.05) * (1 + CGFloat((object.seed % 7)) * 0.01))
+            .opacity(isVisible ? 1 : 0)
+            .animation(.spring(response: 0.42, dampingFraction: 0.54).delay(object.delay), value: isVisible)
+            .onAppear { isVisible = true }
+            .onDisappear { isVisible = false }
+    }
+}
 
 #if DEBUG
 private extension PreviewLocationManager {
@@ -1662,6 +2117,7 @@ struct MapViewProduction: View {
     @StateObject private var locationManager = LocationProvider()
     @StateObject private var flowManager = CaptureFlowManager.shared
     @StateObject private var mapState = MapStateManager.shared
+    @StateObject private var musicPlayer = CityTourMusicPlayerService()
     
     @State private var fixedDistanceAlt: CLLocationDistance = 700 // Start at optimal viewing distance (700m)
     @State private var camera: MapCameraPosition = .camera(
@@ -1692,6 +2148,10 @@ struct MapViewProduction: View {
     @State private var tourZoomOutDistance: CLLocationDistance = 25_000_000 // Distance for zoom out
     @State private var isZoomedOut: Bool = false
     @State private var hasSetInitialLocation: Bool = false  // Track if we've set initial location
+    @State private var activeTourStop: PoplurTourStop? = nil
+    @State private var activeTourInsight: AiTourInsight? = nil
+    @State private var trendPopObjects: [TrendPopObject] = []
+    @State private var musicWaveFrame: Int = 0
     
     @State private var longPressLocation: CGPoint? = nil  // Track long press location
     @State private var selectedCoordinate: CLLocationCoordinate2D? = nil  // Track selected coordinate for long-press
@@ -1733,16 +2193,9 @@ struct MapViewProduction: View {
     #endif
     
     // Available in both Debug and Release for tour functionality
-    let tourPlaces: [(name: String, coordinate: CLLocationCoordinate2D, description: String)] = [
-        ("New York", CLLocationCoordinate2D(latitude: 40.7128, longitude: -74.0060), "The city that never sleeps"),
-        ("San Francisco", CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194), "The Golden Gate City"),
-        ("Los Angeles", CLLocationCoordinate2D(latitude: 34.0522, longitude: -118.2437), "City of Angels"),
-        ("Chicago", CLLocationCoordinate2D(latitude: 41.8781, longitude: -87.6298), "The Windy City"),
-        ("Miami", CLLocationCoordinate2D(latitude: 25.7617, longitude: -80.1918), "Magic City"),
-        ("Seattle", CLLocationCoordinate2D(latitude: 47.6062, longitude: -122.3321), "Emerald City"),
-        ("Boston", CLLocationCoordinate2D(latitude: 42.3601, longitude: -71.0589), "Beantown"),
-        ("Austin", CLLocationCoordinate2D(latitude: 30.2672, longitude: -97.7431), "Live Music Capital")
-    ]
+    let tourPlaces: [(name: String, coordinate: CLLocationCoordinate2D, description: String)] = PoplurTourStops.map {
+        ($0.cityName, $0.coordinate, $0.description)
+    }
     
     init() {
         // Initialize with demo cities and posts synchronously to avoid crash
@@ -1801,6 +2254,7 @@ struct MapViewProduction: View {
         
         // Stop any active tour
         mapState.stopTour()
+        clearTourEffects()
         
         // Only update UI text if we're NOT showing a post location
         // (showing post location sets comprehensive text that shouldn't be overridden)
@@ -1923,6 +2377,15 @@ struct MapViewProduction: View {
         // Delegate to state manager
         mapState.noteUserInteraction()
     }
+
+    private func clearTourEffects(stopAudio: Bool = true) {
+        activeTourStop = nil
+        activeTourInsight = nil
+        trendPopObjects = []
+        if stopAudio {
+            musicPlayer.stop()
+        }
+    }
     
     private func startTour() {
         mapState.startTour()
@@ -1930,6 +2393,7 @@ struct MapViewProduction: View {
     
     private func stopTour() {
         mapState.stopTour()
+        clearTourEffects()
     }
     
     private func centerOnUserLocation() {
@@ -1943,6 +2407,7 @@ struct MapViewProduction: View {
         
         // Stop any active operations and return to browsing
         mapState.cancelCurrentOperation()
+        clearTourEffects()
         
         // Update city and recommendation
         currentCity = "Your Location"
@@ -1991,83 +2456,78 @@ struct MapViewProduction: View {
         aiRecommendation = "Explore what's happening around you right now!"
     }
     
-    private func tourToNextPlace() {
-        guard mapState.isInTourMode, !tourPlaces.isEmpty else { return }
-        
-        let place = tourPlaces[currentTourIndex]
-        
-        // Update AI recommendation for current city
-        let cityRecommendations: [String: String] = [
-            "San Francisco": "Trending posts: Golden Gate views and coffee spots — snap a photo from your vantage point.",
-            "New York": "People nearby are posting street food finds and skyline shots — share your take!",
-            "Los Angeles": "Popular now: murals and sunset beaches — post your favorite scene.",
-            "Chicago": "Hot right now: riverwalk reflections and deep-dish moments — add yours.",
-            "Miami": "Trending: pastel art deco and ocean vibes — capture and post your view.",
-            "Seattle": "Popular nearby: cozy cafes and skyline-in-the-mist — share your snapshot.",
-            "Boston": "Trending posts: cobblestone corners and harbor light — what do you see?",
-            "Austin": "Now popular: live music clips and neon nights — post a moment from your spot."
-        ]
-        
-        // Zoom out first, then zoom back in at the new location
-        if !isZoomedOut {
-            // Zoom out from current location - reset radius to 0
-            if let currentCoord = camera.camera?.centerCoordinate {
-                // Reset radius bar when zooming out
-                print("[MapTour] Zooming out - resetting radius to 0")
-                NotificationCenter.default.post(
-                    name: .MapSuggestedRadius,
-                    object: nil,
-                    userInfo: ["radius": 0.0]
+    private func runExtendedTourStop(_ stop: PoplurTourStop) async {
+        guard mapState.isInTourMode else { return }
+        let globeCoordinate = CLLocationCoordinate2D(latitude: 18.0, longitude: -98.0)
+
+        await MainActor.run {
+            clearTourEffects()
+            currentCity = "World"
+            aiRecommendation = "Scanning global hotspots..."
+            NotificationCenter.default.post(name: .MapSuggestedRadius, object: nil, userInfo: ["radius": 0.0])
+            withAnimation(.easeInOut(duration: 2.6)) {
+                radiusMeters = 0
+                camera = .camera(
+                    MapCamera(
+                        centerCoordinate: globeCoordinate,
+                        distance: tourZoomOutDistance,
+                        heading: 0,
+                        pitch: 0
+                    )
                 )
-                withAnimation(.easeInOut(duration: 1.5)) {
-                    radiusMeters = 0
-                }
-                
-                zoomOut(to: currentCoord)
-                isZoomedOut = true
             }
-        } else {
-            // Update city and recommendation BEFORE zooming in
-            currentCity = place.name
-            aiRecommendation = cityRecommendations[place.name] ?? "Explore what's happening here!"
-            
-            // Fetch weather for new location (DEBUG ONLY)
+        }
+
+        try? await Task.sleep(nanoseconds: 3_300_000_000)
+        guard mapState.isInTourMode, !Task.isCancelled else { return }
+
+        let insight = spoofAiTourInsight(for: stop)
+        await MainActor.run {
+            activeTourStop = stop
+            activeTourInsight = insight
+            currentCity = activeCityTitle(stop)
+            aiRecommendation = insight.subtitle
+            musicPlayer.play(for: stop, insight: insight)
+
             #if DEBUG
             Task {
                 await fetchWeatherForCurrentLocation()
             }
             #endif
-            
-            // Zoom in to the new place
-            zoomIn(to: place.coordinate)
-            isZoomedOut = false
-            
-            // Update radius to a random value between 2km and 15km AFTER starting zoom
-            // This creates the effect of the bar rising as we zoom into the city
-            let newRadius = Double.random(in: 2_000...15_000)
-            
-            // Delay slightly to sync with zoom-in animation
-            Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 second delay
-                
-                print("[MapTour] Zooming into \(place.name) - setting radius to \(Int(newRadius))m")
-                
-                // Animate radius bar up
-                withAnimation(.easeInOut(duration: 2.0)) {
-                    radiusMeters = newRadius
-                }
-                
-                // Notify HomeView to animate the radius bar
-                NotificationCenter.default.post(
-                    name: .MapSuggestedRadius,
-                    object: nil,
-                    userInfo: ["radius": newRadius]
+
+            withAnimation(.easeInOut(duration: 4.2)) {
+                camera = .camera(
+                    MapCamera(
+                        centerCoordinate: stop.coordinate,
+                        distance: stop.distance,
+                        heading: stop.bearing,
+                        pitch: fixedPitchAlt
+                    )
                 )
+                fixedDistanceAlt = stop.distance
+                zoomLevel = stop.distance
+                radiusMeters = stop.radiusMeters
             }
-            
-            // Move to next place
-            currentTourIndex = (currentTourIndex + 1) % tourPlaces.count
+
+            NotificationCenter.default.post(
+                name: .MapSuggestedRadius,
+                object: nil,
+                userInfo: ["radius": stop.radiusMeters]
+            )
         }
+
+        try? await Task.sleep(nanoseconds: trendPopStartDelaySeconds * 1_000_000_000 + 350_000_000)
+        guard mapState.isInTourMode, !Task.isCancelled else { return }
+
+        await MainActor.run {
+            AudioServicesPlaySystemSound(1104)
+            trendPopObjects = buildTrendPopObjects(stop: stop, insight: insight)
+            #if DEBUG
+            simulateTrendingBurst()
+            #endif
+        }
+
+        try? await Task.sleep(nanoseconds: tourStopDwellSeconds * 1_000_000_000)
     }
     
     // MARK: - Computed Properties
@@ -2231,6 +2691,21 @@ struct MapViewProduction: View {
                             // High-intensity purple beacons for dominance locations
                             Enhanced3DBeaconMarker(color: .purple, intensity: 1.0)
                                 .frame(width: 110, height: 130)
+                        }
+                    }
+                }
+
+                if let stop = activeTourStop {
+                    Annotation("", coordinate: stop.coordinate) {
+                        MusicWaveMarker(frame: musicWaveFrame, tint: activeTourInsight?.category.tint ?? .cyan)
+                            .offset(x: 38, y: -72)
+                    }
+                }
+
+                if let insight = activeTourInsight {
+                    ForEach(trendPopObjects) { object in
+                        Annotation("", coordinate: object.coordinate) {
+                            TrendPopMarker(object: object, category: insight.category)
                         }
                     }
                 }
@@ -2786,6 +3261,9 @@ struct MapViewProduction: View {
             }
             .onAppear {
                 handleOnAppear()
+            }
+            .onDisappear {
+                musicPlayer.stop()
             }
             .onChange(of: locationManager.location) { _, newLocation in
                 handleLocationChange(newLocation)
@@ -3394,28 +3872,28 @@ struct MapViewProduction: View {
             mapState.noteUserInteraction()
         }
         
-        // Tour loop - alternates between zoom out (3s) and zoom in (12s at location)
+        var waveTask: Task<Void, Never>?
+        waveTask = Task { @MainActor in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 180_000_000)
+                musicWaveFrame = (musicWaveFrame + 1) % 4
+            }
+        }
+        defer { waveTask?.cancel() }
+
+        // Extended tour loop - mirrors Android's globe scan, fly-in, music/radio, and pop burst.
         while !Task.isCancelled {
             if mapState.isInTourMode {
-                // Initialize tour if just started
-                if currentTourIndex == 0 && !isZoomedOut {
-                    currentTourIndex = 0
-                    isZoomedOut = false
-                    // Brief delay before first transition
-                    try? await Task.sleep(nanoseconds: 500_000_000)
-                }
-                
-                tourToNextPlace()
-                
-                // Wait for animation duration based on zoom state
-                if isZoomedOut {
-                    // Just zoomed out, wait 3 seconds before zooming in
-                    try? await Task.sleep(nanoseconds: 3_000_000_000)
-                } else {
-                    // Just zoomed in, wait 12 seconds at this location before next transition
-                    try? await Task.sleep(nanoseconds: 12_000_000_000)
+                let stop = PoplurTourStops[currentTourIndex % PoplurTourStops.count]
+                await runExtendedTourStop(stop)
+                await MainActor.run {
+                    currentTourIndex = (currentTourIndex + 1) % PoplurTourStops.count
                 }
             } else {
+                await MainActor.run {
+                    clearTourEffects()
+                    isZoomedOut = false
+                }
                 // If tour is not active, wait a bit before checking again
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
@@ -3492,7 +3970,3 @@ struct MapViewProduction: View {
         }
 }
 #endif
-
-
-
-
