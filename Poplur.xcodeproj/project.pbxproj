@@ -46,7 +46,12 @@
 		B3A220102EAC80B900F7BDD7 /* Exceptions for "Poplur2025" folder in "Poplur2025" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				CityTourMusicPlayerService.swift,
+				Enhanced3DBeaconMarker.swift,
 				Info.plist,
+				SceneKitMarkers.swift,
+				TrendOverlays.swift,
+				WeatherParticleOverlay.swift,
 			);
 			target = 391605C02E3F48FF000ACB3E /* Poplur2025 */;
 		};

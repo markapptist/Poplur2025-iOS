@@ -829,7 +829,7 @@ private func activeCityTitle(_ stop: PoplurTourStop) -> String {
 private func spoofAiTourInsight(for stop: PoplurTourStop) -> AiTourInsight {
     let now = Int(Date().timeIntervalSince1970 * 1000)
     let sportsCities: Set<String> = ["New York", "Los Angeles", "Chicago", "Toronto", "London", "Tokyo", "Sydney", "Miami"]
-    if sportsCities.contains(stop.cityName), abs(stop.cityName.hashValue + now) % 3 == 0 {
+    if sportsCities.contains(stop.cityName), stableTourSeed(parts: stop.cityName, "\(now)") % 3 == 0 {
         return AiTourInsight(
             id: "\(stop.cityName)-sports-\(now)",
             subtitle: "AI: sports posts are surging here. Tuning into a live local sports radio station.",
@@ -847,8 +847,19 @@ private func spoofAiTourInsight(for stop: PoplurTourStop) -> AiTourInsight {
     return options.randomElement() ?? options[0]
 }
 
+private func stableTourSeed(parts: String...) -> Int {
+    var value: UInt64 = 14_695_981_039_346_656_037
+    for part in parts {
+        for byte in part.utf8 {
+            value ^= UInt64(byte)
+            value &*= 1_099_511_628_211
+        }
+    }
+    return Int(value % 1_000_000)
+}
+
 private func buildTrendPopObjects(stop: PoplurTourStop, insight: AiTourInsight) -> [TrendPopObject] {
-    let seed = abs(stop.cityName.hashValue ^ insight.id.hashValue ^ insight.category.rawValue.hashValue)
+    let seed = stableTourSeed(parts: stop.cityName, insight.id, insight.category.rawValue)
     let count = trendPopCountMin + seed % trendPopCountRange
     let lngScale = 0.0048
     let latScale = 0.0036
@@ -863,7 +874,7 @@ private func buildTrendPopObjects(stop: PoplurTourStop, insight: AiTourInsight) 
             ),
             scale: 0.9 + CGFloat((index * 17 + seed) % 28) / 100.0,
             delay: Double(index) * 0.26,
-            seed: seed + index * 97
+            seed: (seed + index * 97) % 1_000_000
         )
     }
 }
@@ -877,19 +888,24 @@ private final class CityTourMusicPlayerService: ObservableObject {
     private var sportsRadioTrackCache: [String: [CityMusicTrack]] = [:]
     private var loadTask: Task<Void, Never>?
     private var lastPlayerVolume: Float = 0.72
+    private var interruptionObserver: NSObjectProtocol?
 
     init() {
-        configureCallFriendlyAudioSession()
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handleAudioSessionInterruption(_:)),
-            name: AVAudioSession.interruptionNotification,
-            object: AVAudioSession.sharedInstance()
-        )
+        interruptionObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.interruptionNotification,
+            object: AVAudioSession.sharedInstance(),
+            queue: .main
+        ) { [weak self] notification in
+            Task { @MainActor in
+                self?.handleAudioSessionInterruption(notification)
+            }
+        }
     }
 
     deinit {
-        NotificationCenter.default.removeObserver(self)
+        if let interruptionObserver {
+            NotificationCenter.default.removeObserver(interruptionObserver)
+        }
     }
 
     func play(for stop: PoplurTourStop, insight: AiTourInsight?) {
@@ -927,7 +943,7 @@ private final class CityTourMusicPlayerService: ObservableObject {
         }
     }
 
-    @objc private func handleAudioSessionInterruption(_ notification: Notification) {
+    private func handleAudioSessionInterruption(_ notification: Notification) {
         guard
             let userInfo = notification.userInfo,
             let rawType = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
@@ -1097,12 +1113,13 @@ private struct MusicWaveMarker: View {
     let tint: Color
 
     var body: some View {
+        let activeFrame = ((frame % 3) + 3) % 3
         ZStack {
             ForEach(0..<3, id: \.self) { index in
                 ArcShape(startAngle: .degrees(-54), endAngle: .degrees(54))
-                    .stroke(index == frame % 3 ? Color.white : tint.opacity(0.75), style: StrokeStyle(lineWidth: CGFloat(5 + index * 2), lineCap: .round))
+                    .stroke(index == activeFrame ? Color.white : tint.opacity(0.75), style: StrokeStyle(lineWidth: CGFloat(5 + index * 2), lineCap: .round))
                     .frame(width: CGFloat(30 + index * 22), height: CGFloat(42 + index * 24))
-                    .opacity(index == frame % 3 ? 1 : 0.55)
+                    .opacity(index == activeFrame ? 1 : 0.55)
                     .shadow(color: tint.opacity(0.75), radius: 8)
             }
         }
@@ -1117,9 +1134,18 @@ private struct ArcShape: Shape {
 
     func path(in rect: CGRect) -> Path {
         var path = Path()
+        guard rect.width.isFinite, rect.height.isFinite, rect.width > 0, rect.height > 0 else {
+            return path
+        }
+
+        let radius = min(rect.width, rect.height) / 2
+        guard radius.isFinite, radius > 0 else {
+            return path
+        }
+
         path.addArc(
-            center: CGPoint(x: rect.minX, y: rect.midY),
-            radius: min(rect.width, rect.height) / 2,
+            center: CGPoint(x: rect.midX, y: rect.midY),
+            radius: radius,
             startAngle: startAngle,
             endAngle: endAngle,
             clockwise: false
@@ -1137,8 +1163,10 @@ private struct TrendPopMarker: View {
         TimelineView(.animation) { timeline in
             let elapsed = max(0, timeline.date.timeIntervalSince(startDate) - object.delay)
             let popPhase = min(max(elapsed / 0.42, 0), 1)
+            let seedOffset = Double(object.seed * 157)
+            let bobPhase = (timeline.date.timeIntervalSinceReferenceDate * 1000 + seedOffset) / 520.0
             let popScale = overshootScale(popPhase) * object.scale * (1 + CGFloat(object.seed % 7) * 0.01)
-            let bob = sin((timeline.date.timeIntervalSinceReferenceDate * 1000 + Double(object.seed * 157)) / 520.0) * 3.0
+            let bob = CGFloat(sin(bobPhase) * 3.0)
 
             ZStack {
                 TrendObjectConfetti(seed: object.seed, elapsed: elapsed)
@@ -2748,12 +2776,6 @@ struct MapViewProduction: View {
             showTourNowPlayingText = true
             musicPlayer.play(for: stop, insight: insight)
 
-            #if DEBUG
-            Task {
-                await fetchWeatherForCurrentLocation()
-            }
-            #endif
-
             withAnimation(.easeInOut(duration: 4.2)) {
                 camera = .camera(
                     MapCamera(
@@ -2781,9 +2803,6 @@ struct MapViewProduction: View {
         await MainActor.run {
             AudioServicesPlaySystemSound(1104)
             trendPopObjects = buildTrendPopObjects(stop: stop, insight: insight)
-            #if DEBUG
-            simulateTrendingBurst()
-            #endif
         }
 
         try? await Task.sleep(nanoseconds: tourStopDwellSeconds * 1_000_000_000)
