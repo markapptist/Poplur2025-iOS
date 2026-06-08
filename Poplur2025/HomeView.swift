@@ -1333,7 +1333,7 @@ private struct HomeBarPlacementPreview: View {
     @State private var radius: Double = 0
     //@StateObject private var tuning = BarCubePreviewTuning() // Removed tuning usage
     
-    @State private var selectedTab: AppTab = .record
+    @State private var selectedTab: AppTab
     
     @State private var previewHover: Bool = false
     @State private var previewPopTrigger: Int = 0
@@ -1357,6 +1357,10 @@ private struct HomeBarPlacementPreview: View {
     
     // Added state to control animation flag
     @State private var previewAnimateTabChange: Bool = true
+
+    init(initialTab: AppTab = .record) {
+        _selectedTab = State(initialValue: initialTab)
+    }
     
     private func playPopSound() {
         // Use a lightweight system sound for preview pop feedback
@@ -1661,11 +1665,23 @@ private struct HomePreviewSettings {
     }()
 }
 
-#Preview("HomeView") {
-    HomeBarPlacementPreview()
-        .previewDevice("iPhone 15 Pro")
+struct HomeView_Previews: PreviewProvider {
+    static var previews: some View {
+        Group {
+            LayoutAdjustmentCanvas(tab: .map)
+                .previewDisplayName("Home Layout - Map")
+
+            LayoutAdjustmentCanvas(tab: .record)
+                .previewDisplayName("Home Layout - Record")
+
+            LayoutAdjustmentCanvas(tab: .feed)
+                .previewDisplayName("Home Layout - Feed")
+
+            LayoutAdjustmentCanvas(tab: .profile)
+                .previewDisplayName("Home Layout - Profile")
+        }
         .ignoresSafeArea(.container, edges: [.bottom, .leading, .trailing])
-        .environmentObject(HomePreviewSettings.settings)
+    }
 }
 
 private extension AppTab {
@@ -1999,4 +2015,3 @@ private struct RecognizedUserCard: View {
         .padding(.horizontal, 16)
     }
 }
-

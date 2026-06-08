@@ -1679,15 +1679,84 @@ struct FeedViewHost: View {
     }
 }
 
-#Preview("FeedView with environment") {
-    FeedViewHost()
+private struct FeedTabLayoutPreview: View {
+    var body: some View {
+        ZStack {
+            Color(red: 0.06, green: 0.07, blue: 0.08)
+                .ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("United States")
+                            .font(.system(size: 26, weight: .heavy, design: .rounded))
+                            .foregroundStyle(.white)
+                        Text("Food")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(.white.opacity(0.65))
+                    }
+                    Spacer()
+                    Button {} label: {
+                        Image(systemName: "slider.horizontal.3")
+                            .font(.system(size: 20, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 44, height: 44)
+                            .background(.white.opacity(0.12), in: Circle())
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 22)
+                .padding(.bottom, 14)
+
+                ScrollView {
+                    LazyVStack(spacing: 18) {
+                        ForEach(0..<6, id: \.self) { index in
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(
+                                    LinearGradient(
+                                        colors: [
+                                            Color(hue: Double(index % 6) / 6.0, saturation: 0.36, brightness: 0.84),
+                                            Color.black.opacity(0.42)
+                                        ],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                                .frame(height: 520)
+                                .overlay(alignment: .topLeading) {
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        Text("@creator\(index + 1)")
+                                            .font(.system(size: 17, weight: .heavy, design: .rounded))
+                                        Text("\(2 + index) km away")
+                                            .font(.system(size: 13, weight: .semibold))
+                                            .opacity(0.72)
+                                    }
+                                    .foregroundStyle(.white)
+                                    .padding(16)
+                                }
+                                .overlay(alignment: .trailing) {
+                                    VStack(spacing: 18) {
+                                        Image(systemName: "heart.fill")
+                                        Image(systemName: "bubble.right.fill")
+                                        Image(systemName: "paperplane.fill")
+                                    }
+                                    .font(.system(size: 23, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .padding(.trailing, 14)
+                                }
+                        }
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 30)
+                }
+            }
+        }
+    }
 }
 
-#Preview("FeedView (basic)") {
-    FeedViewHost()
-}
-
-#Preview("FeedView iPhone 15 Pro") {
-    FeedViewHost()
-        .previewDevice("iPhone 15 Pro")
+struct FeedView_Previews: PreviewProvider {
+    static var previews: some View {
+        LayoutAdjustmentCanvas(tab: .feed)
+            .previewDisplayName("Feed Layout")
+    }
 }

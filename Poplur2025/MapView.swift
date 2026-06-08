@@ -4244,24 +4244,97 @@ struct MapViewProduction: View {
 // MARK: - Previews
 
 #if DEBUG
-#Preview("Interactive Tour with Controls") {
-    MapTourPreviewWithControls()
-        .onAppear {
-            print("🗺️ Tour preview loaded")
+private struct MapTabLayoutPreview: View {
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: [
+                    Color(red: 0.08, green: 0.13, blue: 0.12),
+                    Color(red: 0.16, green: 0.20, blue: 0.22)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+
+            Canvas { context, size in
+                let gridColor = Color.white.opacity(0.10)
+                for x in stride(from: 0, through: size.width, by: 42) {
+                    var path = Path()
+                    path.move(to: CGPoint(x: x, y: 0))
+                    path.addLine(to: CGPoint(x: x + 70, y: size.height))
+                    context.stroke(path, with: .color(gridColor), lineWidth: 1)
+                }
+                for y in stride(from: 0, through: size.height, by: 42) {
+                    var path = Path()
+                    path.move(to: CGPoint(x: 0, y: y))
+                    path.addLine(to: CGPoint(x: size.width, y: y - 54))
+                    context.stroke(path, with: .color(gridColor), lineWidth: 1)
+                }
+            }
+            .ignoresSafeArea()
+
+            ForEach(0..<9, id: \.self) { index in
+                Circle()
+                    .fill(.white.opacity(0.18))
+                    .frame(width: CGFloat(20 + (index % 3) * 7), height: CGFloat(20 + (index % 3) * 7))
+                    .overlay(Circle().stroke(.white.opacity(0.55), lineWidth: 1))
+                    .position(
+                        x: [74, 148, 246, 326, 110, 286, 210, 52, 344][index],
+                        y: [154, 238, 184, 312, 428, 500, 620, 694, 724][index]
+                    )
+            }
+
+            VStack {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Toronto")
+                            .font(.system(size: 30, weight: .heavy, design: .rounded))
+                            .foregroundStyle(.white)
+                        Text("Now playing - local radio")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.70))
+                    }
+                    Spacer()
+                    Button {} label: {
+                        Image(systemName: "location.fill")
+                            .font(.system(size: 20, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 44, height: 44)
+                            .background(.white.opacity(0.14), in: Circle())
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 28)
+
+                Spacer()
+
+                HStack {
+                    Button {} label: {
+                        Image(systemName: "minus")
+                            .frame(width: 44, height: 44)
+                    }
+                    Spacer()
+                    Button {} label: {
+                        Image(systemName: "plus")
+                            .frame(width: 44, height: 44)
+                    }
+                }
+                .font(.system(size: 20, weight: .bold))
+                .foregroundStyle(.white)
+                .backgroundStyle(.white.opacity(0.14))
+                .buttonStyle(.bordered)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 34)
+            }
         }
+    }
 }
 
-#Preview("Production MapView") {
-    MapViewProduction()
-        .onAppear {
-            print("🗺️ Production MapView loaded")
-        }
-}
-
-#Preview("Rotating Earth Globe") {
-    RotatingEarthGlobePreview()
-        .onAppear {
-            print("🌍 Globe preview loaded")
-        }
+struct MapView_Previews: PreviewProvider {
+    static var previews: some View {
+        LayoutAdjustmentCanvas(tab: .map)
+            .previewDisplayName("Map Layout")
+    }
 }
 #endif
