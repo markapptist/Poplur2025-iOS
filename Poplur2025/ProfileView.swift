@@ -1792,11 +1792,12 @@ private struct ProfileTabLayoutPreview: View {
     }
 }
 
+@MainActor
 struct ProfileView_Previews: PreviewProvider {
     static var previews: some View {
         RealTabLayoutPreviewShell(tab: .profile) {
             ProfileView()
-                .environmentObject(AuthViewModel())
+                .environmentObject(AuthViewModel(previewAuthenticated: true))
         }
         .previewDisplayName("ProfileView Real UI Layout")
     }

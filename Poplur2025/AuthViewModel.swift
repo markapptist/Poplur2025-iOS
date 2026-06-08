@@ -23,6 +23,14 @@ final class AuthViewModel: ObservableObject {
         }
     }
 
+    #if DEBUG
+    init(previewAuthenticated: Bool) {
+        self.currentUser = nil
+        self.isAuthenticated = previewAuthenticated
+        self.authHandle = nil
+    }
+    #endif
+
     deinit {
         if let handle = authHandle {
             Auth.auth().removeStateDidChangeListener(handle)

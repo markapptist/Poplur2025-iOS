@@ -882,6 +882,7 @@ private func buildTrendPopObjects(stop: PoplurTourStop, insight: AiTourInsight) 
 @MainActor
 private final class CityTourMusicPlayerService: ObservableObject {
     @Published private(set) var currentTrackTitle: String?
+    private let previewOnly: Bool
     private var player: AVPlayer?
     private var chartTrackCache: [String: [CityMusicTrack]] = [:]
     private var radioTrackCache: [String: [CityMusicTrack]] = [:]
@@ -890,7 +891,9 @@ private final class CityTourMusicPlayerService: ObservableObject {
     private var lastPlayerVolume: Float = 0.72
     private var interruptionObserver: NSObjectProtocol?
 
-    init() {
+    init(previewOnly: Bool = false) {
+        self.previewOnly = previewOnly
+        guard !previewOnly else { return }
         interruptionObserver = NotificationCenter.default.addObserver(
             forName: AVAudioSession.interruptionNotification,
             object: AVAudioSession.sharedInstance(),
@@ -909,6 +912,7 @@ private final class CityTourMusicPlayerService: ObservableObject {
     }
 
     func play(for stop: PoplurTourStop, insight: AiTourInsight?) {
+        guard !previewOnly else { return }
         loadTask?.cancel()
         loadTask = Task { [weak self] in
             guard let self else { return }
@@ -2386,7 +2390,7 @@ struct MapViewProduction: View {
     @StateObject private var locationManager = LocationProvider()
     @StateObject private var flowManager = CaptureFlowManager.shared
     @StateObject private var mapState = MapStateManager.shared
-    @StateObject private var musicPlayer = CityTourMusicPlayerService()
+    @StateObject private var musicPlayer: CityTourMusicPlayerService
     
     @State private var fixedDistanceAlt: CLLocationDistance = 700 // Start at optimal viewing distance (700m)
     @State private var camera: MapCameraPosition = .camera(
@@ -2467,7 +2471,9 @@ struct MapViewProduction: View {
         ($0.cityName, $0.coordinate, $0.description)
     }
     
-    init() {
+    init(layoutPreviewOnly: Bool = false) {
+        _musicPlayer = StateObject(wrappedValue: CityTourMusicPlayerService(previewOnly: layoutPreviewOnly))
+
         // Initialize with demo cities and posts synchronously to avoid crash
         _dominance = State(initialValue: [
             CityDominance(city: "San Francisco", coordinate: CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194), profileURL: nil),
@@ -3615,15 +3621,18 @@ struct MapViewProduction: View {
                 #endif
             }
             .onAppear {
+                guard !layoutPreviewMode else { return }
                 handleOnAppear()
             }
             .onDisappear {
                 musicPlayer.stop()
             }
             .onChange(of: locationManager.location) { _, newLocation in
+                guard !layoutPreviewMode else { return }
                 handleLocationChange(newLocation)
             }
             .onChange(of: showCubeHoldSearch) { _, isShowing in
+                guard !layoutPreviewMode else { return }
                 // Pause tour when menu is showing
                 if isShowing {
                     mapState.stopTour()
@@ -3634,6 +3643,7 @@ struct MapViewProduction: View {
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: .CubeGlobalTap)) { _ in
+                guard !layoutPreviewMode else { return }
                 // If menu is open, close it on tap; otherwise center on location
                 if showCubeHoldSearch {
                     showCubeHoldSearch = false
@@ -3654,18 +3664,22 @@ struct MapViewProduction: View {
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: .cameraCubeHoldBegan)) { notification in
+                guard !layoutPreviewMode else { return }
                 // Long press cube shows favorites/search overlay
                 print("[MapView] Cube hold began - showing favorites overlay")
                 showCubeHoldSearch = true
                 mapState.stopTour()
             }
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("CameraCubeHoldMoved"))) { notification in
+                guard !layoutPreviewMode else { return }
                 // No action during drag - slider handles zoom now
             }
             .onReceive(NotificationCenter.default.publisher(for: .cameraCubeHoldEnded)) { _ in
+                guard !layoutPreviewMode else { return }
                 // No action on end - menu stays open
             }
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("SwitchToMapTab"))) { _ in
+                guard !layoutPreviewMode else { return }
                 print("🔔 [MapView] SwitchToMapTab notification received!")
                 print("   ❌❌❌ CRITICAL: pendingPostLocation is nil!")
                 print("   ❌❌❌ This means FeedView long-press handler DID NOT RUN!")
@@ -3815,6 +3829,7 @@ struct MapViewProduction: View {
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: .CenterMapOnUser)) { _ in
+                guard !layoutPreviewMode else { return }
                 // Respect suppression/lock windows after jumping to a post location
                 if let until = lockToPostUntil, until > Date() {
                     print("⛔️ [MapView] CenterMapOnUser ignored during lockToPost window")
@@ -3827,6 +3842,7 @@ struct MapViewProduction: View {
                 centerOnUserLocation()
             }
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ShowLocationOnMap"))) { notification in
+                guard !layoutPreviewMode else { return }
                 print("🔔 [MapView] ShowLocationOnMap notification received!")
                 print("   ⚠️ THIS NOTIFICATION SHOULD HAVE POST DATA!")
                 
@@ -3991,6 +4007,7 @@ struct MapViewProduction: View {
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("SetCameraCoordinate"))) { notification in
+                guard !layoutPreviewMode else { return }
                 guard let userInfo = notification.userInfo,
                       let lat = userInfo["latitude"] as? Double,
                       let lon = userInfo["longitude"] as? Double else {
@@ -4017,6 +4034,7 @@ struct MapViewProduction: View {
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("OpenMapToSelectPostLocation"))) { notification in
+                guard !layoutPreviewMode else { return }
                 // Enter post placement mode when user wants to select location for captured media
                 guard let userInfo = notification.userInfo else { return }
                 
@@ -4033,6 +4051,7 @@ struct MapViewProduction: View {
                 print("[MapView] Entered Camera -> Map flow mode")
             }
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("CaptureComplete"))) { notification in
+                guard !layoutPreviewMode else { return }
                 // Handle when a capture completes in camera tab
                 guard let userInfo = notification.userInfo else { return }
                 
@@ -4058,9 +4077,11 @@ struct MapViewProduction: View {
                 }
             }
             .task {
+                guard !layoutPreviewMode else { return }
                 await runTourLoop()
             }
             .task {
+                guard !layoutPreviewMode else { return }
                 await runTourSubtitleLoop()
             }
     }
@@ -4397,7 +4418,7 @@ private struct MapTabLayoutPreview: View {
 struct MapView_Previews: PreviewProvider {
     static var previews: some View {
         RealTabLayoutPreviewShell(tab: .map) {
-            MapViewProduction()
+            MapViewProduction(layoutPreviewOnly: true)
         }
         .previewDisplayName("MapView Real UI Layout")
     }
