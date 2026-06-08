@@ -820,37 +820,7 @@ struct ProfileView: View {
     }
 
     private var profileLayoutSkeleton: some View {
-        ZStack {
-            Color.white.ignoresSafeArea()
-
-            Circle()
-                .fill(Color.black.opacity(0.12))
-                .frame(width: 88, height: 88)
-                .overlay(Image(systemName: "person.fill").font(.system(size: 34)).foregroundStyle(.black.opacity(0.45)))
-                .positioned(tab: .profile, control: .primaryAction)
-
-            Text(displayUsername ?? "@preview_user")
-                .font(.system(size: 24, weight: .heavy, design: .rounded))
-                .foregroundStyle(.black)
-                .positioned(tab: .profile, control: .title)
-
-            HStack(spacing: 8) {
-                Button("Media") {}
-                    .buttonStyle(.borderedProminent)
-                Button("Messages") {}
-                    .buttonStyle(.bordered)
-            }
-            .positioned(tab: .profile, control: .subtitle)
-
-            Button {} label: {
-                Image(systemName: "gearshape.fill")
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundColor(.black.opacity(0.7))
-                    .frame(width: 44, height: 44)
-            }
-            .buttonStyle(.plain)
-            .positioned(tab: .profile, control: .secondaryAction)
-        }
+        ProfileLayoutSkeleton(displayUsername: displayUsername ?? "@preview_user")
     }
 
     private var avatarRow: some View {
@@ -1685,121 +1655,52 @@ private struct QuerySnapshotProxy {
     let documents: [QueryDocumentSnapshot]
 }
 
-#if DEBUG
-import SwiftUI
+struct ProfileLayoutSkeleton: View {
+    let displayUsername: String
 
-private struct ProfileTabLayoutPreview: View {
     var body: some View {
         ZStack {
-            LinearGradient(
-                colors: [
-                    Color(red: 0.08, green: 0.09, blue: 0.12),
-                    Color(red: 0.20, green: 0.11, blue: 0.24)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
+            Color.white.ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                HStack(alignment: .center, spacing: 14) {
-                    Circle()
-                        .fill(.white.opacity(0.16))
-                        .overlay {
-                            Image(systemName: "person.crop.circle.fill")
-                                .font(.system(size: 48, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.92))
-                        }
-                        .frame(width: 92, height: 92)
+            Circle()
+                .fill(Color.black.opacity(0.12))
+                .frame(width: 88, height: 88)
+                .overlay(Image(systemName: "person.fill").font(.system(size: 34)).foregroundStyle(.black.opacity(0.45)))
+                .positioned(tab: .profile, control: .primaryAction)
 
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("@preview_user")
-                            .font(.system(size: 25, weight: .heavy, design: .rounded))
-                            .foregroundStyle(.white)
+            Text(displayUsername)
+                .font(.system(size: 24, weight: .heavy, design: .rounded))
+                .foregroundStyle(.black)
+                .positioned(tab: .profile, control: .title)
 
-                        HStack(spacing: 16) {
-                            Label("42 posts", systemImage: "square.grid.3x3.fill")
-                            Label("18.4 km", systemImage: "dot.radiowaves.left.and.right")
-                        }
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.74))
-                    }
-
-                    Spacer()
-
-                    Button {} label: {
-                        Image(systemName: "gearshape.fill")
-                            .font(.system(size: 20, weight: .bold))
-                            .foregroundStyle(.white)
-                            .frame(width: 44, height: 44)
-                            .background(.white.opacity(0.14), in: Circle())
-                    }
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 24)
-                .padding(.bottom, 18)
-
-                HStack(spacing: 10) {
-                    Button("Media") {}
-                        .buttonStyle(.borderedProminent)
-                    Button("Messages") {}
-                        .buttonStyle(.bordered)
-                    Spacer()
-                    Button {} label: {
-                        Image(systemName: "plus")
-                            .font(.system(size: 18, weight: .bold))
-                            .frame(width: 42, height: 42)
-                    }
+            HStack(spacing: 8) {
+                Button("Media") {}
+                    .buttonStyle(.borderedProminent)
+                Button("Messages") {}
                     .buttonStyle(.bordered)
-                }
-                .tint(.white)
-                .padding(.horizontal, 20)
-                .padding(.bottom, 16)
-
-                LazyVGrid(
-                    columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 3),
-                    spacing: 10
-                ) {
-                    ForEach(0..<15, id: \.self) { index in
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(
-                                LinearGradient(
-                                    colors: [
-                                        Color(hue: Double(index % 8) / 8.0, saturation: 0.42, brightness: 0.86),
-                                        .white.opacity(0.16)
-                                    ],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                            .aspectRatio(1, contentMode: .fit)
-                            .overlay(alignment: .bottomLeading) {
-                                Text("\(index + 1) km")
-                                    .font(.system(size: 11, weight: .heavy, design: .rounded))
-                                    .foregroundStyle(.white)
-                                    .padding(.horizontal, 7)
-                                    .padding(.vertical, 4)
-                                    .background(.black.opacity(0.36), in: Capsule())
-                                    .padding(7)
-                            }
-                    }
-                }
-                .padding(.horizontal, 20)
-
-                Spacer(minLength: 0)
             }
+            .positioned(tab: .profile, control: .subtitle)
+
+            Button {} label: {
+                Image(systemName: "gearshape.fill")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundColor(.black.opacity(0.7))
+                    .frame(width: 44, height: 44)
+            }
+            .buttonStyle(.plain)
+            .positioned(tab: .profile, control: .secondaryAction)
         }
     }
 }
 
+#if DEBUG
 @MainActor
 struct ProfileView_Previews: PreviewProvider {
     static var previews: some View {
         RealTabLayoutPreviewShell(tab: .profile) {
-            ProfileView()
-                .environmentObject(AuthViewModel(previewAuthenticated: true))
+            ProfileLayoutSkeleton(displayUsername: "@preview_user")
         }
-        .previewDisplayName("ProfileView Real UI Layout")
+        .previewDisplayName("Profile UI Layout")
     }
 }
 #endif
