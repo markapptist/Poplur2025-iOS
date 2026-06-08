@@ -17,6 +17,7 @@ private var isRunningInPreviews: Bool {
 }
 
 struct ProfileView: View {
+    @Environment(\.layoutPreviewMode) private var layoutPreviewMode
     @EnvironmentObject private var auth: AuthViewModel
     @GestureState private var isInteractingWithCube: Bool = false
     @State private var isScrollDisabled = false
@@ -173,7 +174,11 @@ struct ProfileView: View {
         }
     }
 
+    @ViewBuilder
     var body: some View {
+        if layoutPreviewMode {
+            profileLayoutSkeleton
+        } else {
         ZStack {
             Color.white.ignoresSafeArea()
 
@@ -812,6 +817,41 @@ struct ProfileView: View {
             }
             .id(viewID) // Force recreation when viewing different user
         }
+    }
+
+    private var profileLayoutSkeleton: some View {
+        ZStack {
+            Color.white.ignoresSafeArea()
+
+            Circle()
+                .fill(Color.black.opacity(0.12))
+                .frame(width: 88, height: 88)
+                .overlay(Image(systemName: "person.fill").font(.system(size: 34)).foregroundStyle(.black.opacity(0.45)))
+                .positioned(tab: .profile, control: .primaryAction)
+
+            Text(displayUsername ?? "@preview_user")
+                .font(.system(size: 24, weight: .heavy, design: .rounded))
+                .foregroundStyle(.black)
+                .positioned(tab: .profile, control: .title)
+
+            HStack(spacing: 8) {
+                Button("Media") {}
+                    .buttonStyle(.borderedProminent)
+                Button("Messages") {}
+                    .buttonStyle(.bordered)
+            }
+            .positioned(tab: .profile, control: .subtitle)
+
+            Button {} label: {
+                Image(systemName: "gearshape.fill")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundColor(.black.opacity(0.7))
+                    .frame(width: 44, height: 44)
+            }
+            .buttonStyle(.plain)
+            .positioned(tab: .profile, control: .secondaryAction)
+        }
+    }
 
     private var avatarRow: some View {
         Group {
@@ -1754,8 +1794,11 @@ private struct ProfileTabLayoutPreview: View {
 
 struct ProfileView_Previews: PreviewProvider {
     static var previews: some View {
-        LayoutAdjustmentCanvas(tab: .profile)
-            .previewDisplayName("Profile Layout")
+        RealTabLayoutPreviewShell(tab: .profile) {
+            ProfileView()
+                .environmentObject(AuthViewModel())
+        }
+        .previewDisplayName("ProfileView Real UI Layout")
     }
 }
 #endif

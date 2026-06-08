@@ -18,6 +18,8 @@ import GoogleMobileAds
 // 5. ZERO BLOCKING: All data generation is lightweight array construction (< 1ms)
 
 struct FeedView: View {
+    @Environment(\.layoutPreviewMode) private var layoutPreviewMode
+
     @StateObject private var fallbackLocationProvider = LocationProvider()
     @StateObject private var poleModel = PolePositionModel()
     private var activeLocationProvider: LocationProvider { fallbackLocationProvider }
@@ -163,7 +165,9 @@ struct FeedView: View {
                 Color.black.ignoresSafeArea()
                 
                 // Show either timeline or feed, not both
-                if showTimelineView {
+                if layoutPreviewMode {
+                    feedLayoutSkeleton(in: geo.size)
+                } else if showTimelineView {
                     // Twitter-style timeline (vertical scrolling with infinite feed)
                     FeedTwitterTimelineView(
                         posts: posts,
@@ -208,6 +212,7 @@ struct FeedView: View {
             .background(Color.black)
         }
         .task {
+            guard !layoutPreviewMode else { return }
             // INSTANT: Bootstrap on appear without async overhead
             guard didBootstrap == false else { return }
             didBootstrap = true
@@ -283,6 +288,7 @@ struct FeedView: View {
             RadiusBarAnimator.showPostRadius(post.radius, duration: 0.6)
         }
         .onAppear {
+            guard !layoutPreviewMode else { return }
             // Removed duplicate reload here as per instruction
             hapticGenerator.prepare()
             notifHaptics.prepare()
@@ -403,6 +409,55 @@ struct FeedView: View {
                 self.stopStaticSound()
             }
         }
+    }
+
+    private func feedLayoutSkeleton(in size: CGSize) -> some View {
+        ZStack {
+            LinearGradient(
+                colors: [
+                    Color(red: 0.03, green: 0.03, blue: 0.04),
+                    Color(red: 0.12, green: 0.13, blue: 0.16)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+
+            RoundedRectangle(cornerRadius: 0)
+                .fill(.white.opacity(0.08))
+                .overlay {
+                    VStack(spacing: 10) {
+                        Image(systemName: "play.rectangle.fill")
+                            .font(.system(size: 54, weight: .bold))
+                        Text("Feed media area")
+                            .font(.headline)
+                    }
+                    .foregroundStyle(.white.opacity(0.72))
+                }
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(countries[selectedCountryIndex].name)
+                    .font(.system(size: 18, weight: .heavy, design: .rounded))
+                Text(channels[selectedChannelIndex].name)
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
+            .background(.black.opacity(0.36), in: Capsule())
+            .positioned(tab: .feed, control: .title)
+
+            Button {} label: {
+                Image(systemName: "slider.horizontal.3")
+                    .font(.system(size: 19, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 44, height: 44)
+                    .background(.black.opacity(0.36), in: Circle())
+            }
+            .buttonStyle(.plain)
+            .positioned(tab: .feed, control: .secondaryAction)
+        }
+        .frame(width: size.width, height: size.height)
     }
 
     // MARK: - Strict bootstrap sequence
@@ -1756,7 +1811,9 @@ private struct FeedTabLayoutPreview: View {
 
 struct FeedView_Previews: PreviewProvider {
     static var previews: some View {
-        LayoutAdjustmentCanvas(tab: .feed)
-            .previewDisplayName("Feed Layout")
+        RealTabLayoutPreviewShell(tab: .feed) {
+            FeedView()
+        }
+        .previewDisplayName("FeedView Real UI Layout")
     }
 }

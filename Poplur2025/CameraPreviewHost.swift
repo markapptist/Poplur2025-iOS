@@ -151,9 +151,11 @@ private struct RecordTabPreview: View {
 
 struct RecordTab_Previews: PreviewProvider {
     static var previews: some View {
-        LayoutAdjustmentCanvas(tab: .record)
-            .ignoresSafeArea()
-            .previewDisplayName("Record Layout")
+        RealTabLayoutPreviewShell(tab: .record) {
+            HomeBarPlacementPreview(initialTab: .record)
+                .environmentObject(HomePreviewSettings.settings)
+        }
+        .previewDisplayName("Record Real UI Layout")
     }
 }
 #endif

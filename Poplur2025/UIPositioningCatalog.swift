@@ -143,6 +143,17 @@ public enum UIPositionsConfig {
     ]
 }
 
+private struct LayoutPreviewModeKey: EnvironmentKey {
+    static let defaultValue: Bool = false
+}
+
+public extension EnvironmentValues {
+    var layoutPreviewMode: Bool {
+        get { self[LayoutPreviewModeKey.self] }
+        set { self[LayoutPreviewModeKey.self] = newValue }
+    }
+}
+
 public final class UIPositioningCatalog: @unchecked Sendable {
     public static let shared = UIPositioningCatalog()
 
@@ -238,88 +249,129 @@ public extension View {
 }
 
 #if DEBUG
-private struct UIPositioningCatalogPreviewCanvas: View {
-    @State private var selectedTab: TabID = .map
-    @State private var showGrid = true
-    @State private var scale: CGFloat = 1.0
+struct RealTabLayoutPreviewShell<Content: View>: View {
+    let tab: TabID
+    let content: Content
+
+    @State private var selectedControl: ControlID = .title
+    @State private var xOffset: Double = 0
+    @State private var yOffset: Double = 0
+    @State private var scale: Double = 1
+    @State private var refreshID = UUID()
+
+    init(tab: TabID, @ViewBuilder content: () -> Content) {
+        self.tab = tab
+        self.content = content()
+    }
 
     var body: some View {
-        VStack(spacing: 12) {
-            HStack(spacing: 12) {
-                Picker("Tab", selection: $selectedTab) {
-                    ForEach(TabID.allCases, id: \.self) { tab in
-                        Text(tab.rawValue.capitalized).tag(tab)
-                    }
+        VStack(spacing: 0) {
+            content
+                .environment(\.layoutPreviewMode, true)
+                .frame(width: 390, height: 844)
+                .clipped()
+                .id(refreshID)
+                .overlay(alignment: .topTrailing) {
+                    gridToggleHint
                 }
-                .pickerStyle(.segmented)
+                .onAppear(perform: loadSelectedPosition)
+                .onChange(of: selectedControl) { _ in loadSelectedPosition() }
 
-                Toggle("Grid", isOn: $showGrid)
-            }
-            .padding(.horizontal)
-
-            HStack {
-                Text("Scale")
-                Slider(value: $scale, in: 0.8...1.4, step: 0.05)
-                    .onChange(of: scale) { _, value in
-                        UIPositioningCatalog.shared.globalScale = value
-                    }
-            }
-            .padding(.horizontal)
-
-            ZStack {
-                RoundedRectangle(cornerRadius: 20)
-                    .fill(Color(uiColor: .systemBackground))
-                    .shadow(radius: 4)
-
-                if showGrid {
-                    Canvas { context, size in
-                        var path = Path()
-                        for x in stride(from: 0, through: size.width, by: CGFloat(20)) {
-                            path.move(to: CGPoint(x: x, y: 0))
-                            path.addLine(to: CGPoint(x: x, y: size.height))
-                        }
-                        for y in stride(from: 0, through: size.height, by: CGFloat(20)) {
-                            path.move(to: CGPoint(x: 0, y: y))
-                            path.addLine(to: CGPoint(x: size.width, y: y))
-                        }
-                        context.stroke(path, with: .color(.gray.opacity(0.15)), lineWidth: 0.5)
-                    }
-                    .allowsHitTesting(false)
-                }
-
-                Text("Title")
-                    .font(.title3.weight(.semibold))
-                    .padding(8)
-                    .background(.ultraThinMaterial, in: Capsule())
-                    .positioned(tab: selectedTab, control: .title)
-
-                Text("Subtitle")
-                    .font(.footnote)
-                    .padding(6)
-                    .background(.thinMaterial, in: Capsule())
-                    .opacity(UIPositioningCatalog.shared.position(for: .subtitle, in: selectedTab) == nil ? 0 : 1)
-                    .positioned(tab: selectedTab, control: .subtitle)
-
-                Button("Primary Action") {}
-                    .buttonStyle(.borderedProminent)
-                    .positioned(tab: selectedTab, control: .primaryAction)
-
-                Button("Secondary") {}
-                    .buttonStyle(.bordered)
-                    .positioned(tab: selectedTab, control: .secondaryAction)
-            }
-            .padding()
+            controls
+                .padding(12)
+                .background(Color(uiColor: .secondarySystemBackground))
         }
-        .onAppear {
-            UIPositioningCatalog.shared.globalScale = scale
+        .frame(width: 430)
+    }
+
+    private var controls: some View {
+        VStack(spacing: 10) {
+            Picker("Control", selection: $selectedControl) {
+                Text("Title").tag(ControlID.title)
+                Text("Subtitle").tag(ControlID.subtitle)
+                Text("Primary").tag(ControlID.primaryAction)
+                Text("Secondary").tag(ControlID.secondaryAction)
+            }
+            .pickerStyle(.segmented)
+
+            valueEditor("X", value: $xOffset, range: -260...260)
+            valueEditor("Y", value: $yOffset, range: -520...520)
+            valueEditor("Scale", value: $scale, range: 0.5...1.6, step: 0.05)
         }
     }
-}
 
-#Preview("UI Positions Catalog Preview") {
-    UIPositioningCatalogPreviewCanvas()
-        .frame(width: 390, height: 780)
-        .padding()
-        .background(Color(uiColor: .secondarySystemBackground))
+    private var gridToggleHint: some View {
+        Image(systemName: "scope")
+            .font(.system(size: 13, weight: .bold))
+            .foregroundStyle(.white)
+            .padding(8)
+            .background(.black.opacity(0.38), in: Circle())
+            .padding(10)
+    }
+
+    private func valueEditor(
+        _ title: String,
+        value: Binding<Double>,
+        range: ClosedRange<Double>,
+        step: Double = 1
+    ) -> some View {
+        HStack(spacing: 10) {
+            Text(title)
+                .font(.caption.weight(.bold))
+                .frame(width: 48, alignment: .leading)
+            Slider(
+                value: Binding(
+                    get: { value.wrappedValue },
+                    set: {
+                        value.wrappedValue = $0
+                        applySelectedPosition()
+                    }
+                ),
+                in: range,
+                step: step
+            )
+            TextField(
+                title,
+                value: Binding(
+                    get: { value.wrappedValue },
+                    set: {
+                        value.wrappedValue = min(max($0, range.lowerBound), range.upperBound)
+                        applySelectedPosition()
+                    }
+                ),
+                format: .number.precision(.fractionLength(step < 1 ? 2 : 0))
+            )
+            .font(.caption.monospacedDigit())
+            .multilineTextAlignment(.trailing)
+            .keyboardType(.numbersAndPunctuation)
+            .textFieldStyle(.roundedBorder)
+            .frame(width: 64)
+        }
+    }
+
+    private func loadSelectedPosition() {
+        let position = UIPositioningCatalog.shared.position(for: selectedControl, in: tab)
+            ?? UIPosition(alignment: .center)
+        xOffset = position.offset.width
+        yOffset = position.offset.height
+        scale = position.scale
+    }
+
+    private func applySelectedPosition() {
+        let existing = UIPositioningCatalog.shared.position(for: selectedControl, in: tab)
+            ?? UIPosition(alignment: .center)
+        UIPositioningCatalog.shared.register(
+            UIPosition(
+                alignment: existing.alignment,
+                offset: CGSize(width: xOffset, height: yOffset),
+                padding: existing.padding,
+                zIndex: existing.zIndex,
+                scale: scale
+            ),
+            for: selectedControl,
+            in: tab
+        )
+        refreshID = UUID()
+    }
 }
 #endif

@@ -2381,6 +2381,8 @@ private struct CubeHoldSearchOverlay: View {
 
 /// The main MapView used in the app - shows map with AI recommendations and navigation
 struct MapViewProduction: View {
+    @Environment(\.layoutPreviewMode) private var layoutPreviewMode
+
     @StateObject private var locationManager = LocationProvider()
     @StateObject private var flowManager = CaptureFlowManager.shared
     @StateObject private var mapState = MapStateManager.shared
@@ -3520,10 +3522,14 @@ struct MapViewProduction: View {
     private var mapContentLayer: some View {
         ZStack {
             // Main Map Layer - Same settings as interactive preview
-            mapView
-                .ignoresSafeArea()
-                .contentShape(Rectangle())
-                .simultaneousGesture(dragGesture)
+            if layoutPreviewMode {
+                mapLayoutSkeleton
+            } else {
+                mapView
+                    .ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .simultaneousGesture(dragGesture)
+            }
             
             // Top navigation buttons
             navigationButtons
@@ -3535,6 +3541,63 @@ struct MapViewProduction: View {
             #if DEBUG
             weatherControlsOverlay
             #endif
+        }
+    }
+
+    private var mapLayoutSkeleton: some View {
+        ZStack {
+            LinearGradient(
+                colors: [
+                    Color(red: 0.05, green: 0.08, blue: 0.10),
+                    Color(red: 0.14, green: 0.18, blue: 0.20)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+
+            Canvas { context, size in
+                var path = Path()
+                for x in stride(from: CGFloat(0), through: size.width, by: 24) {
+                    path.move(to: CGPoint(x: x, y: 0))
+                    path.addLine(to: CGPoint(x: x, y: size.height))
+                }
+                for y in stride(from: CGFloat(0), through: size.height, by: 24) {
+                    path.move(to: CGPoint(x: 0, y: y))
+                    path.addLine(to: CGPoint(x: size.width, y: y))
+                }
+                context.stroke(path, with: .color(.white.opacity(0.08)), lineWidth: 0.5)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(currentCity)
+                    .font(.headline)
+                Text(aiRecommendation)
+                    .font(.subheadline)
+                    .lineLimit(2)
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(.black.opacity(0.28), in: Capsule())
+            .positioned(tab: .map, control: .title)
+
+            AnimatedZoomSlider(zoomLevel: $zoomLevel) { newZoom in
+                zoomLevel = newZoom
+            }
+            .frame(width: 60, height: 400)
+            .positioned(tab: .map, control: .secondaryAction)
+
+            Button {} label: {
+                Label("Post Here", systemImage: "camera.fill")
+                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 12)
+                    .background(Color.indigo, in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .positioned(tab: .map, control: .primaryAction)
         }
     }
     
@@ -4333,8 +4396,10 @@ private struct MapTabLayoutPreview: View {
 
 struct MapView_Previews: PreviewProvider {
     static var previews: some View {
-        LayoutAdjustmentCanvas(tab: .map)
-            .previewDisplayName("Map Layout")
+        RealTabLayoutPreviewShell(tab: .map) {
+            MapViewProduction()
+        }
+        .previewDisplayName("MapView Real UI Layout")
     }
 }
 #endif

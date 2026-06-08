@@ -1329,7 +1329,7 @@ private struct CubeAndBarOverlay: View {
     }
 }
 
-private struct HomeBarPlacementPreview: View {
+struct HomeBarPlacementPreview: View {
     @State private var radius: Double = 0
     //@StateObject private var tuning = BarCubePreviewTuning() // Removed tuning usage
     
@@ -1653,7 +1653,7 @@ private struct HomeBarPlacementPreview: View {
     }
 }
 
-private struct HomePreviewSettings {
+struct HomePreviewSettings {
     static let settings: IsometricBarSettings = {
         let s = IsometricBarSettings()
         s.horizontalOffset = 40
@@ -1668,17 +1668,18 @@ private struct HomePreviewSettings {
 struct HomeView_Previews: PreviewProvider {
     static var previews: some View {
         Group {
-            LayoutAdjustmentCanvas(tab: .map)
-                .previewDisplayName("Home Layout - Map")
+            RealTabLayoutPreviewShell(tab: .record) {
+                HomeBarPlacementPreview(initialTab: .record)
+                    .environmentObject(HomePreviewSettings.settings)
+            }
+            .previewDisplayName("Home Real UI Layout - Record")
 
-            LayoutAdjustmentCanvas(tab: .record)
-                .previewDisplayName("Home Layout - Record")
+            RealTabLayoutPreviewShell(tab: .map) {
+                HomeBarPlacementPreview(initialTab: .map)
+                    .environmentObject(HomePreviewSettings.settings)
+            }
+            .previewDisplayName("Home Real UI Layout - Map")
 
-            LayoutAdjustmentCanvas(tab: .feed)
-                .previewDisplayName("Home Layout - Feed")
-
-            LayoutAdjustmentCanvas(tab: .profile)
-                .previewDisplayName("Home Layout - Profile")
         }
         .ignoresSafeArea(.container, edges: [.bottom, .leading, .trailing])
     }
