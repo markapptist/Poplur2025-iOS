@@ -84,20 +84,10 @@ struct Poplur2025App: App {
                     HomeView(cameraController: cameraController)
                         .environmentObject(auth)
                         .environmentObject(isometricBarSettings)
-                        .task {
-                            if !PreviewEnv.isPreview {
-                                await prewarmCameraIfAllowed()
-                            }
-                        }
                 } else {
                     WelcomeView()
                         .environmentObject(auth)
                         .environmentObject(isometricBarSettings)
-                        .task {
-                            if !PreviewEnv.isPreview {
-                                await prewarmCameraIfAllowed()
-                            }
-                        }
                 }
             }
             .onAppear {
@@ -113,16 +103,16 @@ struct Poplur2025App: App {
             }
             .task {
                 // Stagger SceneKit prewarm slightly after first frame
-                try? await Task.sleep(nanoseconds: 200_000_000)
+                try? await Task.sleep(nanoseconds: 2_500_000_000)
                 if !PreviewEnv.isPreview {
                     await SceneKitPrewarmer.prewarmIfNeeded()
                 }
             }
             .task {
                 // Stagger camera prewarm a bit later
-                try? await Task.sleep(nanoseconds: 400_000_000)
+                try? await Task.sleep(nanoseconds: 4_000_000_000)
                 if !PreviewEnv.isPreview {
-                    await prewarmCameraIfAllowed()
+                    await prewarmCameraIfAlreadyAuthorized()
                 }
             }
         }
@@ -130,34 +120,8 @@ struct Poplur2025App: App {
 
     // MARK: - Camera + Microphone prewarm
 
-    private func prewarmCameraIfAllowed() async {
-        // Request camera first
-        let camStatus = AVCaptureDevice.authorizationStatus(for: .video)
-        var cameraGranted = (camStatus == .authorized)
-
-        if camStatus == .notDetermined {
-            cameraGranted = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
-                AVCaptureDevice.requestAccess(for: .video) { ok in
-                    cont.resume(returning: ok)
-                }
-            }
-        }
-
-        guard cameraGranted else { return }
-
-        // Request microphone for video recording with audio
-        let micStatus = AVCaptureDevice.authorizationStatus(for: .audio)
-        var micGranted = (micStatus == .authorized)
-        if micStatus == .notDetermined {
-            micGranted = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
-                AVCaptureDevice.requestAccess(for: .audio) { ok in
-                    cont.resume(returning: ok)
-                }
-            }
-        }
-        // Even if mic is denied, we can still start the camera; recording may be silent.
-
+    private func prewarmCameraIfAlreadyAuthorized() async {
+        guard AVCaptureDevice.authorizationStatus(for: .video) == .authorized else { return }
         await cameraController.start()
     }
 }
-
