@@ -176,7 +176,7 @@ struct HomeView: View {
     @ObservedObject var cameraController: CameraKitController
     
     // AR Filters
-    @StateObject private var arFilterManager = ARFilterManager()
+    @State private var arFilterManager: ARFilterManager?
     @State private var showARFilters = false
     
     // One-time flags to avoid doing heavy work repeatedly
@@ -194,7 +194,7 @@ struct HomeView: View {
     @StateObject private var isometricBarModel = IsometricBarModel(radius: 0)
     
     // User recognition manager for face detection
-    @StateObject private var userRecognitionManager = UserRecognitionManager()
+    @State private var userRecognitionManager: UserRecognitionManager?
     
     @StateObject private var motionController = SceneMotionController()
     @StateObject private var cubeTouchConfig = CubeTouchConfiguration()
@@ -303,12 +303,13 @@ struct HomeView: View {
                 let status = AVCaptureDevice.authorizationStatus(for: .video)
                 switch status {
                 case .authorized:
+                    let support = ensureRecordSupportManagers()
                     await cameraController.resumePreviewAfterInterruption()
                     
                     // 🆕 Setup AR filter support
                     if let cameraVC = cameraController.recordPreviewViewController as? CameraPreviewViewController {
                         cameraController.setupARFilterSupport(
-                            filterManager: arFilterManager,
+                            filterManager: support.filterManager,
                             displayLayer: cameraVC.displayLayer!
                         )
                     }
@@ -317,12 +318,12 @@ struct HomeView: View {
                     cameraController.enableMLDetection()
                     
                     // Setup user recognition callback
-                    cameraController.mlDetectionManager?.onFrameProcessed = { [weak userRecognitionManager] pixelBuffer, objects in
-                        userRecognitionManager?.processDetectedObjects(objects, from: pixelBuffer)
+                    cameraController.mlDetectionManager?.onFrameProcessed = { [weak recognitionManager = support.recognitionManager] pixelBuffer, objects in
+                        recognitionManager?.processDetectedObjects(objects, from: pixelBuffer)
                     }
                     
                     // Start recognition session to pre-load user radius
-                    await userRecognitionManager.startRecognitionSession()
+                    await support.recognitionManager.startRecognitionSession()
                 case .notDetermined:
                     // Do not prompt on appear; let user interaction trigger request
                     break
@@ -334,10 +335,10 @@ struct HomeView: View {
         .onDisappear {
             // Disable ML detection when leaving camera tab
             cameraController.disableMLDetection()
-            userRecognitionManager.clearRecognition()
+            userRecognitionManager?.clearRecognition()
             // Reset filters and flag when leaving camera tab
             showARFilters = false
-            arFilterManager.activeFilter = .none
+            arFilterManager?.activeFilter = .none
             UserDefaults.standard.set(false, forKey: "ARFiltersShown")
         }
     }
@@ -364,8 +365,22 @@ struct HomeView: View {
         }
     }
 
+    @MainActor
+    private func ensureRecordSupportManagers() -> (filterManager: ARFilterManager, recognitionManager: UserRecognitionManager) {
+        if arFilterManager == nil {
+            arFilterManager = ARFilterManager()
+        }
+        if userRecognitionManager == nil {
+            userRecognitionManager = UserRecognitionManager()
+        }
+        return (arFilterManager!, userRecognitionManager!)
+    }
+
     private func deferUntilAfterLaunch(_ work: @escaping @Sendable () async -> Void) {
-        launchGate.afterGate(work)
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 650_000_000)
+            await work()
+        }
     }
     
     private func startRecordHoldRamp() {
@@ -631,7 +646,7 @@ struct HomeView: View {
             }
             
             // AR Filter Selector above cube (Snapchat-style)
-            if showARFilters && selectedTab == .record {
+            if showARFilters && selectedTab == .record, let arFilterManager {
                 VStack(spacing: 0) {
                     // Transparent spacer that allows touches to pass through
                     Color.clear
@@ -979,6 +994,9 @@ struct HomeView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ToggleARFilters"))) { _ in
                 withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                    if selectedTab == .record {
+                        _ = ensureRecordSupportManagers()
+                    }
                     showARFilters.toggle()
                     UserDefaults.standard.set(showARFilters, forKey: "ARFiltersShown")
                     NotificationCenter.default.post(

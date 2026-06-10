@@ -290,6 +290,24 @@ class PinTrendingTracker: ObservableObject {
         trendingPins.removeAll { $0.id == id }
         pinHistory.removeValue(forKey: id)
     }
+
+    /// Immediately mark a coordinate as trending so visual bursts can happen without waiting for history.
+    func forceTrendingBurst(id: UUID = UUID(), coordinate: CLLocationCoordinate2D, intensity: Double = 1.0) {
+        let previousRadius = 80.0
+        let radius = previousRadius * (1.0 + max(0.2, intensity))
+        let pin = TrendingPin(
+            id: id,
+            coordinate: coordinate,
+            radius: radius,
+            previousRadius: previousRadius,
+            trendingScore: intensity.clamped(to: 0.6...1.0)
+        )
+        trendingPins.append(pin)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) { [weak self] in
+            self?.removePin(id: id)
+        }
+    }
     
     /// Calculate trending score based on growth rate and velocity
     private func calculateTrendingScore(for id: UUID) -> Double {

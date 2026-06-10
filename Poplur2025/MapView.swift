@@ -34,7 +34,7 @@ import AudioToolbox
 import SpriteKit
 
 struct WeatherVisualizationState {
-    enum Kind { case rain, thunderstorms, cloudy, snow }
+    enum Kind: Equatable { case rain, thunderstorms, cloudy, snow }
     var kind: Kind
     var intensity: Double // 0..1
     var lightningFrequency: Double // 0..1
@@ -881,20 +881,20 @@ private func buildTrendPopObjects(stop: PoplurTourStop, insight: AiTourInsight) 
 
 private func buildTrendPopObjects(center: CLLocationCoordinate2D, cityName: String, insight: AiTourInsight) -> [TrendPopObject] {
     let seed = stableTourSeed(parts: cityName, insight.id, insight.category.rawValue)
-    let count = 6 + seed % 5
-    let lngScale = 0.0024
-    let latScale = 0.0018
+    let count = 12 + seed % 7
+    let lngScale = 0.0032
+    let latScale = 0.0025
 
     return (0..<count).map { index in
         let angle = 2.0 * Double.pi * Double(index) / Double(count) + Double(seed % 180) * Double.pi / 180.0
-        let radius = 0.42 + Double((index * 31 + seed) % 100) / 170.0
+        let radius = 0.34 + Double((index * 31 + seed) % 120) / 145.0
         return TrendPopObject(
             coordinate: CLLocationCoordinate2D(
                 latitude: center.latitude + sin(angle) * latScale * radius,
                 longitude: center.longitude + cos(angle) * lngScale * radius
             ),
-            scale: 0.82 + CGFloat((index * 13 + seed) % 24) / 100.0,
-            delay: Double(index) * 0.18,
+            scale: 0.92 + CGFloat((index * 13 + seed) % 30) / 100.0,
+            delay: Double(index) * 0.1,
             seed: (seed + index * 83) % 1_000_000
         )
     }
@@ -911,6 +911,116 @@ private func makeLocalTrendInsight(for cityName: String) -> AiTourInsight {
     ]
     let index = stableTourSeed(parts: cityName, "\(now)") % options.count
     return options[index]
+}
+
+@MainActor
+private final class RainAmbientAudioService: ObservableObject {
+    private var player: AVAudioPlayer?
+
+    func update(for weatherState: WeatherVisualizationState) {
+        switch weatherState.kind {
+        case .rain, .thunderstorms:
+            play(volume: rainVolume(for: weatherState))
+        case .cloudy, .snow:
+            stop()
+        }
+    }
+
+    func play(volume: Float) {
+        if let player, player.isPlaying {
+            player.setVolume(volume, fadeDuration: 0.25)
+            return
+        }
+        do {
+            let url = try rainLoopURL()
+            try configureAudioSession()
+            let player = try AVAudioPlayer(contentsOf: url)
+            player.numberOfLoops = -1
+            player.volume = volume
+            player.prepareToPlay()
+            player.play()
+            self.player = player
+        } catch {
+            print("[RainAmbientAudio] Failed to start rain audio: \(error)")
+        }
+    }
+
+    private func rainVolume(for state: WeatherVisualizationState) -> Float {
+        let clampedIntensity = max(0, min(1, state.intensity))
+        let baseVolume = state.kind == .thunderstorms ? 0.42 : 0.34
+        return Float(baseVolume + clampedIntensity * 0.28)
+    }
+
+    func stop() {
+        player?.fadeOutAndStop()
+        player = nil
+    }
+
+    private func configureAudioSession() throws {
+        let session = AVAudioSession.sharedInstance()
+        try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+        try session.setActive(true, options: [])
+    }
+
+    private func rainLoopURL() throws -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("poplur-rain-ambient-v2.wav")
+        if FileManager.default.fileExists(atPath: url.path) {
+            return url
+        }
+
+        let sampleRate = 22_050
+        let durationSeconds = 3
+        let sampleCount = sampleRate * durationSeconds
+        var data = Data()
+
+        func appendUInt16(_ value: UInt16) {
+            var littleEndian = value.littleEndian
+            data.append(Data(bytes: &littleEndian, count: MemoryLayout<UInt16>.size))
+        }
+
+        func appendUInt32(_ value: UInt32) {
+            var littleEndian = value.littleEndian
+            data.append(Data(bytes: &littleEndian, count: MemoryLayout<UInt32>.size))
+        }
+
+        data.append("RIFF".data(using: .ascii)!)
+        appendUInt32(UInt32(36 + sampleCount * 2))
+        data.append("WAVEfmt ".data(using: .ascii)!)
+        appendUInt32(16)
+        appendUInt16(1)
+        appendUInt16(1)
+        appendUInt32(UInt32(sampleRate))
+        appendUInt32(UInt32(sampleRate * 2))
+        appendUInt16(2)
+        appendUInt16(16)
+        data.append("data".data(using: .ascii)!)
+        appendUInt32(UInt32(sampleCount * 2))
+
+        var seed: UInt64 = 0xD00D_CA7E
+        var lowPass = 0.0
+        for index in 0..<sampleCount {
+            seed = 6364136223846793005 &* seed &+ 1
+            let raw = Double((seed >> 33) & 0x7fff_ffff) / Double(Int32.max)
+            let white = raw * 2.0 - 1.0
+            lowPass = lowPass * 0.82 + white * 0.18
+            let shimmer = sin(Double(index) * 0.013) * 0.05
+            let sample = max(-1.0, min(1.0, lowPass * 0.68 + shimmer))
+            var pcm = Int16(sample * Double(Int16.max) * 0.72).littleEndian
+            data.append(Data(bytes: &pcm, count: MemoryLayout<Int16>.size))
+        }
+
+        try data.write(to: url, options: .atomic)
+        return url
+    }
+}
+
+private extension AVAudioPlayer {
+    func fadeOutAndStop() {
+        setVolume(0, fadeDuration: 0.35)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            self?.stop()
+        }
+    }
 }
 
 @MainActor
@@ -2462,8 +2572,10 @@ struct MapViewProduction: View {
     @State private var musicWaveFrame: Int = 0
     @State private var showTourNowPlayingText: Bool = true
     @State private var locationContextTask: Task<Void, Never>? = nil
+    @State private var liveUserCoordinate: CLLocationCoordinate2D? = nil
 
     private let mapZoomSliderHeight: CGFloat = 400
+    private let mapLeftOverlayPadding: CGFloat = 28
     
     @State private var longPressLocation: CGPoint? = nil  // Track long press location
     @State private var selectedCoordinate: CLLocationCoordinate2D? = nil  // Track selected coordinate for long-press
@@ -2495,14 +2607,14 @@ struct MapViewProduction: View {
     @State private var cubeHoldStartY: CGFloat? = nil // Track cube hold drag start position
     @State private var initialZoomLevel: Double = 700 // Store zoom level when cube hold starts
     
-    // Weather overlay state (DEBUG ONLY)
-    #if DEBUG
+    // Weather overlay state
     @State private var weatherState = WeatherVisualizationState(
         kind: .rain,
         intensity: 0.5,
         lightningFrequency: 0.3
     )
-    #endif
+    @State private var weatherBadgePulse = false
+    @StateObject private var rainAmbientAudio = RainAmbientAudioService()
     
     // Available in both Debug and Release for tour functionality
     let tourPlaces: [(name: String, coordinate: CLLocationCoordinate2D, description: String)] = PoplurTourStops.map {
@@ -2807,6 +2919,15 @@ struct MapViewProduction: View {
         localTrendInsight = insight
         aiRecommendation = insight.subtitle
         trendPopObjects = buildTrendPopObjects(center: coordinate, cityName: titleCity, insight: insight)
+        emitLocalTrendConfetti(center: coordinate, objects: trendPopObjects)
+    }
+
+    private func emitLocalTrendConfetti(center: CLLocationCoordinate2D, objects: [TrendPopObject]) {
+        showConfetti = true
+        trendingTracker.forceTrendingBurst(coordinate: center, intensity: 1.0)
+        for object in objects.prefix(7) {
+            trendingTracker.forceTrendingBurst(coordinate: object.coordinate, intensity: 0.85)
+        }
     }
 
     private func nearestTourCityName(to coordinate: CLLocationCoordinate2D) -> String? {
@@ -2969,7 +3090,7 @@ struct MapViewProduction: View {
                     interactionModes: [.pan, .rotate, .pitch, .zoom]
                 ) {
                 // Show user annotation with 3D blue pin when location is available
-                if let userCoord = locationManager.location?.coordinate {
+                if let userCoord = liveUserCoordinate ?? locationManager.location?.coordinate {
                     Annotation("", coordinate: userCoord) {
                         Enhanced3DBeaconMarker(color: Color.blue, intensity: 0.9)
                             .frame(width: 100, height: 120)
@@ -3448,12 +3569,11 @@ struct MapViewProduction: View {
                         updateMapZoom(to: newZoom)
                     }
                     .frame(width: 60, height: mapZoomSliderHeight)
-                    .padding(.leading, 12)
                     .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 2)
 
                     Spacer()
                 }
-                .padding(.leading, proxy.safeAreaInsets.leading)
+                .padding(.leading, proxy.safeAreaInsets.leading + mapLeftOverlayPadding)
                 .padding(.bottom, proxy.safeAreaInsets.bottom + 120)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
@@ -3480,39 +3600,52 @@ struct MapViewProduction: View {
         fixedDistanceAlt = clampedZoom
     }
     
-    #if DEBUG
     @ViewBuilder
-    private var weatherControlsOverlay: some View {
+    private var weatherBadgeOverlay: some View {
         GeometryReader { proxy in
             VStack {
                 Spacer()
-
                 HStack {
                     Spacer()
-
-                    VStack(spacing: 4) {
-                        weatherIcon(for: weatherState.kind)
-                            .font(.system(size: 32))
-                            .foregroundStyle(.white)
-                            .shadow(color: .black.opacity(0.5), radius: 2)
-                        
-                        Text(weatherName(for: weatherState.kind))
-                            .font(.caption)
-                            .fontWeight(.semibold)
-                            .foregroundStyle(.white)
-                            .shadow(color: .black.opacity(0.5), radius: 2)
-                    }
-                    .padding(.trailing, proxy.safeAreaInsets.trailing + 16)
-                    .padding(.bottom, proxy.safeAreaInsets.bottom + 200)
+                    weatherBadge
+                        .frame(width: 112, alignment: .center)
                 }
-                .frame(maxWidth: .infinity, alignment: .trailing)
+                .padding(.trailing, proxy.safeAreaInsets.trailing + 12)
+                .padding(.bottom, proxy.safeAreaInsets.bottom + 248)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
         }
+        .allowsHitTesting(false)
+        .zIndex(1001)
     }
-    #endif
+
+    @ViewBuilder
+    private var weatherBadge: some View {
+        VStack(spacing: 4) {
+            ZStack {
+                Circle()
+                    .stroke(Color.white.opacity(weatherBadgePulse ? 0.08 : 0.28), lineWidth: 2)
+                    .frame(width: weatherBadgePulse ? 56 : 38, height: weatherBadgePulse ? 56 : 38)
+
+                weatherIcon(for: weatherState.kind)
+                    .font(.system(size: 32))
+                    .foregroundStyle(.white)
+                    .symbolEffect(.pulse, value: weatherState.kind)
+                    .scaleEffect(weatherBadgePulse ? 1.06 : 0.96)
+                    .shadow(color: .black.opacity(0.5), radius: 2)
+            }
+
+            Text(weatherName(for: weatherState.kind))
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundStyle(.white)
+                .shadow(color: .black.opacity(0.5), radius: 2)
+                .opacity(weatherBadgePulse ? 1 : 0.82)
+        }
+        .animation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true), value: weatherBadgePulse)
+        .onAppear { weatherBadgePulse = true }
+    }
     
-    #if DEBUG
     /// Get icon for weather type
     private func weatherIcon(for kind: WeatherVisualizationState.Kind) -> Image {
         switch kind {
@@ -3568,6 +3701,7 @@ struct MapViewProduction: View {
             
             print("🌦 Weather updated for location: \(latitude), \(centerCoord.longitude)")
             print("   Weather: \(weatherName(for: weatherState.kind))")
+            rainAmbientAudio.update(for: weatherState)
         }
     }
     
@@ -3597,7 +3731,6 @@ struct MapViewProduction: View {
             print("🎉 Simulated trending burst for \(randomPost.title) - radius: \(Int(randomPost.radius))m → \(Int(newRadius))m")
         }
     }
-    #endif // End DEBUG weather methods
     
     @ViewBuilder
     private var mapContentLayer: some View {
@@ -3619,11 +3752,8 @@ struct MapViewProduction: View {
             aiRecommendationOverlay
 
             mapZoomSliderOverlay
-            
-            // Weather controls (DEBUG ONLY - removed in production builds)
-            #if DEBUG
-            weatherControlsOverlay
-            #endif
+
+            weatherBadgeOverlay
         }
     }
 
@@ -3703,11 +3833,22 @@ struct MapViewProduction: View {
             }
             .onDisappear {
                 musicPlayer.stop()
+                rainAmbientAudio.stop()
             }
             .onChange(of: locationManager.location) { _, newLocation in
                 guard !layoutPreviewMode else { return }
                 handleLocationChange(newLocation)
             }
+            #if DEBUG
+            .onChange(of: weatherState.kind) { _, _ in
+                guard !layoutPreviewMode else { return }
+                rainAmbientAudio.update(for: weatherState)
+            }
+            .onChange(of: weatherState.intensity) { _, _ in
+                guard !layoutPreviewMode else { return }
+                rainAmbientAudio.update(for: weatherState)
+            }
+            #endif
             .onChange(of: showCubeHoldSearch) { _, isShowing in
                 guard !layoutPreviewMode else { return }
                 // Pause tour when menu is showing
@@ -4199,14 +4340,13 @@ struct MapViewProduction: View {
         print("   mapState.mode: \(mapState.mode)")
         print("   pendingPostLocation: \(mapState.pendingPostLocation?.latitude ?? 0), \(mapState.pendingPostLocation?.longitude ?? 0)")
         
-        // Fetch initial weather (DEBUG ONLY)
-        #if DEBUG
+        rainAmbientAudio.update(for: weatherState)
         Task {
             await fetchWeatherForCurrentLocation()
         }
-        #endif
 
         if let location = locationManager.location {
+            liveUserCoordinate = location.coordinate
             refreshLocalContext(for: location)
         }
         
@@ -4302,6 +4442,10 @@ struct MapViewProduction: View {
     }
     
     private func handleLocationChange(_ newLocation: CLLocation?) {
+        if let newLocation {
+            liveUserCoordinate = newLocation.coordinate
+        }
+
         // If we're locked to a post, ignore location changes entirely
         if let until = lockToPostUntil, until > Date() {
             let remaining = until.timeIntervalSince(Date())
@@ -4498,12 +4642,4 @@ private struct MapTabLayoutPreview: View {
     }
 }
 
-struct MapView_Previews: PreviewProvider {
-    static var previews: some View {
-        RealTabLayoutPreviewShell(tab: .map) {
-            MapViewProduction(layoutPreviewOnly: true)
-        }
-        .previewDisplayName("MapView Real UI Layout")
-    }
-}
 #endif

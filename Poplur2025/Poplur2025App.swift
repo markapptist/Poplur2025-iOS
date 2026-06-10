@@ -101,27 +101,6 @@ struct Poplur2025App: App {
                 }
                 UITabBar.appearance().isTranslucent = true
             }
-            .task {
-                // Stagger SceneKit prewarm slightly after first frame
-                try? await Task.sleep(nanoseconds: 2_500_000_000)
-                if !PreviewEnv.isPreview {
-                    await SceneKitPrewarmer.prewarmIfNeeded()
-                }
-            }
-            .task {
-                // Stagger camera prewarm a bit later
-                try? await Task.sleep(nanoseconds: 4_000_000_000)
-                if !PreviewEnv.isPreview {
-                    await prewarmCameraIfAlreadyAuthorized()
-                }
-            }
         }
-    }
-
-    // MARK: - Camera + Microphone prewarm
-
-    private func prewarmCameraIfAlreadyAuthorized() async {
-        guard AVCaptureDevice.authorizationStatus(for: .video) == .authorized else { return }
-        await cameraController.start()
     }
 }
