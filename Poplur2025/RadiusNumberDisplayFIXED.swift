@@ -5,6 +5,16 @@
 
 import SwiftUI
 
+enum CounterSeparatorAlignment: AlignmentID {
+    static func defaultValue(in context: ViewDimensions) -> CGFloat {
+        context[VerticalAlignment.center]
+    }
+}
+
+extension VerticalAlignment {
+    static let counterSeparator = VerticalAlignment(CounterSeparatorAlignment.self)
+}
+
 struct RadiusNumberDisplay: View {
     @Binding var radiusMeters: Double
     
@@ -95,6 +105,9 @@ struct RadiusNumberDisplay: View {
                         .frame(width: 90, height: 2)
                         .shadow(color: rank.color.opacity(0.5), radius: 2, x: 0, y: 0)
                         .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 1)
+                        .alignmentGuide(.counterSeparator) { dimensions in
+                            dimensions[VerticalAlignment.center]
+                        }
                 }
                 
                 // Denominator (Earth's radius - constant)
@@ -185,4 +198,3 @@ enum RadiusRank {
         }
     }
 }
-

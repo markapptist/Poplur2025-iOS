@@ -767,15 +767,23 @@ struct HomeView: View {
             }
 #endif
             
-            // Global radius number display overlay (visible on all tabs) — safe-area aware
+            // Counter overlays share one row so their separator lines stay level.
             GeometryReader { proxy in
                 let safe = proxy.safeAreaInsets
 
                 VStack {
                     Spacer()
-                    HStack {
+                    HStack(alignment: .counterSeparator) {
+                        RecordingCountdownView(
+                            isRecording: $isRecording,
+                            secondsRemaining: $recordingSecondsRemaining,
+                            postCount: $userPostCount,
+                            selectedTab: $selectedTab,
+                            radiusTrend: $radiusTrend
+                        )
+
                         Spacer(minLength: 0)
-                        
+
                         // Choose your preferred radius display style:
                         // Option 1: Default card style (recommended)
                         RadiusNumberDisplay(radiusMeters: $isometricBarModel.radius)
@@ -789,14 +797,15 @@ struct HomeView: View {
                         // Option 4: Icon-centered style
                         // RadiusDisplayWithIcon(radiusMeters: $isometricBarModel.radius)
                     }
+                    .padding(.leading, safe.leading + 16)
                     .padding(.trailing, safe.trailing + 16)
                     .padding(.bottom, safe.bottom + 20)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                 .animation(.spring(response: 0.5, dampingFraction: 0.75), value: isometricBarModel.radius)
             }
             .ignoresSafeArea(.container, edges: [.bottom, .leading, .trailing])
-            .zIndex(999)
+            .zIndex(1001)
             .allowsHitTesting(false)
             
             // Camera roll button overlay (bottom-left, aligned with radius display)
@@ -819,30 +828,6 @@ struct HomeView: View {
             }
             .zIndex(1000)
             .allowsHitTesting(true)
-            
-            // Recording countdown and post-count overlay, aligned with the radius display.
-            GeometryReader { proxy in
-                let safe = proxy.safeAreaInsets
-                
-                VStack {
-                    Spacer()
-                    HStack {
-                        RecordingCountdownView(
-                            isRecording: $isRecording,
-                            secondsRemaining: $recordingSecondsRemaining,
-                            postCount: $userPostCount,
-                            selectedTab: $selectedTab,
-                            radiusTrend: $radiusTrend
-                        )
-                        Spacer()
-                    }
-                    .padding(.leading, safe.leading + 16)
-                    .padding(.bottom, safe.bottom + 20)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-            }
-            .zIndex(1001)
-            .allowsHitTesting(false)
             
         }
         

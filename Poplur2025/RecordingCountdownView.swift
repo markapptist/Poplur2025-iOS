@@ -88,23 +88,32 @@ struct RecordingCountdownView: View {
                     )
             }
 
-            Text(secondsRemaining > 0 ? "\(secondsRemaining)" : "0")
-                .font(.system(size: 40, weight: .bold))
-                .foregroundStyle(.red)
-                .monospacedDigit()
-                .shadow(color: .red.opacity(0.3), radius: 6, x: 0, y: 2)
-                .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
-                .contentTransition(.numericText(value: Double(max(secondsRemaining, 0))))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(secondsRemaining > 0 ? "\(secondsRemaining)" : "0")
+                    .font(.system(size: 40, weight: .bold))
+                    .foregroundStyle(.red)
+                    .monospacedDigit()
+                    .shadow(color: .red.opacity(0.3), radius: 6, x: 0, y: 2)
+                    .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
+                    .contentTransition(.numericText(value: Double(max(secondsRemaining, 0))))
 
-            Rectangle()
-                .fill(.white)
-                .frame(width: 90, height: 2)
-                .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 1)
+                Rectangle()
+                    .fill(.white)
+                    .frame(width: 90, height: 2)
+                    .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 1)
+                    .alignmentGuide(.counterSeparator) { dimensions in
+                        dimensions[VerticalAlignment.center]
+                    }
 
-            Text("seconds")
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(.white.opacity(0.7))
-                .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
+                Text("seconds")
+                    .font(.system(size: 28, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.9))
+                    .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
+            }
+
+            Text("unit")
+                .font(.system(size: 14, weight: .medium))
+                .hidden()
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
@@ -122,47 +131,52 @@ struct RecordingCountdownView: View {
                 .kerning(1.2)
                 .transition(.opacity.combined(with: .scale(scale: 0.8)))
             
-            Group {
-                if showLikesMode {
-                    Text("\(likesCount)")
-                        .font(.system(size: 40, weight: .bold))
-                        .foregroundStyle(.red)
-                        .monospacedDigit()
-                        .shadow(color: .red.opacity(0.3), radius: 6, x: 0, y: 2)
-                        .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
-                        .transition(.opacity.combined(with: .scale(scale: 0.8)))
-                } else if radiusTrend != .neutral {
-                    Image(systemName: radiusTrend == .up ? "arrow.up" : "arrow.down")
-                        .font(.system(size: 40, weight: .bold))
-                        .foregroundStyle(radiusTrend == .up ? Color.green : Color.red)
-                        .scaleEffect(arrowAnimation ? 1.0 : 0.85)
-                        .opacity(arrowAnimation ? 1.0 : 0.7)
-                        .animation(
-                            .easeInOut(duration: 0.6)
-                            .repeatForever(autoreverses: true),
-                            value: arrowAnimation
-                        )
-                        .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
-                        .transition(.opacity.combined(with: .scale(scale: 0.8)))
-                } else {
-                    Text("")
-                        .font(.system(size: 40, weight: .bold))
+            VStack(alignment: .leading, spacing: 2) {
+                Group {
+                    if showLikesMode {
+                        Text("\(likesCount)")
+                            .font(.system(size: 40, weight: .bold))
+                            .foregroundStyle(.red)
+                            .monospacedDigit()
+                            .shadow(color: .red.opacity(0.3), radius: 6, x: 0, y: 2)
+                            .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
+                            .transition(.opacity.combined(with: .scale(scale: 0.8)))
+                    } else if radiusTrend != .neutral {
+                        Image(systemName: radiusTrend == .up ? "arrow.up" : "arrow.down")
+                            .font(.system(size: 40, weight: .bold))
+                            .foregroundStyle(radiusTrend == .up ? Color.green : Color.red)
+                            .scaleEffect(arrowAnimation ? 1.0 : 0.85)
+                            .opacity(arrowAnimation ? 1.0 : 0.7)
+                            .animation(
+                                .easeInOut(duration: 0.6)
+                                .repeatForever(autoreverses: true),
+                                value: arrowAnimation
+                            )
+                            .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
+                            .transition(.opacity.combined(with: .scale(scale: 0.8)))
+                    } else {
+                        Text("")
+                            .font(.system(size: 40, weight: .bold))
+                    }
                 }
+
+                Rectangle()
+                    .fill(.white)
+                    .frame(width: 90, height: 2)
+                    .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 1)
+                    .alignmentGuide(.counterSeparator) { dimensions in
+                        dimensions[VerticalAlignment.center]
+                    }
+
+                Text("\(postCount)")
+                    .font(.system(size: 28, weight: .bold))
+                    .foregroundStyle(.white)
+                    .monospacedDigit()
+                    .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
             }
             
-            Rectangle()
-                .fill(.white)
-                .frame(width: 90, height: 2)
-                .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 1)
-            
-            Text("\(postCount)")
-                .font(.system(size: 40, weight: .bold))
-                .foregroundStyle(.white)
-                .monospacedDigit()
-                .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
-            
             Text(postCount == 1 ? "post" : "posts")
-                .font(.system(size: 16, weight: .medium))
+                .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(.white.opacity(0.7))
                 .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
         }
