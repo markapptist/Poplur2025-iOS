@@ -879,6 +879,40 @@ private func buildTrendPopObjects(stop: PoplurTourStop, insight: AiTourInsight) 
     }
 }
 
+private func buildTrendPopObjects(center: CLLocationCoordinate2D, cityName: String, insight: AiTourInsight) -> [TrendPopObject] {
+    let seed = stableTourSeed(parts: cityName, insight.id, insight.category.rawValue)
+    let count = 6 + seed % 5
+    let lngScale = 0.0024
+    let latScale = 0.0018
+
+    return (0..<count).map { index in
+        let angle = 2.0 * Double.pi * Double(index) / Double(count) + Double(seed % 180) * Double.pi / 180.0
+        let radius = 0.42 + Double((index * 31 + seed) % 100) / 170.0
+        return TrendPopObject(
+            coordinate: CLLocationCoordinate2D(
+                latitude: center.latitude + sin(angle) * latScale * radius,
+                longitude: center.longitude + cos(angle) * lngScale * radius
+            ),
+            scale: 0.82 + CGFloat((index * 13 + seed) % 24) / 100.0,
+            delay: Double(index) * 0.18,
+            seed: (seed + index * 83) % 1_000_000
+        )
+    }
+}
+
+private func makeLocalTrendInsight(for cityName: String) -> AiTourInsight {
+    let now = Int(Date().timeIntervalSince1970 / 900)
+    let options: [AiTourInsight] = [
+        AiTourInsight(id: "\(cityName)-food-\(now)", subtitle: "Trending nearby: food spots, cafe runs, and table shots.", category: .food),
+        AiTourInsight(id: "\(cityName)-clothes-\(now)", subtitle: "Trending nearby: fit checks, sneakers, and streetwear drops.", category: .clothes),
+        AiTourInsight(id: "\(cityName)-sports-\(now)", subtitle: "Trending nearby: sports clips, pickup games, and fan reactions.", category: .sports),
+        AiTourInsight(id: "\(cityName)-music-\(now)", subtitle: "Trending nearby: music posts, car audio, and live moments.", category: .music),
+        AiTourInsight(id: "\(cityName)-travel-\(now)", subtitle: "Trending nearby: neighborhood views, landmarks, and arrival shots.", category: .travel)
+    ]
+    let index = stableTourSeed(parts: cityName, "\(now)") % options.count
+    return options[index]
+}
+
 @MainActor
 private final class CityTourMusicPlayerService: ObservableObject {
     @Published private(set) var currentTrackTitle: String?
@@ -2402,8 +2436,8 @@ struct MapViewProduction: View {
         )
     )
     
-    @State private var currentCity: String = "Your Location"
-    @State private var aiRecommendation: String = "Explore what's happening around you right now!"
+    @State private var currentCity: String = "Current Location"
+    @State private var aiRecommendation: String = "Finding what is trending where you are..."
     @State private var showPlacesList: Bool = false
     @State private var showAddressSearch: Bool = false
     @State private var showCubeHoldSearch: Bool = false  // NEW: For long-press search
@@ -2423,9 +2457,11 @@ struct MapViewProduction: View {
     @State private var hasSetInitialLocation: Bool = false  // Track if we've set initial location
     @State private var activeTourStop: PoplurTourStop? = nil
     @State private var activeTourInsight: AiTourInsight? = nil
+    @State private var localTrendInsight: AiTourInsight? = nil
     @State private var trendPopObjects: [TrendPopObject] = []
     @State private var musicWaveFrame: Int = 0
     @State private var showTourNowPlayingText: Bool = true
+    @State private var locationContextTask: Task<Void, Never>? = nil
     
     @State private var longPressLocation: CGPoint? = nil  // Track long press location
     @State private var selectedCoordinate: CLLocationCoordinate2D? = nil  // Track selected coordinate for long-press
@@ -2686,12 +2722,10 @@ struct MapViewProduction: View {
         mapState.cancelCurrentOperation()
         clearTourEffects()
         
-        // Update city and recommendation
-        currentCity = "Your Location"
-        aiRecommendation = "Explore what's happening around you right now!"
+        refreshLocalContext(for: CLLocation(latitude: userCoordinate.latitude, longitude: userCoordinate.longitude))
         
         // Use tour-style transition to go back to current location
-        navigateWithTourTransition(to: userCoordinate, cityName: "Your Location")
+        navigateWithTourTransition(to: userCoordinate, cityName: currentCity)
     }
     
     private func uploadPostToSelectedLocation() {
@@ -2728,9 +2762,67 @@ struct MapViewProduction: View {
         pendingPostVideoURL = nil
         postPlacementCoordinate = nil
         
-        // Return to normal map state
-        currentCity = "Your Location"
-        aiRecommendation = "Explore what's happening around you right now!"
+        if let location = locationManager.location {
+            refreshLocalContext(for: location)
+        } else {
+            aiRecommendation = "Post uploaded successfully!"
+        }
+    }
+
+    private func refreshLocalContext(for location: CLLocation) {
+        locationContextTask?.cancel()
+        locationContextTask = Task { @MainActor in
+            let coordinate = location.coordinate
+            let fallbackName = nearestTourCityName(to: coordinate) ?? "Current Location"
+            let fallbackFlag = nearestTourCountryFlag(to: coordinate)
+            applyLocalContext(cityName: fallbackName, countryFlag: fallbackFlag, coordinate: coordinate)
+
+            let geocoder = CLGeocoder()
+            do {
+                let placemarks = try await geocoder.reverseGeocodeLocation(location)
+                guard !Task.isCancelled, let placemark = placemarks.first else { return }
+
+                let cityName = placemark.locality
+                    ?? placemark.subAdministrativeArea
+                    ?? placemark.administrativeArea
+                    ?? fallbackName
+                let countryFlag = placemark.isoCountryCode.map(countryFlagEmoji) ?? fallbackFlag
+                applyLocalContext(cityName: cityName, countryFlag: countryFlag, coordinate: coordinate)
+            } catch {
+                print("[MapView] Reverse geocode failed: \(error)")
+            }
+        }
+    }
+
+    private func applyLocalContext(cityName: String, countryFlag: String, coordinate: CLLocationCoordinate2D) {
+        guard !mapState.isInTourMode, !(flowManager.currentFlow?.isCameraFirst ?? false), !isPostPlacementMode else { return }
+
+        let trimmedCity = cityName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let titleCity = trimmedCity.isEmpty ? "Current Location" : trimmedCity
+        currentCity = countryFlag.isEmpty ? titleCity : "\(titleCity) \(countryFlag)"
+
+        let insight = makeLocalTrendInsight(for: titleCity)
+        localTrendInsight = insight
+        aiRecommendation = insight.subtitle
+        trendPopObjects = buildTrendPopObjects(center: coordinate, cityName: titleCity, insight: insight)
+    }
+
+    private func nearestTourCityName(to coordinate: CLLocationCoordinate2D) -> String? {
+        nearestTourStop(to: coordinate)?.cityName
+    }
+
+    private func nearestTourCountryFlag(to coordinate: CLLocationCoordinate2D) -> String {
+        guard let stop = nearestTourStop(to: coordinate) else { return "" }
+        return countryFlagEmoji(stop.storefront)
+    }
+
+    private func nearestTourStop(to coordinate: CLLocationCoordinate2D) -> PoplurTourStop? {
+        let location = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+        return PoplurTourStops.min { lhs, rhs in
+            let lhsLocation = CLLocation(latitude: lhs.coordinate.latitude, longitude: lhs.coordinate.longitude)
+            let rhsLocation = CLLocation(latitude: rhs.coordinate.latitude, longitude: rhs.coordinate.longitude)
+            return lhsLocation.distance(from: location) < rhsLocation.distance(from: location)
+        }
     }
 
     private func runTourSubtitleLoop() async {
@@ -2988,7 +3080,7 @@ struct MapViewProduction: View {
                     }
                 }
 
-                if let insight = activeTourInsight {
+                if let insight = activeTourInsight ?? (mapState.isInTourMode ? nil : localTrendInsight) {
                     ForEach(trendPopObjects) { object in
                         Annotation("", coordinate: object.coordinate) {
                             TrendPopMarker(object: object, category: insight.category)
@@ -3201,8 +3293,9 @@ struct MapViewProduction: View {
                         }
                         showPostPrompt = false
                         clickedCoordinate = nil
-                        currentCity = "Your Location"
-                        aiRecommendation = "Explore what's happening around you right now!"
+                        if let location = locationManager.location {
+                            refreshLocalContext(for: location)
+                        }
                     }) {
                         Image(systemName: "xmark.circle.fill")
                             .font(.title2)
@@ -3260,7 +3353,6 @@ struct MapViewProduction: View {
                         // Reset UI
                         showPostPrompt = false
                         clickedCoordinate = nil
-                        currentCity = "Your Location"
                         aiRecommendation = "Post uploaded successfully!"
                         
                         // Return to feed or profile after a delay
@@ -3287,8 +3379,9 @@ struct MapViewProduction: View {
                         // Reset prompt
                         showPostPrompt = false
                         clickedCoordinate = nil
-                        currentCity = "Your Location"
-                        aiRecommendation = "Explore what's happening around you right now!"
+                        if let location = locationManager.location {
+                            refreshLocalContext(for: location)
+                        }
                     }
                 }) {
                     HStack {
@@ -3398,36 +3491,6 @@ struct MapViewProduction: View {
                             .fontWeight(.semibold)
                             .foregroundStyle(.white)
                             .shadow(color: .black.opacity(0.5), radius: 2)
-                    }
-                    .padding(12)
-                    .background(.ultraThinMaterial.opacity(0.6), in: RoundedRectangle(cornerRadius: 12))
-                    
-                    Divider()
-                        .frame(width: 30)
-                        .background(.white.opacity(0.3))
-                    
-                    // Confetti toggle
-                    Button(action: {
-                        showConfetti.toggle()
-                    }) {
-                        Image(systemName: showConfetti ? "party.popper.fill" : "party.popper")
-                            .font(.system(size: 20))
-                            .foregroundStyle(.white)
-                            .frame(width: 44, height: 44)
-                            .background(.ultraThinMaterial.opacity(0.6), in: Circle())
-                            .shadow(color: .black.opacity(0.3), radius: 2)
-                    }
-                    
-                    // Simulate trending button
-                    Button(action: {
-                        simulateTrendingBurst()
-                    }) {
-                        Image(systemName: "chart.line.uptrend.xyaxis")
-                            .font(.system(size: 20))
-                            .foregroundStyle(.white)
-                            .frame(width: 44, height: 44)
-                            .background(.ultraThinMaterial.opacity(0.6), in: Circle())
-                            .shadow(color: .black.opacity(0.3), radius: 2)
                     }
                 }
                 .padding(.trailing, 16)
@@ -4128,6 +4191,10 @@ struct MapViewProduction: View {
             await fetchWeatherForCurrentLocation()
         }
         #endif
+
+        if let location = locationManager.location {
+            refreshLocalContext(for: location)
+        }
         
         // Check if there's a pending post location to navigate to
         if let pendingCoordinate = mapState.pendingPostLocation {
@@ -4229,7 +4296,7 @@ struct MapViewProduction: View {
         }
         
         // Only update camera on first location - don't interfere with tour
-        guard !hasSetInitialLocation, let _ = newLocation else { 
+        guard !hasSetInitialLocation, let newLocation else { 
             if hasSetInitialLocation {
                 print("⏭️ [MapView] handleLocationChange skipped - initial location already set")
             }
@@ -4240,9 +4307,11 @@ struct MapViewProduction: View {
         hasSetInitialLocation = true
         
         if let newCameraPosition = locationManager.getCenteredCamera() {
-            print("   Moving camera to user location: \(newLocation?.coordinate.latitude ?? 0), \(newLocation?.coordinate.longitude ?? 0)")
+            print("   Moving camera to user location: \(newLocation.coordinate.latitude), \(newLocation.coordinate.longitude)")
             camera = newCameraPosition
         }
+
+        refreshLocalContext(for: newLocation)
     }
     
     private func runTourLoop() async {

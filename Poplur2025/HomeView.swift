@@ -801,13 +801,12 @@ struct HomeView: View {
                             CameraRollButton()
                             Spacer()
                         }
-                        .padding(.leading, safe.leading + 28)
+                        .padding(.leading, safe.leading + 16)
                         .padding(.bottom, safe.bottom + 20)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                 }
-                .ignoresSafeArea(.container, edges: [.bottom, .leading])
-                .zIndex(1002)
+                .zIndex(1000)
                 .allowsHitTesting(true)
             }
             
@@ -1441,7 +1440,7 @@ private struct RecordCameraControlsOverlay: View {
                     }
                 )
             }
-            .padding(.top, 54)
+            .padding(.top, 0)
             .padding(.horizontal, 18)
 
             Spacer()
