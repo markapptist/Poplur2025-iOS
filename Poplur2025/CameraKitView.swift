@@ -46,10 +46,8 @@ struct CameraKitView: View {
 
             // Screen flash overlay for front camera
             if showScreenFlash {
-                Rectangle()
-                    .fill(Color.white)
+                ScreenFlashEdgeOverlay()
                     .ignoresSafeArea()
-                    .blendMode(.screen)
                     .zIndex(10)
                     .transition(.opacity)
             }
@@ -216,21 +214,66 @@ struct CameraKitView: View {
     }
 
     private func generateVideoThumbnail(from url: URL) async -> UIImage? {
-        await withCheckedContinuation { (cont: CheckedContinuation<UIImage?, Never>) in
-            DispatchQueue.global(qos: .userInitiated).async {
-                let asset = AVAsset(url: url)
-                let generator = AVAssetImageGenerator(asset: asset)
-                generator.appliesPreferredTrackTransform = true
-                let time = CMTime(seconds: 0.1, preferredTimescale: 600)
-                do {
-                    let imageRef = try generator.copyCGImage(at: time, actualTime: nil)
-                    let image = UIImage(cgImage: imageRef)
-                    cont.resume(returning: image)
-                } catch {
-                    print("[Thumb] Failed to generate thumbnail: \(error)")
-                    cont.resume(returning: nil)
+        let asset = AVURLAsset(url: url)
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        let time = CMTime(seconds: 0.1, preferredTimescale: 600)
+        do {
+            let result = try await generator.image(at: time)
+            return UIImage(cgImage: result.image)
+        } catch {
+            print("[Thumb] Failed to generate thumbnail: \(error)")
+            return nil
+        }
+    }
+
+    private struct ScreenFlashEdgeOverlay: View {
+        var body: some View {
+            GeometryReader { proxy in
+                let edgeThickness = max(proxy.size.width, proxy.size.height) * 0.16
+
+                ZStack {
+                    Color.white.opacity(0.12)
+
+                    VStack(spacing: 0) {
+                        LinearGradient(
+                            colors: [Color.white.opacity(0.92), Color.white.opacity(0)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                        .frame(height: edgeThickness)
+
+                        Spacer(minLength: 0)
+
+                        LinearGradient(
+                            colors: [Color.white.opacity(0), Color.white.opacity(0.92)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                        .frame(height: edgeThickness)
+                    }
+
+                    HStack(spacing: 0) {
+                        LinearGradient(
+                            colors: [Color.white.opacity(0.92), Color.white.opacity(0)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                        .frame(width: edgeThickness)
+
+                        Spacer(minLength: 0)
+
+                        LinearGradient(
+                            colors: [Color.white.opacity(0), Color.white.opacity(0.92)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                        .frame(width: edgeThickness)
+                    }
                 }
+                .blendMode(.screen)
             }
+            .allowsHitTesting(false)
         }
     }
 
@@ -264,8 +307,8 @@ extension CameraKitView {
 
         func makeUIViewController(context: Context) -> UIViewController {
             // Prefer a dedicated RECORD preview view controller if available
-            if let provider = controller as? RecordPreviewViewControllerProviding,
-               let previewVC = provider.recordPreviewViewController {
+            let recordProvider = controller as any RecordPreviewViewControllerProviding
+            if let previewVC = recordProvider.recordPreviewViewController {
                 return previewVC
             }
             // Otherwise, wrap a dedicated RECORD preview view if available
@@ -283,8 +326,8 @@ extension CameraKitView {
                 return wrapper
             }
             // Fallback to generic preview if record-specific preview isn't available
-            if let genericVCProvider = controller as? PreviewViewControllerProviding,
-               let genericVC = genericVCProvider.previewViewController {
+            let genericVCProvider = controller as any PreviewViewControllerProviding
+            if let genericVC = genericVCProvider.previewViewController {
                 return genericVC
             }
             if let genericViewProvider = controller as? PreviewViewProviding,
@@ -316,4 +359,3 @@ extension CameraKitView {
     CameraKitView(controller: CameraKitController(), coordinate: nil)
         .ignoresSafeArea()
 }
-

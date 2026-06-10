@@ -20,14 +20,14 @@ final class CameraPreviewViewController: UIViewController {
         } else {
             let base = AVCaptureVideoPreviewLayer(session: session)
             base.videoGravity = .resizeAspectFill
-            
+
             // Set preview layer connection to portrait
             if let connection = base.connection {
-                if connection.isVideoOrientationSupported {
-                    connection.videoOrientation = .portrait
+                if connection.isVideoRotationAngleSupported(90) {
+                    connection.videoRotationAngle = 90
                 }
             }
-            
+
             view.layer.insertSublayer(base, at: 0)
             previewLayer = base
             // Keep overlay above base if present
@@ -52,14 +52,14 @@ final class CameraPreviewViewController: UIViewController {
             // Here we create a layer without a session; the owning controller should set the session on it later.
             let base = AVCaptureVideoPreviewLayer()
             base.videoGravity = .resizeAspectFill
-            
+
             // Set preview layer connection to portrait
             if let connection = base.connection {
-                if connection.isVideoOrientationSupported {
-                    connection.videoOrientation = .portrait
+                if connection.isVideoRotationAngleSupported(90) {
+                    connection.videoRotationAngle = 90
                 }
             }
-            
+
             view.layer.insertSublayer(base, at: 0)
             previewLayer = base
         } else if let base = previewLayer, base.superlayer == nil {
@@ -149,13 +149,7 @@ final class CameraPreviewViewController: UIViewController {
         longPress.cancelsTouchesInView = false
         view.addGestureRecognizer(longPress)
 
-        // Single tap: Take picture (cube tap)
-        let singleTap = UITapGestureRecognizer(target: self, action: #selector(handleSingleTap(_:)))
-        singleTap.numberOfTapsRequired = 1
-        singleTap.cancelsTouchesInView = false
-        singleTap.require(toFail: doubleTap)
-        view.addGestureRecognizer(singleTap)
-        self.singleTapRecognizer = singleTap
+        // Photo capture is intentionally handled only by CubeTabView.
     }
 
     @objc private func handleSwipeUp(_ gesture: UISwipeGestureRecognizer) {
@@ -218,4 +212,3 @@ final class CameraPreviewViewController: UIViewController {
 }
 
 // Note: the top-level duplicate of applyDisplayLayerTransformForCurrentCamera has been removed.
-

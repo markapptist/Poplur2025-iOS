@@ -757,17 +757,13 @@ struct HomeView: View {
                 VStack {
                     Spacer()
                     HStack(alignment: .counterSeparator) {
-                        if selectedTab == .record && !isRecording {
-                            CameraRollButton()
-                        } else {
-                            RecordingCountdownView(
-                                isRecording: $isRecording,
-                                secondsRemaining: $recordingSecondsRemaining,
-                                postCount: $userPostCount,
-                                selectedTab: $selectedTab,
-                                radiusTrend: $radiusTrend
-                            )
-                        }
+                        RecordingCountdownView(
+                            isRecording: $isRecording,
+                            secondsRemaining: $recordingSecondsRemaining,
+                            postCount: $userPostCount,
+                            selectedTab: $selectedTab,
+                            radiusTrend: $radiusTrend
+                        )
 
                         Spacer(minLength: 0)
 
@@ -793,7 +789,27 @@ struct HomeView: View {
             }
             .ignoresSafeArea(.container, edges: [.bottom, .leading, .trailing])
             .zIndex(1001)
-            .allowsHitTesting(selectedTab == .record && !isRecording)
+            .allowsHitTesting(false)
+
+            if selectedTab == .record && !isRecording {
+                GeometryReader { proxy in
+                    let safe = proxy.safeAreaInsets
+
+                    VStack {
+                        Spacer()
+                        HStack {
+                            CameraRollButton()
+                            Spacer()
+                        }
+                        .padding(.leading, safe.leading + 28)
+                        .padding(.bottom, safe.bottom + 20)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                }
+                .ignoresSafeArea(.container, edges: [.bottom, .leading])
+                .zIndex(1002)
+                .allowsHitTesting(true)
+            }
             
         }
     }
@@ -1402,9 +1418,7 @@ private struct RecordCameraControlsOverlay: View {
 
     var body: some View {
         VStack {
-            HStack(spacing: 12) {
-                Spacer()
-
+            HStack {
                 CameraIconControlButton(
                     systemName: isFlashActive ? "bolt.fill" : "bolt.slash.fill",
                     isActive: isFlashActive,
@@ -1417,6 +1431,8 @@ private struct RecordCameraControlsOverlay: View {
                     }
                 )
 
+                Spacer()
+
                 CameraIconControlButton(
                     systemName: "arrow.triangle.2.circlepath.camera.fill",
                     isActive: false,
@@ -1425,7 +1441,7 @@ private struct RecordCameraControlsOverlay: View {
                     }
                 )
             }
-            .padding(.top, 82)
+            .padding(.top, 54)
             .padding(.horizontal, 18)
 
             Spacer()
