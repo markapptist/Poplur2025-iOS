@@ -820,7 +820,7 @@ struct HomeView: View {
             .zIndex(1000)
             .allowsHitTesting(true)
             
-            // Recording countdown overlay (separate positioning, slightly above camera roll button)
+            // Recording countdown and post-count overlay, aligned with the radius display.
             GeometryReader { proxy in
                 let safe = proxy.safeAreaInsets
                 
@@ -837,7 +837,7 @@ struct HomeView: View {
                         Spacer()
                     }
                     .padding(.leading, safe.leading + 16)
-                    .padding(.bottom, safe.bottom + 85) // Position above camera roll button
+                    .padding(.bottom, safe.bottom + 20)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
             }

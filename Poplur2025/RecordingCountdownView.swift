@@ -54,7 +54,7 @@ struct RecordingCountdownView: View {
             // Start animation timer for likes/trending toggle
             startLikesAnimation()
         }
-        .onChange(of: radiusTrend) { newTrend in
+        .onChange(of: radiusTrend) { _, newTrend in
             // Restart animation when trend changes
             print("🎯 [RecordingCountdownView] Radius trend changed to: \(newTrend)")
             arrowAnimation = false
@@ -68,38 +68,46 @@ struct RecordingCountdownView: View {
     
     @ViewBuilder
     private var recordingCountdownBadge: some View {
-        HStack(spacing: 8) {
-            // Recording indicator (pulsing red dot)
-            Circle()
-                .fill(Color.red)
-                .frame(width: 8, height: 8)
-                .scaleEffect(pulseAnimation ? 1.2 : 1.0)
-                .opacity(pulseAnimation ? 0.6 : 1.0)
-                .animation(
-                    .easeInOut(duration: 0.6)
-                    .repeatForever(autoreverses: true),
-                    value: pulseAnimation
-                )
-            
-            if secondsRemaining > 0 {
-                // Countdown timer (10 → 0)
-                Text("\(secondsRemaining)")
-                    .font(.system(size: 32, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
-                    .monospacedDigit()
-                    .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 2)
-                
-                Text("s")
-                    .font(.system(size: 16, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.8))
-            } else {
-                // Recording complete indicator
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
                 Text("RECORDING")
-                    .font(.system(size: 14, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
-                    .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 2)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.6))
+                    .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
+                    .kerning(1.2)
+
+                Circle()
+                    .fill(Color.red)
+                    .frame(width: 8, height: 8)
+                    .scaleEffect(pulseAnimation ? 1.2 : 1.0)
+                    .opacity(pulseAnimation ? 0.6 : 1.0)
+                    .animation(
+                        .easeInOut(duration: 0.6)
+                        .repeatForever(autoreverses: true),
+                        value: pulseAnimation
+                    )
             }
+
+            Text(secondsRemaining > 0 ? "\(secondsRemaining)" : "0")
+                .font(.system(size: 40, weight: .bold))
+                .foregroundStyle(.red)
+                .monospacedDigit()
+                .shadow(color: .red.opacity(0.3), radius: 6, x: 0, y: 2)
+                .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
+                .contentTransition(.numericText(value: Double(max(secondsRemaining, 0))))
+
+            Rectangle()
+                .fill(.white)
+                .frame(width: 90, height: 2)
+                .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 1)
+
+            Text("seconds")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(.white.opacity(0.7))
+                .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
         }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 16)
     }
     
     // MARK: - Post Count Badge
@@ -107,7 +115,6 @@ struct RecordingCountdownView: View {
     @ViewBuilder
     private var postCountBadge: some View {
         VStack(alignment: .leading, spacing: 4) {
-            // "TRENDING" or "LIKES" label at the top
             Text(showLikesMode ? "LIKES" : "TRENDING")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.6))
@@ -115,13 +122,13 @@ struct RecordingCountdownView: View {
                 .kerning(1.2)
                 .transition(.opacity.combined(with: .scale(scale: 0.8)))
             
-            // Arrow or likes number (directly below label)
             Group {
                 if showLikesMode {
                     Text("\(likesCount)")
-                        .font(.system(size: 28, weight: .bold))
+                        .font(.system(size: 40, weight: .bold))
                         .foregroundStyle(.red)
                         .monospacedDigit()
+                        .shadow(color: .red.opacity(0.3), radius: 6, x: 0, y: 2)
                         .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
                         .transition(.opacity.combined(with: .scale(scale: 0.8)))
                 } else if radiusTrend != .neutral {
@@ -143,26 +150,24 @@ struct RecordingCountdownView: View {
                 }
             }
             
-            // White line separator
             Rectangle()
                 .fill(.white)
-                .frame(width: 100, height: 2)
+                .frame(width: 90, height: 2)
                 .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 1)
             
-            // Post count number
             Text("\(postCount)")
-                .font(.system(size: 36, weight: .bold))
+                .font(.system(size: 40, weight: .bold))
                 .foregroundStyle(.white)
                 .monospacedDigit()
                 .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
             
-            // "posts" label
             Text(postCount == 1 ? "post" : "posts")
                 .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(.white.opacity(0.7))
                 .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
         }
         .padding(.horizontal, 20)
+        .padding(.vertical, 16)
     }
     
     // MARK: - Likes Animation
