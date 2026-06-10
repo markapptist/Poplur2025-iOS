@@ -1358,6 +1358,20 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
         }
         print("[CameraKitController] startPreview() cubeEnabled=\(self.allowPhotoCapture)")
     }
+
+    @MainActor
+    func resumePreviewAfterInterruption() async {
+        #if DEBUG
+        if isRunningInPreviews { return }
+        #endif
+
+        await startPreview()
+        if let previewVC = (self.recordPreviewViewController ?? self.previewViewController) as? CameraPreviewViewController,
+           let arLayer = previewVC.getARDisplayLayer() {
+            arLayer.flushAndRemoveImage()
+        }
+        preparePreviewIfNeeded()
+    }
 }
 
 // MARK: - AVCaptureFileOutputRecordingDelegate

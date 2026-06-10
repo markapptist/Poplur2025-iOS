@@ -283,20 +283,8 @@ struct HomeView: View {
                 .ignoresSafeArea()
                 .allowsHitTesting(true) // Enable UIKit gesture recognizers
             
-            // ML Detection Overlay (hidden when AR filters shown)
             if !showARFilters {
-                LiveMLDetectionOverlay(
-                    controller: cameraController,
-                    userRecognitionManager: userRecognitionManager
-                )
-                .allowsHitTesting(false)
-                .transition(.opacity)
-            }
-            
-            // Animated instructional text overlay (hidden when AR filters shown)
-            if !showARFilters {
-                CameraInstructionsOverlay()
-                    .allowsHitTesting(false)
+                RecordCameraControlsOverlay(controller: cameraController)
                     .transition(.opacity)
             }
         }
@@ -307,15 +295,13 @@ struct HomeView: View {
                 let status = AVCaptureDevice.authorizationStatus(for: .video)
                 switch status {
                 case .authorized:
-                    if !cameraController.isReady {
-                        await cameraController.startPreview()
-                    }
+                    await cameraController.resumePreviewAfterInterruption()
                     
                     // 🆕 Setup AR filter support
                     if let cameraVC = cameraController.recordPreviewViewController as? CameraPreviewViewController {
                         cameraController.setupARFilterSupport(
                             filterManager: arFilterManager,
-                            displayLayer: cameraVC.displayLayer as! AVSampleBufferDisplayLayer
+                            displayLayer: cameraVC.displayLayer!
                         )
                     }
                     
@@ -351,21 +337,17 @@ struct HomeView: View {
     private func ensureCameraRunningIfNeeded() {
         Task { @MainActor in
             guard !PreviewEnvHomeView.isPreview else { return }
-            guard selectedTab == .record, isRecordHolding else {
+            guard selectedTab == .record else {
                 return
             }
             let status = AVCaptureDevice.authorizationStatus(for: .video)
             switch status {
             case .authorized:
-                if !cameraController.isReady {
-                    await cameraController.startPreview()
-                }
+                await cameraController.resumePreviewAfterInterruption()
             case .notDetermined:
                 let granted = await AVCaptureDevice.requestAccess(for: .video)
                 if granted {
-                    if !cameraController.isReady {
-                        await cameraController.start()
-                    }
+                    await cameraController.resumePreviewAfterInterruption()
                 }
             default:
                 // denied or restricted — optionally present guidance UI
@@ -584,8 +566,9 @@ struct HomeView: View {
         }
     }
     
-    var body: some View {
-        
+    // MARK: - Body split for type-checker performance
+
+    private var rootStack: some View {
         ZStack {
             // Content switching by selectedTab (replaces TabView)
             Group {
@@ -774,13 +757,17 @@ struct HomeView: View {
                 VStack {
                     Spacer()
                     HStack(alignment: .counterSeparator) {
-                        RecordingCountdownView(
-                            isRecording: $isRecording,
-                            secondsRemaining: $recordingSecondsRemaining,
-                            postCount: $userPostCount,
-                            selectedTab: $selectedTab,
-                            radiusTrend: $radiusTrend
-                        )
+                        if selectedTab == .record && !isRecording {
+                            CameraRollButton()
+                        } else {
+                            RecordingCountdownView(
+                                isRecording: $isRecording,
+                                secondsRemaining: $recordingSecondsRemaining,
+                                postCount: $userPostCount,
+                                selectedTab: $selectedTab,
+                                radiusTrend: $radiusTrend
+                            )
+                        }
 
                         Spacer(minLength: 0)
 
@@ -806,485 +793,342 @@ struct HomeView: View {
             }
             .ignoresSafeArea(.container, edges: [.bottom, .leading, .trailing])
             .zIndex(1001)
-            .allowsHitTesting(false)
-            
-            // Camera roll button overlay (bottom-left, aligned with radius display)
-            GeometryReader { proxy in
-                let safe = proxy.safeAreaInsets
-                
-                VStack {
-                    Spacer()
-                    HStack {
-                        // Show camera roll button when on record tab and not recording
-                        if selectedTab == .record && !isRecording {
-                            CameraRollButton()
-                        }
-                        Spacer()
-                    }
-                    .padding(.leading, safe.leading + 16)
-                    .padding(.bottom, safe.bottom + 20) // Align with RadiusNumberDisplay center line
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-            }
-            .zIndex(1000)
-            .allowsHitTesting(true)
+            .allowsHitTesting(selectedTab == .record && !isRecording)
             
         }
-        
-        // Inject global settings for radius display (kept for compatibility)
-        .environment(\.isometricRadiusBarDistance, isometricBarSettings.horizontalOffset)
-        // Removed `.environment(\.isometricBarSettings, isometricBarSettings)` per instructions
-        .environment(\.isometricBarModel, isometricBarModel)
-        
-        .task {
-            // Removed cameraController.prewarm() and preparePreviewIfNeeded() here per instructions
+    }
 
-            // Removed all feed triggers to defer until launch gate
-        }
-        // Removed locationProvider.request() task entirely per instructions
-
-        .onAppear {
-            launchGate.start()
-            let appearT0 = CFAbsoluteTimeGetCurrent()
-            // Removed cameraController.prewarm() and preparePreviewIfNeeded() here per instructions
-            
-            // Keep startup minimal; no immediate location or feed triggers here
-            if selectedTab != .feed {
-                NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
+    // MARK: - Body (split into steps to help Swift type-checker)
+    var body: some View {
+        // Step 1: apply environment values and lifecycle modifiers
+        let step1 = rootStack
+            .environment(\.isometricRadiusBarDistance, isometricBarSettings.horizontalOffset)
+            .environment(\.isometricBarModel, isometricBarModel)
+            .task {
+                // Startup tasks deferred; nothing to do here
             }
-            if selectedTab == .profile {
-                NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
-            }
-
-            // Insert initial cube yaw set on first appear
-            if !didSetInitialCubeYaw {
-                didSetInitialCubeYaw = true
-                // Start cube on Feed face (90°) without animation
-                cubeYawDegrees = yawForTab(.feed)
-            }
-
-            Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 120_000_000)
-                await Task.yield()
-                enableLowerHitArea = false // Disabled to prevent accidental taps outside cube
-                
-                if !didApplyDefaultBarSettings {
-                    didApplyDefaultBarSettings = true
-                    // Apply unified defaults for bar settings
-                    isometricBarSettings.horizontalOffset = 40
-                    isometricBarSettings.bottomOffset = -80
-                    isometricBarSettings.barWidth = 98
-                    isometricBarSettings.barHeight = 390
-                    isometricBarSettings.barTiltDegrees = -8
+            .onAppear {
+                launchGate.start()
+                if selectedTab != .feed {
+                    NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
                 }
-            }
-            
-            // Removed entire SceneKit prewarm block per instructions
-        }
-        .onChange(of: selectedTab) { newTab in
-            if !didSetInitialCubeYaw {
-                didSetInitialCubeYaw = true
-                cubeYawDegrees = yawForTab(selectedTab)
-            } else {
-                animateYaw(to: yawForTab(selectedTab), duration: 0.45, direction: nil)
-            }
-
-            if !([AppTab.map, .record, .feed, .profile].contains(selectedTab)) {
-                selectedTab = .feed
-            }
-            
-            // Animate radius bar to 0 when switching tabs
-            // Exception: when switching TO profile, don't reset (will be set by profile view)
-            if newTab != .profile {
-                withAnimation(.easeInOut(duration: 0.6)) {
-                    isometricBarModel.radius = 0
+                if selectedTab == .profile {
+                    NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
                 }
-            }
-            
-            // Pause/resume feed audio based on visibility
-            if selectedTab == .feed {
-                NotificationCenter.default.post(name: .ResumeFeedAudio, object: nil)
-            } else {
-                NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
-            }
-            // Motion is managed by scene phase now (runs on all tabs when active)
-            
-            if selectedTab == .profile {
-                if !PreviewEnvHomeView.isPreview {
-                    cameraController.stop()
+                if !didSetInitialCubeYaw {
+                    didSetInitialCubeYaw = true
+                    cubeYawDegrees = yawForTab(.feed)
                 }
-            }
-            NotificationCenter.default.post(name: .ResetTabToTop, object: nil)
-            
-            // Removed prewarm and preparePreviewIfNeeded task per instructions
-            
-            if selectedTab != .record {
-                isRecordHolding = false
-                stopRecordHoldRamp(reset: false)
-            }
-            
-            enableLowerHitArea = (selectedTab != .record)
-        }
-        .onChange(of: auth.isAuthenticated) { authed in
-            if authed {
-                DispatchQueue.main.async {
-                    selectedTab = .feed
-                    if !didTriggerFeedInitialLoad {
-                        didTriggerFeedInitialLoad = true
-                        NotificationCenter.default.post(name: .LoadFeedNow, object: nil)
-                    }
-                }
-            }
-        }
-        .onChange(of: scenePhase) { phase in
-            switch phase {
-            case .active:
                 Task { @MainActor in
-                    guard !PreviewEnvHomeView.isPreview else { return }
-                    deferUntilAfterLaunch {
-                        await MainActor.run { self.motionController.start() }
+                    try? await Task.sleep(nanoseconds: 120_000_000)
+                    await Task.yield()
+                    enableLowerHitArea = false
+                    if !didApplyDefaultBarSettings {
+                        didApplyDefaultBarSettings = true
+                        isometricBarSettings.horizontalOffset = 40
+                        isometricBarSettings.bottomOffset = -80
+                        isometricBarSettings.barWidth = 98
+                        isometricBarSettings.barHeight = 390
+                        isometricBarSettings.barTiltDegrees = -8
                     }
                 }
-            case .background, .inactive:
-                cameraController.stop()
-                didStartCameraOnce = false
-                motionController.stop()
-                // Ensure feed audio is paused when app not active
-                NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
-                NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
-            @unknown default:
-                break
             }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .FeedReady)) { _ in
-            DispatchQueue.main.async {
-                isFeedReady = true
+            .onChange(of: selectedTab) { _, newTab in
+                if !didSetInitialCubeYaw {
+                    didSetInitialCubeYaw = true
+                    cubeYawDegrees = yawForTab(selectedTab)
+                } else {
+                    animateYaw(to: yawForTab(selectedTab), duration: 0.45, direction: nil)
+                }
+                if !([AppTab.map, .record, .feed, .profile].contains(selectedTab)) {
+                    selectedTab = .feed
+                }
+                if newTab != .profile {
+                    withAnimation(.easeInOut(duration: 0.6)) {
+                        isometricBarModel.radius = 0
+                    }
+                }
+                if selectedTab == .feed {
+                    NotificationCenter.default.post(name: .ResumeFeedAudio, object: nil)
+                } else {
+                    NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
+                }
+                if selectedTab == .record {
+                    ensureCameraRunningIfNeeded()
+                }
+                if selectedTab == .profile {
+                    if !PreviewEnvHomeView.isPreview {
+                        cameraController.stop()
+                    }
+                }
+                NotificationCenter.default.post(name: .ResetTabToTop, object: nil)
+                if selectedTab != .record {
+                    isRecordHolding = false
+                    stopRecordHoldRamp(reset: false)
+                }
+                enableLowerHitArea = (selectedTab != .record)
             }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .CubeMotionUpdate)) { _ in
-            // Motion updates silenced
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .SharedRadiusDidChange)) { note in
-            if let value = note.userInfo?["radius"] as? Double {
-                // Clamp to cap used in app (3,323,000) per updated cap
-                isometricBarModel.radius = min(value, 3_323_000.0)
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("InlinePreviewDismissRequested"))) { _ in
-            // Reset the radius bar so the user can capture again
-            isometricBarModel.radius = 0
-            NotificationCenter.default.post(name: .SharedRadiusDidChange, object: nil, userInfo: ["radius": 0.0])
-        }
-        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ToggleARFilters"))) { _ in
-            // Handle AR filter toggle from CameraPreviewViewController
-            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
-                showARFilters.toggle()
-                UserDefaults.standard.set(showARFilters, forKey: "ARFiltersShown")
-                NotificationCenter.default.post(
-                    name: Notification.Name("ARFiltersStateChanged"),
-                    object: nil,
-                    userInfo: ["isShown": showARFilters]
-                )
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .cameraCubeHoldBegan)) { _ in
-            guard selectedTab == .record else { return }
-            isRecordHolding = true
-            ensureCameraRunningIfNeeded()
-            startRecordHoldRamp()
-            startRecordingCountdown() // Start 10-second countdown
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .cameraCubeHoldEnded)) { _ in
-            // Only stop if recording hasn't started yet (user released before 2 seconds)
-            // If recording is in progress, let the countdown timer handle the stop
-            if !isRecording {
-                isRecordHolding = false
-                stopRecordHoldRamp(reset: true)
-                stopRecordingCountdown()
-            }
-            // If recording is active, isRecordHolding is set to false but recording continues
-            isRecordHolding = false
-        }
-        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("OpenCameraAtCoordinate"))) { notification in
-            // Handle long press on map - switch to camera tab and set coordinate
-            guard let userInfo = notification.userInfo,
-                  let latitude = userInfo["latitude"] as? Double,
-                  let longitude = userInfo["longitude"] as? Double else {
-                return
-            }
-            
-            // Switch to camera/record tab
-            selectedTab = .record
-            
-            // Post notification with coordinate for CameraKitController to use
-            NotificationCenter.default.post(
-                name: Notification.Name("SetCameraCoordinate"),
-                object: nil,
-                userInfo: [
-                    "latitude": latitude,
-                    "longitude": longitude
-                ]
-            )
-        }
-        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("OpenMapToSelectPostLocation"))) { notification in
-            // Handle request to select location for captured media - switch to map tab
-            
-            // Switch to map tab
-            selectedTab = .map
-            
-            // Forward the notification to MapView (it will enter post placement mode)
-            // The notification already contains the image/videoURL in userInfo
-        }
-        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ShowLocationOnMap"))) { notification in
-            // Handle request to show post location on map (from long-press)
-            guard let userInfo = notification.userInfo,
-                  let coordinate = userInfo["coordinate"] as? CLLocationCoordinate2D else { return }
-            
-            // Switch to map tab
-            selectedTab = .map
-            
-            // The notification is already posted to MapView which will center the camera
-        }
-        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ShowLocationOnMapFromPost"))) { note in
-            // Expect userInfo: ["latitude": Double, "longitude": Double]
-            guard let userInfo = note.userInfo,
-                  let latitude = userInfo["latitude"] as? Double,
-                  let longitude = userInfo["longitude"] as? Double else { return }
-            selectedTab = .map
-            NotificationCenter.default.post(name: Notification.Name("ShowLocationOnMap"), object: nil, userInfo: [
-                "coordinate": CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
-            ])
-        }
-        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("UploadPostToCoordinate"))) { notification in
-            // Handle post upload after user selected location on map
-            guard let userInfo = notification.userInfo,
-                  let latitude = userInfo["latitude"] as? Double,
-                  let longitude = userInfo["longitude"] as? Double else {
-                return
-            }
-            
-            // Show upload starting status
-            uploadStatusMessage = "Uploading your post..."
-            uploadStatusIcon = "arrow.up.circle.fill"
-            uploadStatusColor = .blue
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                showUploadStatus = true
-            }
-            
-            // Send to CameraKitController to handle the upload
-            NotificationCenter.default.post(
-                name: Notification.Name("SetCameraCoordinate"),
-                object: nil,
-                userInfo: [
-                    "latitude": latitude,
-                    "longitude": longitude
-                ]
-            )
-            
-            // Trigger the upload with the media from userInfo
-            if let image = userInfo["image"] as? UIImage {
-                // Upload image
-                NotificationCenter.default.post(
-                    name: Notification.Name("UploadImageToCurrentCoordinate"),
-                    object: image
-                )
-            } else if let videoURL = userInfo["videoURL"] as? URL {
-                // Upload video
-                NotificationCenter.default.post(
-                    name: Notification.Name("UploadVideoToCurrentCoordinate"),
-                    object: videoURL
-                )
-            }
-            
-            // Switch to profile tab to show the post once uploaded
-            Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second delay
-                selectedTab = .profile
-                NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("PostUploadStarted"))) { notification in
-            // Show upload started status
-            uploadStatusMessage = notification.userInfo?["message"] as? String ?? "Uploading..."
-            uploadStatusIcon = "arrow.up.circle.fill"
-            uploadStatusColor = .blue
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                showUploadStatus = true
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("PostUploadSuccess"))) { _ in
-            // Show success status
-            uploadStatusMessage = "Post uploaded successfully!"
-            uploadStatusIcon = "checkmark.circle.fill"
-            uploadStatusColor = .green
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                showUploadStatus = true
-            }
-            
-            // Ask profile to refresh its content and scroll to the new post if provided
-            NotificationCenter.default.post(name: Notification.Name("RefreshProfileAfterUpload"), object: nil)
-            
-            // Ensure we land on profile to see the new post
-            selectedTab = .profile
-            
-            NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
-            
-            // Hide after 2 seconds
-            Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                    showUploadStatus = false
+            .onChange(of: auth.isAuthenticated) { _, authed in
+                if authed {
+                    DispatchQueue.main.async {
+                        selectedTab = .feed
+                        if !didTriggerFeedInitialLoad {
+                            didTriggerFeedInitialLoad = true
+                            NotificationCenter.default.post(name: .LoadFeedNow, object: nil)
+                        }
+                    }
                 }
             }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("PostUploadFailed"))) { notification in
-            // Show failure status
-            let error = notification.userInfo?["error"] as? String ?? "Upload failed"
-            uploadStatusMessage = error
-            uploadStatusIcon = "xmark.circle.fill"
-            uploadStatusColor = .red
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                showUploadStatus = true
-            }
-            
-            // Hide after 3 seconds
-            Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 3_000_000_000)
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                    showUploadStatus = false
+            .onChange(of: scenePhase) { _, phase in
+                switch phase {
+                case .active:
+                    Task { @MainActor in
+                        guard !PreviewEnvHomeView.isPreview else { return }
+                        deferUntilAfterLaunch {
+                            await MainActor.run { self.motionController.start() }
+                        }
+                        if selectedTab == .record {
+                            ensureCameraRunningIfNeeded()
+                        }
+                    }
+                case .background, .inactive:
+                    cameraController.stop()
+                    didStartCameraOnce = false
+                    motionController.stop()
+                    NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
+                    NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
+                @unknown default:
+                    break
                 }
             }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("SwitchToFeedTab"))) { _ in
-            // Switch to feed tab (used after successful upload in Camera -> Map flow)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("SwitchToProfileTab"))) { _ in
-            // Switch to profile tab (used after successful upload in Map -> Camera flow)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("SwitchToMapTab"))) { _ in
-            // Switch to map tab (used when long-pressing on post in feed/profile)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .ShowUserProfile)) { note in
-            if let uid = note.object as? String {
-                routedUserID = uid
-                selectedTab = .profile
-                NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
+            .onChange(of: isPreviewRuntime) { _, isPreview in
+                if isPreview {
+                    if let mapped = AppTab(fromPreview: previewSelectedTab) {
+                        selectedTab = mapped
+                    }
+                }
             }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ShowUserProfileContext"))) { note in
-            // Expect userInfo: ["userID": String, "radius": Double?, "currentPostID": String?]
-            if let userInfo = note.userInfo,
-               let uid = userInfo["userID"] as? String {
-                routedUserID = uid
-                // Forward radius/currentPostID to profile via Notification so ProfileView can reflect the tapped user's context
-                var forwardInfo: [String: Any] = ["userID": uid]
-                if let r = userInfo["radius"] as? Double { forwardInfo["radius"] = r }
-                if let pid = userInfo["currentPostID"] as? String { forwardInfo["currentPostID"] = pid }
-                NotificationCenter.default.post(name: Notification.Name("ProfileShowUserContext"), object: nil, userInfo: forwardInfo)
-                selectedTab = .profile
-                NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("FeedCurrentPostContext"))) { note in
-            // Keep track of the last tapped user's context to be used by profile if needed
-            if let userInfo = note.userInfo, let uid = userInfo["userID"] as? String {
-                routedUserID = uid
-            }
-        }
-        .onChange(of: isPreviewRuntime) { isPreview in
-            if isPreview {
-                if let mapped = AppTab(fromPreview: previewSelectedTab) {
+            .onChange(of: previewSelectedTab) { _, tab in
+                guard isPreviewRuntime else { return }
+                if let mapped = AppTab(fromPreview: tab) {
                     selectedTab = mapped
                 }
             }
-        }
-        .onChange(of: previewSelectedTab) { tab in
-            guard isPreviewRuntime else { return }
-            if let mapped = AppTab(fromPreview: tab) {
-                selectedTab = mapped
-            }
-        }
-        .task {
-            deferUntilAfterLaunch {
-                await MainActor.run { isSceneKitReady = true }
-            }
-        }
-        .task {
-            // Removed the 2s TTI marker print task per instructions
-        }
-        .task {
-            try? await Task.sleep(nanoseconds: 5_000_000_000)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .MapSuggestedRadius)) { note in
-            if let value = note.userInfo?["radius"] as? Double {
-                // Clamp to app cap and apply to the global bar with animation on every update
-                let clampedValue = min(value, 3_323_000.0)
-                let anim = Animation.easeInOut(duration: 2.0)
-                withAnimation(anim) {
-                    isometricBarModel.radius = clampedValue
+            .onChange(of: selectedTab) { _, newTab in
+                if newTab != .profile && routedUserID != nil {
+                    routedUserID = nil
                 }
             }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .currentPostRadiusDidChange)) { note in
-            if let value = note.userInfo?["radius"] as? Double {
-                let duration = (note.userInfo?["duration"] as? Double) ?? 0.8
-                let clampedValue = min(value, 3_323_000.0)
-                
-                // Track radius trend
-                let oldTrend = radiusTrend
-                if let prev = previousRadius {
-                    if clampedValue > prev {
-                        radiusTrend = .up
-                    } else if clampedValue < prev {
-                        radiusTrend = .down
+
+        // Step 2: apply notification receivers and remaining tasks
+        return step1
+            .task {
+                deferUntilAfterLaunch {
+                    await MainActor.run { isSceneKitReady = true }
+                }
+            }
+            .task {
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .FeedReady)) { _ in
+                DispatchQueue.main.async { isFeedReady = true }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .CubeMotionUpdate)) { _ in
+                // Motion updates silenced
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .SharedRadiusDidChange)) { note in
+                if let value = note.userInfo?["radius"] as? Double {
+                    isometricBarModel.radius = min(value, 3_323_000.0)
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("UserRecognizedInCamera"))) { note in
+                if let radiusMeters = note.userInfo?["radius"] as? Double {
+                    NotificationCenter.default.post(
+                        name: .SharedRadiusDidChange,
+                        object: nil,
+                        userInfo: ["radius": radiusMeters]
+                    )
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("InlinePreviewDismissRequested"))) { _ in
+                isometricBarModel.radius = 0
+                NotificationCenter.default.post(name: .SharedRadiusDidChange, object: nil, userInfo: ["radius": 0.0])
+            }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ToggleARFilters"))) { _ in
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                    showARFilters.toggle()
+                    UserDefaults.standard.set(showARFilters, forKey: "ARFiltersShown")
+                    NotificationCenter.default.post(
+                        name: Notification.Name("ARFiltersStateChanged"),
+                        object: nil,
+                        userInfo: ["isShown": showARFilters]
+                    )
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .cameraCubeHoldBegan)) { _ in
+                guard selectedTab == .record else { return }
+                isRecordHolding = true
+                ensureCameraRunningIfNeeded()
+                startRecordHoldRamp()
+                startRecordingCountdown()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .cameraCubeHoldEnded)) { _ in
+                if !isRecording {
+                    isRecordHolding = false
+                    stopRecordHoldRamp(reset: true)
+                    stopRecordingCountdown()
+                }
+                isRecordHolding = false
+            }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("OpenCameraAtCoordinate"))) { notification in
+                guard let userInfo = notification.userInfo,
+                      let latitude = userInfo["latitude"] as? Double,
+                      let longitude = userInfo["longitude"] as? Double else { return }
+                selectedTab = .record
+                NotificationCenter.default.post(
+                    name: Notification.Name("SetCameraCoordinate"),
+                    object: nil,
+                    userInfo: ["latitude": latitude, "longitude": longitude]
+                )
+            }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("OpenMapToSelectPostLocation"))) { _ in
+                selectedTab = .map
+            }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ShowLocationOnMap"))) { notification in
+                guard notification.userInfo?["coordinate"] is CLLocationCoordinate2D else { return }
+                selectedTab = .map
+            }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ShowLocationOnMapFromPost"))) { note in
+                guard let userInfo = note.userInfo,
+                      let latitude = userInfo["latitude"] as? Double,
+                      let longitude = userInfo["longitude"] as? Double else { return }
+                selectedTab = .map
+                NotificationCenter.default.post(name: Notification.Name("ShowLocationOnMap"), object: nil, userInfo: [
+                    "coordinate": CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+                ])
+            }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("UploadPostToCoordinate"))) { notification in
+                guard let userInfo = notification.userInfo,
+                      let latitude = userInfo["latitude"] as? Double,
+                      let longitude = userInfo["longitude"] as? Double else { return }
+                uploadStatusMessage = "Uploading your post..."
+                uploadStatusIcon = "arrow.up.circle.fill"
+                uploadStatusColor = .blue
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { showUploadStatus = true }
+                NotificationCenter.default.post(
+                    name: Notification.Name("SetCameraCoordinate"),
+                    object: nil,
+                    userInfo: ["latitude": latitude, "longitude": longitude]
+                )
+                if let image = userInfo["image"] as? UIImage {
+                    NotificationCenter.default.post(name: Notification.Name("UploadImageToCurrentCoordinate"), object: image)
+                } else if let videoURL = userInfo["videoURL"] as? URL {
+                    NotificationCenter.default.post(name: Notification.Name("UploadVideoToCurrentCoordinate"), object: videoURL)
+                }
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    selectedTab = .profile
+                    NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("PostUploadStarted"))) { notification in
+                uploadStatusMessage = notification.userInfo?["message"] as? String ?? "Uploading..."
+                uploadStatusIcon = "arrow.up.circle.fill"
+                uploadStatusColor = .blue
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { showUploadStatus = true }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("PostUploadSuccess"))) { _ in
+                uploadStatusMessage = "Post uploaded successfully!"
+                uploadStatusIcon = "checkmark.circle.fill"
+                uploadStatusColor = .green
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { showUploadStatus = true }
+                NotificationCenter.default.post(name: Notification.Name("RefreshProfileAfterUpload"), object: nil)
+                selectedTab = .profile
+                NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { showUploadStatus = false }
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("PostUploadFailed"))) { notification in
+                let error = notification.userInfo?["error"] as? String ?? "Upload failed"
+                uploadStatusMessage = error
+                uploadStatusIcon = "xmark.circle.fill"
+                uploadStatusColor = .red
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { showUploadStatus = true }
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 3_000_000_000)
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { showUploadStatus = false }
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("SwitchToFeedTab"))) { _ in }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("SwitchToProfileTab"))) { _ in }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("SwitchToMapTab"))) { _ in }
+            .onReceive(NotificationCenter.default.publisher(for: .ShowUserProfile)) { note in
+                if let uid = note.object as? String {
+                    routedUserID = uid
+                    selectedTab = .profile
+                    NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ShowUserProfileContext"))) { note in
+                if let userInfo = note.userInfo, let uid = userInfo["userID"] as? String {
+                    routedUserID = uid
+                    var forwardInfo: [String: Any] = ["userID": uid]
+                    if let r = userInfo["radius"] as? Double { forwardInfo["radius"] = r }
+                    if let pid = userInfo["currentPostID"] as? String { forwardInfo["currentPostID"] = pid }
+                    NotificationCenter.default.post(name: Notification.Name("ProfileShowUserContext"), object: nil, userInfo: forwardInfo)
+                    selectedTab = .profile
+                    NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("FeedCurrentPostContext"))) { note in
+                if let userInfo = note.userInfo, let uid = userInfo["userID"] as? String {
+                    routedUserID = uid
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .MapSuggestedRadius)) { note in
+                if let value = note.userInfo?["radius"] as? Double {
+                    let clampedValue = min(value, 3_323_000.0)
+                    withAnimation(.easeInOut(duration: 2.0)) {
+                        isometricBarModel.radius = clampedValue
+                    }
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .currentPostRadiusDidChange)) { note in
+                if let value = note.userInfo?["radius"] as? Double {
+                    let duration = (note.userInfo?["duration"] as? Double) ?? 0.8
+                    let clampedValue = min(value, 3_323_000.0)
+                    let oldTrend = radiusTrend
+                    if let prev = previousRadius {
+                        if clampedValue > prev { radiusTrend = .up }
+                        else if clampedValue < prev { radiusTrend = .down }
+                        else { radiusTrend = .neutral }
                     } else {
                         radiusTrend = .neutral
                     }
-                } else {
-                    radiusTrend = .neutral
-                }
-                previousRadius = clampedValue
-                
-                if oldTrend != radiusTrend {
-                }
-                
-                let anim = Animation.easeInOut(duration: duration)
-                withAnimation(anim) {
-                    isometricBarModel.radius = clampedValue
+                    previousRadius = clampedValue
+                    _ = oldTrend
+                    withAnimation(.easeInOut(duration: duration)) {
+                        isometricBarModel.radius = clampedValue
+                    }
                 }
             }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .animateRadiusBarToValue)) { note in
-            if let value = note.userInfo?["radius"] as? Double {
-                let duration = (note.userInfo?["duration"] as? Double) ?? 0.8
-                let clampedValue = min(value, 3_323_000.0)
-                let anim = Animation.easeInOut(duration: duration)
-                withAnimation(anim) {
-                    isometricBarModel.radius = clampedValue
+            .onReceive(NotificationCenter.default.publisher(for: .animateRadiusBarToValue)) { note in
+                if let value = note.userInfo?["radius"] as? Double {
+                    let duration = (note.userInfo?["duration"] as? Double) ?? 0.8
+                    let clampedValue = min(value, 3_323_000.0)
+                    withAnimation(.easeInOut(duration: duration)) {
+                        isometricBarModel.radius = clampedValue
+                    }
                 }
             }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("UserPostCountDidChange"))) { note in
-            if let count = note.userInfo?["count"] as? Int {
-                userPostCount = count
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("UserPostCountDidChange"))) { note in
+                if let count = note.userInfo?["count"] as? Int {
+                    userPostCount = count
+                }
             }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .ShowUserProfile)) { note in
-            if let uid = note.object as? String {
-                routedUserID = uid
-                selectedTab = .profile
-                NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
-            }
-        }
-        .onChange(of: selectedTab) { newTab in
-            if newTab != .profile && routedUserID != nil {
-                routedUserID = nil
-            }
-        }
-        // Removed .onChange handler - the binding $isometricBarModel.radius automatically triggers updateUIView in RadiusBarSceneView
     }
-    
-    
 }
 final class BarCubePreviewTuning: ObservableObject {
     // Removed barHorizontalOffset, barBottomOffset, barTiltDegrees, barWidth, barHeight per instructions (no longer used)
@@ -1337,7 +1181,7 @@ struct HomeBarPlacementPreview: View {
     // Changed per instructions to EnvironmentObject
     @EnvironmentObject private var isometricBarSettings: IsometricBarSettings
     
-    var usesImperial: Bool { Locale.current.usesMetricSystem == false }
+    var usesImperial: Bool { Locale.current.measurementSystem != .metric }
     var earthMaxUnit: Double { usesImperial ? 3958.8 : 6371.0 }
     
     // Added state to control animation flag
@@ -1491,123 +1335,9 @@ struct HomeBarPlacementPreview: View {
 
             CubeAndBarOverlay(radius: $radius)
                 .animation(nil, value: radius)
-
-            VStack {
-                VStack(alignment: .leading, spacing: 12) {
-                    Picker("Tab", selection: $selectedTab) {
-                        Text("Record").tag(AppTab.record)
-                        Text("Map").tag(AppTab.map)
-                        Text("Profile").tag(AppTab.profile)
-                        Text("Feed").tag(AppTab.feed)
-                    }
-                    .pickerStyle(.segmented)
-
-                    HStack {
-                        Text("Horizontal")
-                        Slider(
-                            value: Binding<Double>(
-                                get: { Double(isometricBarSettings.horizontalOffset) },
-                                set: { isometricBarSettings.horizontalOffset = CGFloat($0) }
-                            ),
-                            in: -200...200
-                        )
-                        Text("\(Int(isometricBarSettings.horizontalOffset))").monospacedDigit()
-                    }
-                    HStack {
-                        Text("Bottom")
-                        Slider(
-                            value: Binding<Double>(
-                                get: { Double(isometricBarSettings.bottomOffset) },
-                                set: { isometricBarSettings.bottomOffset = CGFloat($0) }
-                            ),
-                            in: -440...240
-                        )
-                        Text("\(Int(isometricBarSettings.bottomOffset))").monospacedDigit()
-                    }
-                    HStack {
-                        Text("Tilt")
-                        Slider(
-                            value: Binding<Double>(
-                                get: { isometricBarSettings.barTiltDegrees },
-                                set: { isometricBarSettings.barTiltDegrees = $0 }
-                            ),
-                            in: -25...0,
-                            step: 1
-                        )
-                        Text("\(Int(isometricBarSettings.barTiltDegrees))°").monospacedDigit()
-                    }
-                    HStack {
-                        Text("Width")
-                        Slider(
-                            value: Binding<Double>(
-                                get: { Double(isometricBarSettings.barWidth) },
-                                set: { isometricBarSettings.barWidth = CGFloat($0) }
-                            ),
-                            in: 64...128
-                        )
-                        Text("\(Int(isometricBarSettings.barWidth))").monospacedDigit()
-                    }
-                    HStack {
-                        Text("Height")
-                        Slider(
-                            value: Binding<Double>(
-                                get: { Double(isometricBarSettings.barHeight) },
-                                set: { isometricBarSettings.barHeight = CGFloat($0) }
-                            ),
-                            in: 260...480
-                        )
-                        Text("\(Int(isometricBarSettings.barHeight))").monospacedDigit()
-                    }
-                    HStack {
-                        Text("Radius")
-                        Slider(
-                            value: Binding(
-                                get: {
-                                    let meters = radius
-                                    return usesImperial ? (meters / 1609.34) : (meters / 1000.0)
-                                },
-                                set: { unitValue in
-                                    if usesImperial { radius = unitValue * 1609.34 } else { radius = unitValue * 1000.0 }
-                                }
-                            ),
-                            in: 0...earthMaxUnit
-                        )
-                        Text({
-                            let unitSymbol = usesImperial ? "mi" : "km"
-                            let unitVal = usesImperial ? (radius / 1609.34) : (radius / 1000.0)
-                            return "\(Int(unitVal)) \(unitSymbol)"
-                        }())
-                        .monospacedDigit()
-                    }
-                    Text(usesImperial ? "out of 3,958.8 mi" : "out of 6,371 km")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                    HStack {
-                        Spacer()
-                        Button(role: .destructive) {
-                            isometricBarSettings.horizontalOffset = 80
-                            isometricBarSettings.bottomOffset = 1
-                            isometricBarSettings.barWidth = 98
-                            isometricBarSettings.barHeight = 390
-                            isometricBarSettings.barTiltDegrees = -8
-                            // Optionally reset preview radius as well
-                            radius = 0
-                        } label: {
-                            Label("Reset to Defaults", systemImage: "arrow.counterclockwise")
-                        }
-                        .buttonStyle(.borderedProminent)
-                    }
-                }
-                .padding(12)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .padding(.horizontal, 16)
-                .padding(.top, 24)
-
-                Spacer()
-            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .onChange(of: previewHoldActive) { newValue in
+        .onChange(of: previewHoldActive) { _, newValue in
             if newValue && selectedTab == .record {
                 // Trigger pop animation immediately on hold begin
                 previewPopTrigger += 1
@@ -1624,7 +1354,7 @@ struct HomeBarPlacementPreview: View {
                 stopPreviewHoldRamp(reset: true)
             }
         }
-        .onChange(of: selectedTab) { newValue in
+        .onChange(of: selectedTab) { _, newValue in
             if newValue != .record {
                 previewHoldActive = false
                 stopPreviewHoldRamp(reset: true)
@@ -1650,26 +1380,6 @@ struct HomePreviewSettings {
     }()
 }
 
-struct HomeView_Previews: PreviewProvider {
-    static var previews: some View {
-        Group {
-            RealTabLayoutPreviewShell(tab: .record) {
-                HomeBarPlacementPreview(initialTab: .record)
-                    .environmentObject(HomePreviewSettings.settings)
-            }
-            .previewDisplayName("Home Real UI Layout - Record")
-
-            RealTabLayoutPreviewShell(tab: .map) {
-                HomeBarPlacementPreview(initialTab: .map)
-                    .environmentObject(HomePreviewSettings.settings)
-            }
-            .previewDisplayName("Home Real UI Layout - Map")
-
-        }
-        .ignoresSafeArea(.container, edges: [.bottom, .leading, .trailing])
-    }
-}
-
 private extension AppTab {
     init?(fromPreview tab: PreviewAppTab) {
         switch tab {
@@ -1678,6 +1388,71 @@ private extension AppTab {
         case .feed: self = .feed
         case .profile: self = .profile
         }
+    }
+}
+
+// MARK: - Record Camera Controls
+
+private struct RecordCameraControlsOverlay: View {
+    @ObservedObject var controller: CameraKitController
+
+    private var isFlashActive: Bool {
+        controller.isTorchOn || controller.isScreenFlashOn
+    }
+
+    var body: some View {
+        VStack {
+            HStack(spacing: 12) {
+                Spacer()
+
+                CameraIconControlButton(
+                    systemName: isFlashActive ? "bolt.fill" : "bolt.slash.fill",
+                    isActive: isFlashActive,
+                    action: {
+                        if isFlashActive {
+                            controller.toggleTorchOff()
+                        } else {
+                            controller.toggleTorchOn()
+                        }
+                    }
+                )
+
+                CameraIconControlButton(
+                    systemName: "arrow.triangle.2.circlepath.camera.fill",
+                    isActive: false,
+                    action: {
+                        controller.flipCamera()
+                    }
+                )
+            }
+            .padding(.top, 82)
+            .padding(.horizontal, 18)
+
+            Spacer()
+        }
+    }
+}
+
+private struct CameraIconControlButton: View {
+    let systemName: String
+    let isActive: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 18, weight: .bold))
+                .foregroundStyle(isActive ? Color.yellow : Color.white)
+                .frame(width: 44, height: 44)
+                .background(.black.opacity(0.38), in: Circle())
+                .overlay(
+                    Circle()
+                        .strokeBorder(.white.opacity(0.18), lineWidth: 1)
+                )
+                .shadow(color: .black.opacity(0.35), radius: 8, x: 0, y: 3)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(systemName.contains("bolt") ? "Toggle flash" : "Switch camera")
     }
 }
 

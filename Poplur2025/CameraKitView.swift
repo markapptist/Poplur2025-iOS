@@ -54,30 +54,6 @@ struct CameraKitView: View {
                     .transition(.opacity)
             }
 
-            VStack {
-                HStack {
-                    Text(userRecognition.recognizedUser != nil ? "@\(userRecognition.recognizedUser!.profile.username)" : (userRecognition.isRecognizing ? "Scanning…" : "No user"))
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(Color.black.opacity(0.35))
-                        .clipShape(Capsule())
-                    Spacer()
-                }
-                .padding(.top, 12)
-                .padding(.horizontal, 16)
-                Spacer()
-            }
-            .allowsHitTesting(false)
-            .zIndex(5)
-
-            // User recognition overlay
-            UserRecognitionOverlay(recognitionManager: userRecognition)
-                .allowsHitTesting(!isRecording) // Don't block camera gestures, disable when recording
-                .zIndex(4)
-                .padding(.top, 8)
-
             // Recording overlay: flashing cube with REC circle
             if isRecording {
                 GeometryReader { geo in
