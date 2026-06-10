@@ -88,7 +88,7 @@ struct RecordingCountdownView: View {
                     )
             }
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .center, spacing: 2) {
                 Text(secondsRemaining > 0 ? "\(secondsRemaining)" : "0")
                     .font(.system(size: 40, weight: .bold))
                     .foregroundStyle(.red)
@@ -110,6 +110,7 @@ struct RecordingCountdownView: View {
                     .foregroundStyle(.white.opacity(0.9))
                     .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
             }
+            .frame(width: 90, alignment: .center)
 
             Text("unit")
                 .font(.system(size: 14, weight: .medium))
@@ -131,7 +132,7 @@ struct RecordingCountdownView: View {
                 .kerning(1.2)
                 .transition(.opacity.combined(with: .scale(scale: 0.8)))
             
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .center, spacing: 2) {
                 Group {
                     if showLikesMode {
                         Text("\(likesCount)")
@@ -174,6 +175,7 @@ struct RecordingCountdownView: View {
                     .monospacedDigit()
                     .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
             }
+            .frame(width: 90, alignment: .center)
             
             Text(postCount == 1 ? "post" : "posts")
                 .font(.system(size: 14, weight: .medium))

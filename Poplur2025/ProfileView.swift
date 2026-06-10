@@ -184,8 +184,8 @@ struct ProfileView: View {
 
             VStack(spacing: 0) {
                     // Top buttons row
-                    if isOwnProfile {
-                        HStack {
+                    HStack {
+                        if isOwnProfile {
                             Button {
                                 navigateToMessages = true
                             } label: {
@@ -207,10 +207,25 @@ struct ProfileView: View {
                                     .frame(width: 44, height: 44)
                             }
                             .buttonStyle(.plain)
+                        } else {
+                            Button {
+                                NotificationCenter.default.post(name: Notification.Name("SwitchToFeedTab"), object: nil)
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "chevron.left")
+                                    Text("Feed")
+                                }
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(.black.opacity(0.7))
+                                .frame(height: 44)
+                            }
+                            .buttonStyle(.plain)
+
+                            Spacer()
                         }
-                        .padding(.horizontal, 16)
-                        .padding(.top, 8)
                     }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 0)
                 
                     VStack(spacing: 10) {
                         avatarRow
@@ -224,7 +239,14 @@ struct ProfileView: View {
                     ScrollViewReader { proxy in
                         Group {
                             if isLoading || !hasLoadedOnce {
-                                VStack { Spacer(); Spacer() }
+                                VStack(spacing: 12) {
+                                    ProgressView()
+                                        .controlSize(.regular)
+                                    Text("Loading posts")
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundColor(.secondary)
+                                }
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
                                     .id("top")
                             } else if myPosts.isEmpty {
                                 VStack(spacing: 8) {
@@ -243,8 +265,8 @@ struct ProfileView: View {
                                         VStack(spacing: 0) {
                                             Color.clear.frame(height: 0).id("top")
                                             LazyVGrid(columns: gridCols, spacing: tileSpacing) {
-                                                ForEach(myPosts.filter { loadedImages[$0.id] != nil }) { post in
-                                                    ProfileGridTile(post: post, preloadedImage: loadedImages[post.id]!)
+                                                ForEach(myPosts) { post in
+                                                    ProfileGridTile(post: post, preloadedImage: loadedImages[post.id])
                                                         .onTapGesture {
                                                             withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                                                                 expandedPost = post
@@ -799,22 +821,7 @@ struct ProfileView: View {
                     }
                 }
             }
-            .navigationTitle(isOwnProfile ? "Your Profile" : (displayUsername ?? "Profile"))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                if !isOwnProfile {
-                    ToolbarItem(placement: .navigationBarLeading) {
-                        Button {
-                            NotificationCenter.default.post(name: Notification.Name("SwitchToFeedTab"), object: nil)
-                        } label: {
-                            HStack(spacing: 4) {
-                                Image(systemName: "chevron.left")
-                                Text("Feed")
-                            }
-                        }
-                    }
-                }
-            }
+            .toolbar(.hidden, for: .navigationBar)
             .id(viewID) // Force recreation when viewing different user
         }
     }
@@ -1598,14 +1605,37 @@ struct ProfileView: View {
 // Grid and list tiles unchanged…
 private struct ProfileGridTile: View {
     let post: Post
-    let preloadedImage: UIImage
+    let preloadedImage: UIImage?
     private let corner: CGFloat = 18
 
     var body: some View {
         ZStack {
-            Image(uiImage: preloadedImage)
-                .resizable()
-                .scaledToFill()
+            if let preloadedImage {
+                Image(uiImage: preloadedImage)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                RoundedRectangle(cornerRadius: corner, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color.black.opacity(0.16),
+                                Color.black.opacity(0.30)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .overlay {
+                        VStack(spacing: 8) {
+                            Image(systemName: post.mediaURL.lowercased().contains(".mp4") ? "play.fill" : "photo")
+                                .font(.system(size: 22, weight: .bold))
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+                        .foregroundStyle(.white.opacity(0.78))
+                    }
+            }
         }
         .frame(height: 120)
         .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
