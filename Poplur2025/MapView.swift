@@ -2462,6 +2462,8 @@ struct MapViewProduction: View {
     @State private var musicWaveFrame: Int = 0
     @State private var showTourNowPlayingText: Bool = true
     @State private var locationContextTask: Task<Void, Never>? = nil
+
+    private let mapZoomSliderHeight: CGFloat = 400
     
     @State private var longPressLocation: CGPoint? = nil  // Track long press location
     @State private var selectedCoordinate: CLLocationCoordinate2D? = nil  // Track selected coordinate for long-press
@@ -3308,39 +3310,6 @@ struct MapViewProduction: View {
             
             Spacer()
             
-            // Animated Zoom Slider - positioned on left side
-            HStack {
-                AnimatedZoomSlider(zoomLevel: $zoomLevel) { newZoom in
-                    // Update camera when slider changes - zoom from CURRENT camera position
-                    // This allows zooming in/out from anywhere on the map
-                    guard let currentCoord = camera.camera?.centerCoordinate else { return }
-                    let heading = camera.camera?.heading ?? 0
-                    
-                    let clampedZoom = newZoom.clamped(to: 10...40_000_000)
-                    
-                    // Smoothly animate zoom change
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        camera = .camera(
-                            MapCamera(
-                                centerCoordinate: currentCoord, // Keep current view position
-                                distance: clampedZoom,
-                                heading: heading,
-                                pitch: fixedPitchAlt
-                            )
-                        )
-                    }
-                    
-                    fixedDistanceAlt = clampedZoom
-                }
-                .frame(width: 60, height: 400)
-                .padding(.leading, 12)
-                .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 2)
-                
-                Spacer()
-            }
-            .padding(.bottom, 120) // Positioned above bottom UI
-            .zIndex(1000) // Ensure slider appears above map
-            
             // Post Here button - shows when coordinate is clicked OR in post placement mode
             if showPostPrompt, let coordinate = clickedCoordinate {
                 Button(action: {
@@ -3468,18 +3437,59 @@ struct MapViewProduction: View {
             Spacer()
         }
     }
+
+    @ViewBuilder
+    private var mapZoomSliderOverlay: some View {
+        GeometryReader { proxy in
+            VStack {
+                Spacer()
+                HStack {
+                    AnimatedZoomSlider(zoomLevel: $zoomLevel) { newZoom in
+                        updateMapZoom(to: newZoom)
+                    }
+                    .frame(width: 60, height: mapZoomSliderHeight)
+                    .padding(.leading, 12)
+                    .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 2)
+
+                    Spacer()
+                }
+                .padding(.leading, proxy.safeAreaInsets.leading)
+                .padding(.bottom, proxy.safeAreaInsets.bottom + 120)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+        }
+        .zIndex(1000)
+    }
+
+    private func updateMapZoom(to newZoom: Double) {
+        guard let currentCoord = camera.camera?.centerCoordinate else { return }
+        let heading = camera.camera?.heading ?? 0
+        let clampedZoom = newZoom.clamped(to: 10...40_000_000)
+
+        withAnimation(.easeOut(duration: 0.2)) {
+            camera = .camera(
+                MapCamera(
+                    centerCoordinate: currentCoord,
+                    distance: clampedZoom,
+                    heading: heading,
+                    pitch: fixedPitchAlt
+                )
+            )
+        }
+
+        fixedDistanceAlt = clampedZoom
+    }
     
     #if DEBUG
     @ViewBuilder
     private var weatherControlsOverlay: some View {
-        VStack {
-            Spacer()
-            
-            HStack {
+        GeometryReader { proxy in
+            VStack {
                 Spacer()
-                
-                VStack(spacing: 12) {
-                    // Current weather display
+
+                HStack {
+                    Spacer()
+
                     VStack(spacing: 4) {
                         weatherIcon(for: weatherState.kind)
                             .font(.system(size: 32))
@@ -3492,10 +3502,12 @@ struct MapViewProduction: View {
                             .foregroundStyle(.white)
                             .shadow(color: .black.opacity(0.5), radius: 2)
                     }
+                    .padding(.trailing, proxy.safeAreaInsets.trailing + 16)
+                    .padding(.bottom, proxy.safeAreaInsets.bottom + 200)
                 }
-                .padding(.trailing, 16)
-                .padding(.bottom, 200)
+                .frame(maxWidth: .infinity, alignment: .trailing)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
         }
     }
     #endif
@@ -3603,8 +3615,10 @@ struct MapViewProduction: View {
             // Top navigation buttons
             navigationButtons
             
-            // AI Recommendation Overlay (now includes zoom slider above it)
+            // AI Recommendation Overlay
             aiRecommendationOverlay
+
+            mapZoomSliderOverlay
             
             // Weather controls (DEBUG ONLY - removed in production builds)
             #if DEBUG

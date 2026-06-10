@@ -282,12 +282,20 @@ struct HomeView: View {
             HomeCameraPreviewHost(controller: cameraController)
                 .ignoresSafeArea()
                 .allowsHitTesting(true) // Enable UIKit gesture recognizers
+
+            if cameraController.isScreenFlashOn && cameraController.currentCameraPosition == .front {
+                FrontCameraFlashEdgeOverlay()
+                    .ignoresSafeArea()
+                    .transition(.opacity)
+                    .zIndex(8)
+            }
             
             if !showARFilters {
                 RecordCameraControlsOverlay(controller: cameraController)
                     .transition(.opacity)
             }
         }
+        .animation(.easeInOut(duration: 0.18), value: cameraController.isScreenFlashOn)
         .onAppear {
             Task { @MainActor in
                 // Removed guard !PreviewEnvHomeView.isPreview else { return }
@@ -780,8 +788,8 @@ struct HomeView: View {
                         // Option 4: Icon-centered style
                         // RadiusDisplayWithIcon(radiusMeters: $isometricBarModel.radius)
                     }
-                    .padding(.leading, safe.leading + 16)
-                    .padding(.trailing, safe.trailing + 16)
+                    .padding(.leading, safe.leading + (selectedTab == .map ? 0 : 16))
+                    .padding(.trailing, safe.trailing + (selectedTab == .map ? 0 : 16))
                     .padding(.bottom, safe.bottom + 20)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
@@ -801,7 +809,7 @@ struct HomeView: View {
                             CameraRollButton()
                             Spacer()
                         }
-                        .padding(.leading, safe.leading + 16)
+                        .padding(.leading, safe.leading + 28)
                         .padding(.bottom, safe.bottom + 20)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
@@ -1468,6 +1476,56 @@ private struct CameraIconControlButton: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(systemName.contains("bolt") ? "Toggle flash" : "Switch camera")
+    }
+}
+
+private struct FrontCameraFlashEdgeOverlay: View {
+    var body: some View {
+        GeometryReader { proxy in
+            let edgeThickness = max(proxy.size.width, proxy.size.height) * 0.17
+
+            ZStack {
+                Color.white.opacity(0.08)
+
+                VStack(spacing: 0) {
+                    LinearGradient(
+                        colors: [Color.white.opacity(0.96), Color.white.opacity(0)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(height: edgeThickness)
+
+                    Spacer(minLength: 0)
+
+                    LinearGradient(
+                        colors: [Color.white.opacity(0), Color.white.opacity(0.96)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(height: edgeThickness)
+                }
+
+                HStack(spacing: 0) {
+                    LinearGradient(
+                        colors: [Color.white.opacity(0.96), Color.white.opacity(0)],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                    .frame(width: edgeThickness)
+
+                    Spacer(minLength: 0)
+
+                    LinearGradient(
+                        colors: [Color.white.opacity(0), Color.white.opacity(0.96)],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                    .frame(width: edgeThickness)
+                }
+            }
+            .blendMode(.screen)
+        }
+        .allowsHitTesting(false)
     }
 }
 
