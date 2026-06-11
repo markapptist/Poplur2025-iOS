@@ -54,8 +54,7 @@ struct TabBarControllerHost<MapContent: View, RecordContent: View, FeedContent: 
     var body: some View {
         tabView
             .onReceive(showUserProfilePublisher, perform: handleShowUserProfile)
-            .onChange(of: selection, perform: handleSelectionChange)
-            .onAppear(perform: triggerBackgroundPreloading)
+            .onChange(of: selection) { _, newTab in handleSelectionChange(newTab) }
     }
     
     // MARK: - View Components
@@ -127,18 +126,4 @@ struct TabBarControllerHost<MapContent: View, RecordContent: View, FeedContent: 
         }
     }
     
-    private func triggerBackgroundPreloading() {
-        // Kick background preloading when the tab bar first appears
-        // If you added AppPreloader, you can call:
-        // AppPreloader.shared.primeAll()
-        
-        // Or just post the notifications directly:
-        let feedName: Notification.Name = .LoadFeedNow
-        let mapName: Notification.Name = .LoadMapNow
-        let profileName: Notification.Name = .LoadProfileNow
-        
-        NotificationCenter.default.post(name: feedName, object: nil)
-        NotificationCenter.default.post(name: mapName, object: nil)
-        NotificationCenter.default.post(name: profileName, object: nil)
-    }
 }

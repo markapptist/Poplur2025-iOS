@@ -189,6 +189,8 @@ struct HomeView: View {
     @State private var didPrewarmSceneKit = false
     @State private var showBarTuner: Bool = false
     @State private var didApplyDefaultBarSettings = false
+    @State private var launchSequenceTask: Task<Void, Never>? = nil
+    @State private var didRunLaunchSequence = false
     
     // Shared radius model controlling the global isometric bar value across all tabs
     @StateObject private var isometricBarModel = IsometricBarModel(radius: 0)
@@ -382,6 +384,59 @@ struct HomeView: View {
             await work()
         }
     }
+
+    private func runLaunchSequenceIfNeeded() {
+        guard !didRunLaunchSequence else { return }
+        didRunLaunchSequence = true
+        launchSequenceTask?.cancel()
+        launchSequenceTask = Task { @MainActor in
+            launchGate.start()
+
+            if !didTriggerFeedInitialLoad {
+                didTriggerFeedInitialLoad = true
+                NotificationCenter.default.post(name: .LoadFeedNow, object: nil)
+            }
+
+            await waitForFeedReadyOrTimeout()
+            await Task.yield()
+
+            NotificationCenter.default.post(name: .PlayFeedLaunchLogo, object: nil)
+
+            try? await Task.sleep(nanoseconds: 650_000_000)
+            await Task.yield()
+
+            if !didTriggerMapInitialLoad {
+                didTriggerMapInitialLoad = true
+                NotificationCenter.default.post(name: .LoadMapNow, object: nil)
+            }
+
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            await Task.yield()
+
+            if !didTriggerProfileInitialLoad {
+                didTriggerProfileInitialLoad = true
+                NotificationCenter.default.post(name: .LoadProfileNow, object: nil)
+            }
+
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            launchGate.markReady()
+        }
+    }
+
+    private func waitForFeedReadyOrTimeout() async {
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask {
+                for await _ in NotificationCenter.default.notifications(named: .FeedReady) {
+                    break
+                }
+            }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: 900_000_000)
+            }
+            await group.next()
+            group.cancelAll()
+        }
+    }
     
     private func startRecordHoldRamp() {
         recordHoldTask?.cancel()
@@ -527,16 +582,6 @@ struct HomeView: View {
     @ViewBuilder
     private var feedTabContent: some View {
         FeedView()
-            .task {
-                if selectedTab == .feed, !didTriggerFeedInitialLoad {
-                    deferUntilAfterLaunch {
-                        await MainActor.run {
-                            didTriggerFeedInitialLoad = true
-                            NotificationCenter.default.post(name: .LoadFeedNow, object: nil)
-                        }
-                    }
-                }
-            }
             .onDisappear {
                 // Ensure all feed players stop when leaving Feed tab view hierarchy
                 NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
@@ -853,6 +898,7 @@ struct HomeView: View {
             }
             .onAppear {
                 launchGate.start()
+                runLaunchSequenceIfNeeded()
                 if selectedTab != .feed {
                     NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
                 }
@@ -916,10 +962,7 @@ struct HomeView: View {
                 if authed {
                     DispatchQueue.main.async {
                         selectedTab = .feed
-                        if !didTriggerFeedInitialLoad {
-                            didTriggerFeedInitialLoad = true
-                            NotificationCenter.default.post(name: .LoadFeedNow, object: nil)
-                        }
+                        runLaunchSequenceIfNeeded()
                     }
                 }
             }

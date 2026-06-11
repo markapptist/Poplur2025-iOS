@@ -5,6 +5,7 @@ extension Notification.Name {
     static let LoadFeedNow = Notification.Name("LoadFeedNow")
     static let LoadMapNow = Notification.Name("LoadMapNow")
     static let LoadProfileNow = Notification.Name("LoadProfileNow")
+    static let PlayFeedLaunchLogo = Notification.Name("PlayFeedLaunchLogo")
     
     // Tab and navigation
     static let ResetTabToTop = Notification.Name("ResetTabToTop")

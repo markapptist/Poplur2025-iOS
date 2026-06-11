@@ -87,7 +87,7 @@ struct FeedView: View {
     ]
 
     @State private var showLaunchLogo: Bool = true
-    @State private var launchLogoOpacity: Double = 1.0
+    @State private var launchLogoOpacity: Double = 0.0
     @State private var launchLogoScale: CGFloat = 0.9
 
     private func countryIndex(for coordinate: CLLocationCoordinate2D?) -> Int {
@@ -165,9 +165,7 @@ struct FeedView: View {
                 Color.black.ignoresSafeArea()
                 
                 // Show either timeline or feed, not both
-                if layoutPreviewMode {
-                    feedLayoutSkeleton(in: geo.size)
-                } else if showTimelineView {
+                if showTimelineView {
                     // Twitter-style timeline (vertical scrolling with infinite feed)
                     FeedTwitterTimelineView(
                         posts: posts,
@@ -194,6 +192,12 @@ struct FeedView: View {
                 VideoLoadingIndicator(isLoading: .constant(isVideoLoading || showStatic), logoName: "logo")
                     .zIndex(30)
                     .transition(.opacity)
+
+                if showLaunchLogo {
+                    feedLaunchLogoOverlay
+                        .zIndex(31)
+                        .allowsHitTesting(false)
+                }
                 
                 // Comment section overlay
                 if showCommentSection, let currentPost = posts[safe: currentIndex] {
@@ -212,17 +216,25 @@ struct FeedView: View {
             .background(Color.black)
         }
         .task {
-            guard !layoutPreviewMode else { return }
-            // INSTANT: Bootstrap on appear without async overhead
+            if layoutPreviewMode {
+                applyPreviewFeedData()
+                return
+            }
             guard didBootstrap == false else { return }
-            didBootstrap = true
-            
-            // Call bootstrap synchronously
-            await runStrictBootstrap()
-            print("[Feed] after bootstrap posts=\(posts.count) ready=\(isFeedReady)")
+            isLoading = posts.isEmpty
         }
         .onReceive(NotificationCenter.default.publisher(for: .LoadFeedNow)) { _ in
-            Task { await reload() }
+            Task {
+                if didBootstrap {
+                    await reload()
+                } else {
+                    await runStrictBootstrap()
+                }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .PlayFeedLaunchLogo)) { _ in
+            guard didBootstrap else { return }
+            startFeedLogoPop()
         }
         .onReceive(NotificationCenter.default.publisher(for: .ResetTabToTop)) { _ in
             currentIndex = 0
@@ -411,67 +423,63 @@ struct FeedView: View {
         }
     }
 
-    private func feedLayoutSkeleton(in size: CGSize) -> some View {
-        ZStack {
-            LinearGradient(
-                colors: [
-                    Color(red: 0.03, green: 0.03, blue: 0.04),
-                    Color(red: 0.12, green: 0.13, blue: 0.16)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea()
+    private var feedLaunchLogoOverlay: some View {
+        Image("logo")
+            .resizable()
+            .scaledToFit()
+            .frame(width: 240, height: 240)
+            .opacity(launchLogoOpacity)
+            .scaleEffect(launchLogoScale)
+            .animation(.easeOut(duration: 0.4), value: launchLogoOpacity)
+            .animation(.spring(response: 0.42, dampingFraction: 0.72), value: launchLogoScale)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+    }
 
-            RoundedRectangle(cornerRadius: 0)
-                .fill(.white.opacity(0.08))
-                .overlay {
-                    VStack(spacing: 10) {
-                        Image(systemName: "play.rectangle.fill")
-                            .font(.system(size: 54, weight: .bold))
-                        Text("Feed media area")
-                            .font(.headline)
-                    }
-                    .foregroundStyle(.white.opacity(0.72))
-                }
+    @MainActor
+    private func startFeedLogoPop() {
+        showLaunchLogo = true
+        launchLogoOpacity = 0
+        launchLogoScale = 0.9
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(countries[selectedCountryIndex].name)
-                    .font(.system(size: 18, weight: .heavy, design: .rounded))
-                Text(channels[selectedChannelIndex].name)
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
-            }
-            .foregroundStyle(.white)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 9)
-            .background(.black.opacity(0.36), in: Capsule())
-            .positioned(tab: .feed, control: .title)
-
-            Button {} label: {
-                Image(systemName: "slider.horizontal.3")
-                    .font(.system(size: 19, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 44, height: 44)
-                    .background(.black.opacity(0.36), in: Circle())
-            }
-            .buttonStyle(.plain)
-            .positioned(tab: .feed, control: .secondaryAction)
+        withAnimation(.easeOut(duration: 0.4)) {
+            launchLogoOpacity = 1
         }
-        .frame(width: size.width, height: size.height)
+        withAnimation(.spring(response: 0.42, dampingFraction: 0.72)) {
+            launchLogoScale = 1.0
+        }
+
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 120_000_000)
+            playOneShotPop()
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            withAnimation(.easeInOut(duration: 0.35)) {
+                launchLogoOpacity = 0
+                launchLogoScale = 0.96
+            }
+            try? await Task.sleep(nanoseconds: 360_000_000)
+            showLaunchLogo = false
+        }
     }
 
     // MARK: - Strict bootstrap sequence
     private func runStrictBootstrap() async {
+        guard didBootstrap == false else { return }
+        didBootstrap = true
+
         // INSTANT: Set default country immediately (US as safe default)
         selectedCountryIndex = 0  // US default
+        let countryCode = countries[selectedCountryIndex].code
+        let channelID = channels[selectedChannelIndex].id
+        let pageSize = self.pageSize
         
-        // Generate posts IMMEDIATELY - this is just array construction
-        let newPosts = Self.generateDemoPostsForCountryAndChannel(
-            country: countries[selectedCountryIndex].code,
-            channel: channels[selectedChannelIndex].id,
-            start: 0,
-            count: pageSize
-        )
+        let newPosts = await Task.detached(priority: .userInitiated) {
+            Self.generateDemoPostsForCountryAndChannel(
+                country: countryCode,
+                channel: channelID,
+                start: 0,
+                count: pageSize
+            )
+        }.value
 
         // Update UI SYNCHRONOUSLY - no await needed
         posts = newPosts
@@ -1080,6 +1088,49 @@ struct FeedView: View {
         return "User \(short)"
     }
 
+    @MainActor
+    private func applyPreviewFeedData() {
+        guard posts.isEmpty else { return }
+        let previewPosts = [
+            FeedPost(
+                id: "preview-feed-0",
+                latitude: 40.7128,
+                longitude: -74.0060,
+                mediaURL: "preview://feed/video-0.mp4",
+                radius: 5_000,
+                viewCount: 42,
+                userID: "preview_creator_0",
+                cityName: "New York",
+                countryName: "United States",
+                countryFlag: "🇺🇸"
+            ),
+            FeedPost(
+                id: "preview-feed-1",
+                latitude: 43.6532,
+                longitude: -79.3832,
+                mediaURL: "preview://feed/image-1.jpg",
+                radius: 12_000,
+                viewCount: 31,
+                userID: "preview_creator_1",
+                cityName: "Toronto",
+                countryName: "Canada",
+                countryFlag: "🇨🇦"
+            )
+        ]
+        posts = previewPosts
+        usernames = [
+            "preview_creator_0": "PREVIEW CREATOR",
+            "preview_creator_1": "CITY CREATOR"
+        ]
+        currentIndex = 0
+        didBootstrap = true
+        isFeedReady = true
+        isLoading = false
+        isVideoLoading = false
+        showStatic = false
+        reachedEnd = true
+    }
+
     private func maybeResolveUsername(for uid: String) {
         // Guard against empty UIDs
         guard !uid.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -1356,7 +1407,6 @@ struct FeedView: View {
         for i in start..<end {
             let id = "demo_\(i)"
             let userID = i % 3 == 0 ? "fake_user_\(i)" : String(format: "user_%06d", i)
-            // Force the first post to be a guaranteed playable HLS stream
             let hlsSample = "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_4x3/gear1/prog_index.m3u8"
             let sampleVideos: [String] = [
                 // Reliable HLS (landscape)
@@ -1731,89 +1781,5 @@ struct FeedViewHost: View {
     var body: some View {
         FeedView()
             .environmentObject(poleModel)
-    }
-}
-
-private struct FeedTabLayoutPreview: View {
-    var body: some View {
-        ZStack {
-            Color(red: 0.06, green: 0.07, blue: 0.08)
-                .ignoresSafeArea()
-
-            VStack(spacing: 0) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("United States")
-                            .font(.system(size: 26, weight: .heavy, design: .rounded))
-                            .foregroundStyle(.white)
-                        Text("Food")
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundStyle(.white.opacity(0.65))
-                    }
-                    Spacer()
-                    Button {} label: {
-                        Image(systemName: "slider.horizontal.3")
-                            .font(.system(size: 20, weight: .bold))
-                            .foregroundStyle(.white)
-                            .frame(width: 44, height: 44)
-                            .background(.white.opacity(0.12), in: Circle())
-                    }
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 22)
-                .padding(.bottom, 14)
-
-                ScrollView {
-                    LazyVStack(spacing: 18) {
-                        ForEach(0..<6, id: \.self) { index in
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .fill(
-                                    LinearGradient(
-                                        colors: [
-                                            Color(hue: Double(index % 6) / 6.0, saturation: 0.36, brightness: 0.84),
-                                            Color.black.opacity(0.42)
-                                        ],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    )
-                                )
-                                .frame(height: 520)
-                                .overlay(alignment: .topLeading) {
-                                    VStack(alignment: .leading, spacing: 6) {
-                                        Text("@creator\(index + 1)")
-                                            .font(.system(size: 17, weight: .heavy, design: .rounded))
-                                        Text("\(2 + index) km away")
-                                            .font(.system(size: 13, weight: .semibold))
-                                            .opacity(0.72)
-                                    }
-                                    .foregroundStyle(.white)
-                                    .padding(16)
-                                }
-                                .overlay(alignment: .trailing) {
-                                    VStack(spacing: 18) {
-                                        Image(systemName: "heart.fill")
-                                        Image(systemName: "bubble.right.fill")
-                                        Image(systemName: "paperplane.fill")
-                                    }
-                                    .font(.system(size: 23, weight: .bold))
-                                    .foregroundStyle(.white)
-                                    .padding(.trailing, 14)
-                                }
-                        }
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.bottom, 30)
-                }
-            }
-        }
-    }
-}
-
-struct FeedView_Previews: PreviewProvider {
-    static var previews: some View {
-        RealTabLayoutPreviewShell(tab: .feed) {
-            FeedView()
-        }
-        .previewDisplayName("FeedView Real UI Layout")
     }
 }

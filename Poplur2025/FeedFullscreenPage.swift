@@ -1,7 +1,7 @@
 import SwiftUI
 import Foundation
 
-struct FeedPost: Identifiable, Hashable {
+struct FeedPost: Identifiable, Hashable, Sendable {
     let id: String
     let latitude: Double
     let longitude: Double
