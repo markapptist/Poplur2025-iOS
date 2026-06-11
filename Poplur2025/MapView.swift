@@ -2613,7 +2613,6 @@ struct MapViewProduction: View {
         intensity: 0.5,
         lightningFrequency: 0.3
     )
-    @State private var weatherBadgePulse = false
     @StateObject private var rainAmbientAudio = RainAmbientAudioService()
     
     // Available in both Debug and Release for tour functionality
@@ -3493,6 +3492,7 @@ struct MapViewProduction: View {
                     .background(Color.indigo, in: Capsule())
                 }
                 .buttonStyle(.plain)
+                .shadow(color: .black.opacity(0.35), radius: 10, x: 0, y: 5)
                 .padding(.horizontal)
                 .padding(.top, 8)
                 .transition(AnyTransition.move(edge: .top).combined(with: .opacity))
@@ -3514,6 +3514,7 @@ struct MapViewProduction: View {
                     .background(Color.indigo, in: Capsule())
                 }
                 .buttonStyle(.plain)
+                .shadow(color: .black.opacity(0.35), radius: 10, x: 0, y: 5)
                 .padding(.horizontal)
                 .padding(.top, 8)
                 .transition(AnyTransition.move(edge: .top).combined(with: .opacity))
@@ -3624,26 +3625,25 @@ struct MapViewProduction: View {
         VStack(spacing: 4) {
             ZStack {
                 Circle()
-                    .stroke(Color.white.opacity(weatherBadgePulse ? 0.08 : 0.28), lineWidth: 2)
-                    .frame(width: weatherBadgePulse ? 56 : 38, height: weatherBadgePulse ? 56 : 38)
+                    .stroke(Color.white.opacity(0.28), lineWidth: 2)
+                    .frame(width: 42, height: 42)
 
                 weatherIcon(for: weatherState.kind)
                     .font(.system(size: 32))
                     .foregroundStyle(.white)
-                    .symbolEffect(.pulse, value: weatherState.kind)
-                    .scaleEffect(weatherBadgePulse ? 1.06 : 0.96)
-                    .shadow(color: .black.opacity(0.5), radius: 2)
+                    .shadow(color: .black.opacity(0.55), radius: 3, x: 0, y: 2)
             }
 
             Text(weatherName(for: weatherState.kind))
                 .font(.caption)
                 .fontWeight(.semibold)
                 .foregroundStyle(.white)
-                .shadow(color: .black.opacity(0.5), radius: 2)
-                .opacity(weatherBadgePulse ? 1 : 0.82)
+                .shadow(color: .black.opacity(0.55), radius: 3, x: 0, y: 2)
         }
-        .animation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true), value: weatherBadgePulse)
-        .onAppear { weatherBadgePulse = true }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(.black.opacity(0.24), in: Capsule())
+        .shadow(color: .black.opacity(0.42), radius: 10, x: 0, y: 5)
     }
     
     /// Get icon for weather type
@@ -3793,12 +3793,14 @@ struct MapViewProduction: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
             .background(.black.opacity(0.28), in: Capsule())
+            .shadow(color: .black.opacity(0.35), radius: 10, x: 0, y: 5)
             .positioned(tab: .map, control: .title)
 
             AnimatedZoomSlider(zoomLevel: $zoomLevel) { newZoom in
                 zoomLevel = newZoom
             }
             .frame(width: 60, height: 400)
+            .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 2)
             .positioned(tab: .map, control: .secondaryAction)
 
             Button {} label: {
@@ -3810,6 +3812,7 @@ struct MapViewProduction: View {
                     .background(Color.indigo, in: Capsule())
             }
             .buttonStyle(.plain)
+            .shadow(color: .black.opacity(0.35), radius: 10, x: 0, y: 5)
             .positioned(tab: .map, control: .primaryAction)
         }
     }
