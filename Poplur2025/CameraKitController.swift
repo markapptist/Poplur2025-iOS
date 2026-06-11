@@ -182,6 +182,20 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
             }
         }
 
+        Foundation.NotificationCenter.default.addObserver(
+            forName: Notification.Name("PresentVideoPreviewRequested"),
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self = self,
+                  let videoURL = notification.object as? URL else {
+                return
+            }
+            Task { @MainActor in
+                self.presentRecordedVideoPreview(videoURL)
+            }
+        }
+
         // Gesture-driven camera controls
         NotificationCenter.default.addObserver(
             forName: Notification.Name("CameraToggleTorchOn"),
@@ -921,6 +935,9 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
            let window = scene.windows.first(where: { $0.isKeyWindow }),
            var top = window.rootViewController {
             while let presented = top.presentedViewController {
+                if String(describing: type(of: presented)).contains("UIHostingController<CapturePreviewOverlay>") {
+                    break
+                }
                 top = presented
             }
             return top
@@ -929,6 +946,57 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
         #else
         return nil
         #endif
+    }
+
+    @MainActor
+    private func presentCameraRollCapturePreview(image: UIImage?, videoURL: URL?) {
+        guard image != nil || videoURL != nil else { return }
+
+        let overlay = CapturePreviewOverlay(image: image, videoURL: videoURL)
+        let host = UIHostingController(rootView: overlay)
+        host.modalPresentationStyle = .fullScreen
+
+        presentCapturePreviewHost(host)
+    }
+
+    @MainActor
+    private func presentRecordedVideoPreview(_ videoURL: URL) {
+        let overlay = CapturePreviewOverlay(image: nil, videoURL: videoURL)
+        let host = UIHostingController(rootView: overlay)
+        host.modalPresentationStyle = .fullScreen
+        presentCapturePreviewHost(host)
+    }
+
+    @MainActor
+    private func presentCapturePreviewHost(_ host: UIHostingController<CapturePreviewOverlay>) {
+        guard let presenter = topMostViewController() else { return }
+        if presenter.presentedViewController == nil {
+            presenter.present(host, animated: true)
+        } else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self, weak host] in
+                guard let self = self, let host = host else { return }
+                let presenter = self.topMostViewController()
+                guard presenter?.presentedViewController == nil else { return }
+                presenter?.present(host, animated: true)
+            }
+        }
+    }
+
+    private func copyCameraRollVideoToTemporaryFileIfNeeded(_ url: URL) -> URL {
+        guard url.isFileURL else { return url }
+
+        let fileExtension = url.pathExtension.isEmpty ? "mov" : url.pathExtension
+        let destination = FileManager.default.temporaryDirectory
+            .appendingPathComponent("camera-roll-\(UUID().uuidString)")
+            .appendingPathExtension(fileExtension)
+
+        do {
+            try FileManager.default.copyItem(at: url, to: destination)
+            return destination
+        } catch {
+            print("[CameraKitController] Failed to copy camera roll video: \(error)")
+            return url
+        }
     }
 
     // MARK: - Photo Capture
@@ -1201,8 +1269,7 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
                         if let useObserver { NotificationCenter.default.removeObserver(useObserver) }
                     }
 
-                    let presenter: UIViewController? = self.recordPreviewViewController ?? self.previewViewController ?? self.topMostViewController()
-                    presenter?.present(host, animated: true)
+                    self.presentCapturePreviewHost(host)
                 }
             }
             #endif
@@ -1378,8 +1445,15 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
 
 extension CameraKitController {
     func fileOutput(_ output: AVCaptureFileOutput, didFinishRecordingTo outputFileURL: URL, from connections: [AVCaptureConnection], error: Error?) {
-        if let _ = error {
-            return
+        if let error {
+            let nsError = error as NSError
+            let finishedSuccessfully = nsError.userInfo[AVErrorRecordingSuccessfullyFinishedKey] as? Bool ?? false
+            let fileExists = FileManager.default.fileExists(atPath: outputFileURL.path)
+            if !finishedSuccessfully && !fileExists {
+                print("[CameraKitController] Recording failed without output: \(error.localizedDescription)")
+                return
+            }
+            print("[CameraKitController] Recording finished with recoverable status: \(error.localizedDescription)")
         }
         
         // Set lastVideoURL on main thread
@@ -1451,8 +1525,7 @@ extension CameraKitController {
                 if let useObserver { NotificationCenter.default.removeObserver(useObserver) }
             }
 
-            let presenter: UIViewController? = self.recordPreviewViewController ?? self.previewViewController ?? self.topMostViewController()
-            presenter?.present(host, animated: true)
+            self.presentCapturePreviewHost(host)
         }
         #else
         // If UIKit not available, fallback to immediate processing
@@ -1744,4 +1817,3 @@ extension UIImage {
     }
 }
 #endif
-

@@ -417,9 +417,11 @@ struct HomeView: View {
     /// Start the 10-second countdown timer and cube flashing
     /// Recording will continue even after user releases the hold (after 2 seconds)
     private func startRecordingCountdown() {
+        guard !isRecording else { return }
         isRecording = true
         recordingSecondsRemaining = 10
         startCubeFlashing()
+        cameraController.beginRecording()
         
         recordingTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { timer in
             DispatchQueue.main.async {
@@ -437,10 +439,14 @@ struct HomeView: View {
     }
     
     private func stopRecordingCountdown() {
+        let wasRecording = isRecording
         isRecording = false
         recordingTimer?.invalidate()
         recordingTimer = nil
         stopCubeFlashing()
+        if wasRecording {
+            cameraController.endRecording()
+        }
     }
     
     private func startCubeFlashing() {
