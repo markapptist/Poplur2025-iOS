@@ -7,8 +7,6 @@ import FirebaseFirestore
 import GoogleMobileAds
 #endif
 
-import AVFoundation
-
 // Detect when running inside Xcode Previews
 private enum PreviewEnv {
     static var isPreview: Bool {
@@ -63,9 +61,6 @@ struct Poplur2025App: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     @StateObject private var auth = AuthViewModel()
-
-    // Prewarmed, shared camera controller for fast camera bring-up
-    @StateObject private var cameraController = CameraKitController()
     
     @StateObject private var isometricBarSettings: IsometricBarSettings = {
         let s = IsometricBarSettings()
@@ -81,7 +76,7 @@ struct Poplur2025App: App {
         WindowGroup {
             NavigationStack {
                 if auth.isAuthenticated {
-                    HomeView(cameraController: cameraController)
+                    HomeView()
                         .environmentObject(auth)
                         .environmentObject(isometricBarSettings)
                 } else {

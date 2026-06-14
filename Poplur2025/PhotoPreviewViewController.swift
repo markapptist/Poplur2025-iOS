@@ -53,7 +53,9 @@ final class PhotoPreviewViewController: UIViewController {
         postButton.titleLabel?.font = UIFont.boldSystemFont(ofSize: 17)
         postButton.backgroundColor = UIColor.systemBlue.withAlphaComponent(0.9)
         postButton.layer.cornerRadius = 8
-        postButton.contentEdgeInsets = UIEdgeInsets(top: 10, left: 16, bottom: 10, right: 16)
+        var config = UIButton.Configuration.filled()
+        config.contentInsets = NSDirectionalEdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16)
+        postButton.configuration = config
         postButton.addTarget(self, action: #selector(postTapped), for: .touchUpInside)
         view.addSubview(postButton)
 

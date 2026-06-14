@@ -187,7 +187,10 @@ ffmpeg -i cube_rotation.mov -vf "fps=10,scale=320:-1:flags=lanczos" cube_rotatio
 - [ ] Post with username, radius, likes, comments
 - [ ] Timeline/grid view
 - [ ] Horizontal swipe transition (country change)
-- [ ] Vertical swipe transition (category change)
+- [ ] Vertical swipe transition (post change)
+- [ ] White Feed launch loading screen with centered animated Poplur logo
+- [ ] Mixed image/video/sponsored-ad first page
+- [ ] Feed custom volume bars after hardware volume up/down
 
 ### Profile Tab Screenshots
 - [ ] Own profile header (with edit button)

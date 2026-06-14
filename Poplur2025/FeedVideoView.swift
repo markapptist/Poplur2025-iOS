@@ -28,7 +28,8 @@ public struct FeedVideoView: View {
                     .onDisappear { player.pause() }
                     .modifier(AspectFillModifier(aspectRatio: aspectRatio))
             } else {
-                Color.clear
+                ProgressView()
+                    .tint(.white)
             }
         }
         .clipped()
@@ -69,30 +70,15 @@ public struct FeedVideoView: View {
             ]
             let asset = AVURLAsset(url: url, options: assetOptions)
 
-            // Keys we want to ensure are loaded
-            let keys = ["playable", "tracks", "duration"]
-
             // Load keys asynchronously with a timeout
             let keysLoaded = await withTaskGroup(of: Bool.self) { group -> Bool in
                 group.addTask {
-                    await withCheckedContinuation { cont in
-                        asset.loadValuesAsynchronously(forKeys: keys) {
-                            var failed = false
-                            for key in keys {
-                                var error: NSError?
-                                let status = asset.statusOfValue(forKey: key, error: &error)
-                                switch status {
-                                case .loaded:
-                                    break
-                                case .failed, .cancelled, .unknown:
-                                    if let error { print("[FeedVideoView] asset key \(key) load failed: \(error)") }
-                                    failed = true
-                                default:
-                                    break
-                                }
-                            }
-                            cont.resume(returning: !failed && asset.isPlayable)
-                        }
+                    do {
+                        let (isPlayable, _, _) = try await asset.load(.isPlayable, .tracks, .duration)
+                        return isPlayable
+                    } catch {
+                        print("[FeedVideoView] asset load failed: \(error)")
+                        return false
                     }
                 }
                 group.addTask {
@@ -135,7 +121,7 @@ public struct FeedVideoView: View {
             ) { notif in
                 let err = (notif.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? NSError)
                 print("[FeedVideoView] FailedToPlayToEnd: \(String(describing: err))")
-                self.handleFailure()
+                Task { @MainActor in self.handleFailure() }
             }
         }
     }

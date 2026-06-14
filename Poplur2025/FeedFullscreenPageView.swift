@@ -14,11 +14,13 @@ import FirebaseFirestore
 struct FeedFullscreenPageView: View {
     let post: FeedPost
     let displayName: String
+    var onMediaReady: () -> Void = {}
     var onUserTapped: (String) -> Void
 
     @State private var imagePhaseDebug: String = ""
     @State private var debugPlayerTimeControl: AVPlayer.TimeControlStatus = .waitingToPlayAtSpecifiedRate
     @State private var debugItemStatus: AVPlayerItem.Status = .unknown
+    @State private var didReportMediaReady = false
 
     // Added for playback stuck detection and UI overlay
     @State private var forceVideoPlaceholder: Bool = false
@@ -49,22 +51,24 @@ struct FeedFullscreenPageView: View {
     // Replaced custom PlayerLayer with AVKit.VideoPlayer for reliability
     struct VideoPlayerContainer: View {
         let url: URL
+        let mediaKey: String
         @Binding var hudTimeControl: AVPlayer.TimeControlStatus
         @Binding var hudItemStatus: AVPlayerItem.Status
         @Binding var playbackStuck: Bool
+        let onReadyToDisplay: () -> Void
         @State private var player: AVPlayer? = nil
         @State private var itemObservation: NSKeyValueObservation? = nil
-        @State private var queuePlayer: AVQueuePlayer? = nil
-        @State private var looper: AVPlayerLooper? = nil
 
         @State private var timeObserver: Any? = nil
+        @State private var endObserver: Any? = nil
         
         @State private var pauseObserver: Any? = nil
 
         @State private var itemFailed: Bool = false
+        @State private var isReadyToDisplay: Bool = false
 
         private func setupPlayer() {
-            guard player == nil, queuePlayer == nil else { return }
+            guard player == nil else { return }
             
             // Configure audio session for playback with mixing disabled so audio is audible
             DispatchQueue.main.async {
@@ -77,133 +81,79 @@ struct FeedFullscreenPageView: View {
                 }
             }
 
-            let isMP4 = url.absoluteString.lowercased().hasSuffix(".mp4")
+            let assetOptions: [String: Any] = [
+                "AVURLAssetAllowsCellularAccessKey": true,
+                "AVURLAssetAllowsConstrainedNetworkAccessKey": true
+            ]
+            let asset = AVURLAsset(url: url, options: assetOptions)
+            asset.resourceLoader.preloadsEligibleContentKeys = true
 
-            if isMP4 {
-                // Use AVQueuePlayer + AVPlayerLooper for seamless mp4 looping
-                let asset = AVURLAsset(url: url)
-                _ = ["playable"]
-                asset.resourceLoader.preloadsEligibleContentKeys = true
+            let item = AVPlayerItem(asset: asset)
+            item.preferredForwardBufferDuration = 0
+            let p = AVPlayer(playerItem: item)
+            p.allowsExternalPlayback = false
+            p.isMuted = false
+            p.automaticallyWaitsToMinimizeStalling = false
+            p.preventsDisplaySleepDuringVideoPlayback = true
 
-                let q = AVQueuePlayer()
-                q.allowsExternalPlayback = false
-                q.isMuted = false
-                q.automaticallyWaitsToMinimizeStalling = true
-                q.preventsDisplaySleepDuringVideoPlayback = true
-
-                // Load required key using modern async API
-                Task { [self] in
-                    do {
-                        let playable = try await asset.load(.isPlayable)
-                        guard playable else {
-                            await MainActor.run {
-                                self.itemFailed = true
-                                self.playbackStuck = true
-                            }
-                            print("[Video] MP4 asset not playable")
-                            NotificationCenter.default.post(name: Notification.Name("FeedAdvanceOnMediaFailure"), object: nil)
-                            return
-                        }
-                        let item = AVPlayerItem(asset: asset)
-                        item.preferredForwardBufferDuration = 0
-                        q.automaticallyWaitsToMinimizeStalling = false
-
-                        await MainActor.run {
-                            self.itemObservation = item.observe(\.status, options: [.initial, .new]) { _, _ in
-                                self.hudItemStatus = item.status
-                                print("[Video] MP4 item status: \(item.status.rawValue)")
-                                switch item.status {
-                                case .readyToPlay:
-                                    self.itemFailed = false
-                                    self.playbackStuck = false
-                                    q.removeAllItems()
-                                    self.looper = AVPlayerLooper(player: q, templateItem: item)
-                                    self.player = q
-                                    q.seek(to: CMTime(seconds: 0.01, preferredTimescale: 600))
-                                    FeedAudioManager.shared.playExclusively(q)
-                                    self.hudTimeControl = q.timeControlStatus
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                                        if q.timeControlStatus != .playing {
-                                            q.seek(to: CMTime(seconds: 0.02, preferredTimescale: 600))
-                                            q.playImmediately(atRate: 1.0)
-                                            self.hudTimeControl = q.timeControlStatus
-                                            if q.timeControlStatus == .playing { self.playbackStuck = false }
-                                        }
-                                    }
-                                case .failed:
-                                    self.itemFailed = true
-                                    if let err = item.error { print("[Video] MP4 item failed: \(err)") }
-                                case .unknown:
-                                    break
-                                @unknown default:
-                                    break
-                                }
-                            }
-                        }
-                    } catch {
-                        await MainActor.run { self.playbackStuck = true }
-                        print("[Video] MP4 asset load failed: \(error)")
+            itemObservation = item.observe(\.status, options: [.initial, .new]) { _, _ in
+                DispatchQueue.main.async {
+                    self.hudItemStatus = item.status
+                    print("[Video] Item status changed to: \(item.status.rawValue)")
+                    switch item.status {
+                    case .readyToPlay:
+                        self.itemFailed = false
+                        self.playbackStuck = false
+                        p.seek(to: CMTime(seconds: 0.01, preferredTimescale: 600))
+                        FeedAudioManager.shared.playExclusively(p)
+                        p.playImmediately(atRate: 1.0)
+                        self.hudTimeControl = p.timeControlStatus
+                    case .failed:
+                        self.itemFailed = true
+                        self.playbackStuck = true
+                        if let err = item.error { print("[Video] Item failed: \(err)") }
                         NotificationCenter.default.post(name: Notification.Name("FeedAdvanceOnMediaFailure"), object: nil)
+                    case .unknown:
+                        break
+                    @unknown default:
+                        break
                     }
                 }
-            } else {
-                // HLS or other stream types: standard AVPlayer with end observer
-                let asset = AVURLAsset(url: url)
-                _ = ["playable"]
-                asset.resourceLoader.preloadsEligibleContentKeys = true
+            }
 
-                // Load required key using modern async API
-                Task { [self] in
-                    do {
-                        let playable = try await asset.load(.isPlayable)
-                        guard playable else {
-                            await MainActor.run { self.playbackStuck = true }
-                            print("[Video] HLS asset not playable")
-                            NotificationCenter.default.post(name: Notification.Name("FeedAdvanceOnMediaFailure"), object: nil)
-                            return
-                        }
-                        let item = AVPlayerItem(asset: asset)
-                        item.preferredForwardBufferDuration = 0
-                        let p = AVPlayer(playerItem: item)
-                        p.allowsExternalPlayback = false
-                        p.isMuted = false
-                        p.automaticallyWaitsToMinimizeStalling = false
-                        p.preventsDisplaySleepDuringVideoPlayback = true
+            endObserver = NotificationCenter.default.addObserver(
+                forName: .AVPlayerItemDidPlayToEndTime,
+                object: item,
+                queue: .main
+            ) { _ in
+                p.seek(to: .zero)
+                p.playImmediately(atRate: 1.0)
+            }
 
-                        await MainActor.run {
-                            self.itemObservation = item.observe(\.status, options: [.initial, .new]) { _, _ in
-                                self.hudItemStatus = item.status
-                                print("[Video] Item status changed to: \(item.status.rawValue)")
-                                switch item.status {
-                                case .readyToPlay:
-                                    self.itemFailed = false
-                                    self.playbackStuck = false
-                                    let current = self.player ?? p
-                                    current.seek(to: CMTime(seconds: 0.01, preferredTimescale: 600))
-                                    FeedAudioManager.shared.playExclusively(current)
-                                    current.playImmediately(atRate: 1.0)
-                                    self.hudTimeControl = current.timeControlStatus
-                                case .failed:
-                                    self.itemFailed = true
-                                    if let err = item.error { print("[Video] Item failed: \(err)") }
-                                case .unknown:
-                                    break
-                                @unknown default:
-                                    break
-                                }
-                            }
+            player = p
+            FeedAudioManager.shared.register(p)
+            p.play()
+            timeObserver = p.addPeriodicTimeObserver(
+                forInterval: CMTime(seconds: 0.1, preferredTimescale: 600),
+                queue: .main
+            ) { time in
+                if time.seconds > 0.05 || p.timeControlStatus == .playing {
+                    self.isReadyToDisplay = true
+                    self.playbackStuck = false
+                    self.onReadyToDisplay()
+                }
+            }
 
-                            self.player = p
-                            FeedAudioManager.shared.register(p)
-
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { self.hudTimeControl = p.timeControlStatus }
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { self.hudTimeControl = p.timeControlStatus }
-                        }
-                    } catch {
-                        await MainActor.run { self.playbackStuck = true }
-                        print("[Video] HLS asset load failed: \(error)")
-                        NotificationCenter.default.post(name: Notification.Name("FeedAdvanceOnMediaFailure"), object: nil)
-                    }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { self.hudTimeControl = p.timeControlStatus }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                if p.timeControlStatus != .playing {
+                    p.playImmediately(atRate: 1.0)
+                }
+                self.hudTimeControl = p.timeControlStatus
+                if p.timeControlStatus == .playing || p.currentTime().seconds > 0.05 {
+                    self.isReadyToDisplay = true
+                    self.playbackStuck = false
+                    self.onReadyToDisplay()
                 }
             }
 
@@ -219,9 +169,15 @@ struct FeedFullscreenPageView: View {
         }
 
         var body: some View {
-            Group {
+            ZStack {
+                VideoLoadingPlaceholder(mediaKey: mediaKey)
+                    .opacity(isReadyToDisplay ? 0 : 1)
+                    .animation(.easeOut(duration: 0.2), value: isReadyToDisplay)
+
                 if let player {
-                    PlayerLayerView(player: player)
+                    PlayerLayerView(player: player, onReadyToDisplay: onReadyToDisplay, isReadyToDisplay: $isReadyToDisplay)
+                        .opacity(isReadyToDisplay ? 1 : 0.01)
+                        .animation(.easeOut(duration: 0.2), value: isReadyToDisplay)
                         .onAppear {
                             if player.timeControlStatus != .playing {
                                 player.playImmediately(atRate: 1.0)
@@ -236,68 +192,99 @@ struct FeedFullscreenPageView: View {
                                 }
                             }
                         }
-                } else {
-                    Color.black
                 }
             }
             .onAppear {
                 setupPlayer()
             }
-            .onDisappear {
-                if let token = pauseObserver {
-                    NotificationCenter.default.removeObserver(token)
-                    pauseObserver = nil
-                }
-                self.playbackStuck = false
-                if let obs = timeObserver, let p = player {
-                    p.removeTimeObserver(obs)
-                }
-                timeObserver = nil
-                player?.pause()
-                (player as? AVQueuePlayer)?.removeAllItems()
-                player = nil
-                queuePlayer = nil
-                looper = nil
-                itemObservation = nil
+            .onReceive(NotificationCenter.default.publisher(for: .PauseGlobalFeedAudio)) { _ in
+                teardownPlayer()
             }
-            .overlay(
-                Group {
-                    if itemFailed {
-                        VStack(spacing: 8) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundColor(.yellow)
-                                .font(.system(size: 28, weight: .bold))
-                            Text("Video failed to start. Showing placeholder.")
-                                .font(.system(size: 13, weight: .semibold))
-                        }
-                        .padding(12)
-                        .background(Color.black.opacity(0.7), in: Capsule())
-                        .foregroundColor(.white)
-                    } else if playbackStuck {
-                        LinearGradient(colors: [.clear, .white.opacity(0.06), .clear], startPoint: .top, endPoint: .bottom)
-                            .allowsHitTesting(false)
-                            .transition(.opacity)
-                    }
-                }
-            )
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+                teardownPlayer()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .PauseFeedAudio)) { _ in
+                player?.pause()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .ResumeFeedAudio)) { _ in
+                resumePlayer()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+                resumePlayer()
+            }
+            .onDisappear {
+                teardownPlayer()
+            }
+        }
+
+        private func resumePlayer() {
+            if let player {
+                player.playImmediately(atRate: 1.0)
+                hudTimeControl = player.timeControlStatus
+            } else {
+                setupPlayer()
+            }
+        }
+
+        private func teardownPlayer() {
+            if let token = pauseObserver {
+                NotificationCenter.default.removeObserver(token)
+                pauseObserver = nil
+            }
+            if let token = endObserver {
+                NotificationCenter.default.removeObserver(token)
+                endObserver = nil
+            }
+            playbackStuck = false
+            isReadyToDisplay = false
+            if let obs = timeObserver, let p = player {
+                p.removeTimeObserver(obs)
+            }
+            timeObserver = nil
+            itemObservation = nil
+            player?.pause()
+            player?.replaceCurrentItem(with: nil)
+            player = nil
         }
     }
 
     struct PlayerLayerView: UIViewRepresentable {
         let player: AVPlayer?
+        let onReadyToDisplay: () -> Void
+        @Binding var isReadyToDisplay: Bool
 
         func makeUIView(context: Context) -> PlayerHostingView {
             let view = PlayerHostingView()
             view.backgroundColor = .black
             view.translatesAutoresizingMaskIntoConstraints = false
-            view.playerLayer.videoGravity = .resizeAspect
+            view.playerLayer.videoGravity = .resizeAspectFill
+            view.onReadyForDisplayChanged = { ready in
+                DispatchQueue.main.async {
+                    if isReadyToDisplay != ready {
+                        isReadyToDisplay = ready
+                    }
+                    if ready {
+                        onReadyToDisplay()
+                    }
+                }
+            }
             view.player = player
             return view
         }
 
         func updateUIView(_ uiView: PlayerHostingView, context: Context) {
+            uiView.onReadyForDisplayChanged = { ready in
+                DispatchQueue.main.async {
+                    if isReadyToDisplay != ready {
+                        isReadyToDisplay = ready
+                    }
+                    if ready {
+                        onReadyToDisplay()
+                    }
+                }
+            }
             uiView.player = player
-            uiView.playerLayer.videoGravity = .resizeAspect
+            uiView.playerLayer.videoGravity = .resizeAspectFill
             uiView.setNeedsLayout()
             uiView.layoutIfNeeded()
         }
@@ -306,14 +293,59 @@ struct FeedFullscreenPageView: View {
     final class PlayerHostingView: UIView {
         override class var layerClass: AnyClass { AVPlayerLayer.self }
         var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
+        var onReadyForDisplayChanged: ((Bool) -> Void)? {
+            didSet {
+                notifyReadyForDisplay()
+            }
+        }
+        private var readyPollWorkItem: DispatchWorkItem?
+
         var player: AVPlayer? {
             get { playerLayer.player }
-            set { playerLayer.player = newValue }
+            set {
+                playerLayer.player = newValue
+                notifyReadyForDisplay()
+                startReadyPolling()
+            }
         }
+
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+        }
+
+        required init?(coder: NSCoder) {
+            super.init(coder: coder)
+        }
+
+        deinit {
+            readyPollWorkItem?.cancel()
+        }
+
         override func layoutSubviews() {
             super.layoutSubviews()
             playerLayer.frame = bounds
-            playerLayer.videoGravity = .resizeAspect
+            playerLayer.videoGravity = .resizeAspectFill
+            startReadyPolling()
+        }
+
+        private func startReadyPolling(attempt: Int = 0) {
+            readyPollWorkItem?.cancel()
+            guard playerLayer.player != nil else { return }
+
+            let workItem = DispatchWorkItem { [weak self] in
+                guard let self else { return }
+                self.notifyReadyForDisplay()
+
+                if !self.playerLayer.isReadyForDisplay && attempt < 240 {
+                    self.startReadyPolling(attempt: attempt + 1)
+                }
+            }
+            readyPollWorkItem = workItem
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: workItem)
+        }
+
+        private func notifyReadyForDisplay() {
+            onReadyForDisplayChanged?(playerLayer.isReadyForDisplay)
         }
     }
 
@@ -446,7 +478,6 @@ struct FeedFullscreenPageView: View {
         
         ZStack {
             Color.black
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .ignoresSafeArea()
                 .zIndex(0)
 
@@ -455,13 +486,10 @@ struct FeedFullscreenPageView: View {
             } else if let url = URL(string: post.mediaURL) {
                 imageContent(size: size, url: url)
             } else {
-                VStack(spacing: 16) {
-                    Image(systemName: "photo.fill")
-                        .font(.system(size: 60))
-                        .foregroundColor(.white.opacity(0.5))
-                    Text("Invalid media URL")
-                        .foregroundColor(.white.opacity(0.7))
-                }
+                unavailableMediaView(isVideo: false)
+                    .onAppear {
+                        reportMediaReady()
+                    }
             }
             
             // Username overlay in top-right corner
@@ -470,9 +498,29 @@ struct FeedFullscreenPageView: View {
         }
     }
 
+    private struct VideoLoadingPlaceholder: View {
+        let mediaKey: String
+
+        var body: some View {
+            ZStack {
+                Color.black
+                ProgressView()
+                    .tint(.white)
+            }
+        }
+    }
+
     @ViewBuilder
     private func videoContent(size: CGSize, videoURL: URL) -> some View {
-        VideoPlayerContainer(url: videoURL, hudTimeControl: $debugPlayerTimeControl, hudItemStatus: $debugItemStatus, playbackStuck: $playbackStuck)
+        VideoPlayerContainer(
+            url: videoURL,
+            mediaKey: post.mediaURL,
+            hudTimeControl: $debugPlayerTimeControl,
+            hudItemStatus: $debugItemStatus,
+            playbackStuck: $playbackStuck,
+            onReadyToDisplay: reportMediaReady
+        )
+            .id(videoURL.absoluteString)
             .frame(width: size.width, height: size.height)
             .background(Color.black)
     }
@@ -486,34 +534,46 @@ struct FeedFullscreenPageView: View {
                     Color.black
                     ProgressView()
                         .tint(.white)
-                        .scaleEffect(1.5)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .ignoresSafeArea()
+                .frame(width: size.width, height: size.height)
             case .success(let img):
                 img
                     .resizable()
                     .aspectRatio(contentMode: .fit)
                     .frame(width: size.width, height: size.height)
                     .background(Color.black)
-            case .failure:
-                ZStack {
-                    Color.black
-                    VStack(spacing: 12) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.system(size: 40))
-                            .foregroundColor(.yellow)
-                        Text("Image failed to load")
-                            .foregroundColor(.white)
+                    .onAppear {
+                        reportMediaReady()
                     }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .ignoresSafeArea()
+            case .failure:
+                unavailableMediaView(isVideo: false)
+                    .frame(width: size.width, height: size.height)
+                    .onAppear {
+                        reportMediaReady()
+                    }
             @unknown default:
-                Color.black
+                unavailableMediaView(isVideo: false)
+                    .onAppear {
+                        reportMediaReady()
+                    }
             }
         }
         .id("image_\(post.id)_\(url.absoluteString)")
+    }
+
+    private func unavailableMediaView(isVideo: Bool) -> some View {
+        ZStack {
+            Color.black
+            Image(systemName: isVideo ? "play.slash.fill" : "photo")
+                .font(.system(size: 42, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.55))
+        }
+    }
+
+    private func reportMediaReady() {
+        guard !didReportMediaReady else { return }
+        didReportMediaReady = true
+        onMediaReady()
     }
 
     private var playerHUD: some View {
@@ -531,14 +591,7 @@ struct FeedFullscreenPageView: View {
 
     @ViewBuilder
     private var nonBlockingLoadingOverlay: some View {
-        // Show a subtle shimmer when playback appears stuck; explicit failure UI is handled inside VideoPlayerContainer
-        if playbackStuck {
-            LinearGradient(colors: [.clear, .white.opacity(0.06), .clear], startPoint: .top, endPoint: .bottom)
-                .allowsHitTesting(false)
-                .transition(.opacity)
-        } else {
-            EmptyView()
-        }
+        EmptyView()
     }
 
     private var mediaURLBadge: some View {
@@ -587,4 +640,5 @@ struct FeedFullscreenPageView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .allowsHitTesting(true)
     }
+    
 }

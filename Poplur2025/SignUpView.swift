@@ -2,8 +2,6 @@ import SwiftUI
 import FirebaseAuth
 
 struct SignUpView: View {
-    @ObservedObject var cameraController: CameraKitController
-
     @State private var email = ""
     @State private var password = ""
     @State private var confirmPassword = ""
@@ -48,10 +46,10 @@ struct SignUpView: View {
                 }
                 .padding()
 
-                NavigationLink(destination: HomeView(cameraController: cameraController), isActive: $isSignedUp) {
-                    EmptyView()  // Empty view that triggers when isSignedUp becomes true
-                }
-                .hidden()
+                EmptyView()
+                    .navigationDestination(isPresented: $isSignedUp) {
+                        HomeView()
+                    }
                 
                 NavigationLink(destination: LoginView()) {
                     Text("Already have an account? Log in")
@@ -84,7 +82,6 @@ struct SignUpView: View {
 
 struct SignUpView_Previews: PreviewProvider {
     static var previews: some View {
-        // For preview, create a temporary controller
-        SignUpView(cameraController: CameraKitController())
+        SignUpView()
     }
 }

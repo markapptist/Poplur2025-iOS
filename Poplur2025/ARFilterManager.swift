@@ -7,7 +7,7 @@ import Foundation
 import ARKit
 import SceneKit
 import CoreImage
-import Vision
+@preconcurrency import Vision
 #if canImport(FirebaseAuth)
 import FirebaseAuth
 #endif

@@ -52,6 +52,8 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
     @Published var currentCameraPosition: AVCaptureDevice.Position = .back
     @Published var isRecording: Bool = false
     private var currentVideoInput: AVCaptureDeviceInput?
+    private var isMovieRecordingRequested = false
+    private var shouldStopRecordingWhenStarted = false
 
     // Added published property for last recorded video URL
     @Published var lastVideoURL: URL? = nil
@@ -182,20 +184,6 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
             }
         }
 
-        Foundation.NotificationCenter.default.addObserver(
-            forName: Notification.Name("PresentVideoPreviewRequested"),
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            guard let self = self,
-                  let videoURL = notification.object as? URL else {
-                return
-            }
-            Task { @MainActor in
-                self.presentRecordedVideoPreview(videoURL)
-            }
-        }
-
         // Gesture-driven camera controls
         NotificationCenter.default.addObserver(
             forName: Notification.Name("CameraToggleTorchOn"),
@@ -245,7 +233,7 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
         ) { [weak self] _ in
             self?.handleCubeTapCapture()
         }
-        
+
         #if DEBUG
         // Skip heavy prewarm when running SwiftUI previews (handle both env var and launch arg)
         let isRunningInPreviews = ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1" ||
@@ -337,12 +325,11 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
         if !captureSession.outputs.contains(photoOutput) {
             if captureSession.canAddOutput(photoOutput) {
                 captureSession.addOutput(photoOutput)
-                photoOutput.isHighResolutionCaptureEnabled = true
-                
+
                 // Set orientation to portrait
                 if let connection = photoOutput.connection(with: .video),
-                   connection.isVideoOrientationSupported {
-                    connection.videoOrientation = .portrait
+                   connection.isVideoRotationAngleSupported(90) {
+                    connection.videoRotationAngle = 90
                 }
             }
         }
@@ -351,11 +338,11 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
         if !captureSession.outputs.contains(movieOutput) {
             if captureSession.canAddOutput(movieOutput) {
                 captureSession.addOutput(movieOutput)
-                
+
                 // Set orientation to portrait
                 if let connection = movieOutput.connection(with: .video),
-                   connection.isVideoOrientationSupported {
-                    connection.videoOrientation = .portrait
+                   connection.isVideoRotationAngleSupported(90) {
+                    connection.videoRotationAngle = 90
                 }
             }
         }
@@ -417,7 +404,6 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
                     self.currentVideoInput = newInput
                     
                     // IMPORTANT: Update position synchronously
-                    let oldPosition = self.currentCameraPosition
                     self.currentCameraPosition = newPosition
                     
                     // Also update on MainActor for UI binding
@@ -435,8 +421,8 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
                         }
                         if let connection = vdo.connection(with: .video) {
                             connection.isEnabled = true
-                            if connection.isVideoOrientationSupported {
-                                connection.videoOrientation = .portrait
+                            if connection.isVideoRotationAngleSupported(90) {
+                                connection.videoRotationAngle = 90
                             }
                             if connection.isVideoMirroringSupported {
                                 connection.isVideoMirrored = (self.currentCameraPosition == .front)
@@ -472,8 +458,8 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
             
             // After commit, set orientation again for previewConnection
             if let connection = self.previewConnection {
-                if connection.isVideoOrientationSupported {
-                    connection.videoOrientation = .portrait
+                if connection.isVideoRotationAngleSupported(90) {
+                    connection.videoRotationAngle = 90
                 }
                 if connection.isVideoMirroringSupported {
                     connection.isVideoMirrored = (self.currentCameraPosition == .front)
@@ -595,41 +581,41 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
         
         // Set photo output connection
         if let photoConnection = photoOutput.connection(with: .video) {
-            if photoConnection.isVideoOrientationSupported {
-                photoConnection.videoOrientation = .portrait
+            if photoConnection.isVideoRotationAngleSupported(90) {
+                photoConnection.videoRotationAngle = 90
             }
             // Don't mirror photo output - we want photos to be correct
             if photoConnection.isVideoMirroringSupported {
                 photoConnection.isVideoMirrored = false
             }
         }
-        
+
         // Set movie output connection
         if let movieConnection = movieOutput.connection(with: .video) {
-            if movieConnection.isVideoOrientationSupported {
-                movieConnection.videoOrientation = .portrait
+            if movieConnection.isVideoRotationAngleSupported(90) {
+                movieConnection.videoRotationAngle = 90
             }
             // Don't mirror video output - we want videos to be correct
             if movieConnection.isVideoMirroringSupported {
                 movieConnection.isVideoMirrored = false
             }
         }
-        
+
         // Set video data output connection (for AR filters / live preview)
         if let videoDataConnection = videoDataOutput?.connection(with: .video) {
-            if videoDataConnection.isVideoOrientationSupported {
-                videoDataConnection.videoOrientation = .portrait
+            if videoDataConnection.isVideoRotationAngleSupported(90) {
+                videoDataConnection.videoRotationAngle = 90
             }
             // Mirror for front camera preview only (display layer handles this)
             if videoDataConnection.isVideoMirroringSupported {
                 videoDataConnection.isVideoMirrored = false
             }
         }
-        
+
         // Update previewConnection if available
         if let previewConnection = self.previewConnection {
-            if previewConnection.isVideoOrientationSupported {
-                previewConnection.videoOrientation = .portrait
+            if previewConnection.isVideoRotationAngleSupported(90) {
+                previewConnection.videoRotationAngle = 90
             }
             if previewConnection.isVideoMirroringSupported {
                 previewConnection.isVideoMirrored = false
@@ -639,7 +625,7 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
     
     @MainActor
     private func requestLocationAuthorizationIfNeeded() {
-        let status = CLLocationManager.authorizationStatus()
+        let status = locationManager.authorizationStatus
         if status == .notDetermined {
             locationManager.requestWhenInUseAuthorization()
         }
@@ -731,7 +717,7 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
         #endif
         
         // Ensure user is authenticated if rules require auth
-        guard let user = Auth.auth().currentUser else {
+        guard Auth.auth().currentUser != nil else {
             return nil
         }
         guard let data = image.jpegData(compressionQuality: 0.9) else {
@@ -761,7 +747,7 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
         #endif
         
         // Ensure user is authenticated if rules require auth
-        guard let user = Auth.auth().currentUser else {
+        guard Auth.auth().currentUser != nil else {
             return nil
         }
         let storage = Storage.storage()
@@ -784,7 +770,7 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
 
     // MARK: - Video Post-Processing (Crop to 9:16 Portrait)
     private func exportCroppedPortrait9x16(inputURL: URL) async -> URL? {
-        let asset = AVAsset(url: inputURL)
+        let asset = AVURLAsset(url: inputURL)
         guard let videoTrack = asset.tracks(withMediaType: .video).first else {
             return nil
         }
@@ -861,22 +847,13 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
         guard let export = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetHighestQuality) else {
             return nil
         }
-        export.outputURL = outputURL
-        export.outputFileType = .mp4
         export.shouldOptimizeForNetworkUse = true
         export.videoComposition = videoComposition
-
-        return await withCheckedContinuation { (cont: CheckedContinuation<URL?, Never>) in
-            export.exportAsynchronously {
-                switch export.status {
-                case .completed:
-                    cont.resume(returning: outputURL)
-                case .failed, .cancelled:
-                    cont.resume(returning: nil)
-                default:
-                    cont.resume(returning: nil)
-                }
-            }
+        do {
+            try await export.export(to: outputURL, as: .mp4)
+            return outputURL
+        } catch {
+            return nil
         }
     }
 
@@ -935,9 +912,6 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
            let window = scene.windows.first(where: { $0.isKeyWindow }),
            var top = window.rootViewController {
             while let presented = top.presentedViewController {
-                if String(describing: type(of: presented)).contains("UIHostingController<CapturePreviewOverlay>") {
-                    break
-                }
                 top = presented
             }
             return top
@@ -949,53 +923,42 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
     }
 
     @MainActor
-    private func presentCameraRollCapturePreview(image: UIImage?, videoURL: URL?) {
-        guard image != nil || videoURL != nil else { return }
-
-        let overlay = CapturePreviewOverlay(image: image, videoURL: videoURL)
-        let host = UIHostingController(rootView: overlay)
-        host.modalPresentationStyle = .fullScreen
-
-        presentCapturePreviewHost(host)
-    }
-
-    @MainActor
-    private func presentRecordedVideoPreview(_ videoURL: URL) {
-        let overlay = CapturePreviewOverlay(image: nil, videoURL: videoURL)
-        let host = UIHostingController(rootView: overlay)
-        host.modalPresentationStyle = .fullScreen
-        presentCapturePreviewHost(host)
-    }
-
-    @MainActor
     private func presentCapturePreviewHost(_ host: UIHostingController<CapturePreviewOverlay>) {
-        guard let presenter = topMostViewController() else { return }
+        presentCapturePreviewHost(host, attempt: 0)
+    }
+
+    @MainActor
+    private func presentCapturePreviewHost(_ host: UIHostingController<CapturePreviewOverlay>, attempt: Int) {
+        guard let presenter = topMostViewController() else {
+            retryPresentCapturePreviewHost(host, attempt: attempt)
+            return
+        }
+        if presenter is UIHostingController<CapturePreviewOverlay> {
+            presenter.dismiss(animated: false) { [weak self, weak host] in
+                guard let self, let host else { return }
+                Task { @MainActor in
+                    self.presentCapturePreviewHost(host, attempt: attempt + 1)
+                }
+            }
+            return
+        }
         if presenter.presentedViewController == nil {
             presenter.present(host, animated: true)
+            print("[CameraKitController] Presented capture preview")
         } else {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self, weak host] in
-                guard let self = self, let host = host else { return }
-                let presenter = self.topMostViewController()
-                guard presenter?.presentedViewController == nil else { return }
-                presenter?.present(host, animated: true)
-            }
+            retryPresentCapturePreviewHost(host, attempt: attempt)
         }
     }
 
-    private func copyCameraRollVideoToTemporaryFileIfNeeded(_ url: URL) -> URL {
-        guard url.isFileURL else { return url }
-
-        let fileExtension = url.pathExtension.isEmpty ? "mov" : url.pathExtension
-        let destination = FileManager.default.temporaryDirectory
-            .appendingPathComponent("camera-roll-\(UUID().uuidString)")
-            .appendingPathExtension(fileExtension)
-
-        do {
-            try FileManager.default.copyItem(at: url, to: destination)
-            return destination
-        } catch {
-            print("[CameraKitController] Failed to copy camera roll video: \(error)")
-            return url
+    @MainActor
+    private func retryPresentCapturePreviewHost(_ host: UIHostingController<CapturePreviewOverlay>, attempt: Int) {
+        guard attempt < 8 else {
+            print("[CameraKitController] Failed to present capture preview after retries")
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self, weak host] in
+            guard let self = self, let host = host else { return }
+            self.presentCapturePreviewHost(host, attempt: attempt + 1)
         }
     }
 
@@ -1048,7 +1011,6 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
                 }
                 if self.captureSession.canAddOutput(self.photoOutput) {
                     self.captureSession.addOutput(self.photoOutput)
-                    self.photoOutput.isHighResolutionCaptureEnabled = true
                 }
                 self.captureSession.commitConfiguration()
                 // Re-fetch connection
@@ -1060,12 +1022,11 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
             }
 
             // Optionally align orientation if supported
-            if videoConnection.isVideoOrientationSupported {
-                videoConnection.videoOrientation = .portrait
+            if videoConnection.isVideoRotationAngleSupported(90) {
+                videoConnection.videoRotationAngle = 90
             }
 
             let settings = AVCapturePhotoSettings()
-            settings.isHighResolutionPhotoEnabled = true
             
             // NO AUTO FLASH - user controls flash manually with swipe gestures
             settings.flashMode = .off
@@ -1090,19 +1051,22 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
     func startVideoRecording() {
         sessionQueue.async { [weak self] in
             guard let self else { return }
+            self.configureSessionIfNeeded()
             // Ensure session is running
             if !self.captureSession.isRunning {
                 self.captureSession.startRunning()
             }
             // Start recording to a temp file if not already recording
             if !self.movieOutput.isRecording {
+                self.isMovieRecordingRequested = true
+                self.shouldStopRecordingWhenStarted = false
                 let tempURL = URL(fileURLWithPath: NSTemporaryDirectory())
                     .appendingPathComponent(UUID().uuidString)
                     .appendingPathExtension("mov")
 
                 if let connection = self.movieOutput.connection(with: .video) {
-                    if connection.isVideoOrientationSupported {
-                        connection.videoOrientation = .portrait
+                    if connection.isVideoRotationAngleSupported(90) {
+                        connection.videoRotationAngle = 90
                     }
                     if connection.isVideoStabilizationSupported {
                         connection.preferredVideoStabilizationMode = .auto
@@ -1110,6 +1074,7 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
                 }
 
                 self.movieOutput.startRecording(to: tempURL, recordingDelegate: self)
+                print("[CameraKitController] startRecording requested: \(tempURL.path)")
                 
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
@@ -1127,15 +1092,20 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
         sessionQueue.async { [weak self] in
             guard let self else { return }
             if self.movieOutput.isRecording {
+                self.shouldStopRecordingWhenStarted = false
                 self.movieOutput.stopRecording()
-                
+                print("[CameraKitController] stopRecording requested")
+            } else if self.isMovieRecordingRequested {
+                self.shouldStopRecordingWhenStarted = true
+                print("[CameraKitController] stopRecording queued until movie output starts")
+            } else {
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
                     self.isRecording = false
                     self.allowPhotoCapture = true
                     NotificationCenter.default.post(name: Notification.Name("RecordingStopped"), object: nil)
                     NotificationCenter.default.post(name: Notification.Name("CubeInteractionEnabled"), object: nil)
-                    print("[CameraKitController] Recording STOPPED: allowPhotoCapture=\(self.allowPhotoCapture)")
+                    print("[CameraKitController] stopRecording ignored: movie output was not recording")
                 }
             }
         }
@@ -1444,6 +1414,19 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
 // MARK: - AVCaptureFileOutputRecordingDelegate
 
 extension CameraKitController {
+    func fileOutput(_ output: AVCaptureFileOutput, didStartRecordingTo fileURL: URL, from connections: [AVCaptureConnection]) {
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            if self.shouldStopRecordingWhenStarted {
+                self.shouldStopRecordingWhenStarted = false
+                if self.movieOutput.isRecording {
+                    self.movieOutput.stopRecording()
+                    print("[CameraKitController] queued stop applied after recording started")
+                }
+            }
+        }
+    }
+
     func fileOutput(_ output: AVCaptureFileOutput, didFinishRecordingTo outputFileURL: URL, from connections: [AVCaptureConnection], error: Error?) {
         if let error {
             let nsError = error as NSError
@@ -1451,34 +1434,28 @@ extension CameraKitController {
             let fileExists = FileManager.default.fileExists(atPath: outputFileURL.path)
             if !finishedSuccessfully && !fileExists {
                 print("[CameraKitController] Recording failed without output: \(error.localizedDescription)")
+                sessionQueue.async { [weak self] in
+                    self?.isMovieRecordingRequested = false
+                    self?.shouldStopRecordingWhenStarted = false
+                }
                 return
             }
             print("[CameraKitController] Recording finished with recoverable status: \(error.localizedDescription)")
         }
+
+        sessionQueue.async { [weak self] in
+            self?.isMovieRecordingRequested = false
+            self?.shouldStopRecordingWhenStarted = false
+        }
         
         // Set lastVideoURL on main thread
         DispatchQueue.main.async { [weak self] in
-            self?.lastVideoURL = outputFileURL
-        }
-
-        // Notify SwiftUI about recording output URL for thumbnail display
-        NotificationCenter.default.post(
-            name: Notification.Name("RecordingOutputReady"),
-            object: nil,
-            userInfo: ["url": outputFileURL]
-        )
-        NotificationCenter.default.post(name: Notification.Name("RecordingStopped"), object: nil)
-
-        #if canImport(UIKit)
-        DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-
-            // Present SwiftUI capture overlay full-screen for video
-            let overlay = CapturePreviewOverlay(image: nil, videoURL: outputFileURL)
-            let host = UIHostingController(rootView: overlay)
-            host.modalPresentationStyle = .fullScreen
+            self.lastVideoURL = outputFileURL
+            self.isRecording = false
+            self.allowPhotoCapture = true
+            NotificationCenter.default.post(name: Notification.Name("CubeInteractionEnabled"), object: nil)
             
-            // Notify preview if we have a map-selected coordinate
             if let coord = self.overrideCoordinate {
                 Foundation.NotificationCenter.default.post(
                     name: Notification.Name("CapturePreviewFromMapLocation"),
@@ -1490,65 +1467,14 @@ extension CameraKitController {
                 )
             }
 
-            // Observers for overlay actions
-            var dismissObserver: NSObjectProtocol?
-            var useObserver: NSObjectProtocol?
-
-            dismissObserver = NotificationCenter.default.addObserver(
-                forName: Notification.Name("InlinePreviewDismissRequested"),
+            NotificationCenter.default.post(
+                name: Notification.Name("RecordingOutputReady"),
                 object: nil,
-                queue: .main
-            ) { [weak host] _ in
-                host?.dismiss(animated: true)
-                if let dismissObserver { NotificationCenter.default.removeObserver(dismissObserver) }
-                if let useObserver { NotificationCenter.default.removeObserver(useObserver) }
-            }
-
-            useObserver = NotificationCenter.default.addObserver(
-                forName: Notification.Name("InlinePreviewUseRequested"),
-                object: nil,
-                queue: .main
-            ) { [weak self, weak host] _ in
-                guard let self else { return }
-                Task { @MainActor in
-                    // Proceed with crop -> upload -> post
-                    self.requestLocationAuthorizationIfNeeded()
-                    let loc = await self.currentLocation()
-                    let coord = self.overrideCoordinate ?? loc?.coordinate
-                    let processedURL = await self.exportCroppedPortrait9x16(inputURL: outputFileURL) ?? outputFileURL
-                    if let url = await self.uploadVideoToStorage(fileURL: processedURL) {
-                        await self.writePostDocument(mediaURL: url, coordinate: coord, mediaType: "video")
-                    }
-                    host?.dismiss(animated: true)
-                }
-                if let dismissObserver { NotificationCenter.default.removeObserver(dismissObserver) }
-                if let useObserver { NotificationCenter.default.removeObserver(useObserver) }
-            }
-
-            self.presentCapturePreviewHost(host)
+                userInfo: ["url": outputFileURL]
+            )
+            NotificationCenter.default.post(name: Notification.Name("RecordingStopped"), object: nil)
+            print("[CameraKitController] Recording output ready: \(outputFileURL.path)")
         }
-        #else
-        // If UIKit not available, fallback to immediate processing
-        Task { @MainActor in
-            if let coord = self.overrideCoordinate {
-                Foundation.NotificationCenter.default.post(
-                    name: Notification.Name("CapturePreviewFromMapLocation"),
-                    object: nil,
-                    userInfo: [
-                        "latitude": coord.latitude,
-                        "longitude": coord.longitude
-                    ]
-                )
-            }
-            self.requestLocationAuthorizationIfNeeded()
-            let loc = await self.currentLocation()
-            let coord = self.overrideCoordinate ?? loc?.coordinate
-            let processedURL = await self.exportCroppedPortrait9x16(inputURL: outputFileURL) ?? outputFileURL
-            if let url = await self.uploadVideoToStorage(fileURL: processedURL) {
-                await self.writePostDocument(mediaURL: url, coordinate: coord, mediaType: "video")
-            }
-        }
-        #endif
     }
 }
 
@@ -1593,8 +1519,8 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
                 // Configure video orientation
                 if let connection = output.connection(with: .video) {
                     connection.isEnabled = true
-                    if connection.isVideoOrientationSupported {
-                        connection.videoOrientation = .portrait
+                    if connection.isVideoRotationAngleSupported(90) {
+                        connection.videoRotationAngle = 90
                     }
                     if connection.isVideoMirroringSupported {
                         connection.isVideoMirrored = (self.currentCameraPosition == .front)

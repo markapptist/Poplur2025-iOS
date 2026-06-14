@@ -10,7 +10,7 @@ import ObjectiveC
 public struct IsometricRadiusBar: View {
     @Binding public var radius: Double
     @State private var dragStartRadius: Double? = nil
-    @State private var usesImperial: Bool = Locale.current.usesMetricSystem == false
+    @State private var usesImperial: Bool = Locale.current.measurementSystem != .metric
     @State private var holdTimer: CADisplayLink? = nil
     @State private var holdStartTime: CFTimeInterval? = nil
     @State private var holdStartRadius: Double = 0
@@ -46,7 +46,7 @@ public struct IsometricRadiusBar: View {
         self.growthSpeed = growthSpeed
         self.maxSceneHeight = maxSceneHeight
         self.uiScale = uiScale
-        self.maxRuntimeRadius = maxRuntimeRadius ?? (Locale.current.usesMetricSystem ? 6_371_000.0 : 3_958.8 * 1609.34)
+        self.maxRuntimeRadius = maxRuntimeRadius ?? (Locale.current.measurementSystem == .metric ? 6_371_000.0 : 3_958.8 * 1609.34)
         // autoLoop defaults to false by declaration, no assignment needed here
     }
 
@@ -222,7 +222,7 @@ private extension IsometricRadiusBar {
         isAutoLooping = true
         autoLoopTask = Task { @MainActor in
             var goingUp = true
-            let earthMeters: Double = (Locale.current.usesMetricSystem ? 6_371_000.0 : 3_958.8 * 1609.34)
+            let earthMeters: Double = (Locale.current.measurementSystem == .metric ? 6_371_000.0 : 3_958.8 * 1609.34)
             var targetHigh = earthMeters * Double.random(in: 0.3...0.8)
             let fps: Double = 60.0
             let dt: Double = 1.0 / fps
@@ -997,7 +997,7 @@ private struct RadiusBarOnlyPreview: View {
     @State private var springBlend: Double = 0.0
     @State private var useGravityRamp: Bool = false
     @State private var gravityStrength: Double = 1.0
-    private let earthMeters: Double = (Locale.current.usesMetricSystem ? 6_371_000.0 : 3_958.8 * 1609.34)
+    private let earthMeters: Double = (Locale.current.measurementSystem == .metric ? 6_371_000.0 : 3_958.8 * 1609.34)
 
     @State private var scaleMode: ScaleMode = .scaleTo
     @State private var scaleByFactor: CGFloat = 1.0
@@ -1219,12 +1219,12 @@ private struct RadiusBarOnlyPreview: View {
                 }
             }
             .onAppear { startLoopingAnimation() }
-            .onChange(of: selectedTab) { newValue in
+            .onChange(of: selectedTab) { _, newValue in
                 if newValue == .record && !isHoldingRecord {
                     radius = 0
                 }
             }
-            .onChange(of: isHoldingRecord) { newValue in
+            .onChange(of: isHoldingRecord) { _, newValue in
                 if selectedTab == .record && !newValue {
                     radius = 0
                 }

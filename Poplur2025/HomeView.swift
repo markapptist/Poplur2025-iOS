@@ -1,9 +1,9 @@
 import SwiftUI
 import CoreLocation
 import AVFoundation
-@preconcurrency import SceneKit
-import CoreMotion
+import SpriteKit
 import Combine
+import MediaPlayer
 import AudioToolbox
 import Foundation
 
@@ -32,6 +32,129 @@ enum PreviewAppTab: Hashable, CaseIterable {
 final class IsometricBarModel: ObservableObject {
     @Published var radius: Double
     init(radius: Double = 0) { self.radius = radius }
+}
+
+private struct HomeRecordedVideoPreviewItem: Identifiable {
+    let id = UUID()
+    let url: URL
+}
+
+private struct HiddenSystemVolumeBridge: UIViewRepresentable {
+    func makeUIView(context: Context) -> MPVolumeView {
+        let view = MPVolumeView(frame: .zero)
+        view.showsRouteButton = false
+        view.showsVolumeSlider = true
+        view.alpha = 0.01
+        view.isUserInteractionEnabled = false
+        return view
+    }
+
+    func updateUIView(_ uiView: MPVolumeView, context: Context) {}
+}
+
+@MainActor
+private final class DeviceVolumeObserver: ObservableObject {
+    @Published private(set) var level: Float
+    @Published private(set) var isShowing: Bool = false
+
+    private let session = AVAudioSession.sharedInstance()
+    private var observation: NSKeyValueObservation?
+    private var volumeNotificationObserver: NSObjectProtocol?
+    private var refreshTimer: AnyCancellable?
+    private var hideTask: Task<Void, Never>?
+    private var volumePopPlayer: AVAudioPlayer?
+    private var lastVolumePopTime: TimeInterval = 0
+
+    init() {
+        level = session.outputVolume
+
+        if !PreviewEnvHomeView.isPreview {
+            try? session.setActive(true)
+            observation = session.observe(\.outputVolume, options: [.new]) { [weak self] session, change in
+                let nextLevel = change.newValue ?? session.outputVolume
+                Task { @MainActor in
+                    self?.handleVolumeChange(nextLevel)
+                }
+            }
+            volumeNotificationObserver = NotificationCenter.default.addObserver(
+                forName: NSNotification.Name("AVSystemController_SystemVolumeDidChangeNotification"),
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                let notifiedLevel = notification.userInfo?["AVSystemController_AudioVolumeNotificationParameter"] as? Float
+                let nextLevel = notifiedLevel ?? AVAudioSession.sharedInstance().outputVolume
+                Task { @MainActor in
+                    self?.handleVolumeChange(nextLevel, forceShow: true)
+                }
+            }
+            refreshTimer = Timer.publish(every: 0.25, on: .main, in: .common)
+                .autoconnect()
+                .sink { [weak self] _ in
+                    guard let self else { return }
+                    self.handleVolumeChange(self.session.outputVolume)
+                }
+        }
+    }
+
+    deinit {
+        observation?.invalidate()
+        if let volumeNotificationObserver {
+            NotificationCenter.default.removeObserver(volumeNotificationObserver)
+        }
+        refreshTimer?.cancel()
+        hideTask?.cancel()
+        volumePopPlayer?.stop()
+    }
+
+    private func handleVolumeChange(_ newLevel: Float, forceShow: Bool = false) {
+        let clampedLevel = max(0, min(1, newLevel))
+        let changed = abs(clampedLevel - level) > 0.005
+        level = clampedLevel
+        if changed || forceShow {
+            playVolumePop()
+            showTemporarily()
+        }
+    }
+
+    private func playVolumePop() {
+        let now = Date().timeIntervalSinceReferenceDate
+        guard now - lastVolumePopTime > 0.08 else { return }
+        lastVolumePopTime = now
+
+        guard let url = Bundle.main.url(forResource: "pop", withExtension: "mp3") ?? Bundle.main.url(forResource: "pop", withExtension: "wav") else {
+            AudioServicesPlaySystemSound(1104)
+            return
+        }
+
+        do {
+            try? session.setActive(true)
+            if volumePopPlayer == nil {
+                let player = try AVAudioPlayer(contentsOf: url)
+                player.numberOfLoops = 0
+                player.volume = 0.9
+                player.prepareToPlay()
+                volumePopPlayer = player
+            }
+            volumePopPlayer?.currentTime = 0
+            volumePopPlayer?.play()
+        } catch {
+            print("[VolumePop] Failed to play pop sound: \(error)")
+            AudioServicesPlaySystemSound(1104)
+        }
+    }
+
+    private func showTemporarily() {
+        hideTask?.cancel()
+        withAnimation(.easeOut(duration: 0.12)) {
+            isShowing = true
+        }
+        hideTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_100_000_000)
+            withAnimation(.easeIn(duration: 0.18)) {
+                isShowing = false
+            }
+        }
+    }
 }
 
 private struct IsometricBarModelKey: EnvironmentKey {
@@ -74,45 +197,6 @@ extension EnvironmentValues {
     }
 }
 
-// One-time SceneKit prewarmer to avoid first-frame stalls
-private enum HomeSceneKitPrewarmer {
-    private static var didPrewarm: Bool = false
-
-    static func prewarmIfNeeded() async {
-        if didPrewarm { return }
-        didPrewarm = true
-
-        // Build a tiny scene off-main
-        let scene = SCNScene()
-        let box = SCNBox(width: 0.01, height: 0.01, length: 0.01, chamferRadius: 0)
-        let mat = SCNMaterial()
-        mat.lightingModel = .physicallyBased
-        box.materials = [mat]
-        let node = SCNNode(geometry: box)
-        scene.rootNode.addChildNode(node)
-
-        // 1) Offscreen renderer path (no view)
-        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
-            DispatchQueue.global(qos: .userInitiated).async {
-                let device = MTLCreateSystemDefaultDevice()
-                let renderer = SCNRenderer(device: device, options: nil)
-                renderer.scene = scene
-                renderer.render(atTime: 0)
-                cont.resume()
-            }
-        }
-
-        // 2) Tiny SCNView path to exercise view-based code
-        await MainActor.run {
-            let tmpView = SCNView(frame: CGRect(x: -1000, y: -1000, width: 1, height: 1))
-            tmpView.antialiasingMode = .none
-            tmpView.isPlaying = false
-            tmpView.scene = scene
-            tmpView.prepare([box], completionHandler: { _ in })
-        }
-    }
-}
-
 struct HomeCameraPreviewHost: UIViewControllerRepresentable {
     @ObservedObject var controller: CameraKitController
 
@@ -127,32 +211,29 @@ struct HomeCameraPreviewHost: UIViewControllerRepresentable {
 }
 
 @MainActor
-final class SceneMotionController: ObservableObject {
-    private let motion = CMMotionManager()
+private final class LazyHomeCameraControllerHolder: ObservableObject {
+    @Published private(set) var controller: CameraKitController?
+    private var cancellable: AnyCancellable?
 
-    func start() {
-        guard motion.isDeviceMotionAvailable else { return }
-        motion.deviceMotionUpdateInterval = 1.0 / 60.0
-        let queue = OperationQueue()
-        queue.qualityOfService = .userInitiated
-        motion.startDeviceMotionUpdates(to: queue) { [weak self] data, _ in
-            guard let attitude = data?.attitude else { return }
-            let userInfo: [String: Double] = [
-                "roll": attitude.roll,
-                "pitch": attitude.pitch,
-                "yaw": attitude.yaw
-            ]
-            DispatchQueue.main.async {
-                NotificationCenter.default.post(name: .CubeMotionUpdate, object: nil, userInfo: userInfo)
-            }
+    func resolve() -> CameraKitController {
+        if let controller {
+            return controller
         }
+
+        let controller = CameraKitController()
+        cancellable = controller.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
+        self.controller = controller
+        return controller
     }
 
-    func stop() {
-        motion.stopDeviceMotionUpdates()
+    func stopIfLoaded() {
+        controller?.stop()
     }
 }
 
+@MainActor
 struct HomeView: View {
     @EnvironmentObject private var auth: AuthViewModel
     @Environment(\.scenePhase) private var scenePhase
@@ -172,8 +253,7 @@ struct HomeView: View {
     // Location only when needed
     @StateObject private var locationProvider = LocationProvider()
     
-    // Use injected, shared camera controller (prewarmed in App)
-    @ObservedObject var cameraController: CameraKitController
+    @StateObject private var cameraControllerHolder = LazyHomeCameraControllerHolder()
     
     // AR Filters
     @State private var arFilterManager: ARFilterManager?
@@ -183,23 +263,17 @@ struct HomeView: View {
     @State private var didTriggerFeedInitialLoad = false
     @State private var didTriggerMapInitialLoad = false
     @State private var didTriggerProfileInitialLoad = false
-    @State private var didStartCameraOnce = false
-    @State private var isFeedReady: Bool = false
     @State private var enableLowerHitArea: Bool = false
-    @State private var didPrewarmSceneKit = false
-    @State private var showBarTuner: Bool = false
     @State private var didApplyDefaultBarSettings = false
-    @State private var launchSequenceTask: Task<Void, Never>? = nil
     @State private var didRunLaunchSequence = false
+    @State private var bottomChromeVisible = false
+    @State private var isFeedLaunchLoading = true
     
     // Shared radius model controlling the global isometric bar value across all tabs
     @StateObject private var isometricBarModel = IsometricBarModel(radius: 0)
     
     // User recognition manager for face detection
     @State private var userRecognitionManager: UserRecognitionManager?
-    
-    @StateObject private var motionController = SceneMotionController()
-    @StateObject private var cubeTouchConfig = CubeTouchConfiguration()
     
     @State private var recordHoldTask: Task<Void, Never>? = nil
     @State private var isRecordHolding: Bool = false
@@ -208,8 +282,8 @@ struct HomeView: View {
     @State private var isRecording: Bool = false
     @State private var recordingSecondsRemaining: Int = 10
     @State private var recordingTimer: Timer? = nil
-    @State private var cubeFlashTimer: Timer? = nil
-    @State private var isCubeFlashing: Bool = false
+    @State private var recordedVideoPreviewItem: HomeRecordedVideoPreviewItem? = nil
+    @StateObject private var deviceVolumeObserver = DeviceVolumeObserver()
     
     // Post count state (for displaying user's total posts)
     @State private var userPostCount: Int = 0
@@ -223,11 +297,8 @@ struct HomeView: View {
     }
     
     // Added state for cube yaw angle
-    @State private var cubeYawDegrees: Double = 0
+    @State private var cubeYawDegrees: Double = 90
     
-    // Added per instruction to gate animations
-    @State private var isSceneKitReady: Bool = false
-
     // Added per instructions to control initial yaw set once
     @State private var didSetInitialCubeYaw: Bool = false
     
@@ -236,12 +307,7 @@ struct HomeView: View {
     @State private var uploadStatusMessage: String = ""
     @State private var uploadStatusIcon: String = "arrow.up.circle.fill"
     @State private var uploadStatusColor: Color = .blue
-
-    private let launchGate = LaunchGate.shared
-    
-    init(cameraController: CameraKitController) {
-        self.cameraController = cameraController
-        
+    init() {
         let appearance = UITabBarAppearance()
         appearance.configureWithTransparentBackground()
         appearance.backgroundEffect = nil
@@ -278,30 +344,37 @@ struct HomeView: View {
     
     @ViewBuilder
     private var recordTabContent: some View {
-        ZStack {
-            // Camera preview with UIKit gestures enabled
-            // UIKit gestures: swipe up/down (flash), double-tap (flip camera), long-press (AR filters)
-            HomeCameraPreviewHost(controller: cameraController)
-                .ignoresSafeArea()
-                .allowsHitTesting(true) // Enable UIKit gesture recognizers
+        Group {
+            if let cameraController = cameraControllerHolder.controller {
+                ZStack {
+                    // Camera preview with UIKit gestures enabled
+                    HomeCameraPreviewHost(controller: cameraController)
+                        .ignoresSafeArea()
+                        .allowsHitTesting(true)
 
-            if cameraController.isScreenFlashOn && cameraController.currentCameraPosition == .front {
-                FrontCameraFlashEdgeOverlay()
+                    if cameraController.isScreenFlashOn && cameraController.currentCameraPosition == .front {
+                        FrontCameraFlashEdgeOverlay()
+                            .ignoresSafeArea()
+                            .transition(.opacity)
+                            .zIndex(8)
+                    }
+
+                    if !showARFilters {
+                        RecordCameraControlsOverlay(controller: cameraController)
+                            .transition(.opacity)
+                    }
+                }
+                .animation(.easeInOut(duration: 0.18), value: cameraController.isScreenFlashOn)
+            } else {
+                Color.black
                     .ignoresSafeArea()
-                    .transition(.opacity)
-                    .zIndex(8)
-            }
-            
-            if !showARFilters {
-                RecordCameraControlsOverlay(controller: cameraController)
-                    .transition(.opacity)
             }
         }
-        .animation(.easeInOut(duration: 0.18), value: cameraController.isScreenFlashOn)
         .onAppear {
             Task { @MainActor in
                 // Removed guard !PreviewEnvHomeView.isPreview else { return }
                 guard selectedTab == .record else { return }
+                let cameraController = cameraControllerHolder.resolve()
                 let status = AVCaptureDevice.authorizationStatus(for: .video)
                 switch status {
                 case .authorized:
@@ -309,10 +382,11 @@ struct HomeView: View {
                     await cameraController.resumePreviewAfterInterruption()
                     
                     // 🆕 Setup AR filter support
-                    if let cameraVC = cameraController.recordPreviewViewController as? CameraPreviewViewController {
+                    if let cameraVC = cameraController.recordPreviewViewController as? CameraPreviewViewController,
+                       let displayLayer = cameraVC.displayLayer {
                         cameraController.setupARFilterSupport(
                             filterManager: support.filterManager,
-                            displayLayer: cameraVC.displayLayer!
+                            displayLayer: displayLayer
                         )
                     }
                     
@@ -336,7 +410,7 @@ struct HomeView: View {
         }
         .onDisappear {
             // Disable ML detection when leaving camera tab
-            cameraController.disableMLDetection()
+            cameraControllerHolder.controller?.disableMLDetection()
             userRecognitionManager?.clearRecognition()
             // Reset filters and flag when leaving camera tab
             showARFilters = false
@@ -351,6 +425,7 @@ struct HomeView: View {
             guard selectedTab == .record else {
                 return
             }
+            let cameraController = cameraControllerHolder.resolve()
             let status = AVCaptureDevice.authorizationStatus(for: .video)
             switch status {
             case .authorized:
@@ -380,64 +455,34 @@ struct HomeView: View {
 
     private func deferUntilAfterLaunch(_ work: @escaping @Sendable () async -> Void) {
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 650_000_000)
+            await Task.yield()
             await work()
         }
+    }
+
+    @MainActor
+    private func triggerFeedInitialLoadIfNeeded() {
+        guard !didTriggerFeedInitialLoad else { return }
+        didTriggerFeedInitialLoad = true
+        NotificationCenter.default.post(name: .LoadFeedNow, object: nil)
     }
 
     private func runLaunchSequenceIfNeeded() {
         guard !didRunLaunchSequence else { return }
         didRunLaunchSequence = true
-        launchSequenceTask?.cancel()
-        launchSequenceTask = Task { @MainActor in
-            launchGate.start()
+        triggerFeedInitialLoadIfNeeded()
+    }
 
-            if !didTriggerFeedInitialLoad {
-                didTriggerFeedInitialLoad = true
-                NotificationCenter.default.post(name: .LoadFeedNow, object: nil)
-            }
-
-            await waitForFeedReadyOrTimeout()
+    private func revealBottomChromeIfNeeded() {
+        guard !bottomChromeVisible else { return }
+        Task { @MainActor in
             await Task.yield()
-
-            NotificationCenter.default.post(name: .PlayFeedLaunchLogo, object: nil)
-
-            try? await Task.sleep(nanoseconds: 650_000_000)
-            await Task.yield()
-
-            if !didTriggerMapInitialLoad {
-                didTriggerMapInitialLoad = true
-                NotificationCenter.default.post(name: .LoadMapNow, object: nil)
+            withAnimation(.easeOut(duration: 0.18)) {
+                bottomChromeVisible = true
             }
-
-            try? await Task.sleep(nanoseconds: 500_000_000)
-            await Task.yield()
-
-            if !didTriggerProfileInitialLoad {
-                didTriggerProfileInitialLoad = true
-                NotificationCenter.default.post(name: .LoadProfileNow, object: nil)
-            }
-
-            try? await Task.sleep(nanoseconds: 300_000_000)
-            launchGate.markReady()
         }
     }
 
-    private func waitForFeedReadyOrTimeout() async {
-        await withTaskGroup(of: Void.self) { group in
-            group.addTask {
-                for await _ in NotificationCenter.default.notifications(named: .FeedReady) {
-                    break
-                }
-            }
-            group.addTask {
-                try? await Task.sleep(nanoseconds: 900_000_000)
-            }
-            await group.next()
-            group.cancelAll()
-        }
-    }
-    
     private func startRecordHoldRamp() {
         recordHoldTask?.cancel()
         let maxMeters: Double = 3_323_000.0
@@ -476,18 +521,15 @@ struct HomeView: View {
         isRecording = true
         recordingSecondsRemaining = 10
         startCubeFlashing()
-        cameraController.beginRecording()
+        cameraControllerHolder.resolve().beginRecording()
         
         recordingTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { timer in
             DispatchQueue.main.async {
-                if self.recordingSecondsRemaining > 0 {
-                    self.recordingSecondsRemaining -= 1
-                } else {
+                self.recordingSecondsRemaining = max(0, self.recordingSecondsRemaining - 1)
+                if self.recordingSecondsRemaining == 0 {
                     // Recording complete - stop everything
                     self.stopRecordingCountdown()
                     self.stopRecordHoldRamp(reset: true)
-                    // Force stop the actual recording
-                    NotificationCenter.default.post(name: .cameraCubeHoldEnded, object: nil)
                 }
             }
         }
@@ -500,17 +542,15 @@ struct HomeView: View {
         recordingTimer = nil
         stopCubeFlashing()
         if wasRecording {
-            cameraController.endRecording()
+            cameraControllerHolder.controller?.endRecording()
         }
     }
     
     private func startCubeFlashing() {
-        isCubeFlashing = true
         NotificationCenter.default.post(name: Notification.Name("CubeStartFlashing"), object: nil)
     }
     
     private func stopCubeFlashing() {
-        isCubeFlashing = false
         NotificationCenter.default.post(name: Notification.Name("CubeStopFlashing"), object: nil)
     }
     
@@ -544,11 +584,7 @@ struct HomeView: View {
         let current = cubeYawDegrees.truncatingRemainder(dividingBy: 360)
         let delta = normalizedDelta(from: current, to: targetYaw, prefer: direction)
         let final = current + delta
-        if isSceneKitReady {
-            withAnimation(.timingCurve(0.2, 0.8, 0.2, 1.0, duration: duration)) {
-                cubeYawDegrees = final
-            }
-        } else {
+        withAnimation(.timingCurve(0.2, 0.8, 0.2, 1.0, duration: duration)) {
             cubeYawDegrees = final
         }
     }
@@ -670,6 +706,11 @@ struct HomeView: View {
                     feedTabContent
                 }
             }
+
+            HiddenSystemVolumeBridge()
+                .frame(width: 1, height: 1)
+                .allowsHitTesting(false)
+                .opacity(0.01)
             
             // Upload Status Overlay
             if showUploadStatus {
@@ -697,7 +738,10 @@ struct HomeView: View {
             }
             
             // AR Filter Selector above cube (Snapchat-style)
-            if showARFilters && selectedTab == .record, let arFilterManager {
+            if showARFilters,
+               selectedTab == .record,
+               let arFilterManager,
+               let cameraController = cameraControllerHolder.controller {
                 VStack(spacing: 0) {
                     // Transparent spacer that allows touches to pass through
                     Color.clear
@@ -838,12 +882,14 @@ struct HomeView: View {
                             selectedTab: $selectedTab,
                             radiusTrend: $radiusTrend
                         )
+                        .frame(width: 150, alignment: .leading)
 
                         Spacer(minLength: 0)
 
                         // Choose your preferred radius display style:
                         // Option 1: Default card style (recommended)
                         RadiusNumberDisplay(radiusMeters: $isometricBarModel.radius)
+                            .frame(width: 150, alignment: .trailing)
                         
                         // Option 2: Compact badge style
                         // RadiusNumberBadge(radiusMeters: $isometricBarModel.radius)
@@ -859,11 +905,39 @@ struct HomeView: View {
                     .padding(.bottom, safe.bottom + 20)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                .animation(.spring(response: 0.5, dampingFraction: 0.75), value: isometricBarModel.radius)
+                .transaction { transaction in
+                    transaction.animation = nil
+                }
+                .opacity(bottomChromeVisible ? 1 : 0)
+                .onAppear {
+                    revealBottomChromeIfNeeded()
+                }
             }
             .ignoresSafeArea(.container, edges: [.bottom, .leading, .trailing])
             .zIndex(1001)
             .allowsHitTesting(false)
+
+            if selectedTab == .feed && deviceVolumeObserver.isShowing && !isFeedLaunchLoading {
+                GeometryReader { proxy in
+                    VStack {
+                        Spacer()
+                        HStack {
+                            Spacer()
+
+                            FeedVolumeBars(volumeLevel: deviceVolumeObserver.level)
+                                .frame(width: 64, height: 320)
+                                .accessibilityElement(children: .ignore)
+                                .accessibilityLabel("Volume \(Int(deviceVolumeObserver.level * 100)) percent")
+                                .transition(.opacity.combined(with: .scale(scale: 0.94)))
+                        }
+                        .padding(.trailing, proxy.safeAreaInsets.trailing + 28)
+                        .padding(.bottom, proxy.safeAreaInsets.bottom + 170)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                }
+                .zIndex(1002)
+                .allowsHitTesting(false)
+            }
 
             if selectedTab == .record && !isRecording {
                 GeometryReader { proxy in
@@ -897,7 +971,6 @@ struct HomeView: View {
                 // Startup tasks deferred; nothing to do here
             }
             .onAppear {
-                launchGate.start()
                 runLaunchSequenceIfNeeded()
                 if selectedTab != .feed {
                     NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
@@ -948,7 +1021,7 @@ struct HomeView: View {
                 }
                 if selectedTab == .profile {
                     if !PreviewEnvHomeView.isPreview {
-                        cameraController.stop()
+                        cameraControllerHolder.stopIfLoaded()
                     }
                 }
                 NotificationCenter.default.post(name: .ResetTabToTop, object: nil)
@@ -957,6 +1030,12 @@ struct HomeView: View {
                     stopRecordHoldRamp(reset: false)
                 }
                 enableLowerHitArea = (selectedTab != .record)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("FeedLaunchLoadingDidStart"))) { _ in
+                isFeedLaunchLoading = true
+            }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("FeedLaunchLoadingDidFinish"))) { _ in
+                isFeedLaunchLoading = false
             }
             .onChange(of: auth.isAuthenticated) { _, authed in
                 if authed {
@@ -969,19 +1048,11 @@ struct HomeView: View {
             .onChange(of: scenePhase) { _, phase in
                 switch phase {
                 case .active:
-                    Task { @MainActor in
-                        guard !PreviewEnvHomeView.isPreview else { return }
-                        deferUntilAfterLaunch {
-                            await MainActor.run { self.motionController.start() }
-                        }
-                        if selectedTab == .record {
-                            ensureCameraRunningIfNeeded()
-                        }
+                    if selectedTab == .record {
+                        ensureCameraRunningIfNeeded()
                     }
                 case .background, .inactive:
-                    cameraController.stop()
-                    didStartCameraOnce = false
-                    motionController.stop()
+                    cameraControllerHolder.stopIfLoaded()
                     NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
                     NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
                 @unknown default:
@@ -1009,20 +1080,6 @@ struct HomeView: View {
 
         // Step 2: apply notification receivers and remaining tasks
         return step1
-            .task {
-                deferUntilAfterLaunch {
-                    await MainActor.run { isSceneKitReady = true }
-                }
-            }
-            .task {
-                try? await Task.sleep(nanoseconds: 5_000_000_000)
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .FeedReady)) { _ in
-                DispatchQueue.main.async { isFeedReady = true }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .CubeMotionUpdate)) { _ in
-                // Motion updates silenced
-            }
             .onReceive(NotificationCenter.default.publisher(for: .SharedRadiusDidChange)) { note in
                 if let value = note.userInfo?["radius"] as? Double {
                     isometricBarModel.radius = min(value, 3_323_000.0)
@@ -1044,6 +1101,7 @@ struct HomeView: View {
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ToggleARFilters"))) { _ in
                 withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
                     if selectedTab == .record {
+                        _ = cameraControllerHolder.resolve()
                         _ = ensureRecordSupportManagers()
                     }
                     showARFilters.toggle()
@@ -1063,12 +1121,18 @@ struct HomeView: View {
                 startRecordingCountdown()
             }
             .onReceive(NotificationCenter.default.publisher(for: .cameraCubeHoldEnded)) { _ in
-                if !isRecording {
-                    isRecordHolding = false
-                    stopRecordHoldRamp(reset: true)
-                    stopRecordingCountdown()
-                }
+                guard selectedTab == .record else { return }
                 isRecordHolding = false
+                if !isRecording {
+                    stopRecordHoldRamp(reset: true)
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("RecordingOutputReady"))) { notification in
+                guard let url = notification.userInfo?["url"] as? URL else { return }
+                recordedVideoPreviewItem = HomeRecordedVideoPreviewItem(url: url)
+            }
+            .fullScreenCover(item: $recordedVideoPreviewItem) { item in
+                CapturePreviewOverlay(image: nil, videoURL: item.url)
             }
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("OpenCameraAtCoordinate"))) { notification in
                 guard let userInfo = notification.userInfo,
@@ -1199,8 +1263,12 @@ struct HomeView: View {
                     }
                     previousRadius = clampedValue
                     _ = oldTrend
-                    withAnimation(.easeInOut(duration: duration)) {
+                    if duration <= 0 {
                         isometricBarModel.radius = clampedValue
+                    } else {
+                        withAnimation(.easeInOut(duration: duration)) {
+                            isometricBarModel.radius = clampedValue
+                        }
                     }
                 }
             }
@@ -1208,8 +1276,12 @@ struct HomeView: View {
                 if let value = note.userInfo?["radius"] as? Double {
                     let duration = (note.userInfo?["duration"] as? Double) ?? 0.8
                     let clampedValue = min(value, 3_323_000.0)
-                    withAnimation(.easeInOut(duration: duration)) {
+                    if duration <= 0 {
                         isometricBarModel.radius = clampedValue
+                    } else {
+                        withAnimation(.easeInOut(duration: duration)) {
+                            isometricBarModel.radius = clampedValue
+                        }
                     }
                 }
             }
@@ -1262,8 +1334,8 @@ struct HomeBarPlacementPreview: View {
     @State private var holdTask: Task<Void, Never>? = nil
     
     // Added state for continuous yaw
-    @State private var yawDegrees: Double = 0
-    
+    @State private var yawDegrees: Double = 90
+
     // Inserted states as per instructions:
     @State private var isPreviewRotating: Bool = false
     @State private var queuedPreviewTab: AppTab? = nil
@@ -1277,7 +1349,7 @@ struct HomeBarPlacementPreview: View {
     // Added state to control animation flag
     @State private var previewAnimateTabChange: Bool = true
 
-    init(initialTab: AppTab = .record) {
+    init(initialTab: AppTab = .feed) {
         _selectedTab = State(initialValue: initialTab)
     }
     
@@ -1549,14 +1621,14 @@ private struct CameraIconControlButton: View {
 private struct FrontCameraFlashEdgeOverlay: View {
     var body: some View {
         GeometryReader { proxy in
-            let edgeThickness = max(proxy.size.width, proxy.size.height) * 0.17
+            let edgeThickness = max(proxy.size.width, proxy.size.height) * 0.07
 
             ZStack {
-                Color.white.opacity(0.08)
+                Color.clear
 
                 VStack(spacing: 0) {
                     LinearGradient(
-                        colors: [Color.white.opacity(0.96), Color.white.opacity(0)],
+                        colors: [Color.white.opacity(0.5), Color.white.opacity(0)],
                         startPoint: .top,
                         endPoint: .bottom
                     )
@@ -1565,7 +1637,7 @@ private struct FrontCameraFlashEdgeOverlay: View {
                     Spacer(minLength: 0)
 
                     LinearGradient(
-                        colors: [Color.white.opacity(0), Color.white.opacity(0.96)],
+                        colors: [Color.white.opacity(0), Color.white.opacity(0.5)],
                         startPoint: .top,
                         endPoint: .bottom
                     )
@@ -1574,7 +1646,7 @@ private struct FrontCameraFlashEdgeOverlay: View {
 
                 HStack(spacing: 0) {
                     LinearGradient(
-                        colors: [Color.white.opacity(0.96), Color.white.opacity(0)],
+                        colors: [Color.white.opacity(0.5), Color.white.opacity(0)],
                         startPoint: .leading,
                         endPoint: .trailing
                     )
@@ -1583,7 +1655,7 @@ private struct FrontCameraFlashEdgeOverlay: View {
                     Spacer(minLength: 0)
 
                     LinearGradient(
-                        colors: [Color.white.opacity(0), Color.white.opacity(0.96)],
+                        colors: [Color.white.opacity(0), Color.white.opacity(0.5)],
                         startPoint: .leading,
                         endPoint: .trailing
                     )
@@ -1831,6 +1903,62 @@ private struct LiveMLDetectionOverlay: View {
         if lowercased.contains("sky") || lowercased.contains("cloud") { return "☁️" }
         
         return "🔍" // Default search icon
+    }
+}
+
+private struct FeedVolumeBars: View {
+    let volumeLevel: Float
+
+    var body: some View {
+        SpriteView(scene: FeedVolumeBarsScene(volumeLevel: volumeLevel), options: [.allowsTransparency])
+    }
+}
+
+private final class FeedVolumeBarsScene: SKScene {
+    private let barCount = 18
+    private let volumeLevel: Float
+    private let meterGreen = SKColor(red: 0.23, green: 1.0, blue: 0.18, alpha: 1.0)
+
+    init(volumeLevel: Float) {
+        self.volumeLevel = max(0, min(1, volumeLevel))
+        super.init(size: CGSize(width: 64, height: 320))
+        scaleMode = .resizeFill
+        backgroundColor = .clear
+        isUserInteractionEnabled = false
+        buildMeter()
+    }
+
+    required init?(coder aDecoder: NSCoder) {
+        self.volumeLevel = AVAudioSession.sharedInstance().outputVolume
+        super.init(coder: aDecoder)
+        scaleMode = .resizeFill
+        backgroundColor = .clear
+        isUserInteractionEnabled = false
+        buildMeter()
+    }
+
+    private func buildMeter() {
+        removeAllChildren()
+
+        let activeLevel = Int(ceil(Double(volumeLevel) * Double(barCount)))
+        let barWidth: CGFloat = 32
+        let barHeight: CGFloat = 8
+        let gap: CGFloat = 6.4
+        let totalHeight = CGFloat(barCount) * barHeight + CGFloat(barCount - 1) * gap
+        let startX = (size.width - barWidth) / 2
+        let startY = (size.height - totalHeight) / 2
+
+        for index in 0..<barCount {
+            let y = startY + CGFloat(index) * (barHeight + gap)
+            let rect = CGRect(x: startX, y: y, width: barWidth, height: barHeight)
+            let path = CGPath(roundedRect: rect, cornerWidth: 2, cornerHeight: 2, transform: nil)
+            let bar = SKShapeNode(path: path)
+            let active = index < activeLevel
+            bar.fillColor = active ? meterGreen : meterGreen.withAlphaComponent(0.18)
+            bar.strokeColor = .clear
+            bar.glowWidth = active ? 1.4 : 0
+            addChild(bar)
+        }
     }
 }
 

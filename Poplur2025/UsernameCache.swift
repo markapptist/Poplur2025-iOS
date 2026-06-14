@@ -29,7 +29,7 @@ actor UsernameCache {
         }
 
         let task = Task<String?, Never> {
-            defer { Task { await self.clearInFlight(for: uid) } }
+            defer { Task { self.clearInFlight(for: uid) } }
             do {
                 let snap = try await Firestore.firestore().collection("users").document(uid).getDocument()
                 guard let data = snap.data() else { return nil }
@@ -38,11 +38,11 @@ actor UsernameCache {
                 let username = (data["username"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
                 let name = (displayName?.isEmpty == false ? displayName : (username?.isEmpty == false ? username : nil))
                 if let name {
-                    await store(username: name, for: uid)
+                    store(username: name, for: uid)
                 }
                 // Also cache photoURL if present
                 if let photoString = data["photoURL"] as? String, let url = URL(string: photoString) {
-                    await store(photoURL: url, for: uid)
+                    store(photoURL: url, for: uid)
                 }
                 return name
             } catch {
@@ -92,7 +92,7 @@ actor UsernameCache {
         }
 
         let task = Task<CachedUserProfile?, Never> {
-            defer { Task { await self.clearProfileInFlight(for: uid) } }
+            defer { Task { self.clearProfileInFlight(for: uid) } }
             do {
                 let snap = try await Firestore.firestore().collection("users").document(uid).getDocument()
                 guard let data = snap.data() else { return nil }
@@ -103,8 +103,8 @@ actor UsernameCache {
                     if let photoString = data["photoURL"] as? String, let url = URL(string: photoString) { return url }
                     return nil
                 }()
-                if let name { await store(username: name, for: uid) }
-                if let photoURL { await store(photoURL: photoURL, for: uid) }
+                if let name { store(username: name, for: uid) }
+                if let photoURL { store(photoURL: photoURL, for: uid) }
                 return CachedUserProfile(uid: uid, displayName: name, photoURL: photoURL)
             } catch {
                 print("UsernameCache: profile fetch failed for \(uid): \(error.localizedDescription)")

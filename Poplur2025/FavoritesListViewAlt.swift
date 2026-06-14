@@ -106,7 +106,7 @@ struct FavoritesListViewAlt: View {
         isLoading = true
         errorMessage = nil
         col.order(by: "rank", descending: false).limit(to: 10).getDocuments { snap, err in
-            if let err = err {
+            if err != nil {
                 // Fall back to ordering by name if rank missing
                 (col.order(by: "name").limit(to: 10)).getDocuments { snap2, err2 in
                     self.handleSnapshot(snap2, err: err2)

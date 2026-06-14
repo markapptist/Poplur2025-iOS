@@ -10,13 +10,12 @@ public final class SceneKitPrewarmer {
     
     public static func prewarmIfNeeded() async {
         #if canImport(SceneKit)
-        lock.lock()
-        let alreadyPrewarmed = didPrewarm
-        if !alreadyPrewarmed {
-            didPrewarm = true
+        let alreadyPrewarmed = lock.withLock { () -> Bool in
+            let was = didPrewarm
+            if !was { didPrewarm = true }
+            return was
         }
-        lock.unlock()
-        
+
         guard !alreadyPrewarmed else { return }
 
         await prewarmSceneKit()

@@ -11,45 +11,32 @@ final class LocationManager: NSObject, ObservableObject {
         manager.delegate = self
         manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
         if CLLocationManager.locationServicesEnabled() {
-            let status = LocationManager.authorizationStatus()
+            let status = manager.authorizationStatus
             if status == .authorizedAlways || status == .authorizedWhenInUse {
                 manager.startUpdatingLocation()
             }
         }
     }
-    
+
     func requestAuthorizationIfNeeded() {
-        let status = LocationManager.authorizationStatus()
+        let status = manager.authorizationStatus
         if status == .notDetermined {
             manager.requestWhenInUseAuthorization()
         } else if status == .authorizedAlways || status == .authorizedWhenInUse {
             manager.startUpdatingLocation()
         }
     }
-    
+
     func centerOnUser(_ camera: inout MapKit.MapCameraPosition) {
         guard let coord = location?.coordinate else { return }
         camera = .camera(MapKit.MapCamera(centerCoordinate: coord, distance: 12_000, heading: 0, pitch: 0))
-    }
-    
-    private static func authorizationStatus() -> CLAuthorizationStatus {
-        if #available(iOS 14.0, *) {
-            return CLLocationManager.authorizationStatus()
-        } else {
-            return CLLocationManager.authorizationStatus()
-        }
     }
 }
 
 extension LocationManager: CLLocationManagerDelegate {
     @MainActor
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
-        let status: CLAuthorizationStatus
-        if #available(iOS 14.0, *) {
-            status = manager.authorizationStatus
-        } else {
-            status = CLLocationManager.authorizationStatus()
-        }
+        let status = manager.authorizationStatus
         switch status {
         case .authorizedAlways, .authorizedWhenInUse:
             manager.startUpdatingLocation()

@@ -56,7 +56,7 @@ struct DMsListView: View {
         }
         .sheet(isPresented: $showingNewThreadSheet) {
             NewThreadPickerView(store: store) { users in
-                let thread = store.createThread(with: users)
+                _ = store.createThread(with: users)
                 // New thread appears at top; tap to open
             }
         }
@@ -128,7 +128,7 @@ struct DMThreadView: View {
                     scrollToBottom(proxy)
                     store.markThreadRead(threadID)
                 }
-                .onChange(of: messages.count) { _ in
+                .onChange(of: messages.count) {
                     scrollToBottom(proxy)
                 }
             }

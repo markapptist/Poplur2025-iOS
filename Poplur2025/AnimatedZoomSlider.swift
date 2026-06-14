@@ -132,9 +132,8 @@ class ZoomSliderScene: SKScene {
         let knobPath = UIBezierPath(roundedRect: CGRect(x: -knobWidth/2, y: -knobHeight/2, width: knobWidth, height: knobHeight), cornerRadius: 4)
         knobNode = SKShapeNode(path: knobPath.cgPath)
         
-        // Dark base matching cube's dark color
-        knobNode.fillColor = UIColor(white: 0.2, alpha: 0.95)
-        knobNode.strokeColor = UIColor(white: 0.4, alpha: 0.6)
+        knobNode.fillColor = UIColor.white
+        knobNode.strokeColor = UIColor.white.withAlphaComponent(0.9)
         knobNode.lineWidth = 1
         knobNode.position = CGPoint(x: centerX, y: centerY)
         knobNode.zPosition = 100

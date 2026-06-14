@@ -162,13 +162,15 @@ Capture photos and videos with ML object detection and AR filters.
 ### 3. FEED TAB
 
 #### Primary Purpose
-Infinite vertical scroll of video posts from different countries and categories.
+Infinite vertical scroll of mixed media posts from different countries and categories.
 
 #### Key Features
 - **Two-dimensional feed**:
-  - **Vertical swipe**: Change category/channel
+  - **Vertical swipe**: Advance to the next/previous post in the current country/category
   - **Horizontal swipe**: Change country
 - **Video playback**: Auto-plays current video
+- **Mixed media**: Feed must include a balanced rotation of photos, videos, and sponsored ads
+- **Launch loading**: Feed opens behind a white loading screen with the animated Poplur logo centered
 - **Categories**: Food, Fitness, Beauty, Sports, Modelling, Fashion, Music, Tech, News
 - **Countries**: 50+ countries available (US, Canada, Mexico, UK, France, Germany, Japan, etc.)
 
@@ -190,17 +192,40 @@ Each post displays:
 - Comment count
 - Caption/description
 
+#### Launch Loading Contract
+- On iOS and Android, the Feed must never launch as a black screen.
+- All Feed UI should start at its final on-screen position. If UI needs to appear gradually, animate opacity only; do not animate controls from a corner or from an incorrect layout position.
+- Show a full-screen white loading layer with the Poplur logo animated in the center while the first Feed item prepares.
+- Dismiss the loading layer with a dissolve/fade only after the first visible media item has rendered:
+  - For images, wait for the image loader success callback and first composition/draw.
+  - For videos, wait for ExoPlayer/Media3 `onRenderedFirstFrame` or an equivalent ready-to-display signal, not merely `STATE_READY`.
+- Do not show the custom volume bars while this loading layer is active.
+
+#### Media Mix and Ads
+- The demo/offline Feed must not load only videos or only pictures.
+- Use a deterministic first-page pattern so QA can verify the mix:
+  - Index `0`: image
+  - Index `1`: video
+  - Index `2`: sponsored ad
+  - Index `3`: image
+  - Index `4`: video
+- Repeat this pattern with `index % 5`; ads appear at `index % 5 == 2`.
+- Sponsored ad cells should use the same full-screen presentation shell as posts, with clear sponsored identity in metadata.
+- Production feeds should preserve the same balance target when server data allows it: interleave videos, photos, and sponsored ads instead of grouping one type.
+
 #### Audio Management
 - **Auto-play**: Current video plays automatically
 - **Pause on tab switch**: Audio pauses when leaving Feed tab
 - **Resume**: Audio resumes when returning to Feed
 - **Global pause**: Notification system to coordinate with other tabs
+- **Volume bars**: The custom green volume meter appears on hardware volume up and volume down while Feed is visible, but never while Feed launch loading is active
 
 #### Country/Channel Navigation
 - **Country indicator**: Flag emoji + country name at top
 - **Channel indicator**: Category emoji + name
 - **Swipe left/right**: Cycle through countries
-- **Swipe up/down**: Cycle through channels
+- **Swipe up/down inside populated Feed**: Move between posts
+- **Channel changes**: Trigger from the channel selector/cube action, not from the populated vertical post swipe
 - Each combination (country × channel) has its own feed
 
 #### Timeline View (Instagram-style)
@@ -213,6 +238,9 @@ Each post displays:
 - Firebase Firestore for data
 - AVPlayer for video playback
 - Location-based filtering by country code
+- Android should use Media3/ExoPlayer for video and Coil/Glide for images
+- Release or pause visible video players on Activity/Composable `onStop`, and rebuild/resume the current player on `onStart`/Feed return so videos do not stay blank after backgrounding
+- Keep the image/video/ad decision in the Feed view model so pagination cannot accidentally request a single media type for every item
 
 ---
 
@@ -355,6 +383,8 @@ The app uses notifications to coordinate audio playback:
 - `LoadFeedNow`: Lazy-loads feed when first accessed
 - `LoadProfileNow`: Lazy-loads profile when first accessed
 - `ResetTabToTop`: Scrolls content to top when switching tabs
+- `FeedLaunchLoadingDidStart`: Feed launch loading overlay became visible
+- `FeedLaunchLoadingDidFinish`: First Feed media rendered and launch loading overlay faded out
 
 ### Cross-Tab Navigation
 - `ShowUserProfile`: Navigate to profile tab with specific user ID
@@ -375,10 +405,12 @@ The app uses notifications to coordinate audio playback:
 - Only one tab can play audio at a time
 - Automatic pause/resume when switching tabs
 - Ambient audio mixing with system audio
+- Feed custom volume bars are event-driven by real system volume changes only; do not preview them during loading or tab entry
 
 ### Memory Management
 - Images cached per view
 - Videos unloaded when off-screen
+- Visible Feed media is recreated after app foregrounding if its player/view was released in the background
 - ML detection only active when camera tab visible
 - AR filters only loaded when requested
 
@@ -472,6 +504,32 @@ Camera gestures work anywhere on screen:
 - Navigation component for cross-tab navigation
 - WorkManager for background uploads
 
+### Android Feed Parity Requirements
+- Implement the Feed launch overlay as a top-level Compose layer:
+  - `Box(Modifier.fillMaxSize().background(Color.White))`
+  - Center the Poplur logo.
+  - Animate logo alpha/scale subtly while loading.
+  - Fade the layer out after first image draw or first video frame render.
+- Use `AnimatedVisibility`, `Crossfade`, or `animateFloatAsState` for opacity only. Feed controls must be measured and laid out at their final coordinates from the first frame.
+- For videos, prefer Media3 `Player.Listener` plus a `PlayerView`/surface callback:
+  - Start playback muted/unmuted according to app policy.
+  - Treat `onRenderedFirstFrame` as the signal to hide the launch overlay.
+  - Do not show a play icon over auto-playing Feed videos.
+  - On `Lifecycle.Event.ON_STOP`, pause/release active Feed players.
+  - On `Lifecycle.Event.ON_START`, recreate the active player and call `prepare()`/`play()` so videos load after returning to the app.
+- For images, hide the launch overlay only from the image loader success path after the composable is ready to draw.
+- Feed pagination should request or synthesize a balanced mix:
+  - `index % 5 == 0`: image
+  - `index % 5 == 1`: video
+  - `index % 5 == 2`: sponsored ad
+  - `index % 5 == 3`: image
+  - `index % 5 == 4`: video
+- Hardware volume handling:
+  - Listen for both `KEYCODE_VOLUME_UP` and `KEYCODE_VOLUME_DOWN`, or observe `AudioManager.STREAM_MUSIC` volume changes.
+  - Show the custom Feed volume bars for either direction.
+  - Suppress them while the Feed launch overlay is visible.
+  - Keep the bars in their final bottom-left Feed position and fade in/out; do not slide them from another position.
+
 ### Firebase Integration
 - Same Firestore database structure
 - Same Storage bucket paths
@@ -503,6 +561,12 @@ Camera gestures work anywhere on screen:
 - ✓ Vertical scroll changes posts
 - ✓ Horizontal swipe changes countries
 - ✓ Video auto-plays
+- ✓ Auto-playing videos do not show a play icon overlay
+- ✓ First page includes images, videos, and sponsored ads
+- ✓ White Poplur-logo loading screen dissolves only after first media render
+- ✓ Feed UI starts in final positions and fades only
+- ✓ Videos reload/resume after app background and foreground
+- ✓ Volume bars appear for hardware volume up and volume down, but not during launch loading
 - ✓ Audio pauses on tab switch
 - ✓ Tap username navigates to profile
 - ✓ Long-press shows location on map

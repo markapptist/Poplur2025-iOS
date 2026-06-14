@@ -42,19 +42,15 @@ class PurchaseViewModel: ObservableObject {
     }
     
     func restoreIfNeeded(quota: DailyQuotaViewModel) async {
-        do {
-            for await verification in Transaction.currentEntitlements {
-                do {
-                    let transaction = try verification.payloadValue
-                    if transaction.productID == productID {
-                        quota.setUpgradePurchased()
-                    }
-                } catch {
-                    print("Failed to verify transaction: \(error)")
+        for await verification in Transaction.currentEntitlements {
+            do {
+                let transaction = try verification.payloadValue
+                if transaction.productID == productID {
+                    quota.setUpgradePurchased()
                 }
+            } catch {
+                print("Failed to verify transaction: \(error)")
             }
-        } catch {
-            print("Failed to restore transactions: \(error)")
         }
     }
 }

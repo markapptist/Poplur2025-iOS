@@ -754,7 +754,7 @@ struct MapView: View {
             }
         }
         .task {
-            await NotificationCenter.default.publisher(for: .LoadMapNow)
+            _ = await NotificationCenter.default.publisher(for: .LoadMapNow)
                 .first()
                 .values
                 .first { _ in true }

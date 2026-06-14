@@ -30,6 +30,7 @@ struct FeedView: View {
     @State private var didBootstrap = false
     @State private var isFeedReady = false  // Added as per instruction
     @State private var isVideoLoading = false  // Track video loading state for logo indicator
+    @State private var showInitialLoadingScreen = true
 
     // Pagination
     private let pageSize = 5
@@ -53,9 +54,6 @@ struct FeedView: View {
     @State private var dragAxis: Axis? = nil
     private enum Axis { case horizontal, vertical }
     
-    // TV static overlay state
-    @State private var showStatic: Bool = false
-    @State private var staticPlayer: AVAudioPlayer? = nil
     @State private var popPlayer: AVAudioPlayer? = nil
 
     @State private var showHeart: Bool = false
@@ -85,10 +83,6 @@ struct FeedView: View {
         ("tech", "Tech", "💻"),
         ("news", "News", "📰")
     ]
-
-    @State private var showLaunchLogo: Bool = true
-    @State private var launchLogoOpacity: Double = 0.0
-    @State private var launchLogoScale: CGFloat = 0.9
 
     private func countryIndex(for coordinate: CLLocationCoordinate2D?) -> Int {
         guard let coordinate else { return 0 }
@@ -187,18 +181,12 @@ struct FeedView: View {
                         .background(Color.black)
                 }
 
-                // Video loading indicator - shown during transitions (visible on all tabs)
-                // ALWAYS show logo during any transition (static overlay, video loading, or channel/country swipes)
-                VideoLoadingIndicator(isLoading: .constant(isVideoLoading || showStatic), logoName: "logo")
-                    .zIndex(30)
-                    .transition(.opacity)
-
-                if showLaunchLogo {
-                    feedLaunchLogoOverlay
-                        .zIndex(31)
-                        .allowsHitTesting(false)
+                if showInitialLoadingScreen {
+                    FeedLaunchLoadingScreen()
+                        .zIndex(100)
+                        .transition(.opacity)
                 }
-                
+
                 // Comment section overlay
                 if showCommentSection, let currentPost = posts[safe: currentIndex] {
                     CommentSectionView(
@@ -220,8 +208,11 @@ struct FeedView: View {
                 applyPreviewFeedData()
                 return
             }
-            guard didBootstrap == false else { return }
-            isLoading = posts.isEmpty
+            if showInitialLoadingScreen {
+                NotificationCenter.default.post(name: Notification.Name("FeedLaunchLoadingDidStart"), object: nil)
+            }
+            guard didBootstrap == false, posts.isEmpty else { return }
+            await runStrictBootstrap()
         }
         .onReceive(NotificationCenter.default.publisher(for: .LoadFeedNow)) { _ in
             Task {
@@ -231,10 +222,6 @@ struct FeedView: View {
                     await runStrictBootstrap()
                 }
             }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .PlayFeedLaunchLogo)) { _ in
-            guard didBootstrap else { return }
-            startFeedLogoPop()
         }
         .onReceive(NotificationCenter.default.publisher(for: .ResetTabToTop)) { _ in
             currentIndex = 0
@@ -286,14 +273,14 @@ struct FeedView: View {
             // Haptic feedback
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         }
-        .onChange(of: currentIndex) { newIndex in
+        .onChange(of: currentIndex) { _, newIndex in
             guard newIndex >= 0, newIndex < posts.count else {
                 print("[Feed] currentIndex out of range: \(newIndex) posts=\(posts.count)")
                 return
             }
             let uid = posts[newIndex].userID
             maybeResolveUsername(for: uid)
-            
+
             // Animate the radius bar to match the current post's radius
             let post = posts[newIndex]
             print("📱 [Feed] Showing post at index \(newIndex), radius: \(post.radius)m")
@@ -318,7 +305,7 @@ struct FeedView: View {
                 isFeedReady = !newPosts.isEmpty
                 
                 if let firstPost = newPosts.first {
-                    RadiusBarAnimator.showPostRadius(firstPost.radius, duration: 0.3)
+                    RadiusBarAnimator.showPostRadius(firstPost.radius, duration: 0.0)
                 }
                 
                 // Background storage only
@@ -346,7 +333,7 @@ struct FeedView: View {
                 isFeedReady = !newPosts.isEmpty
                 
                 if let firstPost = newPosts.first {
-                    RadiusBarAnimator.showPostRadius(firstPost.radius, duration: 0.3)
+                    RadiusBarAnimator.showPostRadius(firstPost.radius, duration: 0.0)
                 }
                 
                 Task.detached(priority: .utility) {
@@ -354,114 +341,20 @@ struct FeedView: View {
                 }
             }
         }
-        .onChange(of: showStatic) { visible in
-            if visible {
-                playStaticSound()
-            } else {
-                stopStaticSound()
-            }
-        }
-        .onChange(of: coordinateKey) { _ in
-            Task.detached(priority: .userInitiated) {
-                guard let coord = await self.activeLocationProvider.coordinate else { return }
-                
-                // Use heuristic first for immediate response
-                let heuristicIdx = self.countryIndex(for: coord)
-                
-                // Try geocoding in background (with timeout to prevent hanging)
-                let geocodedIdx: Int? = await withTaskGroup(of: Int?.self) { group in
-                    group.addTask {
-                        if let iso = await self.geocodeCountry(from: coord),
-                           let idx = self.countries.firstIndex(where: { $0.code == iso }) {
-                            return idx
-                        }
-                        return nil
-                    }
-                    
-                    // Timeout after 2 seconds
-                    group.addTask {
-                        try? await Task.sleep(nanoseconds: 2_000_000_000)
-                        return nil
-                    }
-                    
-                    // Return first result
-                    for await result in group {
-                        group.cancelAll()
-                        return result
-                    }
-                    return nil
-                }
-                
-                // Determine final index
-                let finalIdx: Int
-                if let geocodedIdx = geocodedIdx {
-                    finalIdx = geocodedIdx
-                } else {
-                    finalIdx = heuristicIdx
-                }
-                
-                // Capture current country index on MainActor
-                let currentCountryIndex = await MainActor.run { self.selectedCountryIndex }
-                
-                // Compare indices before proceeding
-                guard finalIdx != currentCountryIndex else { return }
-                
-                await MainActor.run { 
-                    self.selectedCountryIndex = finalIdx
-                    self.showStatic = true
-                }
-                self.playStaticSound()
-                
+        .onChange(of: coordinateKey) {
+            Task { @MainActor in
+                guard let coord = self.activeLocationProvider.coordinate else { return }
+                let finalIdx = self.countryIndex(for: coord)
+                guard finalIdx != self.selectedCountryIndex else { return }
+
+                self.selectedCountryIndex = finalIdx
                 await self.reloadForCountry()
-                
-                try? await Task.sleep(nanoseconds: 120_000_000)
-                await MainActor.run { 
-                    withAnimation { self.showStatic = false }
-                }
-                self.stopStaticSound()
             }
-        }
-    }
-
-    private var feedLaunchLogoOverlay: some View {
-        Image("logo")
-            .resizable()
-            .scaledToFit()
-            .frame(width: 240, height: 240)
-            .opacity(launchLogoOpacity)
-            .scaleEffect(launchLogoScale)
-            .animation(.easeOut(duration: 0.4), value: launchLogoOpacity)
-            .animation(.spring(response: 0.42, dampingFraction: 0.72), value: launchLogoScale)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-    }
-
-    @MainActor
-    private func startFeedLogoPop() {
-        showLaunchLogo = true
-        launchLogoOpacity = 0
-        launchLogoScale = 0.9
-
-        withAnimation(.easeOut(duration: 0.4)) {
-            launchLogoOpacity = 1
-        }
-        withAnimation(.spring(response: 0.42, dampingFraction: 0.72)) {
-            launchLogoScale = 1.0
-        }
-
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 120_000_000)
-            playOneShotPop()
-            try? await Task.sleep(nanoseconds: 2_500_000_000)
-            withAnimation(.easeInOut(duration: 0.35)) {
-                launchLogoOpacity = 0
-                launchLogoScale = 0.96
-            }
-            try? await Task.sleep(nanoseconds: 360_000_000)
-            showLaunchLogo = false
         }
     }
 
     // MARK: - Strict bootstrap sequence
+    @MainActor
     private func runStrictBootstrap() async {
         guard didBootstrap == false else { return }
         didBootstrap = true
@@ -472,30 +365,24 @@ struct FeedView: View {
         let channelID = channels[selectedChannelIndex].id
         let pageSize = self.pageSize
         
-        let newPosts = await Task.detached(priority: .userInitiated) {
-            Self.generateDemoPostsForCountryAndChannel(
-                country: countryCode,
-                channel: channelID,
-                start: 0,
-                count: pageSize
-            )
-        }.value
+        let newPosts = Self.generateDemoPostsForCountryAndChannel(
+            country: countryCode,
+            channel: channelID,
+            start: 0,
+            count: pageSize
+        )
 
         // Update UI SYNCHRONOUSLY - no await needed
         posts = newPosts
         isFeedReady = !posts.isEmpty
         currentIndex = 0
         isVideoLoading = false
-        showStatic = false
         poleModel.position = PolePosition(x: 0.5, y: 0.5)
         
         // Update radius bar immediately
         if let firstPost = newPosts.first {
-            RadiusBarAnimator.showPostRadius(firstPost.radius, duration: 0.3)
+            RadiusBarAnimator.showPostRadius(firstPost.radius, duration: 0.0)
         }
-        
-        // Notify observers immediately
-        NotificationCenter.default.post(name: Notification.Name("FeedReady"), object: nil)
         
         // ALL background tasks happen AFTER UI is ready
         Task.detached(priority: .utility) {
@@ -507,46 +394,13 @@ struct FeedView: View {
             await UsernameCache.shared.prefetch(uids: uids)
         }
         
-        // Geocode and adjust country AFTER initial load (fire and forget)
-        Task.detached(priority: .background) {
-            guard let coord = await self.activeLocationProvider.coordinate else { return }
-            
-            // Try heuristic first
-            let heuristicIdx = await self.countryIndex(for: coord)
-            
-            // Try geocoding with timeout
-            let geocodedIdx: Int? = await withTaskGroup(of: Int?.self) { group in
-                group.addTask {
-                    if let iso = await self.geocodeCountry(from: coord),
-                       let idx = self.countries.firstIndex(where: { $0.code == iso }) {
-                        return idx
-                    }
-                    return nil
-                }
-                
-                group.addTask {
-                    try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second timeout
-                    return nil
-                }
-                
-                for await result in group {
-                    group.cancelAll()
-                    return result
-                }
-                return nil
-            }
-            
-            let finalIdx = geocodedIdx ?? heuristicIdx
-            let currentIdx = await MainActor.run { self.selectedCountryIndex }
-            
-            // Only update if different and worth it
-            guard finalIdx != currentIdx else { return }
-            
-            await MainActor.run {
-                self.selectedCountryIndex = finalIdx
-                // Silently reload in background
-                Task { await self.reload() }
-            }
+        // Adjust by current location after first paint without leaving the main actor.
+        Task { @MainActor in
+            guard let coord = self.activeLocationProvider.coordinate else { return }
+            let finalIdx = self.countryIndex(for: coord)
+            guard finalIdx != self.selectedCountryIndex else { return }
+            self.selectedCountryIndex = finalIdx
+            await self.reload()
         }
     }
 
@@ -600,13 +454,7 @@ struct FeedView: View {
                                             }
                                             hapticGenerator.prepare()
                                             notifHaptics.prepare()
-                                            showStatic = true
                                             playOneShotPop()
-                                            playStaticSound()
-                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
-                                                withAnimation { showStatic = false }
-                                                stopStaticSound()
-                                            }
                                             maybeShowAd()
                                         } else if value.translation.width >= horizontalThreshold {
                                             // swipe right -> previous country
@@ -625,22 +473,15 @@ struct FeedView: View {
                                             }
                                             hapticGenerator.prepare()
                                             notifHaptics.prepare()
-                                            showStatic = true
                                             playOneShotPop()
-                                            playStaticSound()
-                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
-                                                withAnimation { showStatic = false }
-                                                stopStaticSound()
-                                            }
                                             maybeShowAd()
                                         }
                                     case .vertical:
                                         if value.translation.height <= -verticalThreshold {
-                                            // swipe up -> next channel
-                                            selectedChannelIndex = (selectedChannelIndex + 1) % channels.count
-                                            currentIndex = 0
-                                            Task {
-                                                await reloadForChannel()
+                                            // swipe up -> next post
+                                            if !posts.isEmpty {
+                                                currentIndex = min(currentIndex + 1, posts.count - 1)
+                                                maybeLoadMoreIfNeeded(appearingIndex: currentIndex)
                                             }
                                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
                                                 hapticGenerator.impactOccurred(intensity: 1.0)
@@ -652,13 +493,7 @@ struct FeedView: View {
                                             }
                                             hapticGenerator.prepare()
                                             notifHaptics.prepare()
-                                            showStatic = true
                                             playOneShotPop()
-                                            playStaticSound()
-                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
-                                                withAnimation { showStatic = false }
-                                                stopStaticSound()
-                                            }
                                             maybeShowAd()
                                         } else if value.translation.height >= verticalThreshold {
                                             // swipe down -> previous channel
@@ -677,13 +512,7 @@ struct FeedView: View {
                                             }
                                             hapticGenerator.prepare()
                                             notifHaptics.prepare()
-                                            showStatic = true
                                             playOneShotPop()
-                                            playStaticSound()
-                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
-                                                withAnimation { showStatic = false }
-                                                stopStaticSound()
-                                            }
                                             maybeShowAd()
                                         }
                                     }
@@ -757,13 +586,7 @@ struct FeedView: View {
                                             }
                                             hapticGenerator.prepare()
                                             notifHaptics.prepare()
-                                            showStatic = true
                                             playOneShotPop()
-                                            playStaticSound()
-                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
-                                                withAnimation { showStatic = false }
-                                                stopStaticSound()
-                                            }
                                             maybeLoadMoreIfNeeded(appearingIndex: currentIndex)
                                             maybeShowAd()
                                         } else if value.translation.width >= horizontalThreshold {
@@ -783,22 +606,15 @@ struct FeedView: View {
                                             }
                                             hapticGenerator.prepare()
                                             notifHaptics.prepare()
-                                            showStatic = true
                                             playOneShotPop()
-                                            playStaticSound()
-                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
-                                                withAnimation { showStatic = false }
-                                                stopStaticSound()
-                                            }
                                             maybeShowAd()
                                         }
                                     case .vertical:
                                         if value.translation.height <= -verticalThreshold {
-                                            // swipe up -> next channel
-                                            selectedChannelIndex = (selectedChannelIndex + 1) % channels.count
-                                            currentIndex = 0
-                                            Task {
-                                                await reloadForChannel()
+                                            // swipe up -> next post
+                                            if !posts.isEmpty {
+                                                currentIndex = min(currentIndex + 1, posts.count - 1)
+                                                maybeLoadMoreIfNeeded(appearingIndex: currentIndex)
                                             }
                                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
                                                 hapticGenerator.impactOccurred(intensity: 1.0)
@@ -810,21 +626,12 @@ struct FeedView: View {
                                             }
                                             hapticGenerator.prepare()
                                             notifHaptics.prepare()
-                                            showStatic = true
                                             playOneShotPop()
-                                            playStaticSound()
-                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
-                                                withAnimation { showStatic = false }
-                                                stopStaticSound()
-                                            }
-                                            maybeLoadMoreIfNeeded(appearingIndex: currentIndex)
                                             maybeShowAd()
                                         } else if value.translation.height >= verticalThreshold {
-                                            // swipe down -> previous channel
-                                            selectedChannelIndex = (selectedChannelIndex - 1 + channels.count) % channels.count
-                                            currentIndex = 0
-                                            Task {
-                                                await reloadForChannel()
+                                            // swipe down -> previous post
+                                            if !posts.isEmpty {
+                                                currentIndex = max(currentIndex - 1, 0)
                                             }
                                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
                                                 hapticGenerator.impactOccurred(intensity: 1.0)
@@ -836,13 +643,7 @@ struct FeedView: View {
                                             }
                                             hapticGenerator.prepare()
                                             notifHaptics.prepare()
-                                            showStatic = true
                                             playOneShotPop()
-                                            playStaticSound()
-                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
-                                                withAnimation { showStatic = false }
-                                                stopStaticSound()
-                                            }
                                             maybeShowAd()
                                         }
                                     }
@@ -1010,6 +811,9 @@ struct FeedView: View {
         ZStack {
             Color.black
                 .frame(width: size.width, height: size.height)
+
+            ProgressView()
+                .tint(.white)
         }
         .frame(width: size.width, height: size.height)
         .onTapGesture(count: 2) {
@@ -1038,6 +842,9 @@ struct FeedView: View {
                 FeedFullscreenPageView(
                     post: post,
                     displayName: displayName(for: post),
+                    onMediaReady: {
+                        hideInitialLoadingScreen()
+                    },
                     onUserTapped: { uid in
                         print("👤 [FeedView] User tapped - userID: '\(uid)'")
                         guard !uid.isEmpty else {
@@ -1051,6 +858,7 @@ struct FeedView: View {
                         )
                     }
                 )
+                .id(post.id)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .ignoresSafeArea()
                 .clipped()
@@ -1061,12 +869,6 @@ struct FeedView: View {
         }
     }
     
-    @ViewBuilder
-    private func tvStaticOverlay(in size: CGSize) -> some View {
-        StaticView(size: size, isVisible: showStatic)
-            .allowsHitTesting(false)
-    }
-
     private var overlayChrome: some View {
         // REMOVED: Grid icon button and all other chrome elements
         // Overlay is now completely clean - only post info labels remain
@@ -1074,6 +876,15 @@ struct FeedView: View {
     }
 
     // MARK: - Username helpers
+
+    @MainActor
+    private func hideInitialLoadingScreen() {
+        guard showInitialLoadingScreen else { return }
+        withAnimation(.easeOut(duration: 0.45)) {
+            showInitialLoadingScreen = false
+        }
+        NotificationCenter.default.post(name: Notification.Name("FeedLaunchLoadingDidFinish"), object: nil)
+    }
 
     private func displayName(for post: FeedPost) -> String {
         if let name = usernames[post.userID], !name.isEmpty {
@@ -1127,7 +938,6 @@ struct FeedView: View {
         isFeedReady = true
         isLoading = false
         isVideoLoading = false
-        showStatic = false
         reachedEnd = true
     }
 
@@ -1153,13 +963,13 @@ struct FeedView: View {
     private func prefetchVisibleUsernames() {
         // OPTIMIZED: Don't block on username resolution - show feed immediately
         // Usernames will populate asynchronously in the background
-        Task.detached(priority: .utility) {
-            let currentPosts = await self.posts
+        let currentPosts = posts
+        let currentIdx = currentIndex
+        Task {
             let uids = currentPosts.map { $0.userID }
             await UsernameCache.shared.prefetch(uids: uids)
             
             // Update display after prefetch (non-blocking)
-            let currentIdx = await self.currentIndex
             if let uid = currentPosts[safe: currentIdx]?.userID {
                 let name = await UsernameCache.shared.username(for: uid)
                 if let name {
@@ -1172,57 +982,6 @@ struct FeedView: View {
     }
 
     private var currentCoordinate: CLLocationCoordinate2D? { activeLocationProvider.coordinate }
-    
-    private static var audioSessionConfigured = false
-    
-    private func configureAudioSessionForStatic() {
-        // Only configure once to avoid redundant calls
-        guard !Self.audioSessionConfigured else { return }
-        
-        do {
-            let session = AVAudioSession.sharedInstance()
-            // Use ambient so it mixes and avoids activation failures on silent/route-less cases
-            try session.setCategory(.ambient, mode: .default, options: [.mixWithOthers])
-            try session.setActive(true)
-            Self.audioSessionConfigured = true
-        } catch {
-            print("[StaticSound] Audio session config failed (safe): \(error)")
-        }
-    }
-
-    private func playStaticSound() {
-        configureAudioSessionForStatic()
-        // allow restarting even if a previous player exists but is not playing
-        if staticPlayer?.isPlaying == true { return }
-        guard let url = Bundle.main.url(forResource: "pop", withExtension: "mp3") ?? Bundle.main.url(forResource: "pop", withExtension: "wav") else {
-            print("[StaticSound] pop.(mp3|wav) not found in bundle")
-            return
-        }
-        do {
-            let player = try AVAudioPlayer(contentsOf: url)
-            player.numberOfLoops = -1 // loop while visible
-            player.volume = 0.8
-            player.prepareToPlay()
-            player.play()
-            staticPlayer = player
-        } catch {
-            print("[StaticSound] Failed to play: \(error)")
-        }
-    }
-
-    private func stopStaticSound() {
-        staticPlayer?.stop()
-        staticPlayer = nil
-        // Deactivate ambient audio session to avoid conflicts with playback
-        DispatchQueue.main.async {
-            let session = AVAudioSession.sharedInstance()
-            do {
-                try session.setActive(false, options: [.notifyOthersOnDeactivation])
-            } catch {
-                print("[StaticSound] Failed to deactivate session: \(error)")
-            }
-        }
-    }
     
     private func playOneShotPop() {
         do {
@@ -1269,7 +1028,7 @@ struct FeedView: View {
         }
     }
 
-    private func maybeShowAd(probability: Double = 0.03) {
+    private func maybeShowAd(probability: Double = 0.18) {
         let roll = Double.random(in: 0...1)
         guard roll <= probability else { return }
         presentInterstitialOrFallback()
@@ -1277,6 +1036,7 @@ struct FeedView: View {
 
     // MARK: - Data loading stubs (fill in with your real logic)
 
+    @MainActor
     private func reload() async {
         // INSTANT: Generate posts synchronously (just array construction)
         let newPosts = Self.generateDemoPostsForCountryAndChannel(
@@ -1309,6 +1069,7 @@ struct FeedView: View {
         }
     }
 
+    @MainActor
     private func reloadForCountry() async {
         let newPosts = Self.generateDemoPostsForCountryAndChannel(
             country: countries[selectedCountryIndex].code,
@@ -1335,6 +1096,7 @@ struct FeedView: View {
         }
     }
     
+    @MainActor
     private func reloadForChannel() async {
         let newPosts = Self.generateDemoPostsForCountryAndChannel(
             country: countries[selectedCountryIndex].code,
@@ -1397,7 +1159,64 @@ struct FeedView: View {
     }
 
     // MARK: - Demo data generator (local fallback)
-    private static func generateDemoPosts(start: Int, count: Int) -> [FeedPost] {
+    nonisolated private static let reliableDemoVideoURLs: [String] = [
+        "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_4x3/gear1/prog_index.m3u8",
+        "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_16x9/gear1/prog_index.m3u8",
+        "https://media.w3.org/2010/05/sintel/trailer.mp4",
+        "https://media.w3.org/2010/05/bunny/trailer.mp4",
+        "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4",
+        "https://download.samplelib.com/mp4/sample-10s.mp4",
+        "https://download.samplelib.com/mp4/sample-15s.mp4"
+    ]
+
+    nonisolated private static let reliableDemoImageIDs: [Int] = [
+        10, 20, 28, 37, 42, 58, 64, 82, 96, 102, 103, 106, 119, 128, 133, 164, 175, 184, 190, 1025
+    ]
+
+    nonisolated private static var fallbackDemoVideoURL: String {
+        reliableDemoVideoURLs[0]
+    }
+
+    nonisolated private static func stableMediaOffset(for namespace: String) -> Int {
+        namespace.unicodeScalars.reduce(0) { partial, scalar in
+            partial &+ Int(scalar.value)
+        }
+    }
+
+    nonisolated private static func reliableDemoImageURL(for index: Int, namespace: String) -> String {
+        let offset = stableMediaOffset(for: namespace)
+        let imageID = reliableDemoImageIDs[abs(index + offset) % reliableDemoImageIDs.count]
+        return "https://picsum.photos/id/\(imageID)/1080/1920"
+    }
+
+    nonisolated private enum DemoMediaKind {
+        case video
+        case image
+    }
+
+    nonisolated private static func demoMediaKind(for index: Int) -> DemoMediaKind {
+        switch index % 4 {
+        case 1, 3:
+            return .video
+        default:
+            return .image
+        }
+    }
+
+    nonisolated private static func balancedDemoMediaURL(for index: Int, namespace: String) -> String {
+        switch demoMediaKind(for: index) {
+        case .video:
+            return reliableDemoVideoURLs[index % reliableDemoVideoURLs.count]
+        case .image:
+            return reliableDemoImageURL(for: index, namespace: namespace)
+        }
+    }
+
+    nonisolated private static func demoUserID(regular regularUserID: String, for index: Int) -> String {
+        regularUserID
+    }
+
+    nonisolated private static func generateDemoPosts(start: Int, count: Int) -> [FeedPost] {
         guard count > 0 else { return [] }
         let totalCap = 30 // stop after ~30 to simulate end of feed
         let end = min(start + count, totalCap)
@@ -1406,38 +1225,9 @@ struct FeedView: View {
         var result: [FeedPost] = []
         for i in start..<end {
             let id = "demo_\(i)"
-            let userID = i % 3 == 0 ? "fake_user_\(i)" : String(format: "user_%06d", i)
-            let hlsSample = "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_4x3/gear1/prog_index.m3u8"
-            let sampleVideos: [String] = [
-                // Reliable HLS (landscape)
-                "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_4x3/gear1/prog_index.m3u8",
-                "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_16x9/gear1/prog_index.m3u8",
-                // HLS variants
-                "https://devstreaming-cdn.apple.com/videos/wwdc/2020/10653/4/7EEB4C51-2E7F-4B6C-BE1D-2E94C7D10C61/hls_vod_mvp.m3u8",
-                "https://devstreaming-cdn.apple.com/videos/wwdc/2019/502dvxw8o5g9v9b/502/hls_vod_mvp.m3u8",
-                // Small MP4s (landscape)
-                "https://filesamples.com/samples/video/mp4/sample_640x360.mp4",
-                "https://filesamples.com/samples/video/mp4/sample_960x400_ocean_with_audio.mp4",
-                "https://sample-videos.com/video321/mp4/720/big_buck_bunny_720p_1mb.mp4",
-                // Additional MP4s
-                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
-                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
-                // Extra diversity (different encodes/aspects)
-                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
-                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4"
-            ]
-            let mediaURL: String
-            // 70% videos, 30% images for more video content
-            let randomValue = Int.random(in: 0..<10)
-            if randomValue < 7 {
-                // 70% chance -> video
-                mediaURL = sampleVideos.randomElement() ?? hlsSample
-            } else {
-                // 30% chance -> image
-                let w = [640, 720, 800, 1080].randomElement() ?? 800
-                let h = [960, 1280, 1400, 1440, 1920].randomElement() ?? 1400
-                mediaURL = "https://picsum.photos/\(w)/\(h)?random=\(Int.random(in: 1...10_000))"
-            }
+            let regularUserID = i % 3 == 0 ? "fake_user_\(i)" : String(format: "user_%06d", i)
+            let userID = demoUserID(regular: regularUserID, for: i)
+            let mediaURL = balancedDemoMediaURL(for: i, namespace: "global")
             let latitude = 37.3349 + Double(i % 5) * 0.01
             let longitude = -122.0090 - Double(i % 7) * 0.01
             let radius = [50, 100, 250, 500, 1000, 5000].randomElement() ?? 250
@@ -1459,7 +1249,7 @@ struct FeedView: View {
         return result
     }
     
-    private static func generateDemoPostsForCountryAndChannel(country: String, channel: String, start: Int, count: Int) -> [FeedPost] {
+    nonisolated private static func generateDemoPostsForCountryAndChannel(country: String, channel: String, start: Int, count: Int) -> [FeedPost] {
         guard count > 0 else { return [] }
         let totalCap = 30
         let end = min(start + count, totalCap)
@@ -1539,42 +1329,9 @@ struct FeedView: View {
                 userID = "\(channel)_user_\(userIndex)"
                 userIDForIndex[userIndex] = userID
             }
+            let feedUserID = demoUserID(regular: userID, for: i)
             
-            // Force the first post to be a guaranteed playable HLS stream
-            let hlsSample = "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_4x3/gear1/prog_index.m3u8"
-            let sampleVideos: [String] = [
-                // Reliable HLS (landscape)
-                "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_4x3/gear1/prog_index.m3u8",
-                "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_16x9/gear1/prog_index.m3u8",
-                // HLS variants
-                "https://devstreaming-cdn.apple.com/videos/wwdc/2020/10653/4/7EEB4C51-2E7F-4B6C-BE1D-2E94C7D10C61/hls_vod_mvp.m3u8",
-                "https://devstreaming-cdn.apple.com/videos/wwdc/2019/502dvxw8o5g9v9b/502/hls_vod_mvp.m3u8",
-                // Small MP4s (landscape)
-                "https://filesamples.com/samples/video/mp4/sample_640x360.mp4",
-                "https://filesamples.com/samples/video/mp4/sample_960x400_ocean_with_audio.mp4",
-                "https://sample-videos.com/video321/mp4/720/big_buck_bunny_720p_1mb.mp4",
-                // Additional MP4s
-                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
-                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
-                // Extra diversity (different encodes/aspects)
-                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
-                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4"
-            ]
-            let mediaURL: String
-            if i < 2 {
-                // Force images early so the first page shows a mix
-                let w = [640, 720, 800, 1080].randomElement() ?? 800
-                let h = [960, 1280, 1400, 1440, 1920].randomElement() ?? 1400
-                mediaURL = "https://picsum.photos/\(w)/\(h)?random=\(Int.random(in: 1...10_000))"
-            } else if i % 2 == 0 {
-                // Even index -> image
-                let w = [640, 720, 800, 1080].randomElement() ?? 800
-                let h = [960, 1280, 1400, 1440, 1920].randomElement() ?? 1400
-                mediaURL = "https://picsum.photos/\(w)/\(h)?random=\(Int.random(in: 1...10_000))"
-            } else {
-                // Odd index -> random video from sampleVideos
-                mediaURL = sampleVideos.randomElement() ?? hlsSample
-            }
+            let mediaURL = balancedDemoMediaURL(for: i, namespace: "\(country)_\(channel)")
             
             // ✅ USE GLOBAL CITIES for coordinates - posts now come from all over the world!
             let city = globalCities[i % globalCities.count]
@@ -1618,7 +1375,7 @@ struct FeedView: View {
                 mediaURL: mediaURL,
                 radius: radius,
                 viewCount: Int(radius / 100), // Scale view count with radius
-                userID: userID,
+                userID: feedUserID,
                 cityName: city.name,
                 countryName: city.country,
                 countryFlag: city.flag
@@ -1645,7 +1402,7 @@ struct FeedView: View {
         return result
     }
     
-    private static func generateDemoPostsForCountry(country: String, start: Int, count: Int) -> [FeedPost] {
+    nonisolated private static func generateDemoPostsForCountry(country: String, start: Int, count: Int) -> [FeedPost] {
         guard count > 0 else { return [] }
         let totalCap = 30
         let end = min(start + count, totalCap)
@@ -1653,42 +1410,9 @@ struct FeedView: View {
         var result: [FeedPost] = []
         for i in start..<end {
             let id = "\(country.lowercased())_demo_\(i)"
-            let userID = i % 3 == 0 ? "fake_user_\(i)" : String(format: "user_%06d", i)
-            // Force the first post to be a guaranteed playable HLS stream
-            let hlsSample = "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_4x3/gear1/prog_index.m3u8"
-            let sampleVideos: [String] = [
-                // Reliable HLS (landscape)
-                "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_4x3/gear1/prog_index.m3u8",
-                "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_16x9/gear1/prog_index.m3u8",
-                // HLS variants
-                "https://devstreaming-cdn.apple.com/videos/wwdc/2020/10653/4/7EEB4C51-2E7F-4B6C-BE1D-2E94C7D10C61/hls_vod_mvp.m3u8",
-                "https://devstreaming-cdn.apple.com/videos/wwdc/2019/502dvxw8o5g9v9b/502/hls_vod_mvp.m3u8",
-                // Small MP4s (landscape)
-                "https://filesamples.com/samples/video/mp4/sample_640x360.mp4",
-                "https://filesamples.com/samples/video/mp4/sample_960x400_ocean_with_audio.mp4",
-                "https://sample-videos.com/video321/mp4/720/big_buck_bunny_720p_1mb.mp4",
-                // Additional MP4s
-                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
-                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
-                // Extra diversity (different encodes/aspects)
-                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
-                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4"
-            ]
-            let mediaURL: String
-            if i < 2 {
-                // Force images early so the first page shows a mix
-                let w = [640, 720, 800, 1080].randomElement() ?? 800
-                let h = [960, 1280, 1400, 1440, 1920].randomElement() ?? 1400
-                mediaURL = "https://picsum.photos/\(w)/\(h)?random=\(Int.random(in: 1...10_000))"
-            } else if i % 2 == 0 {
-                // Even index -> image
-                let w = [640, 720, 800, 1080].randomElement() ?? 800
-                let h = [960, 1280, 1400, 1440, 1920].randomElement() ?? 1400
-                mediaURL = "https://picsum.photos/\(w)/\(h)?random=\(Int.random(in: 1...10_000))"
-            } else {
-                // Odd index -> random video from sampleVideos
-                mediaURL = sampleVideos.randomElement() ?? hlsSample
-            }
+            let regularUserID = i % 3 == 0 ? "fake_user_\(i)" : String(format: "user_%06d", i)
+            let userID = demoUserID(regular: regularUserID, for: i)
+            let mediaURL = balancedDemoMediaURL(for: i, namespace: country)
             // Shift coordinates slightly by country index to vary positions
             let baseLat = 37.3349 + Double(abs(country.hashValue % 20)) * 0.01
             let baseLon = -122.0090 - Double(abs(country.hashValue % 20)) * 0.01
@@ -1713,7 +1437,7 @@ struct FeedView: View {
     
     // MARK: - On-demand profile post generation
     /// Generates additional posts for a user's profile (called lazily when profile is viewed)
-    static func generateProfilePosts(for userID: String, country: String, channel: String, count: Int = 10) {
+    nonisolated static func generateProfilePosts(for userID: String, country: String, channel: String, count: Int = 10) {
         // Check if we already have enough posts for this user
         let existing = DemoPostStore.shared.posts(for: userID)
         guard existing.count < 5 else {
@@ -1730,21 +1454,13 @@ struct FeedView: View {
         ]
         
         var profilePosts: [FeedPost] = []
-        
         for j in 0..<count {
             let additionalID = "\(country.lowercased())_\(channel)_\(userID)_profile_\(j)"
             let mediaURL: String
-            if j % 2 == 0 {
-                let w = [640, 720, 800, 1080].randomElement() ?? 800
-                let h = [960, 1280, 1400, 1440, 1920].randomElement() ?? 1400
-                mediaURL = "https://picsum.photos/\(w)/\(h)?random=\(Int.random(in: 1...10_000))"
+            if j % 5 == 4 {
+                mediaURL = reliableDemoImageURL(for: j, namespace: "\(country)_\(channel)_profile")
             } else {
-                let sampleVideos = [
-                    "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_4x3/gear1/prog_index.m3u8",
-                    "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
-                    "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
-                ]
-                mediaURL = sampleVideos.randomElement() ?? "https://picsum.photos/800/1400"
+                mediaURL = reliableDemoVideoURLs.randomElement() ?? fallbackDemoVideoURL
             }
             
             let city = globalCities.randomElement() ?? globalCities[0]
@@ -1781,5 +1497,30 @@ struct FeedViewHost: View {
     var body: some View {
         FeedView()
             .environmentObject(poleModel)
+    }
+}
+
+private struct FeedLaunchLoadingScreen: View {
+    @State private var pulse = false
+
+    var body: some View {
+        ZStack {
+            Color.white.ignoresSafeArea()
+
+            Image("logo")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 132, height: 132)
+                .scaleEffect(pulse ? 1.04 : 0.96)
+                .opacity(pulse ? 1.0 : 0.86)
+                .animation(
+                    .easeInOut(duration: 0.9).repeatForever(autoreverses: true),
+                    value: pulse
+                )
+        }
+        .onAppear {
+            pulse = true
+        }
+        .allowsHitTesting(false)
     }
 }

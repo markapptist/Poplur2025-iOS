@@ -10,6 +10,8 @@ import FirebaseAuth
 import FirebaseFirestore
 
 struct AppSettingsView: View {
+    @Environment(\.layoutPreviewMode) private var layoutPreviewMode
+
     @State private var pageIndex: Int = 0
     @State private var isPrivateAccount = false
     @State private var notificationsEnabled = true
@@ -41,6 +43,10 @@ struct AppSettingsView: View {
 
     private let brandPink = Color(red: 255.0/255.0, green: 255.0/255.0, blue: 255.0/255.0)
 
+    init(initialPageIndex: Int = 0) {
+        _pageIndex = State(initialValue: initialPageIndex)
+    }
+
     var body: some View {
         ZStack {
             brandPink.ignoresSafeArea()
@@ -69,11 +75,19 @@ struct AppSettingsView: View {
             }
         }
         .task {
-            await loadStats()
+            if layoutPreviewMode {
+                applyPreviewStats()
+            } else {
+                await loadStats()
+            }
             maxDurationDisplay = SettingsStore.shared.maxVideoDurationSeconds
         }
         .onAppear {
-            Task { await loadStats() }
+            if layoutPreviewMode {
+                applyPreviewStats()
+            } else {
+                Task { await loadStats() }
+            }
             maxDurationDisplay = SettingsStore.shared.maxVideoDurationSeconds
         }
     }
@@ -303,6 +317,16 @@ struct AppSettingsView: View {
 
     // MARK: - Data
 
+    @MainActor
+    private func applyPreviewStats() {
+        posts = [
+            Post(id: "preview-1", latitude: 43.6532, longitude: -79.3832, mediaURL: "", radius: 2_400, viewCount: 12, userID: "preview"),
+            Post(id: "preview-2", latitude: 43.6618, longitude: -79.3956, mediaURL: "", radius: 4_800, viewCount: 8, userID: "preview"),
+            Post(id: "preview-3", latitude: 43.6426, longitude: -79.3871, mediaURL: "", radius: 1_600, viewCount: 5, userID: "preview")
+        ]
+        isLoadingStats = false
+    }
+
     private func loadStats() async {
         await MainActor.run { isLoadingStats = true }
         defer { Task { @MainActor in isLoadingStats = false } }
@@ -471,4 +495,3 @@ struct AppSettingsView: View {
         }
     }
 }
-

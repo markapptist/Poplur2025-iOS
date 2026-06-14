@@ -144,12 +144,14 @@ private extension MDLMesh {
         let vertexCount = faceGeometry.vertices.count
         let vertexBuffer = allocator.newBuffer(MemoryLayout<SIMD3<Float>>.stride * vertexCount, type: .vertex)
         faceGeometry.vertices.withUnsafeBytes { src in
-            vertexBuffer.map().bytes.assumingMemoryBound(to: SIMD3<Float>.self).assign(from: src.baseAddress!.assumingMemoryBound(to: SIMD3<Float>.self), count: vertexCount)
+            let dst = vertexBuffer.map().bytes
+            dst.copyMemory(from: src.baseAddress!, byteCount: MemoryLayout<SIMD3<Float>>.stride * vertexCount)
         }
         let indexCount = faceGeometry.triangleCount * 3
         let indexBuffer = allocator.newBuffer(MemoryLayout<UInt16>.stride * indexCount, type: .index)
         faceGeometry.triangleIndices.withUnsafeBytes { src in
-            indexBuffer.map().bytes.assumingMemoryBound(to: UInt16.self).assign(from: src.baseAddress!.assumingMemoryBound(to: UInt16.self), count: indexCount)
+            let dst = indexBuffer.map().bytes
+            dst.copyMemory(from: src.baseAddress!, byteCount: MemoryLayout<UInt16>.stride * indexCount)
         }
         let submesh = MDLSubmesh(indexBuffer: indexBuffer, indexCount: indexCount, indexType: .uInt16, geometryType: .triangles, material: nil)
         self.init(vertexBuffer: vertexBuffer, vertexCount: vertexCount, descriptor: MDLVertexDescriptor.defaultLayout, submeshes: [submesh])

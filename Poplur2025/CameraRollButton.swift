@@ -12,6 +12,9 @@ import Photos
 /// Tapping opens photo picker to select image or video to upload
 struct CameraRollButton: View {
     @State private var latestPhoto: UIImage? = nil
+    @State private var previewImage: UIImage? = nil
+    @State private var previewVideoURL: URL? = nil
+    @State private var showCapturePreview: Bool = false
     
     var body: some View {
         NavigationLink(destination: PhotoPickerNavigationView(
@@ -51,6 +54,12 @@ struct CameraRollButton: View {
         .onAppear {
             fetchLatestPhoto()
         }
+        .fullScreenCover(isPresented: $showCapturePreview, onDismiss: {
+            previewImage = nil
+            previewVideoURL = nil
+        }) {
+            CapturePreviewOverlay(image: previewImage, videoURL: previewVideoURL)
+        }
     }
     
     // MARK: - Photo Fetching
@@ -84,18 +93,37 @@ struct CameraRollButton: View {
     
     private func handleSelectedImage(_ image: UIImage) {
         print("[CameraRollButton] Image selected from camera roll")
-        NotificationCenter.default.post(
-            name: Notification.Name("CameraRollImageSelected"),
-            object: image
-        )
+        previewImage = image
+        previewVideoURL = nil
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            showCapturePreview = true
+        }
     }
     
     private func handleSelectedVideo(_ url: URL) {
         print("[CameraRollButton] Video selected from camera roll: \(url)")
-        NotificationCenter.default.post(
-            name: Notification.Name("CameraRollVideoSelected"),
-            object: url
-        )
+        previewImage = nil
+        previewVideoURL = copyVideoToTemporaryFileIfNeeded(url)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            showCapturePreview = true
+        }
+    }
+
+    private func copyVideoToTemporaryFileIfNeeded(_ url: URL) -> URL {
+        guard url.isFileURL else { return url }
+
+        let fileExtension = url.pathExtension.isEmpty ? "mov" : url.pathExtension
+        let destination = FileManager.default.temporaryDirectory
+            .appendingPathComponent("camera-roll-\(UUID().uuidString)")
+            .appendingPathExtension(fileExtension)
+
+        do {
+            try FileManager.default.copyItem(at: url, to: destination)
+            return destination
+        } catch {
+            print("[CameraRollButton] Failed to copy selected video: \(error)")
+            return url
+        }
     }
 }
 

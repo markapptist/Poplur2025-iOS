@@ -150,10 +150,10 @@ struct MediaPickerView: View {
         }, message: {
             Text(errorMessage)
         })
-        .onChange(of: selectedImage) { _ in
+        .onChange(of: selectedImage) {
             startPreparation()
         }
-        .onChange(of: selectedVideoURL) { _ in
+        .onChange(of: selectedVideoURL) {
             startPreparation()
         }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("MediaPickerResetPreviewPlayer"))) { _ in
@@ -523,43 +523,16 @@ private extension MediaPickerView {
             AVURLAssetPreferPreciseDurationAndTimingKey: false
         ])
 
-        // Pick a good preset; prefer highest compatible, fall back to 1280x720 for speed/size
-        let preset: String
-        if AVAssetExportSession.exportPresets(compatibleWith: asset).contains(AVAssetExportPresetHighestQuality) {
-            preset = AVAssetExportPresetHighestQuality
-        } else if AVAssetExportSession.exportPresets(compatibleWith: asset).contains(AVAssetExportPreset1280x720) {
-            preset = AVAssetExportPreset1280x720
-        } else {
-            preset = AVAssetExportPresetPassthrough // last resort
-        }
-
         let outURL = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent(UUID().uuidString)
             .appendingPathExtension("mp4")
 
-        // Export
-        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-            guard let exporter = AVAssetExportSession(asset: asset, presetName: preset) else {
-                cont.resume(throwing: NSError(domain: "Transcode", code: -1, userInfo: [NSLocalizedDescriptionKey: "Cannot create exporter"]))
-                return
-            }
-            exporter.outputURL = outURL
-            exporter.outputFileType = .mp4
-            exporter.shouldOptimizeForNetworkUse = true // move moov atom to front
-            exporter.exportAsynchronously {
-                switch exporter.status {
-                case .completed:
-                    cont.resume()
-                case .failed, .cancelled:
-                    let err = exporter.error ?? NSError(domain: "Transcode", code: -2, userInfo: [NSLocalizedDescriptionKey: "Export failed"])
-                    cont.resume(throwing: err)
-                default:
-                    // Unknown or waiting; treat as failure to be safe
-                    let err = exporter.error ?? NSError(domain: "Transcode", code: -3, userInfo: [NSLocalizedDescriptionKey: "Export did not complete"])
-                    cont.resume(throwing: err)
-                }
-            }
+        // Export using modern async API (highest quality preset)
+        guard let exporter = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetHighestQuality) else {
+            throw NSError(domain: "Transcode", code: -1, userInfo: [NSLocalizedDescriptionKey: "Cannot create exporter"])
         }
+        exporter.shouldOptimizeForNetworkUse = true // move moov atom to front
+        try await exporter.export(to: outURL, as: .mp4)
 
         // Generate poster at ~1 second or mid-duration if shorter
         var posterData: Data? = nil
@@ -573,8 +546,8 @@ private extension MediaPickerView {
             let gen = AVAssetImageGenerator(asset: asset)
             gen.appliesPreferredTrackTransform = true
             gen.maximumSize = CGSize(width: 800, height: 800) // modest size
-            let cg = try gen.copyCGImage(at: captureTime, actualTime: nil)
-            let ui = UIImage(cgImage: cg)
+            let cgResult = try await gen.image(at: captureTime)
+            let ui = UIImage(cgImage: cgResult.image)
             posterData = ui.jpegData(compressionQuality: 0.7)
         } catch {
             // Non-fatal; continue without poster

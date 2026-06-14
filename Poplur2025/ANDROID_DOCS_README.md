@@ -122,7 +122,10 @@ See "Android-Specific Implementation Notes" sections in each doc
 
 5. **FeedView** (Feed tab)
    - Vertical scrolling feed → RecyclerView
-   - Video playback → ExoPlayer
+   - Mixed photos/videos/sponsored ads
+   - Video playback → Media3/ExoPlayer
+   - White launch loading screen with animated centered Poplur logo
+   - Custom volume bars on hardware volume up/down after Feed loading completes
    - Country/channel navigation
    - Like/comment actions
 
@@ -249,6 +252,11 @@ Both apps use **Firebase Authentication** with email/password
 - [ ] Tab navigation (swipe left/right on cube)
 - [ ] Camera capture flow
 - [ ] Feed scrolling and video playback
+- [ ] Feed launch uses white Poplur-logo loading screen, not black
+- [ ] Feed UI starts in final positions and fades only; no corner-to-position animation
+- [ ] Feed first page includes images, videos, and sponsored ads
+- [ ] Feed volume bars appear on volume up and volume down, and stay hidden during launch loading
+- [ ] Feed videos resume/reload after app background and foreground
 - [ ] Profile grid interaction
 - [ ] Map location selection
 
@@ -300,7 +308,10 @@ All icons are **SF Symbols** on iOS. Map to **Material Icons** on Android:
 ### Phase 2: Tab Content (Week 3-4)
 1. **Feed Tab**:
    - RecyclerView with vertical scrolling
-   - ExoPlayer for video playback
+   - Media3/ExoPlayer for video playback
+   - Balanced image/video/sponsored-ad pagination
+   - White Poplur-logo launch loading overlay that fades after first media render
+   - Hardware volume up/down custom volume bars, suppressed during launch loading
    - Like/comment actions
    
 2. **Profile Tab**:

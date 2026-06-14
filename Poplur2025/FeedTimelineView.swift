@@ -133,16 +133,9 @@ struct FeedStylePostView: View {
         VStack(spacing: 0) {
             // Profile header
             HStack(spacing: 12) {
-                // Profile circle (gradient ring)
+                // Profile circle
                 Circle()
-                    .strokeBorder(
-                        LinearGradient(
-                            colors: [.purple, .pink, .orange],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: 2
-                    )
+                    .strokeBorder(Color.white.opacity(0.25), lineWidth: 2)
                     .frame(width: 40, height: 40)
                     .overlay(
                         Circle()
@@ -204,14 +197,18 @@ struct FeedStylePostView: View {
                                 .clipped()
                         } else {
                             Color.black
+                                .overlay(ProgressView().tint(.white))
                                 .frame(width: geo.size.width, height: geo.size.width)
+                                .clipped()
                         }
                     } else {
                         AsyncImage(url: URL(string: post.mediaURL)) { phase in
                             switch phase {
                             case .empty:
-                                Color.gray.opacity(0.2)
+                                Color.black
                                     .overlay(ProgressView())
+                                    .frame(width: geo.size.width, height: geo.size.width)
+                                    .clipped()
                             case .success(let image):
                                 image
                                     .resizable()
@@ -219,14 +216,18 @@ struct FeedStylePostView: View {
                                     .frame(width: geo.size.width, height: geo.size.width)
                                     .clipped()
                             case .failure:
-                                Color.gray.opacity(0.2)
+                                Color.black
                                     .overlay(
                                         Image(systemName: "photo")
                                             .font(.system(size: 40))
-                                            .foregroundColor(.gray)
+                                            .foregroundColor(.white.opacity(0.85))
                                     )
+                                    .frame(width: geo.size.width, height: geo.size.width)
+                                    .clipped()
                             @unknown default:
-                                Color.gray.opacity(0.2)
+                                Color.black
+                                    .frame(width: geo.size.width, height: geo.size.width)
+                                    .clipped()
                             }
                         }
                         .frame(width: geo.size.width, height: geo.size.width)

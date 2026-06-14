@@ -132,7 +132,6 @@ struct EditProfileView: View {
         guard let userId = Auth.auth().currentUser?.uid else { return }
 
         // Update username and email in Firestore
-        let db = Firestore.firestore()
         var updates: [String: Any] = [
             "username": newUsername,
             "email": newEmail

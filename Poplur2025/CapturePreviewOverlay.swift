@@ -35,7 +35,7 @@ struct CapturePreviewOverlay: View {
                     .clipped()
                     .ignoresSafeArea()
             } else if let videoURL = videoURL {
-                VideoPlayer(player: AVPlayer(url: videoURL))
+                CaptureVideoPlayer(url: videoURL)
                     .ignoresSafeArea()
             }
             
@@ -177,6 +177,72 @@ struct CapturePreviewOverlay: View {
                     "videoURL": videoURL as Any
                 ]
             )
+        }
+    }
+}
+
+private struct CaptureVideoPlayer: UIViewRepresentable {
+    let url: URL
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeUIView(context: Context) -> PlayerContainerView {
+        let view = PlayerContainerView()
+        configure(view, context: context)
+        return view
+    }
+
+    func updateUIView(_ uiView: PlayerContainerView, context: Context) {
+        guard context.coordinator.url != url else { return }
+        configure(uiView, context: context)
+    }
+
+    static func dismantleUIView(_ uiView: PlayerContainerView, coordinator: Coordinator) {
+        coordinator.observer.map(NotificationCenter.default.removeObserver)
+        coordinator.player?.pause()
+        uiView.playerLayer.player = nil
+        coordinator.player = nil
+        coordinator.observer = nil
+        coordinator.url = nil
+    }
+
+    private func configure(_ view: PlayerContainerView, context: Context) {
+        context.coordinator.observer.map(NotificationCenter.default.removeObserver)
+
+        let player = AVPlayer(url: url)
+        player.actionAtItemEnd = .none
+        view.playerLayer.player = player
+        view.playerLayer.videoGravity = .resizeAspectFill
+
+        context.coordinator.player = player
+        context.coordinator.url = url
+        context.coordinator.observer = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime,
+            object: player.currentItem,
+            queue: .main
+        ) { [weak player] _ in
+            player?.seek(to: .zero)
+            player?.play()
+        }
+
+        player.play()
+    }
+
+    final class Coordinator {
+        var player: AVPlayer?
+        var url: URL?
+        var observer: NSObjectProtocol?
+    }
+
+    final class PlayerContainerView: UIView {
+        override static var layerClass: AnyClass {
+            AVPlayerLayer.self
+        }
+
+        var playerLayer: AVPlayerLayer {
+            layer as! AVPlayerLayer
         }
     }
 }

@@ -58,7 +58,7 @@ struct StaticView: View {
                 }
             }
         }
-        .onChange(of: isVisible) { visible in
+        .onChange(of: isVisible) { _, visible in
             if visible {
                 jitterX = CGFloat.random(in: -6...6)
                 scanlinePhase = .random(in: -4...4)

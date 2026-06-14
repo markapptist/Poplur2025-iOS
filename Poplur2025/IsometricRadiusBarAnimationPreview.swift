@@ -20,7 +20,7 @@ struct IsometricRadiusBarAnimationHarness: View {
     @State private var isAutoPlaying: Bool = false
     
     // Config
-    private let earthMeters: Double = (Locale.current.usesMetricSystem ? 6_371_000.0 : 3_958.8 * 1609.34)
+    private let earthMeters: Double = (Locale.current.measurementSystem == .metric ? 6_371_000.0 : 3_958.8 * 1609.34)
     private let maxRuntime: Double = 3_323_000.0
     private let riseDuration: Double = 2.0
     private let fallDuration: Double = 1.6
@@ -76,7 +76,7 @@ struct IsometricRadiusBarAnimationHarness: View {
         .onAppear {
             animatedRadius = targetRadius
         }
-        .onChange(of: isAutoPlaying) { newValue in
+        .onChange(of: isAutoPlaying) { _, newValue in
             if newValue {
                 startAutoPlay()
             } else {

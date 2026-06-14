@@ -56,13 +56,13 @@ struct FullscreenVideoView: View {
                     player.pause()
                 }
             }
-            .onChange(of: url) { newURL in
+            .onChange(of: url) { _, newURL in
                 configureForURL(newURL)
             }
-            .onChange(of: shouldPlay) { _ in
+            .onChange(of: shouldPlay) {
                 updatePlayback()
             }
-            .onChange(of: isMuted) { _ in
+            .onChange(of: isMuted) {
                 player.isMuted = isMuted
                 if shouldPlay { updatePlayback() }
             }
@@ -129,9 +129,6 @@ struct FullscreenVideoView: View {
             let timeRange = CMTimeRange(start: start, end: end)
 
             if self.shouldLoop {
-                if !(self.player is AVQueuePlayer) {
-                    self.player = AVQueuePlayer()
-                }
                 let queue = self.player
                 queue.automaticallyWaitsToMinimizeStalling = true
                 queue.isMuted = self.isMuted

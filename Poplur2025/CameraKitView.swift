@@ -115,7 +115,11 @@ struct CameraKitView: View {
                         }
                         .onTapGesture {
                             if let url = lastVideoURL {
-                                NotificationCenter.default.post(name: Notification.Name("PresentVideoPreviewRequested"), object: url)
+                                NotificationCenter.default.post(
+                                    name: Notification.Name("RecordingOutputReady"),
+                                    object: nil,
+                                    userInfo: ["url": url]
+                                )
                             }
                         }
                         Spacer()
@@ -230,14 +234,14 @@ struct CameraKitView: View {
     private struct ScreenFlashEdgeOverlay: View {
         var body: some View {
             GeometryReader { proxy in
-                let edgeThickness = max(proxy.size.width, proxy.size.height) * 0.16
+                let edgeThickness = max(proxy.size.width, proxy.size.height) * 0.09
 
                 ZStack {
-                    Color.white.opacity(0.12)
+                    Color.white.opacity(0.035)
 
                     VStack(spacing: 0) {
                         LinearGradient(
-                            colors: [Color.white.opacity(0.92), Color.white.opacity(0)],
+                            colors: [Color.white.opacity(0.68), Color.white.opacity(0)],
                             startPoint: .top,
                             endPoint: .bottom
                         )
@@ -246,7 +250,7 @@ struct CameraKitView: View {
                         Spacer(minLength: 0)
 
                         LinearGradient(
-                            colors: [Color.white.opacity(0), Color.white.opacity(0.92)],
+                            colors: [Color.white.opacity(0), Color.white.opacity(0.68)],
                             startPoint: .top,
                             endPoint: .bottom
                         )
@@ -255,7 +259,7 @@ struct CameraKitView: View {
 
                     HStack(spacing: 0) {
                         LinearGradient(
-                            colors: [Color.white.opacity(0.92), Color.white.opacity(0)],
+                            colors: [Color.white.opacity(0.68), Color.white.opacity(0)],
                             startPoint: .leading,
                             endPoint: .trailing
                         )
@@ -264,7 +268,7 @@ struct CameraKitView: View {
                         Spacer(minLength: 0)
 
                         LinearGradient(
-                            colors: [Color.white.opacity(0), Color.white.opacity(0.92)],
+                            colors: [Color.white.opacity(0), Color.white.opacity(0.68)],
                             startPoint: .leading,
                             endPoint: .trailing
                         )

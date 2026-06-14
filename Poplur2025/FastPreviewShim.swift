@@ -184,7 +184,7 @@ struct FastPreviewHarness: View {
                     .font(.caption).bold()
             }
             .toggleStyle(.switch)
-            .onChange(of: isAuthenticated) { value in
+            .onChange(of: isAuthenticated) { _, value in
                 notify(value ? "Signed In" : "Signed Out")
             }
             

@@ -66,11 +66,11 @@ final class CaptureFlowManager: ObservableObject {
     
     /// Complete the flow and post to the final coordinate
     func completeFlow(finalCoordinate: CLLocationCoordinate2D) {
-        guard let flow = currentFlow else {
+        guard currentFlow != nil else {
             print("❌ [CaptureFlowManager] No active flow to complete")
             return
         }
-        
+
         print("✅ [CaptureFlowManager] Completing flow with final coordinate: \(finalCoordinate.latitude), \(finalCoordinate.longitude)")
         
         // Post notification to upload the media

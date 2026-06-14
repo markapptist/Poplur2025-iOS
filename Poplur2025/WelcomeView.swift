@@ -745,11 +745,6 @@ struct WelcomeView: View {
 
     var body: some View {
         NavigationStack {
-            NavigationLink(isActive: $navigateToLogin) {
-                LoginView()
-            } label: { EmptyView() }
-            .hidden()
-
             ZStack {
                 GeometryReader { geo in
                     let s = ensureScene(size: geo.size)
@@ -763,7 +758,7 @@ struct WelcomeView: View {
                     }
                     .background(Color.white)
                     .ignoresSafeArea()
-                    .onChange(of: geo.size) { newSize in
+                    .onChange(of: geo.size) { _, newSize in
                         // Inform scene about size changes without recreating it
                         s.resize(to: newSize)
                     }
@@ -780,7 +775,7 @@ struct WelcomeView: View {
                     scene?.startConfettiNow()
                 }
             }
-            .onChange(of: auth.isAuthenticated) { authed in
+            .onChange(of: auth.isAuthenticated) { _, authed in
                 if authed {
                     // Proactively tear down the SpriteKit scene before the root swaps to HomeView.
                     navigateToLogin = false
@@ -792,6 +787,9 @@ struct WelcomeView: View {
                 teardownScene()
             }
             .navigationBarHidden(true)
+            .navigationDestination(isPresented: $navigateToLogin) {
+                LoginView()
+            }
         }
     }
 }

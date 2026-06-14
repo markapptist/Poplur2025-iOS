@@ -46,7 +46,7 @@ final class LocationProvider: NSObject, ObservableObject {
         if didRequest { startUpdatesIfAuthorized(); return }
         didRequest = true
 
-        switch CLLocationManager.authorizationStatus() {
+        switch manager.authorizationStatus {
         case .notDetermined:
             manager.requestWhenInUseAuthorization()
         case .authorizedWhenInUse, .authorizedAlways:
@@ -61,7 +61,7 @@ final class LocationProvider: NSObject, ObservableObject {
 
     private func startUpdatesIfAuthorized() {
         guard !isUpdating else { return }
-        let status = CLLocationManager.authorizationStatus()
+        let status = manager.authorizationStatus
         guard status == .authorizedWhenInUse || status == .authorizedAlways else { return }
         isUpdating = true
 

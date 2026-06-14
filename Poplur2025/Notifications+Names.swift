@@ -5,7 +5,6 @@ extension Notification.Name {
     static let LoadFeedNow = Notification.Name("LoadFeedNow")
     static let LoadMapNow = Notification.Name("LoadMapNow")
     static let LoadProfileNow = Notification.Name("LoadProfileNow")
-    static let PlayFeedLaunchLogo = Notification.Name("PlayFeedLaunchLogo")
     
     // Tab and navigation
     static let ResetTabToTop = Notification.Name("ResetTabToTop")
@@ -27,7 +26,6 @@ extension Notification.Name {
     static let CenterMapOnUser = Notification.Name("CenterMapOnUser")
     
     // Feed and audio
-    static let FeedReady = Notification.Name("FeedReady")
     static let PauseFeedAudio = Notification.Name("PauseFeedAudio")
     static let ResumeFeedAudio = Notification.Name("ResumeFeedAudio")
     static let PauseGlobalFeedAudio = Notification.Name("PauseGlobalFeedAudio")

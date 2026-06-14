@@ -112,14 +112,14 @@ struct FeedTwitterTimelineView: View {
             )
             
             // Post notification to show location on map
-            var userInfo: [String: Any] = [
+            let userInfo: [String: Any] = [
                 "coordinate": coordinate,
                 "latitude": tweet.latitude,
                 "longitude": tweet.longitude,
                 "username": tweet.username,
                 "radius": parseRadius(from: tweet.radiusText)
             ]
-            
+
             NotificationCenter.default.post(
                 name: Notification.Name("ShowLocationOnMap"),
                 object: nil,
@@ -323,8 +323,9 @@ private struct FakeTweetCard: View {
             HStack(spacing: 16) {
                 // Profile circle - larger
                 Circle()
-                    .fill(tweet.profileGradient)
+                    .fill(Color.black)
                     .frame(width: 80, height: 80)
+                    .overlay(Circle().stroke(Color.white.opacity(0.18), lineWidth: 1))
                     .overlay {
                         Text(tweet.username.prefix(1).uppercased())
                             .font(.system(size: 36, weight: .bold))
@@ -415,7 +416,6 @@ struct FakeTweet: Identifiable {
     let likes: Int
     let comments: Int
     let isVideo: Bool
-    let profileGradient: LinearGradient
     let latitude: Double
     let longitude: Double
 }
@@ -482,17 +482,6 @@ struct FakeTweetGenerator {
         "The botanical gardens are in full bloom. Absolutely stunning 🌺"
     ]
     
-    private static let gradients = [
-        LinearGradient(colors: [.blue, .purple], startPoint: .topLeading, endPoint: .bottomTrailing),
-        LinearGradient(colors: [.pink, .orange], startPoint: .topLeading, endPoint: .bottomTrailing),
-        LinearGradient(colors: [.green, .blue], startPoint: .topLeading, endPoint: .bottomTrailing),
-        LinearGradient(colors: [.red, .pink], startPoint: .topLeading, endPoint: .bottomTrailing),
-        LinearGradient(colors: [.purple, .blue], startPoint: .topLeading, endPoint: .bottomTrailing),
-        LinearGradient(colors: [.orange, .red], startPoint: .topLeading, endPoint: .bottomTrailing),
-        LinearGradient(colors: [.teal, .cyan], startPoint: .topLeading, endPoint: .bottomTrailing),
-        LinearGradient(colors: [.indigo, .purple], startPoint: .topLeading, endPoint: .bottomTrailing)
-    ]
-    
     static func generate(count: Int) -> [FakeTweet] {
         var tweets: [FakeTweet] = []
         
@@ -500,7 +489,6 @@ struct FakeTweetGenerator {
             let username = usernames.randomElement()!
             let cityData = cities.randomElement()!
             let content = tweetTemplates.randomElement()!
-            let gradient = gradients.randomElement()!
             
             // Generate random time ago
             let timeValue = Int.random(in: 1...59)
@@ -522,7 +510,7 @@ struct FakeTweetGenerator {
             
             let likes = Int.random(in: 5...1500)
             let comments = Int.random(in: 0...150)
-            let isVideo = Bool.random()
+            let isVideo = Int.random(in: 0..<10) < 8
             
             // Add some random offset to coordinates for variety
             let latOffset = Double.random(in: -0.1...0.1)
@@ -537,7 +525,6 @@ struct FakeTweetGenerator {
                 likes: likes,
                 comments: comments,
                 isVideo: isVideo,
-                profileGradient: gradient,
                 latitude: cityData.2 + latOffset,
                 longitude: cityData.3 + lonOffset
             )

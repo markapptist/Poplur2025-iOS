@@ -16,6 +16,36 @@ private var isRunningInPreviews: Bool {
     return env["XCODE_RUNNING_FOR_PREVIEWS"] == "1" || env["XCODE_RUNNING_FOR_PLAYGROUNDS"] == "1"
 }
 
+private struct ProfileNotificationItem: Identifiable {
+    enum Kind {
+        case like
+        case postRadius
+        case accumulatedRadius
+
+        var iconName: String {
+            switch self {
+            case .like: return "heart.fill"
+            case .postRadius: return "arrow.up.right.circle.fill"
+            case .accumulatedRadius: return "arrow.down.right.circle.fill"
+            }
+        }
+
+        var color: Color {
+            switch self {
+            case .like: return .pink
+            case .postRadius: return .green
+            case .accumulatedRadius: return .red
+            }
+        }
+    }
+
+    let id = UUID()
+    let kind: Kind
+    let title: String
+    let detail: String
+    let isUnchecked: Bool
+}
+
 struct ProfileView: View {
     @Environment(\.layoutPreviewMode) private var layoutPreviewMode
     @EnvironmentObject private var auth: AuthViewModel
@@ -62,6 +92,10 @@ struct ProfileView: View {
     @State private var profileImageURL: URL? = nil
     @State private var showSettings = false
     @State private var navigateToMessages = false
+    @State private var showNotifications = false
+    @State private var hasUncheckedNotifications = true
+    @State private var showRadiusStore = false
+    @State private var purchasedRadiusMeters: Int = 0
     @State private var averageRadius: Double = 5000
     @State private var navigateToScanner = false
     @State private var showImagePicker = false
@@ -133,6 +167,29 @@ struct ProfileView: View {
         _mode = State(initialValue: initialMode)
         print("🏗️ [ProfileView] Initialized with userID: \(userID ?? "nil")")
     }
+
+    private var profileNotifications: [ProfileNotificationItem] {
+        [
+            ProfileNotificationItem(
+                kind: .like,
+                title: "Post liked",
+                detail: "Your latest post picked up new likes.",
+                isUnchecked: hasUncheckedNotifications
+            ),
+            ProfileNotificationItem(
+                kind: .postRadius,
+                title: "Post radius jumped",
+                detail: "One of your posts expanded significantly in the last hour.",
+                isUnchecked: hasUncheckedNotifications
+            ),
+            ProfileNotificationItem(
+                kind: .accumulatedRadius,
+                title: "Accumulated radius dipped",
+                detail: "Your total radius is down from the previous check.",
+                isUnchecked: false
+            )
+        ]
+    }
     
     // MARK: - Simple disk cache for posts (per user)
     private struct CachedPost: Codable {
@@ -176,9 +233,6 @@ struct ProfileView: View {
 
     @ViewBuilder
     var body: some View {
-        if layoutPreviewMode {
-            profileLayoutSkeleton
-        } else {
         ZStack {
             Color.white.ignoresSafeArea()
 
@@ -186,27 +240,46 @@ struct ProfileView: View {
                     // Top buttons row
                     HStack {
                         if isOwnProfile {
-                            Button {
-                                navigateToMessages = true
-                            } label: {
-                                Image(systemName: "message.fill")
-                                    .font(.system(size: 20, weight: .semibold))
-                                    .foregroundColor(.black.opacity(0.7))
-                                    .frame(width: 44, height: 44)
+                            VStack(spacing: 8) {
+                                Button {
+                                    navigateToMessages = true
+                                } label: {
+                                    Image(systemName: "message.fill")
+                                        .font(.system(size: 20, weight: .semibold))
+                                        .foregroundColor(.black.opacity(0.7))
+                                        .frame(width: 44, height: 44)
+                                }
+                                .buttonStyle(.plain)
+
+                                Button {
+                                    hasUncheckedNotifications = false
+                                    showNotifications = true
+                                } label: {
+                                    ProfileActionIcon(systemName: "gift.fill", showsBadge: hasUncheckedNotifications)
+                                }
+                                .buttonStyle(.plain)
                             }
-                            .buttonStyle(.plain)
                             
                             Spacer()
                             
-                            Button {
-                                showSettings = true
-                            } label: {
-                                Image(systemName: "gearshape.fill")
-                                    .font(.system(size: 20, weight: .semibold))
-                                    .foregroundColor(.black.opacity(0.7))
-                                    .frame(width: 44, height: 44)
+                            VStack(spacing: 8) {
+                                Button {
+                                    showSettings = true
+                                } label: {
+                                    Image(systemName: "gearshape.fill")
+                                        .font(.system(size: 20, weight: .semibold))
+                                        .foregroundColor(.black.opacity(0.7))
+                                        .frame(width: 44, height: 44)
+                                }
+                                .buttonStyle(.plain)
+
+                                Button {
+                                    showRadiusStore = true
+                                } label: {
+                                    ProfileActionIcon(systemName: "dollarsign", showsBadge: false)
+                                }
+                                .buttonStyle(.plain)
                             }
-                            .buttonStyle(.plain)
                         } else {
                             Button {
                                 NotificationCenter.default.post(name: Notification.Name("SwitchToFeedTab"), object: nil)
@@ -469,12 +542,33 @@ struct ProfileView: View {
             }
             NavigationLink(isActive: $showSettings) {
                 AppSettingsView()
-            } label: { EmptyView() }
+            } label: {
+                EmptyView()
+            }
             .hidden()
-            
+
             NavigationLink(isActive: $navigateToMessages) {
                 MessagesRootView()
-            } label: { EmptyView() }
+            } label: {
+                EmptyView()
+            }
+            .hidden()
+
+            NavigationLink(isActive: $showNotifications) {
+                ProfileNotificationsView(
+                    notifications: profileNotifications,
+                    onMarkRead: { hasUncheckedNotifications = false }
+                )
+            } label: {
+                EmptyView()
+            }
+            .hidden()
+
+            NavigationLink(isActive: $showRadiusStore) {
+                RadiusStoreView(purchasedRadiusMeters: $purchasedRadiusMeters)
+            } label: {
+                EmptyView()
+            }
             .hidden()
 
             NavigationLink(isActive: $navigateToScanner) {
@@ -500,9 +594,11 @@ struct ProfileView: View {
                         break
                     }
                 }
-            } label: { EmptyView() }
+            } label: {
+                EmptyView()
+            }
             .hidden()
-            
+
             .sheet(isPresented: $showImagePicker) {
                 ImagePickerView(
                     selectedImage: Binding(
@@ -529,7 +625,9 @@ struct ProfileView: View {
                 } else {
                     Text("No model available")
                 }
-            } label: { EmptyView() }
+            } label: {
+                EmptyView()
+            }
             .hidden()
 
             .sheet(isPresented: $editing) {
@@ -538,7 +636,7 @@ struct ProfileView: View {
             .task {
                 if !isRunningInPreviews {
                     print("📊 [ProfileView] Initial .task running for userID: \(userID ?? "nil")")
-                    UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { _, _ in }
+                    _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound])
                     await loadMyPosts()
                     await MainActor.run {
                         self.averageRadius = Double(self.averagePostRadius())
@@ -559,10 +657,7 @@ struct ProfileView: View {
                     }
                 } else {
                     await MainActor.run {
-                        self.myPosts = []
-                        self.loadedImages = [:]
-                        self.hasLoadedOnce = true
-                        self.canLoadMore = false
+                        self.applyPreviewProfileData()
                     }
                 }
             }
@@ -778,7 +873,7 @@ struct ProfileView: View {
                 print("📊 [ProfileView] onDisappear - notifying to restore feed radius")
                 NotificationCenter.default.post(name: Notification.Name("ProfileViewDismissed"), object: nil)
             }
-            .onChange(of: routedUserID) { newUserID in
+            .onChange(of: routedUserID) { _, newUserID in
                 print("🔄 [ProfileView] routedUserID changed to: \(newUserID ?? "nil")")
                 // Clear all state and reload everything when viewing a different user
                 displayUsername = nil
@@ -824,11 +919,6 @@ struct ProfileView: View {
             .toolbar(.hidden, for: .navigationBar)
             .id(viewID) // Force recreation when viewing different user
         }
-    }
-
-    private var profileLayoutSkeleton: some View {
-        ProfileLayoutSkeleton(displayUsername: displayUsername ?? "@preview_user")
-    }
 
     private var avatarRow: some View {
         Group {
@@ -976,13 +1066,61 @@ struct ProfileView: View {
         }
     }
 
+    @MainActor
+    private func applyPreviewProfileData() {
+        displayUsername = "USERNAME"
+        let previewPosts = (0..<12).map { index in
+            Post(
+                id: "preview-profile-\(index)",
+                latitude: 43.6532 + Double(index) * 0.002,
+                longitude: -79.3832 - Double(index) * 0.002,
+                mediaURL: "",
+                radius: (index + 1) * 1_000,
+                viewCount: 10 + index,
+                userID: "preview-user"
+            )
+        }
+        myPosts = previewPosts
+        loadedImages = Dictionary(uniqueKeysWithValues: previewPosts.map { post in
+            (post.id, previewProfileImage(seed: post.id.hashValue))
+        })
+        isLoading = false
+        hasLoadedOnce = true
+        canLoadMore = false
+        isLoadingMore = false
+    }
+
+    private func previewProfileImage(seed: Int) -> UIImage {
+        let size = CGSize(width: 220, height: 220)
+        let colorPairs: [(UIColor, UIColor)] = [
+            (.systemIndigo, .systemPink),
+            (.systemTeal, .systemBlue),
+            (.systemOrange, .systemRed),
+            (.systemGreen, .systemMint)
+        ]
+        let safeSeed = seed == Int.min ? 0 : abs(seed)
+        let pair = colorPairs[safeSeed % colorPairs.count]
+
+        return UIGraphicsImageRenderer(size: size).image { context in
+            let rect = CGRect(origin: .zero, size: size)
+            let colors = [pair.0.cgColor, pair.1.cgColor] as CFArray
+            if let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0, 1]) {
+                context.cgContext.drawLinearGradient(
+                    gradient,
+                    start: CGPoint(x: 0, y: 0),
+                    end: CGPoint(x: size.width, y: size.height),
+                    options: []
+                )
+            }
+            UIColor.black.withAlphaComponent(0.16).setFill()
+            UIBezierPath(roundedRect: rect.insetBy(dx: 28, dy: 28), cornerRadius: 32).fill()
+        }
+    }
+
     private func loadMyPosts() async {
         if isRunningInPreviews {
             await MainActor.run {
-                self.myPosts = []
-                self.loadedImages = [:]
-                self.hasLoadedOnce = true
-                self.canLoadMore = false
+                self.applyPreviewProfileData()
             }
             return
         }
@@ -1602,6 +1740,173 @@ struct ProfileView: View {
     }
 }
 
+private struct ProfileActionIcon: View {
+    let systemName: String
+    let showsBadge: Bool
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Image(systemName: systemName)
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundColor(.black.opacity(0.7))
+                .frame(width: 44, height: 44)
+
+            if showsBadge {
+                Circle()
+                    .fill(Color.red)
+                    .frame(width: 10, height: 10)
+                    .offset(x: -9, y: 9)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+    }
+}
+
+private struct ProfileNotificationsView: View {
+    let notifications: [ProfileNotificationItem]
+    let onMarkRead: () -> Void
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                Text("Notifications")
+                    .font(.system(size: 30, weight: .heavy, design: .rounded))
+                    .foregroundColor(.black)
+                    .padding(.top, 24)
+
+                ForEach(notifications) { item in
+                    HStack(alignment: .top, spacing: 14) {
+                        ZStack(alignment: .topTrailing) {
+                            Circle()
+                                .fill(item.kind.color.opacity(0.14))
+                                .frame(width: 48, height: 48)
+                                .overlay {
+                                    Image(systemName: item.kind.iconName)
+                                        .font(.system(size: 20, weight: .bold))
+                                        .foregroundColor(item.kind.color)
+                                }
+
+                            if item.isUnchecked {
+                                Circle()
+                                    .fill(Color.red)
+                                    .frame(width: 10, height: 10)
+                            }
+                        }
+
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(item.title)
+                                .font(.system(size: 17, weight: .heavy, design: .rounded))
+                                .foregroundColor(.black)
+                            Text(item.detail)
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.black.opacity(0.58))
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+
+                        Spacer(minLength: 0)
+                    }
+                    .padding(16)
+                    .background(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .fill(Color.black.opacity(0.045))
+                    )
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 40)
+        }
+        .background(Color.white.ignoresSafeArea())
+        .onAppear(perform: onMarkRead)
+        .navigationTitle("")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct RadiusStoreView: View {
+    @Binding var purchasedRadiusMeters: Int
+
+    private let packages: [(title: String, radiusMeters: Int, price: String)] = [
+        ("Starter Radius", 5_000, "$1.99"),
+        ("City Boost", 25_000, "$4.99"),
+        ("World Push", 100_000, "$9.99")
+    ]
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                Text("Store")
+                    .font(.system(size: 30, weight: .heavy, design: .rounded))
+                    .foregroundColor(.black)
+                    .padding(.top, 24)
+
+                Text("Purchase radius to expand your reach.")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(.black.opacity(0.58))
+
+                if purchasedRadiusMeters > 0 {
+                    Text("Purchased radius: \(formattedRadius(purchasedRadiusMeters))")
+                        .font(.system(size: 14, weight: .heavy, design: .rounded))
+                        .foregroundColor(.green)
+                        .padding(.vertical, 8)
+                }
+
+                ForEach(packages, id: \.title) { package in
+                    HStack(spacing: 14) {
+                        Circle()
+                            .fill(Color.green.opacity(0.14))
+                            .frame(width: 48, height: 48)
+                            .overlay {
+                                Image(systemName: "dollarsign")
+                                    .font(.system(size: 21, weight: .heavy))
+                                    .foregroundColor(.green)
+                            }
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(package.title)
+                                .font(.system(size: 17, weight: .heavy, design: .rounded))
+                                .foregroundColor(.black)
+                            Text("+\(formattedRadius(package.radiusMeters))")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.black.opacity(0.58))
+                        }
+
+                        Spacer()
+
+                        Button {
+                            purchasedRadiusMeters += package.radiusMeters
+                        } label: {
+                            Text(package.price)
+                                .font(.system(size: 15, weight: .heavy, design: .rounded))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 10)
+                                .background(Color.black, in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(16)
+                    .background(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .fill(Color.black.opacity(0.045))
+                    )
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 40)
+        }
+        .background(Color.white.ignoresSafeArea())
+        .navigationTitle("")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func formattedRadius(_ meters: Int) -> String {
+        if meters >= 1000 {
+            return "\(meters / 1000) km"
+        }
+        return "\(meters) m"
+    }
+}
+
 // Grid and list tiles unchanged…
 private struct ProfileGridTile: View {
     let post: Post
@@ -1684,53 +1989,3 @@ private struct ProfileListCard: View {
 private struct QuerySnapshotProxy {
     let documents: [QueryDocumentSnapshot]
 }
-
-struct ProfileLayoutSkeleton: View {
-    let displayUsername: String
-
-    var body: some View {
-        ZStack {
-            Color.white.ignoresSafeArea()
-
-            Circle()
-                .fill(Color.black.opacity(0.12))
-                .frame(width: 88, height: 88)
-                .overlay(Image(systemName: "person.fill").font(.system(size: 34)).foregroundStyle(.black.opacity(0.45)))
-                .positioned(tab: .profile, control: .primaryAction)
-
-            Text(displayUsername)
-                .font(.system(size: 24, weight: .heavy, design: .rounded))
-                .foregroundStyle(.black)
-                .positioned(tab: .profile, control: .title)
-
-            HStack(spacing: 8) {
-                Button("Media") {}
-                    .buttonStyle(.borderedProminent)
-                Button("Messages") {}
-                    .buttonStyle(.bordered)
-            }
-            .positioned(tab: .profile, control: .subtitle)
-
-            Button {} label: {
-                Image(systemName: "gearshape.fill")
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundColor(.black.opacity(0.7))
-                    .frame(width: 44, height: 44)
-            }
-            .buttonStyle(.plain)
-            .positioned(tab: .profile, control: .secondaryAction)
-        }
-    }
-}
-
-#if DEBUG
-@MainActor
-struct ProfileView_Previews: PreviewProvider {
-    static var previews: some View {
-        RealTabLayoutPreviewShell(tab: .profile) {
-            ProfileLayoutSkeleton(displayUsername: "@preview_user")
-        }
-        .previewDisplayName("Profile UI Layout")
-    }
-}
-#endif

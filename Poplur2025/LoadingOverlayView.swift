@@ -2,19 +2,17 @@ import SwiftUI
 import SpriteKit
 
 /// Lightweight logo sprite for quick video loading states in the feed
-/// Shows a large animated logo in the center of the screen occasionally (not every transition)
-/// Note: Logo appears only every N transitions to avoid visual fatigue
+/// Shows a large animated logo in the center of the screen during feed transitions.
 struct VideoLoadingIndicator: View {
     @Binding var isLoading: Bool
     var logoName: String? = "logo"
-    var showEveryNTransitions: Int = 4 // Show logo every 4th transition by default
+    var showEveryNTransitions: Int = 1
     
     @State private var scene: CompactLogoScene?
     @State private var transitionCount: Int = 0
     @State private var shouldShowLogo: Bool = false
     
     var body: some View {
-        // Only show occasionally (every N transitions)
         Group {
             if isLoading && shouldShowLogo, let scene = scene {
                 SpriteView(scene: scene, options: [.allowsTransparency])
@@ -23,13 +21,12 @@ struct VideoLoadingIndicator: View {
                     .transition(.opacity)
             }
         }
-        .onChange(of: isLoading) { newValue in
+        .onChange(of: isLoading) { _, newValue in
             if newValue {
                 // Increment counter on each loading event
                 transitionCount += 1
                 
-                // Only show logo every N transitions
-                shouldShowLogo = (transitionCount % showEveryNTransitions == 0)
+                shouldShowLogo = showEveryNTransitions <= 1 || (transitionCount % showEveryNTransitions == 0)
                 
                 if shouldShowLogo {
                     // Create scene only when needed
@@ -366,4 +363,3 @@ struct LoadingOverlayView: View {
         )
     )
 }
-

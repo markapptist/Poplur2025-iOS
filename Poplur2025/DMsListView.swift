@@ -59,24 +59,16 @@ struct ChatThreadListView: View {
             .scrollContentBackground(.hidden)
             .background(Color.white)
             
-            NavigationLink(
-                destination: Group {
-                    if let thread = navigateToThread {
-                        DMDetailView(thread: thread)
-                    } else {
-                        EmptyView()
-                    }
-                },
-                isActive: Binding(
-                    get: { navigateToThread != nil },
-                    set: { newValue in if !newValue { navigateToThread = nil } }
-                )
-            ) {
-                EmptyView()
-            }
-            .hidden()
         }
         .background(Color.white)
+        .navigationDestination(isPresented: Binding(
+            get: { navigateToThread != nil },
+            set: { newValue in if !newValue { navigateToThread = nil } }
+        )) {
+            if let thread = navigateToThread {
+                DMDetailView(thread: thread)
+            }
+        }
         .navigationTitle("Chats")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {

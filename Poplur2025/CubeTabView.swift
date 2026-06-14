@@ -624,6 +624,12 @@ private struct CubeSceneView: UIViewRepresentable {
     }
 
     // MARK: - Scene
+    private func initialYaw(for tab: AppTab) -> Float {
+        let tabs: [AppTab] = [.map, .record, .feed, .profile]
+        let index = tabs.firstIndex(of: tab) ?? 2
+        return Float(index) * (-Float.pi / 2)
+    }
+
     private func makeScene() -> SCNScene {
         let scene = SCNScene()
 
@@ -718,7 +724,7 @@ private struct CubeSceneView: UIViewRepresentable {
         // node.castsShadow = true
         scene.rootNode.addChildNode(node)
 
-        node.eulerAngles = SCNVector3(0.0, 0.0, 0.0)
+        node.eulerAngles = SCNVector3(0.0, initialYaw(for: selectedTab), 0.0)
 
         // Attach or update glow particle system for previews (only if enableGlow true)
         if enableGlow && !isRunningInPreviews {
@@ -983,8 +989,8 @@ private struct CubeSceneView: UIViewRepresentable {
     class Coordinator: NSObject, UIGestureRecognizerDelegate {
         var parent: CubeSceneView
         weak var view: SCNView?
-        private var currentIndex: Int = 0
         private let tabs: [AppTab] = [.map, .record, .feed, .profile]
+        private var currentIndex: Int = 2
         var onSwipeUp: (() -> Void)?
         var onCubeTap: (() -> Void)?
         var parentSwipeUpHandler: (() -> Void)?
@@ -1016,7 +1022,7 @@ private struct CubeSceneView: UIViewRepresentable {
         private var previewSimObserver: NSObjectProtocol?
 
         // New stored property for continuous yaw state (radians)
-        private var currentYaw: Float = 0
+        private var currentYaw: Float = -Float.pi
 
         // New stored property for pan starting yaw
         private var panStartYaw: Float = 0
@@ -1977,4 +1983,3 @@ private struct CubeOnlyPreview: View {
         }
     }
 }
-

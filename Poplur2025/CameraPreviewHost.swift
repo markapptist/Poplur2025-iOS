@@ -46,8 +46,8 @@ struct ControllerPreviewView: UIViewControllerRepresentable {
     
     func makeUIViewController(context: Context) -> UIViewController {
         // Prefer a dedicated RECORD preview view controller if available
-        if let provider = controller as? RecordPreviewViewControllerProviding,
-           let previewVC = provider.recordPreviewViewController {
+        let provider = controller as any RecordPreviewViewControllerProviding
+        if let previewVC = provider.recordPreviewViewController {
             return previewVC
         }
         // Otherwise, wrap a dedicated RECORD preview view if available
@@ -65,8 +65,8 @@ struct ControllerPreviewView: UIViewControllerRepresentable {
             return wrapper
         }
         // Fallback to generic preview if record-specific preview isn't available
-        if let genericVCProvider = controller as? PreviewViewControllerProviding,
-           let genericVC = genericVCProvider.previewViewController {
+        let genericVCProvider = controller as any PreviewViewControllerProviding
+        if let genericVC = genericVCProvider.previewViewController {
             return genericVC
         }
         if let genericViewProvider = controller as? PreviewViewProviding,
@@ -149,13 +149,4 @@ private struct RecordTabPreview: View {
     }
 }
 
-struct RecordTab_Previews: PreviewProvider {
-    static var previews: some View {
-        RealTabLayoutPreviewShell(tab: .record) {
-            HomeBarPlacementPreview(initialTab: .record)
-                .environmentObject(HomePreviewSettings.settings)
-        }
-        .previewDisplayName("Record Real UI Layout")
-    }
-}
 #endif

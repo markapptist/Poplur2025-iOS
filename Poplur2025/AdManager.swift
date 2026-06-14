@@ -25,7 +25,7 @@ final class AdManager: NSObject, FullScreenContentDelegate {
         let request = Request()
         InterstitialAd.load(with: interstitialUnitID, request: request) { [weak self] ad, error in
             guard let self = self else { return }
-            if let error = error {
+            if error != nil {
                 // Optionally log the error
                 self.interstitial = nil
                 return

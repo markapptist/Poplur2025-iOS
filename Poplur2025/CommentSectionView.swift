@@ -209,7 +209,7 @@ struct CommentSectionView: View {
         let commentCount = Int.random(in: 3...8)
         var generatedComments: [PostComment] = []
         
-        for i in 0..<commentCount {
+        for _ in 0..<commentCount {
             let user = demoUsers.randomElement() ?? demoUsers[0]
             let text = demoCommentTexts.randomElement() ?? "Nice!"
             let timestamp = Date().addingTimeInterval(-Double.random(in: 60...86400)) // Random time in last day

@@ -253,125 +253,60 @@ struct RealTabLayoutPreviewShell<Content: View>: View {
     let tab: TabID
     let content: Content
 
-    @State private var selectedControl: ControlID = .title
-    @State private var xOffset: Double = 0
-    @State private var yOffset: Double = 0
-    @State private var scale: Double = 1
-    @State private var refreshID = UUID()
-
     init(tab: TabID, @ViewBuilder content: () -> Content) {
         self.tab = tab
         self.content = content()
     }
 
     var body: some View {
-        VStack(spacing: 0) {
+        ZStack {
             content
-                .environment(\.layoutPreviewMode, true)
-                .frame(width: 390, height: 844)
-                .clipped()
-                .id(refreshID)
-                .overlay(alignment: .topTrailing) {
-                    gridToggleHint
+
+            previewCounterDisplay
+        }
+        .environment(\.layoutPreviewMode, true)
+        .frame(width: 390, height: 844)
+        .clipped()
+    }
+
+    private var previewCounterDisplay: some View {
+        GeometryReader { proxy in
+            let safe = proxy.safeAreaInsets
+
+            VStack {
+                Spacer()
+                HStack(alignment: .counterSeparator) {
+                    RecordingCountdownView(
+                        isRecording: .constant(tab == .record),
+                        secondsRemaining: .constant(7),
+                        postCount: .constant(42),
+                        selectedTab: .constant(tab.appTab),
+                        radiusTrend: .constant(tab == .record ? HomeView.RadiusTrend.neutral : HomeView.RadiusTrend.up)
+                    )
+
+                    Spacer(minLength: 0)
+                    RadiusNumberDisplay(radiusMeters: .constant(1_200_000))
                 }
-                .onAppear(perform: loadSelectedPosition)
-                .onChange(of: selectedControl) { _ in loadSelectedPosition() }
-
-            controls
-                .padding(12)
-                .background(Color(uiColor: .secondarySystemBackground))
-        }
-        .frame(width: 430)
-    }
-
-    private var controls: some View {
-        VStack(spacing: 10) {
-            Picker("Control", selection: $selectedControl) {
-                Text("Title").tag(ControlID.title)
-                Text("Subtitle").tag(ControlID.subtitle)
-                Text("Primary").tag(ControlID.primaryAction)
-                Text("Secondary").tag(ControlID.secondaryAction)
+                .padding(.leading, safe.leading + 16)
+                .padding(.trailing, safe.trailing + 16)
+                .padding(.bottom, safe.bottom + 20)
             }
-            .pickerStyle(.segmented)
-
-            valueEditor("X", value: $xOffset, range: -260...260)
-            valueEditor("Y", value: $yOffset, range: -520...520)
-            valueEditor("Scale", value: $scale, range: 0.5...1.6, step: 0.05)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         }
+        .ignoresSafeArea(.container, edges: [.bottom, .leading, .trailing])
+        .zIndex(1001)
+        .allowsHitTesting(false)
     }
+}
 
-    private var gridToggleHint: some View {
-        Image(systemName: "scope")
-            .font(.system(size: 13, weight: .bold))
-            .foregroundStyle(.white)
-            .padding(8)
-            .background(.black.opacity(0.38), in: Circle())
-            .padding(10)
-    }
-
-    private func valueEditor(
-        _ title: String,
-        value: Binding<Double>,
-        range: ClosedRange<Double>,
-        step: Double = 1
-    ) -> some View {
-        HStack(spacing: 10) {
-            Text(title)
-                .font(.caption.weight(.bold))
-                .frame(width: 48, alignment: .leading)
-            Slider(
-                value: Binding(
-                    get: { value.wrappedValue },
-                    set: {
-                        value.wrappedValue = $0
-                        applySelectedPosition()
-                    }
-                ),
-                in: range,
-                step: step
-            )
-            TextField(
-                title,
-                value: Binding(
-                    get: { value.wrappedValue },
-                    set: {
-                        value.wrappedValue = min(max($0, range.lowerBound), range.upperBound)
-                        applySelectedPosition()
-                    }
-                ),
-                format: .number.precision(.fractionLength(step < 1 ? 2 : 0))
-            )
-            .font(.caption.monospacedDigit())
-            .multilineTextAlignment(.trailing)
-            .keyboardType(.numbersAndPunctuation)
-            .textFieldStyle(.roundedBorder)
-            .frame(width: 64)
+private extension TabID {
+    var appTab: AppTab {
+        switch self {
+        case .map: return .map
+        case .record: return .record
+        case .feed: return .feed
+        case .profile: return .profile
         }
-    }
-
-    private func loadSelectedPosition() {
-        let position = UIPositioningCatalog.shared.position(for: selectedControl, in: tab)
-            ?? UIPosition(alignment: .center)
-        xOffset = position.offset.width
-        yOffset = position.offset.height
-        scale = position.scale
-    }
-
-    private func applySelectedPosition() {
-        let existing = UIPositioningCatalog.shared.position(for: selectedControl, in: tab)
-            ?? UIPosition(alignment: .center)
-        UIPositioningCatalog.shared.register(
-            UIPosition(
-                alignment: existing.alignment,
-                offset: CGSize(width: xOffset, height: yOffset),
-                padding: existing.padding,
-                zIndex: existing.zIndex,
-                scale: scale
-            ),
-            for: selectedControl,
-            in: tab
-        )
-        refreshID = UUID()
     }
 }
 #endif

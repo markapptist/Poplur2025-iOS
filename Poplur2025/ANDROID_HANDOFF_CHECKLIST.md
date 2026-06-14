@@ -196,7 +196,7 @@ android_documentation_package/
 **Topics**:
 1. Tab structure and navigation (15 min)
 2. Camera tab (CameraX setup, ML detection) (15 min)
-3. Feed tab (RecyclerView, ExoPlayer) (15 min)
+3. Feed tab (RecyclerView/Compose list, Media3/ExoPlayer, launch loading, media mix, volume bars) (15 min)
 4. Map and Profile tabs (10 min)
 5. Cross-tab navigation flows (5 min)
 
@@ -256,6 +256,12 @@ android_documentation_package/
 
 ### Phase 2: Content (Week 3-4) ✅
 - [ ] Feed tab shows posts from Firestore
+- [ ] Feed launch shows a white screen with animated centered Poplur logo until first media renders
+- [ ] Feed UI starts in final positions; any entry animation is opacity-only
+- [ ] Feed first page includes a balanced mix of images, videos, and sponsored ads
+- [ ] Feed videos auto-play without a play icon overlay
+- [ ] Feed videos reload/resume correctly after app background and foreground
+- [ ] Feed custom volume bars appear for hardware volume up and volume down, but not during launch loading
 - [ ] Profile tab shows user posts in grid
 - [ ] Camera tab captures and uploads
 - [ ] Map tab shows Google Maps
@@ -373,6 +379,7 @@ android_documentation_package/
 
 ### Alignment
 - [ ] Android team has reviewed docs
+- [ ] Android team has reviewed the Feed launch/loading/media/volume parity requirements
 - [ ] Questions answered
 - [ ] Acceptance criteria agreed upon
 - [ ] Timeline approved

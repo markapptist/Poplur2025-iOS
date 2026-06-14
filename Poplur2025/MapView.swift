@@ -38,6 +38,7 @@ struct WeatherVisualizationState {
     var kind: Kind
     var intensity: Double // 0..1
     var lightningFrequency: Double // 0..1
+    var temperatureFahrenheit: Int
 }
 
 #if DEBUG
@@ -822,6 +823,12 @@ private func countryFlagEmoji(_ countryCode: String) -> String {
     }))
 }
 
+private func normalizedStorefront(_ countryCode: String?) -> String? {
+    guard let countryCode else { return nil }
+    let trimmed = countryCode.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    return trimmed.count == 2 ? trimmed : nil
+}
+
 private func activeCityTitle(_ stop: PoplurTourStop) -> String {
     "\(stop.cityName) \(countryFlagEmoji(stop.storefront))"
 }
@@ -938,7 +945,9 @@ private final class RainAmbientAudioService: ObservableObject {
             player.numberOfLoops = -1
             player.volume = volume
             player.prepareToPlay()
-            player.play()
+            if !player.play() {
+                print("[RainAmbientAudio] AVAudioPlayer refused to start")
+            }
             self.player = player
         } catch {
             print("[RainAmbientAudio] Failed to start rain audio: \(error)")
@@ -947,8 +956,8 @@ private final class RainAmbientAudioService: ObservableObject {
 
     private func rainVolume(for state: WeatherVisualizationState) -> Float {
         let clampedIntensity = max(0, min(1, state.intensity))
-        let baseVolume = state.kind == .thunderstorms ? 0.42 : 0.34
-        return Float(baseVolume + clampedIntensity * 0.28)
+        let baseVolume = state.kind == .thunderstorms ? 0.82 : 0.78
+        return Float(min(1, baseVolume + clampedIntensity * 0.3))
     }
 
     func stop() {
@@ -963,7 +972,7 @@ private final class RainAmbientAudioService: ObservableObject {
     }
 
     private func rainLoopURL() throws -> URL {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("poplur-rain-ambient-v2.wav")
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("poplur-rain-ambient-v3.wav")
         if FileManager.default.fileExists(atPath: url.path) {
             return url
         }
@@ -1003,9 +1012,9 @@ private final class RainAmbientAudioService: ObservableObject {
             let raw = Double((seed >> 33) & 0x7fff_ffff) / Double(Int32.max)
             let white = raw * 2.0 - 1.0
             lowPass = lowPass * 0.82 + white * 0.18
-            let shimmer = sin(Double(index) * 0.013) * 0.05
-            let sample = max(-1.0, min(1.0, lowPass * 0.68 + shimmer))
-            var pcm = Int16(sample * Double(Int16.max) * 0.72).littleEndian
+            let shimmer = sin(Double(index) * 0.013) * 0.08
+            let sample = max(-1.0, min(1.0, lowPass * 0.82 + shimmer))
+            var pcm = Int16(sample * Double(Int16.max) * 0.9).littleEndian
             data.append(Data(bytes: &pcm, count: MemoryLayout<Int16>.size))
         }
 
@@ -1028,11 +1037,16 @@ private final class CityTourMusicPlayerService: ObservableObject {
     @Published private(set) var currentTrackTitle: String?
     private let previewOnly: Bool
     private var player: AVPlayer?
+    private var playerItemStatusObservation: NSKeyValueObservation?
+    private var playerEndObserver: NSObjectProtocol?
+    private var playbackFallbackTask: Task<Void, Never>?
+    private var activeTracks: [CityMusicTrack] = []
+    private var activeTrackIndex = 0
     private var chartTrackCache: [String: [CityMusicTrack]] = [:]
     private var radioTrackCache: [String: [CityMusicTrack]] = [:]
     private var sportsRadioTrackCache: [String: [CityMusicTrack]] = [:]
     private var loadTask: Task<Void, Never>?
-    private var lastPlayerVolume: Float = 0.72
+    private var lastPlayerVolume: Float = 1.0
     private var interruptionObserver: NSObjectProtocol?
 
     init(previewOnly: Bool = false) {
@@ -1055,20 +1069,16 @@ private final class CityTourMusicPlayerService: ObservableObject {
         }
     }
 
-    func play(for stop: PoplurTourStop, insight: AiTourInsight?) {
+    func play(for stop: PoplurTourStop, insight: AiTourInsight?, preferPreviewTracks: Bool = false) {
         guard !previewOnly else { return }
+        startPlayback(tracks: [FallbackCityMusicTracks[stop.cityName] ?? DefaultFallbackCityMusicTrack], index: 0)
         loadTask?.cancel()
         loadTask = Task { [weak self] in
             guard let self else { return }
-            let track = await self.resolveTrack(for: stop, insight: insight)
-            guard !Task.isCancelled, let url = URL(string: track.assetURI) else { return }
+            let tracks = await self.resolveTrackQueue(for: stop, insight: insight, preferPreviewTracks: preferPreviewTracks)
+            guard !Task.isCancelled, !tracks.isEmpty else { return }
             await MainActor.run {
-                self.configureCallFriendlyAudioSession()
-                let item = AVPlayerItem(url: url)
-                self.player = AVPlayer(playerItem: item)
-                self.player?.volume = self.lastPlayerVolume
-                self.player?.play()
-                self.currentTrackTitle = track.artistSeed
+                self.startPlayback(tracks: tracks, index: 0)
             }
         }
     }
@@ -1076,15 +1086,110 @@ private final class CityTourMusicPlayerService: ObservableObject {
     func stop() {
         loadTask?.cancel()
         loadTask = nil
+        playbackFallbackTask?.cancel()
+        playbackFallbackTask = nil
+        clearPlaybackObservers()
+        activeTracks = []
+        activeTrackIndex = 0
         player?.pause()
         player = nil
         currentTrackTitle = nil
     }
 
+    private func startPlayback(tracks: [CityMusicTrack], index: Int) {
+        guard tracks.indices.contains(index) else { return }
+        let track = tracks[index]
+        guard let url = URL(string: track.assetURI) else {
+            startPlayback(tracks: tracks, index: index + 1)
+            return
+        }
+
+        playbackFallbackTask?.cancel()
+        clearPlaybackObservers()
+        configureCallFriendlyAudioSession()
+
+        activeTracks = tracks
+        activeTrackIndex = index
+
+        let item = AVPlayerItem(url: url)
+        let newPlayer = AVPlayer(playerItem: item)
+        newPlayer.volume = lastPlayerVolume
+        newPlayer.isMuted = false
+        newPlayer.automaticallyWaitsToMinimizeStalling = false
+        player = newPlayer
+        currentTrackTitle = track.artistSeed
+
+        playerItemStatusObservation = item.observe(\.status, options: [.new]) { [weak self, weak item] observedItem, _ in
+            Task { @MainActor in
+                guard
+                    let self,
+                    let item,
+                    self.player?.currentItem === item
+                else { return }
+
+                switch observedItem.status {
+                case .readyToPlay:
+                    self.player?.play()
+                case .failed:
+                    print("[MapTourAudio] Failed to play \(track.assetURI): \(observedItem.error?.localizedDescription ?? "unknown error")")
+                    self.playNextTrack()
+                case .unknown:
+                    break
+                @unknown default:
+                    break
+                }
+            }
+        }
+
+        playerEndObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime,
+            object: item,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.playNextTrack(loopAtEnd: true)
+            }
+        }
+
+        newPlayer.play()
+        playbackFallbackTask = Task { [weak self, weak item] in
+            try? await Task.sleep(nanoseconds: 6_000_000_000)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                guard
+                    let self,
+                    let item,
+                    self.player?.currentItem === item,
+                    item.status != .readyToPlay || self.player?.timeControlStatus == .waitingToPlayAtSpecifiedRate
+                else { return }
+                print("[MapTourAudio] Playback did not become audible quickly; trying next source")
+                self.playNextTrack()
+            }
+        }
+    }
+
+    private func playNextTrack(loopAtEnd: Bool = false) {
+        let nextIndex = activeTrackIndex + 1
+        if activeTracks.indices.contains(nextIndex) {
+            startPlayback(tracks: activeTracks, index: nextIndex)
+        } else if loopAtEnd, !activeTracks.isEmpty {
+            startPlayback(tracks: activeTracks, index: 0)
+        }
+    }
+
+    private func clearPlaybackObservers() {
+        playerItemStatusObservation?.invalidate()
+        playerItemStatusObservation = nil
+        if let playerEndObserver {
+            NotificationCenter.default.removeObserver(playerEndObserver)
+            self.playerEndObserver = nil
+        }
+    }
+
     private func configureCallFriendlyAudioSession() {
         let session = AVAudioSession.sharedInstance()
         do {
-            try session.setCategory(.ambient, mode: .default, options: [.mixWithOthers])
+            try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
             try session.setActive(true, options: [])
         } catch {
             print("[MapTourAudio] Call-friendly audio session setup failed: \(error)")
@@ -1114,7 +1219,7 @@ private final class CityTourMusicPlayerService: ObservableObject {
         }
     }
 
-    private func resolveTrack(for stop: PoplurTourStop, insight: AiTourInsight?) async -> CityMusicTrack {
+    private func resolveTrackQueue(for stop: PoplurTourStop, insight: AiTourInsight?, preferPreviewTracks: Bool) async -> [CityMusicTrack] {
         async let chartTracks = cachedChartTracks(for: stop)
         async let radioTracks = cachedRadioTracks(for: stop)
         async let sportsTracks = cachedSportsTracks(for: stop)
@@ -1123,15 +1228,22 @@ private final class CityTourMusicPlayerService: ObservableObject {
         let resolvedRadioTracks = await radioTracks
         let resolvedSportsTracks = await sportsTracks
 
-        if insight?.category == .sports, let track = resolvedSportsTracks.randomElement() {
-            return track
+        var tracks: [CityMusicTrack] = []
+        if insight?.category == .sports {
+            tracks.append(contentsOf: resolvedSportsTracks)
         }
-        if Bool.random(), let track = resolvedRadioTracks.randomElement() {
-            return track
+        if preferPreviewTracks {
+            tracks.append(contentsOf: resolvedChartTracks)
+            tracks.append(contentsOf: resolvedRadioTracks)
+        } else {
+            tracks.append(contentsOf: resolvedRadioTracks)
+            tracks.append(contentsOf: resolvedChartTracks)
         }
-        return resolvedChartTracks.randomElement()
-            ?? FallbackCityMusicTracks[stop.cityName]
-            ?? DefaultFallbackCityMusicTrack
+        if let fallback = FallbackCityMusicTracks[stop.cityName] {
+            tracks.append(fallback)
+        }
+        tracks.append(DefaultFallbackCityMusicTrack)
+        return tracks.uniquedByAssetURI()
     }
 
     private func cachedChartTracks(for stop: PoplurTourStop) async -> [CityMusicTrack] {
@@ -1223,7 +1335,7 @@ private func queryRadioTracks(url: URL, suffix: String, sportsOnly: Bool = false
         let streamURL = (station["url_resolved"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? station["url"] as? String ?? ""
         let name = station["name"] as? String ?? "Live radio"
         let tags = station["tags"] as? String ?? ""
-        guard streamURL.lowercased().hasPrefix("http"), !name.isEmpty else { return nil }
+        guard streamURL.lowercased().hasPrefix("https://"), !name.isEmpty else { return nil }
         if sportsOnly {
             let searchable = "\(name) \(tags)".lowercased()
             guard sportsSignals.contains(where: { searchable.contains($0) }) else { return nil }
@@ -2571,6 +2683,7 @@ struct MapViewProduction: View {
     @State private var trendPopObjects: [TrendPopObject] = []
     @State private var musicWaveFrame: Int = 0
     @State private var showTourNowPlayingText: Bool = true
+    @State private var currentLocationMusicStopID: String? = nil
     @State private var locationContextTask: Task<Void, Never>? = nil
     @State private var liveUserCoordinate: CLLocationCoordinate2D? = nil
 
@@ -2611,7 +2724,8 @@ struct MapViewProduction: View {
     @State private var weatherState = WeatherVisualizationState(
         kind: .rain,
         intensity: 0.5,
-        lightningFrequency: 0.3
+        lightningFrequency: 0.3,
+        temperatureFahrenheit: 72
     )
     @StateObject private var rainAmbientAudio = RainAmbientAudioService()
     
@@ -2886,9 +3000,11 @@ struct MapViewProduction: View {
         locationContextTask?.cancel()
         locationContextTask = Task { @MainActor in
             let coordinate = location.coordinate
-            let fallbackName = nearestTourCityName(to: coordinate) ?? "Current Location"
-            let fallbackFlag = nearestTourCountryFlag(to: coordinate)
-            applyLocalContext(cityName: fallbackName, countryFlag: fallbackFlag, coordinate: coordinate)
+            let fallbackStop = nearestTourStop(to: coordinate)
+            let fallbackName = fallbackStop?.cityName ?? "Current Location"
+            let fallbackCountryCode = fallbackStop?.storefront
+            let fallbackFlag = fallbackCountryCode.map(countryFlagEmoji) ?? ""
+            applyLocalContext(cityName: fallbackName, countryFlag: fallbackFlag, countryCode: fallbackCountryCode, coordinate: coordinate)
 
             let geocoder = CLGeocoder()
             do {
@@ -2899,15 +3015,16 @@ struct MapViewProduction: View {
                     ?? placemark.subAdministrativeArea
                     ?? placemark.administrativeArea
                     ?? fallbackName
-                let countryFlag = placemark.isoCountryCode.map(countryFlagEmoji) ?? fallbackFlag
-                applyLocalContext(cityName: cityName, countryFlag: countryFlag, coordinate: coordinate)
+                let countryCode = placemark.isoCountryCode ?? fallbackCountryCode
+                let countryFlag = countryCode.map(countryFlagEmoji) ?? fallbackFlag
+                applyLocalContext(cityName: cityName, countryFlag: countryFlag, countryCode: countryCode, coordinate: coordinate)
             } catch {
                 print("[MapView] Reverse geocode failed: \(error)")
             }
         }
     }
 
-    private func applyLocalContext(cityName: String, countryFlag: String, coordinate: CLLocationCoordinate2D) {
+    private func applyLocalContext(cityName: String, countryFlag: String, countryCode: String?, coordinate: CLLocationCoordinate2D) {
         guard !mapState.isInTourMode, !(flowManager.currentFlow?.isCameraFirst ?? false), !isPostPlacementMode else { return }
 
         let trimmedCity = cityName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2919,6 +3036,30 @@ struct MapViewProduction: View {
         aiRecommendation = insight.subtitle
         trendPopObjects = buildTrendPopObjects(center: coordinate, cityName: titleCity, insight: insight)
         emitLocalTrendConfetti(center: coordinate, objects: trendPopObjects)
+        playCurrentLocationMusicIfNeeded(cityName: titleCity, countryCode: countryCode, coordinate: coordinate, insight: insight)
+    }
+
+    private func playCurrentLocationMusicIfNeeded(cityName: String, countryCode: String?, coordinate: CLLocationCoordinate2D, insight: AiTourInsight?) {
+        guard !mapState.isInTourMode else { return }
+        let fallbackStorefront = nearestTourStop(to: coordinate)?.storefront
+        let storefront = normalizedStorefront(countryCode) ?? fallbackStorefront ?? Locale.current.region?.identifier.lowercased() ?? "us"
+        let stop = PoplurTourStop(
+            cityName: cityName,
+            storefront: storefront,
+            coordinate: coordinate,
+            bearing: camera.camera?.heading ?? 0,
+            radiusMeters: radiusMeters,
+            distance: max(850, fixedDistanceAlt),
+            description: "Current location"
+        )
+        guard currentLocationMusicStopID != stop.id else {
+            if musicPlayer.currentTrackTitle == nil {
+                musicPlayer.play(for: stop, insight: insight, preferPreviewTracks: true)
+            }
+            return
+        }
+        currentLocationMusicStopID = stop.id
+        musicPlayer.play(for: stop, insight: insight, preferPreviewTracks: true)
     }
 
     private func emitLocalTrendConfetti(center: CLLocationCoordinate2D, objects: [TrendPopObject]) {
@@ -3520,42 +3661,6 @@ struct MapViewProduction: View {
                 .transition(AnyTransition.move(edge: .top).combined(with: .opacity))
             }
             
-            // Cube Hold Search Overlay - appears below AI text
-            if showCubeHoldSearch {
-                CubeHoldSearchOverlay(
-                    query: $searchQuery,
-                    results: $searchResults,
-                    isSearching: $isSearching,
-                    tourPlaces: tourPlaces,
-                    onSelectPlace: { place in
-                        showCubeHoldSearch = false
-                        
-                        // If in post placement mode, set coordinate
-                        if isPostPlacementMode {
-                            postPlacementCoordinate = place.coordinate
-                            panTo(place.coordinate)
-                        } else {
-                            navigateWithTourTransition(to: place.coordinate, cityName: place.name)
-                        }
-                    },
-                    onSelectMapItem: { item in
-                        showCubeHoldSearch = false
-                        if let coord = item.placemark.location?.coordinate {
-                            // If in post placement mode, set coordinate
-                            if isPostPlacementMode {
-                                postPlacementCoordinate = coord
-                                panTo(coord)
-                            } else {
-                                let name = item.name ?? "Selected Location"
-                                navigateWithTourTransition(to: coord, cityName: name)
-                            }
-                        }
-                    }
-                )
-                .transition(AnyTransition.move(edge: .top).combined(with: .opacity))
-                .animation(.spring(response: 0.4, dampingFraction: 0.8), value: showCubeHoldSearch)
-            }
-            
             Spacer()
         }
     }
@@ -3621,29 +3726,50 @@ struct MapViewProduction: View {
     }
 
     @ViewBuilder
+    private var mapSearchButtonOverlay: some View {
+        GeometryReader { proxy in
+            VStack {
+                Spacer()
+                HStack {
+                    Spacer()
+                    Button {
+                        showCubeHoldSearch = false
+                        showAddressSearch = true
+                    } label: {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 22, weight: .heavy))
+                            .foregroundStyle(.white)
+                            .frame(width: 54, height: 54)
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Search locations")
+                    .frame(width: 112, alignment: .center)
+                }
+                .padding(.trailing, proxy.safeAreaInsets.trailing + 12)
+                .padding(.bottom, proxy.safeAreaInsets.bottom + 152)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+        }
+        .zIndex(1002)
+    }
+
+    @ViewBuilder
     private var weatherBadge: some View {
         VStack(spacing: 4) {
-            ZStack {
-                Circle()
-                    .stroke(Color.white.opacity(0.28), lineWidth: 2)
-                    .frame(width: 42, height: 42)
-
-                weatherIcon(for: weatherState.kind)
-                    .font(.system(size: 32))
-                    .foregroundStyle(.white)
-                    .shadow(color: .black.opacity(0.55), radius: 3, x: 0, y: 2)
-            }
+            weatherIcon(for: weatherState.kind)
+                .font(.system(size: 32))
+                .foregroundStyle(.white)
 
             Text(weatherName(for: weatherState.kind))
                 .font(.caption)
                 .fontWeight(.semibold)
                 .foregroundStyle(.white)
-                .shadow(color: .black.opacity(0.55), radius: 3, x: 0, y: 2)
+
+            Text("\(weatherState.temperatureFahrenheit)°")
+                .font(.system(size: 20, weight: .heavy, design: .rounded))
+                .foregroundStyle(.white)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(.black.opacity(0.24), in: Capsule())
-        .shadow(color: .black.opacity(0.42), radius: 10, x: 0, y: 5)
     }
     
     /// Get icon for weather type
@@ -3688,15 +3814,18 @@ struct MapViewProduction: View {
                 // Northern regions - snow
                 weatherState.kind = .snow
                 weatherState.intensity = 0.6
+                weatherState.temperatureFahrenheit = Int(max(18, min(42, 58 - latitude * 0.45)))
             } else if latitude > 30 {
                 // Temperate - rain
                 weatherState.kind = .rain
                 weatherState.intensity = 0.5
+                weatherState.temperatureFahrenheit = Int(max(45, min(78, 82 - abs(latitude - 35) * 1.25)))
             } else {
                 // Tropical - thunderstorms
                 weatherState.kind = .thunderstorms
                 weatherState.intensity = 0.7
                 weatherState.lightningFrequency = 0.4
+                weatherState.temperatureFahrenheit = Int(max(72, min(92, 90 - abs(latitude) * 0.25)))
             }
             
             print("🌦 Weather updated for location: \(latitude), \(centerCoord.longitude)")
@@ -3754,6 +3883,8 @@ struct MapViewProduction: View {
             mapZoomSliderOverlay
 
             weatherBadgeOverlay
+
+            mapSearchButtonOverlay
         }
     }
 
@@ -3826,9 +3957,7 @@ struct MapViewProduction: View {
                 #endif
             }
             .sheet(isPresented: $showAddressSearch) {
-                #if DEBUG
-                addressSearchSheet
-                #endif
+                locationSearchSheet
             }
             .onAppear {
                 guard !layoutPreviewMode else { return }
@@ -3842,7 +3971,6 @@ struct MapViewProduction: View {
                 guard !layoutPreviewMode else { return }
                 handleLocationChange(newLocation)
             }
-            #if DEBUG
             .onChange(of: weatherState.kind) { _, _ in
                 guard !layoutPreviewMode else { return }
                 rainAmbientAudio.update(for: weatherState)
@@ -3851,7 +3979,6 @@ struct MapViewProduction: View {
                 guard !layoutPreviewMode else { return }
                 rainAmbientAudio.update(for: weatherState)
             }
-            #endif
             .onChange(of: showCubeHoldSearch) { _, isShowing in
                 guard !layoutPreviewMode else { return }
                 // Pause tour when menu is showing
@@ -3886,10 +4013,7 @@ struct MapViewProduction: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: .cameraCubeHoldBegan)) { notification in
                 guard !layoutPreviewMode else { return }
-                // Long press cube shows favorites/search overlay
-                print("[MapView] Cube hold began - showing favorites overlay")
-                showCubeHoldSearch = true
-                mapState.stopTour()
+                print("[MapView] Cube hold began - keeping map search closed")
             }
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("CameraCubeHoldMoved"))) { notification in
                 guard !layoutPreviewMode else { return }
@@ -4334,6 +4458,27 @@ struct MapViewProduction: View {
         .presentationDetents([.medium, .large])
     }
     #endif
+
+    @ViewBuilder
+    private var locationSearchSheet: some View {
+        AddressSearchView(
+            query: $searchQuery,
+            results: $searchResults,
+            isSearching: $isSearching
+        ) { item in
+            showAddressSearch = false
+            if let coord = item.placemark.location?.coordinate {
+                if isPostPlacementMode {
+                    postPlacementCoordinate = coord
+                    panTo(coord)
+                } else {
+                    let name = item.name ?? "Selected Location"
+                    navigateWithTourTransition(to: coord, cityName: name)
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
     
     // MARK: - Event Handlers
     

@@ -4,7 +4,7 @@
 //
 
 import Foundation
-import Vision
+@preconcurrency import Vision
 import CoreImage
 import UIKit
 import FirebaseFirestore
@@ -367,8 +367,8 @@ struct RecognizedUser: Identifiable {
     }
     
     var formattedRadius: String {
-        let usesMetric = Locale.current.usesMetricSystem
-        
+        let usesMetric = Locale.current.measurementSystem == .metric
+
         if usesMetric {
             if radiusMeters >= 1000 {
                 return String(format: "%.1f km", radiusMeters / 1000)

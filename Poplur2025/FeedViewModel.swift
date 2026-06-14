@@ -2,13 +2,13 @@ import SwiftUI
 import CoreLocation
 import AVFoundation
 
+@MainActor
 final class FeedViewModel: ObservableObject {
     // MARK: - Published UI State
     @Published var posts: [FeedPost] = []
     @Published var isLoading: Bool = false
     @Published var isFeedReady: Bool = false
     @Published var currentIndex: Int = 0
-    @Published var showStatic: Bool = false
     @Published var navigateToProfile: Bool = false
     @Published var selectedUserID: String? = nil
     @Published var usernames: [String: String] = [:]
@@ -25,9 +25,16 @@ final class FeedViewModel: ObservableObject {
     // Services
     // Demo content
     private let demoVideoURLs: [String] = [
-        "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
-        "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
-        "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4"
+        "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_4x3/gear1/prog_index.m3u8",
+        "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_16x9/gear1/prog_index.m3u8",
+        "https://media.w3.org/2010/05/sintel/trailer.mp4",
+        "https://media.w3.org/2010/05/bunny/trailer.mp4",
+        "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4",
+        "https://download.samplelib.com/mp4/sample-10s.mp4",
+        "https://download.samplelib.com/mp4/sample-15s.mp4"
+    ]
+    private let demoImageIDs: [Int] = [
+        10, 20, 28, 37, 42, 58, 64, 82, 96, 102, 103, 106, 119, 128, 133, 164, 175, 184, 190, 1025
     ]
     private let demoUserIDs: [String] = [
         "na_user_alex",
@@ -38,7 +45,6 @@ final class FeedViewModel: ObservableObject {
     ]
 
     // Audio
-    private var staticPlayer: AVAudioPlayer? = nil
     private var popPlayer: AVAudioPlayer? = nil
 
     // Caches
@@ -70,38 +76,12 @@ extension FeedViewModel {
     func deactivateAudioSessionIfPossible() {
         let session = AVAudioSession.sharedInstance()
         do {
-            if (staticPlayer?.isPlaying != true) && (popPlayer?.isPlaying != true) {
+            if popPlayer?.isPlaying != true {
                 try session.setActive(false, options: [.notifyOthersOnDeactivation])
             }
         } catch {
             print("[Audio] deactivateAudioSessionIfPossible failed: \(error)")
         }
-    }
-
-    func playStaticSound() {
-        activateAmbientAudioSessionIfNeeded()
-        guard staticPlayer == nil || staticPlayer?.isPlaying == false else { return }
-        guard let url = Bundle.main.url(forResource: "pop", withExtension: "mp3") ?? Bundle.main.url(forResource: "pop", withExtension: "wav") else {
-            print("[StaticSound] pop.(mp3|wav) not found in bundle")
-            return
-        }
-        do {
-            let player = try AVAudioPlayer(contentsOf: url)
-            player.numberOfLoops = -1
-            player.volume = 0.8
-            player.prepareToPlay()
-            player.play()
-            staticPlayer = player
-            try? AVAudioSession.sharedInstance().setActive(true)
-        } catch {
-            print("[StaticSound] Failed to play: \(error)")
-        }
-    }
-
-    func stopStaticSound() {
-        staticPlayer?.stop()
-        staticPlayer = nil
-        deactivateAudioSessionIfPossible()
     }
 
     func playOneShotPop() {
@@ -163,21 +143,35 @@ extension FeedViewModel {
 
 // MARK: - Demo video injection
 extension FeedViewModel {
-    /// Mutates a subset of posts to use demo video URLs and plausible social-style user IDs.
+    private func demoImageURL(for index: Int) -> String {
+        let imageID = demoImageIDs[index % demoImageIDs.count]
+        return "https://picsum.photos/id/\(imageID)/1080/1920"
+    }
+
+    /// Keeps demo pages mixed between real remote videos and images.
     func injectDemoVideos(into posts: inout [FeedPost]) {
         guard posts.isEmpty == false else { return }
-        // Choose every 2nd post as a demo video to keep a mixed feed look.
-        for i in posts.indices where i % 2 == 0 {
-            guard let url = demoVideoURLs.randomElement() else { continue }
-            let user = demoUserIDs.randomElement() ?? posts[i].userID
+        for i in posts.indices {
+            let mediaURL: String
+            let userID: String
+
+            switch i % 4 {
+            case 0, 2:
+                mediaURL = demoVideoURLs[i % demoVideoURLs.count]
+                userID = demoUserIDs[i % demoUserIDs.count]
+            default:
+                mediaURL = demoImageURL(for: i)
+                userID = posts[i].userID
+            }
+
             posts[i] = FeedPost(
                 id: posts[i].id,
                 latitude: posts[i].latitude,
                 longitude: posts[i].longitude,
-                mediaURL: url,
+                mediaURL: mediaURL,
                 radius: posts[i].radius,
                 viewCount: posts[i].viewCount,
-                userID: user
+                userID: userID
             )
         }
     }
