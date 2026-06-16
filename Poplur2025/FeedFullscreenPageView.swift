@@ -4,16 +4,22 @@
 //
 
 import SwiftUI
+import Foundation
 import AVFoundation
 import AVKit
 import CoreLocation
 import FirebaseFirestore
+import UIKit
 
 // MARK: - Fullscreen Feed Page View
 
 struct FeedFullscreenPageView: View {
     let post: FeedPost
     let displayName: String
+    let channelNumber: Int
+    let channelCategory: String
+    let channelEmoji: String
+    let isTVGuideVisible: Bool
     var onMediaReady: () -> Void = {}
     var onUserTapped: (String) -> Void
 
@@ -30,22 +36,52 @@ struct FeedFullscreenPageView: View {
         String(format: "%.4f, %.4f", post.latitude, post.longitude)
     }
 
-    // REPLACED directVideoURL property with updated logic
     private var directVideoURL: URL? {
         guard let url = URL(string: post.mediaURL) else { return nil }
         let lower = url.absoluteString.lowercased()
 
-        // If it's the Apple devstreaming segment (fileSequenceX.mp4), treat as non-direct video so we don't try to play a fragment.
+        // Avoid playing Apple devstreaming fragments directly
         if lower.contains("devstreaming-cdn.apple.com"),
            lower.contains("filesequence"),
-            lower.hasSuffix(".mp4") {
+           lower.hasSuffix(".mp4") {
             return nil
         }
 
-        // Broaden detection: handle querystrings and common video hints
-        let videoHints = [".mp4", ".m3u8", "/prog_index.m3u8", "video.mp4", "format=mp4", "format=hls", "type=video"]
-        let isVideo = videoHints.contains { lower.contains($0) }
-        return isVideo ? url : nil
+        // Strong video hints: explicit video extensions or HLS playlists
+        let videoExtensions = [".mp4", ".mov", ".m4v", ".m3u8"]
+        if videoExtensions.contains(where: { lower.hasSuffix($0) }) {
+            return url
+        }
+
+        // Query and path hints that often indicate video
+        let videoHints = ["/prog_index.m3u8", "video.mp4", "format=mp4", "format=hls", "type=video", "contentType=video", "mime=video"]
+        if videoHints.contains(where: { lower.contains($0) }) {
+            return url
+        }
+
+        // Image extensions that clearly indicate image
+        let imageExtensions = [".jpg", ".jpeg", ".png", ".gif", ".heic", ".webp"]
+        if imageExtensions.contains(where: { lower.hasSuffix($0) }) {
+            return nil
+        }
+
+        if lower.contains("picsum.photos") {
+            return nil
+        }
+
+        // Ambiguous: prefer video to avoid treating recorded videos as photos
+        return url
+    }
+
+    private enum MediaType { case video, image, unknown }
+    private var mediaType: MediaType {
+        if directVideoURL != nil { return .video }
+        guard let url = URL(string: post.mediaURL) else { return .unknown }
+        let lower = url.absoluteString.lowercased()
+        let imageExtensions = [".jpg", ".jpeg", ".png", ".gif", ".heic", ".webp"]
+        if imageExtensions.contains(where: { lower.hasSuffix($0) }) { return .image }
+        if lower.contains("picsum.photos") { return .image }
+        return .unknown
     }
 
     // Replaced custom PlayerLayer with AVKit.VideoPlayer for reliability
@@ -467,6 +503,10 @@ struct FeedFullscreenPageView: View {
                         }
                     }
                 }
+                .onChange(of: post.mediaURL) { _, _ in
+                    // Reset readiness so freshly recorded media triggers playback/display
+                    didReportMediaReady = false
+                }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black)
@@ -474,24 +514,42 @@ struct FeedFullscreenPageView: View {
 
     @ViewBuilder
     private func contentView(size: CGSize) -> some View {
-        let isVideo = (directVideoURL != nil)
-        
         ZStack {
             Color.black
                 .ignoresSafeArea()
                 .zIndex(0)
 
-            if isVideo, let videoURL = directVideoURL {
-                videoContent(size: size, videoURL: videoURL)
-            } else if let url = URL(string: post.mediaURL) {
-                imageContent(size: size, url: url)
-            } else {
-                unavailableMediaView(isVideo: false)
-                    .onAppear {
-                        reportMediaReady()
-                    }
+            switch mediaType {
+            case .video:
+                if let videoURL = directVideoURL {
+                    videoContent(size: size, videoURL: videoURL)
+                        .id("video_\(post.id)_\(videoURL.absoluteString)")
+                } else {
+                    unavailableMediaView(isVideo: true)
+                        .onAppear { reportMediaReady() }
+                }
+            case .image:
+                if let url = URL(string: post.mediaURL) {
+                    imageContent(size: size, url: url)
+                        .id("image_\(post.id)_\(url.absoluteString)")
+                } else {
+                    unavailableMediaView(isVideo: false)
+                        .onAppear { reportMediaReady() }
+                }
+            case .unknown:
+                // Prefer trying video first when unknown (recorded assets often are video)
+                if let videoURL = directVideoURL {
+                    videoContent(size: size, videoURL: videoURL)
+                        .id("video_\(post.id)_\(videoURL.absoluteString)")
+                } else if let url = URL(string: post.mediaURL) {
+                    imageContent(size: size, url: url)
+                        .id("image_\(post.id)_\(url.absoluteString)")
+                } else {
+                    unavailableMediaView(isVideo: false)
+                        .onAppear { reportMediaReady() }
+                }
             }
-            
+
             // Username overlay in top-right corner
             topRightInfo(size: size)
                 .zIndex(10)
@@ -527,38 +585,8 @@ struct FeedFullscreenPageView: View {
 
     @ViewBuilder
     private func imageContent(size: CGSize, url: URL) -> some View {
-        AsyncImage(url: url, transaction: Transaction(animation: .none)) { phase in
-            switch phase {
-            case .empty:
-                ZStack {
-                    Color.black
-                    ProgressView()
-                        .tint(.white)
-                }
-                .frame(width: size.width, height: size.height)
-            case .success(let img):
-                img
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: size.width, height: size.height)
-                    .background(Color.black)
-                    .onAppear {
-                        reportMediaReady()
-                    }
-            case .failure:
-                unavailableMediaView(isVideo: false)
-                    .frame(width: size.width, height: size.height)
-                    .onAppear {
-                        reportMediaReady()
-                    }
-            @unknown default:
-                unavailableMediaView(isVideo: false)
-                    .onAppear {
-                        reportMediaReady()
-                    }
-            }
-        }
-        .id("image_\(post.id)_\(url.absoluteString)")
+        FullBleedRemoteImage(url: url, size: size, onReady: reportMediaReady)
+            .id("image_\(post.id)_\(url.absoluteString)")
     }
 
     private func unavailableMediaView(isVideo: Bool) -> some View {
@@ -614,24 +642,46 @@ struct FeedFullscreenPageView: View {
                     Text(flag)
                         .font(.system(size: 32))
                 }
-                // Channel emoji placeholder (you can pass this from FeedPost or derive from category)
-                Text("🍔")  // This should come from the post's channel/category
+                Text(channelEmoji)
                     .font(.system(size: 32))
             }
             
             // Right side: Username and coordinates
             VStack(alignment: .leading, spacing: 4) {
-                Button(action: { onUserTapped(post.userID) }) {
-                    Text(displayName.isEmpty ? "User" : displayName)
-                        .font(.system(size: 20, weight: .bold, design: .default))
-                        .foregroundColor(.white)
+                ZStack(alignment: .leading) {
+                    Button(action: { onUserTapped(post.userID) }) {
+                        Text(displayName.isEmpty ? "User" : displayName)
+                            .font(.system(size: 20, weight: .bold, design: .default))
+                            .foregroundColor(.white)
+                    }
+                    .buttonStyle(.plain)
+                    .opacity(isTVGuideVisible ? 0 : 1)
+                    .offset(y: isTVGuideVisible ? -10 : 0)
+
+                    Text("CH \(channelNumber)")
+                        .font(.system(size: 22, weight: .black, design: .rounded))
+                        .foregroundColor(Color(red: 0.31, green: 1.0, blue: 0.25))
+                        .opacity(isTVGuideVisible ? 1 : 0)
+                        .offset(y: isTVGuideVisible ? 0 : 10)
                 }
-                .buttonStyle(.plain)
-                
-                Text(String(format: "%.4f, %.4f", post.latitude, post.longitude))
-                    .font(.system(size: 16, weight: .regular, design: .default))
-                    .foregroundColor(.white.opacity(0.9))
+                .animation(.spring(response: 0.34, dampingFraction: 0.82), value: isTVGuideVisible)
+
+                ZStack(alignment: .leading) {
+                    Text(String(format: "%.4f, %.4f", post.latitude, post.longitude))
+                        .font(.system(size: 16, weight: .regular, design: .default))
+                        .foregroundColor(.white.opacity(0.9))
+                        .opacity(isTVGuideVisible ? 0 : 1)
+                        .offset(y: isTVGuideVisible ? -8 : 0)
+
+                    Text(channelCategory.uppercased())
+                        .font(.system(size: 16, weight: .heavy, design: .rounded))
+                        .foregroundColor(Color(red: 0.31, green: 1.0, blue: 0.25))
+                        .opacity(isTVGuideVisible ? 1 : 0)
+                        .offset(y: isTVGuideVisible ? 0 : 8)
+                }
+                .animation(.spring(response: 0.34, dampingFraction: 0.82).delay(0.03), value: isTVGuideVisible)
             }
+            .frame(minWidth: 150, alignment: .leading)
             
             Spacer()
         }
@@ -641,4 +691,164 @@ struct FeedFullscreenPageView: View {
         .allowsHitTesting(true)
     }
     
+}
+
+private struct FullBleedRemoteImage: View {
+    let url: URL
+    let size: CGSize
+    let onReady: () -> Void
+
+    @State private var loadState: FullBleedImageLoadState = .loading
+
+    var body: some View {
+        ZStack {
+            Color.black
+
+            switch loadState {
+            case .loading:
+                ProgressView()
+                    .tint(.white)
+            case .loaded(let image):
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: size.width, height: size.height)
+                    .clipped()
+            case .failed:
+                Image(systemName: "photo")
+                    .font(.system(size: 42, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.55))
+            }
+        }
+        .frame(width: size.width, height: size.height)
+        .clipped()
+        .task(id: url.absoluteString) {
+            await loadImage()
+        }
+    }
+
+    private func loadImage() async {
+        await MainActor.run { loadState = .loading }
+
+        do {
+            let data: Data
+            if url.isFileURL {
+                data = try Data(contentsOf: url)
+            } else {
+                let (remoteData, _) = try await URLSession.shared.data(from: url)
+                data = remoteData
+            }
+
+            guard !Task.isCancelled else { return }
+            guard let image = UIImage(data: data) else {
+                throw URLError(.cannotDecodeContentData)
+            }
+
+            if image.hasLikelyBlackBars {
+                await MainActor.run {
+                    loadState = .failed
+                    onReady()
+                    NotificationCenter.default.post(
+                        name: Notification.Name("FeedAdvanceOnMediaFailure"),
+                        object: nil
+                    )
+                }
+                return
+            }
+
+            await MainActor.run {
+                loadState = .loaded(image)
+                onReady()
+            }
+        } catch {
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                loadState = .failed
+                onReady()
+            }
+        }
+    }
+}
+
+private enum FullBleedImageLoadState {
+    case loading
+    case loaded(UIImage)
+    case failed
+}
+
+private extension UIImage {
+    var hasLikelyBlackBars: Bool {
+        guard let cgImage else { return false }
+
+        let sampleWidth = min(max(cgImage.width, 1), 96)
+        let sampleHeight = min(max(cgImage.height, 1), 96)
+        guard sampleWidth >= 24, sampleHeight >= 24 else { return false }
+
+        let bytesPerPixel = 4
+        let bytesPerRow = sampleWidth * bytesPerPixel
+        var pixels = [UInt8](repeating: 0, count: sampleHeight * bytesPerRow)
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+
+        let didDrawSample = pixels.withUnsafeMutableBytes { buffer -> Bool in
+            guard let baseAddress = buffer.baseAddress,
+                  let context = CGContext(
+                    data: baseAddress,
+                    width: sampleWidth,
+                    height: sampleHeight,
+                    bitsPerComponent: 8,
+                    bytesPerRow: bytesPerRow,
+                    space: colorSpace,
+                    bitmapInfo: bitmapInfo
+                  ) else {
+                return false
+            }
+
+            context.interpolationQuality = .low
+            context.draw(cgImage, in: CGRect(x: 0, y: 0, width: sampleWidth, height: sampleHeight))
+            return true
+        }
+
+        guard didDrawSample else { return false }
+
+        let stripHeight = max(2, Int(Double(sampleHeight) * 0.07))
+        let stripWidth = max(2, Int(Double(sampleWidth) * 0.07))
+        let centerX = (sampleWidth / 4)..<max(sampleWidth / 4 + 1, sampleWidth * 3 / 4)
+        let centerY = (sampleHeight / 4)..<max(sampleHeight / 4 + 1, sampleHeight * 3 / 4)
+
+        func darkRatio(xRange: Range<Int>, yRange: Range<Int>) -> Double {
+            var darkPixels = 0
+            var countedPixels = 0
+
+            for y in yRange {
+                for x in xRange {
+                    let index = y * bytesPerRow + x * bytesPerPixel
+                    let red = Int(pixels[index])
+                    let green = Int(pixels[index + 1])
+                    let blue = Int(pixels[index + 2])
+                    let alpha = Int(pixels[index + 3])
+                    guard alpha > 32 else { continue }
+
+                    countedPixels += 1
+                    let brightness = (red + green + blue) / 3
+                    if brightness < 28 {
+                        darkPixels += 1
+                    }
+                }
+            }
+
+            guard countedPixels > 0 else { return 0 }
+            return Double(darkPixels) / Double(countedPixels)
+        }
+
+        let top = darkRatio(xRange: 0..<sampleWidth, yRange: 0..<stripHeight)
+        let bottom = darkRatio(xRange: 0..<sampleWidth, yRange: (sampleHeight - stripHeight)..<sampleHeight)
+        let left = darkRatio(xRange: 0..<stripWidth, yRange: 0..<sampleHeight)
+        let right = darkRatio(xRange: (sampleWidth - stripWidth)..<sampleWidth, yRange: 0..<sampleHeight)
+        let center = darkRatio(xRange: centerX, yRange: centerY)
+
+        let hasLetterbox = top > 0.96 && bottom > 0.96
+        let hasPillarbox = left > 0.96 && right > 0.96
+        return (hasLetterbox || hasPillarbox) && center < 0.75
+    }
 }

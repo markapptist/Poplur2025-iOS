@@ -450,6 +450,7 @@ private struct CubeSceneView: UIViewRepresentable {
 
             if let cube = v.scene?.rootNode.childNode(withName: "cube", recursively: true), let box = cube.geometry as? SCNBox {
                 context.coordinator.cubeMaterials = box.materials
+                context.coordinator.applyCurrentProfileIconOverride()
             }
             // Defer normal map and glow attachment one more pass in previews
             if isRunningInPreviews {
@@ -869,7 +870,11 @@ private struct CubeSceneView: UIViewRepresentable {
     }
 
     private func faceEmissionMask(for tab: AppTab) -> UIImage {
-        let key = "face_emission_\(tab.title)"
+        faceEmissionMask(title: tab.title, systemImage: tab.systemImage)
+    }
+
+    private func faceEmissionMask(title: String, systemImage: String) -> UIImage {
+        let key = "face_emission_v2_\(title)_\(systemImage)"
         return CubeFaceImageCache.image(for: key) {
             let size = CGSize(width: 300, height: 300)
             let renderer = UIGraphicsImageRenderer(size: size)
@@ -879,18 +884,19 @@ private struct CubeSceneView: UIViewRepresentable {
                 ctx.fill(CGRect(origin: .zero, size: size))
 
                 // Icon (white)
-                let symbolName = tab.systemImage
-                let pointSize: CGFloat = 80
-                let iconWidth: CGFloat = 90
-                let iconHeight: CGFloat = 90
-                let iconY: CGFloat = 70
+                let symbolName = systemImage
+                let isPhoneIcon = title == "Phone" || systemImage.contains("phone")
+                let pointSize: CGFloat = isPhoneIcon ? 118 : 80
+                let iconWidth: CGFloat = isPhoneIcon ? 132 : 90
+                let iconHeight: CGFloat = isPhoneIcon ? 132 : 90
+                let iconY: CGFloat = isPhoneIcon ? 48 : 70
                 let config = UIImage.SymbolConfiguration(pointSize: pointSize, weight: .bold)
                 let imgRect = CGRect(x: (size.width - iconWidth) / 2, y: iconY, width: iconWidth, height: iconHeight)
 
                 // Stronger glow for emission
-                let glowConfig = UIImage.SymbolConfiguration(pointSize: pointSize + 10, weight: .bold)
+                let glowConfig = UIImage.SymbolConfiguration(pointSize: pointSize + (isPhoneIcon ? 18 : 10), weight: .bold)
                 let glowImage = UIImage(systemName: symbolName, withConfiguration: glowConfig) ?? UIImage()
-                let glowRect = imgRect.insetBy(dx: -6, dy: -6)
+                let glowRect = imgRect.insetBy(dx: isPhoneIcon ? -10 : -6, dy: isPhoneIcon ? -10 : -6)
                 glowImage.withTintColor(.white, renderingMode: .alwaysOriginal).draw(in: glowRect, blendMode: .normal, alpha: 0.55)
 
                 let image = UIImage(systemName: symbolName, withConfiguration: config) ?? UIImage()
@@ -899,7 +905,7 @@ private struct CubeSceneView: UIViewRepresentable {
                 // Title (white)
                 let paragraph = NSMutableParagraphStyle()
                 paragraph.alignment = .center
-                let title = tab.title as NSString
+                let title = title as NSString
                 let titleRect = CGRect(x: 0, y: 180, width: size.width, height: 40)
                 // Bold pass to thicken emission mask
                 let boldAttrs: [NSAttributedString.Key: Any] = [
@@ -1004,6 +1010,8 @@ private struct CubeSceneView: UIViewRepresentable {
         private var liveRotation: SCNVector3 = SCNVector3Zero
 
         private var holdObservers: [NSObjectProtocol] = []
+        private var profileIconOverrideObserver: NSObjectProtocol?
+        private var profileIconOverride: (title: String, systemImage: String)?
         private var isBlinking: Bool = false
         var cubeMaterials: [SCNMaterial] = []
 
@@ -1134,6 +1142,18 @@ private struct CubeSceneView: UIViewRepresentable {
                 print("🔦 [CubeTabView] Flash OFF - stopping cube illumination")
                 self.stopFlashing()
             }
+
+            profileIconOverrideObserver = NotificationCenter.default.addObserver(forName: .CubeProfileIconOverrideChanged, object: nil, queue: .main) { [weak self] notification in
+                guard let self = self else { return }
+                let title = notification.userInfo?["title"] as? String
+                let systemImage = notification.userInfo?["systemImage"] as? String
+                if let title, let systemImage {
+                    self.profileIconOverride = (title, systemImage)
+                } else {
+                    self.profileIconOverride = nil
+                }
+                self.applyCurrentProfileIconOverride()
+            }
         }
 
         deinit {
@@ -1141,9 +1161,23 @@ private struct CubeSceneView: UIViewRepresentable {
                 NotificationCenter.default.removeObserver(token)
                 previewSimObserver = nil
             }
+            if let token = profileIconOverrideObserver {
+                NotificationCenter.default.removeObserver(token)
+                profileIconOverrideObserver = nil
+            }
             stopObservingMotion()
             stopObservingHold()
             stopAccelerometerSimulation()
+        }
+
+        func applyCurrentProfileIconOverride() {
+            let profileMaterialIndex = 3
+            guard cubeMaterials.indices.contains(profileMaterialIndex) else { return }
+            let descriptor = profileIconOverride ?? (title: AppTab.profile.title, systemImage: AppTab.profile.systemImage)
+            cubeMaterials[profileMaterialIndex].emission.contents = parent.faceEmissionMask(
+                title: descriptor.title,
+                systemImage: descriptor.systemImage
+            )
         }
 
         func setInitialYaw(for tab: AppTab) {

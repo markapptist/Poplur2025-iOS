@@ -190,6 +190,13 @@ struct AppSettingsView: View {
                 VStack(spacing: 14) {
                     settingsToggleRow(title: "Private Account", isOn: $isPrivateAccount)
                     settingsToggleRow(title: "Notifications", isOn: $notificationsEnabled)
+                    settingsToggleRow(
+                        title: "HUD Sleep Timer",
+                        isOn: Binding(
+                            get: { SettingsStore.shared.hudSleepTimerEnabled },
+                            set: { SettingsStore.shared.hudSleepTimerEnabled = $0 }
+                        )
+                    )
                     settingsNavRow(title: "Email Address") { /* push email editor */ }
                     settingsNavRow(title: "Password") { /* push password editor */ }
                 }

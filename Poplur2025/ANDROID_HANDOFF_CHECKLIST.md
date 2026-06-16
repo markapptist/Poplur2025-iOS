@@ -196,7 +196,7 @@ android_documentation_package/
 **Topics**:
 1. Tab structure and navigation (15 min)
 2. Camera tab (CameraX setup, ML detection) (15 min)
-3. Feed tab (RecyclerView/Compose list, Media3/ExoPlayer, launch loading, media mix, volume bars) (15 min)
+3. Feed tab (RecyclerView/Compose list, Media3/ExoPlayer, launch loading, media mix, volume bars, TV Guide) (15 min)
 4. Map and Profile tabs (10 min)
 5. Cross-tab navigation flows (5 min)
 
@@ -262,7 +262,15 @@ android_documentation_package/
 - [ ] Feed videos auto-play without a play icon overlay
 - [ ] Feed videos reload/resume correctly after app background and foreground
 - [ ] Feed custom volume bars appear for hardware volume up and volume down, but not during launch loading
+- [ ] Feed TV Guide is full-screen, uses PiP layout, keeps current video audio playing, has green channel numbers, and exposes a tablet hamburger channel rail
 - [ ] Profile tab shows user posts in grid
+- [ ] Profile removes the fixed top action icons, moves the header upward, and exposes mail/settings/phone/notifications/store through a reusable hold-cube rainbow menu wheel
+- [ ] Cube menu wheel dims the background with translucent white, cycles focused items while held, plays a pop on each tick, and release-selects the focused item
+- [ ] Profile phone action opens a constructed PopularPhone UI that aspect-fits on Android and uses a dynamic LCD content area instead of a stretched full-phone bitmap
+- [ ] Radius Store uses Google Play Billing real checkout, not fake local radius grants
+- [ ] Radius Store writes verified purchase ledger and increments purchased radius in Firestore
+- [ ] Notifications appear both on device and inside the app
+- [ ] Daily AI radius notification covers growth, decline, strongest area, or area takeover
 - [ ] Camera tab captures and uploads
 - [ ] Map tab shows Google Maps
 
@@ -270,7 +278,8 @@ android_documentation_package/
 - [ ] 3D cube renders with correct geometry
 - [ ] Cube rotates smoothly with gestures
 - [ ] Cube faces show tab icons
-- [ ] Tap/hold gestures work
+- [ ] Cube remains visible and interactive on every main-tab child screen
+- [ ] Tap/hold gestures work, including the profile hold-cube wheel and release-to-select behavior
 
 ### Phase 4: Polish (Week 7-8) ✅
 - [ ] Radius bar animates correctly
@@ -379,7 +388,7 @@ android_documentation_package/
 
 ### Alignment
 - [ ] Android team has reviewed docs
-- [ ] Android team has reviewed the Feed launch/loading/media/volume parity requirements
+- [ ] Android team has reviewed the Feed launch/loading/media/volume/TV Guide parity requirements
 - [ ] Questions answered
 - [ ] Acceptance criteria agreed upon
 - [ ] Timeline approved
@@ -404,6 +413,9 @@ Once all items are checked, the handoff is complete and the Android team can beg
 1. **ANDROID_DOCS_README.md** - Start here, read first
 2. **ANDROID_DOCS_HomeView_Tabs.md** - Tab functionality
 3. **ANDROID_DOCS_Cube_Specification.md** - 3D technical details
+4. **ANDROID_DOCS_Notifications_Implementation.md** - Daily AI device + in-app notifications
+5. **ANDROID_DOCS_PopularPhone.md** - Constructed, aspect-fit retro phone UI
+6. **ANDROID_DOCS_Cube_Menu_Wheel.md** - Hold-driven rainbow cube submenu wheel
 
 ### Most Important Sections
 - Cube face mapping (yaw angles)
@@ -411,6 +423,9 @@ Once all items are checked, the handoff is complete and the Android team can beg
 - Gesture handling (pan, tap, hold)
 - Recording flow (hold → 10s countdown → upload)
 - Radius bar animation system
+- Daily AI radius notification system
+- Constructed PopularPhone geometry and dynamic LCD screen
+- Hold-cube menu wheel timing, pop sound, focus dim, and release-select behavior
 
 ### Quick Commands
 ```bash

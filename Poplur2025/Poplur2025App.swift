@@ -12,7 +12,9 @@ private enum PreviewEnv {
     static var isPreview: Bool {
         let env = ProcessInfo.processInfo.environment
         // Xcode sets one of these when hosting previews
-        return env["XCODE_RUNNING_FOR_PREVIEWS"] == "1" || env["XCODE_RUNNING_FOR_PLAYGROUNDS"] == "1"
+        return env["XCODE_RUNNING_FOR_PREVIEWS"] == "1"
+            || env["XCODE_RUNNING_FOR_PLAYGROUNDS"] == "1"
+            || env["__XCODE_BUILT_PRODUCTS_DIR_PATHS"] != nil
     }
 }
 
@@ -20,31 +22,38 @@ private enum PreviewEnv {
 final class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
-        if !PreviewEnv.isPreview {
-            // Always configure Firebase (needed for Auth)
-            if FirebaseApp.app() == nil {
-                FirebaseApp.configure()
-                
-                // Disable Firestore offline persistence in simulator to avoid disk space issues
-                #if targetEnvironment(simulator)
-                let settings = FirestoreSettings()
-                settings.isPersistenceEnabled = false
-                Firestore.firestore().settings = settings
-                #endif
-            }
-            
-            // Only start ads in release builds on real devices
-            #if !DEBUG && !targetEnvironment(simulator) && canImport(GoogleMobileAds)
-            MobileAds.shared.start(completionHandler: nil)
-            #endif
-            
-            #if !targetEnvironment(simulator)
-            AdManager.shared.start()
-            #endif
-        } else {
-            // Skip heavy SDK bootstrap in previews to avoid timeouts/crashes
-            print("[AppDelegate] Skipping Firebase/Ads init in Previews")
+
+        // Exit early if in preview mode
+        guard !PreviewEnv.isPreview else {
+            print("[AppDelegate] Running in Preview mode - skipping all SDK initialization")
+            return true
         }
+
+        // Always configure Firebase (needed for Auth)
+        if FirebaseApp.app() == nil {
+            FirebaseApp.configure()
+
+            // Disable Firestore offline persistence in simulator to avoid disk space issues
+            #if targetEnvironment(simulator)
+            let settings = FirestoreSettings()
+            settings.isPersistenceEnabled = false
+            Firestore.firestore().settings = settings
+            #endif
+        }
+
+        // Only start ads in release builds on real devices
+        #if !DEBUG && !targetEnvironment(simulator) && canImport(GoogleMobileAds)
+        MobileAds.shared.start(completionHandler: nil)
+        #endif
+
+        #if !targetEnvironment(simulator)
+        AdManager.shared.start()
+        #endif
+
+        Task { @MainActor in
+            PoplurNotificationCenter.shared.configure()
+        }
+
         return true
     }
 }
@@ -79,12 +88,16 @@ struct Poplur2025App: App {
                     HomeView()
                         .environmentObject(auth)
                         .environmentObject(isometricBarSettings)
+                        .task(id: auth.currentUser?.uid) {
+                            await PoplurNotificationCenter.shared.refreshDailyNotificationForCurrentUser()
+                        }
                 } else {
                     WelcomeView()
                         .environmentObject(auth)
                         .environmentObject(isometricBarSettings)
                 }
             }
+            .toolbar(.hidden, for: .navigationBar)
             .onAppear {
                 let appearance = UITabBarAppearance()
                 appearance.configureWithTransparentBackground()
@@ -95,6 +108,19 @@ struct Poplur2025App: App {
                     UITabBar.appearance().scrollEdgeAppearance = appearance
                 }
                 UITabBar.appearance().isTranslucent = true
+
+                let navigationAppearance = UINavigationBarAppearance()
+                navigationAppearance.configureWithTransparentBackground()
+                navigationAppearance.backgroundEffect = nil
+                navigationAppearance.backgroundColor = .clear
+                navigationAppearance.setBackIndicatorImage(UIImage(), transitionMaskImage: UIImage())
+                UINavigationBar.appearance().standardAppearance = navigationAppearance
+                UINavigationBar.appearance().scrollEdgeAppearance = navigationAppearance
+                UINavigationBar.appearance().compactAppearance = navigationAppearance
+                UIBarButtonItem.appearance().setBackButtonTitlePositionAdjustment(
+                    UIOffset(horizontal: -1000, vertical: 0),
+                    for: .default
+                )
             }
         }
     }

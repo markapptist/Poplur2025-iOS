@@ -39,6 +39,7 @@ struct AnyEditableUserProfile: EditableUserProfile {
 struct EditProfileView: View {
     @Environment(\.dismiss) private var dismiss
     @Binding var user: AnyEditableUserProfile?  // Binding to the user profile from the parent view
+    var onDone: (() -> Void)?
     @State private var newUsername: String
     @State private var newEmail: String
     @State private var selectedImage: UIImage?
@@ -47,8 +48,9 @@ struct EditProfileView: View {
     @State private var isImageChanged = false
     @State private var isSaving = false
 
-    init(user: Binding<AnyEditableUserProfile?>) {
+    init(user: Binding<AnyEditableUserProfile?>, onDone: (() -> Void)? = nil) {
         _user = user
+        self.onDone = onDone
         _newUsername = State(initialValue: user.wrappedValue?.username ?? "")
         _newEmail = State(initialValue: user.wrappedValue?.email ?? "")
     }
@@ -190,7 +192,11 @@ struct EditProfileView: View {
                 // Successfully updated the profile, dismiss the edit view
                 user?.username = newUsername
                 user?.email = newEmail
-                dismiss()
+                if let onDone {
+                    onDone()
+                } else {
+                    dismiss()
+                }
             }
             isSaving = false
         }

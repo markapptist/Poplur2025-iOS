@@ -92,9 +92,12 @@ struct RadiusNumberDisplay: View {
                 Text(formattedNumerator)
                     .font(.system(size: 40, weight: .bold))
                     .foregroundStyle(rank.color)
+                    .minimumScaleFactor(0.4)
+                    .lineLimit(1)
                     .shadow(color: rank.color.opacity(0.3), radius: 6, x: 0, y: 2)
                     .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
                     .monospacedDigit()
+                    .poplurMetalNumberShader(intensity: 1.05)
                     .contentTransition(.numericText(value: currentPostRadius))
                 
                 // Fraction bar - matches width of denominator
@@ -114,8 +117,11 @@ struct RadiusNumberDisplay: View {
                 Text(String(format: "%.0f", currentEarthRadius))
                     .font(.system(size: 28, weight: .bold))
                     .foregroundStyle(.white.opacity(0.9))
+                    .minimumScaleFactor(0.4)
+                    .lineLimit(1)
                     .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
                     .monospacedDigit()
+                    .poplurMetalNumberShader(intensity: 0.72)
                     .contentTransition(.numericText(value: currentEarthRadius))
             }
             

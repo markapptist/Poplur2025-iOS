@@ -46,6 +46,12 @@ Each tab has a specific rotation angle (yaw) on the cube:
 - **Profile**: 180° (back face)
 - **Map**: 270° (left face)
 
+### 4. Persistent Cube Visibility
+- Keep the cube visible on every main-tab screen and every child screen opened from a main tab, including Feed TV Guide, Profile mail, settings, phone, notifications, store, scanner, and post detail routes.
+- Child routes may hide secondary bottom chrome such as counters, upload status, radius bars, and volume bars, but they must not unmount or visually cover the cube.
+- Render the cube from the root tab container as a persistent overlay with a higher z-order/elevation than tab content and child routes.
+- Limit any expanded/invisible cube hit target to main tab content only so child route controls remain tappable; the visible cube itself remains interactive everywhere.
+
 ---
 
 ## Individual Tab Functionality
@@ -180,6 +186,7 @@ Infinite vertical scroll of mixed media posts from different countries and categ
 - **Tap username/avatar**: Navigate to that user's profile
 - **Long-press on post**: Show post location on map
 - **Tap cube**: Scroll to top of feed or perform feed-specific action
+- **Hold cube / TV Guide action**: Show the TV Guide above the whole Feed
 - **Like**: Double-tap or tap heart icon
 - **Comment**: Tap comment button to open comment section
 
@@ -220,6 +227,16 @@ Each post displays:
 - **Global pause**: Notification system to coordinate with other tabs
 - **Volume bars**: The custom green volume meter appears on hardware volume up and volume down while Feed is visible, but never while Feed launch loading is active
 
+#### TV Guide Contract
+- The TV Guide is a full-screen Feed overlay above Feed chrome, counters, and volume bars, while the persistent cube remains visible and interactive above the guide.
+- Opening the TV Guide must not pause or tear down the current Feed player; the current video should keep playing audibly in the background like live TV.
+- Use a PiP-style current-channel panel inside the guide so the user can see the tuned channel context while browsing rows.
+- Channel numbers are green in the guide and in the Feed header.
+- While the guide is open, animate the Feed username label into the current channel number, and animate the coordinate subtext into the channel station/category.
+- On phones, the guide uses the full screen with the PiP panel above the channel rows.
+- On tablets, include a hamburger button that toggles a channel rail/menu alongside the guide.
+- Selecting a guide row tunes the Feed to that category/channel and then dismisses the guide.
+
 #### Country/Channel Navigation
 - **Country indicator**: Flag emoji + country name at top
 - **Channel indicator**: Category emoji + name
@@ -257,6 +274,22 @@ Display user's posts in a grid layout with statistics and profile information.
   - Average radius stat
   - Post count
   - Edit button (own profile only)
+- **Cube submenu**:
+  - Remove the old fixed top action icons from the profile screen
+  - Push the profile header upward to use the reclaimed vertical space
+  - Long-press/hold the cube to show a reusable rainbow menu wheel above the cube
+  - The background behind the cube dims with translucent white while the wheel is open
+  - The wheel cycles through the icon actions while the user keeps holding the cube
+  - Play a short pop sound and tick haptic each time the focused menu item changes
+  - Releasing the cube closes the wheel with animation and activates the currently focused item
+  - Wheel items contain icon-only actions: mail, settings, phone, notifications, and store
+  - Keep this component screen-agnostic so other tabs can provide their own submenu items later
+- **PopularPhone**:
+  - The phone submenu action opens the retro phone screen
+  - Android must construct the phone using Compose/Canvas or equivalent app-rendered geometry
+  - Do not stretch a full-phone bitmap to fit the viewport
+  - Use a fixed phone aspect ratio and normalized coordinates so the phone fits every Android screen without distortion
+  - The LCD screen is a real dynamic content area for dialed numbers and mini-game content
 - **Post grid**: 3-column grid of user's photos/videos
 - **Post detail view**: Tap any post to see full screen
 
@@ -264,8 +297,9 @@ Display user's posts in a grid layout with statistics and profile information.
 - **Tap profile picture**: View/scan 3D head model
 - **Tap edit**: Open profile editing screen
 - **Tap post**: Open expanded view with all post details
-- **Long-press cube**: Trigger profile-specific actions
-- **Tap cube**: Scroll to top or perform profile action
+- **Long-press cube**: Open the profile bubble submenu
+- **Tap cube while submenu is open**: Close the submenu
+- **Tap cube while submenu is closed**: Perform the default profile action
 - **Message button**: Navigate to messaging (if viewing another user)
 
 #### Profile Types
@@ -273,7 +307,8 @@ Display user's posts in a grid layout with statistics and profile information.
 - Shows edit button
 - Can update profile picture, username, email
 - Can delete posts
-- Shows settings access
+- Shows settings, mail, phone, notifications, and store through the hold-cube menu wheel
+- Phone action opens the constructed, aspect-fit PopularPhone screen described in `ANDROID_DOCS_PopularPhone.md`
 
 ##### Other User's Profile
 - Reached by tapping username in Feed
@@ -313,6 +348,33 @@ When navigating from Feed by tapping username:
 
 ---
 
+## Radius Store
+
+### Purpose
+Sell consumable radius boosts that expand a user's reach.
+
+### Products
+- Starter Radius: +5 km, product ID `com.apptist.Poplur2025.radius.starter`
+- City Boost: +25 km, product ID `com.apptist.Poplur2025.radius.city`
+- World Push: +100 km, product ID `com.apptist.Poplur2025.radius.world`
+
+### Payment Requirements
+- iOS must use StoreKit In-App Purchase. Do not use a fake local grant.
+- Android must use Google Play Billing Library consumable products. Google Pay-backed cards can be used through Play checkout, but radius should not be sold through an off-store payment button.
+- Disable purchase buttons until products are loaded from the platform store.
+- Grant radius only after the platform returns a verified/purchased transaction.
+- Record every delivered purchase in Firestore at `users/{userID}/radiusPurchases/{purchaseID}` and increment `users/{userID}.purchasedRadiusMeters`.
+- Use the store transaction ID or Play purchase token as the ledger document ID so duplicate delivery does not double-credit radius.
+
+### Android Implementation Notes
+- Query products with `BillingClient.queryProductDetailsAsync`.
+- Launch checkout with `BillingClient.launchBillingFlow`.
+- On `Purchase.PurchaseState.PURCHASED`, verify the purchase token server-side when backend support is available.
+- Write the Firestore ledger and increment only after verification succeeds.
+- Acknowledge/consume the purchase after successful delivery so repeat consumable purchases work correctly.
+
+---
+
 ## Radius Bar System
 
 ### Overview
@@ -337,6 +399,36 @@ A global radius display appears on all tabs in the bottom-right corner.
 ### Maximum Radius
 - **Earth's radius**: 6,371 km (3,958 mi)
 - This is the theoretical maximum distance represented
+
+---
+
+## Notifications System
+
+### Purpose
+Send the same notification content to both:
+- The user's device notification tray
+- The in-app Profile notifications list
+
+### Daily Test Notification
+- Send at most one generated notification per user per day.
+- For test builds, schedule the first daily notification shortly after app launch so QA can verify it on a physical phone.
+- Store a last-sent day stamp locally or in Firestore to avoid duplicate same-day sends.
+
+### Notification Content
+- Notifications should be randomized from several templates so they do not feel repetitive.
+- Some notifications should be AI-style radius insights based on current user post data:
+  - Radius increasing
+  - Radius decreasing
+  - Strongest area/city
+  - Area takeover momentum
+- If one area has the user's strongest concentration of posts/views/radius, generate copy such as: "You are taking over Tokyo" and explain that their radius is becoming dominant there.
+
+### Android Implementation Notes
+- Use Firebase Cloud Messaging for production server-driven notifications.
+- Use Android local notifications/WorkManager for the daily test notification path.
+- Mirror every delivered notification into the in-app notification list.
+- Foreground notifications should still render in-app immediately.
+- Notification generation should use the same Firestore post fields as iOS: `latitude`, `longitude`, `radius`, `viewCount`, and `userID`.
 
 ---
 
@@ -567,6 +659,7 @@ Camera gestures work anywhere on screen:
 - ✓ Feed UI starts in final positions and fades only
 - ✓ Videos reload/resume after app background and foreground
 - ✓ Volume bars appear for hardware volume up and volume down, but not during launch loading
+- ✓ Full-screen TV Guide covers Feed chrome, keeps video audio playing, uses PiP layout, and uses green channel numbers
 - ✓ Audio pauses on tab switch
 - ✓ Tap username navigates to profile
 - ✓ Long-press shows location on map
@@ -578,6 +671,7 @@ Camera gestures work anywhere on screen:
 - ✓ Post grid loads with pagination
 - ✓ Tap post shows expanded view
 - ✓ Long-press on post shows location
+- ✓ Hold-cube menu wheel opens above the cube, dims the background with translucent white, cycles with pop sounds, release-selects the focused item, and opens the constructed phone from the phone item
 
 ### Map Tab
 - ✓ Centers on user location

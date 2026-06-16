@@ -137,6 +137,7 @@ struct CameraKitView: View {
             }
             .padding(.top, 16)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .ignoresSafeArea()
         .onAppear {
             isVisible = true
@@ -290,6 +291,7 @@ struct CameraKitView: View {
             Group {
                 if mounted {
                     RecordPreviewContainer(controller: controller)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .ignoresSafeArea()
                 } else {
                     EmptyView()
@@ -313,6 +315,7 @@ extension CameraKitView {
             // Prefer a dedicated RECORD preview view controller if available
             let recordProvider = controller as any RecordPreviewViewControllerProviding
             if let previewVC = recordProvider.recordPreviewViewController {
+                previewVC.view.setNeedsLayout()
                 return previewVC
             }
             // Otherwise, wrap a dedicated RECORD preview view if available
@@ -332,6 +335,7 @@ extension CameraKitView {
             // Fallback to generic preview if record-specific preview isn't available
             let genericVCProvider = controller as any PreviewViewControllerProviding
             if let genericVC = genericVCProvider.previewViewController {
+                genericVC.view.setNeedsLayout()
                 return genericVC
             }
             if let genericViewProvider = controller as? PreviewViewProviding,
@@ -354,7 +358,14 @@ extension CameraKitView {
         }
 
         func updateUIViewController(_ uiViewController: UIViewController, context: Context) {
-            // No-op
+            forceCameraPreviewLayout(in: uiViewController)
+        }
+
+        private func forceCameraPreviewLayout(in viewController: UIViewController) {
+            if let previewController = viewController as? CameraPreviewViewController {
+                previewController.forcePreviewLayout()
+            }
+            viewController.children.forEach(forceCameraPreviewLayout)
         }
     }
 }

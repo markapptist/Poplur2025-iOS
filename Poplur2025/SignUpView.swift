@@ -49,9 +49,15 @@ struct SignUpView: View {
                 EmptyView()
                     .navigationDestination(isPresented: $isSignedUp) {
                         HomeView()
+                            .toolbar(.hidden, for: .navigationBar)
+                            .navigationBarBackButtonHidden(true)
                     }
                 
-                NavigationLink(destination: LoginView()) {
+                NavigationLink {
+                    LoginView()
+                        .toolbar(.hidden, for: .navigationBar)
+                        .navigationBarBackButtonHidden(true)
+                } label: {
                     Text("Already have an account? Log in")
                         .padding()
                         .foregroundColor(.blue)

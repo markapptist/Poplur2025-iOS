@@ -216,35 +216,42 @@ struct HeadScannerView: View {
             .background(.black.opacity(0.35))
             .clipShape(RoundedRectangle(cornerRadius: 12))
             .padding(.bottom, 24)
+
+            if showResult {
+                VStack(spacing: 16) {
+                    if let img = result?.previewImage {
+                        Image(uiImage: img)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxHeight: 300)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                    } else {
+                        Text("No preview available")
+                    }
+                    if let url = result?.usdzURL {
+                        Text("Model exported to: \(url.lastPathComponent)")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        ShareLink(item: url) {
+                            Label("Share USDZ", systemImage: "square.and.arrow.up")
+                        }
+                    }
+                    Button("Done") {
+                        showResult = false
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                .padding()
+                .frame(maxWidth: .infinity)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .padding(20)
+                .transition(.opacity)
+                .zIndex(20)
+            }
         }
         .navigationBarTitleDisplayMode(.inline)
-        .sheet(isPresented: $showResult) {
-            VStack(spacing: 16) {
-                if let img = result?.previewImage {
-                    Image(uiImage: img)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(maxHeight: 300)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                } else {
-                    Text("No preview available")
-                }
-                if let url = result?.usdzURL {
-                    Text("Model exported to: \(url.lastPathComponent)")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                    ShareLink(item: url) {
-                        Label("Share USDZ", systemImage: "square.and.arrow.up")
-                    }
-                }
-                Button("Done") {
-                    showResult = false
-                }
-                .buttonStyle(.borderedProminent)
-            }
-            .padding()
-            .presentationDetents([.medium, .large])
-        }
+        .toolbar(.hidden, for: .navigationBar)
+        .navigationBarBackButtonHidden(true)
     }
 }
 

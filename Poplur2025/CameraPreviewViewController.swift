@@ -37,13 +37,13 @@ final class CameraPreviewViewController: UIViewController {
             }
         }
         // Ensure frames are laid out
-        view.setNeedsLayout()
-        view.layoutIfNeeded()
+        forcePreviewLayout()
     }
 
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .black
+        view.clipsToBounds = false
 
         // Base preview layer (raw camera) as fallback to avoid black screen
         if previewLayer == nil {
@@ -99,28 +99,81 @@ final class CameraPreviewViewController: UIViewController {
         NotificationCenter.default.addObserver(forName: Notification.Name("CubeInteractionEnabled"), object: nil, queue: .main) { [weak self] _ in
             self?.singleTapRecognizer?.isEnabled = true
         }
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handlePreviewGeometryChanged),
+            name: UIApplication.didBecomeActiveNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handlePreviewGeometryChanged),
+            name: UIApplication.willEnterForegroundNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handlePreviewGeometryChanged),
+            name: UIDevice.orientationDidChangeNotification,
+            object: nil
+        )
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        forcePreviewLayout()
+    }
+
+    override func viewSafeAreaInsetsDidChange() {
+        super.viewSafeAreaInsetsDidChange()
+        forcePreviewLayout()
     }
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
+        layoutPreviewLayers()
+    }
+
+    public func forcePreviewLayout() {
+        view.setNeedsLayout()
+        view.layoutIfNeeded()
+        layoutPreviewLayers()
+    }
+
+    @objc private func handlePreviewGeometryChanged() {
+        forcePreviewLayout()
+    }
+
+    private func layoutPreviewLayers() {
+        let frame = fullScreenPreviewFrame()
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
 
-        let bounds = view.bounds
         if let base = previewLayer {
-            base.frame = bounds
+            base.frame = frame
             base.videoGravity = .resizeAspectFill
         }
         if let overlay = displayLayer {
-            overlay.frame = bounds
+            overlay.frame = frame
             overlay.videoGravity = .resizeAspectFill
         }
 
         CATransaction.commit()
+    }
 
-        // TEMP sanity log to confirm frames match bounds
-        print("[PreviewVC] bounds: \(bounds), preview: \(String(describing: previewLayer?.frame)), display: \(String(describing: displayLayer?.frame))")
+    private func fullScreenPreviewFrame() -> CGRect {
+        guard let window = view.window else {
+            return view.bounds
+        }
+
+        let windowBoundsInView = view.convert(window.bounds, from: window)
+        return view.bounds.union(windowBoundsInView)
     }
 
     // MARK: - Gesture recognizers for camera controls

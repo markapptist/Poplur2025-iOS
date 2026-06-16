@@ -17,6 +17,7 @@ final class SettingsStore: ObservableObject {
         static let maxVideoDurationSeconds = "settings.maxVideoDurationSeconds"
         static let isPrivateAccount = "settings.isPrivateAccount"
         static let notificationsEnabled = "settings.notificationsEnabled"
+        static let hudSleepTimerEnabled = "settings.hudSleepTimerEnabled"
     }
 
     // MARK: - Video duration limit
@@ -44,5 +45,12 @@ final class SettingsStore: ObservableObject {
     var notificationsEnabled: Bool {
         get { defaults.object(forKey: Keys.notificationsEnabled) as? Bool ?? true }
         set { defaults.set(newValue, forKey: Keys.notificationsEnabled) }
+    }
+
+    // MARK: - HUD sleep timer
+
+    var hudSleepTimerEnabled: Bool {
+        get { defaults.object(forKey: Keys.hudSleepTimerEnabled) as? Bool ?? true }
+        set { defaults.set(newValue, forKey: Keys.hudSleepTimerEnabled) }
     }
 }

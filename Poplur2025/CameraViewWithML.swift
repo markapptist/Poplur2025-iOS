@@ -264,12 +264,22 @@ struct CameraViewWithMLExample: View {
                 }
                 .padding(.bottom, 30)
             }
-        }
-        .sheet(isPresented: $showSettings) {
-            MLSettingsView(isEnabled: $isMLEnabled)
+                if showSettings {
+                    Color.black.opacity(0.58)
+                        .ignoresSafeArea()
+                        .overlay(alignment: .bottom) {
+                            MLSettingsView(isEnabled: $isMLEnabled)
+                                .frame(maxHeight: 520)
+                                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                                .padding(.horizontal, 16)
+                                .padding(.bottom, 18)
+                        }
+                        .transition(.opacity)
+                        .zIndex(30)
+                }
+            }
         }
     }
-}
 
 /// Settings view for ML detection
 struct MLSettingsView: View {
@@ -354,4 +364,3 @@ struct MLSettingsView: View {
     }
 }
 #endif
-

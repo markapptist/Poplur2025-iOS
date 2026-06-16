@@ -45,6 +45,40 @@ This package contains all necessary documentation for Android recreation:
    - **Status**: Complete guide, follow steps to generate PDFs
    - **Size**: ~20KB, ~600 lines
 
+### 4. **ANDROID_DOCS_Notifications_Implementation.md** ✅ COMPLETE
+   - **What**: Kotlin implementation guide for daily device + in-app radius notifications
+   - **Content**:
+     - Data models and local persistence
+     - Firestore post/radius inputs
+     - AI-style radius notification generation
+     - Local notification channel
+     - WorkManager daily test worker
+     - Firebase Cloud Messaging production path
+     - Profile in-app notification mirror
+   - **Status**: Complete guide, ready for Android implementation
+
+### 5. **ANDROID_DOCS_PopularPhone.md** ✅ COMPLETE
+   - **What**: Kotlin/Compose guide for reconstructing the retro phone UI without stretching a bitmap
+   - **Content**:
+     - Aspect-fit phone rectangle
+     - Normalized body, screen, navigation key, and keypad geometry
+     - Compose Canvas skeleton
+     - Dynamic LCD screen area
+     - Key hit testing
+     - DTMF tone mapping
+   - **Status**: Complete guide, ready for Android implementation
+
+### 6. **ANDROID_DOCS_Cube_Menu_Wheel.md** ✅ COMPLETE
+   - **What**: Kotlin/Compose guide for the hold-driven cube submenu wheel
+   - **Content**:
+     - Reusable menu wheel controller
+     - Rainbow arc overlay above the cube
+     - White translucent focus dim
+     - Hold-to-cycle selection
+     - Pop sound and haptic ticks
+     - Release-to-select behavior
+   - **Status**: Complete guide, ready for Android implementation
+
 ---
 
 ## 🎯 Quick Start for Android Team
@@ -52,7 +86,10 @@ This package contains all necessary documentation for Android recreation:
 ### Step 1: Read the Documentation
 1. Start with **ANDROID_DOCS_HomeView_Tabs.md** to understand overall architecture
 2. Deep dive into **ANDROID_DOCS_Cube_Specification.md** for 3D rendering details
-3. Reference **ANDROID_DOCS_PDF_CREATION_GUIDE.md** if you need visual PDFs
+3. Use **ANDROID_DOCS_Notifications_Implementation.md** for device + in-app radius notifications
+4. Use **ANDROID_DOCS_PopularPhone.md** for the constructed, aspect-fit retro phone
+5. Use **ANDROID_DOCS_Cube_Menu_Wheel.md** for the reusable hold-cube submenu wheel
+6. Reference **ANDROID_DOCS_PDF_CREATION_GUIDE.md** if you need visual PDFs
 
 ### Step 2: Generate PDFs (Optional but Recommended)
 ```bash
@@ -99,6 +136,7 @@ See "Android-Specific Implementation Notes" sections in each doc
 1. **HomeView** (Main container)
    - Tab state management
    - Cube rotation controller
+   - Persistent cube overlay that remains visible above all main-tab child screens
    - Global radius bar
    - Upload status overlay
 
@@ -127,11 +165,14 @@ See "Android-Specific Implementation Notes" sections in each doc
    - White launch loading screen with animated centered Poplur logo
    - Custom volume bars on hardware volume up/down after Feed loading completes
    - Country/channel navigation
+   - Full-screen TV Guide overlay with PiP layout; videos keep playing audibly behind it
    - Like/comment actions
 
 6. **ProfileView** (Profile tab)
    - Post grid → RecyclerView with GridLayoutManager
-   - Profile header
+   - Profile header pushed up after removing fixed top action icons
+   - Reusable hold-cube rainbow menu wheel for mail, settings, phone, notifications, and store
+   - PopularPhone opens from the phone submenu action as a constructed, aspect-fit Compose/Canvas phone
    - Statistics display
    - Navigation to other profiles
 
@@ -226,6 +267,14 @@ The iOS and Android apps **share the same Firebase project**:
   - userID: String
   - text: String
   - timestamp: Timestamp
+
+/users/{userID}/radiusPurchases/{purchaseID}
+  - productID: String
+  - title: String
+  - radiusMeters: Int
+  - storeTransactionID: String
+  - purchasedAt: Timestamp
+  - platform: String ("ios" or "android")
 ```
 
 ### Storage
@@ -237,6 +286,16 @@ The iOS and Android apps **share the same Firebase project**:
 
 ### Authentication
 Both apps use **Firebase Authentication** with email/password
+
+### Radius Purchases
+- Radius is a digital app benefit and must use the platform store checkout.
+- iOS uses StoreKit In-App Purchase consumables; Android must use Google Play Billing consumable products.
+- Android product IDs must match the iOS package meanings:
+  - `com.apptist.Poplur2025.radius.starter`: +5 km
+  - `com.apptist.Poplur2025.radius.city`: +25 km
+  - `com.apptist.Poplur2025.radius.world`: +100 km
+- The app must not grant radius from a local button tap. Grant only after Google Play returns a purchased state and the purchase token is verified/recorded.
+- After purchase, write a `radiusPurchases` ledger document and increment `users/{userID}.purchasedRadiusMeters`.
 
 ---
 
@@ -250,6 +309,7 @@ Both apps use **Firebase Authentication** with email/password
 
 ### UI Tests (Espresso)
 - [ ] Tab navigation (swipe left/right on cube)
+- [ ] Cube remains visible and interactive on every main-tab child screen, with higher z-order/elevation than tab content
 - [ ] Camera capture flow
 - [ ] Feed scrolling and video playback
 - [ ] Feed launch uses white Poplur-logo loading screen, not black
@@ -257,13 +317,19 @@ Both apps use **Firebase Authentication** with email/password
 - [ ] Feed first page includes images, videos, and sponsored ads
 - [ ] Feed volume bars appear on volume up and volume down, and stay hidden during launch loading
 - [ ] Feed videos resume/reload after app background and foreground
+- [ ] TV Guide covers the whole Feed UI, keeps Feed video audio playing behind it, uses green channel numbers, and uses a tablet hamburger channel rail
 - [ ] Profile grid interaction
 - [ ] Map location selection
+- [ ] Daily notification appears on device and in the in-app notifications list
+- [ ] AI radius notification describes growth, decline, strongest area, or area takeover
 
 ### Integration Tests
 - [ ] Firebase read/write
 - [ ] Image/video upload
 - [ ] User authentication
+- [ ] Google Play Billing radius purchase uses real checkout and grants only after verified purchase
+- [ ] Radius purchase ledger writes to Firestore and survives app restart
+- [ ] FCM/local notification pipeline mirrors delivered notifications in app
 - [ ] Real-time updates
 
 ### Performance Tests
@@ -312,11 +378,13 @@ All icons are **SF Symbols** on iOS. Map to **Material Icons** on Android:
    - Balanced image/video/sponsored-ad pagination
    - White Poplur-logo launch loading overlay that fades after first media render
    - Hardware volume up/down custom volume bars, suppressed during launch loading
+   - Full-screen TV Guide with PiP-style current channel panel; selecting a row tunes the Feed category
    - Like/comment actions
    
 2. **Profile Tab**:
    - Post grid with RecyclerView
    - Profile header with stats
+   - Constructed PopularPhone screen for the phone action
    - Navigation to other profiles
    
 3. **Map Tab**:
@@ -464,9 +532,12 @@ The Android app should match iOS when:
 ### Functional Parity
 - [ ] All 4 tabs work identically
 - [ ] Cube rotates smoothly with gestures
+- [ ] Cube remains visible on every main-tab and child-route screen
 - [ ] Camera captures photos and 10-second videos
 - [ ] Feed plays videos with country/channel navigation
 - [ ] Profile shows posts in grid with stats
+- [ ] Profile top action icons are removed; holding the cube opens the reusable rainbow menu wheel, cycles with pop sounds, and release selects the focused item
+- [ ] PopularPhone is rendered from Android UI geometry, aspect-fits to the screen, and does not stretch a phone bitmap
 - [ ] Map allows location selection for posts
 - [ ] Radius bar displays and animates correctly
 - [ ] Upload flow works end-to-end
@@ -490,6 +561,7 @@ The Android app should match iOS when:
 - [ ] AR face filters work
 - [ ] User recognition works
 - [ ] Push notifications work
+- [ ] Daily AI radius notification appears on device and in Profile notifications
 - [ ] Offline mode works (cached content)
 
 ---

@@ -46,6 +46,19 @@ private struct ProfileNotificationItem: Identifiable {
     let isUnchecked: Bool
 }
 
+private extension ProfileNotificationItem.Kind {
+    init(deviceKind: PoplurDeviceNotification.Kind) {
+        switch deviceKind {
+        case .radiusGrowth:
+            self = .postRadius
+        case .radiusDip:
+            self = .accumulatedRadius
+        case .areaTakeover, .dailyInsight:
+            self = .like
+        }
+    }
+}
+
 struct ProfileView: View {
     @Environment(\.layoutPreviewMode) private var layoutPreviewMode
     @EnvironmentObject private var auth: AuthViewModel
@@ -92,10 +105,13 @@ struct ProfileView: View {
     @State private var profileImageURL: URL? = nil
     @State private var showSettings = false
     @State private var navigateToMessages = false
+    @State private var showPopularPhone = false
     @State private var showNotifications = false
     @State private var hasUncheckedNotifications = true
+    @StateObject private var notificationCenter = PoplurNotificationCenter.shared
     @State private var showRadiusStore = false
     @State private var purchasedRadiusMeters: Int = 0
+    @StateObject private var radiusPurchaseVM = RadiusPurchaseViewModel()
     @State private var averageRadius: Double = 5000
     @State private var navigateToScanner = false
     @State private var showImagePicker = false
@@ -107,11 +123,139 @@ struct ProfileView: View {
 
     @State private var barHeightFactor: CGFloat = 1.0
     @State private var isHoldingCube: Bool = false
+    @StateObject private var cubeMenuWheel = CubeMenuWheelController()
 
     @State private var isLoadingMore = false
     @State private var canLoadMore = true
     @State private var lastDocument: QueryDocumentSnapshot? = nil
     private let pageSize = 18
+
+    private enum ProfileSubmenuRoute {
+        case mail
+        case settings
+        case notifications
+        case phone
+        case store
+    }
+
+    private var isShowingMainTabChildRoute: Bool {
+        showSettings || navigateToMessages || showNotifications || showRadiusStore || navigateToScanner || navigateToViewer
+    }
+
+    private func postMainTabChildRouteVisibility() {
+        NotificationCenter.default.post(
+            name: .MainTabChildRouteVisibilityChanged,
+            object: isShowingMainTabChildRoute
+        )
+    }
+
+    private func postProfileCubeIconOverride(_ item: CubeSubmenuItem?) {
+        guard isOwnProfile else { return }
+        if let item {
+            NotificationCenter.default.post(
+                name: .CubeProfileIconOverrideChanged,
+                object: nil,
+                userInfo: [
+                    "title": item.title,
+                    "systemImage": item.systemImage
+                ]
+            )
+        } else {
+            NotificationCenter.default.post(name: .CubeProfileIconOverrideChanged, object: nil)
+        }
+    }
+
+    private func postProfileCubeIconOverride(forSubmenuID id: String) {
+        postProfileCubeIconOverride(cubeSubmenuItems.first { $0.id == id })
+    }
+
+    private func syncProfileCubeIconToActiveRoute() {
+        guard !cubeMenuWheel.isOnScreen else { return }
+        if showPopularPhone {
+            postProfileCubeIconOverride(forSubmenuID: "phone")
+        } else if navigateToMessages {
+            postProfileCubeIconOverride(forSubmenuID: "mail")
+        } else if showSettings {
+            postProfileCubeIconOverride(forSubmenuID: "settings")
+        } else if showNotifications {
+            postProfileCubeIconOverride(forSubmenuID: "notifications")
+        } else if showRadiusStore {
+            postProfileCubeIconOverride(forSubmenuID: "store")
+        } else {
+            postProfileCubeIconOverride(nil)
+        }
+    }
+
+    private func openProfileSubmenuRoute(_ route: ProfileSubmenuRoute) {
+        navigateToScanner = false
+        navigateToViewer = false
+        showSettings = route == .settings
+        navigateToMessages = route == .mail
+        showNotifications = route == .notifications
+        showPopularPhone = route == .phone
+        showRadiusStore = route == .store
+
+        if route == .notifications {
+            hasUncheckedNotifications = false
+        }
+    }
+
+    private func closeProfileSubroutes() {
+        editing = false
+        showProfilePhotoOptions = false
+        showPopularPhone = false
+        showSettings = false
+        navigateToMessages = false
+        showNotifications = false
+        showRadiusStore = false
+        navigateToScanner = false
+        navigateToViewer = false
+    }
+
+    private var cubeSubmenuItems: [CubeSubmenuItem] {
+        [
+            CubeSubmenuItem(
+                id: "mail",
+                title: "Mail",
+                systemImage: "envelope.fill",
+                tint: Color(red: 0.42, green: 1.0, blue: 0.33)
+            ) {
+                openProfileSubmenuRoute(.mail)
+            },
+            CubeSubmenuItem(
+                id: "settings",
+                title: "Settings",
+                systemImage: "gearshape.fill",
+                tint: .indigo
+            ) {
+                openProfileSubmenuRoute(.settings)
+            },
+            CubeSubmenuItem(
+                id: "notifications",
+                title: "Notifications",
+                systemImage: "bell.fill",
+                tint: .orange
+            ) {
+                openProfileSubmenuRoute(.notifications)
+            },
+            CubeSubmenuItem(
+                id: "phone",
+                title: "Phone",
+                systemImage: "phone.fill",
+                tint: .teal
+            ) {
+                openProfileSubmenuRoute(.phone)
+            },
+            CubeSubmenuItem(
+                id: "store",
+                title: "Store",
+                systemImage: "cart.fill",
+                tint: Color(red: 0.95, green: 0.55, blue: 0.16)
+            ) {
+                openProfileSubmenuRoute(.store)
+            }
+        ]
+    }
     
     // Helper to create binding for EditProfileView
     private var editableUserProfileBinding: Binding<AnyEditableUserProfile?> {
@@ -169,26 +313,14 @@ struct ProfileView: View {
     }
 
     private var profileNotifications: [ProfileNotificationItem] {
-        [
+        notificationCenter.notifications.map { item in
             ProfileNotificationItem(
-                kind: .like,
-                title: "Post liked",
-                detail: "Your latest post picked up new likes.",
-                isUnchecked: hasUncheckedNotifications
-            ),
-            ProfileNotificationItem(
-                kind: .postRadius,
-                title: "Post radius jumped",
-                detail: "One of your posts expanded significantly in the last hour.",
-                isUnchecked: hasUncheckedNotifications
-            ),
-            ProfileNotificationItem(
-                kind: .accumulatedRadius,
-                title: "Accumulated radius dipped",
-                detail: "Your total radius is down from the previous check.",
-                isUnchecked: false
+                kind: ProfileNotificationItem.Kind(deviceKind: item.kind),
+                title: item.title,
+                detail: item.detail,
+                isUnchecked: item.isUnread
             )
-        ]
+        }
     }
     
     // MARK: - Simple disk cache for posts (per user)
@@ -237,76 +369,13 @@ struct ProfileView: View {
             Color.white.ignoresSafeArea()
 
             VStack(spacing: 0) {
-                    // Top buttons row
-                    HStack {
-                        if isOwnProfile {
-                            VStack(spacing: 8) {
-                                Button {
-                                    navigateToMessages = true
-                                } label: {
-                                    Image(systemName: "message.fill")
-                                        .font(.system(size: 20, weight: .semibold))
-                                        .foregroundColor(.black.opacity(0.7))
-                                        .frame(width: 44, height: 44)
-                                }
-                                .buttonStyle(.plain)
-
-                                Button {
-                                    hasUncheckedNotifications = false
-                                    showNotifications = true
-                                } label: {
-                                    ProfileActionIcon(systemName: "gift.fill", showsBadge: hasUncheckedNotifications)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                            
-                            Spacer()
-                            
-                            VStack(spacing: 8) {
-                                Button {
-                                    showSettings = true
-                                } label: {
-                                    Image(systemName: "gearshape.fill")
-                                        .font(.system(size: 20, weight: .semibold))
-                                        .foregroundColor(.black.opacity(0.7))
-                                        .frame(width: 44, height: 44)
-                                }
-                                .buttonStyle(.plain)
-
-                                Button {
-                                    showRadiusStore = true
-                                } label: {
-                                    ProfileActionIcon(systemName: "dollarsign", showsBadge: false)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        } else {
-                            Button {
-                                NotificationCenter.default.post(name: Notification.Name("SwitchToFeedTab"), object: nil)
-                            } label: {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "chevron.left")
-                                    Text("Feed")
-                                }
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundColor(.black.opacity(0.7))
-                                .frame(height: 44)
-                            }
-                            .buttonStyle(.plain)
-
-                            Spacer()
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 0)
-                
                     VStack(spacing: 10) {
                         avatarRow
                         usernameRow
                         modeSwitcher
                     }
-                    .padding(.top, 4)
-                    .padding(.bottom, 4)
+                    .padding(.top, isOwnProfile ? 8 : 0)
+                    .padding(.bottom, 0)
 
                     // Scrollable content with readers for "scroll to top"
                     ScrollViewReader { proxy in
@@ -493,18 +562,6 @@ struct ProfileView: View {
                         .onDisappear {
                             NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
                         }
-                        .overlay(alignment: .topTrailing) {
-                            Button {
-                                withAnimation(.easeOut(duration: 0.25)) { expandedPost = nil }
-                                NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
-                            } label: {
-                                Image(systemName: "xmark.circle.fill")
-                                    .font(.system(size: 28, weight: .bold))
-                                    .foregroundStyle(.white.opacity(0.95))
-                                    .padding(12)
-                            }
-                            .buttonStyle(.plain)
-                        }
                         .overlay(alignment: .topLeading) {
                             if isOwnProfile {
                                 Button(role: .destructive) {
@@ -539,65 +596,132 @@ struct ProfileView: View {
                     }
                     .zIndex(10)
                 }
-            }
-            NavigationLink(isActive: $showSettings) {
-                AppSettingsView()
-            } label: {
-                EmptyView()
-            }
-            .hidden()
 
-            NavigationLink(isActive: $navigateToMessages) {
-                MessagesRootView()
-            } label: {
-                EmptyView()
-            }
-            .hidden()
+                if cubeMenuWheel.isOnScreen && isOwnProfile {
+                    CubeMenuWheelOverlay(controller: cubeMenuWheel)
+                    .transition(.opacity)
+                    .zIndex(20)
+                }
 
-            NavigationLink(isActive: $showNotifications) {
-                ProfileNotificationsView(
-                    notifications: profileNotifications,
-                    onMarkRead: { hasUncheckedNotifications = false }
-                )
-            } label: {
-                EmptyView()
-            }
-            .hidden()
+                if showPopularPhone {
+                    PopularPhone(user: FakeUser(id: UUID(), name: "Poplur Phone"))
+                        .transition(.opacity)
+                        .zIndex(30)
+                }
 
-            NavigationLink(isActive: $showRadiusStore) {
-                RadiusStoreView(purchasedRadiusMeters: $purchasedRadiusMeters)
-            } label: {
-                EmptyView()
-            }
-            .hidden()
+                if editing {
+                    EditProfileView(user: editableUserProfileBinding) {
+                        editing = false
+                    }
+                    .transition(.opacity)
+                    .zIndex(40)
+                }
 
-            NavigationLink(isActive: $navigateToScanner) {
-                HeadScannerView { result in
-                    switch result {
-                    case .success(let output):
-                        // Save snapshot image for ML face recognition
-                        if let image = output.previewImage {
-                            self.profileImage = image
-                            if let url = try? saveProfileImage(image) {
-                                self.profileImageURL = url
-                                // Save for face recognition ML model
-                                saveFaceForRecognition(image: image)
+                if showProfilePhotoOptions {
+                    VStack(spacing: 12) {
+                        Button("Scan Face (AR)") {
+                            showProfilePhotoOptions = false
+                            navigateToScanner = true
+                        }
+                        .buttonStyle(.borderedProminent)
+
+                        Button("Take Photo") {
+                            showProfilePhotoOptions = false
+                            showImagePicker = true
+                        }
+                        .buttonStyle(.bordered)
+
+                        if profileImage != nil || profileImageURL != nil {
+                            Button("Delete Photo", role: .destructive) {
+                                showProfilePhotoOptions = false
+                                deleteProfilePhoto()
                             }
-                            NotificationCenter.default.post(name: Notification.Name("ProfilePhotoUpdated"), object: image)
+                            .buttonStyle(.bordered)
                         }
-                        // Save 3D model URL if available
-                        self.lastHeadModelURL = output.usdzURL
-                        if output.usdzURL != nil {
-                            self.navigateToViewer = true
+                    }
+                    .padding(18)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .padding(.horizontal, 28)
+                    .transition(.opacity)
+                    .zIndex(45)
+                }
+
+                if showSettings {
+                    AppSettingsView()
+                        .transition(.opacity)
+                        .zIndex(50)
+                }
+
+                if navigateToMessages {
+                    MessagesRootView()
+                        .transition(.opacity)
+                        .zIndex(51)
+                }
+
+                if showNotifications {
+                    ProfileNotificationsView(
+                        notifications: profileNotifications,
+                        onMarkRead: {
+                            hasUncheckedNotifications = false
+                            notificationCenter.markAllRead()
                         }
-                    case .failure:
-                        break
+                    )
+                    .transition(.opacity)
+                    .zIndex(52)
+                }
+
+                if showRadiusStore {
+                    RadiusStoreView(
+                        purchasedRadiusMeters: $purchasedRadiusMeters,
+                        userID: effectiveUserID,
+                        purchaseVM: radiusPurchaseVM
+                    )
+                    .transition(.opacity)
+                    .zIndex(53)
+                }
+
+                if navigateToScanner {
+                    HeadScannerView { result in
+                        switch result {
+                        case .success(let output):
+                            // Save snapshot image for ML face recognition
+                            if let image = output.previewImage {
+                                self.profileImage = image
+                                if let url = try? saveProfileImage(image) {
+                                    self.profileImageURL = url
+                                    // Save for face recognition ML model
+                                    saveFaceForRecognition(image: image)
+                                }
+                                NotificationCenter.default.post(name: Notification.Name("ProfilePhotoUpdated"), object: image)
+                            }
+                            // Save 3D model URL if available
+                            self.lastHeadModelURL = output.usdzURL
+                            if output.usdzURL != nil {
+                                self.navigateToViewer = true
+                            }
+                        case .failure:
+                            break
+                        }
+                    }
+                    .transition(.opacity)
+                    .zIndex(54)
+                }
+
+                if navigateToViewer {
+                    if let url = lastHeadModelURL {
+                        USDZViewerView(usdzURL: url)
+                            .transition(.opacity)
+                            .zIndex(55)
+                    } else {
+                        Text("No model available")
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .background(Color.black)
+                            .foregroundColor(.white)
+                            .transition(.opacity)
+                            .zIndex(55)
                     }
                 }
-            } label: {
-                EmptyView()
             }
-            .hidden()
 
             .sheet(isPresented: $showImagePicker) {
                 ImagePickerView(
@@ -619,20 +743,6 @@ struct ProfileView: View {
                 )
             }
 
-            NavigationLink(isActive: $navigateToViewer) {
-                if let url = lastHeadModelURL {
-                    USDZViewerView(usdzURL: url)
-                } else {
-                    Text("No model available")
-                }
-            } label: {
-                EmptyView()
-            }
-            .hidden()
-
-            .sheet(isPresented: $editing) {
-                EditProfileView(user: editableUserProfileBinding)
-            }
             .task {
                 if !isRunningInPreviews {
                     print("📊 [ProfileView] Initial .task running for userID: \(userID ?? "nil")")
@@ -649,6 +759,7 @@ struct ProfileView: View {
                         } else {
                             print("📊 [ProfileView] No posts loaded, radius stays at 0")
                         }
+                        self.refreshDailyNotificationsFromCurrentPosts()
                     }
                     
                     // Only load profile image for own profile
@@ -685,6 +796,7 @@ struct ProfileView: View {
                             // Ensure radius stays at 0 if no posts
                             RadiusBarAnimator.animate(to: 0, duration: 0.3)
                         }
+                        self.refreshDailyNotificationsFromCurrentPosts()
                     }
                 }
             }
@@ -815,26 +927,30 @@ struct ProfileView: View {
                 // Update radius bar to reflect new total
                 averageRadius = Double(averagePostRadius())
                 RadiusBarAnimator.animate(to: averageRadius, duration: 0.8)
+                refreshDailyNotificationsFromCurrentPosts()
             }
             .onReceive(NotificationCenter.default.publisher(for: .cubeHoldBegan)) { _ in
                 print("🎯 [ProfileView] Received cubeHoldBegan - isOwnProfile: \(isOwnProfile)")
-                if !isRunningInPreviews { 
+                if !isRunningInPreviews {
                     isHoldingCube = true
-                    
-                    // Navigate to settings if viewing own profile (after brief delay to allow hold gesture to complete)
+
                     if isOwnProfile {
-                        print("✅ [ProfileView] Navigating to settings in 0.1s")
-                        Task { @MainActor in
-                            try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 second
-                            showSettings = true
-                        }
+                        print("✅ [ProfileView] Showing cube menu wheel")
+                        cubeMenuWheel.beginHold(items: cubeSubmenuItems)
+                        postProfileCubeIconOverride(cubeMenuWheel.selectedItem)
                     } else {
-                        print("⚠️ [ProfileView] Not navigating to settings - not own profile")
+                        print("⚠️ [ProfileView] Not showing cube menu wheel - not own profile")
                     }
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: .cubeHoldEnded)) { _ in
-                if !isRunningInPreviews { isHoldingCube = false }
+                if !isRunningInPreviews {
+                    isHoldingCube = false
+                    if isOwnProfile {
+                        postProfileCubeIconOverride(cubeMenuWheel.selectedItem)
+                        cubeMenuWheel.endHold(activateSelected: true)
+                    }
+                }
             }
             .task(id: isHoldingCube) {
                 if isRunningInPreviews { return }
@@ -865,13 +981,61 @@ struct ProfileView: View {
                     print("⚠️ [ProfileView] Ignoring CubeGlobalTap - not own profile")
                     return 
                 }
+                if cubeMenuWheel.isOnScreen {
+                    print("✅ [ProfileView] Closing cube menu wheel")
+                    postProfileCubeIconOverride(nil)
+                    cubeMenuWheel.endHold(activateSelected: false)
+                    return
+                }
+                if expandedPost != nil {
+                    expandedPost = nil
+                    return
+                }
+                if editing || showProfilePhotoOptions || showPopularPhone || isShowingMainTabChildRoute {
+                    closeProfileSubroutes()
+                    return
+                }
                 print("✅ [ProfileView] Opening messages")
-                navigateToMessages = true
+                openProfileSubmenuRoute(.mail)
             }
             .onDisappear {
                 // Reset radius bar when leaving profile view
                 print("📊 [ProfileView] onDisappear - notifying to restore feed radius")
+                cubeMenuWheel.endHold(activateSelected: false)
+                postProfileCubeIconOverride(nil)
                 NotificationCenter.default.post(name: Notification.Name("ProfileViewDismissed"), object: nil)
+                NotificationCenter.default.post(name: .MainTabChildRouteVisibilityChanged, object: false)
+            }
+            .onChange(of: cubeMenuWheel.selectedIndex) { _, _ in
+                if cubeMenuWheel.isVisible {
+                    postProfileCubeIconOverride(cubeMenuWheel.selectedItem)
+                }
+            }
+            .onChange(of: showSettings) { _, _ in
+                postMainTabChildRouteVisibility()
+                syncProfileCubeIconToActiveRoute()
+            }
+            .onChange(of: navigateToMessages) { _, _ in
+                postMainTabChildRouteVisibility()
+                syncProfileCubeIconToActiveRoute()
+            }
+            .onChange(of: showNotifications) { _, _ in
+                postMainTabChildRouteVisibility()
+                syncProfileCubeIconToActiveRoute()
+            }
+            .onChange(of: showRadiusStore) { _, _ in
+                postMainTabChildRouteVisibility()
+                syncProfileCubeIconToActiveRoute()
+            }
+            .onChange(of: showPopularPhone) { _, _ in
+                syncProfileCubeIconToActiveRoute()
+            }
+            .onChange(of: navigateToScanner) { _, _ in
+                postMainTabChildRouteVisibility()
+                syncProfileCubeIconToActiveRoute()
+            }
+            .onChange(of: navigateToViewer) { _, _ in
+                postMainTabChildRouteVisibility()
             }
             .onChange(of: routedUserID) { _, newUserID in
                 print("🔄 [ProfileView] routedUserID changed to: \(newUserID ?? "nil")")
@@ -927,20 +1091,6 @@ struct ProfileView: View {
                     showProfilePhotoOptions = true
                 } label: {
                     avatarContent
-                }
-                .confirmationDialog("Update Profile Photo", isPresented: $showProfilePhotoOptions, titleVisibility: .visible) {
-                    Button("Scan Face (AR)") {
-                        navigateToScanner = true
-                    }
-                    Button("Take Photo") {
-                        showImagePicker = true
-                    }
-                    if profileImage != nil || profileImageURL != nil {
-                        Button("Delete Photo", role: .destructive) {
-                            deleteProfilePhoto()
-                        }
-                    }
-                    Button("Cancel", role: .cancel) {}
                 }
                 .buttonStyle(.plain)
             } else {
@@ -1180,6 +1330,7 @@ struct ProfileView: View {
                 self.canLoadMore = false
                 self.averageRadius = Double(self.averagePostRadius())
                 self.isLoading = false
+                self.refreshDailyNotificationsFromCurrentPosts()
             }
             
             Task.detached { await prefetchImages(for: convertedPosts) }
@@ -1192,6 +1343,7 @@ struct ProfileView: View {
                 self.myPosts = cached
                 self.hasLoadedOnce = true
                 self.averageRadius = Double(self.averagePostRadius())
+                self.refreshDailyNotificationsFromCurrentPosts()
             }
             // Prefetch images for cached posts
             Task.detached { await prefetchImages(for: cached) }
@@ -1219,6 +1371,7 @@ struct ProfileView: View {
                 self.canLoadMore = page.posts.count >= pageSize && page.lastDoc != nil
                 self.averageRadius = Double(self.averagePostRadius())
                 self.hasLoadedOnce = true
+                self.refreshDailyNotificationsFromCurrentPosts()
             }
             // Persist latest posts to cache
             savePostsToCache(page.posts, for: targetUID)
@@ -1270,6 +1423,7 @@ struct ProfileView: View {
                 self.canLoadMore = false
                 self.averageRadius = Double(self.averagePostRadius())
                 self.isLoading = false
+                self.refreshDailyNotificationsFromCurrentPosts()
             }
             Task.detached { await prefetchImages(for: converted) }
             return
@@ -1281,6 +1435,7 @@ struct ProfileView: View {
                 self.myPosts = cached
                 self.hasLoadedOnce = true
                 self.averageRadius = Double(self.averagePostRadius())
+                self.refreshDailyNotificationsFromCurrentPosts()
             }
             Task.detached { await prefetchImages(for: cached) }
         } else {
@@ -1307,6 +1462,7 @@ struct ProfileView: View {
                 self.canLoadMore = page.posts.count >= pageSize && page.lastDoc != nil
                 self.averageRadius = Double(self.averagePostRadius())
                 self.hasLoadedOnce = true
+                self.refreshDailyNotificationsFromCurrentPosts()
             }
             savePostsToCache(page.posts, for: uid)
             Task.detached { await prefetchImages(for: page.posts) }
@@ -1326,6 +1482,7 @@ struct ProfileView: View {
                     self.hasLoadedOnce = true
                     self.canLoadMore = false
                     self.averageRadius = Double(self.averagePostRadius())
+                    self.refreshDailyNotificationsFromCurrentPosts()
                 }
                 Task.detached { await prefetchImages(for: cached) }
             } else {
@@ -1606,6 +1763,22 @@ struct ProfileView: View {
         let total = myPosts.reduce(0) { $0 + $1.radius }
         return total
     }
+
+    private func refreshDailyNotificationsFromCurrentPosts() {
+        guard isOwnProfile else { return }
+        let signals = myPosts.map {
+            PoplurNotificationPostSignal(
+                id: $0.id,
+                latitude: $0.latitude,
+                longitude: $0.longitude,
+                radius: $0.radius,
+                viewCount: $0.viewCount
+            )
+        }
+        Task {
+            await notificationCenter.refreshDailyNotification(from: signals)
+        }
+    }
     
     private func deletePost(_ post: Post?) async {
         guard let post else { return }
@@ -1740,28 +1913,6 @@ struct ProfileView: View {
     }
 }
 
-private struct ProfileActionIcon: View {
-    let systemName: String
-    let showsBadge: Bool
-
-    var body: some View {
-        ZStack(alignment: .topTrailing) {
-            Image(systemName: systemName)
-                .font(.system(size: 20, weight: .semibold))
-                .foregroundColor(.black.opacity(0.7))
-                .frame(width: 44, height: 44)
-
-            if showsBadge {
-                Circle()
-                    .fill(Color.red)
-                    .frame(width: 10, height: 10)
-                    .offset(x: -9, y: 9)
-            }
-        }
-        .accessibilityElement(children: .ignore)
-    }
-}
-
 private struct ProfileNotificationsView: View {
     let notifications: [ProfileNotificationItem]
     let onMarkRead: () -> Void
@@ -1824,12 +1975,8 @@ private struct ProfileNotificationsView: View {
 
 private struct RadiusStoreView: View {
     @Binding var purchasedRadiusMeters: Int
-
-    private let packages: [(title: String, radiusMeters: Int, price: String)] = [
-        ("Starter Radius", 5_000, "$1.99"),
-        ("City Boost", 25_000, "$4.99"),
-        ("World Push", 100_000, "$9.99")
-    ]
+    let userID: String?
+    @ObservedObject var purchaseVM: RadiusPurchaseViewModel
 
     var body: some View {
         ScrollView {
@@ -1850,7 +1997,14 @@ private struct RadiusStoreView: View {
                         .padding(.vertical, 8)
                 }
 
-                ForEach(packages, id: \.title) { package in
+                if let message = purchaseVM.message {
+                    Text(message)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(message.localizedCaseInsensitiveContains("failed") || message.localizedCaseInsensitiveContains("not") ? .red : .green)
+                        .padding(.vertical, 6)
+                }
+
+                ForEach(RadiusPurchasePackage.allCases) { package in
                     HStack(spacing: 14) {
                         Circle()
                             .fill(Color.green.opacity(0.14))
@@ -1873,16 +2027,28 @@ private struct RadiusStoreView: View {
                         Spacer()
 
                         Button {
-                            purchasedRadiusMeters += package.radiusMeters
+                            Task {
+                                if let purchased = await purchaseVM.buyRadius(package, userID: userID) {
+                                    purchasedRadiusMeters += purchased
+                                }
+                            }
                         } label: {
-                            Text(package.price)
-                                .font(.system(size: 15, weight: .heavy, design: .rounded))
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 10)
-                                .background(Color.black, in: Capsule())
+                            Group {
+                                if purchaseVM.isPurchasing(package) {
+                                    ProgressView()
+                                        .tint(.white)
+                                } else {
+                                    Text(purchaseVM.displayPrice(for: package))
+                                        .font(.system(size: 15, weight: .heavy, design: .rounded))
+                                }
+                            }
+                            .foregroundColor(.white)
+                            .frame(minWidth: 64, minHeight: 38)
+                            .padding(.horizontal, 12)
+                            .background(purchaseVM.productsByID[package.productID] == nil ? Color.gray : Color.black, in: Capsule())
                         }
                         .buttonStyle(.plain)
+                        .disabled(purchaseVM.isPurchasing(package) || purchaseVM.productsByID[package.productID] == nil)
                     }
                     .padding(16)
                     .background(
@@ -1897,6 +2063,13 @@ private struct RadiusStoreView: View {
         .background(Color.white.ignoresSafeArea())
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
+        .task {
+            await purchaseVM.loadProducts()
+            let delivered = await purchaseVM.finishUndeliveredRadiusPurchases(userID: userID)
+            if delivered > 0 {
+                purchasedRadiusMeters += delivered
+            }
+        }
     }
 
     private func formattedRadius(_ meters: Int) -> String {

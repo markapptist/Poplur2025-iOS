@@ -1,7 +1,6 @@
 import SwiftUI
 import CoreLocation
 import AVFoundation
-import SpriteKit
 import Combine
 import MediaPlayer
 import AudioToolbox
@@ -34,9 +33,10 @@ final class IsometricBarModel: ObservableObject {
     init(radius: Double = 0) { self.radius = radius }
 }
 
-private struct HomeRecordedVideoPreviewItem: Identifiable {
+private struct HomeCapturePreviewItem: Identifiable {
     let id = UUID()
-    let url: URL
+    let image: UIImage?
+    let videoURL: URL?
 }
 
 private struct HiddenSystemVolumeBridge: UIViewRepresentable {
@@ -52,6 +52,34 @@ private struct HiddenSystemVolumeBridge: UIViewRepresentable {
     func updateUIView(_ uiView: MPVolumeView, context: Context) {}
 }
 
+private struct HomeFeedLaunchCover: View {
+    @State private var pulse = false
+
+    var body: some View {
+        ZStack {
+            Color.white.ignoresSafeArea()
+
+            Image("logo")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 132, height: 132)
+                .scaleEffect(pulse ? 1.04 : 0.96)
+                .opacity(pulse ? 1.0 : 0.86)
+                .animation(
+                    .easeInOut(duration: 0.9).repeatForever(autoreverses: true),
+                    value: pulse
+                )
+        }
+        .onAppear {
+            pulse = true
+        }
+    }
+}
+
+private extension Notification.Name {
+    static let feedHardwareVolumeChanged = Notification.Name("FeedHardwareVolumeChanged")
+}
+
 @MainActor
 private final class DeviceVolumeObserver: ObservableObject {
     @Published private(set) var level: Float
@@ -64,6 +92,7 @@ private final class DeviceVolumeObserver: ObservableObject {
     private var hideTask: Task<Void, Never>?
     private var volumePopPlayer: AVAudioPlayer?
     private var lastVolumePopTime: TimeInterval = 0
+    private var isSuppressed = false
 
     init() {
         level = session.outputVolume
@@ -83,6 +112,9 @@ private final class DeviceVolumeObserver: ObservableObject {
             ) { [weak self] notification in
                 let notifiedLevel = notification.userInfo?["AVSystemController_AudioVolumeNotificationParameter"] as? Float
                 let nextLevel = notifiedLevel ?? AVAudioSession.sharedInstance().outputVolume
+                NotificationCenter.default.post(name: .feedHardwareVolumeChanged, object: nil, userInfo: [
+                    "level": nextLevel
+                ])
                 Task { @MainActor in
                     self?.handleVolumeChange(nextLevel, forceShow: true)
                 }
@@ -106,10 +138,26 @@ private final class DeviceVolumeObserver: ObservableObject {
         volumePopPlayer?.stop()
     }
 
+    func showForHardwareVolumePress(level newLevel: Float? = nil) {
+        if isSuppressed {
+            setSuppressed(false)
+        }
+        handleVolumeChange(newLevel ?? session.outputVolume, forceShow: true)
+    }
+
+    func setSuppressed(_ suppressed: Bool) {
+        isSuppressed = suppressed
+        if suppressed {
+            hideTask?.cancel()
+            isShowing = false
+        }
+    }
+
     private func handleVolumeChange(_ newLevel: Float, forceShow: Bool = false) {
         let clampedLevel = max(0, min(1, newLevel))
         let changed = abs(clampedLevel - level) > 0.005
         level = clampedLevel
+        guard !isSuppressed else { return }
         if changed || forceShow {
             playVolumePop()
             showTemporarily()
@@ -185,12 +233,12 @@ extension EnvironmentValues {
         get { self[IsometricBarModelKey.self] }
         set { self[IsometricBarModelKey.self] = newValue }
     }
-    
+
     var homeViewIsPreviewRuntime: Bool {
         get { self[HomeViewIsPreviewRuntimeKey.self] }
         set { self[HomeViewIsPreviewRuntimeKey.self] = newValue }
     }
-    
+
     var previewSelectedTab: PreviewAppTab {
         get { self[PreviewSelectedTabKey.self] }
         set { self[PreviewSelectedTabKey.self] = newValue }
@@ -202,11 +250,20 @@ struct HomeCameraPreviewHost: UIViewControllerRepresentable {
 
     func makeUIViewController(context: Context) -> UIViewController {
         // Removed controller.preparePreviewIfNeeded() per instructions
-        return controller.recordPreviewViewController ?? controller.previewViewController ?? UIViewController()
+        let previewController = controller.recordPreviewViewController ?? controller.previewViewController ?? UIViewController()
+        forceCameraPreviewLayout(in: previewController)
+        return previewController
     }
 
     func updateUIViewController(_ uiViewController: UIViewController, context: Context) {
-        // No-op; preview controller is managed by CameraKitController
+        forceCameraPreviewLayout(in: uiViewController)
+    }
+
+    private func forceCameraPreviewLayout(in viewController: UIViewController) {
+        if let previewController = viewController as? CameraPreviewViewController {
+            previewController.forcePreviewLayout()
+        }
+        viewController.children.forEach(forceCameraPreviewLayout)
     }
 }
 
@@ -221,6 +278,7 @@ private final class LazyHomeCameraControllerHolder: ObservableObject {
         }
 
         let controller = CameraKitController()
+        controller.preparePreviewIfNeeded()
         cancellable = controller.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }
@@ -237,28 +295,28 @@ private final class LazyHomeCameraControllerHolder: ObservableObject {
 struct HomeView: View {
     @EnvironmentObject private var auth: AuthViewModel
     @Environment(\.scenePhase) private var scenePhase
-    
+
     @Environment(\.homeViewIsPreviewRuntime) private var isPreviewRuntime
     @Environment(\.previewSelectedTab) private var previewSelectedTab
-    
+
     // Changed per instructions to use EnvironmentObject
     @EnvironmentObject private var isometricBarSettings: IsometricBarSettings
-    
+
     // Start on feed tab instead of record tab
     @State private var selectedTab: AppTab = .feed
-    
+
     // Routed user ID when tapping on a username in Feed
     @State private var routedUserID: String? = nil
-    
+
     // Location only when needed
     @StateObject private var locationProvider = LocationProvider()
-    
+
     @StateObject private var cameraControllerHolder = LazyHomeCameraControllerHolder()
-    
+
     // AR Filters
     @State private var arFilterManager: ARFilterManager?
     @State private var showARFilters = false
-    
+
     // One-time flags to avoid doing heavy work repeatedly
     @State private var didTriggerFeedInitialLoad = false
     @State private var didTriggerMapInitialLoad = false
@@ -268,45 +326,64 @@ struct HomeView: View {
     @State private var didRunLaunchSequence = false
     @State private var bottomChromeVisible = false
     @State private var isFeedLaunchLoading = true
-    
+    @State private var feedLaunchSuppressionTask: Task<Void, Never>? = nil
+    @State private var isMainTabChildRouteVisible = false
+
+    // HUD sleep timer
+    @State private var isChromeAsleep: Bool = false
+    @State private var chromeSleepTask: Task<Void, Never>? = nil
+
     // Shared radius model controlling the global isometric bar value across all tabs
     @StateObject private var isometricBarModel = IsometricBarModel(radius: 0)
-    
+
     // User recognition manager for face detection
     @State private var userRecognitionManager: UserRecognitionManager?
-    
+
     @State private var recordHoldTask: Task<Void, Never>? = nil
     @State private var isRecordHolding: Bool = false
-    
+
     // Recording countdown state
     @State private var isRecording: Bool = false
     @State private var recordingSecondsRemaining: Int = 10
     @State private var recordingTimer: Timer? = nil
-    @State private var recordedVideoPreviewItem: HomeRecordedVideoPreviewItem? = nil
+    @State private var capturePreviewItem: HomeCapturePreviewItem? = nil
     @StateObject private var deviceVolumeObserver = DeviceVolumeObserver()
-    
+
     // Post count state (for displaying user's total posts)
     @State private var userPostCount: Int = 0
-    
+
     // Radius trend tracking for post count display
     @State private var previousRadius: Double? = nil
     @State private var radiusTrend: RadiusTrend = .neutral
-    
+
     enum RadiusTrend {
         case up, down, neutral
     }
-    
+
+    private var isCubeVisibleOnCurrentRoute: Bool {
+        [.map, .record, .feed, .profile].contains(selectedTab)
+    }
+
+    private var isLowerCubeHitAreaActive: Bool {
+        isCubeVisibleOnCurrentRoute && !isMainTabChildRouteVisible
+    }
+
     // Added state for cube yaw angle
     @State private var cubeYawDegrees: Double = 90
-    
+
     // Added per instructions to control initial yaw set once
     @State private var didSetInitialCubeYaw: Bool = false
-    
+
     // Upload status state
     @State private var showUploadStatus: Bool = false
     @State private var uploadStatusMessage: String = ""
     @State private var uploadStatusIcon: String = "arrow.up.circle.fill"
     @State private var uploadStatusColor: Color = .blue
+
+    // In-app call
+    @ObservedObject private var callManager = CallSessionManager.shared
+    @State private var incomingCallInfo: (callerName: String, channelId: String, documentId: String)? = nil
+
     init() {
         let appearance = UITabBarAppearance()
         appearance.configureWithTransparentBackground()
@@ -318,7 +395,7 @@ struct HomeView: View {
         }
         UITabBar.appearance().isTranslucent = true
     }
-    
+
     @ViewBuilder
     private var mapTabContent: some View {
         // LOCKED: MapViewProduction is the ONLY map view used in production.
@@ -341,7 +418,7 @@ struct HomeView: View {
                 }
             }
     }
-    
+
     @ViewBuilder
     private var recordTabContent: some View {
         Group {
@@ -349,6 +426,7 @@ struct HomeView: View {
                 ZStack {
                     // Camera preview with UIKit gestures enabled
                     HomeCameraPreviewHost(controller: cameraController)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .ignoresSafeArea()
                         .allowsHitTesting(true)
 
@@ -380,7 +458,7 @@ struct HomeView: View {
                 case .authorized:
                     let support = ensureRecordSupportManagers()
                     await cameraController.resumePreviewAfterInterruption()
-                    
+
                     // 🆕 Setup AR filter support
                     if let cameraVC = cameraController.recordPreviewViewController as? CameraPreviewViewController,
                        let displayLayer = cameraVC.displayLayer {
@@ -389,15 +467,15 @@ struct HomeView: View {
                             displayLayer: displayLayer
                         )
                     }
-                    
+
                     // Enable ML detection with user recognition
                     cameraController.enableMLDetection()
-                    
+
                     // Setup user recognition callback
                     cameraController.mlDetectionManager?.onFrameProcessed = { [weak recognitionManager = support.recognitionManager] pixelBuffer, objects in
                         recognitionManager?.processDetectedObjects(objects, from: pixelBuffer)
                     }
-                    
+
                     // Start recognition session to pre-load user radius
                     await support.recognitionManager.startRecognitionSession()
                 case .notDetermined:
@@ -418,7 +496,7 @@ struct HomeView: View {
             UserDefaults.standard.set(false, forKey: "ARFiltersShown")
         }
     }
-    
+
     private func ensureCameraRunningIfNeeded() {
         Task { @MainActor in
             guard !PreviewEnvHomeView.isPreview else { return }
@@ -511,9 +589,9 @@ struct HomeView: View {
             NotificationCenter.default.post(name: .SharedRadiusDidChange, object: nil, userInfo: ["radius": 0.0])
         }
     }
-    
+
     // MARK: - Recording Countdown Functions
-    
+
     /// Start the 10-second countdown timer and cube flashing
     /// Recording will continue even after user releases the hold (after 2 seconds)
     private func startRecordingCountdown() {
@@ -522,7 +600,7 @@ struct HomeView: View {
         recordingSecondsRemaining = 10
         startCubeFlashing()
         cameraControllerHolder.resolve().beginRecording()
-        
+
         recordingTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { timer in
             DispatchQueue.main.async {
                 self.recordingSecondsRemaining = max(0, self.recordingSecondsRemaining - 1)
@@ -534,7 +612,7 @@ struct HomeView: View {
             }
         }
     }
-    
+
     private func stopRecordingCountdown() {
         let wasRecording = isRecording
         isRecording = false
@@ -545,19 +623,19 @@ struct HomeView: View {
             cameraControllerHolder.controller?.endRecording()
         }
     }
-    
+
     private func startCubeFlashing() {
         NotificationCenter.default.post(name: Notification.Name("CubeStartFlashing"), object: nil)
     }
-    
+
     private func stopCubeFlashing() {
         NotificationCenter.default.post(name: Notification.Name("CubeStopFlashing"), object: nil)
     }
-    
+
     // MARK: - Helper rotation logic for cube yaw and tab switching
-    
+
     private enum RotationDirection { case left, right }
-    
+
     private func yawForTab(_ tab: AppTab) -> Double {
         // Define faces: record=0°, feed=90°, profile=180°, map=270°
         switch tab {
@@ -568,7 +646,7 @@ struct HomeView: View {
         case .settings: return 0 // Settings not currently in rotation
         }
     }
-    
+
     private func normalizedDelta(from current: Double, to target: Double, prefer direction: RotationDirection?) -> Double {
         // Compute shortest delta in [-180, 180]
         var delta = fmod(target - current + 540, 360) - 180
@@ -579,7 +657,7 @@ struct HomeView: View {
         }
         return delta
     }
-    
+
     private func animateYaw(to targetYaw: Double, duration: Double = 0.45, direction: RotationDirection? = nil) {
         let current = cubeYawDegrees.truncatingRemainder(dividingBy: 360)
         let delta = normalizedDelta(from: current, to: targetYaw, prefer: direction)
@@ -588,7 +666,7 @@ struct HomeView: View {
             cubeYawDegrees = final
         }
     }
-    
+
     private func nextTab(from tab: AppTab) -> AppTab {
         switch tab {
         case .map: return .record
@@ -598,7 +676,7 @@ struct HomeView: View {
         case .settings: return .feed // Settings not in rotation, default to feed
         }
     }
-    
+
     private func previousTab(from tab: AppTab) -> AppTab {
         switch tab {
         case .map: return .profile
@@ -608,13 +686,13 @@ struct HomeView: View {
         case .settings: return .feed // Settings not in rotation, default to feed
         }
     }
-    
+
     private func rotateCube(to newTab: AppTab, direction: RotationDirection) {
         let targetYaw = yawForTab(newTab)
         animateYaw(to: targetYaw, duration: 0.45, direction: direction)
         selectedTab = newTab
     }
-    
+
     @ViewBuilder
     private var feedTabContent: some View {
         FeedView()
@@ -623,7 +701,7 @@ struct HomeView: View {
                 NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
             }
     }
-    
+
     @ViewBuilder
     private var profileTabContent: some View {
         let resolvedUserID: String = {
@@ -656,7 +734,7 @@ struct HomeView: View {
             // 3) Give up and return empty string
             return ""
         }()
-        
+
         NavigationStack {
             ProfileView(userID: resolvedUserID)
                 .environment(\.routedUserID, routedUserID)
@@ -675,7 +753,32 @@ struct HomeView: View {
                 }
         }
     }
-    
+
+    // MARK: - HUD sleep timer
+
+    private func resetChromeSleepTimer() {
+        guard SettingsStore.shared.hudSleepTimerEnabled else {
+            if isChromeAsleep {
+                withAnimation(.easeIn(duration: 0.35)) { isChromeAsleep = false }
+            }
+            return
+        }
+        chromeSleepTask?.cancel()
+        if isChromeAsleep {
+            withAnimation(.easeIn(duration: 0.35)) { isChromeAsleep = false }
+        }
+        chromeSleepTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 30_000_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.8)) { isChromeAsleep = true }
+        }
+    }
+
+    private func putChromeToSleepImmediately() {
+        chromeSleepTask?.cancel()
+        withAnimation(.easeOut(duration: 0.5)) { isChromeAsleep = true }
+    }
+
     // MARK: - Body split for type-checker performance
 
     private var rootStack: some View {
@@ -711,16 +814,16 @@ struct HomeView: View {
                 .frame(width: 1, height: 1)
                 .allowsHitTesting(false)
                 .opacity(0.01)
-            
+
             // Upload Status Overlay
-            if showUploadStatus {
+            if showUploadStatus && !isMainTabChildRouteVisible {
                 VStack {
                     HStack(spacing: 12) {
                         Image(systemName: uploadStatusIcon)
                             .font(.title2)
                             .foregroundStyle(uploadStatusColor)
                             .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
-                        
+
                         Text(uploadStatusMessage)
                             .font(.subheadline)
                             .fontWeight(.medium)
@@ -730,13 +833,13 @@ struct HomeView: View {
                     .padding(.horizontal, 20)
                     .padding(.vertical, 14)
                     .padding(.top, 60)
-                    
+
                     Spacer()
                 }
                 .transition(.move(edge: .top).combined(with: .opacity))
                 .zIndex(999)
             }
-            
+
             // AR Filter Selector above cube (Snapchat-style)
             if showARFilters,
                selectedTab == .record,
@@ -746,7 +849,7 @@ struct HomeView: View {
                     // Transparent spacer that allows touches to pass through
                     Color.clear
                         .allowsHitTesting(false)
-                    
+
                     // Filter selector (captures touches for buttons)
                     ARFilterSelectorHorizontal(
                         filterManager: arFilterManager,
@@ -759,71 +862,97 @@ struct HomeView: View {
                 .zIndex(999)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
-            
-            // 3D Cube tab control overlay
-            VStack {
-                Spacer()
-                CubeTabView(
-                    selectedTab: $selectedTab,
-                    tintColor: .indigo,
-                    onSwipeUp: {
-                        if selectedTab == .record {
-                            NotificationCenter.default.post(name: Notification.Name("TriggerCameraCapture"), object: nil)
-                        } else {
-                            NotificationCenter.default.post(name: Notification.Name("ShowRecordCaptureUI"), object: nil)
-                        }
-                    },
-                    onCubeTap: {
-                        if selectedTab == .map {
-                            NotificationCenter.default.post(
-                                name: Notification.Name("CenterMapOnUser"),
-                                object: nil,
-                                userInfo: nil
-                            )
-                        } else if selectedTab == .profile {
-                            NotificationCenter.default.post(
-                                name: .CubeGlobalTap,
-                                object: nil
-                            )
-                        }
+
+            if let item = capturePreviewItem {
+                CapturePreviewOverlay(
+                    image: item.image,
+                    videoURL: item.videoURL,
+                    onDismiss: {
+                        capturePreviewItem = nil
                     }
                 )
-                .tint(.white)
-                .frame(height: 230)
-                .padding(.bottom, 8)
-                .padding(.trailing, 8)
+                .transition(.opacity)
+                .zIndex(900)
             }
-            .padding(.bottom, 24)
-            .ignoresSafeArea(edges: .bottom)
-            .allowsHitTesting(true)
-            .zIndex(998)
-            .gesture(
-                DragGesture(minimumDistance: 20)
-                    .onEnded { value in
-                        // Detect swipe down; settings no longer accessible via tab
-                        if value.translation.height > 20, selectedTab == .profile {
-                            // No-op: settings access removed from tab navigation
-                        }
-                        // New swipe logic for cube rotation based on horizontal swipe
-                        let dx = value.translation.width
-                        let dy = value.translation.height
-                        if abs(dx) > abs(dy) {
-                            if dx < -20 {
-                                // swipe left -> next tab, rotate right 90°
-                                rotateCube(to: nextTab(from: selectedTab), direction: .right)
-                            } else if dx > 20 {
-                                // swipe right -> previous tab, rotate left 90°
-                                rotateCube(to: previousTab(from: selectedTab), direction: .left)
+
+            if let info = incomingCallInfo {
+                IncomingCallView(
+                    callerName: info.callerName,
+                    channelId: info.channelId,
+                    documentId: info.documentId
+                )
+                .transition(.opacity)
+                .zIndex(900)
+            }
+
+            if isCubeVisibleOnCurrentRoute {
+                // 3D Cube tab control overlay
+                VStack {
+                    Spacer()
+                    CubeTabView(
+                        selectedTab: $selectedTab,
+                        tintColor: .indigo,
+                        onSwipeUp: {
+                            if selectedTab == .record {
+                                NotificationCenter.default.post(name: Notification.Name("TriggerCameraCapture"), object: nil)
+                            } else {
+                                NotificationCenter.default.post(name: Notification.Name("ShowRecordCaptureUI"), object: nil)
+                            }
+                        },
+                        onCubeTap: {
+                            if selectedTab == .map {
+                                NotificationCenter.default.post(
+                                    name: Notification.Name("CenterMapOnUser"),
+                                    object: nil,
+                                    userInfo: nil
+                                )
+                            } else if selectedTab == .profile {
+                                NotificationCenter.default.post(
+                                    name: .CubeGlobalTap,
+                                    object: nil
+                                )
                             }
                         }
-                    }
-            )
-            
+                    )
+                    .tint(.white)
+                    .frame(height: 230)
+                    .padding(.bottom, 8)
+                    .padding(.trailing, 8)
+                }
+                .padding(.bottom, 24)
+                .ignoresSafeArea(edges: .bottom)
+                .allowsHitTesting(true)
+                .zIndex(6000)
+                .gesture(
+                    DragGesture(minimumDistance: 20)
+                        .onEnded { value in
+                            // Detect swipe down; settings no longer accessible via tab
+                            if value.translation.height > 20, selectedTab == .profile {
+                                // No-op: settings access removed from tab navigation
+                            }
+                            // New swipe logic for cube rotation based on horizontal swipe
+                            let dx = value.translation.width
+                            let dy = value.translation.height
+                            if abs(dx) > abs(dy) {
+                                if dx < -20 {
+                                    // swipe left -> next tab, rotate right 90°
+                                    rotateCube(to: nextTab(from: selectedTab), direction: .right)
+                                } else if dx > 20 {
+                                    // swipe right -> previous tab, rotate left 90°
+                                    rotateCube(to: previousTab(from: selectedTab), direction: .left)
+                                }
+                            }
+                        }
+                )
+                .opacity(isChromeAsleep ? 0.2 : 1)
+                .allowsHitTesting(!isChromeAsleep)
+            }
+
 #if DEBUG
             // Invisible hit area temporarily disabled for input testing
             // (Re-enable after verifying CubeTabView touch responsiveness)
 #else
-            if enableLowerHitArea {
+            if enableLowerHitArea && isLowerCubeHitAreaActive {
                 // Invisible hit area to detect touches in the lower third of the screen
                 VStack {
                     Spacer()
@@ -867,7 +996,7 @@ struct HomeView: View {
                 .transition(.opacity)
             }
 #endif
-            
+
             // Counter overlays share one row so their separator lines stay level.
             GeometryReader { proxy in
                 let safe = proxy.safeAreaInsets
@@ -890,13 +1019,13 @@ struct HomeView: View {
                         // Option 1: Default card style (recommended)
                         RadiusNumberDisplay(radiusMeters: $isometricBarModel.radius)
                             .frame(width: 150, alignment: .trailing)
-                        
+
                         // Option 2: Compact badge style
                         // RadiusNumberBadge(radiusMeters: $isometricBarModel.radius)
-                        
+
                         // Option 3: Corner badge style
                         // RadiusCornerBadge(radiusMeters: $isometricBarModel.radius)
-                        
+
                         // Option 4: Icon-centered style
                         // RadiusDisplayWithIcon(radiusMeters: $isometricBarModel.radius)
                     }
@@ -908,7 +1037,7 @@ struct HomeView: View {
                 .transaction { transaction in
                     transaction.animation = nil
                 }
-                .opacity(bottomChromeVisible ? 1 : 0)
+                .opacity(bottomChromeVisible && !isMainTabChildRouteVisible ? (isChromeAsleep ? 0.2 : 1) : 0)
                 .onAppear {
                     revealBottomChromeIfNeeded()
                 }
@@ -917,7 +1046,7 @@ struct HomeView: View {
             .zIndex(1001)
             .allowsHitTesting(false)
 
-            if selectedTab == .feed && deviceVolumeObserver.isShowing && !isFeedLaunchLoading {
+            if selectedTab == .feed && deviceVolumeObserver.isShowing && !isMainTabChildRouteVisible {
                 GeometryReader { proxy in
                     VStack {
                         Spacer()
@@ -928,7 +1057,7 @@ struct HomeView: View {
                                 .frame(width: 64, height: 320)
                                 .accessibilityElement(children: .ignore)
                                 .accessibilityLabel("Volume \(Int(deviceVolumeObserver.level * 100)) percent")
-                                .transition(.opacity.combined(with: .scale(scale: 0.94)))
+                                .transition(.opacity)
                         }
                         .padding(.trailing, proxy.safeAreaInsets.trailing + 28)
                         .padding(.bottom, proxy.safeAreaInsets.bottom + 170)
@@ -957,7 +1086,13 @@ struct HomeView: View {
                 .zIndex(1000)
                 .allowsHitTesting(true)
             }
-            
+
+            if selectedTab == .feed && isFeedLaunchLoading {
+                HomeFeedLaunchCover()
+                    .zIndex(900)
+                    .transition(.opacity)
+            }
+
         }
     }
 
@@ -971,6 +1106,7 @@ struct HomeView: View {
                 // Startup tasks deferred; nothing to do here
             }
             .onAppear {
+                CallSessionManager.shared.startListeningForIncomingCalls()
                 runLaunchSequenceIfNeeded()
                 if selectedTab != .feed {
                     NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
@@ -995,6 +1131,7 @@ struct HomeView: View {
                         isometricBarSettings.barTiltDegrees = -8
                     }
                 }
+                resetChromeSleepTimer()
             }
             .onChange(of: selectedTab) { _, newTab in
                 if !didSetInitialCubeYaw {
@@ -1033,9 +1170,36 @@ struct HomeView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("FeedLaunchLoadingDidStart"))) { _ in
                 isFeedLaunchLoading = true
+                deviceVolumeObserver.setSuppressed(true)
+                feedLaunchSuppressionTask?.cancel()
+                feedLaunchSuppressionTask = Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 3_000_000_000)
+                    guard !Task.isCancelled else { return }
+                    isFeedLaunchLoading = false
+                    deviceVolumeObserver.setSuppressed(false)
+                    feedLaunchSuppressionTask = nil
+                }
             }
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("FeedLaunchLoadingDidFinish"))) { _ in
+                feedLaunchSuppressionTask?.cancel()
+                feedLaunchSuppressionTask = nil
                 isFeedLaunchLoading = false
+                deviceVolumeObserver.setSuppressed(false)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .MainTabChildRouteVisibilityChanged)) { notification in
+                isMainTabChildRouteVisible = (notification.object as? Bool) ?? false
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .feedHardwareVolumeChanged)) { notification in
+                guard selectedTab == .feed else { return }
+                if isFeedLaunchLoading {
+                    feedLaunchSuppressionTask?.cancel()
+                    feedLaunchSuppressionTask = nil
+                    isFeedLaunchLoading = false
+                    deviceVolumeObserver.setSuppressed(false)
+                }
+                let rawLevel = notification.userInfo?["level"]
+                let level = (rawLevel as? Float) ?? (rawLevel as? Double).map(Float.init)
+                deviceVolumeObserver.showForHardwareVolumePress(level: level)
             }
             .onChange(of: auth.isAuthenticated) { _, authed in
                 if authed {
@@ -1051,8 +1215,11 @@ struct HomeView: View {
                     if selectedTab == .record {
                         ensureCameraRunningIfNeeded()
                     }
-                case .background, .inactive:
+                case .background:
                     cameraControllerHolder.stopIfLoaded()
+                    NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
+                    NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
+                case .inactive:
                     NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
                     NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
                 @unknown default:
@@ -1129,10 +1296,14 @@ struct HomeView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("RecordingOutputReady"))) { notification in
                 guard let url = notification.userInfo?["url"] as? URL else { return }
-                recordedVideoPreviewItem = HomeRecordedVideoPreviewItem(url: url)
+                capturePreviewItem = HomeCapturePreviewItem(image: nil, videoURL: url)
             }
-            .fullScreenCover(item: $recordedVideoPreviewItem) { item in
-                CapturePreviewOverlay(image: nil, videoURL: item.url)
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ShowCapturePreviewOverlay"))) { notification in
+                if let image = notification.object as? UIImage {
+                    capturePreviewItem = HomeCapturePreviewItem(image: image, videoURL: nil)
+                } else if let url = notification.object as? URL {
+                    capturePreviewItem = HomeCapturePreviewItem(image: nil, videoURL: url)
+                }
             }
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("OpenCameraAtCoordinate"))) { notification in
                 guard let userInfo = notification.userInfo,
@@ -1290,6 +1461,23 @@ struct HomeView: View {
                     userPostCount = count
                 }
             }
+            // ── In-app incoming call presentation ────────────────────────────
+            .onChange(of: callManager.callState) { _, newState in
+                if case .incoming(let callerName, let channelId, let documentId) = newState {
+                    incomingCallInfo = (callerName, channelId, documentId)
+                } else if incomingCallInfo != nil {
+                    incomingCallInfo = nil
+                }
+            }
+            // ─────────────────────────────────────────────────────────────────
+            // ── HUD sleep timer ──────────────────────────────────────────────
+            .onReceive(NotificationCenter.default.publisher(for: .popularPhoneDidPresent)) { _ in
+                putChromeToSleepImmediately()
+            }
+            .simultaneousGesture(
+                TapGesture().onEnded { resetChromeSleepTimer() }
+            )
+            // ─────────────────────────────────────────────────────────────────
     }
 }
 final class BarCubePreviewTuning: ObservableObject {
@@ -1323,42 +1511,42 @@ private struct CubeAndBarOverlay: View {
 struct HomeBarPlacementPreview: View {
     @State private var radius: Double = 0
     //@StateObject private var tuning = BarCubePreviewTuning() // Removed tuning usage
-    
+
     @State private var selectedTab: AppTab
-    
+
     @State private var previewHover: Bool = false
     @State private var previewPopTrigger: Int = 0
     @State private var previewPopSoundEnabled: Bool = true
-    
+
     @State private var previewHoldActive: Bool = false
     @State private var holdTask: Task<Void, Never>? = nil
-    
+
     // Added state for continuous yaw
     @State private var yawDegrees: Double = 90
 
     // Inserted states as per instructions:
     @State private var isPreviewRotating: Bool = false
     @State private var queuedPreviewTab: AppTab? = nil
-    
+
     // Changed per instructions to EnvironmentObject
     @EnvironmentObject private var isometricBarSettings: IsometricBarSettings
-    
+
     var usesImperial: Bool { Locale.current.measurementSystem != .metric }
     var earthMaxUnit: Double { usesImperial ? 3958.8 : 6371.0 }
-    
+
     // Added state to control animation flag
     @State private var previewAnimateTabChange: Bool = true
 
     init(initialTab: AppTab = .feed) {
         _selectedTab = State(initialValue: initialTab)
     }
-    
+
     private func playPopSound() {
         // Use a lightweight system sound for preview pop feedback
         let systemSoundID: SystemSoundID = 1104 // Tock-like sound
         AudioServicesPlaySystemSound(systemSoundID)
     }
-    
+
     private func startPreviewHoldRamp() {
         holdTask?.cancel()
         let maxMeters: Double = 3_323_000.0
@@ -1375,7 +1563,7 @@ struct HomeBarPlacementPreview: View {
             }
         }
     }
-    
+
     private func stopPreviewHoldRamp(reset: Bool) {
         holdTask?.cancel()
         holdTask = nil
@@ -1383,10 +1571,10 @@ struct HomeBarPlacementPreview: View {
             withAnimation(.easeOut(duration: 0.35)) { radius = 0 }
         }
     }
-    
+
     // MARK: - Helper rotation logic for preview cube yaw and tab switching
     private enum RotationDirection { case left, right }
-    
+
     private func yawForTab(_ tab: AppTab) -> Double {
         switch tab {
         case .record: return 0
@@ -1396,7 +1584,7 @@ struct HomeBarPlacementPreview: View {
         case .settings: return 0 // Settings not currently in rotation
         }
     }
-    
+
     private func normalizedDelta(from current: Double, to target: Double, prefer direction: RotationDirection?) -> Double {
         var delta = fmod(target - current + 540, 360) - 180
         if let dir = direction {
@@ -1405,7 +1593,7 @@ struct HomeBarPlacementPreview: View {
         }
         return delta
     }
-    
+
     private func animateYaw(to targetYaw: Double, duration: Double = 0.8, direction: RotationDirection? = nil) {
         let current = yawDegrees.truncatingRemainder(dividingBy: 360)
         let delta = normalizedDelta(from: current, to: targetYaw, prefer: direction)
@@ -1414,7 +1602,7 @@ struct HomeBarPlacementPreview: View {
             yawDegrees = final
         }
     }
-    
+
     private func nextPreviewTab(from tab: AppTab) -> AppTab {
         switch tab {
         case .map: return .record
@@ -1424,7 +1612,7 @@ struct HomeBarPlacementPreview: View {
         case .settings: return .feed // Settings not in rotation, default to feed
         }
     }
-    
+
     private func previousPreviewTab(from tab: AppTab) -> AppTab {
         switch tab {
         case .map: return .profile
@@ -1434,7 +1622,7 @@ struct HomeBarPlacementPreview: View {
         case .settings: return .feed // Settings not in rotation, default to feed
         }
     }
-    
+
     // Replaced rotatePreview function as per instructions:
     private func rotatePreview(to newTab: AppTab, direction: RotationDirection) {
         let duration: Double = 1.0
@@ -1673,7 +1861,7 @@ private struct FrontCameraFlashEdgeOverlay: View {
 private struct CameraInstructionsOverlay: View {
     @State private var currentInstructionIndex = 0
     @State private var instructionOpacity: Double = 1.0
-    
+
     private let instructions: [(title: String, message: String)] = [
         (
             "Camera Controls",
@@ -1696,18 +1884,18 @@ private struct CameraInstructionsOverlay: View {
             "Long-press on the map to choose where you want to post your content"
         )
     ]
-    
+
     var body: some View {
         VStack {
             Spacer().frame(height: 24)
-            
+
             HStack {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(instructions[currentInstructionIndex].title)
                         .font(.headline)
                         .foregroundStyle(.white)
                         .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
-                    
+
                     Text(instructions[currentInstructionIndex].message)
                         .font(.subheadline)
                         .foregroundStyle(.white.opacity(0.9))
@@ -1722,28 +1910,28 @@ private struct CameraInstructionsOverlay: View {
             .frame(minHeight: 90) // Increased height for longer messages
             .padding(.horizontal, 12)
             .opacity(instructionOpacity)
-            
+
             Spacer()
         }
         .task {
             // Cycle through instructions every 6 seconds
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 6_000_000_000)
-                
+
                 // Fade out
                 await MainActor.run {
                     withAnimation(.easeOut(duration: 0.3)) {
                         instructionOpacity = 0.0
                     }
                 }
-                
+
                 try? await Task.sleep(nanoseconds: 300_000_000)
-                
+
                 // Change instruction
                 await MainActor.run {
                     currentInstructionIndex = (currentInstructionIndex + 1) % instructions.count
                 }
-                
+
                 // Fade in
                 await MainActor.run {
                     withAnimation(.easeIn(duration: 0.3)) {
@@ -1763,7 +1951,7 @@ private struct LiveMLDetectionOverlay: View {
     @ObservedObject var userRecognitionManager: UserRecognitionManager
     @State private var detectedObjects: [DetectedObject] = []
     @State private var isDetecting: Bool = false
-    
+
     var body: some View {
         VStack {
             // Show user recognition if available
@@ -1780,12 +1968,12 @@ private struct LiveMLDetectionOverlay: View {
                             // Icon
                             Text(getIcon(for: primary.identifier))
                                 .font(.system(size: 32))
-                            
+
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(primary.identifier.capitalized)
                                     .font(.headline)
                                     .foregroundStyle(.white)
-                                
+
                                 Text("\(primary.confidencePercentage)% confidence")
                                     .font(.caption)
                                     .foregroundStyle(.white.opacity(0.8))
@@ -1797,14 +1985,14 @@ private struct LiveMLDetectionOverlay: View {
                         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                         .shadow(color: .black.opacity(0.2), radius: 8, x: 0, y: 4)
                     }
-                    
+
                     // Additional detections (compact)
                     if detectedObjects.count > 1 {
                         HStack(spacing: 8) {
                             Image(systemName: "plus.circle.fill")
                                 .font(.caption)
                                 .foregroundStyle(.white.opacity(0.7))
-                            
+
                             Text("Also seeing: \(detectedObjects.dropFirst().map { $0.identifier.capitalized }.joined(separator: ", "))")
                                 .font(.caption)
                                 .foregroundStyle(.white.opacity(0.9))
@@ -1826,7 +2014,7 @@ private struct LiveMLDetectionOverlay: View {
                     ProgressView()
                         .progressViewStyle(CircularProgressViewStyle(tint: .white))
                         .scaleEffect(0.8)
-                    
+
                     Text("Scanning...")
                         .font(.subheadline)
                         .foregroundStyle(.white)
@@ -1838,7 +2026,7 @@ private struct LiveMLDetectionOverlay: View {
                 .padding(.top, 60)
                 .transition(.opacity)
             }
-            
+
             Spacer()
         }
         .onAppear {
@@ -1850,7 +2038,7 @@ private struct LiveMLDetectionOverlay: View {
                     detectedObjects = objects
                     isDetecting = !objects.isEmpty
                 }
-                
+
                 // Clear detections after 2 seconds of no updates
                 clearDetectionsAfterDelay()
             }
@@ -1866,7 +2054,7 @@ private struct LiveMLDetectionOverlay: View {
             }
         }
     }
-    
+
     private func clearDetectionsAfterDelay() {
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 2_000_000_000)
@@ -1878,10 +2066,10 @@ private struct LiveMLDetectionOverlay: View {
             }
         }
     }
-    
+
     private func getIcon(for identifier: String) -> String {
         let lowercased = identifier.lowercased()
-        
+
         // Map identifiers to emojis
         if lowercased.contains("person") || lowercased.contains("face") || lowercased.contains("human") {
             return "👤"
@@ -1901,7 +2089,7 @@ private struct LiveMLDetectionOverlay: View {
         if lowercased.contains("beach") || lowercased.contains("ocean") { return "🏖" }
         if lowercased.contains("mountain") { return "⛰" }
         if lowercased.contains("sky") || lowercased.contains("cloud") { return "☁️" }
-        
+
         return "🔍" // Default search icon
     }
 }
@@ -1909,56 +2097,23 @@ private struct LiveMLDetectionOverlay: View {
 private struct FeedVolumeBars: View {
     let volumeLevel: Float
 
-    var body: some View {
-        SpriteView(scene: FeedVolumeBarsScene(volumeLevel: volumeLevel), options: [.allowsTransparency])
-    }
-}
-
-private final class FeedVolumeBarsScene: SKScene {
     private let barCount = 18
-    private let volumeLevel: Float
-    private let meterGreen = SKColor(red: 0.23, green: 1.0, blue: 0.18, alpha: 1.0)
+    private let meterGreen = Color(red: 0.23, green: 1.0, blue: 0.18)
 
-    init(volumeLevel: Float) {
-        self.volumeLevel = max(0, min(1, volumeLevel))
-        super.init(size: CGSize(width: 64, height: 320))
-        scaleMode = .resizeFill
-        backgroundColor = .clear
-        isUserInteractionEnabled = false
-        buildMeter()
-    }
+    var body: some View {
+        let activeLevel = Int(ceil(Double(max(0, min(1, volumeLevel))) * Double(barCount)))
 
-    required init?(coder aDecoder: NSCoder) {
-        self.volumeLevel = AVAudioSession.sharedInstance().outputVolume
-        super.init(coder: aDecoder)
-        scaleMode = .resizeFill
-        backgroundColor = .clear
-        isUserInteractionEnabled = false
-        buildMeter()
-    }
-
-    private func buildMeter() {
-        removeAllChildren()
-
-        let activeLevel = Int(ceil(Double(volumeLevel) * Double(barCount)))
-        let barWidth: CGFloat = 32
-        let barHeight: CGFloat = 8
-        let gap: CGFloat = 6.4
-        let totalHeight = CGFloat(barCount) * barHeight + CGFloat(barCount - 1) * gap
-        let startX = (size.width - barWidth) / 2
-        let startY = (size.height - totalHeight) / 2
-
-        for index in 0..<barCount {
-            let y = startY + CGFloat(index) * (barHeight + gap)
-            let rect = CGRect(x: startX, y: y, width: barWidth, height: barHeight)
-            let path = CGPath(roundedRect: rect, cornerWidth: 2, cornerHeight: 2, transform: nil)
-            let bar = SKShapeNode(path: path)
-            let active = index < activeLevel
-            bar.fillColor = active ? meterGreen : meterGreen.withAlphaComponent(0.18)
-            bar.strokeColor = .clear
-            bar.glowWidth = active ? 1.4 : 0
-            addChild(bar)
+        VStack(spacing: 6.4) {
+            ForEach((0..<barCount).reversed(), id: \.self) { index in
+                let active = index < activeLevel
+                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                    .fill(meterGreen.opacity(active ? 1.0 : 0.18))
+                    .shadow(color: meterGreen.opacity(active ? 0.55 : 0), radius: 3, x: 0, y: 0)
+                    .frame(width: 32, height: 8)
+            }
         }
+        .frame(width: 64, height: 320)
+        .drawingGroup()
     }
 }
 
@@ -1967,7 +2122,7 @@ private final class FeedVolumeBarsScene: SKScene {
 /// Card showing recognized user with their radius
 private struct RecognizedUserCard: View {
     let user: RecognizedUser
-    
+
     var body: some View {
         VStack(spacing: 10) {
             // User header
@@ -1985,19 +2140,19 @@ private struct RecognizedUserCard: View {
                             .font(.system(size: 20))
                             .foregroundStyle(.white)
                     )
-                
+
                 VStack(alignment: .leading, spacing: 2) {
                     Text("@\(user.profile.username)")
                         .font(.headline)
                         .foregroundStyle(.white)
-                    
+
                     Text("Tap to view profile")
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.7))
                 }
-                
+
                 Spacer()
-                
+
                 // Confidence badge
                 Text("\(Int(user.confidence * 100))%")
                     .font(.caption.bold())
@@ -2007,25 +2162,25 @@ private struct RecognizedUserCard: View {
                     .background(Color.green.opacity(0.2))
                     .clipShape(Capsule())
             }
-            
+
             // Radius display
             HStack(spacing: 12) {
                 Image(systemName: "circle.dashed")
                     .font(.title2)
                     .foregroundStyle(.white.opacity(0.9))
-                
+
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Radius")
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.7))
-                    
+
                     Text(user.formattedRadius)
                         .font(.title3.bold())
                         .foregroundStyle(.white)
                 }
-                
+
                 Spacer()
-                
+
                 // Trend indicator (optional)
                 Image(systemName: "arrow.up.right")
                     .font(.caption)

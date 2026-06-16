@@ -3,62 +3,86 @@ import SwiftUI
 struct ChatThreadListView: View {
     @StateObject private var chatStore: FakeChatStore
     @State private var navigateToThread: FakeChatThread? = nil
-    
+    @State private var callingUser: FakeUser? = nil
+    @State private var showPhoneCall = false
+
     init() {
         _chatStore = StateObject(wrappedValue: FakeChatStore())
     }
-    
+
     init(chatStore: FakeChatStore) {
         _chatStore = StateObject(wrappedValue: chatStore)
     }
-    
+
     var body: some View {
         NavigationStack {
             List {
                 ForEach(chatStore.threads, id: \.id) { (item: FakeChatThread) in
-                    NavigationLink(destination: DMDetailView(thread: item)) {
-                        HStack(alignment: .top, spacing: 12) {
-                            ZStack {
-                                Circle()
-                                    .fill(Color.blue)
-                                    .frame(width: 48, height: 48)
-                                Text(initials(for: chatTitle(for: item)))
-                                    .font(.headline)
-                                    .foregroundColor(.white)
-                            }
-                            
-                            VStack(alignment: .leading, spacing: 4) {
-                                HStack {
-                                    Text(chatTitle(for: item))
+                    HStack(alignment: .top, spacing: 12) {
+                        NavigationLink {
+                            DMDetailView(thread: item)
+                                .toolbar(.hidden, for: .navigationBar)
+                                .navigationBarBackButtonHidden(true)
+                        } label: {
+                            HStack(alignment: .top, spacing: 12) {
+                                ZStack {
+                                    Circle()
+                                        .fill(Color.blue)
+                                        .frame(width: 48, height: 48)
+                                    Text(initials(for: chatTitle(for: item)))
                                         .font(.headline)
-                                    Spacer()
+                                        .foregroundColor(.white)
                                 }
-                                
-                                HStack(alignment: .center) {
-                                    Text(lastMessagePreview(for: item))
-                                        .font(.subheadline)
-                                        .foregroundColor(.secondary)
-                                        .lineLimit(1)
-                                    Spacer()
-                                    if item.unreadCount > 0 {
-                                        Text("\(item.unreadCount)")
-                                            .font(.caption2)
-                                            .bold()
-                                            .padding(6)
-                                            .background(Color.red)
-                                            .foregroundColor(.white)
-                                            .clipShape(Circle())
+
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack {
+                                        Text(chatTitle(for: item))
+                                            .font(.headline)
+                                        Spacer()
+                                    }
+
+                                    HStack(alignment: .center) {
+                                        Text(lastMessagePreview(for: item))
+                                            .font(.subheadline)
+                                            .foregroundColor(.secondary)
+                                            .lineLimit(1)
+                                        Spacer()
+                                        if item.unreadCount > 0 {
+                                            Text("\(item.unreadCount)")
+                                                .font(.caption2)
+                                                .bold()
+                                                .padding(6)
+                                                .background(Color.red)
+                                                .foregroundColor(.white)
+                                                .clipShape(Circle())
+                                        }
                                     }
                                 }
                             }
+                            .padding(.vertical, 8)
                         }
-                        .padding(.vertical, 8)
+
+                        // Phone call button
+                        Button(action: {
+                            if let user = item.participants.first(where: { $0.name != "Alice" }) {
+                                callingUser = user
+                                showPhoneCall = true
+                            }
+                        }) {
+                            Image(systemName: "phone.fill")
+                                .font(.system(size: 18))
+                                .foregroundColor(.white)
+                                .frame(width: 40, height: 40)
+                                .background(Color.green)
+                                .clipShape(Circle())
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
             }
             .scrollContentBackground(.hidden)
             .background(Color.white)
-            
+
         }
         .background(Color.white)
         .navigationDestination(isPresented: Binding(
@@ -67,6 +91,15 @@ struct ChatThreadListView: View {
         )) {
             if let thread = navigateToThread {
                 DMDetailView(thread: thread)
+                    .toolbar(.hidden, for: .navigationBar)
+                    .navigationBarBackButtonHidden(true)
+            }
+        }
+        .overlay {
+            if let user = callingUser {
+                PopularPhone(user: user)
+                    .opacity(showPhoneCall ? 1 : 0)
+                    .allowsHitTesting(showPhoneCall)
             }
         }
         .navigationTitle("Chats")
@@ -78,13 +111,13 @@ struct ChatThreadListView: View {
             }
         }
     }
-    
+
     private func initials(for name: String) -> String {
         let parts = name.split(separator: " ")
         let initials = parts.prefix(2).map { $0.first.map { String($0) } ?? "" }.joined()
         return initials.uppercased()
     }
-    
+
     private func timestampString(for date: Date) -> String {
         let formatter = DateFormatter()
         if Calendar.current.isDateInToday(date) {
@@ -94,14 +127,14 @@ struct ChatThreadListView: View {
         }
         return formatter.string(from: date)
     }
-    
+
     private func chatTitle(for thread: FakeChatThread) -> String {
         // Fallback title using a short form of the id
         // If your model later adds a `displayName`, you can switch to it here.
         let shortId = String(String(describing: thread.id).prefix(6))
         return "Chat \(shortId)"
     }
-    
+
     private func lastMessagePreview(for thread: FakeChatThread) -> String {
         // Derive a preview string safely from available properties on FakeChatThread.
         // If your model later adds a `lastMessagePreview`, switch to it here.
@@ -115,7 +148,7 @@ struct ChatThreadListView: View {
         }
         return "No messages yet"
     }
-    
+
     private func startNewConversation() {
         // Attempt to create a new fake thread using minimal assumptions.
         // We derive an ID and rely on fallback title/preview helpers.
@@ -138,10 +171,10 @@ struct ChatThreadListView: View {
 
 struct DMDetailView: View {
     let thread: FakeChatThread
-    
+
     @State private var messages: [Message] = []
     @State private var draft: String = ""
-    
+
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
@@ -181,17 +214,19 @@ struct DMDetailView: View {
             .background(Color.white)
         }
         .navigationTitle(chatTitle(for: thread))
+        .toolbar(.hidden, for: .navigationBar)
+        .navigationBarBackButtonHidden(true)
         .background(Color.white)
         .onAppear { seedConversation() }
     }
-    
+
     private func chatTitle(for thread: FakeChatThread) -> String {
         // Fallback title using a short form of the id
         // If your model later adds a `displayName`, you can switch to it here.
         let shortId = String(String(describing: thread.id).prefix(6))
         return "Chat \(shortId)"
     }
-    
+
     private func lastMessagePreview(for thread: FakeChatThread) -> String {
         if let mirrorPreview = (Mirror(reflecting: thread).children.first { $0.label == "lastMessageText" })?.value as? String, !mirrorPreview.isEmpty {
             return mirrorPreview
@@ -201,7 +236,7 @@ struct DMDetailView: View {
         }
         return "No messages yet"
     }
-    
+
     struct Message: Identifiable {
         let id = UUID()
         let text: String
@@ -230,7 +265,7 @@ struct DMDetailView: View {
             messages.append(Message(text: reply, isIncoming: true))
         }
     }
-    
+
     private func seedConversation() {
         if messages.isEmpty {
             messages = [
@@ -240,4 +275,3 @@ struct DMDetailView: View {
         }
     }
 }
-

@@ -1,5 +1,6 @@
 import SwiftUI
 import Foundation
+import AVFoundation
 import AVKit
 
 struct FeedPost: Identifiable, Hashable, Sendable {
@@ -35,6 +36,7 @@ struct FeedFullscreenPage: View {
     private var directVideoURL: URL? {
         guard let url = URL(string: post.mediaURL) else { return nil }
         let lower = url.absoluteString.lowercased()
+        if lower.contains("picsum.photos") { return nil }
         let videoHints = [".mp4", ".m3u8", "/prog_index.m3u8", "video.mp4", "format=mp4", "format=hls", "type=video"]
         return videoHints.contains { lower.contains($0) } ? url : nil
     }
@@ -47,23 +49,29 @@ struct FeedFullscreenPage: View {
                 FeedInlineVideoPlayer(url: videoURL)
                     .ignoresSafeArea()
             } else if let url = URL(string: post.mediaURL) {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .empty:
-                        ZStack {
-                            Color.black
-                            ProgressView()
-                                .tint(.white)
+                GeometryReader { geo in
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .empty:
+                            ZStack {
+                                Color.black
+                                ProgressView()
+                                    .tint(.white)
+                            }
+                            .frame(width: geo.size.width, height: geo.size.height)
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: geo.size.width, height: geo.size.height)
+                                .clipped()
+                        case .failure:
+                            placeholder
+                                .frame(width: geo.size.width, height: geo.size.height)
+                        @unknown default:
+                            placeholder
+                                .frame(width: geo.size.width, height: geo.size.height)
                         }
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .scaledToFit()
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    case .failure:
-                        placeholder
-                    @unknown default:
-                        placeholder
                     }
                 }
             } else {
@@ -111,10 +119,14 @@ private struct FeedInlineVideoPlayer: View {
     var body: some View {
         ZStack {
             Color.black
-            ProgressView()
-                .tint(.white)
-            VideoPlayer(player: player)
+            if let player {
+                AspectFillInlinePlayer(player: player)
+            } else {
+                ProgressView()
+                    .tint(.white)
+            }
         }
+            .clipped()
             .onAppear {
                 let nextPlayer = AVPlayer(url: url)
                 nextPlayer.actionAtItemEnd = .none
@@ -137,6 +149,39 @@ private struct FeedInlineVideoPlayer: View {
                 player?.pause()
                 player = nil
             }
+    }
+}
+
+private struct AspectFillInlinePlayer: UIViewRepresentable {
+    let player: AVPlayer
+
+    func makeUIView(context: Context) -> AspectFillInlinePlayerView {
+        let view = AspectFillInlinePlayerView()
+        view.backgroundColor = .black
+        view.playerLayer.videoGravity = .resizeAspectFill
+        view.player = player
+        return view
+    }
+
+    func updateUIView(_ uiView: AspectFillInlinePlayerView, context: Context) {
+        uiView.player = player
+        uiView.playerLayer.videoGravity = .resizeAspectFill
+        uiView.setNeedsLayout()
+    }
+}
+
+private final class AspectFillInlinePlayerView: UIView {
+    override class var layerClass: AnyClass { AVPlayerLayer.self }
+    var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
+    var player: AVPlayer? {
+        get { playerLayer.player }
+        set { playerLayer.player = newValue }
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        playerLayer.frame = bounds
+        playerLayer.videoGravity = .resizeAspectFill
     }
 }
 

@@ -148,17 +148,20 @@ extension FeedViewModel {
         return "https://picsum.photos/id/\(imageID)/1080/1920"
     }
 
-    /// Keeps demo pages mixed between real remote videos and images.
+    /// Keeps demo pages mixed between images, videos, and sponsored slots.
     func injectDemoVideos(into posts: inout [FeedPost]) {
         guard posts.isEmpty == false else { return }
         for i in posts.indices {
             let mediaURL: String
             let userID: String
 
-            switch i % 4 {
-            case 0, 2:
+            switch i % 5 {
+            case 1, 4:
                 mediaURL = demoVideoURLs[i % demoVideoURLs.count]
                 userID = demoUserIDs[i % demoUserIDs.count]
+            case 2:
+                mediaURL = demoImageURL(for: i + 97)
+                userID = "sponsored_ad_\(i)"
             default:
                 mediaURL = demoImageURL(for: i)
                 userID = posts[i].userID

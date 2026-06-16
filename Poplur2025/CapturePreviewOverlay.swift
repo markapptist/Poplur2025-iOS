@@ -16,6 +16,7 @@ import CoreLocation
 struct CapturePreviewOverlay: View {
     let image: UIImage?
     let videoURL: URL?
+    var onDismiss: (() -> Void)? = nil
     
     @Environment(\.dismiss) private var dismiss
     @StateObject private var flowManager = CaptureFlowManager.shared
@@ -46,7 +47,7 @@ struct CapturePreviewOverlay: View {
                 HStack(spacing: 24) {
                     // Retake button
                     Button {
-                        dismiss()
+                        close()
                     } label: {
                         VStack(spacing: 8) {
                             Image(systemName: "xmark.circle.fill")
@@ -90,6 +91,16 @@ struct CapturePreviewOverlay: View {
         }
         .onAppear {
             print("📸 [CapturePreview] Appeared - Flow: \(flowManager.currentFlow.map { flow -> String in flow.isMapFirst ? "Map→Camera" : flow.isCameraFirst ? "Camera→Map" : "None" } ?? "None")")
+        }
+        .toolbar(.hidden, for: .navigationBar)
+        .navigationBarBackButtonHidden(true)
+    }
+
+    private func close() {
+        if let onDismiss {
+            onDismiss()
+        } else {
+            dismiss()
         }
     }
     
@@ -145,7 +156,7 @@ struct CapturePreviewOverlay: View {
         
         // Dismiss preview after brief delay
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            dismiss()
+            close()
             
             // Navigate to profile to see the new post
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
@@ -165,7 +176,7 @@ struct CapturePreviewOverlay: View {
         flowManager.startCameraToMapFlow(image: image, videoURL: videoURL)
         
         // Dismiss preview
-        dismiss()
+        close()
         
         // Open map tab for location selection
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {

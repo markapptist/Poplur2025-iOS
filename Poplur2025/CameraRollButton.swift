@@ -12,9 +12,6 @@ import Photos
 /// Tapping opens photo picker to select image or video to upload
 struct CameraRollButton: View {
     @State private var latestPhoto: UIImage? = nil
-    @State private var previewImage: UIImage? = nil
-    @State private var previewVideoURL: URL? = nil
-    @State private var showCapturePreview: Bool = false
     
     var body: some View {
         NavigationLink(destination: PhotoPickerNavigationView(
@@ -54,12 +51,6 @@ struct CameraRollButton: View {
         .onAppear {
             fetchLatestPhoto()
         }
-        .fullScreenCover(isPresented: $showCapturePreview, onDismiss: {
-            previewImage = nil
-            previewVideoURL = nil
-        }) {
-            CapturePreviewOverlay(image: previewImage, videoURL: previewVideoURL)
-        }
     }
     
     // MARK: - Photo Fetching
@@ -93,19 +84,22 @@ struct CameraRollButton: View {
     
     private func handleSelectedImage(_ image: UIImage) {
         print("[CameraRollButton] Image selected from camera roll")
-        previewImage = image
-        previewVideoURL = nil
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-            showCapturePreview = true
+            NotificationCenter.default.post(
+                name: Notification.Name("ShowCapturePreviewOverlay"),
+                object: image
+            )
         }
     }
     
     private func handleSelectedVideo(_ url: URL) {
         print("[CameraRollButton] Video selected from camera roll: \(url)")
-        previewImage = nil
-        previewVideoURL = copyVideoToTemporaryFileIfNeeded(url)
+        let previewVideoURL = copyVideoToTemporaryFileIfNeeded(url)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-            showCapturePreview = true
+            NotificationCenter.default.post(
+                name: Notification.Name("ShowCapturePreviewOverlay"),
+                object: previewVideoURL
+            )
         }
     }
 
@@ -162,6 +156,8 @@ struct PhotoPickerNavigationView: View {
         )
         .navigationTitle("Camera Roll")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .navigationBar)
+        .navigationBarBackButtonHidden(true)
         .ignoresSafeArea()
     }
 }

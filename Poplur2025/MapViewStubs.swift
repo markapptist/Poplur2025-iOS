@@ -581,21 +581,45 @@ struct MapView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
-            .sheet(isPresented: $showFavorites) {
-                FavoritesListView(
-                    onSelect: { coord in panTo(coord) },
-                    currentCenter: camera.camera?.centerCoordinate,
-                    userLocation: locationManager.location?.coordinate
-                )
-                .presentationDetents([.medium, .large])
-            }
-            .sheet(isPresented: $showSearch) {
-                SearchView(query: $searchQuery, results: $searchResults) { item in
-                    if let coord = item.placemark.location?.coordinate {
-                        panTo(coord)
-                    }
+            .overlay {
+                if showFavorites {
+                    Color.black.opacity(0.58)
+                        .ignoresSafeArea()
+                        .overlay(alignment: .bottom) {
+                            FavoritesListView(
+                                onSelect: { coord in
+                                    showFavorites = false
+                                    panTo(coord)
+                                },
+                                currentCenter: camera.camera?.centerCoordinate,
+                                userLocation: locationManager.location?.coordinate
+                            )
+                            .frame(maxHeight: 520)
+                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 18)
+                        }
+                        .transition(.opacity)
                 }
-                .presentationDetents([.medium, .large])
+            }
+            .overlay {
+                if showSearch {
+                    Color.black.opacity(0.58)
+                        .ignoresSafeArea()
+                        .overlay(alignment: .bottom) {
+                            SearchView(query: $searchQuery, results: $searchResults) { item in
+                                showSearch = false
+                                if let coord = item.placemark.location?.coordinate {
+                                    panTo(coord)
+                                }
+                            }
+                            .frame(maxHeight: 520)
+                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 18)
+                        }
+                        .transition(.opacity)
+                }
             }
         }
         .navigationBarHidden(true)
@@ -890,4 +914,3 @@ enum MockAIRecommender {
     MapViewStub()
 }
 #endif
-

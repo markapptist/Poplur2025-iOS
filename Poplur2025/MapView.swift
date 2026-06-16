@@ -956,8 +956,8 @@ private final class RainAmbientAudioService: ObservableObject {
 
     private func rainVolume(for state: WeatherVisualizationState) -> Float {
         let clampedIntensity = max(0, min(1, state.intensity))
-        let baseVolume = state.kind == .thunderstorms ? 0.82 : 0.78
-        return Float(min(1, baseVolume + clampedIntensity * 0.3))
+        let baseVolume = state.kind == .thunderstorms ? 0.18 : 0.14
+        return Float(min(0.28, baseVolume + clampedIntensity * 0.08))
     }
 
     func stop() {
@@ -972,7 +972,7 @@ private final class RainAmbientAudioService: ObservableObject {
     }
 
     private func rainLoopURL() throws -> URL {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("poplur-rain-ambient-v3.wav")
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("poplur-rain-ambient-v4-background.wav")
         if FileManager.default.fileExists(atPath: url.path) {
             return url
         }
@@ -1007,14 +1007,18 @@ private final class RainAmbientAudioService: ObservableObject {
 
         var seed: UInt64 = 0xD00D_CA7E
         var lowPass = 0.0
+        var darkerPass = 0.0
         for index in 0..<sampleCount {
             seed = 6364136223846793005 &* seed &+ 1
             let raw = Double((seed >> 33) & 0x7fff_ffff) / Double(Int32.max)
             let white = raw * 2.0 - 1.0
-            lowPass = lowPass * 0.82 + white * 0.18
-            let shimmer = sin(Double(index) * 0.013) * 0.08
-            let sample = max(-1.0, min(1.0, lowPass * 0.82 + shimmer))
-            var pcm = Int16(sample * Double(Int16.max) * 0.9).littleEndian
+            lowPass = lowPass * 0.94 + white * 0.06
+            darkerPass = darkerPass * 0.985 + lowPass * 0.015
+            let softenedHighs = white * 0.035
+            let body = darkerPass * 0.86 + lowPass * 0.28
+            let shimmer = sin(Double(index) * 0.006) * 0.018
+            let sample = max(-1.0, min(1.0, body + softenedHighs + shimmer))
+            var pcm = Int16(sample * Double(Int16.max) * 0.22).littleEndian
             data.append(Data(bytes: &pcm, count: MemoryLayout<Int16>.size))
         }
 
@@ -1048,6 +1052,11 @@ private final class CityTourMusicPlayerService: ObservableObject {
     private var loadTask: Task<Void, Never>?
     private var lastPlayerVolume: Float = 1.0
     private var interruptionObserver: NSObjectProtocol?
+
+    var isPlaybackActive: Bool {
+        guard let player else { return false }
+        return player.timeControlStatus == .playing || player.rate != 0
+    }
 
     init(previewOnly: Bool = false) {
         self.previewOnly = previewOnly
@@ -1818,35 +1827,56 @@ private struct MapTourPreviewWithControls: View {
                 .padding()
             }
         }
-        .sheet(isPresented: $showPlacesList) {
-            PlacesListView(places: tourPlaces) { place in
-                showPlacesList = false
-                NotificationCenter.default.post(name: .preview_stopDominanceTour, object: nil)
-                NotificationCenter.default.post(
-                    name: Notification.Name("JumpToPlace"),
-                    object: nil,
-                    userInfo: ["coordinate": place.coordinate]
-                )
+        .overlay {
+            if showPlacesList {
+                Color.black.opacity(0.58)
+                    .ignoresSafeArea()
+                    .overlay(alignment: .bottom) {
+                        PlacesListView(places: tourPlaces) { place in
+                            showPlacesList = false
+                            NotificationCenter.default.post(name: .preview_stopDominanceTour, object: nil)
+                            NotificationCenter.default.post(
+                                name: Notification.Name("JumpToPlace"),
+                                object: nil,
+                                userInfo: ["coordinate": place.coordinate]
+                            )
+                        }
+                        .frame(maxHeight: 520)
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 18)
+                    }
+                    .transition(.opacity)
+                    .zIndex(50)
             }
-            .presentationDetents([.medium, .large])
-        }
-        .sheet(isPresented: $showAddressSearch) {
-            AddressSearchView(
-                query: $searchQuery,
-                results: $searchResults,
-                isSearching: $isSearching
-            ) { item in
-                showAddressSearch = false
-                if let coord = item.placemark.location?.coordinate {
-                    NotificationCenter.default.post(name: .preview_stopDominanceTour, object: nil)
-                    NotificationCenter.default.post(
-                        name: Notification.Name("JumpToPlace"),
-                        object: nil,
-                        userInfo: ["coordinate": coord]
-                    )
-                }
+
+            if showAddressSearch {
+                Color.black.opacity(0.58)
+                    .ignoresSafeArea()
+                    .overlay(alignment: .bottom) {
+                        AddressSearchView(
+                            query: $searchQuery,
+                            results: $searchResults,
+                            isSearching: $isSearching
+                        ) { item in
+                            showAddressSearch = false
+                            if let coord = item.placemark.location?.coordinate {
+                                NotificationCenter.default.post(name: .preview_stopDominanceTour, object: nil)
+                                NotificationCenter.default.post(
+                                    name: Notification.Name("JumpToPlace"),
+                                    object: nil,
+                                    userInfo: ["coordinate": coord]
+                                )
+                            }
+                        }
+                        .frame(maxHeight: 520)
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 18)
+                    }
+                    .transition(.opacity)
+                    .zIndex(51)
             }
-            .presentationDetents([.medium, .large])
         }
         .task {
 #if POP_PREVIEW_LIGHT
@@ -2949,10 +2979,11 @@ struct MapViewProduction: View {
         mapState.cancelCurrentOperation()
         clearTourEffects()
         
-        refreshLocalContext(for: CLLocation(latitude: userCoordinate.latitude, longitude: userCoordinate.longitude))
-        
         // Use tour-style transition to go back to current location
         navigateWithTourTransition(to: userCoordinate, cityName: currentCity)
+
+        // Start the current-location context after the transition helper clears tour audio.
+        refreshLocalContext(for: CLLocation(latitude: userCoordinate.latitude, longitude: userCoordinate.longitude))
     }
     
     private func uploadPostToSelectedLocation() {
@@ -3053,13 +3084,28 @@ struct MapViewProduction: View {
             description: "Current location"
         )
         guard currentLocationMusicStopID != stop.id else {
-            if musicPlayer.currentTrackTitle == nil {
+            if !musicPlayer.isPlaybackActive {
                 musicPlayer.play(for: stop, insight: insight, preferPreviewTracks: true)
             }
             return
         }
         currentLocationMusicStopID = stop.id
         musicPlayer.play(for: stop, insight: insight, preferPreviewTracks: true)
+    }
+
+    private func ensureCurrentLocationMusicAfterLaunch(delayNanoseconds: UInt64 = 1_200_000_000) {
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: delayNanoseconds)
+            guard !mapState.isInTourMode, !(flowManager.currentFlow?.isCameraFirst ?? false), !isPostPlacementMode else { return }
+            guard lockToPostUntil == nil || lockToPostUntil! <= Date() else { return }
+
+            if let location = locationManager.location {
+                liveUserCoordinate = location.coordinate
+                refreshLocalContext(for: location)
+            } else {
+                locationManager.request()
+            }
+        }
     }
 
     private func emitLocalTrendConfetti(center: CLLocationCoordinate2D, objects: [TrendPopObject]) {
@@ -3951,13 +3997,22 @@ struct MapViewProduction: View {
     var body: some View {
         mapContentLayer
             .toolbar(.hidden, for: .navigationBar)
-            .sheet(isPresented: $showPlacesList) {
+            .overlay {
                 #if DEBUG
-                placesListSheet
+                if showPlacesList {
+                    mapOverlayPanel {
+                        placesListSheet
+                    }
+                    .zIndex(50)
+                }
                 #endif
-            }
-            .sheet(isPresented: $showAddressSearch) {
-                locationSearchSheet
+
+                if showAddressSearch {
+                    mapOverlayPanel {
+                        locationSearchSheet
+                    }
+                    .zIndex(51)
+                }
             }
             .onAppear {
                 guard !layoutPreviewMode else { return }
@@ -4430,6 +4485,20 @@ struct MapViewProduction: View {
                 await runTourSubtitleLoop()
             }
     }
+
+    @ViewBuilder
+    private func mapOverlayPanel<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        Color.black.opacity(0.58)
+            .ignoresSafeArea()
+            .overlay(alignment: .bottom) {
+                content()
+                    .frame(maxHeight: 520)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 18)
+            }
+            .transition(.opacity)
+    }
     
     #if DEBUG
     // MARK: - Sheet Views
@@ -4440,7 +4509,6 @@ struct MapViewProduction: View {
             showPlacesList = false
             panTo(place.coordinate)
         }
-        .presentationDetents([.medium, .large])
     }
     
     @ViewBuilder
@@ -4455,7 +4523,6 @@ struct MapViewProduction: View {
                 panTo(coord)
             }
         }
-        .presentationDetents([.medium, .large])
     }
     #endif
 
@@ -4477,7 +4544,6 @@ struct MapViewProduction: View {
                 }
             }
         }
-        .presentationDetents([.medium, .large])
     }
     
     // MARK: - Event Handlers
@@ -4497,6 +4563,7 @@ struct MapViewProduction: View {
             liveUserCoordinate = location.coordinate
             refreshLocalContext(for: location)
         }
+        ensureCurrentLocationMusicAfterLaunch(delayNanoseconds: 1_500_000_000)
         
         // Check if there's a pending post location to navigate to
         if let pendingCoordinate = mapState.pendingPostLocation {
@@ -4577,6 +4644,16 @@ struct MapViewProduction: View {
         print("✅ [MapView] handleOnAppear proceeding - no locks active")
         
         locationManager.request()
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 900_000_000)
+            guard !mapState.isInTourMode, !(flowManager.currentFlow?.isCameraFirst ?? false), !isPostPlacementMode else { return }
+            guard lockToPostUntil == nil || lockToPostUntil! <= Date() else { return }
+            if let location = locationManager.location {
+                liveUserCoordinate = location.coordinate
+                refreshLocalContext(for: location)
+            }
+        }
+        ensureCurrentLocationMusicAfterLaunch(delayNanoseconds: 2_800_000_000)
         if let current = camera.camera {
             camera = .camera(
                 MapCamera(
@@ -4592,6 +4669,9 @@ struct MapViewProduction: View {
     private func handleLocationChange(_ newLocation: CLLocation?) {
         if let newLocation {
             liveUserCoordinate = newLocation.coordinate
+            if currentLocationMusicStopID == nil || !musicPlayer.isPlaybackActive {
+                refreshLocalContext(for: newLocation)
+            }
         }
 
         // If we're locked to a post, ignore location changes entirely

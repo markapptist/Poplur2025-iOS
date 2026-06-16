@@ -789,8 +789,9 @@ struct WelcomeView: View {
             .navigationBarHidden(true)
             .navigationDestination(isPresented: $navigateToLogin) {
                 LoginView()
+                    .toolbar(.hidden, for: .navigationBar)
+                    .navigationBarBackButtonHidden(true)
             }
         }
     }
 }
-

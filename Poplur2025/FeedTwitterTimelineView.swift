@@ -2,537 +2,674 @@
 //  FeedTwitterTimelineView.swift
 //  Poplur2025
 //
-//  Twitter-style vertical scrolling timeline for feed posts
+//  Poplur Newspaper — AI-powered feed of map events, trending cities,
+//  area dominance leaders, and user posts. Replaces the old fake-tweet view.
 //
 
 import SwiftUI
 import UIKit
 import MapKit
 import AVFoundation
-import AudioToolbox
+
+// MARK: - Article models
+
+struct MapEventArticle: Identifiable {
+    let id = UUID()
+    let city: String
+    let flag: String
+    let headline: String
+    let detail: String
+    let userCount: Int
+    let latitude: Double
+    let longitude: Double
+    let timeAgo: String
+}
+
+struct TrendingCityArticle: Identifiable {
+    let id = UUID()
+    let city: String
+    let flag: String
+    let headline: String
+    let detail: String
+    let growthPercent: Int
+    let activeUsers: Int
+    let latitude: Double
+    let longitude: Double
+    let timeAgo: String
+}
+
+struct DominanceArticle: Identifiable {
+    let id = UUID()
+    let username: String
+    let city: String
+    let flag: String
+    let headline: String
+    let detail: String
+    let radiusText: String
+    let score: Int
+    let latitude: Double
+    let longitude: Double
+    let timeAgo: String
+}
+
+struct UserPostArticle: Identifiable {
+    let id = UUID()
+    let username: String
+    let city: String
+    let flag: String
+    let headline: String
+    let detail: String
+    let likes: Int
+    let comments: Int
+    let latitude: Double
+    let longitude: Double
+    let timeAgo: String
+}
+
+enum NewspaperSection {
+    case mapEvent(MapEventArticle)
+    case trending(TrendingCityArticle)
+    case dominance(DominanceArticle)
+    case userPost(UserPostArticle)
+}
+
+// MARK: - Main view (drop-in replacement — same init signature)
 
 struct FeedTwitterTimelineView: View {
     let posts: [FeedPost]
     let displayNameProvider: (FeedPost) -> String
     let onPostTapped: (Int) -> Void
-    
-    @State private var fakeTweets: [FakeTweet] = []
-    @State private var currentTweetIndex: Int = 0
+
+    @State private var articles: [NewspaperSection] = []
+    @State private var currentArticleIndex: Int = 0
     @State private var hapticGenerator = UIImpactFeedbackGenerator(style: .rigid)
-    @State private var lastScrollOffset: CGFloat = 0
     @State private var popPlayer: AVAudioPlayer? = nil
-    @State private var scrollPosition: Int? = 0
-    
-    // Combined array of all items (fake tweets only for now - real posts don't have text content)
-    private var allItems: [TimelineItem] {
-        fakeTweets.map { .fake($0) }
-    }
-    
+
+    private static let today: String = {
+        let f = DateFormatter()
+        f.dateFormat = "MMMM d, yyyy"
+        return f.string(from: Date())
+    }()
+
     var body: some View {
         GeometryReader { geometry in
             ScrollView(.vertical, showsIndicators: false) {
                 LazyVStack(spacing: 0) {
-                    ForEach(Array(allItems.enumerated()), id: \.offset) { index, item in
-                        if case .fake(let tweet) = item {
-                            FakeTweetCard(
-                                tweet: tweet,
-                                onLongPress: {
-                                    showMapForTweet(tweet)
-                                }
-                            )
-                            .containerRelativeFrame([.horizontal, .vertical])
-                            .id(index)
-                            .onAppear {
-                                updateRadiusForTweet(tweet)
-                                // Load more tweets when nearing the end (infinite scroll)
-                                if index == allItems.count - 3 {
-                                    generateMoreTweets()
-                                }
-                            }
+                    ForEach(Array(articles.enumerated()), id: \.offset) { index, article in
+                        NewspaperArticleCard(
+                            section: article,
+                            edition: "No. \(index + 1)",
+                            date: Self.today,
+                            onLongPress: { showMapForArticle(article) }
+                        )
+                        .containerRelativeFrame([.horizontal, .vertical])
+                        .id(index)
+                        .onAppear {
+                            if index == articles.count - 3 { generateMoreArticles() }
                         }
                     }
                 }
                 .scrollTargetLayout()
                 .background(
-                    GeometryReader { scrollGeo in
+                    GeometryReader { proxy in
                         Color.clear.preference(
-                            key: ScrollOffsetPreferenceKey.self,
-                            value: scrollGeo.frame(in: .named("scroll")).origin.y
+                            key: NewspaperScrollOffsetKey.self,
+                            value: proxy.frame(in: .named("newsScroll")).origin.y
                         )
                     }
                 )
             }
-            .coordinateSpace(name: "scroll")
+            .coordinateSpace(name: "newsScroll")
             .scrollTargetBehavior(.paging)
             .scrollBounceBehavior(.basedOnSize)
-            .onPreferenceChange(ScrollOffsetPreferenceKey.self) { offset in
-                let pageHeight = geometry.size.height
-                let newIndex = Int(round(-offset / pageHeight))
-                
-                if newIndex != currentTweetIndex && newIndex >= 0 && newIndex < allItems.count {
-                    currentTweetIndex = newIndex
-                    
-                    // Haptic feedback
-                    hapticGenerator.impactOccurred(intensity: 0.7)
-                    
-                    // Pop sound
-                    playOneShotPop()
-                    
-                    // Update radius for new item
-                    if case .fake(let tweet) = allItems[newIndex] {
-                        updateRadiusForTweet(tweet)
-                    }
-                }
+            .onPreferenceChange(NewspaperScrollOffsetKey.self) { offset in
+                let newIndex = Int(round(-offset / geometry.size.height))
+                guard newIndex != currentArticleIndex,
+                      newIndex >= 0, newIndex < articles.count else { return }
+                currentArticleIndex = newIndex
+                hapticGenerator.impactOccurred(intensity: 0.7)
+                playPop()
             }
             .ignoresSafeArea()
         }
         .background(Color.black.ignoresSafeArea())
         .onAppear {
             hapticGenerator.prepare()
-            if fakeTweets.isEmpty {
-                generateInitialTweets()
-            }
+            if articles.isEmpty { generateInitialArticles() }
         }
     }
-    
-    private func showMapForTweet(_ tweet: FakeTweet) {
-        Task { @MainActor in
-            let coordinate = CLLocationCoordinate2D(latitude: tweet.latitude, longitude: tweet.longitude)
-            
-            // Set pending location in MapStateManager
-            MapStateManager.shared.setPendingPostLocation(
-                coordinate,
-                userID: "fake_\(tweet.id)",
-                username: tweet.username,
-                profileImageURL: nil,
-                radius: parseRadius(from: tweet.radiusText),
-                cityName: tweet.location,
-                countryName: nil,
-                countryFlag: nil
-            )
-            
-            // Post notification to show location on map
-            let userInfo: [String: Any] = [
-                "coordinate": coordinate,
-                "latitude": tweet.latitude,
-                "longitude": tweet.longitude,
-                "username": tweet.username,
-                "radius": parseRadius(from: tweet.radiusText)
-            ]
 
-            NotificationCenter.default.post(
-                name: Notification.Name("ShowLocationOnMap"),
-                object: nil,
-                userInfo: userInfo
-            )
-            
-            // Wait briefly, then switch to map tab
-            try? await Task.sleep(nanoseconds: 150_000_000)
-            
-            NotificationCenter.default.post(
-                name: Notification.Name("SwitchToMapTab"),
-                object: nil
-            )
-        }
-    }
-    
-    private func showMapForPost(_ post: FeedPost) {
+    // MARK: - Helpers
+
+    private func showMapForArticle(_ article: NewspaperSection) {
+        let (lat, lon): (Double, Double) = {
+            switch article {
+            case .mapEvent(let a):  return (a.latitude, a.longitude)
+            case .trending(let a):  return (a.latitude, a.longitude)
+            case .dominance(let a): return (a.latitude, a.longitude)
+            case .userPost(let a):  return (a.latitude, a.longitude)
+            }
+        }()
         Task { @MainActor in
-            let coordinate = CLLocationCoordinate2D(latitude: post.latitude, longitude: post.longitude)
-            
-            // Set pending location in MapStateManager
-            MapStateManager.shared.setPendingPostLocation(
-                coordinate,
-                userID: post.userID,
-                username: displayNameProvider(post),
-                profileImageURL: nil,
-                radius: post.radius,
-                cityName: post.cityName,
-                countryName: post.countryName,
-                countryFlag: post.countryFlag
-            )
-            
-            // Post notification to show location on map
-            var userInfo: [String: Any] = [
-                "coordinate": coordinate,
-                "latitude": post.latitude,
-                "longitude": post.longitude,
-                "userID": post.userID,
-                "username": displayNameProvider(post),
-                "radius": post.radius
-            ]
-            
-            if let city = post.cityName {
-                userInfo["cityName"] = city
-            }
-            if let country = post.countryName {
-                userInfo["countryName"] = country
-            }
-            if let flag = post.countryFlag {
-                userInfo["countryFlag"] = flag
-            }
-            
             NotificationCenter.default.post(
-                name: Notification.Name("ShowLocationOnMap"),
+                name: Notification.Name("FeedFlyToCoordinate"),
                 object: nil,
-                userInfo: userInfo
-            )
-            
-            // Wait briefly, then switch to map tab
-            try? await Task.sleep(nanoseconds: 150_000_000)
-            
-            NotificationCenter.default.post(
-                name: Notification.Name("SwitchToMapTab"),
-                object: nil
+                userInfo: ["coordinate": CLLocationCoordinate2D(latitude: lat, longitude: lon)]
             )
         }
     }
-    
-    private func generateMoreTweets() {
-        let newTweets = FakeTweetGenerator.generate(count: 10)
-        fakeTweets.append(contentsOf: newTweets)
-    }
-    
-    private func generateInitialTweets() {
-        fakeTweets = FakeTweetGenerator.generate(count: 20)
-        
-        // Update radius for first tweet
-        if let firstTweet = fakeTweets.first {
-            updateRadiusForTweet(firstTweet)
-        }
-    }
-    
-    private func updateRadiusForTweet(_ tweet: FakeTweet) {
-        // Parse radius from tweet.radiusText and update global radius
-        let radiusMeters = parseRadius(from: tweet.radiusText)
-        
-        // Update global radius bar with animation
-        NotificationCenter.default.post(
-            name: .animateRadiusBarToValue,
-            object: nil,
-            userInfo: ["radius": radiusMeters, "duration": 0.8]
+
+    private func generateInitialArticles() {
+        articles = NewspaperGenerator.generate(
+            posts: posts,
+            displayNameProvider: displayNameProvider,
+            startIndex: 0,
+            count: 10
         )
-        
-        // Update post count (use likes as post count for tweets)
-        NotificationCenter.default.post(
-            name: Notification.Name("UserPostCountDidChange"),
-            object: nil,
-            userInfo: ["count": tweet.likes]
-        )
-        
-        print("[Timeline] Updated radius to \(Int(radiusMeters))m, likes: \(tweet.likes)")
     }
-    
-    private func updateRadiusForPost(_ post: FeedPost) {
-        // Update global radius bar with animation
-        NotificationCenter.default.post(
-            name: .animateRadiusBarToValue,
-            object: nil,
-            userInfo: ["radius": post.radius, "duration": 0.8]
-        )
-        
-        // Update post count with view count
-        NotificationCenter.default.post(
-            name: Notification.Name("UserPostCountDidChange"),
-            object: nil,
-            userInfo: ["count": post.viewCount]
-        )
-        
-        print("[Timeline] Updated radius to \(Int(post.radius))m, views: \(post.viewCount)")
+
+    private func generateMoreArticles() {
+        articles.append(contentsOf: NewspaperGenerator.generate(
+            posts: posts,
+            displayNameProvider: displayNameProvider,
+            startIndex: articles.count,
+            count: 8
+        ))
     }
-    
-    private func parseRadius(from text: String) -> Double {
-        // Parse radius text like "5km", "100m", "2.5Mm" back to meters
-        let numericPart = text.trimmingCharacters(in: CharacterSet.decimalDigits.inverted)
-        guard let value = Double(numericPart.replacingOccurrences(of: ",", with: "")) else {
-            return 0
-        }
-        
-        if text.contains("Mm") {
-            return value * 1_000_000
-        } else if text.contains("km") {
-            return value * 1000
-        } else {
-            return value
-        }
-    }
-    
-    private func playOneShotPop() {
-        // Try to play the pop sound file
-        do {
-            let session = AVAudioSession.sharedInstance()
-            // Use ambient to avoid errors and allow mixing
-            try session.setCategory(.ambient, mode: .default, options: [.mixWithOthers])
-            try session.setActive(true)
-        } catch {
-            print("[PopSound] Audio session config failed: \(error)")
-        }
-        
-        if let url = Bundle.main.url(forResource: "pop", withExtension: "mp3") ?? Bundle.main.url(forResource: "pop", withExtension: "wav") {
-            do {
-                let player = try AVAudioPlayer(contentsOf: url)
-                player.numberOfLoops = 0
-                player.volume = 0.9
-                player.prepareToPlay()
-                player.play()
-                popPlayer = player
-                print("[PopSound] ✅ Playing pop sound from file")
-                // Auto release after it finishes (~0.5s typical)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak popPlayer] in
-                    popPlayer?.stop()
-                    self.popPlayer = nil
-                }
-            } catch {
-                print("[PopSound] ❌ Failed to create player: \(error)")
-                // Fallback to system sound
-                AudioServicesPlaySystemSound(1104) // System pop sound
-            }
-        } else {
-            print("[PopSound] ⚠️ pop.(mp3|wav) not found in bundle - using system sound")
-            // Fallback to system sound
-            AudioServicesPlaySystemSound(1104) // System pop sound
-        }
+
+    private func playPop() {
+        guard let url = Bundle.main.url(forResource: "pop", withExtension: "mp3")
+                     ?? Bundle.main.url(forResource: "pop", withExtension: "wav") else { return }
+        guard let player = try? AVAudioPlayer(contentsOf: url) else { return }
+        player.numberOfLoops = 0
+        player.volume = 0.9
+        player.prepareToPlay()
+        player.play()
+        popPlayer = player
     }
 }
 
-// MARK: - Scroll Offset Preference Key
+// MARK: - Scroll offset preference key
 
-private struct ScrollOffsetPreferenceKey: PreferenceKey {
+private struct NewspaperScrollOffsetKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
-    
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
-// MARK: - Timeline Item Enum
+// MARK: - Full-page article card
 
-private enum TimelineItem {
-    case fake(FakeTweet)
-}
-
-// MARK: - Fake Tweet Card
-
-private struct FakeTweetCard: View {
-    let tweet: FakeTweet
+private struct NewspaperArticleCard: View {
+    let section: NewspaperSection
+    let edition: String
+    let date: String
     let onLongPress: () -> Void
-    
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            // Header: Profile + Username + Location
-            HStack(spacing: 16) {
-                // Profile circle - larger
-                Circle()
-                    .fill(Color.black)
-                    .frame(width: 80, height: 80)
-                    .overlay(Circle().stroke(Color.white.opacity(0.18), lineWidth: 1))
-                    .overlay {
-                        Text(tweet.username.prefix(1).uppercased())
-                            .font(.system(size: 36, weight: .bold))
-                            .foregroundStyle(.white)
-                    }
-                
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(tweet.username)
-                        .font(.system(size: 28, weight: .bold))
-                        .foregroundStyle(.white)
-                    
-                    HStack(spacing: 6) {
-                        Image(systemName: "location.fill")
-                            .font(.system(size: 20))
-                            .foregroundStyle(.white.opacity(0.7))
-                        
-                        Text(tweet.location)
-                            .font(.system(size: 22))
-                            .foregroundStyle(.white.opacity(0.7))
-                    }
-                }
-                
-                Spacer()
-                
-                Text(tweet.timeAgo)
-                    .font(.system(size: 20))
-                    .foregroundStyle(.white.opacity(0.6))
-            }
-            
-            // Tweet text content - VERY large and prominent
-            Text(tweet.content)
-                .font(.system(size: 42, weight: .medium))
-                .foregroundStyle(.white)
-                .lineSpacing(12)
-                .padding(.vertical, 24)
-            
-            Spacer()
-            
-            // Coordinates display at bottom
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 12) {
-                    Image(systemName: "mappin.and.ellipse")
-                        .font(.system(size: 18))
-                        .foregroundStyle(.white.opacity(0.6))
-                    
-                    Text(formatCoordinate(tweet.latitude, tweet.longitude))
-                        .font(.system(size: 18, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.6))
-                }
-                
-                Text("Hold to view on map")
-                    .font(.system(size: 16))
-                    .foregroundStyle(.white.opacity(0.5))
-                    .italic()
+        ZStack(alignment: .topLeading) {
+            Color.black
+            VStack(alignment: .leading, spacing: 0) {
+                masthead
+                articleBody
+                Spacer(minLength: 0)
+                footer
             }
         }
-        .padding(.horizontal, 32)
-        .padding(.vertical, 40)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Color.black)
         .contentShape(Rectangle())
-        .gesture(
-            LongPressGesture(minimumDuration: 0.5)
-                .onEnded { _ in
-                    let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
-                    impactFeedback.impactOccurred()
-                    onLongPress()
+        .gesture(LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            onLongPress()
+        })
+    }
+
+    // MARK: Masthead
+
+    private var masthead: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("POPLUR")
+                    .font(.system(size: 42, weight: .black, design: .serif))
+                    .foregroundStyle(.white)
+                + Text(" DAILY")
+                    .font(.system(size: 42, weight: .ultraLight, design: .serif))
+                    .foregroundStyle(Color(red: 1.0, green: 0.85, blue: 0.10))
+                Spacer()
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(date)
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.45))
+                    Text(edition)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.28))
                 }
-        )
-    }
-    
-    private func formatCoordinate(_ lat: Double, _ lon: Double) -> String {
-        let latDir = lat >= 0 ? "N" : "S"
-        let lonDir = lon >= 0 ? "E" : "W"
-        return String(format: "%.4f°%@ %.4f°%@", abs(lat), latDir, abs(lon), lonDir)
-    }
-}
-
-// MARK: - Fake Tweet Model
-
-struct FakeTweet: Identifiable {
-    let id = UUID()
-    let username: String
-    let location: String
-    let content: String
-    let timeAgo: String
-    let radiusText: String
-    let likes: Int
-    let comments: Int
-    let isVideo: Bool
-    let latitude: Double
-    let longitude: Double
-}
-
-// MARK: - Fake Tweet Generator
-
-struct FakeTweetGenerator {
-    private static let usernames = [
-        "Alex_Chen", "Sarah_M", "Mike_Rodriguez", "Emma_Johnson", "David_Kim",
-        "Sophie_Williams", "Lucas_Brown", "Olivia_Davis", "Noah_Martinez", "Ava_Garcia",
-        "Ethan_Wilson", "Mia_Anderson", "Mason_Taylor", "Isabella_Thomas", "Logan_Moore",
-        "Charlotte_Jackson", "Liam_White", "Amelia_Harris", "Oliver_Martin", "Harper_Lee",
-        "Elijah_Clark", "Evelyn_Lewis", "James_Walker", "Abigail_Hall", "Benjamin_Young"
-    ]
-    
-    private static let cities = [
-        ("Tokyo", "🇯🇵", 35.6762, 139.6503),
-        ("London", "🇬🇧", 51.5074, -0.1278),
-        ("New York", "🇺🇸", 40.7128, -74.0060),
-        ("Paris", "🇫🇷", 48.8566, 2.3522),
-        ("Sydney", "🇦🇺", -33.8688, 151.2093),
-        ("Toronto", "🇨🇦", 43.6532, -79.3832),
-        ("Dubai", "🇦🇪", 25.2048, 55.2708),
-        ("Singapore", "🇸🇬", 1.3521, 103.8198),
-        ("Berlin", "🇩🇪", 52.5200, 13.4050),
-        ("Amsterdam", "🇳🇱", 52.3676, 4.9041),
-        ("Barcelona", "🇪🇸", 41.3851, 2.1734),
-        ("Rome", "🇮🇹", 41.9028, 12.4964),
-        ("Seoul", "🇰🇷", 37.5665, 126.9780),
-        ("Mexico City", "🇲🇽", 19.4326, -99.1332),
-        ("São Paulo", "🇧🇷", -23.5505, -46.6333),
-        ("Mumbai", "🇮🇳", 19.0760, 72.8777),
-        ("Hong Kong", "🇭🇰", 22.3193, 114.1694),
-        ("Bangkok", "🇹🇭", 13.7563, 100.5018),
-        ("Istanbul", "🇹🇷", 41.0082, 28.9784),
-        ("Moscow", "🇷🇺", 55.7558, 37.6173)
-    ]
-    
-    private static let tweetTemplates = [
-        "Just captured an amazing moment at the local park! The sunset was incredible 🌅",
-        "Can't believe how busy downtown is today. Everyone's out enjoying the weather ☀️",
-        "Found this hidden gem of a cafe. Best coffee I've had in months! ☕",
-        "The street art scene here is absolutely mind-blowing 🎨",
-        "Just witnessed the most beautiful architecture. This city never disappoints 🏛️",
-        "Food scene here is next level. Every meal is an adventure 🍜",
-        "The energy at the market today was unreal. So many amazing finds! 🛍️",
-        "Nothing beats a morning run along the waterfront. Pure bliss 🏃‍♀️",
-        "This neighborhood has such a unique vibe. Love exploring new areas 🏘️",
-        "Concert vibes tonight were incredible! Music brings people together 🎵",
-        "The view from up here is absolutely breathtaking 🏔️",
-        "Local festival energy is AMAZING right now! 🎉",
-        "Just tried the most incredible dish. My taste buds are dancing 🍽️",
-        "The skyline at night here is something else ✨",
-        "Beach day perfection. Sun, sand, and good company 🏖️",
-        "This hiking trail exceeded all expectations. Nature therapy 🥾",
-        "The shopping district here is dangerous for my wallet 😅",
-        "Museum visit today was so inspiring. Art really moves you 🖼️",
-        "The nightlife here is absolutely electric ⚡",
-        "Just experienced the best street performance. Talent everywhere! 🎭",
-        "The local produce market is a feast for the senses 🥬",
-        "Rain or shine, this city always delivers ☔",
-        "The historic quarter is like stepping back in time ⏰",
-        "Fitness community here is so welcoming and supportive 💪",
-        "The botanical gardens are in full bloom. Absolutely stunning 🌺"
-    ]
-    
-    static func generate(count: Int) -> [FakeTweet] {
-        var tweets: [FakeTweet] = []
-        
-        for _ in 0..<count {
-            let username = usernames.randomElement()!
-            let cityData = cities.randomElement()!
-            let content = tweetTemplates.randomElement()!
-            
-            // Generate random time ago
-            let timeValue = Int.random(in: 1...59)
-            let timeUnit = ["s", "m", "h"].randomElement()!
-            let timeAgo = "\(timeValue)\(timeUnit)"
-            
-            // Generate random radius
-            let radiusMeters = [100, 500, 1_000, 5_000, 10_000, 50_000, 100_000, 500_000, 1_000_000, 5_000_000].randomElement()!
-            let radiusText: String
-            if radiusMeters < 1000 {
-                radiusText = "\(radiusMeters)m"
-            } else if radiusMeters < 1_000_000 {
-                let km = Double(radiusMeters) / 1000
-                radiusText = km < 10 ? String(format: "%.1fkm", km) : "\(Int(km))km"
-            } else {
-                let mm = Double(radiusMeters) / 1_000_000
-                radiusText = String(format: "%.1fMm", mm)
             }
-            
-            let likes = Int.random(in: 5...1500)
-            let comments = Int.random(in: 0...150)
-            let isVideo = Int.random(in: 0..<10) < 8
-            
-            // Add some random offset to coordinates for variety
-            let latOffset = Double.random(in: -0.1...0.1)
-            let lonOffset = Double.random(in: -0.1...0.1)
-            
-            let tweet = FakeTweet(
-                username: username,
-                location: "\(cityData.0) \(cityData.1)",
-                content: content,
-                timeAgo: timeAgo,
-                radiusText: radiusText,
-                likes: likes,
-                comments: comments,
-                isVideo: isVideo,
-                latitude: cityData.2 + latOffset,
-                longitude: cityData.3 + lonOffset
-            )
-            
-            tweets.append(tweet)
+            .padding(.horizontal, 26)
+            .padding(.top, 54)
+
+            Rectangle().fill(.white.opacity(0.88)).frame(height: 2)
+                .padding(.horizontal, 26).padding(.top, 8)
+            Rectangle().fill(.white.opacity(0.18)).frame(height: 1)
+                .padding(.horizontal, 26).padding(.top, 3)
         }
-        
-        return tweets
+    }
+
+    // MARK: Article body (switches on section type)
+
+    @ViewBuilder
+    private var articleBody: some View {
+        switch section {
+        case .mapEvent(let a):  mapEventBody(a)
+        case .trending(let a):  trendingBody(a)
+        case .dominance(let a): dominanceBody(a)
+        case .userPost(let a):  userPostBody(a)
+        }
+    }
+
+    @ViewBuilder
+    private func mapEventBody(_ a: MapEventArticle) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            categoryRow(label: "MAP EVENT",
+                        labelColor: .black,
+                        chipColor: Color(red: 1.0, green: 0.85, blue: 0.10),
+                        city: a.city, flag: a.flag, timeAgo: a.timeAgo)
+            headlineText(a.headline)
+            divider
+            bodyText(a.detail)
+            statsRow(
+                stat1: (icon: "person.2.fill",   value: briefCount(a.userCount) + " users nearby"),
+                stat2: (icon: "mappin.and.ellipse", value: coordStr(a.latitude, a.longitude))
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func trendingBody(_ a: TrendingCityArticle) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            categoryRow(label: "TRENDING",
+                        labelColor: .black,
+                        chipColor: Color(red: 0.18, green: 0.90, blue: 0.50),
+                        city: a.city, flag: a.flag, timeAgo: a.timeAgo)
+            headlineText(a.headline)
+            divider
+            bodyText(a.detail)
+            statsRow(
+                stat1: (icon: "chart.line.uptrend.xyaxis", value: "+\(a.growthPercent)% engagement"),
+                stat2: (icon: "person.fill",               value: briefCount(a.activeUsers) + " active")
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func dominanceBody(_ a: DominanceArticle) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            categoryRow(label: "DOMINANCE",
+                        labelColor: .white,
+                        chipColor: Color(red: 0.85, green: 0.10, blue: 0.10),
+                        city: a.city, flag: a.flag, timeAgo: a.timeAgo)
+
+            HStack(spacing: 10) {
+                Text("👑")
+                    .font(.system(size: 32))
+                Text("@\(a.username)")
+                    .font(.system(size: 28, weight: .black))
+                    .foregroundStyle(Color(red: 1.0, green: 0.85, blue: 0.10))
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 26)
+            .padding(.top, 14)
+
+            headlineText(a.headline, size: 32)
+            divider
+            bodyText(a.detail)
+            statsRow(
+                stat1: (icon: "scope",     value: a.radiusText + " radius"),
+                stat2: (icon: "star.fill", value: briefCount(a.score) + " score")
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func userPostBody(_ a: UserPostArticle) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            categoryRow(label: "USER POST",
+                        labelColor: .black,
+                        chipColor: .white,
+                        city: a.city, flag: a.flag, timeAgo: a.timeAgo)
+
+            Text("@\(a.username)")
+                .font(.system(size: 22, weight: .bold))
+                .foregroundStyle(.white.opacity(0.75))
+                .padding(.horizontal, 26)
+                .padding(.top, 14)
+
+            headlineText(a.headline)
+            divider
+            bodyText(a.detail)
+            statsRow(
+                stat1: (icon: "heart.fill",      value: briefCount(a.likes) + " likes"),
+                stat2: (icon: "bubble.left.fill", value: "\(a.comments) comments")
+            )
+        }
+    }
+
+    // MARK: Shared sub-views
+
+    @ViewBuilder
+    private func categoryRow(
+        label: String,
+        labelColor: Color,
+        chipColor: Color,
+        city: String,
+        flag: String,
+        timeAgo: String
+    ) -> some View {
+        HStack(spacing: 8) {
+            Text(label)
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .foregroundStyle(labelColor)
+                .padding(.horizontal, 10).padding(.vertical, 4)
+                .background(chipColor)
+                .clipShape(Capsule())
+
+            Text("\(flag) \(city)")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.white.opacity(0.55))
+
+            Spacer()
+
+            Text(timeAgo)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.38))
+        }
+        .padding(.horizontal, 26)
+        .padding(.top, 22)
+    }
+
+    @ViewBuilder
+    private func headlineText(_ text: String, size: CGFloat = 36) -> some View {
+        Text(text)
+            .font(.system(size: size, weight: .black, design: .serif))
+            .foregroundStyle(.white)
+            .lineSpacing(5)
+            .padding(.horizontal, 26)
+            .padding(.top, 14)
+    }
+
+    private var divider: some View {
+        Rectangle()
+            .fill(.white.opacity(0.12))
+            .frame(height: 1)
+            .padding(.horizontal, 26)
+            .padding(.top, 14)
+    }
+
+    @ViewBuilder
+    private func bodyText(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 19, weight: .regular))
+            .foregroundStyle(.white.opacity(0.72))
+            .lineSpacing(5)
+            .padding(.horizontal, 26)
+            .padding(.top, 14)
+    }
+
+    @ViewBuilder
+    private func statsRow(
+        stat1: (icon: String, value: String),
+        stat2: (icon: String, value: String)
+    ) -> some View {
+        HStack(spacing: 20) {
+            statItem(icon: stat1.icon, value: stat1.value)
+            statItem(icon: stat2.icon, value: stat2.value)
+        }
+        .padding(.horizontal, 26)
+        .padding(.top, 18)
+    }
+
+    @ViewBuilder
+    private func statItem(icon: String, value: String) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon)
+                .font(.system(size: 12))
+                .foregroundStyle(.white.opacity(0.45))
+            Text(value)
+                .font(.system(size: 13, weight: .medium, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.45))
+                .lineLimit(1)
+        }
+    }
+
+    private var footer: some View {
+        VStack(spacing: 5) {
+            Rectangle().fill(.white.opacity(0.12)).frame(height: 1)
+            Text("Hold to view on map  •  Swipe for next story")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.28))
+        }
+        .padding(.horizontal, 26)
+        .padding(.bottom, 30)
+    }
+
+    // MARK: Formatting
+
+    private func briefCount(_ n: Int) -> String {
+        if n >= 1_000_000 { return String(format: "%.1fM", Double(n) / 1_000_000) }
+        if n >= 1_000     { return String(format: "%.1fK", Double(n) / 1_000) }
+        return "\(n)"
+    }
+
+    private func coordStr(_ lat: Double, _ lon: Double) -> String {
+        String(format: "%.3f°%@, %.3f°%@",
+               abs(lat), lat >= 0 ? "N" : "S",
+               abs(lon), lon >= 0 ? "E" : "W")
+    }
+}
+
+// MARK: - Content generator
+
+struct NewspaperGenerator {
+
+    private static let cities: [(name: String, flag: String, lat: Double, lon: Double)] = [
+        ("Tokyo",       "🇯🇵",  35.6762,  139.6503),
+        ("London",      "🇬🇧",  51.5074,   -0.1278),
+        ("New York",    "🇺🇸",  40.7128,  -74.0060),
+        ("Paris",       "🇫🇷",  48.8566,    2.3522),
+        ("Sydney",      "🇦🇺", -33.8688,  151.2093),
+        ("Toronto",     "🇨🇦",  43.6532,  -79.3832),
+        ("Dubai",       "🇦🇪",  25.2048,   55.2708),
+        ("Singapore",   "🇸🇬",   1.3521,  103.8198),
+        ("Berlin",      "🇩🇪",  52.5200,   13.4050),
+        ("Barcelona",   "🇪🇸",  41.3851,    2.1734),
+        ("Seoul",       "🇰🇷",  37.5665,  126.9780),
+        ("São Paulo",   "🇧🇷", -23.5505,  -46.6333),
+        ("Mumbai",      "🇮🇳",  19.0760,   72.8777),
+        ("Bangkok",     "🇹🇭",  13.7563,  100.5018),
+        ("Istanbul",    "🇹🇷",  41.0082,   28.9784),
+        ("Lagos",       "🇳🇬",   6.5244,    3.3792),
+        ("Cairo",       "🇪🇬",  30.0444,   31.2357),
+        ("Mexico City", "🇲🇽",  19.4326,  -99.1332),
+        ("Jakarta",     "🇮🇩",  -6.2088,  106.8456),
+        ("Chicago",     "🇺🇸",  41.8781,  -87.6298)
+    ]
+
+    private static let mapEventTemplates: [(String, String)] = [
+        (
+            "Viral Content Surge Detected Near Central District",
+            "Poplur AI flagged an unusual spike in post activity within a 2 km radius. Over 3,200 users captured content here in the last 90 minutes — a 580% jump above the daily baseline."
+        ),
+        (
+            "Midnight Flash Crowd Emerges at the Waterfront",
+            "Thermal activity on the Poplur map suggests a spontaneous gathering forming near the harbor district. Real-time post velocity has tripled since 11:40 PM."
+        ),
+        (
+            "Stadium Energy Spikes — Major Event Underway",
+            "AI analysis of geotagged post density confirms a live event in this zone. Crowd-sourced signals show peak attendance, with post likes averaging 4.2× higher than non-event posts."
+        ),
+        (
+            "Urban Exploration Trend Sweeps the Old Quarter",
+            "A coordinated wave of Poplur users is documenting the historic district tonight. The AI identified a 'discovery cluster' — 14 unique rooftop viewpoints tagged in under 3 hours."
+        ),
+        (
+            "Unofficial Street Festival Detected — Not on Any Calendar",
+            "Post clusters, audio snippets, and density heatmaps point to a music gathering near the market district. Poplur AI is classifying this as an 'organic event emergence.'"
+        ),
+        (
+            "Dawn Patrol Runners Form Largest Fitness Cluster of the Week",
+            "Riverside park runners generated the highest fitness-category post density seen this week. AI estimates 800+ active users within a 500 m corridor at first light."
+        ),
+        (
+            "Night Market Buzz at Seasonal Record",
+            "Poplur's location AI tracked a 12-hour buildup of food and shopping posts converging on this coordinate. Engagement on night market content is 2.9× the platform average."
+        ),
+    ]
+
+    private static let trendingTemplates: [(String, String, Int, Int)] = [
+        (
+            "Post Volume Triples — City Breaks into Global Top 10",
+            "An unprecedented wave of content creation has catapulted this city into Poplur's weekly global leaderboard. AI trend analysis attributes the surge to weather, a cultural moment, and influencer activity.",
+            312, 14_200
+        ),
+        (
+            "City's Engagement Rate Hits All-Time Platform Record",
+            "Average post likes-per-view in this metro has surpassed every prior benchmark on Poplur. The AI identifies rising creators in food, street art, and fitness as key drivers.",
+            287, 9_800
+        ),
+        (
+            "Overnight Viral Moment Puts City on the Global Map",
+            "A single video from this city generated 2.1M views in 8 hours, triggering a cascade of follow-on posts. Poplur AI is classifying this as a 'viral echo event' — rare but powerful.",
+            445, 22_500
+        ),
+        (
+            "Longest-Running Trend This Year — Day 4 Continues",
+            "This city has maintained trending status for four consecutive days — the longest streak in 2024. Sustained content quality, high radius posts, and active community response keep momentum going.",
+            198, 7_400
+        ),
+        (
+            "New Creator Cohort Drives 8× Weekend Engagement Spike",
+            "Poplur AI detected an emerging cluster of high-quality creators in this metro. Combined, they drove an 8× spike in city-level engagement over a single weekend.",
+            792, 31_000
+        ),
+    ]
+
+    private static let dominanceNames = [
+        "xX_King_Xx", "CityQueen_Riri", "BlazeRunner", "NightOwl_Kai",
+        "UrbanHawk", "NovaStar_Lena", "GridLock_Ty", "SkyWatcher_J",
+        "PoplurElite99", "StreetKing_Mav", "TowerVault_Em", "CityPulse_Zara"
+    ]
+
+    private static let dominanceTemplates: [(String, String)] = [
+        (
+            "Claims Full Control of Metro District After 72-Hour Push",
+            "Through sustained high-radius posts and aggressive engagement, this user has locked down the metro zone. Challengers within 10 km have been pushed entirely off the leaderboard."
+        ),
+        (
+            "Breaks City Record — Largest Radius Ever Logged in Region",
+            "A single post blanketed the entire metropolitan area, outranking 340 competing accounts simultaneously. Poplur AI has flagged this as a historic radius achievement."
+        ),
+        (
+            "Retains Crown for Third Consecutive Week",
+            "Despite heavy competition from rising challengers, this user has successfully defended their dominant position for three weeks running. AI analysis cites content consistency as the primary factor."
+        ),
+        (
+            "Tactical Late-Night Push Flips City Leaderboard",
+            "In a calculated off-peak move at 2:47 AM, this user deployed high-quality posts that flipped the entire city ranking. AI ranked this as one of the top-10 most strategic dominance moves this year."
+        ),
+        (
+            "From Zero to City Champion in Just 11 Days",
+            "This account went from newcomer to city champion in a record 11 days. Rapid follower growth, viral content acceleration, and precision radius targeting are cited by AI as the winning formula."
+        ),
+    ]
+
+    private static let userPostTemplates: [(String, String)] = [
+        (
+            "Captured Something the City Hasn't Seen Before",
+            "This post's unique angle and timing generated immediate traction. Poplur AI flagged it as 'discovery content' — documenting a moment or place with genuine novelty value."
+        ),
+        (
+            "A Moment the Algorithm Loved",
+            "High engagement velocity, strong radius, and early reshare activity pushed this post into the trending queue within minutes of upload."
+        ),
+        (
+            "Local Insight. Global Reach.",
+            "What started as a personal moment quickly resonated far beyond this creator's immediate circle. The post's radius has expanded three times since it was first published."
+        ),
+        (
+            "Raw. Unfiltered. Trending.",
+            "No filters, no production budget — just authentic street-level content that the Poplur community responded to immediately."
+        ),
+        (
+            "This Post Is Why Poplur Exists",
+            "A perfectly timed, genuinely local moment — exactly the kind of content that defines what Poplur was built for."
+        ),
+    ]
+
+    private static let times = ["2m", "5m", "11m", "18m", "27m", "43m", "1h", "2h", "3h", "5h", "8h", "12h"]
+    private static let radii = ["500m", "2km", "5km", "12km", "28km", "50km", "100km", "500km"]
+    private static let scores = [1_200, 3_400, 7_800, 15_000, 42_000, 88_000, 210_000, 550_000]
+    private static let userCounts = [820, 1_240, 2_100, 3_400, 560, 4_800, 720, 9_300]
+    private static let fakeLikes = [88, 234, 1_200, 340, 56, 3_100, 780]
+    private static let fakeComments = [12, 34, 88, 210, 7, 400, 55]
+    private static let fakeHandles = ["MavericK", "SkylineJ", "UrbanLens", "NovaBeat"]
+
+    static func generate(
+        posts: [FeedPost],
+        displayNameProvider: (FeedPost) -> String,
+        startIndex: Int,
+        count: Int
+    ) -> [NewspaperSection] {
+        (0..<count).map { i in
+            let gi = startIndex + i
+            let city = cities[(gi * 7 + i * 3) % cities.count]
+            let timeAgo = times[gi % times.count] + " ago"
+            let jitter = { Double.random(in: -0.08...0.08) }
+            let slot = gi % 20
+
+            switch slot {
+            case 0..<6:
+                let t = mapEventTemplates[gi % mapEventTemplates.count]
+                return .mapEvent(MapEventArticle(
+                    city: city.name, flag: city.flag,
+                    headline: t.0, detail: t.1,
+                    userCount: userCounts[gi % userCounts.count],
+                    latitude: city.lat + jitter(), longitude: city.lon + jitter(),
+                    timeAgo: timeAgo
+                ))
+            case 6..<11:
+                let t = trendingTemplates[gi % trendingTemplates.count]
+                return .trending(TrendingCityArticle(
+                    city: city.name, flag: city.flag,
+                    headline: t.0, detail: t.1,
+                    growthPercent: t.2, activeUsers: t.3,
+                    latitude: city.lat + jitter(), longitude: city.lon + jitter(),
+                    timeAgo: timeAgo
+                ))
+            case 11..<16:
+                let t = dominanceTemplates[gi % dominanceTemplates.count]
+                return .dominance(DominanceArticle(
+                    username: dominanceNames[gi % dominanceNames.count],
+                    city: city.name, flag: city.flag,
+                    headline: t.0, detail: t.1,
+                    radiusText: radii[gi % radii.count],
+                    score: scores[gi % scores.count],
+                    latitude: city.lat + jitter(), longitude: city.lon + jitter(),
+                    timeAgo: timeAgo
+                ))
+            default:
+                let t = userPostTemplates[gi % userPostTemplates.count]
+                let realPost = posts.isEmpty ? nil : posts[gi % posts.count]
+                let name = realPost.map { displayNameProvider($0) }
+                            ?? fakeHandles[gi % fakeHandles.count]
+                return .userPost(UserPostArticle(
+                    username: name,
+                    city: city.name, flag: city.flag,
+                    headline: t.0, detail: t.1,
+                    likes: realPost?.viewCount ?? fakeLikes[gi % fakeLikes.count],
+                    comments: fakeComments[gi % fakeComments.count],
+                    latitude: realPost?.latitude ?? (city.lat + jitter()),
+                    longitude: realPost?.longitude ?? (city.lon + jitter()),
+                    timeAgo: timeAgo
+                ))
+            }
+        }
     }
 }
 
@@ -541,50 +678,12 @@ struct FakeTweetGenerator {
 #if DEBUG
 struct FeedTwitterTimelineView_Previews: PreviewProvider {
     static var previews: some View {
-        let samplePosts = [
-            FeedPost(
-                id: "1",
-                latitude: 40.7128,
-                longitude: -74.0060,
-                mediaURL: "https://picsum.photos/800/600",
-                radius: 5000,
-                viewCount: 1250,
-                userID: "user1",
-                cityName: "New York",
-                countryName: "USA",
-                countryFlag: "🇺🇸"
-            ),
-            FeedPost(
-                id: "2",
-                latitude: 51.5074,
-                longitude: -0.1278,
-                mediaURL: "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_4x3/gear1/prog_index.m3u8",
-                radius: 50000,
-                viewCount: 8500,
-                userID: "user2",
-                cityName: "London",
-                countryName: "United Kingdom",
-                countryFlag: "🇬🇧"
-            ),
-            FeedPost(
-                id: "3",
-                latitude: 35.6762,
-                longitude: 139.6503,
-                mediaURL: "https://picsum.photos/800/600?random=2",
-                radius: 500000,
-                viewCount: 25000,
-                userID: "user3",
-                cityName: "Tokyo",
-                countryName: "Japan",
-                countryFlag: "🇯🇵"
-            )
-        ]
-        
         FeedTwitterTimelineView(
-            posts: samplePosts,
-            displayNameProvider: { post in "User \(post.userID)" },
-            onPostTapped: { index in print("Tapped post \(index)") }
+            posts: [],
+            displayNameProvider: { _ in "demo_user" },
+            onPostTapped: { _ in }
         )
+        .preferredColorScheme(.dark)
     }
 }
 #endif

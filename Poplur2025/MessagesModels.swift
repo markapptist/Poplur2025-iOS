@@ -57,6 +57,8 @@ public final class FakeDMStore: ObservableObject {
         let me = DMUser(id: UUID(), displayName: "You", handle: "you", avatarSystemImage: "person.circle.fill")
         self.currentUser = me
         self.users = [
+            DMUser(id: UUID(), displayName: "Mia", handle: "mia", avatarSystemImage: "person.circle.fill"),
+            DMUser(id: UUID(), displayName: "Jay", handle: "jay", avatarSystemImage: "person.circle.fill"),
             DMUser(id: UUID(), displayName: "Alex Johnson", handle: "alexj", avatarSystemImage: "person.circle.fill"),
             DMUser(id: UUID(), displayName: "Samira Khan", handle: "samk", avatarSystemImage: "person.crop.circle"),
             DMUser(id: UUID(), displayName: "Diego Morales", handle: "diegom", avatarSystemImage: "person.circle"),
@@ -64,10 +66,18 @@ public final class FakeDMStore: ObservableObject {
         ]
         self.threads = []
 
-        if seed, let other = users.first {
-            let thread = createThread(with: [other]) // will reuse if exists
-            _ = send(message: "Hey! This is a demo DM thread.", in: thread.id, from: other.id)
-            _ = send(message: "Reply to keep the conversation going.", in: thread.id, from: other.id)
+        if seed {
+            seedThread(with: "Alex Johnson", messages: ["Hey! This is a demo DM thread.", "Reply to keep the conversation going."])
+            seedThread(with: "Jay", messages: ["The map animation is ready"])
+            seedThread(with: "Mia", messages: ["Let's post at the food market"])
+        }
+    }
+
+    private func seedThread(with displayName: String, messages: [String]) {
+        guard let other = users.first(where: { $0.displayName == displayName }) else { return }
+        let thread = createThread(with: [other])
+        for message in messages {
+            _ = send(message: message, in: thread.id, from: other.id)
         }
     }
 

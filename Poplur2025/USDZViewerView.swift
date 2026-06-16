@@ -11,6 +11,8 @@ struct USDZViewerView: View {
             .ignoresSafeArea()
             .navigationTitle("Head Preview")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar(.hidden, for: .navigationBar)
+            .navigationBarBackButtonHidden(true)
     }
 }
 
