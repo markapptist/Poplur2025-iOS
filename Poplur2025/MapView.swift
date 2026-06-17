@@ -2515,6 +2515,24 @@ private struct PlacesListView: View {
 
 // MARK: - Address Search View
 
+/// Back button for sub-screens pushed inside the cube-hold NavigationStack.
+/// Hides the system nav bar and shows a single ← chevron that calls dismiss().
+private struct CubeMenuBackButton: View {
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        Button {
+            dismiss()
+        } label: {
+            Image(systemName: "chevron.left")
+                .font(.system(size: 17, weight: .bold))
+                .foregroundStyle(.primary)
+                .frame(width: 36, height: 36)
+                .background(.thinMaterial, in: Circle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 private struct MapRadioSearchChecklistView: View {
     @Binding var query: String
     @Binding var results: [MKMapItem]
@@ -2539,7 +2557,7 @@ private struct MapRadioSearchChecklistView: View {
                 }
                 Spacer()
                 Button(action: onClose) {
-                    Image(systemName: "xmark")
+                    Image(systemName: "chevron.left")
                         .font(.system(size: 15, weight: .black))
                         .foregroundStyle(.primary)
                         .frame(width: 34, height: 34)
@@ -3491,6 +3509,7 @@ struct MapViewProduction: View {
     @State private var cubeHoldStartY: CGFloat? = nil // Track cube hold drag start position
     @State private var initialZoomLevel: Double = 700 // Store zoom level when cube hold starts
     @State private var showIndoorMap: Bool = false
+    @State private var cubeHoldNavPath = NavigationPath()
     
     // Weather overlay state
     @State private var weatherState = WeatherVisualizationState(
@@ -5134,16 +5153,21 @@ struct MapViewProduction: View {
                 if isShowing {
                     mapState.stopTour()
                 } else {
-                    // Clear search when menu closes
+                    // Clear search and reset nav stack when menu closes
                     searchQuery = ""
                     searchResults = []
+                    cubeHoldNavPath = NavigationPath()
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: .CubeGlobalTap)) { _ in
                 guard !layoutPreviewMode else { return }
-                // If menu is open, close it on tap; otherwise center on location
+                // If menu is open, pop sub-screen or close root; otherwise center on location
                 if showCubeHoldSearch {
-                    showCubeHoldSearch = false
+                    if !cubeHoldNavPath.isEmpty {
+                        cubeHoldNavPath.removeLast()
+                    } else {
+                        showCubeHoldSearch = false
+                    }
                 } else {
                     // Respect lock/suppression windows after jumping to a post location
                     if let until = lockToPostUntil, until > Date() {
@@ -5666,35 +5690,38 @@ struct MapViewProduction: View {
 
     @ViewBuilder
     private var mapHoldRadioMenuSheet: some View {
-        MapRadioSearchChecklistView(
-            query: $searchQuery,
-            results: $searchResults,
-            isSearching: $isSearching,
-            selectedTopics: $selectedRadioTopics,
-            isTouring: mapState.isInTourMode,
-            radioScript: mapRadioScript,
-            onClose: {
-                showCubeHoldSearch = false
-            },
-            onSelectSearchResult: { item in
-                showCubeHoldSearch = false
-                if let coord = item.placemark.location?.coordinate {
-                    let name = item.name ?? "Selected Location"
-                    navigateWithTourTransition(to: coord, cityName: name)
+        NavigationStack(path: $cubeHoldNavPath) {
+            MapRadioSearchChecklistView(
+                query: $searchQuery,
+                results: $searchResults,
+                isSearching: $isSearching,
+                selectedTopics: $selectedRadioTopics,
+                isTouring: mapState.isInTourMode,
+                radioScript: mapRadioScript,
+                onClose: {
+                    showCubeHoldSearch = false
+                },
+                onSelectSearchResult: { item in
+                    showCubeHoldSearch = false
+                    if let coord = item.placemark.location?.coordinate {
+                        let name = item.name ?? "Selected Location"
+                        navigateWithTourTransition(to: coord, cityName: name)
+                    }
+                },
+                onToggleRadio: {
+                    mapRadioHost.toggle(script: mapRadioScript)
+                },
+                onToggleTour: {
+                    if mapState.isInTourMode {
+                        stopTour()
+                    } else {
+                        startTour()
+                    }
+                    showCubeHoldSearch = false
                 }
-            },
-            onToggleRadio: {
-                mapRadioHost.toggle(script: mapRadioScript)
-            },
-            onToggleTour: {
-                if mapState.isInTourMode {
-                    stopTour()
-                } else {
-                    startTour()
-                }
-                showCubeHoldSearch = false
-            }
-        )
+            )
+            .toolbar(.hidden, for: .navigationBar)
+        }
     }
     
     // MARK: - First Launch Sequence
