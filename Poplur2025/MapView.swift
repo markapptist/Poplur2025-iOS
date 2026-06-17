@@ -670,13 +670,24 @@ private final class PoplurMapRadioHost: NSObject, ObservableObject, AVSpeechSynt
         onSpeechFinished = onFinished
 
         let utterance = AVSpeechUtterance(string: script)
-        utterance.voice = AVSpeechSynthesisVoice(language: "en-GB")
-        utterance.rate = 0.45
-        utterance.pitchMultiplier = 1.05
+        utterance.voice = Self.preferredRadioVoice()
+        utterance.rate = 0.50
+        utterance.pitchMultiplier = 1.0
         utterance.volume = 1.0
+        utterance.preUtteranceDelay = 0.12
+        utterance.postUtteranceDelay = 0.18
 
         isLive = true
         synth.speak(utterance)
+    }
+
+    private static func preferredRadioVoice() -> AVSpeechSynthesisVoice? {
+        let voices = AVSpeechSynthesisVoice.speechVoices()
+        return voices.first {
+            $0.language == "en-US" && ($0.quality == .premium || $0.quality == .enhanced)
+        } ?? voices.first {
+            $0.language == "en-GB" && ($0.quality == .premium || $0.quality == .enhanced)
+        } ?? AVSpeechSynthesisVoice(language: "en-US")
     }
 
     func stop() {
@@ -830,6 +841,100 @@ private struct TrendPopObject: Identifiable {
     let seed: Int
 }
 
+private enum PoplurRadioTopic: String, CaseIterable, Identifiable {
+    case malls
+    case universities
+    case restaurants
+    case stadiums
+    case airports
+    case concerts
+    case downtown
+    case themeParks
+    case casinos
+    case hotels
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .malls: return "Malls"
+        case .universities: return "Universities"
+        case .restaurants: return "Restaurants"
+        case .stadiums: return "Stadiums"
+        case .airports: return "Airports"
+        case .concerts: return "Concert Venues"
+        case .downtown: return "Downtown Districts"
+        case .themeParks: return "Theme Parks"
+        case .casinos: return "Casinos"
+        case .hotels: return "Hotels & Resorts"
+        }
+    }
+
+    var shortTitle: String {
+        switch self {
+        case .universities: return "Colleges"
+        case .restaurants: return "Food"
+        case .stadiums: return "Arenas"
+        case .themeParks: return "Parks"
+        case .hotels: return "Hotels"
+        default: return title
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .malls: return "bag.fill"
+        case .universities: return "graduationcap.fill"
+        case .restaurants: return "fork.knife"
+        case .stadiums: return "sportscourt.fill"
+        case .airports: return "airplane"
+        case .concerts: return "music.mic"
+        case .downtown: return "building.2.fill"
+        case .themeParks: return "sparkles"
+        case .casinos: return "suit.diamond.fill"
+        case .hotels: return "bed.double.fill"
+        }
+    }
+
+    var trendCategory: TrendCategory {
+        switch self {
+        case .malls, .universities:
+            return .clothes
+        case .restaurants:
+            return .food
+        case .stadiums:
+            return .sports
+        case .concerts:
+            return .music
+        case .casinos:
+            return .nightlife
+        case .airports, .downtown, .themeParks, .hotels:
+            return .travel
+        }
+    }
+
+    var defaultEnabled: Bool {
+        switch self {
+        case .malls, .restaurants, .stadiums, .concerts, .downtown:
+            return true
+        case .universities, .airports, .themeParks, .casinos, .hotels:
+            return false
+        }
+    }
+}
+
+private struct PoplurTourFocus {
+    let topic: PoplurRadioTopic
+    let title: String
+    let subtitle: String
+    let coordinate: CLLocationCoordinate2D
+    let bearing: CLLocationDirection
+    let radiusMeters: Double
+    let distance: CLLocationDistance
+    let category: TrendCategory
+    let liveMoment: PoplurLiveTourMoment?
+}
+
 private enum TrendCategory: String, CaseIterable {
     case clothes
     case sports
@@ -884,6 +989,7 @@ private enum TrendCategory: String, CaseIterable {
 }
 
 private let tourStopDwellSeconds: UInt64 = 30
+private let tourTopicDwellSeconds: UInt64 = 14
 private let trendPopStartDelaySeconds: UInt64 = 1
 private let trendPopCountMin = 10
 private let trendPopCountRange = 6
@@ -1154,7 +1260,7 @@ private enum PoplurLiveTourMomentResolver {
         return shoppingSaleMoment(for: stop)
     }
 
-    private static func liveSportsMoment(for stop: PoplurTourStop) async -> PoplurLiveTourMoment? {
+    static func liveSportsMoment(for stop: PoplurTourStop) async -> PoplurLiveTourMoment? {
         guard PoplurSportsVenueCatalog[stop.cityName]?.isEmpty == false else { return nil }
 
         for feed in PoplurSportsScoreboardFeeds {
@@ -1244,7 +1350,7 @@ private enum PoplurLiveTourMomentResolver {
         return "\(label(away)) \(score(away)) - \(label(home)) \(score(home))"
     }
 
-    private static func shoppingSaleMoment(for stop: PoplurTourStop) -> PoplurLiveTourMoment? {
+    static func shoppingSaleMoment(for stop: PoplurTourStop) -> PoplurLiveTourMoment? {
         guard let venues = PoplurShoppingSaleCatalog[stop.cityName], !venues.isEmpty else { return nil }
         let saleBucket = Int(Date().timeIntervalSince1970 / 10_800)
         let index = stableTourSeed(parts: stop.cityName, "shopping", "\(saleBucket)") % venues.count
@@ -2398,6 +2504,175 @@ private struct PlacesListView: View {
 
 // MARK: - Address Search View
 
+private struct MapRadioSearchChecklistView: View {
+    @Binding var query: String
+    @Binding var results: [MKMapItem]
+    @Binding var isSearching: Bool
+    @Binding var selectedTopics: Set<PoplurRadioTopic>
+    let isTouring: Bool
+    let radioScript: String
+    let onClose: () -> Void
+    let onSelectSearchResult: (MKMapItem) -> Void
+    let onToggleRadio: () -> Void
+    let onToggleTour: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Search Menu")
+                        .font(.system(size: 22, weight: .black, design: .rounded))
+                    Text("Choose what Poplur Radio should cover.")
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button(action: onClose) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 15, weight: .black))
+                        .foregroundStyle(.primary)
+                        .frame(width: 34, height: 34)
+                        .background(.thinMaterial, in: Circle())
+                }
+                .buttonStyle(.plain)
+            }
+
+            HStack(spacing: 8) {
+                TextField("Search city, mall, campus, arena...", text: $query)
+                    .textFieldStyle(.roundedBorder)
+                    .disableAutocorrection(true)
+                    .textInputAutocapitalization(.words)
+                    .onSubmit(performSearch)
+
+                Button(action: performSearch) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 17, weight: .black))
+                        .frame(width: 38, height: 38)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSearching)
+            }
+
+            if isSearching {
+                HStack(spacing: 8) {
+                    ProgressView()
+                    Text("Searching")
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.secondary)
+                }
+            } else if !results.isEmpty {
+                ScrollView {
+                    VStack(spacing: 8) {
+                        ForEach(results.prefix(5), id: \.self) { item in
+                            Button {
+                                onSelectSearchResult(item)
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Image(systemName: "mappin.circle.fill")
+                                        .foregroundStyle(.indigo)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(item.name ?? "Unknown place")
+                                            .font(.system(size: 14, weight: .heavy, design: .rounded))
+                                            .foregroundStyle(.primary)
+                                        if let title = item.placemark.title {
+                                            Text(title)
+                                                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                                                .foregroundStyle(.secondary)
+                                                .lineLimit(1)
+                                        }
+                                    }
+                                    Spacer()
+                                }
+                                .padding(10)
+                                .background(Color.black.opacity(0.045), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .frame(maxHeight: 168)
+            }
+
+            Divider()
+
+            Text("Poplur Radio Checklist")
+                .font(.system(size: 16, weight: .black, design: .rounded))
+
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 9) {
+                ForEach(PoplurRadioTopic.allCases) { topic in
+                    Button {
+                        toggle(topic)
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: selectedTopics.contains(topic) ? "checkmark.square.fill" : "square")
+                                .font(.system(size: 16, weight: .black))
+                                .foregroundStyle(selectedTopics.contains(topic) ? topic.trendCategory.tint : .secondary)
+                            Image(systemName: topic.symbolName)
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundStyle(topic.trendCategory.tint)
+                            Text(topic.title)
+                                .font(.system(size: 12, weight: .heavy, design: .rounded))
+                                .foregroundStyle(.primary)
+                                .lineLimit(2)
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 9)
+                        .background(Color.black.opacity(selectedTopics.contains(topic) ? 0.075 : 0.035), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            Text(radioScript)
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+
+            HStack(spacing: 10) {
+                Button(action: onToggleRadio) {
+                    Label("Radio", systemImage: "antenna.radiowaves.left.and.right")
+                        .font(.system(size: 14, weight: .black, design: .rounded))
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.green)
+
+                Button(action: onToggleTour) {
+                    Label(isTouring ? "Stop Tour" : "Start Tour", systemImage: isTouring ? "pause.fill" : "play.fill")
+                        .font(.system(size: 14, weight: .black, design: .rounded))
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.black)
+            }
+        }
+        .padding(16)
+    }
+
+    private func toggle(_ topic: PoplurRadioTopic) {
+        if selectedTopics.contains(topic) {
+            selectedTopics.remove(topic)
+        } else {
+            selectedTopics.insert(topic)
+        }
+    }
+
+    private func performSearch() {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        isSearching = true
+        results = []
+
+        let request = MKLocalSearch.Request()
+        request.naturalLanguageQuery = trimmed
+        MKLocalSearch(request: request).start { response, _ in
+            results = response?.mapItems ?? []
+            isSearching = false
+        }
+    }
+}
+
 private struct AddressSearchView: View {
     @Binding var query: String
     @Binding var results: [MKMapItem]
@@ -3144,8 +3419,12 @@ struct MapViewProduction: View {
     @State private var searchQuery: String = ""
     @State private var searchResults: [MKMapItem] = []
     @State private var isSearching: Bool = false
+    @State private var selectedRadioTopics: Set<PoplurRadioTopic> = Set(PoplurRadioTopic.allCases.filter(\.defaultEnabled))
     @State private var clickedCoordinate: CLLocationCoordinate2D? = nil  // Track clicked coordinate
     @State private var showPostPrompt: Bool = false  // Show "Post Here?" prompt
+    @State private var isInitialMapLaunchPreparing: Bool
+    @State private var isInitialMapLaunchActive: Bool = false
+    @State private var mapLaunchTask: Task<Void, Never>? = nil
     
     @State private var posts: [MapAnnotationPost] = []
     @State private var dominance: [CityDominance] = []
@@ -3217,6 +3496,7 @@ struct MapViewProduction: View {
     
     init(layoutPreviewOnly: Bool = false) {
         _musicPlayer = StateObject(wrappedValue: CityTourMusicPlayerService(previewOnly: layoutPreviewOnly))
+        _isInitialMapLaunchPreparing = State(initialValue: !layoutPreviewOnly && !MapStateManager.shared.hasRunFirstLaunchSequence)
 
         // Initialize with demo cities and posts synchronously to avoid crash
         _dominance = State(initialValue: [
@@ -3416,10 +3696,12 @@ struct MapViewProduction: View {
         let activityLine = visiblePosts.isEmpty
             ? "No public posts are inside your current filter yet, so we are watching for the first spark."
             : "We are tracking \(visiblePosts.count) visible \(visiblePosts.count == 1 ? "post" : "posts") around this map."
+        let topics = selectedRadioTopics.isEmpty ? Set(PoplurRadioTopic.allCases.filter(\.defaultEnabled)) : selectedRadioTopics
+        let topicLine = "On this tour, I am watching \(topics.map(\.shortTitle).sorted().joined(separator: ", "))."
 
         var lines = [
-            "You are listening to Poplur Radio.",
-            "I am Nova, live over \(cityName).",
+            "You are listening to Poplur Radio. I am Nova, riding with you over \(cityName).",
+            topicLine,
             cleanMapRadioLine(momentLine ?? insightLine ?? aiRecommendation),
             activityLine
         ]
@@ -3430,7 +3712,7 @@ struct MapViewProduction: View {
             lines.append("Your active radius is \(mapRadioRadiusLabel(radiusMeters)).")
         }
 
-        lines.append("Keep the map open and I will call out what starts moving.")
+        lines.append("Keep the map open. If something useful pops off, I will take you there and talk you through it.")
 
         return lines
             .map(cleanMapRadioLine)
@@ -3595,7 +3877,10 @@ struct MapViewProduction: View {
     }
 
     private func applyLocalContext(cityName: String, countryFlag: String, countryCode: String?, coordinate: CLLocationCoordinate2D) {
-        guard !mapState.isInTourMode, !(flowManager.currentFlow?.isCameraFirst ?? false), !isPostPlacementMode else { return }
+        guard !isInitialMapLaunchActive,
+              !mapState.isInTourMode,
+              !(flowManager.currentFlow?.isCameraFirst ?? false),
+              !isPostPlacementMode else { return }
 
         let trimmedCity = cityName.trimmingCharacters(in: .whitespacesAndNewlines)
         let titleCity = trimmedCity.isEmpty ? "Current Location" : trimmedCity
@@ -3673,6 +3958,136 @@ struct MapViewProduction: View {
         }
     }
 
+    private func enabledRadioTopics() -> [PoplurRadioTopic] {
+        let topics = selectedRadioTopics.isEmpty ? Set(PoplurRadioTopic.allCases.filter(\.defaultEnabled)) : selectedRadioTopics
+        return PoplurRadioTopic.allCases.filter { topics.contains($0) }
+    }
+
+    private func landmarkFocus(for stop: PoplurTourStop) -> PoplurTourFocus {
+        PoplurTourFocus(
+            topic: .downtown,
+            title: activeCityTitle(stop),
+            subtitle: "Starting at the main landmark: \(stop.description). I will use your checklist to decide where we go next.",
+            coordinate: stop.coordinate,
+            bearing: stop.bearing,
+            radiusMeters: stop.radiusMeters,
+            distance: stop.distance,
+            category: .travel,
+            liveMoment: nil
+        )
+    }
+
+    private func tourFocuses(for stop: PoplurTourStop, topics: [PoplurRadioTopic]) async -> [PoplurTourFocus] {
+        var focuses: [PoplurTourFocus] = []
+        for topic in topics {
+            if let focus = await tourFocus(for: topic, in: stop) {
+                focuses.append(focus)
+            }
+        }
+        return focuses
+    }
+
+    private func tourFocus(for topic: PoplurRadioTopic, in stop: PoplurTourStop) async -> PoplurTourFocus? {
+        switch topic {
+        case .malls:
+            guard let moment = PoplurLiveTourMomentResolver.shoppingSaleMoment(for: stop) else { return nil }
+            return focus(from: moment, topic: topic)
+        case .stadiums:
+            if let moment = await PoplurLiveTourMomentResolver.liveSportsMoment(for: stop) {
+                return focus(from: moment, topic: topic)
+            }
+            guard let venue = PoplurSportsVenueCatalog[stop.cityName]?.first else { return nil }
+            return PoplurTourFocus(
+                topic: topic,
+                title: venue.name,
+                subtitle: "Checking the arena signal. Fan clips, game-day fits, and local sports chatter are usually strongest around here.",
+                coordinate: venue.coordinate,
+                bearing: venue.bearing,
+                radiusMeters: min(max(stop.radiusMeters * 0.45, 35_000), 75_000),
+                distance: max(520, min(stop.distance, 820)),
+                category: .sports,
+                liveMoment: nil
+            )
+        case .casinos:
+            guard ["Las Vegas", "Singapore", "Dubai"].contains(stop.cityName) else { return nil }
+            return syntheticFocus(topic, stop: stop, placeName: casinoName(for: stop), subtitle: "Casino and resort energy is active here: arrivals, nightlife, food, and big-room moments are the things to watch.")
+        case .themeParks:
+            guard ["Los Angeles", "Tokyo", "Paris", "Singapore", "Dubai"].contains(stop.cityName) else { return nil }
+            return syntheticFocus(topic, stop: stop, placeName: themeParkName(for: stop), subtitle: "Theme park traffic is worth watching: ride waits, character moments, food drops, and crowd surges can move fast.")
+        case .restaurants:
+            return syntheticFocus(topic, stop: stop, placeName: "\(stop.cityName) food district", subtitle: "Restaurant and food court posts are heating up. I am watching for specials, packed rooms, and late plates.")
+        case .universities:
+            return syntheticFocus(topic, stop: stop, placeName: "\(stop.cityName) campus zone", subtitle: "Campus energy is on the checklist: student events, study spots, sports clips, and cafe traffic.")
+        case .airports:
+            return syntheticFocus(topic, stop: stop, placeName: "\(stop.cityName) airport corridor", subtitle: "Airport signal is on: arrivals, delays, travel posts, and terminal food are all fair game.")
+        case .concerts:
+            return syntheticFocus(topic, stop: stop, placeName: "\(stop.cityName) live music district", subtitle: "Concert venue watch is active. If doors open or crowds build, Poplur Radio will call it out.")
+        case .downtown:
+            return syntheticFocus(topic, stop: stop, placeName: "\(stop.cityName) downtown", subtitle: "Downtown district check: street clips, public squares, traffic, shopping, and nightlife all overlap here.")
+        case .hotels:
+            return syntheticFocus(topic, stop: stop, placeName: "\(stop.cityName) hotel row", subtitle: "Hotel and resort watch is on: arrivals, rooftop scenes, lobbies, pool decks, and weekend energy.")
+        }
+    }
+
+    private func focus(from moment: PoplurLiveTourMoment, topic: PoplurRadioTopic) -> PoplurTourFocus {
+        PoplurTourFocus(
+            topic: topic,
+            title: moment.title,
+            subtitle: moment.subtitle,
+            coordinate: moment.coordinate,
+            bearing: moment.bearing,
+            radiusMeters: moment.radiusMeters,
+            distance: moment.distance,
+            category: moment.category,
+            liveMoment: moment
+        )
+    }
+
+    private func syntheticFocus(_ topic: PoplurRadioTopic, stop: PoplurTourStop, placeName: String, subtitle: String) -> PoplurTourFocus {
+        let coordinate = offsetCoordinate(from: stop.coordinate, topic: topic, cityName: stop.cityName)
+        return PoplurTourFocus(
+            topic: topic,
+            title: placeName,
+            subtitle: subtitle,
+            coordinate: coordinate,
+            bearing: stop.bearing + CLLocationDirection((stableTourSeed(parts: stop.cityName, topic.rawValue) % 70) - 35),
+            radiusMeters: min(max(stop.radiusMeters * 0.36, 24_000), 68_000),
+            distance: max(560, min(stop.distance, 840)),
+            category: topic.trendCategory,
+            liveMoment: nil
+        )
+    }
+
+    private func offsetCoordinate(from coordinate: CLLocationCoordinate2D, topic: PoplurRadioTopic, cityName: String) -> CLLocationCoordinate2D {
+        let seed = stableTourSeed(parts: cityName, topic.rawValue)
+        let angle = Double(seed % 360) * .pi / 180
+        let distanceDegrees = 0.018 + Double(seed % 11) * 0.002
+        let latitude = coordinate.latitude + sin(angle) * distanceDegrees
+        let longitudeScale = max(0.35, cos(coordinate.latitude * .pi / 180))
+        let longitude = coordinate.longitude + cos(angle) * distanceDegrees / longitudeScale
+        return CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+    }
+
+    private func casinoName(for stop: PoplurTourStop) -> String {
+        switch stop.cityName {
+        case "Las Vegas": return "Las Vegas Strip casinos"
+        case "Singapore": return "Marina Bay casino district"
+        case "Dubai": return "Dubai resort nightlife"
+        default: return "\(stop.cityName) casino district"
+        }
+    }
+
+    private func themeParkName(for stop: PoplurTourStop) -> String {
+        switch stop.cityName {
+        case "Los Angeles": return "Anaheim theme park corridor"
+        case "Tokyo": return "Tokyo Disney Resort area"
+        case "Paris": return "Disneyland Paris corridor"
+        case "Singapore": return "Sentosa theme park district"
+        case "Dubai": return "Dubai Parks corridor"
+        default: return "\(stop.cityName) theme park district"
+        }
+    }
+
     private func runTourSubtitleLoop() async {
         while !Task.isCancelled {
             try? await Task.sleep(nanoseconds: 5_000_000_000)
@@ -3693,6 +4108,7 @@ struct MapViewProduction: View {
     private func runExtendedTourStop(_ stop: PoplurTourStop) async {
         guard mapState.isInTourMode else { return }
         let globeCoordinate = CLLocationCoordinate2D(latitude: 18.0, longitude: -98.0)
+        let topics = await MainActor.run { enabledRadioTopics() }
 
         await MainActor.run {
             clearTourEffects()
@@ -3715,56 +4131,61 @@ struct MapViewProduction: View {
         try? await Task.sleep(nanoseconds: 3_300_000_000)
         guard mapState.isInTourMode, !Task.isCancelled else { return }
 
-        let liveMoment = await PoplurLiveTourMomentResolver.moment(for: stop)
-        let focusStop: PoplurTourStop
-        let insight: AiTourInsight
-        if let liveMoment {
-            focusStop = PoplurTourStop(
-                cityName: stop.cityName,
-                storefront: stop.storefront,
-                coordinate: liveMoment.coordinate,
-                bearing: liveMoment.bearing,
-                radiusMeters: liveMoment.radiusMeters,
-                distance: liveMoment.distance,
-                description: liveMoment.title
-            )
-            insight = AiTourInsight(
-                id: liveMoment.id,
-                subtitle: liveMoment.subtitle,
-                category: liveMoment.category
-            )
-        } else {
-            focusStop = stop
-            insight = spoofAiTourInsight(for: stop)
+        let topicFocuses = await tourFocuses(for: stop, topics: topics)
+        let itinerary = [landmarkFocus(for: stop)] + topicFocuses
+
+        for (index, focus) in itinerary.enumerated() {
+            guard mapState.isInTourMode, !Task.isCancelled else { return }
+            await runTourFocus(focus, cityStop: stop, index: index, total: itinerary.count)
+            let dwell = index == 0 ? tourTopicDwellSeconds + 4 : tourTopicDwellSeconds
+            try? await Task.sleep(nanoseconds: dwell * 1_000_000_000)
         }
+    }
+
+    private func runTourFocus(_ focus: PoplurTourFocus, cityStop: PoplurTourStop, index: Int, total: Int) async {
+        let focusStop = PoplurTourStop(
+            cityName: cityStop.cityName,
+            storefront: cityStop.storefront,
+            coordinate: focus.coordinate,
+            bearing: focus.bearing,
+            radiusMeters: focus.radiusMeters,
+            distance: focus.distance,
+            description: focus.title
+        )
+        let insight = AiTourInsight(
+            id: focus.liveMoment?.id ?? "\(cityStop.cityName)-\(focus.topic.rawValue)-\(index)",
+            subtitle: focus.subtitle,
+            category: focus.category
+        )
 
         await MainActor.run {
             activeTourStop = focusStop
             activeTourInsight = insight
-            activeTourMoment = liveMoment
-            currentCity = liveMoment?.title ?? activeCityTitle(stop)
-            aiRecommendation = insight.subtitle
-            showTourNowPlayingText = liveMoment == nil
-            musicPlayer.play(for: stop, insight: insight)
+            activeTourMoment = focus.liveMoment
+            currentCity = index == 0 ? activeCityTitle(cityStop) : focus.title
+            aiRecommendation = focus.subtitle
+            showTourNowPlayingText = false
+            musicPlayer.play(for: cityStop, insight: insight)
+            mapRadioHost.speak(radioScript(for: focus, cityStop: cityStop, index: index, total: total))
 
-            withAnimation(.easeInOut(duration: 4.2)) {
+            withAnimation(.easeInOut(duration: index == 0 ? 4.2 : 2.4)) {
                 camera = .camera(
                     MapCamera(
-                        centerCoordinate: focusStop.coordinate,
-                        distance: focusStop.distance,
-                        heading: focusStop.bearing,
+                        centerCoordinate: focus.coordinate,
+                        distance: focus.distance,
+                        heading: focus.bearing,
                         pitch: fixedPitchAlt
                     )
                 )
-                fixedDistanceAlt = focusStop.distance
-                zoomLevel = focusStop.distance
-                radiusMeters = focusStop.radiusMeters
+                fixedDistanceAlt = focus.distance
+                zoomLevel = focus.distance
+                radiusMeters = focus.radiusMeters
             }
 
             NotificationCenter.default.post(
                 name: .MapSuggestedRadius,
                 object: nil,
-                userInfo: ["radius": focusStop.radiusMeters]
+                userInfo: ["radius": focus.radiusMeters]
             )
         }
 
@@ -3775,8 +4196,20 @@ struct MapViewProduction: View {
             AudioServicesPlaySystemSound(1104)
             trendPopObjects = buildTrendPopObjects(stop: focusStop, insight: insight)
         }
+    }
 
-        try? await Task.sleep(nanoseconds: tourStopDwellSeconds * 1_000_000_000)
+    private func radioScript(for focus: PoplurTourFocus, cityStop: PoplurTourStop, index: Int, total: Int) -> String {
+        if index == 0 {
+            let watched = enabledRadioTopics().map(\.shortTitle).joined(separator: ", ")
+            return cleanMapRadioLine("Poplur Radio is live in \(cityStop.cityName). We are starting at the main landmark, \(cityStop.description). Your checklist is set to \(watched). If this city has those spots, I will pan us there next.")
+        }
+
+        let opener = "Next stop, \(focus.title)."
+        let context = focus.liveMoment == nil
+            ? focus.subtitle
+            : "There is something happening here right now. \(focus.subtitle)"
+        let progress = "Stop \(index + 1) of \(total)."
+        return cleanMapRadioLine("\(opener) \(context) \(progress)")
     }
     
     // MARK: - Computed Properties
@@ -4468,8 +4901,17 @@ struct MapViewProduction: View {
                     .ignoresSafeArea()
                     .contentShape(Rectangle())
                     .simultaneousGesture(dragGesture)
+                    .opacity(shouldObscureMapForInitialLaunch ? 0.001 : 1)
+                    .allowsHitTesting(!shouldObscureMapForInitialLaunch)
+
+                if shouldObscureMapForInitialLaunch {
+                    mapLaunchCurtain
+                        .transition(.opacity)
+                        .zIndex(2_000)
+                }
             }
-            
+
+            if !shouldObscureMapForInitialLaunch {
             // Top navigation buttons
             navigationButtons
             
@@ -4487,7 +4929,58 @@ struct MapViewProduction: View {
                 .padding(.bottom, 132)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                 .zIndex(1003)
+            }
         }
+        .animation(.easeOut(duration: 0.28), value: shouldObscureMapForInitialLaunch)
+    }
+
+    private var shouldObscureMapForInitialLaunch: Bool {
+        isInitialMapLaunchPreparing
+            && mapState.pendingPostLocation == nil
+            && shownPostCoordinate == nil
+            && !layoutPreviewMode
+    }
+
+    private var mapLaunchCurtain: some View {
+        ZStack {
+            LinearGradient(
+                colors: [
+                    Color(red: 0.02, green: 0.04, blue: 0.05),
+                    Color(red: 0.08, green: 0.12, blue: 0.15)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+
+            Canvas { context, size in
+                var path = Path()
+                for x in stride(from: CGFloat(0), through: size.width, by: 28) {
+                    path.move(to: CGPoint(x: x, y: 0))
+                    path.addLine(to: CGPoint(x: x, y: size.height))
+                }
+                for y in stride(from: CGFloat(0), through: size.height, by: 28) {
+                    path.move(to: CGPoint(x: 0, y: y))
+                    path.addLine(to: CGPoint(x: size.width, y: y))
+                }
+                context.stroke(path, with: .color(.white.opacity(0.055)), lineWidth: 0.5)
+            }
+
+            VStack(spacing: 10) {
+                ProgressView()
+                    .tint(.white)
+                Text(currentCity)
+                    .font(.system(size: 18, weight: .black, design: .rounded))
+                Text(aiRecommendation)
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(.white.opacity(0.72))
+                    .lineLimit(2)
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 24)
+        }
+        .ignoresSafeArea()
     }
 
     private var mapLayoutSkeleton: some View {
@@ -4569,12 +5062,26 @@ struct MapViewProduction: View {
                     }
                     .zIndex(51)
                 }
+
+                if showCubeHoldSearch {
+                    mapOverlayPanel {
+                        mapHoldRadioMenuSheet
+                    }
+                    .zIndex(52)
+                }
             }
             .onAppear {
                 guard !layoutPreviewMode else { return }
                 handleOnAppear()
             }
             .onDisappear {
+                mapLaunchTask?.cancel()
+                mapLaunchTask = nil
+                if !mapState.hasRunFirstLaunchSequence {
+                    isInitialMapLaunchPreparing = true
+                }
+                isInitialMapLaunchActive = false
+                isCameraTransitionInProgress = false
                 mapRadioHost.stop()
                 musicPlayer.stop()
                 rainAmbientAudio.stop()
@@ -4625,7 +5132,9 @@ struct MapViewProduction: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: .cameraCubeHoldBegan)) { notification in
                 guard !layoutPreviewMode else { return }
-                print("[MapView] Cube hold began - keeping map search closed")
+                print("[MapView] Cube hold began - opening radio search menu")
+                showAddressSearch = false
+                showCubeHoldSearch = true
             }
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("CameraCubeHoldMoved"))) { notification in
                 guard !layoutPreviewMode else { return }
@@ -5102,6 +5611,39 @@ struct MapViewProduction: View {
             }
         }
     }
+
+    @ViewBuilder
+    private var mapHoldRadioMenuSheet: some View {
+        MapRadioSearchChecklistView(
+            query: $searchQuery,
+            results: $searchResults,
+            isSearching: $isSearching,
+            selectedTopics: $selectedRadioTopics,
+            isTouring: mapState.isInTourMode,
+            radioScript: mapRadioScript,
+            onClose: {
+                showCubeHoldSearch = false
+            },
+            onSelectSearchResult: { item in
+                showCubeHoldSearch = false
+                if let coord = item.placemark.location?.coordinate {
+                    let name = item.name ?? "Selected Location"
+                    navigateWithTourTransition(to: coord, cityName: name)
+                }
+            },
+            onToggleRadio: {
+                mapRadioHost.toggle(script: mapRadioScript)
+            },
+            onToggleTour: {
+                if mapState.isInTourMode {
+                    stopTour()
+                } else {
+                    startTour()
+                }
+                showCubeHoldSearch = false
+            }
+        )
+    }
     
     // MARK: - First Launch Sequence
 
@@ -5142,71 +5684,99 @@ struct MapViewProduction: View {
         return options[seed % options.count]
     }
 
-    private func runFirstLaunchSequence(at coordinate: CLLocationCoordinate2D, cityName: String, insight: AiTourInsight?) {
-        Task { @MainActor in
-            // 1. Start slightly above the user pin
+    @MainActor
+    private func runFirstLaunchSequence(at coordinate: CLLocationCoordinate2D, cityName: String, insight: AiTourInsight?, countryCode: String?) async {
+        var didCompleteLaunch = false
+        defer {
+            if !didCompleteLaunch, Task.isCancelled, !mapState.hasRunFirstLaunchSequence {
+                isInitialMapLaunchPreparing = true
+            }
+            isInitialMapLaunchActive = false
+            isCameraTransitionInProgress = false
+        }
+
+        fixedDistanceAlt = 700
+        zoomLevel = 700
+        radiusMeters = 5_000
+        showConfetti = false
+        isCameraTransitionInProgress = true
+
+        camera = .camera(MapCamera(
+            centerCoordinate: coordinate,
+            distance: 10_000,
+            heading: 0,
+            pitch: 0
+        ))
+
+        try? await Task.sleep(nanoseconds: 260_000_000)
+        guard !Task.isCancelled else { return }
+
+        withAnimation(.easeOut(duration: 0.28)) {
+            isInitialMapLaunchPreparing = false
+        }
+
+        try? await Task.sleep(nanoseconds: 240_000_000)
+        guard !Task.isCancelled else { return }
+
+        currentCity = cityName
+        let launchInsight = insight ?? makeLocalTrendInsight(for: cityName)
+        localTrendInsight = launchInsight
+        aiRecommendation = launchInsight.subtitle
+        trendPopObjects = buildTrendPopObjects(center: coordinate, cityName: cityName, insight: launchInsight)
+
+        withAnimation(.easeInOut(duration: 2.2)) {
             camera = .camera(MapCamera(
                 centerCoordinate: coordinate,
-                distance: 10_000,
+                distance: fixedDistanceAlt,
                 heading: 0,
-                pitch: 0
+                pitch: fixedPitchAlt
             ))
-            try? await Task.sleep(nanoseconds: 350_000_000)
-
-            // 2. Fly into the pin
-            withAnimation(.easeInOut(duration: 2.2)) {
-                camera = .camera(MapCamera(
-                    centerCoordinate: coordinate,
-                    distance: fixedDistanceAlt,
-                    heading: 0,
-                    pitch: fixedPitchAlt
-                ))
-            }
-            try? await Task.sleep(nanoseconds: 2_500_000_000)
-
-            // 3. Pop / confetti burst at the pin
-            showConfetti = true
-            trendingTracker.forceTrendingBurst(coordinate: coordinate, intensity: 1.0)
-            let spread = [
-                CLLocationCoordinate2D(latitude: coordinate.latitude + 0.0018, longitude: coordinate.longitude + 0.0022),
-                CLLocationCoordinate2D(latitude: coordinate.latitude - 0.0012, longitude: coordinate.longitude + 0.0028)
-            ]
-            for c in spread { trendingTracker.forceTrendingBurst(coordinate: c, intensity: 0.65) }
-            try? await Task.sleep(nanoseconds: 700_000_000)
-
-            // 4. Poplur Radio speaks about the area (British UK accent)
-            let script = generateLaunchRadioScript(cityName: cityName, insight: insight)
-            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-                mapRadioHost.speak(script) {
-                    continuation.resume()
-                }
-            }
-            try? await Task.sleep(nanoseconds: 450_000_000)
-
-            // 5. Music radio starts
-            guard !mapState.isInTourMode else { return }
-            let storefront = nearestTourStop(to: coordinate)?.storefront
-                ?? Locale.current.region?.identifier.lowercased()
-                ?? "us"
-            let stop = PoplurTourStop(
-                cityName: cityName,
-                storefront: storefront,
-                coordinate: coordinate,
-                bearing: 0,
-                radiusMeters: radiusMeters,
-                distance: max(850, fixedDistanceAlt),
-                description: "Current location"
-            )
-            currentLocationMusicStopID = stop.id
-            musicPlayer.play(for: stop, insight: insight, preferPreviewTracks: true)
         }
+
+        try? await Task.sleep(nanoseconds: 2_500_000_000)
+        guard !Task.isCancelled else { return }
+
+        emitLocalTrendConfetti(center: coordinate, objects: trendPopObjects)
+
+        try? await Task.sleep(nanoseconds: 700_000_000)
+        guard !Task.isCancelled else { return }
+
+        let script = generateLaunchRadioScript(cityName: cityName, insight: launchInsight)
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            mapRadioHost.speak(script) {
+                continuation.resume()
+            }
+        }
+
+        try? await Task.sleep(nanoseconds: 450_000_000)
+        guard !Task.isCancelled, !mapState.isInTourMode else { return }
+
+        let storefront = normalizedStorefront(countryCode)
+            ?? nearestTourStop(to: coordinate)?.storefront
+            ?? Locale.current.region?.identifier.lowercased()
+            ?? "us"
+        let stop = PoplurTourStop(
+            cityName: cityName,
+            storefront: storefront,
+            coordinate: coordinate,
+            bearing: 0,
+            radiusMeters: radiusMeters,
+            distance: max(850, fixedDistanceAlt),
+            description: "Current location"
+        )
+        currentLocationMusicStopID = stop.id
+        musicPlayer.play(for: stop, insight: launchInsight, preferPreviewTracks: true)
+
+        didCompleteLaunch = true
+        mapState.hasRunFirstLaunchSequence = true
+
+        await fetchWeatherForCurrentLocation()
     }
 
     // MARK: - Event Handlers
 
     private func handleOnAppear() {
         rainAmbientAudio.update(for: weatherState)
-        Task { await fetchWeatherForCurrentLocation() }
 
         if let location = locationManager.location {
             liveUserCoordinate = location.coordinate
@@ -5263,14 +5833,21 @@ struct MapViewProduction: View {
         locationManager.request()
 
         if !mapState.hasRunFirstLaunchSequence {
-            // First-ever map open: block handleLocationChange from fighting the sequence
-            mapState.hasRunFirstLaunchSequence = true
+            guard !isInitialMapLaunchActive else { return }
+            mapLaunchTask?.cancel()
+            isInitialMapLaunchPreparing = true
+            isInitialMapLaunchActive = true
             hasSetInitialLocation = true
+            currentCity = "Current Location"
+            aiRecommendation = "Finding what is trending where you are..."
+            locationContextTask?.cancel()
 
-            Task { @MainActor in
-                // Wait up to 5 s for location fix
+            mapLaunchTask = Task { @MainActor in
+                // Wait briefly for the real location before revealing the map, so the
+                // first visible camera is already aimed at the correct place.
                 var attempts = 0
-                while locationManager.location == nil && attempts < 50 {
+                while locationManager.location == nil && attempts < 35 {
+                    guard !Task.isCancelled else { return }
                     try? await Task.sleep(nanoseconds: 100_000_000)
                     attempts += 1
                 }
@@ -5280,8 +5857,8 @@ struct MapViewProduction: View {
                     ?? CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194)
                 liveUserCoordinate = coordinate
 
-                // Geocode for city name
                 var cityName = "Your Location"
+                var countryCode: String? = nil
                 if let location {
                     let geocoder = CLGeocoder()
                     if let placemarks = try? await geocoder.reverseGeocodeLocation(location),
@@ -5290,18 +5867,19 @@ struct MapViewProduction: View {
                             ?? placemark.subAdministrativeArea
                             ?? placemark.administrativeArea
                             ?? "Your Location"
+                        countryCode = placemark.isoCountryCode
                     }
+                } else if let nearest = nearestTourStop(to: coordinate) {
+                    cityName = nearest.cityName
+                    countryCode = nearest.storefront
                 }
 
-                currentCity = cityName
                 let insight = makeLocalTrendInsight(for: cityName)
-                localTrendInsight = insight
-                aiRecommendation = insight.subtitle
-                trendPopObjects = buildTrendPopObjects(center: coordinate, cityName: cityName, insight: insight)
-
-                runFirstLaunchSequence(at: coordinate, cityName: cityName, insight: insight)
+                await runFirstLaunchSequence(at: coordinate, cityName: cityName, insight: insight, countryCode: countryCode)
+                mapLaunchTask = nil
             }
         } else {
+            Task { await fetchWeatherForCurrentLocation() }
             // Returning to map tab: restore context and resume music without re-running the intro
             Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 900_000_000)
@@ -5319,6 +5897,10 @@ struct MapViewProduction: View {
     private func handleLocationChange(_ newLocation: CLLocation?) {
         if let newLocation {
             liveUserCoordinate = newLocation.coordinate
+            if isInitialMapLaunchActive {
+                print("⏭️ [MapView] handleLocationChange deferred during initial launch")
+                return
+            }
             // Only refresh context after the launch sequence has fully run
             if mapState.hasRunFirstLaunchSequence &&
                (currentLocationMusicStopID == nil || !musicPlayer.isPlaybackActive) {

@@ -17,6 +17,7 @@ struct DMsListView: View {
     @State private var showingNewThreadSheet = false
     @State private var selectedThreadID: UUID?
     @State private var searchText = ""
+    @State private var videoCallUser: DMUser? = nil
 
     init(store: FakeDMStore) {
         self.store = store
@@ -30,7 +31,7 @@ struct DMsListView: View {
                 DMThreadView(
                     store: store,
                     threadID: selectedThreadID,
-                    onVideoCall: { user in FaceTimeLauncher.startVideoCall(to: user) }
+                    onVideoCall: { user in videoCallUser = user }
                 )
                 .transition(.opacity)
             } else {
@@ -53,6 +54,9 @@ struct DMsListView: View {
             }
         }
         .toolbar(.hidden, for: .navigationBar)
+        .fullScreenCover(item: $videoCallUser) { user in
+            DMCallCoordinatorView(calleeName: user.displayName, isVideo: true) { videoCallUser = nil }
+        }
     }
 
     private var listContent: some View {
@@ -75,7 +79,7 @@ struct DMsListView: View {
                         DMThreadRow(thread: thread, store: store) {
                             selectedThreadID = thread.id
                         } onVideoCall: { user in
-                            FaceTimeLauncher.startVideoCall(to: user)
+                            videoCallUser = user
                         }
 
                         if index < filteredThreads.count - 1 {
@@ -271,6 +275,8 @@ struct DMThreadView: View {
     var onVideoCall: ((DMUser) -> Void)? = nil
 
     @State private var draft: String = ""
+    @State private var showVideoCall = false
+    @State private var showAudioCall = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -316,6 +322,12 @@ struct DMThreadView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
+        .fullScreenCover(isPresented: $showVideoCall) {
+            DMCallCoordinatorView(calleeName: displayName, isVideo: true) { showVideoCall = false }
+        }
+        .fullScreenCover(isPresented: $showAudioCall) {
+            DMCallCoordinatorView(calleeName: displayName, isVideo: false) { showAudioCall = false }
+        }
     }
 
     private var detailTopBar: some View {
@@ -337,8 +349,13 @@ struct DMThreadView: View {
 
             Spacer(minLength: 12)
 
-            DMCircleIconButton(systemName: "video.fill", size: 52, iconSize: 23) {
-                onVideoCall?(videoCallUser)
+            HStack(spacing: 10) {
+                DMCircleIconButton(systemName: "phone.fill", size: 44, iconSize: 19) {
+                    showAudioCall = true
+                }
+                DMCircleIconButton(systemName: "video.fill", size: 44, iconSize: 20) {
+                    showVideoCall = true
+                }
             }
         }
         .frame(height: 92)

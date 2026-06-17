@@ -1,70 +1,37 @@
 import SwiftUI
+import SpriteKit
 
 /// Full-screen incoming call UI — shown when another user calls you.
+/// Displays the Poplur phone with "INCOMING [CALLER]" on the LCD + ringtone.
 struct IncomingCallView: View {
     let callerName: String
     let channelId: String
     let documentId: String
 
-    @State private var pulseScale: CGFloat = 1.0
+    @State private var phoneScene: PhoneScene
+
+    init(callerName: String, channelId: String, documentId: String) {
+        self.callerName = callerName
+        self.channelId = channelId
+        self.documentId = documentId
+        _phoneScene = State(initialValue: PhoneScene(callingUser: FakeUser(id: UUID(), name: callerName)))
+    }
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            VStack(spacing: 0) {
+            SpriteView(scene: phoneScene, options: [.allowsTransparency])
+                .ignoresSafeArea()
+
+            // Accept / Decline buttons
+            VStack {
                 Spacer()
-
-                // Avatar pulse ring
-                ZStack {
-                    Circle()
-                        .stroke(Color.green.opacity(0.25), lineWidth: 2)
-                        .frame(width: 120, height: 120)
-                        .scaleEffect(pulseScale)
-                        .opacity(2 - pulseScale)
-
-                    Circle()
-                        .fill(Color(white: 0.18))
-                        .frame(width: 96, height: 96)
-
-                    Text(String(callerName.prefix(1)).uppercased())
-                        .font(.system(size: 40, weight: .bold))
-                        .foregroundColor(.white)
-                }
-                .onAppear {
-                    withAnimation(.easeInOut(duration: 1.4).repeatForever(autoreverses: false)) {
-                        pulseScale = 1.55
-                    }
-                }
-
-                Spacer().frame(height: 28)
-
-                Text(callerName)
-                    .font(.title.bold())
-                    .foregroundColor(.white)
-
-                Text("Poplur Call")
-                    .font(.subheadline)
-                    .foregroundColor(.white.opacity(0.55))
-                    .padding(.top, 6)
-
-                Spacer()
-
-                // Action buttons
                 HStack(spacing: 64) {
-                    CallActionButton(
-                        icon: "phone.down.fill",
-                        label: "Decline",
-                        tint: .red
-                    ) {
+                    CallActionButton(icon: "phone.down.fill", label: "Decline", tint: .red) {
                         Task { await CallSessionManager.shared.declineCall(documentId: documentId) }
                     }
-
-                    CallActionButton(
-                        icon: "phone.fill",
-                        label: "Accept",
-                        tint: .green
-                    ) {
+                    CallActionButton(icon: "phone.fill", label: "Accept", tint: .green) {
                         Task {
                             await CallSessionManager.shared.acceptCall(
                                 channelId: channelId,
@@ -76,6 +43,16 @@ struct IncomingCallView: View {
                 }
                 .padding(.bottom, 64)
             }
+        }
+        .statusBarHidden()
+        .onAppear {
+            phoneScene.applyCallState(
+                .incoming(callerName: callerName, channelId: channelId, documentId: documentId),
+                elapsed: 0
+            )
+        }
+        .onDisappear {
+            phoneScene.stopAllSounds()
         }
     }
 }

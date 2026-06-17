@@ -443,6 +443,13 @@ struct HomeView: View {
                         RecordCameraControlsOverlay(controller: cameraController)
                             .transition(.opacity)
                     }
+
+                    if let recognitionManager = userRecognitionManager {
+                        RecognizedFaceBoxOverlay(recognitionManager: recognitionManager)
+                            .allowsHitTesting(false)
+                            .transition(.opacity)
+                            .zIndex(7)
+                    }
                 }
                 .animation(.easeInOut(duration: 0.18), value: cameraController.isScreenFlashOn)
             } else {
@@ -471,6 +478,7 @@ struct HomeView: View {
                     }
 
                     // Enable ML detection with user recognition
+                    cameraController.userRecognitionManager = support.recognitionManager
                     cameraController.enableMLDetection()
 
                     // Setup user recognition callback
@@ -491,6 +499,7 @@ struct HomeView: View {
         .onDisappear {
             // Disable ML detection when leaving camera tab
             cameraControllerHolder.controller?.disableMLDetection()
+            cameraControllerHolder.controller?.userRecognitionManager = nil
             userRecognitionManager?.clearRecognition()
             // Reset filters and flag when leaving camera tab
             showARFilters = false
@@ -667,6 +676,13 @@ struct HomeView: View {
                 systemImage: "dot.radiowaves.left.and.right",
                 tint: .red,
                 action: toggleLiveVideoFromCubeMenu
+            ),
+            CubeSubmenuItem(
+                id: "camera-ar-filters",
+                title: "AR",
+                systemImage: "sparkles",
+                tint: .cyan,
+                action: openARFiltersFromCubeMenu
             )
         ]
     }
@@ -724,6 +740,23 @@ struct HomeView: View {
         stopRecordHoldRamp(reset: true)
         ensureCameraRunningIfNeeded()
         controller.toggleLiveVideo()
+    }
+
+    @MainActor
+    private func openARFiltersFromCubeMenu() {
+        guard selectedTab == .record else { return }
+        _ = cameraControllerHolder.resolve()
+        _ = ensureRecordSupportManagers()
+        ensureCameraRunningIfNeeded()
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+            showARFilters = true
+        }
+        UserDefaults.standard.set(true, forKey: "ARFiltersShown")
+        NotificationCenter.default.post(
+            name: Notification.Name("ARFiltersStateChanged"),
+            object: nil,
+            userInfo: ["isShown": true]
+        )
     }
 
     // MARK: - Helper rotation logic for cube yaw and tab switching
@@ -2014,15 +2047,53 @@ private struct CameraIconControlButton: View {
                 .font(.system(size: 18, weight: .bold))
                 .foregroundStyle(isActive ? Color.yellow : Color.white)
                 .frame(width: 44, height: 44)
-                .background(.black.opacity(0.38), in: Circle())
-                .overlay(
-                    Circle()
-                        .strokeBorder(.white.opacity(0.18), lineWidth: 1)
-                )
-                .shadow(color: .black.opacity(0.35), radius: 8, x: 0, y: 3)
+                .contentShape(Circle())
+                .shadow(color: .black.opacity(0.45), radius: 5, x: 0, y: 2)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(systemName.contains("bolt") ? "Toggle flash" : "Switch camera")
+    }
+}
+
+private struct RecognizedFaceBoxOverlay: View {
+    @ObservedObject var recognitionManager: UserRecognitionManager
+
+    var body: some View {
+        GeometryReader { proxy in
+            if let user = recognitionManager.recognizedUser,
+               user.isRecent,
+               let bounds = recognitionManager.recognizedFaceBounds {
+                let rect = bounds.visionBoxToViewRect(in: proxy.size)
+                ZStack(alignment: .topLeading) {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(Color(red: 0.36, green: 1.0, blue: 0.42), lineWidth: 3)
+                        .frame(width: rect.width, height: rect.height)
+                        .position(x: rect.midX, y: rect.midY)
+                        .shadow(color: Color(red: 0.36, green: 1.0, blue: 0.42).opacity(0.8), radius: 10)
+
+                    Text("@\(user.profile.username)")
+                        .font(.system(size: 11, weight: .black))
+                        .foregroundStyle(.black)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Color(red: 0.36, green: 1.0, blue: 0.42), in: Capsule())
+                        .position(x: rect.minX + 34, y: max(rect.minY - 12, 14))
+                }
+                .animation(.easeInOut(duration: 0.16), value: bounds)
+            }
+        }
+        .ignoresSafeArea()
+    }
+}
+
+private extension CGRect {
+    func visionBoxToViewRect(in size: CGSize) -> CGRect {
+        CGRect(
+            x: origin.x * size.width,
+            y: (1 - origin.y - height) * size.height,
+            width: width * size.width,
+            height: height * size.height
+        )
     }
 }
 

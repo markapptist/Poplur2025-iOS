@@ -105,7 +105,8 @@ class DTMFToneGenerator {
         "1": (697, 1209), "2": (697, 1336), "3": (697, 1477),
         "4": (770, 1209), "5": (770, 1336), "6": (770, 1477),
         "7": (852, 1209), "8": (852, 1336), "9": (852, 1477),
-        "*": (941, 1209), "0": (941, 1336), "#": (941, 1477)
+        "*": (941, 1209), "0": (941, 1336), "#": (941, 1477),
+        "ring": (440, 480)
     ]
 
     /// Generate a DTMF tone as WAV audio data
@@ -233,6 +234,8 @@ class PhoneScene: SKScene, ObservableObject {
 
     private let tonePlayer = DialTonePlayer()
     private var bootupPlayer: AVAudioPlayer?
+    private var ringtonePlayer: AVAudioPlayer?
+    private var ringtoneCycleTask: Task<Void, Never>?
 
     let callingUser: FakeUser
 
@@ -1509,11 +1512,40 @@ class PhoneScene: SKScene, ObservableObject {
 
     func stopAllSounds() {
         tonePlayer.stopAllTones()
+        stopRingtone()
         bootupPlayer?.stop()
         bootupPlayer = nil
         phoneLayer?.removeAction(forKey: "bootupVibration")
         removeAction(forKey: "bootupHaptics")
         stopIdleSignalAnimation()
+    }
+
+    func startRingtone() {
+        stopRingtone()
+        playRingBurst()
+        ringtoneCycleTask = Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(6.0))
+                guard !Task.isCancelled else { return }
+                DispatchQueue.main.async { [weak self] in self?.playRingBurst() }
+            }
+        }
+    }
+
+    func stopRingtone() {
+        ringtoneCycleTask?.cancel()
+        ringtoneCycleTask = nil
+        ringtonePlayer?.stop()
+        ringtonePlayer = nil
+    }
+
+    private func playRingBurst() {
+        guard let data = DTMFToneGenerator.generateTone(for: "ring", duration: 2.0),
+              let player = try? AVAudioPlayer(data: data) else { return }
+        ringtonePlayer?.stop()
+        ringtonePlayer = player
+        player.volume = 0.85
+        player.play()
     }
 
     private func placeCall() {
@@ -2053,15 +2085,20 @@ class PhoneScene: SKScene, ObservableObject {
     func applyCallState(_ state: CallState, elapsed: Int) {
         switch state {
         case .idle:
+            stopRingtone()
             clearCallStatus()
         case .outgoing(let calleeName):
+            startRingtone()
             showCallStatus("CALLING\n\(calleeName.uppercased())", pulsing: true)
         case .incoming(let callerName, _, _):
+            startRingtone()
             showCallStatus("INCOMING\n\(callerName.uppercased())", pulsing: true)
         case .connected(let calleeName, _):
+            stopRingtone()
             let duration = CallSessionManager.formattedDuration(elapsed)
             showCallStatus("\(calleeName.uppercased())\n\(duration)", pulsing: false)
         case .ended(let reason):
+            stopRingtone()
             let msg: String
             switch reason {
             case .hangUp:   msg = "CALL ENDED"

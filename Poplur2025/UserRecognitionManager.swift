@@ -18,6 +18,9 @@ class UserRecognitionManager: ObservableObject {
     
     /// Currently recognized user in the camera view
     @Published var recognizedUser: RecognizedUser?
+
+    /// Normalized Vision face bounds for the recognized user.
+    @Published var recognizedFaceBounds: CGRect?
     
     /// Whether recognition is actively running
     @Published var isRecognizing: Bool = false
@@ -206,6 +209,7 @@ class UserRecognitionManager: ObservableObject {
         
         guard !faces.isEmpty else {
             recognizedUser = nil
+            recognizedFaceBounds = nil
             return
         }
         
@@ -228,9 +232,11 @@ class UserRecognitionManager: ObservableObject {
         
         // If similarity is high enough, recognize as the current user
         if similarity > 0.7 {  // 70% similarity threshold
+            recognizedFaceBounds = primaryFace.boundingBox
             await recognizeCurrentUser(confidence: Float(similarity))
         } else {
             recognizedUser = nil
+            recognizedFaceBounds = nil
         }
     }
     
@@ -346,6 +352,7 @@ class UserRecognitionManager: ObservableObject {
     func clearRecognition() {
         if recognizedUser != nil {
             recognizedUser = nil
+            recognizedFaceBounds = nil
             print("👤 User recognition cleared")
         }
     }

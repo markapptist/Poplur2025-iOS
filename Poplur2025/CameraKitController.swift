@@ -1493,53 +1493,72 @@ extension CameraKitController {
     }
 
     func fileOutput(_ output: AVCaptureFileOutput, didFinishRecordingTo outputFileURL: URL, from connections: [AVCaptureConnection], error: Error?) {
-        if let error {
-            let nsError = error as NSError
-            let finishedSuccessfully = nsError.userInfo[AVErrorRecordingSuccessfullyFinishedKey] as? Bool ?? false
-            let fileExists = FileManager.default.fileExists(atPath: outputFileURL.path)
-            if !finishedSuccessfully && !fileExists {
-                print("[CameraKitController] Recording failed without output: \(error.localizedDescription)")
-                sessionQueue.async { [weak self] in
-                    self?.isMovieRecordingRequested = false
-                    self?.shouldStopRecordingWhenStarted = false
-                }
-                return
-            }
-            print("[CameraKitController] Recording finished with recoverable status: \(error.localizedDescription)")
-        }
-
         sessionQueue.async { [weak self] in
             self?.isMovieRecordingRequested = false
             self?.shouldStopRecordingWhenStarted = false
         }
-        
-        // Set lastVideoURL on main thread
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.lastVideoURL = outputFileURL
-            self.isRecording = false
-            self.allowPhotoCapture = true
-            NotificationCenter.default.post(name: Notification.Name("CubeInteractionEnabled"), object: nil)
-            
-            if let coord = self.overrideCoordinate {
-                Foundation.NotificationCenter.default.post(
-                    name: Notification.Name("CapturePreviewFromMapLocation"),
-                    object: nil,
-                    userInfo: [
-                        "latitude": coord.latitude,
-                        "longitude": coord.longitude
-                    ]
-                )
+
+        let nsError = error as NSError?
+        let finishedSuccessfully = nsError?.userInfo[AVErrorRecordingSuccessfullyFinishedKey] as? Bool ?? (error == nil)
+        if let error, !finishedSuccessfully {
+            print("[CameraKitController] Recording finished with error, validating output anyway: \(error.localizedDescription)")
+        }
+
+        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.35) { [weak self] in
+            let attributes = try? FileManager.default.attributesOfItem(atPath: outputFileURL.path)
+            let fileSize = attributes?[.size] as? NSNumber
+            let hasUsableFile = FileManager.default.fileExists(atPath: outputFileURL.path) && (fileSize?.int64Value ?? 0) > 0
+
+            if !hasUsableFile {
+                print("[CameraKitController] Recording failed without usable output: \(outputFileURL.path)")
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    self.isRecording = false
+                    self.allowPhotoCapture = true
+                    NotificationCenter.default.post(name: Notification.Name("CubeInteractionEnabled"), object: nil)
+                    NotificationCenter.default.post(name: Notification.Name("RecordingStopped"), object: nil)
+                    NotificationCenter.default.post(
+                        name: Notification.Name("RecordingOutputFailed"),
+                        object: nil,
+                        userInfo: ["url": outputFileURL]
+                    )
+                }
+                return
             }
 
-            NotificationCenter.default.post(
-                name: Notification.Name("RecordingOutputReady"),
-                object: nil,
-                userInfo: ["url": outputFileURL]
-            )
-            NotificationCenter.default.post(name: Notification.Name("RecordingStopped"), object: nil)
-            print("[CameraKitController] Recording output ready: \(outputFileURL.path)")
+            DispatchQueue.main.async { [weak self] in
+                Task { @MainActor in
+                    self?.completeVideoRecording(with: outputFileURL)
+                }
+            }
         }
+    }
+
+    @MainActor
+    private func completeVideoRecording(with outputFileURL: URL) {
+        self.lastVideoURL = outputFileURL
+        self.isRecording = false
+        self.allowPhotoCapture = true
+        NotificationCenter.default.post(name: Notification.Name("CubeInteractionEnabled"), object: nil)
+
+        if let coord = self.overrideCoordinate {
+            Foundation.NotificationCenter.default.post(
+                name: Notification.Name("CapturePreviewFromMapLocation"),
+                object: nil,
+                userInfo: [
+                    "latitude": coord.latitude,
+                    "longitude": coord.longitude
+                ]
+            )
+        }
+
+        NotificationCenter.default.post(
+            name: Notification.Name("RecordingOutputReady"),
+            object: nil,
+            userInfo: ["url": outputFileURL]
+        )
+        NotificationCenter.default.post(name: Notification.Name("RecordingStopped"), object: nil)
+        print("[CameraKitController] Recording output ready: \(outputFileURL.path)")
     }
 }
 
