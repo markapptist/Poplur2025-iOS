@@ -5,6 +5,7 @@ import SceneKit
 import Foundation
 import AVFoundation
 import AudioToolbox
+import WebKit
 
 // MARK: - Required Dependencies
 /*
@@ -1656,6 +1657,16 @@ private final class CityTourMusicPlayerService: ObservableObject {
         player?.pause()
         player = nil
         currentTrackTitle = nil
+    }
+
+    func duckForRadio() {
+        lastPlayerVolume = 0.10
+        player?.volume = 0.10
+    }
+
+    func unduckAfterRadio() {
+        lastPlayerVolume = 1.0
+        player?.volume = 1.0
     }
 
     private func startPlayback(tracks: [CityMusicTrack], index: Int) {
@@ -3479,6 +3490,7 @@ struct MapViewProduction: View {
     @State private var showConfetti: Bool = true // Toggle confetti on/off
     @State private var cubeHoldStartY: CGFloat? = nil // Track cube hold drag start position
     @State private var initialZoomLevel: Double = 700 // Store zoom level when cube hold starts
+    @State private var showIndoorMap: Bool = false
     
     // Weather overlay state
     @State private var weatherState = WeatherVisualizationState(
@@ -4929,6 +4941,24 @@ struct MapViewProduction: View {
                 .padding(.bottom, 132)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                 .zIndex(1003)
+
+            if fixedDistanceAlt < 300 {
+                Button { showIndoorMap = true } label: {
+                    Label("Indoor", systemImage: "building.2.fill")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .foregroundStyle(.white)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                .padding(.trailing, 20)
+                .padding(.bottom, 200)
+                .zIndex(1004)
+                .transition(.scale.combined(with: .opacity))
+                .animation(.spring(response: 0.35), value: fixedDistanceAlt < 300)
+            }
             }
         }
         .animation(.easeOut(duration: 0.28), value: shouldObscureMapForInitialLaunch)
@@ -5550,6 +5580,13 @@ struct MapViewProduction: View {
                 guard !layoutPreviewMode else { return }
                 await runTourSubtitleLoop()
             }
+            .onChange(of: mapRadioHost.isLive) { _, isLive in
+                guard !layoutPreviewMode else { return }
+                if isLive { musicPlayer.duckForRadio() } else { musicPlayer.unduckAfterRadio() }
+            }
+            .sheet(isPresented: $showIndoorMap) {
+                indoorMapSheet
+            }
     }
 
     @ViewBuilder
@@ -5609,6 +5646,21 @@ struct MapViewProduction: View {
                     navigateWithTourTransition(to: coord, cityName: name)
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var indoorMapSheet: some View {
+        NavigationStack {
+            MappedInWebView()
+                .ignoresSafeArea(edges: .bottom)
+                .navigationTitle("Indoor Map")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Done") { showIndoorMap = false }
+                    }
+                }
         }
     }
 
@@ -6107,3 +6159,18 @@ private struct MapTabLayoutPreview: View {
 }
 
 #endif
+
+private struct MappedInWebView: UIViewRepresentable {
+    private let url = URL(string: "https://app.mappedin.com/map/mappedin-demo-mall")!
+
+    func makeUIView(context: Context) -> WKWebView {
+        let config = WKWebViewConfiguration()
+        config.allowsInlineMediaPlayback = true
+        let webView = WKWebView(frame: .zero, configuration: config)
+        webView.scrollView.bounces = false
+        webView.load(URLRequest(url: url))
+        return webView
+    }
+
+    func updateUIView(_ uiView: WKWebView, context: Context) {}
+}

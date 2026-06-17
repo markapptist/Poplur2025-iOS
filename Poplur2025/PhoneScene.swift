@@ -192,6 +192,8 @@ class PhoneScene: SKScene, ObservableObject {
     private var selectedPhoneBatterySpritesheetName = "poplur_phone_battery_01"
     private var signalStatusNode: SKSpriteNode?
     private var signalStatusFrames: [SKTexture] = []
+    private var batteryStatusNode: SKSpriteNode?
+    private var idleAnimationNode: SKSpriteNode?
     private var isBootingUp = false
     private var wasShowingCallStatusBeforeBootup = false
     private var deviceBatteryLevel: Float = 1.0
@@ -292,6 +294,8 @@ class PhoneScene: SKScene, ObservableObject {
         phoneArtworkNode = nil
         signalStatusNode = nil
         signalStatusFrames = []
+        batteryStatusNode = nil
+        idleAnimationNode = nil
         screenNode = nil
         screenTextLabel = nil
         callStatusLabel = nil
@@ -309,6 +313,7 @@ class PhoneScene: SKScene, ObservableObject {
         screenFrames = []
         setupAnimatedScreen()
         setupSignalStatusOverlay()
+        setupBatteryIndicator()
         setupDialPad()
         setupCallButton()
         showPhoneMenu(.main)
@@ -344,6 +349,13 @@ class PhoneScene: SKScene, ObservableObject {
     }
 
     private func setupSignalStatusOverlay() {
+        // Solid background ensures the sprite blends perfectly with the LCD fill colour
+        let bg = SKSpriteNode(color: phoneScreenColor, size: signalStatusRect().size)
+        bg.position = CGPoint(x: signalStatusRect().midX, y: signalStatusRect().midY)
+        bg.zPosition = 6.9
+        bg.name = "signal_bg"
+        addChild(bg)
+
         let node = SKSpriteNode(color: .clear, size: signalStatusRect().size)
         node.position = CGPoint(x: signalStatusRect().midX, y: signalStatusRect().midY)
         node.zPosition = 7
@@ -370,6 +382,82 @@ class PhoneScene: SKScene, ObservableObject {
             width: Self.signalPatchWidthFraction,
             height: Self.signalPatchHeightFraction
         )
+    }
+
+    private func batteryStatusRect() -> CGRect {
+        rectFromTop(
+            x: Self.batteryPatchLeftFraction,
+            y: Self.batteryPatchTopFraction,
+            width: Self.batteryPatchWidthFraction,
+            height: Self.batteryPatchHeightFraction
+        )
+    }
+
+    private func setupBatteryIndicator() {
+        let rect = batteryStatusRect()
+
+        let bg = SKSpriteNode(color: phoneScreenColor, size: rect.size)
+        bg.position = CGPoint(x: rect.midX, y: rect.midY)
+        bg.zPosition = 6.9
+        bg.name = "battery_bg"
+        addChild(bg)
+
+        let node = SKSpriteNode(
+            texture: makeBatteryTexture(level: deviceBatteryLevel, size: rect.size),
+            size: rect.size
+        )
+        node.position = CGPoint(x: rect.midX, y: rect.midY)
+        node.zPosition = 7
+        node.name = "battery_status_overlay"
+        batteryStatusNode = node
+        addChild(node)
+    }
+
+    private func updateBatteryIndicator() {
+        guard let batteryStatusNode else { return }
+        batteryStatusNode.texture = makeBatteryTexture(
+            level: deviceBatteryLevel,
+            size: batteryStatusRect().size
+        )
+    }
+
+    private func makeBatteryTexture(level: Float, size: CGSize) -> SKTexture {
+        let renderer = UIGraphicsImageRenderer(size: size)
+        let image = renderer.image { ctx in
+            let padX = size.width * 0.05
+            let padY = size.height * 0.18
+            let nubW = size.width * 0.08
+            let lineW = max(1.0, size.height * 0.08)
+
+            phoneScreenColor.setFill()
+            ctx.fill(CGRect(origin: .zero, size: size))
+
+            let bodyW = size.width - padX * 2 - nubW
+            let bodyH = size.height - padY * 2
+            let bodyRect = CGRect(x: padX, y: padY, width: bodyW, height: bodyH)
+
+            // Battery body filled with ink, then cleared in interior (outline effect)
+            lcdDarkColor.setFill()
+            ctx.fill(bodyRect)
+            phoneScreenColor.setFill()
+            ctx.fill(bodyRect.insetBy(dx: lineW, dy: lineW))
+
+            // Fill segments based on battery level (4 Nokia-style bars)
+            let bars = max(0, min(4, Int((level * 4 + 0.5).rounded())))
+            if bars > 0 {
+                let segW = (bodyW - lineW * 2) / 4
+                lcdDarkColor.setFill()
+                ctx.fill(CGRect(x: padX + lineW, y: padY + lineW,
+                                width: segW * CGFloat(bars), height: bodyH - lineW * 2))
+            }
+
+            // Nub (positive terminal on right side)
+            let nubH = bodyH * 0.50
+            lcdDarkColor.setFill()
+            ctx.fill(CGRect(x: padX + bodyW, y: padY + (bodyH - nubH) / 2,
+                            width: nubW * 0.75, height: nubH))
+        }
+        return SKTexture(image: image)
     }
 
     private func lcdBorderPath(for rect: CGRect) -> CGPath {
@@ -524,6 +612,7 @@ class PhoneScene: SKScene, ObservableObject {
 
         guard updateArtwork, changed, !isBootingUp else { return }
         phoneArtworkNode?.texture = restingPhoneTexture()
+        updateBatteryIndicator()
     }
 
     private func batteryFrameIndex(frameCount: Int) -> Int {
@@ -535,6 +624,8 @@ class PhoneScene: SKScene, ObservableObject {
     private func scheduleNextIdleSignalAnimation() {
         removeAction(forKey: "idleSignalSchedule")
         guard isPhoneIdleForSignalAnimation else { return }
+
+        startIdleAnimation()
 
         // Show signal at full bars right away; the idle sweep plays after the random delay.
         signalStatusNode?.texture = signalStatusFrames.last
@@ -552,6 +643,55 @@ class PhoneScene: SKScene, ObservableObject {
         signalStatusNode?.removeAction(forKey: "idleSignalAnimation")
         signalStatusNode?.texture = signalStatusFrames.last
         updateSignalStatusVisibility()
+        stopIdleAnimation()
+    }
+
+    private func idleSpritesheetName(for bootupName: String) -> String? {
+        switch bootupName {
+        case "poplur_phone_bootup_icy_aqua_turquoise":
+            return "poplur_phone_idle_icy_aqua_turquoise"
+        case "poplur_phone_bootup_holographic_iridescent":
+            return "poplur_phone_idle_holographic_iridescent"
+        default:
+            return nil
+        }
+    }
+
+    private func startIdleAnimation() {
+        guard let sheetName = idleSpritesheetName(for: selectedPhoneBootupSpritesheetName),
+              let phoneLayer else {
+            idleAnimationNode?.isHidden = true
+            return
+        }
+        let frames = Self.makeIdleFrames(named: sheetName)
+        guard !frames.isEmpty else {
+            idleAnimationNode?.isHidden = true
+            return
+        }
+
+        if idleAnimationNode == nil {
+            let node = SKSpriteNode(texture: frames.first)
+            node.position = CGPoint(x: phoneFrame.midX, y: phoneFrame.midY)
+            node.size = phoneFrame.size
+            node.zPosition = 0.8
+            node.blendMode = .screen
+            node.name = "idleAnimationNode"
+            phoneLayer.addChild(node)
+            idleAnimationNode = node
+        } else {
+            idleAnimationNode?.position = CGPoint(x: phoneFrame.midX, y: phoneFrame.midY)
+            idleAnimationNode?.size = phoneFrame.size
+            idleAnimationNode?.texture = frames.first
+        }
+
+        idleAnimationNode?.isHidden = false
+        let animate = SKAction.animate(with: frames, timePerFrame: 0.10, resize: false, restore: false)
+        idleAnimationNode?.run(.repeatForever(animate), withKey: "idleAnimation")
+    }
+
+    private func stopIdleAnimation() {
+        idleAnimationNode?.removeAction(forKey: "idleAnimation")
+        idleAnimationNode?.isHidden = true
     }
 
     private func runIdleSignalAnimationIfPossible() {
@@ -584,7 +724,11 @@ class PhoneScene: SKScene, ObservableObject {
     }
 
     private func updateSignalStatusVisibility() {
-        signalStatusNode?.isHidden = signalStatusFrames.isEmpty || !isPhoneIdleForSignalAnimation
+        let hidden = signalStatusFrames.isEmpty || !isPhoneIdleForSignalAnimation
+        signalStatusNode?.isHidden = hidden
+        childNode(withName: "signal_bg")?.isHidden = hidden
+        batteryStatusNode?.isHidden = hidden
+        childNode(withName: "battery_bg")?.isHidden = hidden
     }
 
     private func setInteractiveContentHiddenForBootup(_ hidden: Bool) {
@@ -596,6 +740,9 @@ class PhoneScene: SKScene, ObservableObject {
             callStatusLabel?.isHidden = true
             snakeLayer?.isHidden = true
             signalStatusNode?.isHidden = true
+            batteryStatusNode?.isHidden = true
+            childNode(withName: "signal_bg")?.isHidden = true
+            childNode(withName: "battery_bg")?.isHidden = true
             return
         }
 
@@ -608,6 +755,9 @@ class PhoneScene: SKScene, ObservableObject {
             screenTextLabel?.isHidden = true
             menuLayer?.isHidden = true
             signalStatusNode?.isHidden = true
+            batteryStatusNode?.isHidden = true
+            childNode(withName: "signal_bg")?.isHidden = true
+            childNode(withName: "battery_bg")?.isHidden = true
             return
         }
 
@@ -617,6 +767,9 @@ class PhoneScene: SKScene, ObservableObject {
             menuLayer?.isHidden = true
             snakeLayer?.isHidden = true
             signalStatusNode?.isHidden = true
+            batteryStatusNode?.isHidden = true
+            childNode(withName: "signal_bg")?.isHidden = true
+            childNode(withName: "battery_bg")?.isHidden = true
             wasShowingCallStatusBeforeBootup = false
             return
         }
@@ -1439,17 +1592,16 @@ class PhoneScene: SKScene, ObservableObject {
         stopIdleSignalAnimation()
         phoneArtworkNode.removeAction(forKey: "phonePressFrame")
         signalStatusNode?.isHidden = true
+        batteryStatusNode?.isHidden = true
+        childNode(withName: "signal_bg")?.isHidden = true
+        childNode(withName: "battery_bg")?.isHidden = true
 
-        // Press spritesheets have more transparent padding than battery/resting spritesheets.
-        // Scale up so the phone body stays the same visual size during the press frame.
-        phoneArtworkNode.setScale(Self.pressFrameScaleFactor)
         phoneArtworkNode.texture = frames[frameIndex]
 
         phoneArtworkNode.run(.sequence([
             .wait(forDuration: 0.14),
             .run { [weak self, weak phoneArtworkNode] in
                 guard let self, let phoneArtworkNode else { return }
-                phoneArtworkNode.setScale(1.0)
                 phoneArtworkNode.texture = self.restingPhoneTexture()
                 self.scheduleNextIdleSignalAnimation()
             }
@@ -1457,39 +1609,46 @@ class PhoneScene: SKScene, ObservableObject {
     }
 
     private func pressFrameIndex(for control: String) -> Int? {
+        // CGImage y=0 is visual bottom. Row 3 (visual top) = frames 12-15.
+        // Frame 0 and 12 are reference/overview images in the sheet — avoid them.
+        // Confirmed by visual inspection of each cell:
+        // Row 3 (visual top):  12=ref,    13=call,   14=gear,   15=nav
+        // Row 2:               8=1,       9=2,       10=3,      11=nav/4
+        // Row 1:               4=5,       5=6,       6=7,       7=8
+        // Row 0 (visual bot):  0=ref,     1=0,       2=nav,     3=nav
         switch control {
         case "gear":
-            return 0
+            return 14
         case "call":
-            return 1
+            return 13
         case "navUp", "navLeft":
             return 2
         case "navDown", "navRight":
             return 3
         case "1":
-            return 4
-        case "2":
-            return 5
-        case "3":
-            return 6
-        case "4":
-            return 7
-        case "5":
             return 8
-        case "6":
+        case "2":
             return 9
-        case "7":
+        case "3":
             return 10
-        case "8":
+        case "4":
             return 11
+        case "5":
+            return 4
+        case "6":
+            return 5
+        case "7":
+            return 6
+        case "8":
+            return 7
         case "9":
-            return 12
+            return nil  // frame 12 is a reference image — skip to avoid wrong colorway
         case "*":
-            return 13
+            return nil  // frame 0 is a reference image — skip
         case "0":
-            return 14
+            return 1
         case "#":
-            return 15
+            return nil  // frame 15 shows nav highlight — skip to avoid wrong button
         default:
             return nil
         }
@@ -1790,6 +1949,38 @@ class PhoneScene: SKScene, ObservableObject {
         return frames
     }
 
+    private static func makeIdleFrames(named spritesheetName: String) -> [SKTexture] {
+        if let cached = idleFrameCache[spritesheetName] { return cached }
+
+        guard let spriteSheet = UIImage(named: spritesheetName),
+              let cgImage = spriteSheet.cgImage
+        else { return [] }
+
+        let cellWidth = CGFloat(cgImage.width) / CGFloat(idleColumns)
+        let cellHeight = CGFloat(cgImage.height) / CGFloat(idleRows)
+        var frames: [SKTexture] = []
+
+        for row in 0..<idleRows {
+            for column in 0..<idleColumns {
+                let cell = CGRect(
+                    x: CGFloat(column) * cellWidth,
+                    y: CGFloat(row) * cellHeight,
+                    width: cellWidth,
+                    height: cellHeight
+                ).integral
+                if let cropped = cgImage.cropping(to: cell) {
+                    let image = UIImage(cgImage: cropped, scale: spriteSheet.scale, orientation: spriteSheet.imageOrientation)
+                    let texture = SKTexture(image: image)
+                    texture.filteringMode = .linear
+                    frames.append(texture)
+                }
+            }
+        }
+
+        idleFrameCache[spritesheetName] = frames
+        return frames
+    }
+
     private func fallbackPhoneArtworkName(for bootupSpritesheetName: String) -> String {
         switch bootupSpritesheetName {
         case "poplur_phone_bootup_champagne_gold":
@@ -1894,6 +2085,9 @@ class PhoneScene: SKScene, ObservableObject {
         isSnakeActive = true
         stopIdleSignalAnimation()
         signalStatusNode?.isHidden = true
+        batteryStatusNode?.isHidden = true
+        childNode(withName: "signal_bg")?.isHidden = true
+        childNode(withName: "battery_bg")?.isHidden = true
         menuLayer?.removeFromParent()
         menuLayer = nil
         snakeScore = 0
@@ -2112,6 +2306,9 @@ class PhoneScene: SKScene, ObservableObject {
     private func showCallStatus(_ text: String, pulsing: Bool) {
         stopIdleSignalAnimation()
         signalStatusNode?.isHidden = true
+        batteryStatusNode?.isHidden = true
+        childNode(withName: "signal_bg")?.isHidden = true
+        childNode(withName: "battery_bg")?.isHidden = true
         screenTextLabel?.isHidden = true
         menuLayer?.isHidden = true
         snakeLayer?.isHidden = true
@@ -2170,15 +2367,15 @@ class PhoneScene: SKScene, ObservableObject {
     private static let signalRows = 4
     private static let batteryColumns = 4
     private static let batteryRows = 4
+    private static let idleColumns = 4
+    private static let idleRows = 2
     private static let phoneHorizontalInsetFraction: CGFloat = 0.0
-    // Press spritesheets contain ~10% more transparent padding per side than battery spritesheets.
-    // Scaling the node by this factor keeps the phone body the same visual size during a press.
-    private static let pressFrameScaleFactor: CGFloat = 1.10
     private static let bootupFallbackDuration: TimeInterval = 1.8
     private static var bootupFrameCache: [String: [SKTexture]] = [:]
     private static var pressFrameCache: [String: [SKTexture]] = [:]
     private static var batteryFrameCache: [String: [SKTexture]] = [:]
     private static var signalStatusFrameCache: [String: [SKTexture]] = [:]
+    private static var idleFrameCache: [String: [SKTexture]] = [:]
     private let phoneAspectRatio: CGFloat = 1024.0 / 1536.0
     private let screenLeftFraction: CGFloat = 0.240
     private let screenTopFraction: CGFloat = 0.183
@@ -2208,6 +2405,11 @@ class PhoneScene: SKScene, ObservableObject {
     private static let signalPatchTopFraction: CGFloat = 0.195
     private static let signalPatchWidthFraction: CGFloat = 0.135
     private static let signalPatchHeightFraction: CGFloat = 0.058
+    // Battery: mirrored to top-right of LCD (symmetric with signal at top-left)
+    private static let batteryPatchLeftFraction: CGFloat = 0.600
+    private static let batteryPatchTopFraction: CGFloat = 0.195
+    private static let batteryPatchWidthFraction: CGFloat = 0.135
+    private static let batteryPatchHeightFraction: CGFloat = 0.058
 }
 
 private struct SnakeGridPoint: Equatable {
