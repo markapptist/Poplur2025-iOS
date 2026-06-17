@@ -5,6 +5,7 @@ import Combine
 import MediaPlayer
 import AudioToolbox
 import Foundation
+import SpriteKit
 
 private enum PreviewEnvHomeView {
     static var isPreview: Bool {
@@ -53,26 +54,11 @@ private struct HiddenSystemVolumeBridge: UIViewRepresentable {
 }
 
 private struct HomeFeedLaunchCover: View {
-    @State private var pulse = false
+    @State private var scene = HomeFeedLaunchCoverScene.make()
 
     var body: some View {
-        ZStack {
-            Color.white.ignoresSafeArea()
-
-            Image("logo")
-                .resizable()
-                .scaledToFit()
-                .frame(width: 132, height: 132)
-                .scaleEffect(pulse ? 1.04 : 0.96)
-                .opacity(pulse ? 1.0 : 0.86)
-                .animation(
-                    .easeInOut(duration: 0.9).repeatForever(autoreverses: true),
-                    value: pulse
-                )
-        }
-        .onAppear {
-            pulse = true
-        }
+        SpriteView(scene: scene)
+            .ignoresSafeArea()
     }
 }
 
@@ -98,11 +84,17 @@ private final class DeviceVolumeObserver: ObservableObject {
         level = session.outputVolume
 
         if !PreviewEnvHomeView.isPreview {
-            try? session.setActive(true)
-            observation = session.observe(\.outputVolume, options: [.new]) { [weak self] session, change in
+            // Defer audio session activation to avoid blocking the first render.
+            // KVO observation and notification delivery work without an active session;
+            // only playback (pop sound) requires it, which won't be needed immediately.
+            Task { @MainActor in
+                try? AVAudioSession.sharedInstance().setCategory(.ambient, options: [.mixWithOthers])
+                try? AVAudioSession.sharedInstance().setActive(true)
+            }
+            observation = session.observe(\.outputVolume, options: [.old, .new]) { [weak self] session, change in
                 let nextLevel = change.newValue ?? session.outputVolume
                 Task { @MainActor in
-                    self?.handleVolumeChange(nextLevel)
+                    self?.handleVolumeChange(nextLevel, forceShow: true)
                 }
             }
             volumeNotificationObserver = NotificationCenter.default.addObserver(
@@ -110,14 +102,7 @@ private final class DeviceVolumeObserver: ObservableObject {
                 object: nil,
                 queue: .main
             ) { [weak self] notification in
-                let notifiedLevel = notification.userInfo?["AVSystemController_AudioVolumeNotificationParameter"] as? Float
-                let nextLevel = notifiedLevel ?? AVAudioSession.sharedInstance().outputVolume
-                NotificationCenter.default.post(name: .feedHardwareVolumeChanged, object: nil, userInfo: [
-                    "level": nextLevel
-                ])
-                Task { @MainActor in
-                    self?.handleVolumeChange(nextLevel, forceShow: true)
-                }
+                self?.handleSystemVolumeNotification(notification)
             }
             refreshTimer = Timer.publish(every: 0.25, on: .main, in: .common)
                 .autoconnect()
@@ -150,6 +135,20 @@ private final class DeviceVolumeObserver: ObservableObject {
         if suppressed {
             hideTask?.cancel()
             isShowing = false
+        }
+    }
+
+    private nonisolated func handleSystemVolumeNotification(_ notification: Notification) {
+        let notifiedLevel = notification.userInfo?["AVSystemController_AudioVolumeNotificationParameter"] as? Float
+        let reason = notification.userInfo?["AVSystemController_AudioVolumeChangeReasonNotificationParameter"] as? String
+        let nextLevel = notifiedLevel ?? AVAudioSession.sharedInstance().outputVolume
+
+        Task { @MainActor in
+            NotificationCenter.default.post(name: .feedHardwareVolumeChanged, object: nil, userInfo: [
+                "level": nextLevel,
+                "reason": reason ?? "unknown"
+            ])
+            self.handleVolumeChange(nextLevel, forceShow: reason == nil || reason == "ExplicitVolumeChange")
         }
     }
 
@@ -341,6 +340,8 @@ struct HomeView: View {
 
     @State private var recordHoldTask: Task<Void, Never>? = nil
     @State private var isRecordHolding: Bool = false
+    @StateObject private var feedCubeMenuWheel = CubeMenuWheelController()
+    @StateObject private var cameraCubeMenuWheel = CubeMenuWheelController()
 
     // Recording countdown state
     @State private var isRecording: Bool = false
@@ -351,6 +352,7 @@ struct HomeView: View {
 
     // Post count state (for displaying user's total posts)
     @State private var userPostCount: Int = 0
+    @State private var currentPostLikesCount: Int = 0
 
     // Radius trend tracking for post count display
     @State private var previousRadius: Double? = nil
@@ -632,6 +634,98 @@ struct HomeView: View {
         NotificationCenter.default.post(name: Notification.Name("CubeStopFlashing"), object: nil)
     }
 
+    @MainActor
+    private func showCompletedVideoPreview(url: URL) {
+        selectedTab = .record
+        cameraCubeMenuWheel.endHold(activateSelected: false)
+        isRecordHolding = false
+        stopRecordHoldRamp(reset: true)
+        withAnimation(.easeInOut(duration: 0.18)) {
+            capturePreviewItem = HomeCapturePreviewItem(image: nil, videoURL: url)
+        }
+    }
+
+    private var cameraCubeMenuItems: [CubeSubmenuItem] {
+        [
+            CubeSubmenuItem(
+                id: "camera-photo",
+                title: "Photo",
+                systemImage: "camera.fill",
+                tint: .green,
+                action: triggerCameraPhotoFromCubeMenu
+            ),
+            CubeSubmenuItem(
+                id: "camera-video",
+                title: "Video",
+                systemImage: "video.fill",
+                tint: .indigo,
+                action: triggerCameraVideoFromCubeMenu
+            ),
+            CubeSubmenuItem(
+                id: "camera-live",
+                title: "Live",
+                systemImage: "dot.radiowaves.left.and.right",
+                tint: .red,
+                action: toggleLiveVideoFromCubeMenu
+            )
+        ]
+    }
+
+    private var feedCubeMenuItems: [CubeSubmenuItem] {
+        [
+            CubeSubmenuItem(
+                id: "feed-tv-guide",
+                title: "TV Guide",
+                systemImage: "tv.fill",
+                tint: .green,
+                action: {
+                    NotificationCenter.default.post(name: .FeedOpenTVGuide, object: nil)
+                }
+            ),
+            CubeSubmenuItem(
+                id: "feed-news",
+                title: "News",
+                systemImage: "newspaper.fill",
+                tint: .red,
+                action: {
+                    NotificationCenter.default.post(name: .FeedOpenNews, object: nil)
+                }
+            )
+        ]
+    }
+
+    @MainActor
+    private func triggerCameraPhotoFromCubeMenu() {
+        guard selectedTab == .record else { return }
+        guard !cameraControllerHolder.resolve().isLiveVideoActive else { return }
+        ensureCameraRunningIfNeeded()
+        NotificationCenter.default.post(name: .cameraCubeTabViewTapped, object: nil)
+    }
+
+    @MainActor
+    private func triggerCameraVideoFromCubeMenu() {
+        guard selectedTab == .record, !isRecording else { return }
+        let controller = cameraControllerHolder.resolve()
+        guard !controller.isLiveVideoActive else { return }
+        isRecordHolding = true
+        ensureCameraRunningIfNeeded()
+        startRecordHoldRamp()
+        startRecordingCountdown()
+    }
+
+    @MainActor
+    private func toggleLiveVideoFromCubeMenu() {
+        guard selectedTab == .record else { return }
+        let controller = cameraControllerHolder.resolve()
+        isRecordHolding = false
+        if isRecording {
+            stopRecordingCountdown()
+        }
+        stopRecordHoldRamp(reset: true)
+        ensureCameraRunningIfNeeded()
+        controller.toggleLiveVideo()
+    }
+
     // MARK: - Helper rotation logic for cube yaw and tab switching
 
     private enum RotationDirection { case left, right }
@@ -695,7 +789,7 @@ struct HomeView: View {
 
     @ViewBuilder
     private var feedTabContent: some View {
-        FeedView()
+        FeedView(homeChromeInactive: selectedTab == .feed && isChromeAsleep)
             .onDisappear {
                 // Ensure all feed players stop when leaving Feed tab view hierarchy
                 NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
@@ -757,13 +851,16 @@ struct HomeView: View {
     // MARK: - HUD sleep timer
 
     private func resetChromeSleepTimer() {
-        guard SettingsStore.shared.hudSleepTimerEnabled else {
+        chromeSleepTask?.cancel()
+        chromeSleepTask = nil
+        guard SettingsStore.shared.hudSleepTimerEnabled,
+              selectedTab == .feed,
+              !isMainTabChildRouteVisible else {
             if isChromeAsleep {
                 withAnimation(.easeIn(duration: 0.35)) { isChromeAsleep = false }
             }
             return
         }
-        chromeSleepTask?.cancel()
         if isChromeAsleep {
             withAnimation(.easeIn(duration: 0.35)) { isChromeAsleep = false }
         }
@@ -775,6 +872,7 @@ struct HomeView: View {
     }
 
     private func putChromeToSleepImmediately() {
+        guard selectedTab == .feed else { return }
         chromeSleepTask?.cancel()
         withAnimation(.easeOut(duration: 0.5)) { isChromeAsleep = true }
     }
@@ -814,6 +912,20 @@ struct HomeView: View {
                 .frame(width: 1, height: 1)
                 .allowsHitTesting(false)
                 .opacity(0.01)
+
+            FeedChromeNotificationBridge(
+                isActive: selectedTab == .feed,
+                onHoldBegan: {
+                    resetChromeSleepTimer()
+                    feedCubeMenuWheel.beginHold(items: feedCubeMenuItems)
+                },
+                onHoldEnded: {
+                    resetChromeSleepTimer()
+                    feedCubeMenuWheel.endHold(activateSelected: true)
+                },
+                onInteraction: resetChromeSleepTimer
+            )
+            .allowsHitTesting(false)
 
             // Upload Status Overlay
             if showUploadStatus && !isMainTabChildRouteVisible {
@@ -872,8 +984,16 @@ struct HomeView: View {
                     }
                 )
                 .transition(.opacity)
-                .zIndex(900)
+                .zIndex(7200)
             }
+
+            CubeMenuWheelOverlay(controller: cameraCubeMenuWheel)
+                .opacity(selectedTab == .record ? 1 : 0)
+                .zIndex(6100)
+
+            CubeMenuWheelOverlay(controller: feedCubeMenuWheel)
+                .opacity(selectedTab == .feed ? 1 : 0)
+                .zIndex(6101)
 
             if let info = incomingCallInfo {
                 IncomingCallView(
@@ -1008,6 +1128,7 @@ struct HomeView: View {
                             isRecording: $isRecording,
                             secondsRemaining: $recordingSecondsRemaining,
                             postCount: $userPostCount,
+                            likesCount: $currentPostLikesCount,
                             selectedTab: $selectedTab,
                             radiusTrend: $radiusTrend
                         )
@@ -1087,12 +1208,6 @@ struct HomeView: View {
                 .allowsHitTesting(true)
             }
 
-            if selectedTab == .feed && isFeedLaunchLoading {
-                HomeFeedLaunchCover()
-                    .zIndex(900)
-                    .transition(.opacity)
-            }
-
         }
     }
 
@@ -1164,9 +1279,14 @@ struct HomeView: View {
                 NotificationCenter.default.post(name: .ResetTabToTop, object: nil)
                 if selectedTab != .record {
                     isRecordHolding = false
+                    cameraCubeMenuWheel.endHold(activateSelected: false)
                     stopRecordHoldRamp(reset: false)
                 }
+                if selectedTab != .feed {
+                    feedCubeMenuWheel.endHold(activateSelected: false)
+                }
                 enableLowerHitArea = (selectedTab != .record)
+                resetChromeSleepTimer()
             }
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("FeedLaunchLoadingDidStart"))) { _ in
                 isFeedLaunchLoading = true
@@ -1175,7 +1295,9 @@ struct HomeView: View {
                 feedLaunchSuppressionTask = Task { @MainActor in
                     try? await Task.sleep(nanoseconds: 3_000_000_000)
                     guard !Task.isCancelled else { return }
-                    isFeedLaunchLoading = false
+                    withAnimation(.easeOut(duration: 0.50)) {
+                        isFeedLaunchLoading = false
+                    }
                     deviceVolumeObserver.setSuppressed(false)
                     feedLaunchSuppressionTask = nil
                 }
@@ -1183,11 +1305,14 @@ struct HomeView: View {
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("FeedLaunchLoadingDidFinish"))) { _ in
                 feedLaunchSuppressionTask?.cancel()
                 feedLaunchSuppressionTask = nil
-                isFeedLaunchLoading = false
+                withAnimation(.easeOut(duration: 0.50)) {
+                    isFeedLaunchLoading = false
+                }
                 deviceVolumeObserver.setSuppressed(false)
             }
             .onReceive(NotificationCenter.default.publisher(for: .MainTabChildRouteVisibilityChanged)) { notification in
                 isMainTabChildRouteVisible = (notification.object as? Bool) ?? false
+                resetChromeSleepTimer()
             }
             .onReceive(NotificationCenter.default.publisher(for: .feedHardwareVolumeChanged)) { notification in
                 guard selectedTab == .feed else { return }
@@ -1284,25 +1409,25 @@ struct HomeView: View {
                 guard selectedTab == .record else { return }
                 isRecordHolding = true
                 ensureCameraRunningIfNeeded()
-                startRecordHoldRamp()
-                startRecordingCountdown()
+                cameraCubeMenuWheel.beginHold(items: cameraCubeMenuItems)
             }
             .onReceive(NotificationCenter.default.publisher(for: .cameraCubeHoldEnded)) { _ in
                 guard selectedTab == .record else { return }
                 isRecordHolding = false
+                cameraCubeMenuWheel.endHold(activateSelected: true)
                 if !isRecording {
                     stopRecordHoldRamp(reset: true)
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("RecordingOutputReady"))) { notification in
                 guard let url = notification.userInfo?["url"] as? URL else { return }
-                capturePreviewItem = HomeCapturePreviewItem(image: nil, videoURL: url)
+                showCompletedVideoPreview(url: url)
             }
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ShowCapturePreviewOverlay"))) { notification in
                 if let image = notification.object as? UIImage {
                     capturePreviewItem = HomeCapturePreviewItem(image: image, videoURL: nil)
                 } else if let url = notification.object as? URL {
-                    capturePreviewItem = HomeCapturePreviewItem(image: nil, videoURL: url)
+                    showCompletedVideoPreview(url: url)
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("OpenCameraAtCoordinate"))) { notification in
@@ -1434,6 +1559,12 @@ struct HomeView: View {
                     }
                     previousRadius = clampedValue
                     _ = oldTrend
+                    if let count = note.userInfo?["postCount"] as? Int {
+                        userPostCount = count
+                    }
+                    if let likes = note.userInfo?["likesCount"] as? Int {
+                        currentPostLikesCount = likes
+                    }
                     if duration <= 0 {
                         isometricBarModel.radius = clampedValue
                     } else {
@@ -1475,13 +1606,53 @@ struct HomeView: View {
                 putChromeToSleepImmediately()
             }
             .simultaneousGesture(
-                TapGesture().onEnded { resetChromeSleepTimer() }
+                TapGesture().onEnded {
+                    if selectedTab == .feed && isChromeAsleep {
+                        return
+                    }
+                    resetChromeSleepTimer()
+                }
             )
+            // Feed launch cover sits ABOVE the TabView UIKit boundary so it
+            // truly occludes all content including the black safe-area fill.
+            .overlay {
+                if selectedTab == .feed && isFeedLaunchLoading {
+                    HomeFeedLaunchCover()
+                        .ignoresSafeArea()
+                        .transition(.opacity)
+                        .allowsHitTesting(false)
+                }
+            }
+            .animation(.easeOut(duration: 0.50), value: isFeedLaunchLoading)
             // ─────────────────────────────────────────────────────────────────
     }
 }
 final class BarCubePreviewTuning: ObservableObject {
     // Removed barHorizontalOffset, barBottomOffset, barTiltDegrees, barWidth, barHeight per instructions (no longer used)
+}
+
+private struct FeedChromeNotificationBridge: View {
+    let isActive: Bool
+    let onHoldBegan: () -> Void
+    let onHoldEnded: () -> Void
+    let onInteraction: () -> Void
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .onReceive(NotificationCenter.default.publisher(for: .cubeHoldBegan)) { _ in
+                guard isActive else { return }
+                onHoldBegan()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .cubeHoldEnded)) { _ in
+                guard isActive else { return }
+                onHoldEnded()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .FeedUserInteraction)) { _ in
+                guard isActive else { return }
+                onInteraction()
+            }
+    }
 }
 
 private struct CubeAndBarOverlay: View {
@@ -1778,8 +1949,57 @@ private struct RecordCameraControlsOverlay: View {
             .padding(.top, 0)
             .padding(.horizontal, 18)
 
+            if controller.isLiveVideoActive {
+                LiveVideoStatusBadge(
+                    seconds: controller.liveVideoSeconds,
+                    viewers: controller.liveViewerCount
+                )
+                .padding(.top, 12)
+            }
+
             Spacer()
         }
+    }
+}
+
+private struct LiveVideoStatusBadge: View {
+    let seconds: Int
+    let viewers: Int
+
+    var body: some View {
+        HStack(spacing: 10) {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(Color.red)
+                    .frame(width: 9, height: 9)
+                    .shadow(color: .red.opacity(0.8), radius: 7)
+
+                Text("LIVE")
+                    .font(.system(size: 12, weight: .black))
+                    .tracking(1.1)
+                    .foregroundStyle(.white)
+            }
+
+            Text(formatDuration(seconds))
+                .font(.system(size: 13, weight: .bold, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.9))
+
+            Text("\(viewers) watching")
+                .font(.system(size: 13, weight: .black))
+                .foregroundStyle(Color(red: 0.36, green: 1.0, blue: 0.42))
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
+        .background(.black.opacity(0.58), in: Capsule())
+        .overlay(Capsule().stroke(.white.opacity(0.16), lineWidth: 1))
+        .shadow(color: .black.opacity(0.35), radius: 10, x: 0, y: 5)
+        .accessibilityLabel("Live video, \(formatDuration(seconds)), \(viewers) watching")
+    }
+
+    private func formatDuration(_ totalSeconds: Int) -> String {
+        let minutes = totalSeconds / 60
+        let seconds = totalSeconds % 60
+        return String(format: "%d:%02d", minutes, seconds)
     }
 }
 
@@ -1865,7 +2085,7 @@ private struct CameraInstructionsOverlay: View {
     private let instructions: [(title: String, message: String)] = [
         (
             "Camera Controls",
-            "Tap cube to take photo • Hold cube to record video"
+            "Tap cube to take photo • Hold cube for Photo, Video, or Live"
         ),
         (
             "AR Filters",

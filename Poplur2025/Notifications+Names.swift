@@ -35,6 +35,10 @@ extension Notification.Name {
     static let PauseFeedAudio = Notification.Name("PauseFeedAudio")
     static let ResumeFeedAudio = Notification.Name("ResumeFeedAudio")
     static let PauseGlobalFeedAudio = Notification.Name("PauseGlobalFeedAudio")
+    static let ActiveFeedPlayerDidChange = Notification.Name("ActiveFeedPlayerDidChange")
+    static let FeedUserInteraction = Notification.Name("FeedUserInteraction")
+    static let FeedOpenTVGuide = Notification.Name("FeedOpenTVGuide")
+    static let FeedOpenNews = Notification.Name("FeedOpenNews")
     
     // Map and location
     static let CenterMapOnUserLocation = Notification.Name("CenterMapOnUserLocation")

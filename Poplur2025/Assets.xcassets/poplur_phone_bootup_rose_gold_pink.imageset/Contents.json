@@ -1,0 +1,21 @@
+{
+  "images" : [
+    {
+      "filename" : "poplur_rose_gold_pink_boot_spritesheet_4x4.png",
+      "idiom" : "universal",
+      "scale" : "1x"
+    },
+    {
+      "idiom" : "universal",
+      "scale" : "2x"
+    },
+    {
+      "idiom" : "universal",
+      "scale" : "3x"
+    }
+  ],
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  }
+}

@@ -280,6 +280,7 @@ struct RealTabLayoutPreviewShell<Content: View>: View {
                         isRecording: .constant(tab == .record),
                         secondsRemaining: .constant(7),
                         postCount: .constant(42),
+                        likesCount: .constant(180),
                         selectedTab: .constant(tab.appTab),
                         radiusTrend: .constant(tab == .record ? HomeView.RadiusTrend.neutral : HomeView.RadiusTrend.up)
                     )

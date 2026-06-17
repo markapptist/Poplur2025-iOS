@@ -1,5 +1,6 @@
 import SpriteKit
 import AVFoundation
+import UIKit
 
 // MARK: - Data Extensions
 
@@ -80,7 +81,8 @@ class DialTonePlayer {
 
     private func configureAudioSessionIfNeeded() {
         #if os(iOS)
-        try? AVAudioSession.sharedInstance().setCategory(.ambient, mode: .default, options: [.mixWithOthers])
+        // .playback ignores the ringer/silent switch so dial tones are always audible.
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.mixWithOthers])
         try? AVAudioSession.sharedInstance().setActive(true)
         #endif
     }
@@ -184,6 +186,16 @@ private struct PhoneMenuItem {
 class PhoneScene: SKScene, ObservableObject {
     private var phoneLayer: SKNode?
     private var phoneFrame: CGRect = .zero
+    private var phoneArtworkNode: SKSpriteNode?
+    private var selectedPhoneBootupSpritesheetName = "poplur_phone_bootup_silver_diamond"
+    private var selectedPhoneBatterySpritesheetName = "poplur_phone_battery_01"
+    private var signalStatusNode: SKSpriteNode?
+    private var signalStatusFrames: [SKTexture] = []
+    private var isBootingUp = false
+    private var wasShowingCallStatusBeforeBootup = false
+    private var deviceBatteryLevel: Float = 1.0
+    private var batteryObserverTokens: [NSObjectProtocol] = []
+    private var isPhoneButtonActive = true
     private var screenNode: SKSpriteNode?
     private var screenTextLabel: SKLabelNode?
     private var callStatusLabel: SKLabelNode?
@@ -220,6 +232,7 @@ class PhoneScene: SKScene, ObservableObject {
     ]
 
     private let tonePlayer = DialTonePlayer()
+    private var bootupPlayer: AVAudioPlayer?
 
     let callingUser: FakeUser
 
@@ -234,8 +247,13 @@ class PhoneScene: SKScene, ObservableObject {
         fatalError("init(coder:) has not been implemented")
     }
 
+    deinit {
+        batteryObserverTokens.forEach(NotificationCenter.default.removeObserver)
+    }
+
     override func didMove(to view: SKView) {
         super.didMove(to: view)
+        startDeviceBatteryMonitoring()
         setupPhone()
     }
 
@@ -245,10 +263,32 @@ class PhoneScene: SKScene, ObservableObject {
         setupPhone()
     }
 
+    func applyColorway(_ assetName: String) {
+        selectedPhoneBootupSpritesheetName = assetName
+        selectedPhoneBatterySpritesheetName = batterySpritesheetName(for: assetName)
+        reloadSignalStatusOverlay()
+        startBootup()
+    }
+
+    func animatePhoneButtonPress(_ control: String) {
+        runPhonePressAnimation(for: control)
+    }
+
+    func setPhoneButtonActive(_ isActive: Bool, announce: Bool = true) {
+        isPhoneButtonActive = isActive
+        guard announce else { return }
+        generateHapticFeedback()
+        flashMenuDetail(isActive ? "BUTTON\nACTIVE" : "BUTTON\nLOCKED")
+    }
+
     private func setupPhone() {
         removeAllChildren()
         removeAction(forKey: "snakeLoop")
+        removeAction(forKey: "idleSignalSchedule")
         dialButtons.removeAll()
+        phoneArtworkNode = nil
+        signalStatusNode = nil
+        signalStatusFrames = []
         screenNode = nil
         screenTextLabel = nil
         callStatusLabel = nil
@@ -256,6 +296,7 @@ class PhoneScene: SKScene, ObservableObject {
         menuLayer = nil
 
         let layer = SKNode()
+        layer.position = .zero
         layer.zPosition = 0
         addChild(layer)
         phoneLayer = layer
@@ -264,9 +305,11 @@ class PhoneScene: SKScene, ObservableObject {
         addPhoneArtwork(to: layer)
         screenFrames = []
         setupAnimatedScreen()
+        setupSignalStatusOverlay()
         setupDialPad()
         setupCallButton()
         showPhoneMenu(.main)
+        scheduleNextIdleSignalAnimation()
 
         if isSnakeActive {
             startSnakeGame()
@@ -275,8 +318,20 @@ class PhoneScene: SKScene, ObservableObject {
 
     private func setupAnimatedScreen() {
         let screenRect = phoneScreenRect()
-        let node = SKSpriteNode(texture: roundedLCDTexture(size: screenRect.size), color: .clear, size: screenRect.size)
 
+        // Custom shape that traces the static LCD border in the phone image.
+        // Slightly smaller corner radius than a generic rounded rect to match
+        // the chunky rectangular Nokia-era screen bezel.
+        let shape = SKShapeNode(path: lcdBorderPath(for: screenRect))
+        shape.fillColor = phoneScreenColor
+        shape.strokeColor = UIColor(red: 0.08, green: 0.10, blue: 0.0, alpha: 0.55)
+        shape.lineWidth = max(1, min(screenRect.width, screenRect.height) * 0.010)
+        shape.zPosition = 1.9
+        shape.name = "lcd_fill"
+        addChild(shape)
+
+        // Transparent sprite kept for position reference by other helpers
+        let node = SKSpriteNode(color: .clear, size: screenRect.size)
         node.position = CGPoint(x: screenRect.midX, y: screenRect.midY)
         node.zPosition = 2
         screenNode = node
@@ -285,11 +340,48 @@ class PhoneScene: SKScene, ObservableObject {
         setupScreenText()
     }
 
+    private func setupSignalStatusOverlay() {
+        let node = SKSpriteNode(color: .clear, size: signalStatusRect().size)
+        node.position = CGPoint(x: signalStatusRect().midX, y: signalStatusRect().midY)
+        node.zPosition = 7
+        node.name = "signal_status_overlay"
+        signalStatusNode = node
+        addChild(node)
+        reloadSignalStatusOverlay()
+    }
+
+    private func reloadSignalStatusOverlay() {
+        signalStatusFrames = currentSignalStatusFrames()
+        guard let signalStatusNode else { return }
+        signalStatusNode.removeAction(forKey: "idleSignalAnimation")
+        signalStatusNode.size = signalStatusRect().size
+        signalStatusNode.position = CGPoint(x: signalStatusRect().midX, y: signalStatusRect().midY)
+        signalStatusNode.texture = signalStatusFrames.last
+        updateSignalStatusVisibility()
+    }
+
+    private func signalStatusRect() -> CGRect {
+        rectFromTop(
+            x: Self.signalPatchLeftFraction,
+            y: Self.signalPatchTopFraction,
+            width: Self.signalPatchWidthFraction,
+            height: Self.signalPatchHeightFraction
+        )
+    }
+
+    private func lcdBorderPath(for rect: CGRect) -> CGPath {
+        // Nokia screens had small corner radii — use ~4% of the shorter dimension
+        let r = min(rect.width, rect.height) * 0.040
+        return UIBezierPath(roundedRect: rect, cornerRadius: r).cgPath
+    }
+
     private func fittedPhoneFrame(in container: CGSize) -> CGRect {
         let aspect = phoneAspectRatio
+        let horizontalInset = container.width * Self.phoneHorizontalInsetFraction
+        let availableWidth = max(1, container.width - horizontalInset * 2)
+        let availableHeight = max(1, container.height)
 
-        let widthFromHeight = container.height * aspect
-        let phoneWidth = max(container.width, widthFromHeight)
+        let phoneWidth = min(availableWidth, availableHeight * aspect)
         let phoneHeight = phoneWidth / aspect
 
         return CGRect(
@@ -319,12 +411,361 @@ class PhoneScene: SKScene, ObservableObject {
     }
 
     private func addPhoneArtwork(to layer: SKNode) {
-        let phone = SKSpriteNode(imageNamed: "phone_body")
+        let texture = restingPhoneTexture()
+        let phone = SKSpriteNode(texture: texture)
         phone.position = CGPoint(x: phoneFrame.midX, y: phoneFrame.midY)
         phone.size = phoneFrame.size
         phone.zPosition = 0
-        phone.shader = makePlasticShader()
+        phoneArtworkNode = phone
         layer.addChild(phone)
+    }
+
+    private func startBootup() {
+        guard let phoneArtworkNode else { return }
+
+        let frames = currentBootupFrames()
+        guard !frames.isEmpty else {
+            phoneArtworkNode.texture = restingPhoneTexture()
+            updateSignalStatusVisibility()
+            scheduleNextIdleSignalAnimation()
+            return
+        }
+
+        isBootingUp = true
+        stopIdleSignalAnimation()
+        setInteractiveContentHiddenForBootup(true)
+        phoneArtworkNode.removeAction(forKey: "bootup")
+        phoneArtworkNode.removeAction(forKey: "phonePressFrame")
+        phoneArtworkNode.setScale(1.0)
+        phoneLayer?.removeAction(forKey: "bootupVibration")
+        removeAction(forKey: "bootupHaptics")
+
+        phoneArtworkNode.texture = frames.first
+
+        let soundDuration = playBootupSound()
+        let bootupDuration = max(soundDuration, Self.bootupFallbackDuration)
+        let timePerFrame = bootupDuration / Double(frames.count)
+        let bootupFrames = SKAction.animate(with: frames, timePerFrame: timePerFrame, resize: false, restore: false)
+        let finish = SKAction.run { [weak self] in
+            guard let self else { return }
+            self.isBootingUp = false
+            self.phoneArtworkNode?.texture = self.restingPhoneTexture()
+            self.setInteractiveContentHiddenForBootup(false)
+            self.reloadSignalStatusOverlay()
+            self.scheduleNextIdleSignalAnimation()
+        }
+
+        phoneArtworkNode.run(.sequence([bootupFrames, finish]), withKey: "bootup")
+        runBootupVibration(duration: bootupDuration)
+        runBootupHaptics(duration: bootupDuration)
+    }
+
+    private func currentBootupFrames() -> [SKTexture] {
+        Self.makeBootupFrames(named: selectedPhoneBootupSpritesheetName)
+    }
+
+    private func currentPressFrames() -> [SKTexture] {
+        Self.makePressFrames(named: pressSpritesheetName(for: selectedPhoneBootupSpritesheetName))
+    }
+
+    private func currentBatteryFrames() -> [SKTexture] {
+        Self.makeBatteryFrames(named: selectedPhoneBatterySpritesheetName)
+    }
+
+    private func currentSignalStatusFrames() -> [SKTexture] {
+        Self.makeSignalStatusFrames(named: signalSpritesheetName(for: selectedPhoneBootupSpritesheetName))
+    }
+
+    private func restingPhoneTexture() -> SKTexture {
+        let batteryFrames = currentBatteryFrames()
+        let texture: SKTexture
+        if !batteryFrames.isEmpty {
+            texture = batteryFrames[batteryFrameIndex(frameCount: batteryFrames.count)]
+        } else {
+            texture = currentBootupFrames().last ?? SKTexture(imageNamed: fallbackPhoneArtworkName(for: selectedPhoneBootupSpritesheetName))
+        }
+        texture.filteringMode = .linear
+        return texture
+    }
+
+    private func startDeviceBatteryMonitoring() {
+        guard batteryObserverTokens.isEmpty else { return }
+
+        UIDevice.current.isBatteryMonitoringEnabled = true
+        refreshDeviceBatteryLevel(updateArtwork: false)
+
+        let center = NotificationCenter.default
+        batteryObserverTokens = [
+            center.addObserver(
+                forName: UIDevice.batteryLevelDidChangeNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                self?.refreshDeviceBatteryLevel(updateArtwork: true)
+            },
+            center.addObserver(
+                forName: UIDevice.batteryStateDidChangeNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                self?.refreshDeviceBatteryLevel(updateArtwork: true)
+            }
+        ]
+    }
+
+    private func refreshDeviceBatteryLevel(updateArtwork: Bool) {
+        let rawLevel = UIDevice.current.batteryLevel
+        let normalizedLevel = rawLevel >= 0 ? min(max(rawLevel, 0), 1) : 1
+        let changed = abs(normalizedLevel - deviceBatteryLevel) > 0.001
+        deviceBatteryLevel = normalizedLevel
+
+        guard updateArtwork, changed, !isBootingUp else { return }
+        phoneArtworkNode?.texture = restingPhoneTexture()
+    }
+
+    private func batteryFrameIndex(frameCount: Int) -> Int {
+        guard frameCount > 1 else { return 0 }
+        let clampedLevel = CGFloat(min(max(deviceBatteryLevel, 0), 1))
+        return min(frameCount - 1, max(0, Int((clampedLevel * CGFloat(frameCount - 1)).rounded())))
+    }
+
+    private func scheduleNextIdleSignalAnimation() {
+        removeAction(forKey: "idleSignalSchedule")
+        guard isPhoneIdleForSignalAnimation else { return }
+
+        // Show signal at full bars right away; the idle sweep plays after the random delay.
+        signalStatusNode?.texture = signalStatusFrames.last
+        updateSignalStatusVisibility()
+
+        let delay = TimeInterval.random(in: 1.2...4.2)
+        run(.sequence([
+            .wait(forDuration: delay),
+            .run { [weak self] in self?.runIdleSignalAnimationIfPossible() }
+        ]), withKey: "idleSignalSchedule")
+    }
+
+    private func stopIdleSignalAnimation() {
+        removeAction(forKey: "idleSignalSchedule")
+        signalStatusNode?.removeAction(forKey: "idleSignalAnimation")
+        signalStatusNode?.texture = signalStatusFrames.last
+        updateSignalStatusVisibility()
+    }
+
+    private func runIdleSignalAnimationIfPossible() {
+        guard isPhoneIdleForSignalAnimation,
+              let signalStatusNode,
+              !signalStatusFrames.isEmpty
+        else {
+            scheduleNextIdleSignalAnimation()
+            return
+        }
+
+        updateSignalStatusVisibility()
+        let frames = Bool.random() ? signalStatusFrames : Array(signalStatusFrames.reversed())
+        let timePerFrame = TimeInterval.random(in: 0.055...0.095)
+        let animate = SKAction.animate(with: frames, timePerFrame: timePerFrame, resize: false, restore: false)
+        let finish = SKAction.run { [weak self] in
+            guard let self else { return }
+            self.signalStatusNode?.texture = self.signalStatusFrames.last
+            self.scheduleNextIdleSignalAnimation()
+        }
+
+        signalStatusNode.run(.sequence([animate, finish]), withKey: "idleSignalAnimation")
+    }
+
+    private var isPhoneIdleForSignalAnimation: Bool {
+        guard !isBootingUp, !isSnakeActive else { return false }
+        guard phoneArtworkNode?.action(forKey: "phonePressFrame") == nil else { return false }
+        guard callStatusLabel?.isHidden != false else { return false }
+        return true
+    }
+
+    private func updateSignalStatusVisibility() {
+        signalStatusNode?.isHidden = signalStatusFrames.isEmpty || !isPhoneIdleForSignalAnimation
+    }
+
+    private func setInteractiveContentHiddenForBootup(_ hidden: Bool) {
+        if hidden {
+            wasShowingCallStatusBeforeBootup = callStatusLabel?.isHidden == false
+            // Keep lcd_fill, screenNode, and menuLayer visible so the main menu
+            // remains on-screen during the bootup animation.
+            screenTextLabel?.isHidden = true
+            callStatusLabel?.isHidden = true
+            snakeLayer?.isHidden = true
+            signalStatusNode?.isHidden = true
+            return
+        }
+
+        childNode(withName: "lcd_fill")?.isHidden = false
+        screenNode?.isHidden = false
+        updateSignalStatusVisibility()
+
+        if isSnakeActive {
+            snakeLayer?.isHidden = false
+            screenTextLabel?.isHidden = true
+            menuLayer?.isHidden = true
+            signalStatusNode?.isHidden = true
+            return
+        }
+
+        if wasShowingCallStatusBeforeBootup {
+            callStatusLabel?.isHidden = false
+            screenTextLabel?.isHidden = true
+            menuLayer?.isHidden = true
+            snakeLayer?.isHidden = true
+            signalStatusNode?.isHidden = true
+            wasShowingCallStatusBeforeBootup = false
+            return
+        }
+
+        if menuLayer != nil {
+            menuLayer?.isHidden = false
+            screenTextLabel?.isHidden = true
+        } else {
+            screenTextLabel?.isHidden = false
+        }
+    }
+
+    private func playBootupSound() -> TimeInterval {
+        configureBootupAudioSessionIfNeeded()
+        bootupPlayer?.stop()
+        bootupPlayer = nil
+
+        guard let url = Bundle.main.url(forResource: "popular_phone_bootup", withExtension: "mp3") else {
+            return Self.bootupFallbackDuration
+        }
+
+        do {
+            let player = try AVAudioPlayer(contentsOf: url)
+            player.volume = 1.0
+            player.prepareToPlay()
+            player.play()
+            bootupPlayer = player
+            return player.duration
+        } catch {
+            return Self.bootupFallbackDuration
+        }
+    }
+
+    private func configureBootupAudioSessionIfNeeded() {
+        #if os(iOS)
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.mixWithOthers])
+        try? AVAudioSession.sharedInstance().setActive(true)
+        #endif
+    }
+
+    private func runBootupVibration(duration: TimeInterval) {
+        guard let phoneLayer else { return }
+
+        let shake = SKAction.sequence([
+            .moveBy(x: -2.4, y: 1.2, duration: 0.035),
+            .moveBy(x: 4.8, y: -2.2, duration: 0.045),
+            .moveBy(x: -3.8, y: 1.6, duration: 0.035),
+            .moveBy(x: 1.4, y: -0.6, duration: 0.030)
+        ])
+        let cycles = max(1, Int(duration / 0.145))
+        phoneLayer.run(.sequence([
+            .repeat(shake, count: cycles),
+            .move(to: .zero, duration: 0.05)
+        ]), withKey: "bootupVibration")
+    }
+
+    private func runBootupHaptics(duration: TimeInterval) {
+        #if os(iOS)
+        let tick = SKAction.sequence([
+            .run { [weak self] in self?.generateHapticFeedback() },
+            .wait(forDuration: 0.28)
+        ])
+        run(.repeat(tick, count: max(1, Int(duration / 0.28))), withKey: "bootupHaptics")
+        #endif
+    }
+
+    private func addGlitterOverlay(to layer: SKNode) {
+        let tex = makeGlitterTexture()
+        let node = SKSpriteNode(texture: tex)
+        node.position = CGPoint(x: phoneFrame.midX, y: phoneFrame.midY)
+        node.size = phoneFrame.size
+        node.zPosition = 0.5
+        node.blendMode = .screen
+        node.alpha = 0.48
+        node.shader = makeGlitterMaskShader()
+        layer.addChild(node)
+
+        // Slow shimmer so the glitter catches light differently over time
+        let shimmer = SKAction.sequence([
+            .fadeAlpha(to: 0.28, duration: 1.8),
+            .fadeAlpha(to: 0.52, duration: 2.1)
+        ])
+        node.run(.repeatForever(shimmer))
+    }
+
+    private func makeGlitterTexture() -> SKTexture {
+        let tile = CGSize(width: 512, height: 512)
+        let renderer = UIGraphicsImageRenderer(size: tile)
+        let img = renderer.image { _ in
+            // Near-black base — dark areas stay transparent against the red body
+            UIColor.black.setFill()
+            UIBezierPath(rect: CGRect(origin: .zero, size: tile)).fill()
+
+            // Dense multi-coloured flecks: purple, pink, gold, silver
+            let fleckColors: [UIColor] = [
+                UIColor(red: 0.80, green: 0.0,  blue: 0.90, alpha: 0.88),
+                UIColor(red: 0.95, green: 0.20, blue: 0.60, alpha: 0.82),
+                UIColor(red: 0.90, green: 0.55, blue: 0.10, alpha: 0.78),
+                UIColor(red: 0.70, green: 0.68, blue: 0.90, alpha: 0.72),
+                UIColor(red: 0.60, green: 0.0,  blue: 0.70, alpha: 0.85),
+            ]
+            for i in 0..<2800 {
+                let fi = CGFloat(i)
+                let x = (fi * 1.618).truncatingRemainder(dividingBy: 1.0) * tile.width
+                let y = (fi * 2.414).truncatingRemainder(dividingBy: 1.0) * tile.height
+                let r = CGFloat(0.9 + fi.truncatingRemainder(dividingBy: 6) * 0.45)
+                fleckColors[i % fleckColors.count].setFill()
+                UIBezierPath(ovalIn: CGRect(x: x - r, y: y - r, width: r * 2, height: r * 2)).fill()
+            }
+
+            // Bright white sparkle dots (the actual "glitter" catch-lights)
+            for i in 0..<320 {
+                let fi = CGFloat(i)
+                let x = (fi * 3.14159).truncatingRemainder(dividingBy: 1.0) * tile.width
+                let y = (fi * 2.71828).truncatingRemainder(dividingBy: 1.0) * tile.height
+                let r = CGFloat(1.1 + fi.truncatingRemainder(dividingBy: 4) * 1.0)
+                UIColor.white.withAlphaComponent(0.88 + fi.truncatingRemainder(dividingBy: 3) * 0.04).setFill()
+                UIBezierPath(ovalIn: CGRect(x: x - r, y: y - r, width: r * 2, height: r * 2)).fill()
+            }
+        }
+        return SKTexture(image: img)
+    }
+
+    private func makeGlitterMaskShader() -> SKShader {
+        let source = """
+        void main() {
+            vec4 tex = texture2D(u_texture, v_tex_coord);
+            vec2 uv = v_tex_coord;
+
+            float bw = 0.138; float bh = 0.052;
+            float dx, dy, isButton;
+            isButton = 0.0;
+            dx=(uv.x-0.28)/bw; dy=(uv.y-0.317)/bh; isButton=max(isButton,step(dx*dx+dy*dy,1.0));
+            dx=(uv.x-0.50)/bw; dy=(uv.y-0.317)/bh; isButton=max(isButton,step(dx*dx+dy*dy,1.0));
+            dx=(uv.x-0.72)/bw; dy=(uv.y-0.317)/bh; isButton=max(isButton,step(dx*dx+dy*dy,1.0));
+            dx=(uv.x-0.28)/bw; dy=(uv.y-0.242)/bh; isButton=max(isButton,step(dx*dx+dy*dy,1.0));
+            dx=(uv.x-0.50)/bw; dy=(uv.y-0.242)/bh; isButton=max(isButton,step(dx*dx+dy*dy,1.0));
+            dx=(uv.x-0.72)/bw; dy=(uv.y-0.242)/bh; isButton=max(isButton,step(dx*dx+dy*dy,1.0));
+            dx=(uv.x-0.28)/bw; dy=(uv.y-0.167)/bh; isButton=max(isButton,step(dx*dx+dy*dy,1.0));
+            dx=(uv.x-0.50)/bw; dy=(uv.y-0.167)/bh; isButton=max(isButton,step(dx*dx+dy*dy,1.0));
+            dx=(uv.x-0.72)/bw; dy=(uv.y-0.167)/bh; isButton=max(isButton,step(dx*dx+dy*dy,1.0));
+            dx=(uv.x-0.28)/bw; dy=(uv.y-0.092)/bh; isButton=max(isButton,step(dx*dx+dy*dy,1.0));
+            dx=(uv.x-0.50)/bw; dy=(uv.y-0.092)/bh; isButton=max(isButton,step(dx*dx+dy*dy,1.0));
+            dx=(uv.x-0.72)/bw; dy=(uv.y-0.092)/bh; isButton=max(isButton,step(dx*dx+dy*dy,1.0));
+            dx=(uv.x-0.50)/0.195; dy=(uv.y-0.503)/0.065; isButton=max(isButton,step(dx*dx+dy*dy,1.0));
+            dx=(uv.x-0.235)/0.120; dy=(uv.y-0.503)/0.062; isButton=max(isButton,step(dx*dx+dy*dy,1.0));
+            dx=(uv.x-0.765)/0.120; dy=(uv.y-0.503)/0.062; isButton=max(isButton,step(dx*dx+dy*dy,1.0));
+
+            gl_FragColor = vec4(tex.rgb, tex.a * (1.0 - isButton));
+        }
+        """
+        return SKShader(source: source)
     }
 
     private func makePlasticShader() -> SKShader {
@@ -333,10 +774,8 @@ class PhoneScene: SKScene, ObservableObject {
             vec4 tex = texture2D(u_texture, v_tex_coord);
             vec2 uv   = v_tex_coord;
 
-            // ---- Button UV mask ----
-            // Keypad: xCenters [0.28,0.50,0.72], yCentersFromTop [0.683,0.758,0.833,0.908]
-            // UV y = 1.0 - yFromTop. Half-extents with margin: bw=0.11, bh=0.040
-            float bw = 0.11; float bh = 0.040;
+            // ---- Button UV mask (generous clearance so red never touches button edges) ----
+            float bw = 0.138; float bh = 0.052;
             float dx, dy, isButton;
             isButton = 0.0;
             // Row 0  (UV y 0.317)
@@ -355,10 +794,10 @@ class PhoneScene: SKScene, ObservableObject {
             dx=(uv.x-0.28)/bw; dy=(uv.y-0.092)/bh; isButton=max(isButton,step(dx*dx+dy*dy,1.0));
             dx=(uv.x-0.50)/bw; dy=(uv.y-0.092)/bh; isButton=max(isButton,step(dx*dx+dy*dy,1.0));
             dx=(uv.x-0.72)/bw; dy=(uv.y-0.092)/bh; isButton=max(isButton,step(dx*dx+dy*dy,1.0));
-            // Nav: centre (0.50, 0.503), left (0.235, 0.503), right (0.765, 0.503)
-            dx=(uv.x-0.50)/0.170; dy=(uv.y-0.503)/0.052; isButton=max(isButton,step(dx*dx+dy*dy,1.0));
-            dx=(uv.x-0.235)/0.100; dy=(uv.y-0.503)/0.050; isButton=max(isButton,step(dx*dx+dy*dy,1.0));
-            dx=(uv.x-0.765)/0.100; dy=(uv.y-0.503)/0.050; isButton=max(isButton,step(dx*dx+dy*dy,1.0));
+            // Nav: centre, left, right — wider clearance
+            dx=(uv.x-0.50)/0.195; dy=(uv.y-0.503)/0.065; isButton=max(isButton,step(dx*dx+dy*dy,1.0));
+            dx=(uv.x-0.235)/0.120; dy=(uv.y-0.503)/0.062; isButton=max(isButton,step(dx*dx+dy*dy,1.0));
+            dx=(uv.x-0.765)/0.120; dy=(uv.y-0.503)/0.062; isButton=max(isButton,step(dx*dx+dy*dy,1.0));
 
             // ---- Luminance ----
             float lum = dot(tex.rgb, vec3(0.2126, 0.7152, 0.0722));
@@ -388,29 +827,6 @@ class PhoneScene: SKScene, ObservableObject {
             float rim = smoothstep(0.0, 0.55, length(vc * vec2(0.75, 0.88)));
             bodyColor *= mix(1.0, 0.78, rim * rim);
 
-            // ---- Glitter sparkle (twinkling gold flecks on body, animated) ----
-            float sparkle, h1, h2, h3, speed, phase, twinkle, sparkDist;
-            vec2 nb, sparkPos;
-            sparkle = 0.0;
-            float cellSize = 0.065;
-            vec2 cellI = floor(uv / cellSize);
-            for (int sx = -1; sx <= 1; sx++) {
-                for (int sy = -1; sy <= 1; sy++) {
-                    nb = cellI + vec2(float(sx), float(sy));
-                    h1 = fract(sin(dot(nb, vec2(127.1, 311.7))) * 43758.545);
-                    h2 = fract(sin(dot(nb, vec2(269.5, 183.3))) * 53778.725);
-                    h3 = fract(sin(dot(nb, vec2(73.1,  451.7))) * 83738.245);
-                    sparkPos = (nb + vec2(h1, h2)) * cellSize;
-                    speed = 1.8 + h3 * 4.5;
-                    phase = h3 * 6.28318;
-                    twinkle = pow(max(0.0, sin(u_time * speed + phase)), 10.0);
-                    sparkDist = length(uv - sparkPos);
-                    sparkle = max(sparkle, twinkle * smoothstep(0.022, 0.002, sparkDist));
-                }
-            }
-            sparkle *= holeMask * (1.0 - isButton);
-            bodyColor += vec3(sparkle * 1.4, sparkle * 1.1, sparkle * 0.5);
-
             // ---- Hole colour ----
             vec3 holeColor = vec3(0.045, 0.010, 0.010);
 
@@ -434,18 +850,6 @@ class PhoneScene: SKScene, ObservableObject {
         }
         """
         return SKShader(source: source)
-    }
-
-    private func roundedLCDTexture(size: CGSize) -> SKTexture {
-        let renderer = UIGraphicsImageRenderer(size: size)
-        let image = renderer.image { _ in
-            let rect = CGRect(origin: .zero, size: size)
-            let radius = size.width * screenCornerRadiusFraction
-            let path = UIBezierPath(roundedRect: rect, cornerRadius: radius)
-            phoneScreenColor.setFill()
-            path.fill()
-        }
-        return SKTexture(image: image)
     }
 
     private func drawConstructedPhone(in layer: SKNode) {
@@ -585,8 +989,8 @@ class PhoneScene: SKScene, ObservableObject {
 
     private func setupDialPad() {
         let buttonSize = CGSize(width: phoneFrame.width * 0.18, height: phoneFrame.height * 0.055)
-        let xCenters: [CGFloat] = [0.28, 0.50, 0.72]
-        let yCentersFromTop: [CGFloat] = [0.683, 0.758, 0.833, 0.908]
+        let xCenters: [CGFloat] = [0.30, 0.50, 0.70]
+        let yCentersFromTop: [CGFloat] = [0.63, 0.705, 0.78, 0.855]
 
         for (rowIndex, row) in buttonLayout.enumerated() {
             for (colIndex, digit) in row.enumerated() {
@@ -605,7 +1009,7 @@ class PhoneScene: SKScene, ObservableObject {
     }
 
     private func setupCallButton() {
-        let callRect = rectFromTop(x: 0.335, y: 0.452, width: 0.33, height: 0.09)
+        let callRect = rectFromTop(x: 0.335, y: 0.485, width: 0.33, height: 0.08)
         let button = SKNode()
         button.name = "call_button"
         button.position = CGPoint(x: callRect.midX, y: callRect.midY)
@@ -921,8 +1325,13 @@ class PhoneScene: SKScene, ObservableObject {
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard !isBootingUp else { return }
         guard let touch = touches.first else { return }
         let location = touch.location(in: self)
+
+        // LCD screen area is always passive — tapping it never navigates menus
+        if phoneScreenRect().contains(location) { return }
+
         let touchedNodes = nodes(at: location)
 
         for node in touchedNodes {
@@ -962,6 +1371,14 @@ class PhoneScene: SKScene, ObservableObject {
     }
 
     private func handleCallButtonPress(_ button: SKNode) {
+        runPhonePressAnimation(for: "call")
+
+        guard isPhoneButtonActive else {
+            generateHapticFeedback()
+            flashMenuDetail("BUTTON\nLOCKED")
+            return
+        }
+
         if menuLayer != nil {
             activateSelectedMenuItem()
             return
@@ -983,14 +1400,19 @@ class PhoneScene: SKScene, ObservableObject {
     }
 
     private func handleButtonPress(digit: String, button: SKNode) {
+        runPhonePressAnimation(for: digit)
+        playDialTone(for: digit)
+
+        guard isPhoneButtonActive else {
+            flashMenuDetail("BUTTON\nLOCKED")
+            return
+        }
+
         // Visual feedback
         let scaleDown = SKAction.scale(to: 0.85, duration: 0.1)
         let scaleUp = SKAction.scale(to: 1.0, duration: 0.1)
         let sequence = SKAction.sequence([scaleDown, scaleUp])
         button.run(sequence)
-
-        // Play dial tone
-        playDialTone(for: digit)
 
         if isSnakeActive {
             handleSnakeButton(digit)
@@ -1002,6 +1424,72 @@ class PhoneScene: SKScene, ObservableObject {
         }
 
         appendDialedDigit(digit)
+    }
+
+    private func runPhonePressAnimation(for control: String) {
+        guard !isBootingUp, let phoneArtworkNode else { return }
+        guard let frameIndex = pressFrameIndex(for: control) else { return }
+
+        let frames = currentPressFrames()
+        guard frames.indices.contains(frameIndex) else { return }
+
+        stopIdleSignalAnimation()
+        phoneArtworkNode.removeAction(forKey: "phonePressFrame")
+        signalStatusNode?.isHidden = true
+
+        // Press spritesheets have more transparent padding than battery/resting spritesheets.
+        // Scale up so the phone body stays the same visual size during the press frame.
+        phoneArtworkNode.setScale(Self.pressFrameScaleFactor)
+        phoneArtworkNode.texture = frames[frameIndex]
+
+        phoneArtworkNode.run(.sequence([
+            .wait(forDuration: 0.14),
+            .run { [weak self, weak phoneArtworkNode] in
+                guard let self, let phoneArtworkNode else { return }
+                phoneArtworkNode.setScale(1.0)
+                phoneArtworkNode.texture = self.restingPhoneTexture()
+                self.scheduleNextIdleSignalAnimation()
+            }
+        ]), withKey: "phonePressFrame")
+    }
+
+    private func pressFrameIndex(for control: String) -> Int? {
+        switch control {
+        case "gear":
+            return 0
+        case "call":
+            return 1
+        case "navUp", "navLeft":
+            return 2
+        case "navDown", "navRight":
+            return 3
+        case "1":
+            return 4
+        case "2":
+            return 5
+        case "3":
+            return 6
+        case "4":
+            return 7
+        case "5":
+            return 8
+        case "6":
+            return 9
+        case "7":
+            return 10
+        case "8":
+            return 11
+        case "9":
+            return 12
+        case "*":
+            return 13
+        case "0":
+            return 14
+        case "#":
+            return 15
+        default:
+            return nil
+        }
     }
 
     private func playDialTone(for digit: String) {
@@ -1021,6 +1509,11 @@ class PhoneScene: SKScene, ObservableObject {
 
     func stopAllSounds() {
         tonePlayer.stopAllTones()
+        bootupPlayer?.stop()
+        bootupPlayer = nil
+        phoneLayer?.removeAction(forKey: "bootupVibration")
+        removeAction(forKey: "bootupHaptics")
+        stopIdleSignalAnimation()
     }
 
     private func placeCall() {
@@ -1119,8 +1612,256 @@ class PhoneScene: SKScene, ObservableObject {
         return frames
     }
 
+    private static func makeBootupFrames(named spritesheetName: String) -> [SKTexture] {
+        if let cached = bootupFrameCache[spritesheetName] {
+            return cached
+        }
+
+        guard let spriteSheet = UIImage(named: spritesheetName),
+              let cgImage = spriteSheet.cgImage
+        else { return [] }
+
+        let cellWidth = CGFloat(cgImage.width) / CGFloat(bootupColumns)
+        let cellHeight = CGFloat(cgImage.height) / CGFloat(bootupRows)
+        var frames: [SKTexture] = []
+
+        for row in 0..<bootupRows {
+            for column in 0..<bootupColumns {
+                let cell = CGRect(
+                    x: CGFloat(column) * cellWidth,
+                    y: CGFloat(row) * cellHeight,
+                    width: cellWidth,
+                    height: cellHeight
+                ).integral
+
+                if let cropped = cgImage.cropping(to: cell) {
+                    let image = UIImage(cgImage: cropped, scale: spriteSheet.scale, orientation: spriteSheet.imageOrientation)
+                    let texture = SKTexture(image: image)
+                    texture.filteringMode = .linear
+                    frames.append(texture)
+                }
+            }
+        }
+
+        bootupFrameCache[spritesheetName] = frames
+        return frames
+    }
+
+    private static func makePressFrames(named spritesheetName: String) -> [SKTexture] {
+        if let cached = pressFrameCache[spritesheetName] {
+            return cached
+        }
+
+        guard let spriteSheet = UIImage(named: spritesheetName),
+              let cgImage = spriteSheet.cgImage
+        else { return [] }
+
+        let cellWidth = CGFloat(cgImage.width) / CGFloat(pressColumns)
+        let cellHeight = CGFloat(cgImage.height) / CGFloat(pressRows)
+        var frames: [SKTexture] = []
+
+        for row in 0..<pressRows {
+            for column in 0..<pressColumns {
+                let cell = CGRect(
+                    x: CGFloat(column) * cellWidth,
+                    y: CGFloat(row) * cellHeight,
+                    width: cellWidth,
+                    height: cellHeight
+                ).integral
+
+                if let cropped = cgImage.cropping(to: cell) {
+                    let image = UIImage(cgImage: cropped, scale: spriteSheet.scale, orientation: spriteSheet.imageOrientation)
+                    let texture = SKTexture(image: image)
+                    texture.filteringMode = .linear
+                    frames.append(texture)
+                }
+            }
+        }
+
+        pressFrameCache[spritesheetName] = frames
+        return frames
+    }
+
+    private static func makeBatteryFrames(named spritesheetName: String) -> [SKTexture] {
+        if let cached = batteryFrameCache[spritesheetName] {
+            return cached
+        }
+
+        guard let spriteSheet = UIImage(named: spritesheetName),
+              let cgImage = spriteSheet.cgImage
+        else { return [] }
+
+        let cellWidth = CGFloat(cgImage.width) / CGFloat(batteryColumns)
+        let cellHeight = CGFloat(cgImage.height) / CGFloat(batteryRows)
+        var frames: [SKTexture] = []
+
+        for row in 0..<batteryRows {
+            for column in 0..<batteryColumns {
+                let cell = CGRect(
+                    x: CGFloat(column) * cellWidth,
+                    y: CGFloat(row) * cellHeight,
+                    width: cellWidth,
+                    height: cellHeight
+                ).integral
+
+                if let cropped = cgImage.cropping(to: cell) {
+                    let image = UIImage(cgImage: cropped, scale: spriteSheet.scale, orientation: spriteSheet.imageOrientation)
+                    let texture = SKTexture(image: image)
+                    texture.filteringMode = .linear
+                    frames.append(texture)
+                }
+            }
+        }
+
+        batteryFrameCache[spritesheetName] = frames
+        return frames
+    }
+
+    private static func makeSignalStatusFrames(named spritesheetName: String) -> [SKTexture] {
+        if let cached = signalStatusFrameCache[spritesheetName] {
+            return cached
+        }
+
+        guard let spriteSheet = UIImage(named: spritesheetName),
+              let cgImage = spriteSheet.cgImage
+        else { return [] }
+
+        let cellWidth = CGFloat(cgImage.width) / CGFloat(signalColumns)
+        let cellHeight = CGFloat(cgImage.height) / CGFloat(signalRows)
+        var frames: [SKTexture] = []
+
+        for row in 0..<signalRows {
+            for column in 0..<signalColumns {
+                let cell = CGRect(
+                    x: CGFloat(column) * cellWidth,
+                    y: CGFloat(row) * cellHeight,
+                    width: cellWidth,
+                    height: cellHeight
+                )
+                let crop = CGRect(
+                    x: cell.minX + cell.width * signalPatchLeftFraction,
+                    y: cell.minY + cell.height * signalPatchTopFraction,
+                    width: cell.width * signalPatchWidthFraction,
+                    height: cell.height * signalPatchHeightFraction
+                ).integral
+
+                if let cropped = cgImage.cropping(to: crop) {
+                    let image = UIImage(cgImage: cropped, scale: spriteSheet.scale, orientation: spriteSheet.imageOrientation)
+                    let texture = SKTexture(image: image)
+                    texture.filteringMode = .nearest
+                    frames.append(texture)
+                }
+            }
+        }
+
+        signalStatusFrameCache[spritesheetName] = frames
+        return frames
+    }
+
+    private func fallbackPhoneArtworkName(for bootupSpritesheetName: String) -> String {
+        switch bootupSpritesheetName {
+        case "poplur_phone_bootup_champagne_gold":
+            return "poplur_bling_phone_02_champagne_gold"
+        case "poplur_phone_bootup_rose_gold_pink":
+            return "poplur_bling_phone_03_rose_gold_pink"
+        case "poplur_phone_bootup_ruby_red":
+            return "poplur_bling_phone_04_ruby_red"
+        case "poplur_phone_bootup_sapphire_blue":
+            return "poplur_bling_phone_05_sapphire_blue"
+        case "poplur_phone_bootup_emerald_green":
+            return "poplur_bling_phone_06_emerald_green"
+        case "poplur_phone_bootup_amethyst_purple":
+            return "poplur_bling_phone_07_amethyst_purple"
+        case "poplur_phone_bootup_jet_black_onyx":
+            return "poplur_bling_phone_08_jet_black_onyx"
+        case "poplur_phone_bootup_icy_aqua_turquoise":
+            return "poplur_bling_phone_09_icy_aqua_turquoise"
+        case "poplur_phone_bootup_holographic_iridescent":
+            return "poplur_bling_phone_10_holographic_iridescent"
+        default:
+            return "poplur_bling_phone_01_silver_diamond"
+        }
+    }
+
+    private func pressSpritesheetName(for bootupSpritesheetName: String) -> String {
+        switch bootupSpritesheetName {
+        case "poplur_phone_bootup_champagne_gold":
+            return "poplur_phone_press_champagne_gold"
+        case "poplur_phone_bootup_rose_gold_pink":
+            return "poplur_phone_press_rose_gold_pink"
+        case "poplur_phone_bootup_ruby_red":
+            return "poplur_phone_press_ruby_red"
+        case "poplur_phone_bootup_sapphire_blue":
+            return "poplur_phone_press_sapphire_blue"
+        case "poplur_phone_bootup_emerald_green":
+            return "poplur_phone_press_emerald_green"
+        case "poplur_phone_bootup_amethyst_purple":
+            return "poplur_phone_press_amethyst_purple"
+        case "poplur_phone_bootup_jet_black_onyx":
+            return "poplur_phone_press_jet_black_onyx"
+        case "poplur_phone_bootup_icy_aqua_turquoise":
+            return "poplur_phone_press_icy_aqua_turquoise"
+        case "poplur_phone_bootup_holographic_iridescent":
+            return "poplur_phone_press_holographic_iridescent"
+        default:
+            return "poplur_phone_press_silver_diamond"
+        }
+    }
+
+    private func batterySpritesheetName(for bootupSpritesheetName: String) -> String {
+        switch bootupSpritesheetName {
+        case "poplur_phone_bootup_champagne_gold":
+            return "poplur_phone_battery_02"
+        case "poplur_phone_bootup_rose_gold_pink":
+            return "poplur_phone_battery_03"
+        case "poplur_phone_bootup_ruby_red":
+            return "poplur_phone_battery_04"
+        case "poplur_phone_bootup_sapphire_blue":
+            return "poplur_phone_battery_05"
+        case "poplur_phone_bootup_emerald_green":
+            return "poplur_phone_battery_06"
+        case "poplur_phone_bootup_amethyst_purple":
+            return "poplur_phone_battery_07"
+        case "poplur_phone_bootup_jet_black_onyx":
+            return "poplur_phone_battery_08"
+        case "poplur_phone_bootup_icy_aqua_turquoise":
+            return "poplur_phone_battery_09"
+        case "poplur_phone_bootup_holographic_iridescent":
+            return "poplur_phone_battery_10"
+        default:
+            return "poplur_phone_battery_01"
+        }
+    }
+
+    private func signalSpritesheetName(for bootupSpritesheetName: String) -> String {
+        switch bootupSpritesheetName {
+        case "poplur_phone_bootup_champagne_gold":
+            return "poplur_phone_signal_champagne_gold"
+        case "poplur_phone_bootup_rose_gold_pink":
+            return "poplur_phone_signal_rose_gold_pink"
+        case "poplur_phone_bootup_ruby_red":
+            return "poplur_phone_signal_ruby_red"
+        case "poplur_phone_bootup_sapphire_blue":
+            return "poplur_phone_signal_sapphire_blue"
+        case "poplur_phone_bootup_emerald_green":
+            return "poplur_phone_signal_emerald_green"
+        case "poplur_phone_bootup_amethyst_purple":
+            return "poplur_phone_signal_amethyst_purple"
+        case "poplur_phone_bootup_jet_black_onyx":
+            return "poplur_phone_signal_jet_black_onyx"
+        case "poplur_phone_bootup_icy_aqua_turquoise":
+            return "poplur_phone_signal_icy_aqua_turquoise"
+        case "poplur_phone_bootup_holographic_iridescent":
+            return "poplur_phone_signal_holographic_iridescent"
+        default:
+            return "poplur_phone_signal_silver_diamond"
+        }
+    }
+
     private func startSnakeGame() {
         isSnakeActive = true
+        stopIdleSignalAnimation()
+        signalStatusNode?.isHidden = true
         menuLayer?.removeFromParent()
         menuLayer = nil
         snakeScore = 0
@@ -1135,6 +1876,7 @@ class PhoneScene: SKScene, ObservableObject {
 
         screenNode?.removeAction(forKey: "screenPowerUp")
         screenNode?.isHidden = true
+        childNode(withName: "lcd_fill")?.isHidden = true
         screenTextLabel?.isHidden = true
 
         snakeLayer?.removeFromParent()
@@ -1215,8 +1957,11 @@ class PhoneScene: SKScene, ObservableObject {
         snakeLayer?.removeFromParent()
         snakeLayer = nil
         screenNode?.isHidden = false
+        childNode(withName: "lcd_fill")?.isHidden = false
         screenTextLabel?.isHidden = false
+        updateSignalStatusVisibility()
         showPhoneMenu(.games)
+        scheduleNextIdleSignalAnimation()
     }
 
     private func showSnakeGameOver() {
@@ -1328,6 +2073,8 @@ class PhoneScene: SKScene, ObservableObject {
     }
 
     private func showCallStatus(_ text: String, pulsing: Bool) {
+        stopIdleSignalAnimation()
+        signalStatusNode?.isHidden = true
         screenTextLabel?.isHidden = true
         menuLayer?.isHidden = true
         snakeLayer?.isHidden = true
@@ -1372,16 +2119,35 @@ class PhoneScene: SKScene, ObservableObject {
         if !isSnakeActive {
             menuLayer?.isHidden = false
         }
+        updateSignalStatusVisibility()
+        scheduleNextIdleSignalAnimation()
     }
 
     private static let screenColumns = 5
     private static let screenRows = 8
+    private static let bootupColumns = 4
+    private static let bootupRows = 4
+    private static let pressColumns = 4
+    private static let pressRows = 4
+    private static let signalColumns = 4
+    private static let signalRows = 4
+    private static let batteryColumns = 4
+    private static let batteryRows = 4
+    private static let phoneHorizontalInsetFraction: CGFloat = 0.0
+    // Press spritesheets contain ~10% more transparent padding per side than battery spritesheets.
+    // Scaling the node by this factor keeps the phone body the same visual size during a press.
+    private static let pressFrameScaleFactor: CGFloat = 1.10
+    private static let bootupFallbackDuration: TimeInterval = 1.8
+    private static var bootupFrameCache: [String: [SKTexture]] = [:]
+    private static var pressFrameCache: [String: [SKTexture]] = [:]
+    private static var batteryFrameCache: [String: [SKTexture]] = [:]
+    private static var signalStatusFrameCache: [String: [SKTexture]] = [:]
     private let phoneAspectRatio: CGFloat = 1024.0 / 1536.0
-    private let screenLeftFraction: CGFloat = 0.205
-    private let screenTopFraction: CGFloat = 0.145
-    private let screenWidthFraction: CGFloat = 0.590
-    private let screenHeightFraction: CGFloat = 0.235
-    private let screenCornerRadiusFraction: CGFloat = 0.045
+    private let screenLeftFraction: CGFloat = 0.240
+    private let screenTopFraction: CGFloat = 0.183
+    private let screenWidthFraction: CGFloat = 0.520
+    private let screenHeightFraction: CGFloat = 0.245
+    private let screenCornerRadiusFraction: CGFloat = 0.040
     private var phoneYellow: UIColor {
         UIColor(red: 0.91, green: 0.96, blue: 0.04, alpha: 1.0)
     }
@@ -1401,6 +2167,10 @@ class PhoneScene: SKScene, ObservableObject {
     private static let spriteCropTopFraction: CGFloat = 0.12
     private static let spriteCropWidthFraction: CGFloat = 0.79
     private static let spriteCropHeightFraction: CGFloat = 0.69
+    private static let signalPatchLeftFraction: CGFloat = 0.265
+    private static let signalPatchTopFraction: CGFloat = 0.195
+    private static let signalPatchWidthFraction: CGFloat = 0.135
+    private static let signalPatchHeightFraction: CGFloat = 0.058
 }
 
 private struct SnakeGridPoint: Equatable {

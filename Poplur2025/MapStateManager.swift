@@ -99,8 +99,8 @@ final class MapStateManager: ObservableObject {
         }
     }
     
-    @Published var lastInteractionTime: Date = Date()
-    @Published var idleTimerTask: Task<Void, Never>?
+    var lastInteractionTime: Date = Date()
+    private var idleTimerTask: Task<Void, Never>?
     
     // MARK: - Pending Navigation
     
@@ -115,8 +115,14 @@ final class MapStateManager: ObservableObject {
     @Published var pendingPostCountryName: String? = nil
     @Published var pendingPostCountryFlag: String? = nil
     
+    // MARK: - Launch Sequence
+
+    /// True once the first-ever zoom-in → pop → radio → music sequence has played.
+    /// Persists on the shared singleton so it survives tab switches that recreate MapViewProduction.
+    var hasRunFirstLaunchSequence: Bool = false
+
     // MARK: - Configuration
-    
+
     /// How long to wait before starting auto-tour (30 seconds)
     let tourIdleThreshold: TimeInterval = 30.0
     
@@ -133,15 +139,20 @@ final class MapStateManager: ObservableObject {
     
     /// Call this whenever user interacts with the map
     func noteUserInteraction() {
-        lastInteractionTime = Date()
-        
+        let now = Date()
+        let timeSinceLastNote = now.timeIntervalSince(lastInteractionTime)
+        lastInteractionTime = now
+
         // Stop tour if it's running
         if case .autoTour = mode {
             print("🗺️ [MapState] User interaction detected - stopping tour")
             mode = .browsing
         }
-        
-        // Cancel and restart idle timer
+
+        // Restart the idle timer, but only if enough time has passed.
+        // This prevents recreating the Task on every drag frame (60fps), which
+        // caused the map to jitter due to @StateObject re-renders.
+        guard timeSinceLastNote > 0.3 || idleTimerTask == nil else { return }
         restartIdleTimer()
     }
     

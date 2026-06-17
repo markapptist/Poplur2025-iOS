@@ -36,6 +36,11 @@ final class FeedViewModel: ObservableObject {
     private let demoImageIDs: [Int] = [
         10, 20, 28, 37, 42, 58, 64, 82, 96, 102, 103, 106, 119, 128, 133, 164, 175, 184, 190, 1025
     ]
+    private let demoAdMediaURLs: [String] = [
+        "asset://poplur_ad_real_humans",
+        "asset://poplur_ad_3d_group",
+        "asset://poplur_ad_3d_creator"
+    ]
     private let demoUserIDs: [String] = [
         "na_user_alex",
         "na_user_jamie",
@@ -113,6 +118,9 @@ extension FeedViewModel {
 // MARK: - Username helpers
 extension FeedViewModel {
     func displayName(for post: FeedPost) -> String {
+        if post.isPoplurAd || post.userID.hasPrefix("poplur_ad_") || post.userID.hasPrefix("sponsored_ad_") {
+            return "Poplur Ad"
+        }
         if let name = usernames[post.userID], !name.isEmpty { return name }
         if post.userID.hasPrefix("fake_") || post.userID.hasPrefix("na_user_") || post.userID.hasPrefix("world_user_") {
             return post.userID.replacingOccurrences(of: "_", with: " ").uppercased()
@@ -122,6 +130,7 @@ extension FeedViewModel {
     }
 
     func maybeResolveUsername(for uid: String) {
+        guard !uid.hasPrefix("poplur_ad_") else { return }
         if usernames[uid] != nil || usernameLoadsInProgress.contains(uid) { return }
         usernameLoadsInProgress.insert(uid)
         Task {
@@ -154,17 +163,37 @@ extension FeedViewModel {
         for i in posts.indices {
             let mediaURL: String
             let userID: String
+            let isPoplurAd: Bool
+            let adHeadline: String?
+            let adBody: String?
+            let adCallToAction: String?
+            let adCreativeKind: String?
 
             switch i % 5 {
             case 1, 4:
                 mediaURL = demoVideoURLs[i % demoVideoURLs.count]
                 userID = demoUserIDs[i % demoUserIDs.count]
+                isPoplurAd = false
+                adHeadline = nil
+                adBody = nil
+                adCallToAction = nil
+                adCreativeKind = nil
             case 2:
-                mediaURL = demoImageURL(for: i + 97)
-                userID = "sponsored_ad_\(i)"
+                mediaURL = demoAdMediaURLs[i % demoAdMediaURLs.count]
+                userID = "poplur_ad_demo_\(i)"
+                isPoplurAd = true
+                adHeadline = "See what is happening nearby"
+                adBody = "Poplur-owned creative slot for real human scenes and dimensional 3D figures."
+                adCallToAction = "Open Poplur"
+                adCreativeKind = i % 2 == 0 ? "Human creative" : "3D figure creative"
             default:
                 mediaURL = demoImageURL(for: i)
                 userID = posts[i].userID
+                isPoplurAd = false
+                adHeadline = nil
+                adBody = nil
+                adCallToAction = nil
+                adCreativeKind = nil
             }
 
             posts[i] = FeedPost(
@@ -174,7 +203,17 @@ extension FeedViewModel {
                 mediaURL: mediaURL,
                 radius: posts[i].radius,
                 viewCount: posts[i].viewCount,
-                userID: userID
+                userID: userID,
+                cityName: posts[i].cityName,
+                countryName: posts[i].countryName,
+                countryFlag: posts[i].countryFlag,
+                isPoplurAd: isPoplurAd,
+                adHeadline: adHeadline,
+                adBody: adBody,
+                adCallToAction: adCallToAction,
+                adCreativeKind: adCreativeKind,
+                adStorageProvider: isPoplurAd ? "stream_url" : nil,
+                adDriveFileID: nil
             )
         }
     }

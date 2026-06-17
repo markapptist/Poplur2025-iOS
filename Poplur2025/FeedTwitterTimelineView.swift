@@ -73,6 +73,90 @@ enum NewspaperSection {
     case userPost(UserPostArticle)
 }
 
+// MARK: - Article narrator (AVSpeechSynthesizer wrapper)
+
+@MainActor
+private final class NewsNarrator: NSObject, ObservableObject, AVSpeechSynthesizerDelegate {
+    @Published private(set) var highlightedRange: NSRange? = nil
+    @Published private(set) var isSpeaking = false
+
+    private let synth = AVSpeechSynthesizer()
+
+    override init() {
+        super.init()
+        synth.delegate = self
+    }
+
+    func speak(_ text: String) {
+        synth.stopSpeaking(at: .immediate)
+        highlightedRange = nil
+        let utterance = AVSpeechUtterance(string: text)
+        utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
+        utterance.rate = 0.50
+        utterance.volume = 1.0
+        isSpeaking = true
+        synth.speak(utterance)
+    }
+
+    func stop() {
+        synth.stopSpeaking(at: .immediate)
+        highlightedRange = nil
+        isSpeaking = false
+    }
+
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
+                                       willSpeakRangeOfSpeechString characterRange: NSRange,
+                                       utterance: AVSpeechUtterance) {
+        Task { @MainActor in self.highlightedRange = characterRange }
+    }
+
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
+                                       didFinish utterance: AVSpeechUtterance) {
+        Task { @MainActor in self.highlightedRange = nil; self.isSpeaking = false }
+    }
+
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
+                                       didCancel utterance: AVSpeechUtterance) {
+        Task { @MainActor in self.highlightedRange = nil; self.isSpeaking = false }
+    }
+}
+
+// MARK: - Word-level highlight text
+
+private struct HighlightedText: View {
+    let text: String
+    let textOffset: Int        // byte offset of `text` within the full spoken string
+    let highlightedRange: NSRange?
+    let font: Font
+    let baseColor: Color
+
+    var body: some View {
+        Text(attributedString)
+    }
+
+    private var attributedString: AttributedString {
+        var result = AttributedString(text)
+        result.font = font
+        result.foregroundColor = baseColor
+
+        guard let global = highlightedRange else { return result }
+
+        let localLoc = global.location - textOffset
+        guard localLoc >= 0 else { return result }
+        let localRange = NSRange(location: localLoc, length: global.length)
+        let nsText = text as NSString
+        guard localRange.upperBound <= nsText.length else { return result }
+        guard let swiftRange = Range(localRange, in: text),
+              let lower = AttributedString.Index(swiftRange.lowerBound, within: result),
+              let upper = AttributedString.Index(swiftRange.upperBound, within: result)
+        else { return result }
+
+        result[lower..<upper].backgroundColor = Color(red: 1.0, green: 0.85, blue: 0.10)
+        result[lower..<upper].foregroundColor = .black
+        return result
+    }
+}
+
 // MARK: - Main view (drop-in replacement — same init signature)
 
 struct FeedTwitterTimelineView: View {
@@ -84,6 +168,7 @@ struct FeedTwitterTimelineView: View {
     @State private var currentArticleIndex: Int = 0
     @State private var hapticGenerator = UIImpactFeedbackGenerator(style: .rigid)
     @State private var popPlayer: AVAudioPlayer? = nil
+    @StateObject private var narrator = NewsNarrator()
 
     private static let today: String = {
         let f = DateFormatter()
@@ -100,7 +185,8 @@ struct FeedTwitterTimelineView: View {
                             section: article,
                             edition: "No. \(index + 1)",
                             date: Self.today,
-                            onLongPress: { showMapForArticle(article) }
+                            onLongPress: { showMapForArticle(article) },
+                            highlightedRange: index == currentArticleIndex ? narrator.highlightedRange : nil
                         )
                         .containerRelativeFrame([.horizontal, .vertical])
                         .id(index)
@@ -129,17 +215,35 @@ struct FeedTwitterTimelineView: View {
                 currentArticleIndex = newIndex
                 hapticGenerator.impactOccurred(intensity: 0.7)
                 playPop()
+                narrator.speak(spokenText(for: articles[newIndex]))
             }
             .ignoresSafeArea()
         }
         .background(Color.black.ignoresSafeArea())
         .onAppear {
             hapticGenerator.prepare()
-            if articles.isEmpty { generateInitialArticles() }
+            if articles.isEmpty {
+                generateInitialArticles()
+                if let first = articles.first {
+                    narrator.speak(spokenText(for: first))
+                }
+            }
+        }
+        .onDisappear {
+            narrator.stop()
         }
     }
 
     // MARK: - Helpers
+
+    private func spokenText(for section: NewspaperSection) -> String {
+        switch section {
+        case .mapEvent(let a):   return "\(a.headline). \(a.detail)"
+        case .trending(let a):   return "\(a.headline). \(a.detail)"
+        case .dominance(let a):  return "\(a.headline). \(a.detail)"
+        case .userPost(let a):   return "\(a.headline). \(a.detail)"
+        }
+    }
 
     private func showMapForArticle(_ article: NewspaperSection) {
         let (lat, lon): (Double, Double) = {
@@ -203,6 +307,19 @@ private struct NewspaperArticleCard: View {
     let edition: String
     let date: String
     let onLongPress: () -> Void
+    let highlightedRange: NSRange?
+
+    // Each article speaks headline + ". " + detail.
+    // These offsets map each text block into the full spoken string.
+    private var headlineOffset: Int { 0 }
+    private var detailOffset: Int {
+        switch section {
+        case .mapEvent(let a):   return a.headline.count + 2
+        case .trending(let a):   return a.headline.count + 2
+        case .dominance(let a):  return a.headline.count + 2
+        case .userPost(let a):   return a.headline.count + 2
+        }
+    }
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -386,12 +503,16 @@ private struct NewspaperArticleCard: View {
 
     @ViewBuilder
     private func headlineText(_ text: String, size: CGFloat = 36) -> some View {
-        Text(text)
-            .font(.system(size: size, weight: .black, design: .serif))
-            .foregroundStyle(.white)
-            .lineSpacing(5)
-            .padding(.horizontal, 26)
-            .padding(.top, 14)
+        HighlightedText(
+            text: text,
+            textOffset: headlineOffset,
+            highlightedRange: highlightedRange,
+            font: .system(size: size, weight: .black, design: .serif),
+            baseColor: .white
+        )
+        .lineSpacing(5)
+        .padding(.horizontal, 26)
+        .padding(.top, 14)
     }
 
     private var divider: some View {
@@ -404,12 +525,16 @@ private struct NewspaperArticleCard: View {
 
     @ViewBuilder
     private func bodyText(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 19, weight: .regular))
-            .foregroundStyle(.white.opacity(0.72))
-            .lineSpacing(5)
-            .padding(.horizontal, 26)
-            .padding(.top, 14)
+        HighlightedText(
+            text: text,
+            textOffset: detailOffset,
+            highlightedRange: highlightedRange,
+            font: .system(size: 19, weight: .regular),
+            baseColor: .white.opacity(0.72)
+        )
+        .lineSpacing(5)
+        .padding(.horizontal, 26)
+        .padding(.top, 14)
     }
 
     @ViewBuilder
@@ -441,7 +566,7 @@ private struct NewspaperArticleCard: View {
     private var footer: some View {
         VStack(spacing: 5) {
             Rectangle().fill(.white.opacity(0.12)).frame(height: 1)
-            Text("Hold to view on map  •  Swipe for next story")
+            Text("Hold to view on map  •  Swipe for next story  •  Reading aloud")
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(.white.opacity(0.28))
         }

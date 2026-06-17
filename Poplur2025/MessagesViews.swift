@@ -16,7 +16,6 @@ struct DMsListView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showingNewThreadSheet = false
     @State private var selectedThreadID: UUID?
-    @State private var callingUser: FakeUser?
     @State private var searchText = ""
 
     init(store: FakeDMStore) {
@@ -31,18 +30,12 @@ struct DMsListView: View {
                 DMThreadView(
                     store: store,
                     threadID: selectedThreadID,
-                    onCall: { user in callingUser = user }
+                    onVideoCall: { user in FaceTimeLauncher.startVideoCall(to: user) }
                 )
                 .transition(.opacity)
             } else {
                 listContent
                     .transition(.opacity)
-            }
-
-            if let callingUser {
-                PopularPhone(user: callingUser)
-                    .transition(.opacity)
-                    .zIndex(30)
             }
 
             if showingNewThreadSheet {
@@ -65,40 +58,37 @@ struct DMsListView: View {
     private var listContent: some View {
         VStack(spacing: 0) {
             DMTopBar(
-                title: "Messages",
+                title: "Chats",
                 onEdit: { showingNewThreadSheet = true }
             )
             .padding(.horizontal, 20)
-            .padding(.top, 12)
-
-            Spacer()
-                .frame(height: 48)
-
-            Text("Recent")
-                .font(.system(size: 28, weight: .black))
-                .foregroundStyle(Color(red: 0.6, green: 0.6, blue: 0.63))
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.leading, 40)
-
-            Spacer()
-                .frame(height: 14)
+            .padding(.top, 18)
 
             DMSearchField(text: $searchText)
                 .padding(.horizontal, 20)
-                .padding(.bottom, 14)
+                .padding(.top, 18)
+                .padding(.bottom, 10)
 
-            VStack(spacing: 12) {
-                ForEach(filteredThreads) { thread in
-                    DMThreadRow(thread: thread, store: store) {
-                        selectedThreadID = thread.id
-                    } onCall: { user in
-                        callingUser = user
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(Array(filteredThreads.enumerated()), id: \.element.id) { index, thread in
+                        DMThreadRow(thread: thread, store: store) {
+                            selectedThreadID = thread.id
+                        } onVideoCall: { user in
+                            FaceTimeLauncher.startVideoCall(to: user)
+                        }
+
+                        if index < filteredThreads.count - 1 {
+                            Divider()
+                                .overlay(Color.white.opacity(0.08))
+                                .padding(.leading, 88)
+                                .padding(.trailing, 20)
+                        }
                     }
                 }
+                .padding(.top, 2)
             }
-            .padding(.horizontal, 20)
-
-            Spacer(minLength: 0)
+            .scrollIndicators(.hidden)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black)
@@ -120,20 +110,23 @@ private struct DMSearchField: View {
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 17, weight: .black))
+                .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(Color(red: 0.58, green: 0.58, blue: 0.62))
 
             TextField("Search", text: $text)
-                .font(.system(size: 17, weight: .bold))
+                .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(.white)
                 .tint(.white)
                 .textInputAutocapitalization(.never)
                 .disableAutocorrection(true)
         }
-        .padding(.horizontal, 18)
-        .frame(height: 48)
-        .background(Color(red: 0.09, green: 0.09, blue: 0.1), in: Capsule())
-        .overlay(Capsule().stroke(.white.opacity(0.08), lineWidth: 1))
+        .padding(.horizontal, 14)
+        .frame(height: 44)
+        .background(Color(red: 0.075, green: 0.075, blue: 0.085), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(.white.opacity(0.08), lineWidth: 1)
+        )
     }
 }
 
@@ -142,17 +135,42 @@ private struct DMTopBar: View {
     let onEdit: () -> Void
 
     var body: some View {
-        ZStack {
-            Text(title)
-                .font(.system(size: 33, weight: .black))
-                .foregroundStyle(.white)
+        VStack(spacing: 14) {
+            Image("logo")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 84, height: 84)
 
-            HStack {
+            HStack(alignment: .center) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.system(size: 34, weight: .bold))
+                        .foregroundStyle(.white)
+
+                    Text("Recent messages")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(Color(red: 0.58, green: 0.58, blue: 0.62))
+                }
+
                 Spacer()
-                DMCircleIconButton(systemName: "square.and.pencil", size: 58, iconSize: 31, action: onEdit)
+
+                Button(action: onEdit) {
+                    Image(systemName: "square.and.pencil")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 44, height: 44)
+                        .background(
+                            Color(red: 0.08, green: 0.08, blue: 0.09),
+                            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(.white.opacity(0.1), lineWidth: 1)
+                        )
+                }
+                .buttonStyle(.plain)
             }
         }
-        .frame(height: 112)
     }
 }
 
@@ -160,32 +178,32 @@ private struct DMThreadRow: View {
     let thread: DMThread
     @ObservedObject var store: FakeDMStore
     let onOpen: () -> Void
-    let onCall: (FakeUser) -> Void
+    let onVideoCall: (DMUser) -> Void
 
     var body: some View {
         Button(action: onOpen) {
-            HStack(spacing: 0) {
+            HStack(spacing: 14) {
                 DMAvatarCircle(name: displayName, isOnline: true)
                     .frame(width: 52, height: 52)
 
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 5) {
                     HStack(spacing: 8) {
                         Text(displayName)
-                            .font(.system(size: 21, weight: .black))
+                            .font(.system(size: 18, weight: .semibold))
                             .foregroundStyle(.white)
                             .lineLimit(1)
 
                         Spacer(minLength: 6)
 
                         Text(lastTime)
-                            .font(.system(size: 12, weight: .black))
+                            .font(.system(size: 13, weight: unreadCount > 0 ? .semibold : .regular))
                             .foregroundStyle(unreadCount > 0 ? Color(red: 0.38, green: 1.0, blue: 0.47) : Color(red: 0.56, green: 0.56, blue: 0.59))
                     }
 
                     HStack(spacing: 8) {
                         Text(thread.lastMessage?.text ?? "Start the conversation")
-                            .font(.system(size: 17, weight: .bold))
-                            .foregroundStyle(Color(red: 0.66, green: 0.66, blue: 0.7))
+                            .font(.system(size: 15, weight: unreadCount > 0 ? .semibold : .regular))
+                            .foregroundStyle(Color(red: 0.67, green: 0.67, blue: 0.71))
                             .lineLimit(1)
 
                         Spacer(minLength: 6)
@@ -203,45 +221,20 @@ private struct DMThreadRow: View {
                         }
                     }
                 }
-                .padding(.leading, 18)
-
-                Spacer(minLength: 12)
 
                 Button {
-                    onCall(fakeUser)
+                    onVideoCall(videoCallUser)
                 } label: {
-                    Image(systemName: "phone.fill")
-                        .font(.system(size: 22, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 44, height: 44)
-                        .background(Color(red: 0.09, green: 0.09, blue: 0.1), in: Circle())
-                        .overlay(Circle().stroke(.white.opacity(0.09), lineWidth: 1))
+                    Image(systemName: "video.fill")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(Color(red: 0.82, green: 0.82, blue: 0.86))
+                        .frame(width: 36, height: 36)
                 }
                 .buttonStyle(.plain)
-                .padding(.leading, 14)
-
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 30, weight: .semibold))
-                    .foregroundStyle(Color(red: 0.43, green: 0.43, blue: 0.45))
-                    .frame(width: 36)
-                    .padding(.leading, 12)
             }
-            .padding(.leading, 22)
-            .padding(.trailing, 16)
-            .frame(height: 88)
-            .background(
-                LinearGradient(
-                    colors: [
-                        Color(red: 0.13, green: 0.13, blue: 0.16),
-                        Color(red: 0.09, green: 0.09, blue: 0.11)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                ),
-                in: Capsule()
-            )
-            .overlay(Capsule().stroke(.white.opacity(0.06), lineWidth: 1))
-            .contentShape(Capsule())
+            .padding(.horizontal, 20)
+            .frame(height: 76)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
@@ -250,8 +243,14 @@ private struct DMThreadRow: View {
         store.displayNameForParticipants(thread.participantIDs)
     }
 
-    private var fakeUser: FakeUser {
-        FakeUser(id: thread.participantIDs.first(where: { $0 != store.currentUser.id }) ?? thread.id, name: displayName)
+    private var videoCallUser: DMUser {
+        let userID = thread.participantIDs.first(where: { $0 != store.currentUser.id }) ?? thread.id
+        return store.user(for: userID) ?? DMUser(
+            id: userID,
+            displayName: displayName,
+            handle: displayName.lowercased().replacingOccurrences(of: " ", with: "."),
+            avatarSystemImage: "person.circle.fill"
+        )
     }
 
     private var unreadCount: Int {
@@ -269,7 +268,7 @@ private struct DMThreadRow: View {
 struct DMThreadView: View {
     @ObservedObject var store: FakeDMStore
     let threadID: UUID
-    var onCall: ((FakeUser) -> Void)? = nil
+    var onVideoCall: ((DMUser) -> Void)? = nil
 
     @State private var draft: String = ""
 
@@ -338,8 +337,8 @@ struct DMThreadView: View {
 
             Spacer(minLength: 12)
 
-            DMCircleIconButton(systemName: "phone.fill", size: 52, iconSize: 24) {
-                onCall?(fakeUser)
+            DMCircleIconButton(systemName: "video.fill", size: 52, iconSize: 23) {
+                onVideoCall?(videoCallUser)
             }
         }
         .frame(height: 92)
@@ -396,8 +395,14 @@ struct DMThreadView: View {
         store.displayNameForParticipants(thread?.participantIDs ?? [])
     }
 
-    private var fakeUser: FakeUser {
-        FakeUser(id: thread?.participantIDs.first(where: { $0 != store.currentUser.id }) ?? threadID, name: displayName)
+    private var videoCallUser: DMUser {
+        let userID = thread?.participantIDs.first(where: { $0 != store.currentUser.id }) ?? threadID
+        return store.user(for: userID) ?? DMUser(
+            id: userID,
+            displayName: displayName,
+            handle: displayName.lowercased().replacingOccurrences(of: " ", with: "."),
+            avatarSystemImage: "person.circle.fill"
+        )
     }
 
     private func send() {
@@ -487,29 +492,20 @@ private struct DMAvatarCircle: View {
     var body: some View {
         ZStack {
             Circle()
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color(red: 0.18, green: 0.18, blue: 0.22),
-                            Color(red: 0.07, green: 0.07, blue: 0.09)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
+                .fill(Color(red: 0.1, green: 0.1, blue: 0.12))
             Text(initials)
-                .font(.system(size: 16, weight: .black))
+                .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(.white)
 
             if isOnline {
                 Circle()
                     .fill(Color(red: 0.38, green: 1.0, blue: 0.47))
-                    .frame(width: 12, height: 12)
+                    .frame(width: 11, height: 11)
                     .overlay(Circle().stroke(Color.black, lineWidth: 2))
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
             }
         }
-        .overlay(Circle().stroke(.white.opacity(0.08), lineWidth: 1))
+        .overlay(Circle().stroke(.white.opacity(0.12), lineWidth: 1))
     }
 
     private var initials: String {

@@ -15,6 +15,7 @@ struct RecordingCountdownView: View {
     @Binding var isRecording: Bool
     @Binding var secondsRemaining: Int
     @Binding var postCount: Int
+    @Binding var likesCount: Int
     @Binding var selectedTab: AppTab
     @Binding var radiusTrend: HomeView.RadiusTrend
     
@@ -23,7 +24,6 @@ struct RecordingCountdownView: View {
     
     // Animation state for toggling between TRENDING/arrow and LIKES/number
     @State private var showLikesMode: Bool = false
-    @State private var likesCount: Int = 0
     
     private var shouldShowRecording: Bool {
         isRecording && selectedTab == .record
@@ -113,6 +113,7 @@ struct RecordingCountdownView: View {
                     .foregroundStyle(.white.opacity(0.9))
                     .minimumScaleFactor(0.4)
                     .lineLimit(1)
+                    .poplurMetalNumberShader(intensity: 0.60)
                     .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
             }
             .frame(width: 90, alignment: .center)
@@ -193,28 +194,21 @@ struct RecordingCountdownView: View {
                 .foregroundStyle(.white.opacity(0.7))
                 .minimumScaleFactor(0.5)
                 .lineLimit(1)
+                .poplurMetalNumberShader(intensity: 0.45)
                 .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
+        .animation(.spring(response: 0.5, dampingFraction: 0.7), value: showLikesMode)
     }
-    
+
     // MARK: - Likes Animation
     
     private func startLikesAnimation() {
-        // Generate random likes count
-        likesCount = Int.random(in: 50...500)
-        
-        // Animate between TRENDING/arrow and LIKES/number every 3 seconds
+        // Toggle without withAnimation wrapper — the postCountBadge VStack owns the spring
+        // so it never leaks into secondsRemaining updates and causes countdown jitter.
         Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { _ in
-            withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) {
-                showLikesMode.toggle()
-            }
-            
-            // Generate new likes count when switching to likes mode
-            if showLikesMode {
-                likesCount = Int.random(in: 50...500)
-            }
+            showLikesMode.toggle()
         }
     }
 }
@@ -231,6 +225,7 @@ struct RecordingCountdownView_Previews: PreviewProvider {
                     isRecording: .constant(true),
                     secondsRemaining: .constant(10),
                     postCount: .constant(42),
+                    likesCount: .constant(126),
                     selectedTab: .constant(.record),
                     radiusTrend: .constant(.neutral)
                 )
@@ -244,6 +239,7 @@ struct RecordingCountdownView_Previews: PreviewProvider {
                     isRecording: .constant(true),
                     secondsRemaining: .constant(5),
                     postCount: .constant(42),
+                    likesCount: .constant(126),
                     selectedTab: .constant(.record),
                     radiusTrend: .constant(.neutral)
                 )
@@ -257,6 +253,7 @@ struct RecordingCountdownView_Previews: PreviewProvider {
                     isRecording: .constant(true),
                     secondsRemaining: .constant(0),
                     postCount: .constant(42),
+                    likesCount: .constant(126),
                     selectedTab: .constant(.record),
                     radiusTrend: .constant(.neutral)
                 )
@@ -270,6 +267,7 @@ struct RecordingCountdownView_Previews: PreviewProvider {
                     isRecording: .constant(false),
                     secondsRemaining: .constant(10),
                     postCount: .constant(42),
+                    likesCount: .constant(420),
                     selectedTab: .constant(.map),
                     radiusTrend: .constant(.up)
                 )
@@ -283,6 +281,7 @@ struct RecordingCountdownView_Previews: PreviewProvider {
                     isRecording: .constant(false),
                     secondsRemaining: .constant(10),
                     postCount: .constant(128),
+                    likesCount: .constant(904),
                     selectedTab: .constant(.feed),
                     radiusTrend: .constant(.down)
                 )
@@ -296,6 +295,7 @@ struct RecordingCountdownView_Previews: PreviewProvider {
                     isRecording: .constant(false),
                     secondsRemaining: .constant(10),
                     postCount: .constant(1),
+                    likesCount: .constant(12),
                     selectedTab: .constant(.profile),
                     radiusTrend: .constant(.neutral)
                 )

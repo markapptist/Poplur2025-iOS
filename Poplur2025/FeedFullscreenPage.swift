@@ -16,6 +16,16 @@ struct FeedPost: Identifiable, Hashable, Sendable {
     var cityName: String? = nil
     var countryName: String? = nil
     var countryFlag: String? = nil
+
+    // Poplur-owned creative slots. These are rendered like posts so generated
+    // video URLs can drop into the feed without a separate ad surface.
+    var isPoplurAd: Bool = false
+    var adHeadline: String? = nil
+    var adBody: String? = nil
+    var adCallToAction: String? = nil
+    var adCreativeKind: String? = nil
+    var adStorageProvider: String? = nil
+    var adDriveFileID: String? = nil
     
     // Hashable conformance
     func hash(into hasher: inout Hasher) {
@@ -34,11 +44,19 @@ struct FeedFullscreenPage: View {
     let onUserTapped: (String) -> Void
 
     private var directVideoURL: URL? {
+        guard localAssetName == nil else { return nil }
         guard let url = URL(string: post.mediaURL) else { return nil }
         let lower = url.absoluteString.lowercased()
         if lower.contains("picsum.photos") { return nil }
         let videoHints = [".mp4", ".m3u8", "/prog_index.m3u8", "video.mp4", "format=mp4", "format=hls", "type=video"]
         return videoHints.contains { lower.contains($0) } ? url : nil
+    }
+
+    private var localAssetName: String? {
+        let prefix = "asset://"
+        guard post.mediaURL.hasPrefix(prefix) else { return nil }
+        let name = String(post.mediaURL.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? nil : name
     }
 
     var body: some View {
@@ -48,6 +66,14 @@ struct FeedFullscreenPage: View {
             if let videoURL = directVideoURL {
                 FeedInlineVideoPlayer(url: videoURL)
                     .ignoresSafeArea()
+            } else if let assetName = localAssetName, let image = UIImage(named: assetName) {
+                GeometryReader { geo in
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        .clipped()
+                }
             } else if let url = URL(string: post.mediaURL) {
                 GeometryReader { geo in
                     AsyncImage(url: url) { phase in
@@ -87,17 +113,24 @@ struct FeedFullscreenPage: View {
                         .fill(Color.white.opacity(0.2))
                         .frame(width: 36, height: 36)
                         .overlay(
-                            Image(systemName: "person.fill")
+                            Image(systemName: post.isPoplurAd ? "megaphone.fill" : "person.fill")
                                 .foregroundStyle(.white)
                         )
                 }
                 .buttonStyle(.plain)
 
-                Text(displayName.isEmpty ? "" : displayName)
+                Text(post.isPoplurAd ? "Poplur Ad" : (displayName.isEmpty ? "" : displayName))
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(.white)
             }
             .padding(16)
+        }
+        .overlay(alignment: .bottomLeading) {
+            if post.isPoplurAd {
+                poplurAdCopy
+                    .padding(.horizontal, 22)
+                    .padding(.bottom, 118)
+            }
         }
     }
 
@@ -108,6 +141,36 @@ struct FeedFullscreenPage: View {
                 .font(.system(size: 42, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.55))
         }
+    }
+
+    private var poplurAdCopy: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(post.adCreativeKind?.uppercased() ?? "AI CREATIVE")
+                .font(.system(size: 12, weight: .black, design: .rounded))
+                .foregroundStyle(.white.opacity(0.78))
+
+            Text(post.adHeadline ?? "See what is happening nearby")
+                .font(.system(size: 32, weight: .black, design: .rounded))
+                .foregroundStyle(.white)
+                .lineLimit(2)
+
+            if let body = post.adBody, !body.isEmpty {
+                Text(body)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.86))
+                    .lineLimit(3)
+            }
+
+            Text(post.adCallToAction ?? "Open Poplur")
+                .font(.system(size: 14, weight: .black, design: .rounded))
+                .foregroundStyle(.black)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 9)
+                .background(Color.white, in: Capsule())
+                .padding(.top, 4)
+        }
+        .shadow(color: .black.opacity(0.55), radius: 10, x: 0, y: 4)
+        .allowsHitTesting(false)
     }
 }
 

@@ -41,14 +41,16 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
             #endif
         }
 
-        // Only start ads in release builds on real devices
-        #if !DEBUG && !targetEnvironment(simulator) && canImport(GoogleMobileAds)
-        MobileAds.shared.start(completionHandler: nil)
-        #endif
-
-        #if !targetEnvironment(simulator)
-        AdManager.shared.start()
-        #endif
+        // Defer ad SDK init to after first frame — MobileAds.shared.start() is synchronous
+        // and can block the main thread for 100–300 ms, delaying first render.
+        DispatchQueue.main.async {
+            #if !DEBUG && !targetEnvironment(simulator) && canImport(GoogleMobileAds)
+            MobileAds.shared.start(completionHandler: nil)
+            #endif
+            #if !targetEnvironment(simulator)
+            AdManager.shared.start()
+            #endif
+        }
 
         Task { @MainActor in
             PoplurNotificationCenter.shared.configure()

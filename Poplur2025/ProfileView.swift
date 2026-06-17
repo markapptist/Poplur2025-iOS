@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import SpriteKit
 import FirebaseAuth
 @preconcurrency import FirebaseFirestore
 import UserNotifications
@@ -1973,22 +1974,372 @@ private struct ProfileNotificationsView: View {
     }
 }
 
+private struct PoplurCreditCardProduct: Identifiable {
+    let id: String
+    let name: String
+    let spriteSheetName: String
+    let price: String
+    let accent: Color
+    let material: String
+    let delivery: String
+
+    static let catalog: [PoplurCreditCardProduct] = [
+        PoplurCreditCardProduct(id: "cosmic-silver", name: "Cosmic Silver", spriteSheetName: "poplur_card_cosmic_silver_spritesheet", price: "$29", accent: Color(red: 0.56, green: 0.58, blue: 0.60), material: "star-polished graphite", delivery: "Ships in 3-5 days"),
+        PoplurCreditCardProduct(id: "icy-aqua", name: "Icy Aqua", spriteSheetName: "poplur_card_icy_aqua_spritesheet", price: "$29", accent: Color(red: 0.05, green: 0.66, blue: 0.66), material: "turquoise crystal", delivery: "Ships in 3-5 days"),
+        PoplurCreditCardProduct(id: "champagne-gold", name: "Champagne Gold", spriteSheetName: "poplur_card_champagne_gold_spritesheet", price: "$35", accent: Color(red: 0.86, green: 0.55, blue: 0.12), material: "gold glitter resin", delivery: "Ships in 2-4 days"),
+        PoplurCreditCardProduct(id: "jet-black", name: "Jet Black Onyx", spriteSheetName: "poplur_card_jet_black_onyx_spritesheet", price: "$35", accent: Color(red: 0.06, green: 0.06, blue: 0.07), material: "black starfield", delivery: "Ships in 2-4 days"),
+        PoplurCreditCardProduct(id: "amethyst", name: "Amethyst Purple", spriteSheetName: "poplur_card_amethyst_purple_spritesheet", price: "$39", accent: Color(red: 0.46, green: 0.14, blue: 0.76), material: "faceted crystal", delivery: "Limited finish"),
+        PoplurCreditCardProduct(id: "ruby", name: "Ruby Red", spriteSheetName: "poplur_card_ruby_red_spritesheet", price: "$39", accent: Color(red: 0.72, green: 0.02, blue: 0.08), material: "ruby sparkle", delivery: "Limited finish"),
+        PoplurCreditCardProduct(id: "emerald", name: "Emerald Green", spriteSheetName: "poplur_card_emerald_green_spritesheet", price: "$39", accent: Color(red: 0.0, green: 0.45, blue: 0.20), material: "emerald glitter", delivery: "Limited finish"),
+        PoplurCreditCardProduct(id: "sapphire", name: "Sapphire Blue", spriteSheetName: "poplur_card_sapphire_blue_spritesheet", price: "$39", accent: Color(red: 0.03, green: 0.19, blue: 0.72), material: "sapphire crystal", delivery: "Limited finish")
+    ]
+}
+
+private final class PoplurCreditCardSpriteScene: SKScene {
+    private let sheetName: String
+    private let cardSize = CGSize(width: 482, height: 320)
+    private var cardNode: SKSpriteNode?
+
+    init(sheetName: String) {
+        self.sheetName = sheetName
+        super.init(size: cardSize)
+        scaleMode = .resizeFill
+        backgroundColor = .clear
+    }
+
+    required init?(coder aDecoder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func didMove(to view: SKView) {
+        view.allowsTransparency = true
+        view.backgroundColor = .clear
+        buildSprite()
+    }
+
+    override func didChangeSize(_ oldSize: CGSize) {
+        super.didChangeSize(oldSize)
+        layoutSprite()
+    }
+
+    private func buildSprite() {
+        guard cardNode == nil else { return }
+
+        let node = SKSpriteNode(texture: makeFirstTexture())
+        node.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+        addChild(node)
+        cardNode = node
+        layoutSprite()
+    }
+
+    private func makeFirstTexture() -> SKTexture {
+        let sheet = SKTexture(imageNamed: sheetName)
+        let sheetSize = CGSize(width: 1122, height: 1402)
+        let origin = CGPoint(x: 62, y: 54)
+        let rect = CGRect(
+            x: origin.x / sheetSize.width,
+            y: (sheetSize.height - origin.y - cardSize.height) / sheetSize.height,
+            width: cardSize.width / sheetSize.width,
+            height: cardSize.height / sheetSize.height
+        )
+        let texture = SKTexture(rect: rect, in: sheet)
+        texture.filteringMode = .linear
+        return texture
+    }
+
+    private func layoutSprite() {
+        guard let cardNode else { return }
+        cardNode.position = CGPoint(x: size.width / 2, y: size.height / 2)
+
+        let aspect = cardSize.width / cardSize.height
+        var width = size.width
+        var height = width / aspect
+        if height > size.height {
+            height = size.height
+            width = height * aspect
+        }
+        cardNode.size = CGSize(width: width, height: height)
+    }
+}
+
+private struct PoplurCreditCardSpriteView: View {
+    let card: PoplurCreditCardProduct
+
+    var body: some View {
+        SpriteView(
+            scene: PoplurCreditCardSpriteScene(sheetName: card.spriteSheetName),
+            options: [.allowsTransparency]
+        )
+        .id(card.id)
+        .aspectRatio(482.0 / 320.0, contentMode: .fit)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+}
+
 private struct RadiusStoreView: View {
     @Binding var purchasedRadiusMeters: Int
     let userID: String?
     @ObservedObject var purchaseVM: RadiusPurchaseViewModel
+    @State private var selectedCardID = PoplurCreditCardProduct.catalog[0].id
+    @State private var orderMessage: String?
+
+    private let columns = [
+        GridItem(.flexible(), spacing: 12),
+        GridItem(.flexible(), spacing: 12)
+    ]
+
+    private var selectedCard: PoplurCreditCardProduct {
+        PoplurCreditCardProduct.catalog.first { $0.id == selectedCardID } ?? PoplurCreditCardProduct.catalog[0]
+    }
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                Text("Store")
-                    .font(.system(size: 30, weight: .heavy, design: .rounded))
-                    .foregroundColor(.black)
+            LazyVStack(alignment: .leading, spacing: 22) {
+                storeHeader
                     .padding(.top, 24)
 
-                Text("Purchase radius to expand your reach.")
-                    .font(.system(size: 15, weight: .semibold))
+                featuredCard
+
+                finishPicker
+
+                LazyVGrid(columns: columns, spacing: 12) {
+                    ForEach(PoplurCreditCardProduct.catalog) { card in
+                        creditCardTile(card)
+                    }
+                }
+
+                checkoutSummary
+
+                radiusAddOns
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 40)
+        }
+        .background(Color.white.ignoresSafeArea())
+        .navigationTitle("")
+        .navigationBarTitleDisplayMode(.inline)
+        .task {
+            await purchaseVM.loadProducts()
+            let delivered = await purchaseVM.finishUndeliveredRadiusPurchases(userID: userID)
+            if delivered > 0 {
+                purchasedRadiusMeters += delivered
+            }
+        }
+    }
+
+    private var storeHeader: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Poplur Store")
+                    .font(.system(size: 31, weight: .heavy, design: .rounded))
+                    .foregroundColor(.black)
+
+                Spacer()
+
+                Image(systemName: "bag.fill")
+                    .font(.system(size: 18, weight: .heavy))
+                    .foregroundStyle(.white)
+                    .frame(width: 38, height: 38)
+                    .background(Color.black, in: Circle())
+            }
+
+            Text("Shop World Service cards, collectible finishes, and radius boosts.")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundColor(.black.opacity(0.58))
+        }
+    }
+
+    private var featuredCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            PoplurCreditCardSpriteView(card: selectedCard)
+                .shadow(color: selectedCard.accent.opacity(0.28), radius: 22, x: 0, y: 12)
+
+            HStack(alignment: .top, spacing: 14) {
+                VStack(alignment: .leading, spacing: 7) {
+                    Text(selectedCard.name)
+                        .font(.system(size: 23, weight: .heavy, design: .rounded))
+                        .foregroundColor(.black)
+
+                    Text("Poplur World Service members card in \(selectedCard.material).")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.black.opacity(0.62))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer()
+
+                Text(selectedCard.price)
+                    .font(.system(size: 24, weight: .heavy, design: .rounded))
+                    .foregroundColor(.black)
+            }
+
+            HStack(spacing: 10) {
+                storeBadge("Contactless")
+                storeBadge("Numbered")
+                storeBadge(selectedCard.delivery)
+            }
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .fill(Color.black.opacity(0.045))
+        )
+    }
+
+    private var finishPicker: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Choose a finish")
+                .font(.system(size: 18, weight: .heavy, design: .rounded))
+                .foregroundColor(.black)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(PoplurCreditCardProduct.catalog) { card in
+                        Button {
+                            selectedCardID = card.id
+                        } label: {
+                            VStack(spacing: 7) {
+                                Circle()
+                                    .fill(card.accent)
+                                    .frame(width: 34, height: 34)
+                                    .overlay {
+                                        if selectedCardID == card.id {
+                                            Image(systemName: "checkmark")
+                                                .font(.system(size: 13, weight: .heavy))
+                                                .foregroundColor(.white)
+                                        }
+                                    }
+                                    .overlay(
+                                        Circle()
+                                            .stroke(selectedCardID == card.id ? Color.black : Color.clear, lineWidth: 3)
+                                            .padding(-4)
+                                    )
+
+                                Text(card.name.components(separatedBy: " ").first ?? card.name)
+                                    .font(.system(size: 12, weight: .heavy, design: .rounded))
+                                    .foregroundColor(.black)
+                            }
+                            .frame(width: 72)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+        }
+    }
+
+    private func creditCardTile(_ card: PoplurCreditCardProduct) -> some View {
+        Button {
+            selectedCardID = card.id
+        } label: {
+            VStack(alignment: .leading, spacing: 10) {
+                PoplurCreditCardSpriteView(card: card)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                Text(card.name)
+                    .font(.system(size: 15, weight: .heavy, design: .rounded))
+                    .foregroundColor(.black)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack {
+                    Text(card.price)
+                        .font(.system(size: 15, weight: .heavy, design: .rounded))
+                        .foregroundColor(.black)
+                    Spacer()
+                    Image(systemName: selectedCardID == card.id ? "checkmark.circle.fill" : "plus.circle.fill")
+                        .font(.system(size: 18, weight: .heavy))
+                        .foregroundColor(selectedCardID == card.id ? card.accent : .black.opacity(0.72))
+                }
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Color.black.opacity(selectedCardID == card.id ? 0.075 : 0.035))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(selectedCardID == card.id ? card.accent : Color.clear, lineWidth: 2)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var checkoutSummary: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Order summary")
+                        .font(.system(size: 18, weight: .heavy, design: .rounded))
+                        .foregroundColor(.black)
+                    Text("1 Poplur card - \(selectedCard.name)")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.black.opacity(0.58))
+                }
+
+                Spacer()
+
+                Text(selectedCard.price)
+                    .font(.system(size: 20, weight: .heavy, design: .rounded))
+                    .foregroundColor(.black)
+            }
+
+            Divider()
+
+            HStack {
+                Text("Estimated shipping")
+                    .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(.black.opacity(0.58))
+                Spacer()
+                Text("Free")
+                    .font(.system(size: 14, weight: .heavy, design: .rounded))
+                    .foregroundColor(.green)
+            }
+
+            Button {
+                orderMessage = "\(selectedCard.name) card is ready for checkout."
+            } label: {
+                HStack {
+                    Image(systemName: "creditcard.fill")
+                    Text("Buy \(selectedCard.name)")
+                }
+                .font(.system(size: 16, weight: .heavy, design: .rounded))
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity, minHeight: 48)
+                .background(Color.black, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            }
+            .buttonStyle(.plain)
+
+            if let orderMessage {
+                Text(orderMessage)
+                    .font(.system(size: 13, weight: .heavy, design: .rounded))
+                    .foregroundColor(selectedCard.accent)
+            }
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .fill(Color.black.opacity(0.045))
+        )
+    }
+
+    private var radiusAddOns: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("Add radius")
+                    .font(.system(size: 20, weight: .heavy, design: .rounded))
+                    .foregroundColor(.black)
+                Spacer()
+                Image(systemName: "dot.radiowaves.left.and.right")
+                    .font(.system(size: 17, weight: .heavy))
+                    .foregroundColor(.green)
+            }
+
+            Text("Boost your Poplur reach after choosing a card.")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(.black.opacity(0.58))
 
                 if purchasedRadiusMeters > 0 {
                     Text("Purchased radius: \(formattedRadius(purchasedRadiusMeters))")
@@ -2056,20 +2407,16 @@ private struct RadiusStoreView: View {
                             .fill(Color.black.opacity(0.045))
                     )
                 }
-            }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 40)
         }
-        .background(Color.white.ignoresSafeArea())
-        .navigationTitle("")
-        .navigationBarTitleDisplayMode(.inline)
-        .task {
-            await purchaseVM.loadProducts()
-            let delivered = await purchaseVM.finishUndeliveredRadiusPurchases(userID: userID)
-            if delivered > 0 {
-                purchasedRadiusMeters += delivered
-            }
-        }
+    }
+
+    private func storeBadge(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 11, weight: .heavy, design: .rounded))
+            .foregroundColor(.black)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(Color.white.opacity(0.88), in: Capsule())
     }
 
     private func formattedRadius(_ meters: Int) -> String {

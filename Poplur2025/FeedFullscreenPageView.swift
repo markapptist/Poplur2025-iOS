@@ -32,11 +32,16 @@ struct FeedFullscreenPageView: View {
     @State private var forceVideoPlaceholder: Bool = false
     @State private var playbackStuck: Bool = false
 
+    // Auto-cycles the username ↔ channel-number display like a TV ticker
+    @State private var showChannelMode: Bool = false
+    private var displayAsChannel: Bool { showChannelMode || isTVGuideVisible }
+
     private var coordinateText: String {
         String(format: "%.4f, %.4f", post.latitude, post.longitude)
     }
 
     private var directVideoURL: URL? {
+        guard localAssetName == nil else { return nil }
         guard let url = URL(string: post.mediaURL) else { return nil }
         let lower = url.absoluteString.lowercased()
 
@@ -75,6 +80,7 @@ struct FeedFullscreenPageView: View {
 
     private enum MediaType { case video, image, unknown }
     private var mediaType: MediaType {
+        if localAssetName != nil { return .image }
         if directVideoURL != nil { return .video }
         guard let url = URL(string: post.mediaURL) else { return .unknown }
         let lower = url.absoluteString.lowercased()
@@ -82,6 +88,17 @@ struct FeedFullscreenPageView: View {
         if imageExtensions.contains(where: { lower.hasSuffix($0) }) { return .image }
         if lower.contains("picsum.photos") { return .image }
         return .unknown
+    }
+
+    private var localAssetName: String? {
+        Self.localAssetName(from: post.mediaURL)
+    }
+
+    private static func localAssetName(from mediaURL: String) -> String? {
+        let prefix = "asset://"
+        guard mediaURL.hasPrefix(prefix) else { return nil }
+        let name = String(mediaURL.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? nil : name
     }
 
     // Replaced custom PlayerLayer with AVKit.VideoPlayer for reliability
@@ -510,6 +527,16 @@ struct FeedFullscreenPageView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black)
+        .task(id: post.id) {
+            // Continuously cycle username ↔ channel number like a TV ticker
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(3.5))
+                guard !Task.isCancelled else { break }
+                withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
+                    showChannelMode.toggle()
+                }
+            }
+        }
     }
 
     @ViewBuilder
@@ -529,7 +556,10 @@ struct FeedFullscreenPageView: View {
                         .onAppear { reportMediaReady() }
                 }
             case .image:
-                if let url = URL(string: post.mediaURL) {
+                if let assetName = localAssetName {
+                    localAssetImageContent(size: size, assetName: assetName)
+                        .id("asset_\(post.id)_\(assetName)")
+                } else if let url = URL(string: post.mediaURL) {
                     imageContent(size: size, url: url)
                         .id("image_\(post.id)_\(url.absoluteString)")
                 } else {
@@ -541,6 +571,9 @@ struct FeedFullscreenPageView: View {
                 if let videoURL = directVideoURL {
                     videoContent(size: size, videoURL: videoURL)
                         .id("video_\(post.id)_\(videoURL.absoluteString)")
+                } else if let assetName = localAssetName {
+                    localAssetImageContent(size: size, assetName: assetName)
+                        .id("asset_\(post.id)_\(assetName)")
                 } else if let url = URL(string: post.mediaURL) {
                     imageContent(size: size, url: url)
                         .id("image_\(post.id)_\(url.absoluteString)")
@@ -553,6 +586,11 @@ struct FeedFullscreenPageView: View {
             // Username overlay in top-right corner
             topRightInfo(size: size)
                 .zIndex(10)
+
+            if post.isPoplurAd {
+                poplurAdInfo
+                    .zIndex(11)
+            }
         }
     }
 
@@ -587,6 +625,21 @@ struct FeedFullscreenPageView: View {
     private func imageContent(size: CGSize, url: URL) -> some View {
         FullBleedRemoteImage(url: url, size: size, onReady: reportMediaReady)
             .id("image_\(post.id)_\(url.absoluteString)")
+    }
+
+    @ViewBuilder
+    private func localAssetImageContent(size: CGSize, assetName: String) -> some View {
+        if let image = UIImage(named: assetName) {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFill()
+                .frame(width: size.width, height: size.height)
+                .clipped()
+                .onAppear { reportMediaReady() }
+        } else {
+            unavailableMediaView(isVideo: false)
+                .onAppear { reportMediaReady() }
+        }
     }
 
     private func unavailableMediaView(isVideo: Bool) -> some View {
@@ -642,44 +695,44 @@ struct FeedFullscreenPageView: View {
                     Text(flag)
                         .font(.system(size: 32))
                 }
-                Text(channelEmoji)
-                    .font(.system(size: 32))
+                Text(post.isPoplurAd ? "AD" : channelEmoji)
+                    .font(.system(size: post.isPoplurAd ? 22 : 32, weight: .black, design: .rounded))
             }
             
             // Right side: Username and coordinates
             VStack(alignment: .leading, spacing: 4) {
                 ZStack(alignment: .leading) {
                     Button(action: { onUserTapped(post.userID) }) {
-                        Text(displayName.isEmpty ? "User" : displayName)
+                        Text(post.isPoplurAd ? "Poplur Ad" : (displayName.isEmpty ? "User" : displayName))
                             .font(.system(size: 20, weight: .bold, design: .default))
                             .foregroundColor(.white)
                     }
                     .buttonStyle(.plain)
-                    .opacity(isTVGuideVisible ? 0 : 1)
-                    .offset(y: isTVGuideVisible ? -10 : 0)
+                    .opacity(displayAsChannel ? 0 : 1)
+                    .offset(y: displayAsChannel ? -10 : 0)
 
                     Text("CH \(channelNumber)")
                         .font(.system(size: 22, weight: .black, design: .rounded))
                         .foregroundColor(Color(red: 0.31, green: 1.0, blue: 0.25))
-                        .opacity(isTVGuideVisible ? 1 : 0)
-                        .offset(y: isTVGuideVisible ? 0 : 10)
+                        .opacity(displayAsChannel ? 1 : 0)
+                        .offset(y: displayAsChannel ? 0 : 10)
                 }
-                .animation(.spring(response: 0.34, dampingFraction: 0.82), value: isTVGuideVisible)
+                .animation(.spring(response: 0.34, dampingFraction: 0.82), value: displayAsChannel)
 
                 ZStack(alignment: .leading) {
-                    Text(String(format: "%.4f, %.4f", post.latitude, post.longitude))
+                    Text(post.isPoplurAd ? (post.adCreativeKind?.uppercased() ?? "AI CREATIVE") : String(format: "%.4f, %.4f", post.latitude, post.longitude))
                         .font(.system(size: 16, weight: .regular, design: .default))
                         .foregroundColor(.white.opacity(0.9))
-                        .opacity(isTVGuideVisible ? 0 : 1)
-                        .offset(y: isTVGuideVisible ? -8 : 0)
+                        .opacity(displayAsChannel ? 0 : 1)
+                        .offset(y: displayAsChannel ? -8 : 0)
 
                     Text(channelCategory.uppercased())
                         .font(.system(size: 16, weight: .heavy, design: .rounded))
                         .foregroundColor(Color(red: 0.31, green: 1.0, blue: 0.25))
-                        .opacity(isTVGuideVisible ? 1 : 0)
-                        .offset(y: isTVGuideVisible ? 0 : 8)
+                        .opacity(displayAsChannel ? 1 : 0)
+                        .offset(y: displayAsChannel ? 0 : 8)
                 }
-                .animation(.spring(response: 0.34, dampingFraction: 0.82).delay(0.03), value: isTVGuideVisible)
+                .animation(.spring(response: 0.34, dampingFraction: 0.82).delay(0.03), value: displayAsChannel)
             }
             .frame(minWidth: 150, alignment: .leading)
             
@@ -689,6 +742,49 @@ struct FeedFullscreenPageView: View {
         .padding(.top, 60)  // ✅ Increased from 40 to 60 to push label down
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .allowsHitTesting(true)
+    }
+
+    private var poplurAdInfo: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Text("POPLUR AD")
+                .font(.system(size: 12, weight: .black, design: .rounded))
+                .foregroundStyle(.white.opacity(0.78))
+                .tracking(0)
+
+            Text(post.adHeadline ?? "See what is happening nearby")
+                .font(.system(size: 36, weight: .black, design: .rounded))
+                .foregroundStyle(.white)
+                .lineLimit(2)
+                .minimumScaleFactor(0.82)
+
+            if let body = post.adBody, !body.isEmpty {
+                Text(body)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.88))
+                    .lineLimit(3)
+            }
+
+            Text(post.adCallToAction ?? "Open Poplur")
+                .font(.system(size: 14, weight: .black, design: .rounded))
+                .foregroundStyle(.black)
+                .padding(.horizontal, 17)
+                .padding(.vertical, 9)
+                .background(Color.white, in: Capsule())
+                .padding(.top, 3)
+        }
+        .padding(.horizontal, 24)
+        .padding(.bottom, 138)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+        .background(
+            LinearGradient(
+                colors: [.clear, .black.opacity(0.62)],
+                startPoint: .center,
+                endPoint: .bottom
+            )
+            .allowsHitTesting(false)
+        )
+        .shadow(color: .black.opacity(0.62), radius: 12, x: 0, y: 5)
+        .allowsHitTesting(false)
     }
     
 }

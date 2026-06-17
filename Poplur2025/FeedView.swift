@@ -5,6 +5,7 @@ import UIKit
 import AVFoundation
 import AVKit
 import Contacts
+import SpriteKit
 #if canImport(GoogleMobileAds)
 import GoogleMobileAds
 #endif
@@ -19,6 +20,7 @@ import GoogleMobileAds
 
 struct FeedView: View {
     @Environment(\.layoutPreviewMode) private var layoutPreviewMode
+    var homeChromeInactive: Bool = false
 
     @StateObject private var fallbackLocationProvider = LocationProvider()
     @StateObject private var poleModel = PolePositionModel()
@@ -31,6 +33,8 @@ struct FeedView: View {
     @State private var isFeedReady = false  // Added as per instruction
     @State private var isVideoLoading = false  // Track video loading state for logo indicator
     @State private var showInitialLoadingScreen = true
+    // Only true once the first post's media fires onMediaReady — gates hideInitialLoadingScreen
+    @State private var firstMediaReady = false
 
     // Pagination
     private let pageSize = 5
@@ -57,11 +61,15 @@ struct FeedView: View {
     @State private var popPlayer: AVAudioPlayer? = nil
 
     @State private var showHeart: Bool = false
+    @State private var likedPostIDs: Set<String> = []
+    @State private var localLikeBoosts: [String: Int] = [:]
     
     // Instagram-style timeline view
     @State private var showTimelineView: Bool = false
     @State private var isFlippingTimeline: Bool = false
     @State private var showTVGuide: Bool = false
+    @State private var tvGuideActivePlayer: AVPlayer? = nil
+    @State private var breakingNewsConfettiTrigger: Int = 0
     
     // Comment section overlay
     @State private var showCommentSection: Bool = false
@@ -210,11 +218,26 @@ struct FeedView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
 
+                if homeChromeInactive,
+                   !showTimelineView,
+                   !showTVGuide,
+                   !showCommentSection,
+                   let currentPost = posts[safe: currentIndex] {
+                    FeedLiveCommentsOverlay(
+                        postID: currentPost.id,
+                        displayName: displayName(for: currentPost),
+                        onInteraction: noteFeedInteraction
+                    )
+                    .zIndex(850_000)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+
                 if showTVGuide {
                     FeedTVGuideView(
                         channels: tvGuideChannels,
                         currentChannelID: currentChannel.id,
                         currentPostName: currentPostDisplayName,
+                        activeFeedPlayer: tvGuideActivePlayer,
                         onDismiss: {
                             withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
                                 showTVGuide = false
@@ -227,6 +250,11 @@ struct FeedView: View {
                     .zIndex(1_000_000)
                     .transition(.opacity)
                 }
+
+                FeedBreakingNewsConfettiOverlay(trigger: breakingNewsConfettiTrigger)
+                    .allowsHitTesting(false)
+                    .ignoresSafeArea()
+                    .zIndex(1_000_100)
             }
             .background(Color.black)
         }
@@ -259,6 +287,7 @@ struct FeedView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .ResetTabToTop)) { _ in
             currentIndex = 0
+            publishCurrentPostMetrics(duration: 0.35)
         }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("FeedRefreshRequested"))) { _ in
             Task { await reload() }
@@ -277,21 +306,31 @@ struct FeedView: View {
             // Restore feed radius when returning from profile
             if let post = posts[safe: currentIndex] {
                 print("📱 [Feed] ProfileViewDismissed - restoring radius to \(post.radius)m")
-                RadiusBarAnimator.showPostRadius(post.radius, duration: 0.6)
+                publishCurrentPostMetrics(duration: 0.6)
             } else if posts.isEmpty {
                 print("📱 [Feed] ProfileViewDismissed - no posts, setting radius to 0")
-                RadiusBarAnimator.showPostRadius(0, duration: 0.3)
+                publishEmptyPostMetrics(duration: 0.3)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ToggleTimelineView"))) { _ in
             toggleTimelineFlip()
         }
-        .onReceive(NotificationCenter.default.publisher(for: .cubeHoldBegan)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: .FeedOpenTVGuide)) { _ in
             guard !posts.isEmpty else { return }
+            noteFeedInteraction()
             withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                showTimelineView = false
                 showTVGuide = true
             }
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .FeedOpenNews)) { _ in
+            guard !posts.isEmpty else { return }
+            noteFeedInteraction()
+            showTVGuide = false
+            if !showTimelineView {
+                toggleTimelineFlip()
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("CubeTapped"))) { _ in
             // Tap cube to show comment section (only when NOT in timeline view)
@@ -313,10 +352,11 @@ struct FeedView: View {
             // Animate the radius bar to match the current post's radius
             let post = posts[newIndex]
             print("📱 [Feed] Showing post at index \(newIndex), radius: \(post.radius)m")
-            RadiusBarAnimator.showPostRadius(post.radius, duration: 0.6)
+            publishCurrentPostMetrics(duration: 0.6)
         }
         .onAppear {
             guard !layoutPreviewMode else { return }
+            triggerBreakingNewsArrival()
             // Removed duplicate reload here as per instruction
             hapticGenerator.prepare()
             notifHaptics.prepare()
@@ -334,8 +374,8 @@ struct FeedView: View {
                 isFeedReady = !newPosts.isEmpty
                 hideInitialLoadingScreen()
                 
-                if let firstPost = newPosts.first {
-                    RadiusBarAnimator.showPostRadius(firstPost.radius, duration: 0.0)
+                if newPosts.first != nil {
+                    publishCurrentPostMetrics(duration: 0.0)
                 }
                 
                 // Background storage only
@@ -349,6 +389,7 @@ struct FeedView: View {
                 print("[Feed] onAppear - restoring feed ready state")
                 isFeedReady = true
             }
+            publishCurrentPostMetrics(duration: 0.35)
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
             // INSTANT: Only reload if truly empty - avoid unnecessary async overhead
@@ -363,8 +404,8 @@ struct FeedView: View {
                 isFeedReady = !newPosts.isEmpty
                 hideInitialLoadingScreen()
                 
-                if let firstPost = newPosts.first {
-                    RadiusBarAnimator.showPostRadius(firstPost.radius, duration: 0.0)
+                if newPosts.first != nil {
+                    publishCurrentPostMetrics(duration: 0.0)
                 }
                 
                 Task.detached(priority: .utility) {
@@ -383,9 +424,15 @@ struct FeedView: View {
             }
         }
         .onChange(of: showTVGuide) { _, visible in
+            tvGuideActivePlayer = visible ? FeedAudioManager.shared.activePlayer : nil
             NotificationCenter.default.post(name: .MainTabChildRouteVisibilityChanged, object: visible)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .ActiveFeedPlayerDidChange)) { notification in
+            guard showTVGuide else { return }
+            tvGuideActivePlayer = notification.object as? AVPlayer
+        }
         .onDisappear {
+            tvGuideActivePlayer = nil
             NotificationCenter.default.post(name: .MainTabChildRouteVisibilityChanged, object: false)
         }
     }
@@ -418,8 +465,8 @@ struct FeedView: View {
         hideInitialLoadingScreen()
         
         // Update radius bar immediately
-        if let firstPost = newPosts.first {
-            RadiusBarAnimator.showPostRadius(firstPost.radius, duration: 0.0)
+        if newPosts.first != nil {
+            publishCurrentPostMetrics(duration: 0.0)
         }
         
         // ALL background tasks happen AFTER UI is ready
@@ -456,6 +503,7 @@ struct FeedView: View {
                         DragGesture(minimumDistance: 20, coordinateSpace: .local)
                             .onChanged { value in
                                 if dragAxis == nil {
+                                    noteFeedInteraction()
                                     dragAxis = abs(value.translation.width) > abs(value.translation.height) ? .horizontal : .vertical
                                     hapticGenerator.prepare()
                                     notifHaptics.prepare()
@@ -562,7 +610,7 @@ struct FeedView: View {
                             }
                     )
                     .onTapGesture(count: 2) {
-                        toggleTimelineFlip()
+                        likeCurrentPost()
                     }
             } else {
                 populatedFeedView(in: size)
@@ -573,6 +621,7 @@ struct FeedView: View {
                         DragGesture(minimumDistance: 20, coordinateSpace: .local)
                             .onChanged { value in
                                 if dragAxis == nil {
+                                    noteFeedInteraction()
                                     dragAxis = abs(value.translation.width) > abs(value.translation.height) ? .horizontal : .vertical
                                     hapticGenerator.prepare()
                                     notifHaptics.prepare()
@@ -678,7 +727,7 @@ struct FeedView: View {
                             }
                     )
                     .onTapGesture(count: 2) {
-                        toggleTimelineFlip()
+                        likeCurrentPost()
                     }
                     .onLongPressGesture(minimumDuration: 0.5) {
                         // Long press to show post location on map with user annotation
@@ -807,7 +856,7 @@ struct FeedView: View {
         }
         .frame(width: size.width, height: size.height)
         .onTapGesture(count: 2) {
-            toggleTimelineFlip()
+            likeCurrentPost()
         }
     }
 
@@ -822,10 +871,15 @@ struct FeedView: View {
                     channelEmoji: currentChannel.emoji,
                     isTVGuideVisible: showTVGuide,
                     onMediaReady: {
+                        firstMediaReady = true
                         hideInitialLoadingScreen()
                     },
                     onUserTapped: { uid in
                         print("👤 [FeedView] User tapped - userID: '\(uid)'")
+                        guard !uid.hasPrefix("poplur_ad_") else {
+                            print("📢 [FeedView] Poplur ad tapped - reserved for ad CTA routing")
+                            return
+                        }
                         guard !uid.isEmpty else {
                             print("⚠️ [FeedView] Cannot navigate to profile - userID is empty")
                             return
@@ -867,9 +921,9 @@ struct FeedView: View {
         return channels.enumerated().map { index, channel in
             let post = posts[safe: index]
             let fallbackUser = usernames[index % usernames.count]
-            let userID = post?.userID.hasPrefix("sponsored_ad_") == true ? "tv_\(channel.id)_user" : (post?.userID ?? "tv_\(channel.id)_user")
+            let userID = post?.isPoplurAd == true ? "tv_\(channel.id)_user" : (post?.userID ?? "tv_\(channel.id)_user")
             let resolvedName = post.map { displayName(for: $0) }
-            let username = (resolvedName?.isEmpty == false && resolvedName != "Sponsored") ? (resolvedName ?? fallbackUser) : fallbackUser
+            let username = post?.isPoplurAd == true ? "Poplur" : ((resolvedName?.isEmpty == false && resolvedName != "Sponsored") ? (resolvedName ?? fallbackUser) : fallbackUser)
 
             return FeedTVGuideChannel(
                 id: channel.id,
@@ -878,7 +932,8 @@ struct FeedView: View {
                 category: channel.name,
                 userID: userID,
                 username: username,
-                program: programs[index % programs.count]
+                program: programs[index % programs.count],
+                videoURL: post.flatMap { URL(string: $0.mediaURL) }
             )
         }
     }
@@ -898,6 +953,7 @@ struct FeedView: View {
 
     private func toggleTimelineFlip() {
         guard !isFlippingTimeline else { return }
+        noteFeedInteraction()
         showTVGuide = false
         playOneShotPop()
         UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.9)
@@ -912,7 +968,35 @@ struct FeedView: View {
         }
     }
 
+    private func noteFeedInteraction() {
+        NotificationCenter.default.post(name: .FeedUserInteraction, object: nil)
+    }
+
+    private func likeCurrentPost() {
+        guard let post = posts[safe: currentIndex] else { return }
+        noteFeedInteraction()
+
+        if !likedPostIDs.contains(post.id) {
+            likedPostIDs.insert(post.id)
+            localLikeBoosts[post.id, default: 0] += 1
+        }
+
+        playOneShotPop()
+        UIImpactFeedbackGenerator(style: .heavy).impactOccurred(intensity: 0.9)
+        publishCurrentPostMetrics(duration: 0.18)
+
+        withAnimation(.spring(response: 0.18, dampingFraction: 0.62)) {
+            showHeart = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.72) {
+            withAnimation(.easeOut(duration: 0.24)) {
+                showHeart = false
+            }
+        }
+    }
+
     private func openTVGuideChannel(_ channel: FeedTVGuideChannel) {
+        noteFeedInteraction()
         if let index = channels.firstIndex(where: { $0.id == channel.id }) {
             selectedChannelIndex = index
             Task { @MainActor in
@@ -930,6 +1014,9 @@ struct FeedView: View {
     @MainActor
     private func hideInitialLoadingScreen() {
         guard showInitialLoadingScreen else { return }
+        // Hold the veil until the first post's media signals it is ready to display.
+        // The HomeView 3-second timeout is the safety-net fallback if media never fires.
+        guard firstMediaReady else { return }
         withAnimation(.easeOut(duration: 0.45)) {
             showInitialLoadingScreen = false
         }
@@ -937,8 +1024,8 @@ struct FeedView: View {
     }
 
     private func displayName(for post: FeedPost) -> String {
-        if post.userID.hasPrefix("sponsored_ad_") {
-            return "Sponsored"
+        if post.isPoplurAd || post.userID.hasPrefix("poplur_ad_") || post.userID.hasPrefix("sponsored_ad_") {
+            return "Poplur Ad"
         }
         if let name = usernames[post.userID], !name.isEmpty {
             return name
@@ -999,6 +1086,9 @@ struct FeedView: View {
         guard !uid.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return
         }
+        guard !uid.hasPrefix("poplur_ad_") else {
+            return
+        }
         // Avoid duplicate fetches per-view
         if usernames[uid] != nil || usernameLoadsInProgress.contains(uid) { return }
         usernameLoadsInProgress.insert(uid)
@@ -1035,6 +1125,48 @@ struct FeedView: View {
     }
 
     private var currentCoordinate: CLLocationCoordinate2D? { activeLocationProvider.coordinate }
+
+    private func triggerBreakingNewsArrival() {
+        breakingNewsConfettiTrigger &+= 1
+        playOneShotPop()
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+    }
+
+    private func publishCurrentPostMetrics(duration: Double = 0.6) {
+        guard let post = posts[safe: currentIndex] else {
+            publishEmptyPostMetrics(duration: duration)
+            return
+        }
+
+        NotificationCenter.default.post(
+            name: .currentPostRadiusDidChange,
+            object: nil,
+            userInfo: [
+                "radius": post.radius,
+                "duration": duration,
+                "postCount": post.viewCount,
+                "likesCount": likesCount(for: post)
+            ]
+        )
+    }
+
+    private func publishEmptyPostMetrics(duration: Double = 0.3) {
+        NotificationCenter.default.post(
+            name: .currentPostRadiusDidChange,
+            object: nil,
+            userInfo: [
+                "radius": 0.0,
+                "duration": duration,
+                "postCount": 0,
+                "likesCount": 0
+            ]
+        )
+    }
+
+    private func likesCount(for post: FeedPost) -> Int {
+        let seed = post.id.unicodeScalars.reduce(0) { ($0 + Int($1.value)) % 97 }
+        return max(0, post.viewCount * 3 + seed + (localLikeBoosts[post.id] ?? 0))
+    }
     
     private func playOneShotPop() {
         do {
@@ -1045,8 +1177,10 @@ struct FeedView: View {
         } catch {
             print("[PopSound] Audio session config failed: \(error)")
         }
-        guard let url = Bundle.main.url(forResource: "pop", withExtension: "mp3") ?? Bundle.main.url(forResource: "pop", withExtension: "wav") else {
-            print("[PopSound] pop.(mp3|wav) not found in bundle")
+        guard let url = Bundle.main.url(forResource: "pop", withExtension: "mp3")
+            ?? Bundle.main.url(forResource: "pop", withExtension: "caf")
+            ?? Bundle.main.url(forResource: "pop", withExtension: "wav") else {
+            print("[PopSound] pop.(mp3|caf|wav) not found in bundle")
             return
         }
         do {
@@ -1109,10 +1243,10 @@ struct FeedView: View {
         hideInitialLoadingScreen()
         
         // Update radius bar immediately
-        if let firstPost = newPosts.first {
-            RadiusBarAnimator.showPostRadius(firstPost.radius, duration: 0.3)
+        if newPosts.first != nil {
+            publishCurrentPostMetrics(duration: 0.3)
         } else {
-            RadiusBarAnimator.showPostRadius(0, duration: 0.3)
+            publishEmptyPostMetrics(duration: 0.3)
         }
         
         // Background tasks only
@@ -1141,8 +1275,8 @@ struct FeedView: View {
         currentIndex = 0
         hideInitialLoadingScreen()
         
-        if let firstPost = newPosts.first {
-            RadiusBarAnimator.showPostRadius(firstPost.radius, duration: 0.3)
+        if newPosts.first != nil {
+            publishCurrentPostMetrics(duration: 0.3)
         }
         
         // Background only
@@ -1169,8 +1303,8 @@ struct FeedView: View {
         currentIndex = 0
         hideInitialLoadingScreen()
         
-        if let firstPost = newPosts.first {
-            RadiusBarAnimator.showPostRadius(firstPost.radius, duration: 0.3)
+        if newPosts.first != nil {
+            publishCurrentPostMetrics(duration: 0.3)
         }
         
         // Background only
@@ -1225,6 +1359,74 @@ struct FeedView: View {
         "https://download.samplelib.com/mp4/sample-15s.mp4"
     ]
 
+    private struct PoplurAdCreative: Sendable {
+        let id: String
+        let mediaURL: String
+        let headline: String
+        let body: String
+        let callToAction: String
+        let creativeKind: String
+        let latitude: Double
+        let longitude: Double
+        let cityName: String
+        let countryName: String
+        let countryFlag: String
+        let radius: Double
+        let viewCount: Int
+        let driveFileID: String?
+    }
+
+    nonisolated private static let poplurAdCreatives: [PoplurAdCreative] = [
+        PoplurAdCreative(
+            id: "nearby-reel",
+            mediaURL: "asset://poplur_ad_real_humans",
+            headline: "Real people are already nearby",
+            body: "Human-first Poplur ad slot for finding pop-ups, food, and people around you.",
+            callToAction: "Open the map",
+            creativeKind: "Live human creative",
+            latitude: 40.7128,
+            longitude: -74.0060,
+            cityName: "New York",
+            countryName: "USA",
+            countryFlag: "🇺🇸",
+            radius: 125_000,
+            viewCount: 840,
+            driveFileID: nil
+        ),
+        PoplurAdCreative(
+            id: "three-d-city-tour",
+            mediaURL: "asset://poplur_ad_3d_group",
+            headline: "Your city is already talking",
+            body: "3D human figures bring local radius discovery into a premium city ad slot.",
+            callToAction: "Start a Poplur tour",
+            creativeKind: "3D human creative",
+            latitude: 43.6532,
+            longitude: -79.3832,
+            cityName: "Toronto",
+            countryName: "Canada",
+            countryFlag: "🇨🇦",
+            radius: 95_000,
+            viewCount: 730,
+            driveFileID: nil
+        ),
+        PoplurAdCreative(
+            id: "radius-hero",
+            mediaURL: "asset://poplur_ad_3d_creator",
+            headline: "Post it where it matters",
+            body: "Dimensional creator-led ad slot for radius sharing, local discovery, and city energy.",
+            callToAction: "Share with your radius",
+            creativeKind: "3D figure creative",
+            latitude: 34.0522,
+            longitude: -118.2437,
+            cityName: "Los Angeles",
+            countryName: "USA",
+            countryFlag: "🇺🇸",
+            radius: 150_000,
+            viewCount: 910,
+            driveFileID: nil
+        )
+    ]
+
     nonisolated private static let reliableDemoImageIDs: [Int] = [
         10, 20, 28, 37, 42, 58, 64, 82, 96, 102, 103, 106, 119, 128, 133, 164, 175, 184, 190, 1025
     ]
@@ -1243,6 +1445,11 @@ struct FeedView: View {
         let offset = stableMediaOffset(for: namespace)
         let imageID = reliableDemoImageIDs[abs(index + offset) % reliableDemoImageIDs.count]
         return "https://picsum.photos/id/\(imageID)/1080/1920"
+    }
+
+    nonisolated private static func poplurAdCreative(for index: Int, namespace: String) -> PoplurAdCreative {
+        let offset = stableMediaOffset(for: namespace)
+        return poplurAdCreatives[abs(index + offset) % poplurAdCreatives.count]
     }
 
     nonisolated private enum DemoMediaKind {
@@ -1269,12 +1476,12 @@ struct FeedView: View {
         case .image:
             return reliableDemoImageURL(for: index, namespace: namespace)
         case .ad:
-            return reliableDemoImageURL(for: index + 97, namespace: "\(namespace)_sponsored")
+            return poplurAdCreative(for: index, namespace: namespace).mediaURL
         }
     }
 
     nonisolated private static func demoUserID(regular regularUserID: String, for index: Int) -> String {
-        demoMediaKind(for: index) == .ad ? "sponsored_ad_\(index)" : regularUserID
+        demoMediaKind(for: index) == .ad ? "poplur_ad_\(index)" : regularUserID
     }
 
     nonisolated private static func generateDemoPosts(start: Int, count: Int) -> [FeedPost] {
@@ -1287,10 +1494,11 @@ struct FeedView: View {
         for i in start..<end {
             let id = "demo_\(i)"
             let regularUserID = i % 3 == 0 ? "fake_user_\(i)" : String(format: "user_%06d", i)
-            let userID = demoUserID(regular: regularUserID, for: i)
+            let adCreative = demoMediaKind(for: i) == .ad ? poplurAdCreative(for: i, namespace: "global") : nil
+            let userID = adCreative.map { "poplur_ad_\($0.id)" } ?? demoUserID(regular: regularUserID, for: i)
             let mediaURL = balancedDemoMediaURL(for: i, namespace: "global")
-            let latitude = 37.3349 + Double(i % 5) * 0.01
-            let longitude = -122.0090 - Double(i % 7) * 0.01
+            let latitude = adCreative?.latitude ?? (37.3349 + Double(i % 5) * 0.01)
+            let longitude = adCreative?.longitude ?? (-122.0090 - Double(i % 7) * 0.01)
             let radius = [50, 100, 250, 500, 1000, 5000].randomElement() ?? 250
 
             let post = FeedPost(
@@ -1298,12 +1506,19 @@ struct FeedView: View {
                 latitude: latitude,
                 longitude: longitude,
                 mediaURL: mediaURL,
-                radius: Double(radius),
-                viewCount: radius,
+                radius: adCreative?.radius ?? Double(radius),
+                viewCount: adCreative?.viewCount ?? radius,
                 userID: userID,
-                cityName: nil,
-                countryName: nil,
-                countryFlag: nil
+                cityName: adCreative?.cityName,
+                countryName: adCreative?.countryName,
+                countryFlag: adCreative?.countryFlag,
+                isPoplurAd: adCreative != nil,
+                adHeadline: adCreative?.headline,
+                adBody: adCreative?.body,
+                adCallToAction: adCreative?.callToAction,
+                adCreativeKind: adCreative?.creativeKind,
+                adStorageProvider: adCreative == nil ? nil : "stream_url",
+                adDriveFileID: adCreative?.driveFileID
             )
             result.append(post)
         }
@@ -1390,7 +1605,8 @@ struct FeedView: View {
                 userID = "\(channel)_user_\(userIndex)"
                 userIDForIndex[userIndex] = userID
             }
-            let feedUserID = demoUserID(regular: userID, for: i)
+            let adCreative = demoMediaKind(for: i) == .ad ? poplurAdCreative(for: i, namespace: "\(country)_\(channel)") : nil
+            let feedUserID = adCreative.map { "poplur_ad_\($0.id)" } ?? demoUserID(regular: userID, for: i)
             
             let mediaURL = balancedDemoMediaURL(for: i, namespace: "\(country)_\(channel)")
             
@@ -1434,12 +1650,19 @@ struct FeedView: View {
                 latitude: latitude,
                 longitude: longitude,
                 mediaURL: mediaURL,
-                radius: radius,
-                viewCount: Int(radius / 100), // Scale view count with radius
+                radius: adCreative?.radius ?? radius,
+                viewCount: adCreative?.viewCount ?? Int(radius / 100), // Scale view count with radius
                 userID: feedUserID,
                 cityName: city.name,
                 countryName: city.country,
-                countryFlag: city.flag
+                countryFlag: city.flag,
+                isPoplurAd: adCreative != nil,
+                adHeadline: adCreative?.headline,
+                adBody: adCreative?.body,
+                adCallToAction: adCreative?.callToAction,
+                adCreativeKind: adCreative?.creativeKind,
+                adStorageProvider: adCreative == nil ? nil : "stream_url",
+                adDriveFileID: adCreative?.driveFileID
             )
             result.append(post)
         }
@@ -1472,25 +1695,33 @@ struct FeedView: View {
         for i in start..<end {
             let id = "\(country.lowercased())_demo_\(i)"
             let regularUserID = i % 3 == 0 ? "fake_user_\(i)" : String(format: "user_%06d", i)
-            let userID = demoUserID(regular: regularUserID, for: i)
+            let adCreative = demoMediaKind(for: i) == .ad ? poplurAdCreative(for: i, namespace: country) : nil
+            let userID = adCreative.map { "poplur_ad_\($0.id)" } ?? demoUserID(regular: regularUserID, for: i)
             let mediaURL = balancedDemoMediaURL(for: i, namespace: country)
             // Shift coordinates slightly by country index to vary positions
             let baseLat = 37.3349 + Double(abs(country.hashValue % 20)) * 0.01
             let baseLon = -122.0090 - Double(abs(country.hashValue % 20)) * 0.01
-            let latitude = baseLat + Double(i % 5) * 0.01
-            let longitude = baseLon - Double(i % 7) * 0.01
+            let latitude = adCreative?.latitude ?? (baseLat + Double(i % 5) * 0.01)
+            let longitude = adCreative?.longitude ?? (baseLon - Double(i % 7) * 0.01)
             let radius = [50, 100, 250, 500, 1000, 5000].randomElement() ?? 250
             result.append(FeedPost(
                 id: id,
                 latitude: latitude,
                 longitude: longitude,
                 mediaURL: mediaURL,
-                radius: Double(radius),
-                viewCount: radius,
+                radius: adCreative?.radius ?? Double(radius),
+                viewCount: adCreative?.viewCount ?? radius,
                 userID: userID,
-                cityName: nil,
-                countryName: nil,
-                countryFlag: nil
+                cityName: adCreative?.cityName,
+                countryName: adCreative?.countryName,
+                countryFlag: adCreative?.countryFlag,
+                isPoplurAd: adCreative != nil,
+                adHeadline: adCreative?.headline,
+                adBody: adCreative?.body,
+                adCallToAction: adCreative?.callToAction,
+                adCreativeKind: adCreative?.creativeKind,
+                adStorageProvider: adCreative == nil ? nil : "stream_url",
+                adDriveFileID: adCreative?.driveFileID
             ))
         }
         return result
@@ -1560,17 +1791,37 @@ fileprivate struct FeedTVGuideChannel: Identifiable, Hashable {
     let userID: String
     let username: String
     let program: String
+    var videoURL: URL? = nil
 }
 
 private struct FeedTVGuideView: View {
     let channels: [FeedTVGuideChannel]
     let currentChannelID: String
     let currentPostName: String
+    let activeFeedPlayer: AVPlayer?
     let onDismiss: () -> Void
     let onChannelSelected: (FeedTVGuideChannel) -> Void
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var isTabletMenuOpen = true
+    @State private var previewedChannelID: String
+
+    init(
+        channels: [FeedTVGuideChannel],
+        currentChannelID: String,
+        currentPostName: String,
+        activeFeedPlayer: AVPlayer?,
+        onDismiss: @escaping () -> Void,
+        onChannelSelected: @escaping (FeedTVGuideChannel) -> Void
+    ) {
+        self.channels = channels
+        self.currentChannelID = currentChannelID
+        self.currentPostName = currentPostName
+        self.activeFeedPlayer = activeFeedPlayer
+        self.onDismiss = onDismiss
+        self.onChannelSelected = onChannelSelected
+        _previewedChannelID = State(initialValue: currentChannelID)
+    }
 
     private let guideGreen = Color(red: 0.31, green: 1.0, blue: 0.25)
 
@@ -1593,28 +1844,10 @@ private struct FeedTVGuideView: View {
                                     .transition(.move(edge: .leading).combined(with: .opacity))
                             }
 
-                            guideList
-
-                            GuidePipPane(
-                                channel: selectedChannel,
-                                currentPostName: currentPostName,
-                                guideGreen: guideGreen
-                            )
-                            .frame(width: 320)
-                            .padding(.horizontal, 18)
-                            .padding(.top, 18)
+                            guideListWithPip(isTablet: true)
                         }
                     } else {
-                        GuidePipPane(
-                            channel: selectedChannel,
-                            currentPostName: currentPostName,
-                            guideGreen: guideGreen
-                        )
-                        .frame(height: 138)
-                        .padding(.horizontal, 18)
-                        .padding(.top, 14)
-
-                        guideList
+                        guideListWithPip(isTablet: false)
                     }
                 }
                 .padding(.top, proxy.safeAreaInsets.top)
@@ -1625,16 +1858,35 @@ private struct FeedTVGuideView: View {
         }
     }
 
-    private var selectedChannel: FeedTVGuideChannel {
-        channels.first { $0.id == currentChannelID } ?? channels.first ?? FeedTVGuideChannel(
-            id: "feed",
-            number: 101,
-            emoji: "▶",
-            category: "Feed",
-            userID: "",
-            username: currentPostName,
-            program: "Live posts"
-        )
+    private var previewedChannel: FeedTVGuideChannel {
+        channels.first { $0.id == previewedChannelID }
+            ?? channels.first
+            ?? FeedTVGuideChannel(id: "feed", number: 101, emoji: "▶", category: "Feed",
+                                  userID: "", username: currentPostName, program: "Live posts")
+    }
+
+    /// Channel list with floating PiP corner overlay
+    private func guideListWithPip(isTablet: Bool) -> some View {
+        let pipWidth: CGFloat = isTablet ? 200 : 148
+        let pipHeight: CGFloat = pipWidth * (16.0 / 9.0)
+
+        return ZStack(alignment: .topTrailing) {
+            guideList
+
+            // Real PiP video corner
+            GuidePipVideoPane(
+                channel: previewedChannel,
+                currentPostName: previewedChannelID == currentChannelID ? currentPostName : "",
+                activeFeedPlayer: activeFeedPlayer,
+                guideGreen: guideGreen
+            )
+            .frame(width: pipWidth, height: pipHeight)
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .shadow(color: .black.opacity(0.55), radius: 10, x: 0, y: 4)
+            .padding(.top, 8)
+            .padding(.trailing, 12)
+            .animation(.spring(response: 0.28, dampingFraction: 0.82), value: previewedChannelID)
+        }
     }
 
     private var guideList: some View {
@@ -1644,16 +1896,20 @@ private struct FeedTVGuideView: View {
             ScrollView(.vertical, showsIndicators: false) {
                 LazyVStack(spacing: 0) {
                     ForEach(channels) { channel in
-                        Button {
+                        FeedTVGuideRow(
+                            channel: channel,
+                            isSelected: channel.id == previewedChannelID,
+                            guideGreen: guideGreen
+                        )
+                        .onTapGesture(count: 2) {
                             onChannelSelected(channel)
-                        } label: {
-                            FeedTVGuideRow(
-                                channel: channel,
-                                isSelected: channel.id == currentChannelID,
-                                guideGreen: guideGreen
-                            )
                         }
-                        .buttonStyle(.plain)
+                        .onTapGesture(count: 1) {
+                            withAnimation(.spring(response: 0.24, dampingFraction: 0.80)) {
+                                previewedChannelID = channel.id
+                            }
+                        }
+                        .contentShape(Rectangle())
                     }
                 }
                 .padding(.bottom, 20)
@@ -1816,48 +2072,362 @@ private struct FeedTVGuideRow: View {
     }
 }
 
-private struct GuidePipPane: View {
+private struct GuidePipVideoPane: View {
     let channel: FeedTVGuideChannel
     let currentPostName: String
+    let activeFeedPlayer: AVPlayer?
     let guideGreen: Color
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            ZStack(alignment: .bottomLeading) {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color.black.opacity(0.28))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .stroke(guideGreen.opacity(0.72), lineWidth: 2)
-                    )
+        ZStack(alignment: .bottom) {
+            // Live video layer
+            Color.black
 
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 8) {
-                        Text(channel.emoji)
-                        Text("CH \(channel.number)")
-                            .foregroundStyle(guideGreen)
-                    }
-                    .font(.system(size: 18, weight: .black, design: .rounded))
-
-                    Text(currentPostName.isEmpty ? channel.username : currentPostName)
-                        .font(.system(size: 18, weight: .black))
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-
-                    Text(channel.category.uppercased())
-                        .font(.system(size: 12, weight: .heavy))
-                        .foregroundStyle(.white.opacity(0.68))
-                }
-                .padding(14)
+            if activeFeedPlayer != nil || channel.videoURL != nil {
+                TvPipPlayerView(player: activeFeedPlayer, fallbackURL: channel.videoURL)
+                    .id(activeFeedPlayer.map { ObjectIdentifier($0).hashValue.description } ?? channel.videoURL?.absoluteString ?? "empty")
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            Text("LIVE AUDIO")
-                .font(.system(size: 11, weight: .black, design: .monospaced))
-                .foregroundStyle(Color.black)
-                .padding(.horizontal, 9)
-                .padding(.vertical, 5)
-                .background(guideGreen, in: Capsule())
+            // Green border
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(guideGreen.opacity(0.80), lineWidth: 2)
+
+            // Info scrim at bottom
+            LinearGradient(
+                colors: [.black.opacity(0.0), .black.opacity(0.78)],
+                startPoint: .center,
+                endPoint: .bottom
+            )
+
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 5) {
+                    Text(channel.emoji)
+                        .font(.system(size: 13))
+                    Text("CH \(channel.number)")
+                        .font(.system(size: 13, weight: .black, design: .rounded))
+                        .foregroundStyle(guideGreen)
+                }
+
+                Text(currentPostName.isEmpty ? channel.username : currentPostName)
+                    .font(.system(size: 12, weight: .black))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+
+                Text("LIVE")
+                    .font(.system(size: 9, weight: .black, design: .monospaced))
+                    .foregroundStyle(.black)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(guideGreen, in: Capsule())
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(8)
+        }
+    }
+}
+
+// MARK: - Mini AVPlayer for TV Guide PiP
+
+private struct TvPipPlayerView: UIViewRepresentable {
+    let player: AVPlayer?
+    let fallbackURL: URL?
+
+    func makeUIView(context: Context) -> TvPipHostView {
+        let view = TvPipHostView()
+        view.configure(player: player, fallbackURL: fallbackURL)
+        return view
+    }
+
+    func updateUIView(_ uiView: TvPipHostView, context: Context) {
+        uiView.configure(player: player, fallbackURL: fallbackURL)
+    }
+}
+
+final class TvPipHostView: UIView {
+    override class var layerClass: AnyClass { AVPlayerLayer.self }
+
+    private var avPlayerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
+    private weak var attachedPlayer: AVPlayer?
+    private var fallbackPlayer: AVPlayer?
+    private var currentURL: URL?
+    private var loopToken: NSObjectProtocol?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        avPlayerLayer.videoGravity = .resizeAspectFill
+        backgroundColor = .black
+    }
+
+    required init?(coder: NSCoder) { super.init(coder: coder) }
+
+    func configure(player: AVPlayer?, fallbackURL: URL?) {
+        if let player {
+            guard attachedPlayer !== player || fallbackPlayer != nil else { return }
+            tearDownFallback()
+            attachedPlayer = player
+            currentURL = nil
+            avPlayerLayer.player = player
+            if player.timeControlStatus != .playing {
+                player.playImmediately(atRate: 1.0)
+            }
+            return
+        }
+
+        guard let fallbackURL else {
+            tearDown()
+            return
+        }
+
+        loadFallback(url: fallbackURL)
+    }
+
+    private func loadFallback(url: URL) {
+        guard url != currentURL || attachedPlayer != nil else { return }
+        currentURL = url
+        tearDown()
+
+        let item = AVPlayerItem(url: url)
+        let p = AVPlayer(playerItem: item)
+        p.isMuted = true
+        p.allowsExternalPlayback = false
+        fallbackPlayer = p
+        attachedPlayer = nil
+        avPlayerLayer.player = p
+        p.play()
+
+        loopToken = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime,
+            object: item,
+            queue: .main
+        ) { [weak p] _ in
+            p?.seek(to: .zero)
+            p?.play()
+        }
+    }
+
+    private func tearDownFallback() {
+        if let t = loopToken { NotificationCenter.default.removeObserver(t); loopToken = nil }
+        fallbackPlayer?.pause()
+        fallbackPlayer = nil
+    }
+
+    private func tearDown() {
+        tearDownFallback()
+        avPlayerLayer.player = nil
+        attachedPlayer = nil
+        currentURL = nil
+    }
+
+    deinit { tearDown() }
+}
+
+private struct FeedBreakingNewsConfettiOverlay: UIViewRepresentable {
+    let trigger: Int
+
+    func makeUIView(context: Context) -> SKView {
+        let view = SKView()
+        view.backgroundColor = .clear
+        view.allowsTransparency = true
+        view.ignoresSiblingOrder = true
+        view.isUserInteractionEnabled = false
+
+        let scene = FeedBreakingNewsConfettiScene(size: view.bounds.size)
+        context.coordinator.scene = scene
+        view.presentScene(scene)
+
+        return view
+    }
+
+    func updateUIView(_ uiView: SKView, context: Context) {
+        if let scene = context.coordinator.scene, scene.size != uiView.bounds.size {
+            scene.size = uiView.bounds.size
+        }
+
+        guard trigger != context.coordinator.lastTrigger else { return }
+        context.coordinator.lastTrigger = trigger
+        context.coordinator.scene?.burstFromTop()
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    final class Coordinator {
+        weak var scene: FeedBreakingNewsConfettiScene?
+        var lastTrigger: Int = 0
+    }
+}
+
+private struct FeedLiveComment: Identifiable, Hashable {
+    let id = UUID()
+    let username: String
+    let text: String
+}
+
+private struct FeedLiveCommentsOverlay: View {
+    let postID: String
+    let displayName: String
+    let onInteraction: () -> Void
+
+    @State private var comments: [FeedLiveComment] = []
+    @State private var draft = ""
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        GeometryReader { proxy in
+            VStack {
+                Spacer()
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(comments.suffix(5)) { comment in
+                        HStack(alignment: .top, spacing: 7) {
+                            Circle()
+                                .fill(Color.white.opacity(0.22))
+                                .frame(width: 24, height: 24)
+                                .overlay {
+                                    Text(String(comment.username.prefix(1)).uppercased())
+                                        .font(.system(size: 11, weight: .black, design: .rounded))
+                                        .foregroundStyle(.white)
+                                }
+
+                            Text("\(comment.username)  ")
+                                .font(.system(size: 13, weight: .black, design: .rounded))
+                                .foregroundStyle(.white)
+                            + Text(comment.text)
+                                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                                .foregroundStyle(.white.opacity(0.92))
+                        }
+                        .shadow(color: .black.opacity(0.65), radius: 5, x: 0, y: 2)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+
+                    HStack(spacing: 10) {
+                        TextField("Comment", text: $draft)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 13)
+                            .padding(.vertical, 9)
+                            .background(Color.black.opacity(0.34), in: Capsule())
+                            .overlay(
+                                Capsule().stroke(Color.white.opacity(0.42), lineWidth: 1)
+                            )
+                            .focused($isFocused)
+                            .onSubmit(addComment)
+
+                        Button(action: addComment) {
+                            Image(systemName: "paperplane.fill")
+                                .font(.system(size: 17, weight: .black))
+                                .foregroundStyle(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .white.opacity(0.38) : .white)
+                                .frame(width: 38, height: 38)
+                                .background(Color.black.opacity(0.34), in: Circle())
+                                .overlay(Circle().stroke(Color.white.opacity(0.34), lineWidth: 1))
+                        }
+                        .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                    .padding(.top, 4)
+                }
+                .frame(maxWidth: min(proxy.size.width - 26, 360), alignment: .leading)
+                .padding(.horizontal, 13)
+                .padding(.bottom, proxy.safeAreaInsets.bottom + 18)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+        }
+        .onAppear {
+            if comments.isEmpty {
+                comments = Self.seedComments(for: postID, displayName: displayName)
+            }
+        }
+        .onChange(of: postID) { _, newPostID in
+            comments = Self.seedComments(for: newPostID, displayName: displayName)
+            draft = ""
+        }
+    }
+
+    private func addComment() {
+        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        withAnimation(.spring(response: 0.26, dampingFraction: 0.78)) {
+            comments.append(FeedLiveComment(username: "You", text: trimmed))
+        }
+        draft = ""
+        isFocused = false
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+
+    private static func seedComments(for postID: String, displayName: String) -> [FeedLiveComment] {
+        let samples = [
+            FeedLiveComment(username: "vi.xi.mmvi", text: "this is live right now"),
+            FeedLiveComment(username: "leurdavoir", text: "keep the camera there"),
+            FeedLiveComment(username: "monsekee", text: "the radius is going crazy"),
+            FeedLiveComment(username: "poplur", text: "watching \(displayName)")
+        ]
+        let offset = abs(postID.hashValue) % samples.count
+        return Array(samples[offset...]) + Array(samples[..<offset])
+    }
+}
+
+private final class FeedBreakingNewsConfettiScene: SKScene {
+    override init(size: CGSize) {
+        super.init(size: size)
+        backgroundColor = .clear
+        scaleMode = .resizeFill
+    }
+
+    required init?(coder aDecoder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func burstFromTop() {
+        guard size.width > 0, size.height > 0 else { return }
+
+        let emitter = SKEmitterNode()
+        emitter.particleTexture = SKTexture(image: Self.confettiTexture())
+        emitter.position = CGPoint(x: size.width / 2, y: size.height + 12)
+        emitter.particlePositionRange = CGVector(dx: size.width * 0.98, dy: 0)
+        emitter.emissionAngle = -CGFloat.pi / 2
+        emitter.emissionAngleRange = CGFloat.pi / 7
+        emitter.particleBirthRate = 520
+        emitter.numParticlesToEmit = 180
+        emitter.particleLifetime = 4.0
+        emitter.particleLifetimeRange = 1.1
+        emitter.particleSpeed = 160
+        emitter.particleSpeedRange = 90
+        emitter.yAcceleration = -170
+        emitter.xAcceleration = 0
+        emitter.particleScale = 0.78
+        emitter.particleScaleRange = 0.32
+        emitter.particleScaleSpeed = -0.08
+        emitter.particleRotationRange = CGFloat.pi * 2
+        emitter.particleRotationSpeed = 5.5
+        emitter.particleAlpha = 0.95
+        emitter.particleAlphaRange = 0.12
+        emitter.particleAlphaSpeed = -0.18
+        emitter.particleBlendMode = .alpha
+        emitter.particleColorBlendFactor = 1.0
+        emitter.particleColorSequence = SKKeyframeSequence(
+            keyframeValues: [
+                UIColor.systemYellow,
+                UIColor.white,
+                UIColor.systemRed,
+                UIColor.systemBlue,
+                UIColor.systemGreen,
+                UIColor.systemPink
+            ],
+            times: [0.0, 0.18, 0.36, 0.54, 0.72, 1.0].map(NSNumber.init(value:))
+        )
+
+        addChild(emitter)
+        emitter.run(.sequence([
+            .wait(forDuration: 4.6),
+            .removeFromParent()
+        ]))
+    }
+
+    private static func confettiTexture() -> UIImage {
+        let size = CGSize(width: 8, height: 15)
+        return UIGraphicsImageRenderer(size: size).image { context in
+            UIColor.white.setFill()
+            context.fill(CGRect(origin: .zero, size: size))
         }
     }
 }
@@ -1872,26 +2442,11 @@ struct FeedViewHost: View {
 }
 
 private struct FeedLaunchLoadingScreen: View {
-    @State private var pulse = false
+    @State private var scene = HomeFeedLaunchCoverScene.make()
 
     var body: some View {
-        ZStack {
-            Color.white.ignoresSafeArea()
-
-            Image("logo")
-                .resizable()
-                .scaledToFit()
-                .frame(width: 132, height: 132)
-                .scaleEffect(pulse ? 1.04 : 0.96)
-                .opacity(pulse ? 1.0 : 0.86)
-                .animation(
-                    .easeInOut(duration: 0.9).repeatForever(autoreverses: true),
-                    value: pulse
-                )
-        }
-        .onAppear {
-            pulse = true
-        }
-        .allowsHitTesting(false)
+        SpriteView(scene: scene)
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
     }
 }

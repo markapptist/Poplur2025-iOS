@@ -6,6 +6,7 @@ final class FeedAudioManager {
 
     // Keep weak references so players can deallocate
     private let players = NSHashTable<AVPlayer>.weakObjects()
+    private weak var currentPlayer: AVPlayer?
 
     private init() {
         NotificationCenter.default.addObserver(forName: Notification.Name("PauseGlobalFeedAudio"), object: nil, queue: .main) { [weak self] _ in
@@ -24,7 +25,15 @@ final class FeedAudioManager {
                 p.pause()
             }
         }
+        if currentPlayer !== player {
+            currentPlayer = player
+            NotificationCenter.default.post(name: .ActiveFeedPlayerDidChange, object: player)
+        }
         player.play()
+    }
+
+    var activePlayer: AVPlayer? {
+        currentPlayer
     }
 
     func stopAll() {
@@ -33,5 +42,7 @@ final class FeedAudioManager {
             p.replaceCurrentItem(with: nil)
         }
         players.removeAllObjects()
+        currentPlayer = nil
+        NotificationCenter.default.post(name: .ActiveFeedPlayerDidChange, object: nil)
     }
 }

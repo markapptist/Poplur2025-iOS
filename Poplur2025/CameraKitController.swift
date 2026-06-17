@@ -51,9 +51,13 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
     @Published var isScreenFlashOn: Bool = false // For front camera "flash"
     @Published var currentCameraPosition: AVCaptureDevice.Position = .back
     @Published var isRecording: Bool = false
+    @Published var isLiveVideoActive: Bool = false
+    @Published var liveVideoSeconds: Int = 0
+    @Published var liveViewerCount: Int = 128
     private var currentVideoInput: AVCaptureDeviceInput?
     private var isMovieRecordingRequested = false
     private var shouldStopRecordingWhenStarted = false
+    private var liveVideoTimer: Timer?
 
     // Added published property for last recorded video URL
     @Published var lastVideoURL: URL? = nil
@@ -1039,6 +1043,11 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
     private func handleCubeTapCapture() {
         print("[CameraKitController] Cube tap received")
         // Block capturing while recording
+        if self.isLiveVideoActive {
+            print("[CameraKitController] Cube tap BLOCKED: live video active")
+            NotificationCenter.default.post(name: Notification.Name("PhotoCaptureBlockedDuringLiveVideo"), object: nil)
+            return
+        }
         if !self.allowPhotoCapture || self.isRecording || self.movieOutput.isRecording {
             print("[CameraKitController] Cube tap BLOCKED: allowPhotoCapture=\(self.allowPhotoCapture) isRecording=\(self.isRecording) movieRecording=\(self.movieOutput.isRecording)")
             NotificationCenter.default.post(name: Notification.Name("PhotoCaptureBlockedDuringRecording"), object: nil)
@@ -1119,6 +1128,62 @@ class CameraKitController: NSObject, ObservableObject, AVCapturePhotoCaptureDele
     @MainActor
     func endRecording() {
         self.stopVideoRecording()
+    }
+
+    @MainActor
+    func toggleLiveVideo() {
+        if isLiveVideoActive {
+            stopLiveVideo()
+        } else {
+            startLiveVideo()
+        }
+    }
+
+    @MainActor
+    func startLiveVideo() {
+        if isRecording || movieOutput.isRecording {
+            stopVideoRecording()
+        }
+
+        ensurePreviewFallbackIfNeeded()
+        if let previewVC = (recordPreviewViewController ?? previewViewController) as? CameraPreviewViewController {
+            previewVC.setCaptureSession(captureSession)
+        }
+
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            self.configureSessionIfNeeded()
+            if !self.captureSession.isRunning {
+                self.captureSession.startRunning()
+            }
+        }
+
+        liveVideoTimer?.invalidate()
+        liveVideoSeconds = 0
+        liveViewerCount = 128
+        isLiveVideoActive = true
+        allowPhotoCapture = false
+        NotificationCenter.default.post(name: Notification.Name("LiveVideoStarted"), object: nil)
+        NotificationCenter.default.post(name: Notification.Name("CubeInteractionDisabled"), object: nil)
+
+        liveVideoTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.isLiveVideoActive else { return }
+                self.liveVideoSeconds += 1
+                self.liveViewerCount = 128 + ((self.liveVideoSeconds * 7) % 43)
+            }
+        }
+    }
+
+    @MainActor
+    func stopLiveVideo() {
+        liveVideoTimer?.invalidate()
+        liveVideoTimer = nil
+        isLiveVideoActive = false
+        liveVideoSeconds = 0
+        allowPhotoCapture = true
+        NotificationCenter.default.post(name: Notification.Name("LiveVideoStopped"), object: nil)
+        NotificationCenter.default.post(name: Notification.Name("CubeInteractionEnabled"), object: nil)
     }
     
     @MainActor

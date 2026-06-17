@@ -3,8 +3,6 @@ import SwiftUI
 struct ChatThreadListView: View {
     @StateObject private var chatStore: FakeChatStore
     @State private var navigateToThread: FakeChatThread? = nil
-    @State private var callingUser: FakeUser? = nil
-    @State private var showPhoneCall = false
 
     init() {
         _chatStore = StateObject(wrappedValue: FakeChatStore())
@@ -62,18 +60,17 @@ struct ChatThreadListView: View {
                             .padding(.vertical, 8)
                         }
 
-                        // Phone call button
+                        // FaceTime video button
                         Button(action: {
                             if let user = item.participants.first(where: { $0.name != "Alice" }) {
-                                callingUser = user
-                                showPhoneCall = true
+                                FaceTimeLauncher.startVideoCall(to: user)
                             }
                         }) {
-                            Image(systemName: "phone.fill")
+                            Image(systemName: "video.fill")
                                 .font(.system(size: 18))
                                 .foregroundColor(.white)
                                 .frame(width: 40, height: 40)
-                                .background(Color.green)
+                                .background(Color.blue)
                                 .clipShape(Circle())
                         }
                         .buttonStyle(.plain)
@@ -93,13 +90,6 @@ struct ChatThreadListView: View {
                 DMDetailView(thread: thread)
                     .toolbar(.hidden, for: .navigationBar)
                     .navigationBarBackButtonHidden(true)
-            }
-        }
-        .overlay {
-            if let user = callingUser {
-                PopularPhone(user: user)
-                    .opacity(showPhoneCall ? 1 : 0)
-                    .allowsHitTesting(showPhoneCall)
             }
         }
         .navigationTitle("Chats")
@@ -218,6 +208,27 @@ struct DMDetailView: View {
         .navigationBarBackButtonHidden(true)
         .background(Color.white)
         .onAppear { seedConversation() }
+        .safeAreaInset(edge: .top) {
+            HStack {
+                Spacer()
+                Button {
+                    if let user = videoCallUser {
+                        FaceTimeLauncher.startVideoCall(to: user)
+                    }
+                } label: {
+                    Image(systemName: "video.fill")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(width: 42, height: 42)
+                        .background(Color.blue)
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .padding(.trailing, 16)
+                .padding(.top, 8)
+            }
+            .background(Color.white)
+        }
     }
 
     private func chatTitle(for thread: FakeChatThread) -> String {
@@ -235,6 +246,10 @@ struct DMDetailView: View {
             return mirrorPreview
         }
         return "No messages yet"
+    }
+
+    private var videoCallUser: FakeUser? {
+        thread.participants.first(where: { $0.name != "Alice" }) ?? thread.participants.last
     }
 
     struct Message: Identifiable {
