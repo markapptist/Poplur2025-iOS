@@ -1430,9 +1430,11 @@ private struct CubeSceneView: UIViewRepresentable {
             down.timingMode = .easeInEaseOut
             let rest = SCNAction.wait(duration: 0.35)
 
-            // Pop sound exactly at peak
+            // Pop sound exactly at peak — skip on record tab because SCNAction.playAudio
+            // uses AVAudioEngine internally; calling setActive() while AVCaptureSession
+            // holds the audio session interrupts the camera and crashes the preview.
             var peakSound: SCNAction = .wait(duration: 0)
-            if let src = popAudioSource {
+            if let src = popAudioSource, parent.selectedTab != .record {
                 peakSound = SCNAction.playAudio(src, waitForCompletion: false)
             }
 

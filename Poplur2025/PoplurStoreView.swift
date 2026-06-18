@@ -113,8 +113,9 @@ private struct ProductCard: View {
         VStack(spacing: 12) {
             Image(product.imageName)
                 .resizable()
-                .scaledToFit()
-                .frame(height: 140)
+                .scaledToFill()
+                .frame(maxWidth: .infinity, maxHeight: 140)
+                .clipped()
                 .cornerRadius(12)
                 .shadow(radius: 3)
             Text(product.name)

@@ -5677,7 +5677,7 @@ struct MapViewProduction: View {
     @ViewBuilder
     private var indoorMapSheet: some View {
         NavigationStack {
-            MappedInWebView()
+            IndoorMapContainer(coordinate: locationManager.location?.coordinate)
                 .ignoresSafeArea(edges: .bottom)
                 .navigationTitle("Indoor Map")
                 .navigationBarTitleDisplayMode(.inline)
@@ -6188,8 +6188,52 @@ private struct MapTabLayoutPreview: View {
 
 #endif
 
+// MARK: - Mappedin Indoor Maps
+
+private struct IndoorMapContainer: View {
+    let coordinate: CLLocationCoordinate2D?
+
+    @State private var venueURL: URL? = nil
+    @State private var isSearching = true
+
+    var body: some View {
+        Group {
+            if let url = venueURL {
+                MappedInWebView(url: url)
+            } else if isSearching {
+                VStack(spacing: 14) {
+                    ProgressView()
+                    Text("Searching for nearby venues…")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                VStack(spacing: 16) {
+                    Image(systemName: "building.2.slash")
+                        .font(.system(size: 52))
+                        .foregroundStyle(.secondary)
+                    Text("No indoor map available\nfor this location")
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .task {
+            if let coord = coordinate {
+                let slug = await MappedinVenueSearch.nearestVenue(lat: coord.latitude, lng: coord.longitude)
+                venueURL = slug.flatMap { URL(string: "https://app.mappedin.com/map/\($0)") }
+            } else {
+                venueURL = URL(string: "https://app.mappedin.com/map/\(MappedinVenueSearch.demoSlug)")
+            }
+            isSearching = false
+        }
+    }
+}
+
 private struct MappedInWebView: UIViewRepresentable {
-    private let url = URL(string: "https://app.mappedin.com/map/mappedin-demo-mall")!
+    let url: URL
 
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
@@ -6200,5 +6244,38 @@ private struct MappedInWebView: UIViewRepresentable {
         return webView
     }
 
-    func updateUIView(_ uiView: WKWebView, context: Context) {}
+    func updateUIView(_ uiView: WKWebView, context: Context) {
+        if uiView.url != url { uiView.load(URLRequest(url: url)) }
+    }
+}
+
+private enum MappedinVenueSearch {
+    // Sign up at developer.mappedin.com and replace these with your own credentials.
+    static let clientId = "5eab30aa91b055001a68e996"
+    static let clientSecret = "RJyRXKcryCMy4erZqqCbuB1NpgM2G7NMEAD75cFhotP"
+    static let demoSlug = "mappedin-demo-mall"
+
+    /// Returns the slug of the nearest Mappedin-indexed venue, or nil if none is nearby.
+    static func nearestVenue(lat: Double, lng: Double) async -> String? {
+        guard var comps = URLComponents(string: "https://api.mappedin.com/1/venue") else { return nil }
+        comps.queryItems = [
+            .init(name: "venue", value: "nearby"),
+            .init(name: "lat", value: String(lat)),
+            .init(name: "lng", value: String(lng))
+        ]
+        guard let url = comps.url else { return nil }
+        var request = URLRequest(url: url, timeoutInterval: 6)
+        let token = Data("\(clientId):\(clientSecret)".utf8).base64EncodedString()
+        request.setValue("Basic \(token)", forHTTPHeaderField: "Authorization")
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request)
+            if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let arr = json["data"] as? [[String: Any]],
+               let first = arr.first,
+               let slug = first["slug"] as? String, !slug.isEmpty {
+                return slug
+            }
+        } catch {}
+        return nil
+    }
 }
