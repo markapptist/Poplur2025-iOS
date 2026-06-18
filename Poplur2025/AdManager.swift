@@ -11,14 +11,16 @@ final class AdManager: NSObject, FullScreenContentDelegate {
     
     private override init() {
         super.init()
-        loadInterstitial()
+        // loadInterstitial() is intentionally NOT called here — the singleton is accessed
+        // at app launch, so any network request in init() fires before the first frame.
+        // start() is called after the first frame and triggers the ad preload there.
     }
-    
+
     func start() {
         guard !hasStarted else { return }
-        // Start the Google Mobile Ads SDK. Current API does not require a nil completion.
         MobileAds.shared.start(completionHandler: nil)
         hasStarted = true
+        loadInterstitial()
     }
     
     func loadInterstitial() {

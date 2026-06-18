@@ -10,14 +10,21 @@ struct PopularPhone: View {
     @StateObject private var colorWheel = CubeMenuWheelController()
     @ObservedObject private var callManager = CallSessionManager.shared
     @Environment(\.dismiss) private var dismiss
+    @AppStorage("poplur_phoneXLMode") private var phoneXLMode: Bool = true
     @State private var selectedColorway = PoplurPhoneColorway.all[0]
     @State private var isPhoneButtonActive = true
+    @State private var isLCDActive = false
     @State private var holdWorkItem: DispatchWorkItem?
     @State private var isHoldingColorWheel = false
 
     init(user: FakeUser) {
         self.user = user
-        _phoneScene = State(initialValue: PhoneScene(callingUser: user))
+        let scene = PhoneScene(callingUser: user)
+        // Apply stored size preference before setupPhone runs in didMove(to:)
+        if let stored = UserDefaults.standard.object(forKey: "poplur_phoneXLMode") as? Bool {
+            scene.isXLSize = stored
+        }
+        _phoneScene = State(initialValue: scene)
     }
 
     var body: some View {
@@ -34,12 +41,18 @@ struct PopularPhone: View {
         }
         .background(Color.black)
         .ignoresSafeArea()
+        .onChange(of: phoneXLMode) { _, xl in
+            phoneScene.applyPhoneSize(xl)
+        }
         .onAppear {
             NotificationCenter.default.post(name: .popularPhoneDidPresent, object: nil)
             NotificationCenter.default.post(name: Notification.Name("CubeInteractionDisabled"), object: nil)
+            phoneScene.applyPhoneSize(phoneXLMode)
             phoneScene.applyColorway(selectedColorway.bootupSpritesheetName)
             phoneScene.setPhoneButtonActive(isPhoneButtonActive, announce: false)
             phoneScene.onDismiss = { dismiss() }
+            phoneScene.onLCDActivated = { isLCDActive = true }
+            phoneScene.onLCDDeactivated = { isLCDActive = false }
             // Wire the centre nav key -> in-app call / hang up when the hardware button is active.
             phoneScene.onCallButtonTapped = { [user] in
                 Task {
@@ -104,7 +117,15 @@ struct PopularPhone: View {
         let aspect = 1024.0 / 1536.0
         let availableWidth = max(1, container.width)
         let availableHeight = max(1, container.height)
-        let phoneWidth = min(availableWidth, availableHeight * aspect)
+
+        let phoneWidth: CGFloat
+        if phoneXLMode {
+            phoneWidth = max(availableWidth, availableHeight * aspect)
+        } else {
+            let normalHeight = availableHeight * 0.65
+            let normalWidth = normalHeight * aspect
+            phoneWidth = min(normalWidth, availableWidth * 0.88)
+        }
         let phoneHeight = phoneWidth / aspect
 
         return CGRect(
@@ -116,6 +137,7 @@ struct PopularPhone: View {
     }
 
     private func scheduleColorHold() {
+        guard isLCDActive else { return }
         guard holdWorkItem == nil, !isHoldingColorWheel else { return }
         let workItem = DispatchWorkItem {
             isHoldingColorWheel = true
@@ -133,7 +155,12 @@ struct PopularPhone: View {
             holdWorkItem = nil
         } else {
             cancelColorHold()
-            togglePhoneButtonActive()
+            if isLCDActive {
+                togglePhoneButtonActive()
+            } else {
+                phoneScene.activateLCD()
+                isLCDActive = true
+            }
         }
     }
 
@@ -164,7 +191,7 @@ struct PopularPhone: View {
     }
 }
 
-private struct PoplurPhoneColorway: Identifiable, Equatable {
+struct PoplurPhoneColorway: Identifiable, Equatable {
     let id: String
     let title: String
     let bootupSpritesheetName: String

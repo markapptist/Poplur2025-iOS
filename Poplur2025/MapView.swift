@@ -672,11 +672,11 @@ private final class PoplurMapRadioHost: NSObject, ObservableObject, AVSpeechSynt
 
         let utterance = AVSpeechUtterance(string: script)
         utterance.voice = Self.preferredRadioVoice()
-        utterance.rate = 0.50
-        utterance.pitchMultiplier = 1.0
+        utterance.rate = 0.52          // slightly above default — more natural conversational pace
+        utterance.pitchMultiplier = 1.05  // slight lift makes voice less flat/monotone
         utterance.volume = 1.0
-        utterance.preUtteranceDelay = 0.12
-        utterance.postUtteranceDelay = 0.18
+        utterance.preUtteranceDelay = 0.05  // shorter startup gap = less robotic
+        utterance.postUtteranceDelay = 0.15
 
         isLive = true
         synth.speak(utterance)
@@ -684,11 +684,26 @@ private final class PoplurMapRadioHost: NSObject, ObservableObject, AVSpeechSynt
 
     private static func preferredRadioVoice() -> AVSpeechSynthesisVoice? {
         let voices = AVSpeechSynthesisVoice.speechVoices()
-        return voices.first {
-            $0.language == "en-US" && ($0.quality == .premium || $0.quality == .enhanced)
-        } ?? voices.first {
-            $0.language == "en-GB" && ($0.quality == .premium || $0.quality == .enhanced)
-        } ?? AVSpeechSynthesisVoice(language: "en-US")
+        // "Ava" (US) and "Siri" premium voices are the most natural-sounding on iOS.
+        // Fall through quality tiers so we always return something audible.
+        let enUS = voices.filter { $0.language == "en-US" }
+        if let ava = enUS.first(where: { $0.quality == .premium && $0.name.lowercased().contains("ava") }) {
+            return ava
+        }
+        if let premium = enUS.first(where: { $0.quality == .premium }) {
+            return premium
+        }
+        if let enhanced = enUS.first(where: { $0.quality == .enhanced }) {
+            return enhanced
+        }
+        // Try any English premium/enhanced before falling back to system default
+        if let anyPremium = voices.first(where: { $0.language.hasPrefix("en") && $0.quality == .premium }) {
+            return anyPremium
+        }
+        if let anyEnhanced = voices.first(where: { $0.language.hasPrefix("en") && $0.quality == .enhanced }) {
+            return anyEnhanced
+        }
+        return AVSpeechSynthesisVoice(language: "en-US")
     }
 
     func stop() {
@@ -723,57 +738,20 @@ private struct PoplurMapRadioOverlay: View {
         Button {
             host.toggle(script: script)
         } label: {
-            HStack(spacing: 10) {
-                ZStack {
-                    Circle()
-                        .fill(Color.green.opacity(host.isLive ? 0.24 : 0.12))
-                        .frame(width: 42, height: 42)
-                        .overlay(
-                            Circle()
-                                .stroke(Color.green.opacity(host.isLive ? 0.9 : 0.45), lineWidth: 1.4)
-                        )
+            ZStack {
+                Circle()
+                    .fill(Color.green.opacity(host.isLive ? 0.24 : 0.12))
+                    .frame(width: 48, height: 48)
+                    .overlay(
+                        Circle()
+                            .stroke(Color.green.opacity(host.isLive ? 0.9 : 0.45), lineWidth: 1.4)
+                    )
 
-                    Image(systemName: host.isLive ? "pause.fill" : "antenna.radiowaves.left.and.right")
-                        .font(.system(size: 18, weight: .black))
-                        .foregroundStyle(.green)
-                        .shadow(color: .green.opacity(host.isLive ? 0.8 : 0.35), radius: host.isLive ? 8 : 3)
-                }
-
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 6) {
-                        Text("POPLUR RADIO")
-                            .font(.system(size: 11, weight: .black, design: .rounded))
-                            .foregroundStyle(.white)
-                            .tracking(1.1)
-
-                        if host.isLive {
-                            Text("LIVE")
-                                .font(.system(size: 9, weight: .black, design: .rounded))
-                                .foregroundStyle(.black)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Color.green, in: Capsule())
-                        }
-                    }
-
-                    Text(host.isLive ? host.currentScript : script)
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.86))
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
-                }
+                Image(systemName: host.isLive ? "pause.fill" : "antenna.radiowaves.left.and.right")
+                    .font(.system(size: 18, weight: .black))
+                    .foregroundStyle(.green)
+                    .shadow(color: .green.opacity(host.isLive ? 0.8 : 0.35), radius: host.isLive ? 8 : 3)
             }
-            .padding(.leading, 8)
-            .padding(.trailing, 12)
-            .padding(.vertical, 8)
-            .frame(maxWidth: 262, alignment: .leading)
-            .background(.black.opacity(0.58), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(Color.green.opacity(host.isLive ? 0.65 : 0.28), lineWidth: 1)
-            )
-            .shadow(color: .green.opacity(host.isLive ? 0.32 : 0.12), radius: host.isLive ? 16 : 8, x: 0, y: 0)
-            .shadow(color: .black.opacity(0.36), radius: 12, x: 0, y: 6)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(host.isLive ? "Stop Poplur Radio" : "Play Poplur Radio")
@@ -1634,6 +1612,7 @@ private final class CityTourMusicPlayerService: ObservableObject {
 
     func play(for stop: PoplurTourStop, insight: AiTourInsight?, preferPreviewTracks: Bool = false) {
         guard !previewOnly else { return }
+        configureCallFriendlyAudioSession()
         startPlayback(tracks: [FallbackCityMusicTracks[stop.cityName] ?? DefaultFallbackCityMusicTrack], index: 0)
         loadTask?.cancel()
         loadTask = Task { [weak self] in
@@ -1667,6 +1646,11 @@ private final class CityTourMusicPlayerService: ObservableObject {
     func unduckAfterRadio() {
         lastPlayerVolume = 1.0
         player?.volume = 1.0
+        // AVSpeechSynthesizer can interrupt AVPlayer even with .mixWithOthers; the interruption
+        // handler only resumes if shouldResume is set (often absent for TTS). Force-resume here.
+        if let p = player, p.rate == 0, p.currentItem?.status == .readyToPlay {
+            p.play()
+        }
     }
 
     private func startPlayback(tracks: [CityMusicTrack], index: Int) {
@@ -1679,7 +1663,9 @@ private final class CityTourMusicPlayerService: ObservableObject {
 
         playbackFallbackTask?.cancel()
         clearPlaybackObservers()
-        configureCallFriendlyAudioSession()
+        // Silence the old player before releasing it to prevent an audible pop/click
+        player?.volume = 0
+        player?.pause()
 
         activeTracks = tracks
         activeTrackIndex = index
@@ -1688,7 +1674,7 @@ private final class CityTourMusicPlayerService: ObservableObject {
         let newPlayer = AVPlayer(playerItem: item)
         newPlayer.volume = lastPlayerVolume
         newPlayer.isMuted = false
-        newPlayer.automaticallyWaitsToMinimizeStalling = false
+        // Keep default stalling behaviour (true) so streaming URLs buffer properly
         player = newPlayer
         currentTrackTitle = track.artistSeed
 
@@ -3429,7 +3415,10 @@ struct MapViewProduction: View {
     @StateObject private var mapState = MapStateManager.shared
     @StateObject private var musicPlayer: CityTourMusicPlayerService
     @StateObject private var mapRadioHost = PoplurMapRadioHost()
-    
+
+    @AppStorage("poplur_use2DMap") private var use2DMap: Bool = false
+    private var activePitch: CGFloat { use2DMap ? 0 : fixedPitchAlt }
+
     @State private var fixedDistanceAlt: CLLocationDistance = 700 // Start at optimal viewing distance (700m)
     @State private var camera: MapCameraPosition = .camera(
         MapCamera(
@@ -3553,7 +3542,7 @@ struct MapViewProduction: View {
                     centerCoordinate: $0.centerCoordinate,
                     distance: fixedDistanceAlt,
                     heading: $0.heading,
-                    pitch: fixedPitchAlt
+                    pitch: activePitch
                 )
             )
         } ?? pos
@@ -3567,7 +3556,7 @@ struct MapViewProduction: View {
                     centerCoordinate: coordinate,
                     distance: fixedDistanceAlt,
                     heading: heading,
-                    pitch: fixedPitchAlt
+                    pitch: activePitch
                 )
             )
         }
@@ -3644,7 +3633,7 @@ struct MapViewProduction: View {
                         centerCoordinate: coordinate,
                         distance: targetDistance,
                         heading: 0,
-                        pitch: fixedPitchAlt
+                        pitch: activePitch
                     )
                 )
             }
@@ -3696,7 +3685,7 @@ struct MapViewProduction: View {
                     centerCoordinate: coordinate,
                     distance: fixedDistanceAlt,
                     heading: heading,
-                    pitch: fixedPitchAlt
+                    pitch: activePitch
                 )
             )
         }
@@ -3830,7 +3819,7 @@ struct MapViewProduction: View {
                     centerCoordinate: userCoordinate,
                     distance: fixedDistanceAlt,
                     heading: camera.camera?.heading ?? 0,
-                    pitch: fixedPitchAlt
+                    pitch: activePitch
                 )
             )
         }
@@ -4205,7 +4194,7 @@ struct MapViewProduction: View {
                         centerCoordinate: focus.coordinate,
                         distance: focus.distance,
                         heading: focus.bearing,
-                        pitch: fixedPitchAlt
+                        pitch: activePitch
                     )
                 )
                 fixedDistanceAlt = focus.distance
@@ -4287,7 +4276,7 @@ struct MapViewProduction: View {
             ZStack {
                 Map(
                     position: cameraBinding,
-                    interactionModes: [.pan, .rotate, .pitch, .zoom]
+                    interactionModes: use2DMap ? [.pan, .rotate, .zoom] : [.pan, .rotate, .pitch, .zoom]
                 ) {
                 // Show user annotation with 3D blue pin when location is available
                 if let userCoord = liveUserCoordinate ?? locationManager.location?.coordinate {
@@ -4414,7 +4403,7 @@ struct MapViewProduction: View {
 #if POP_PREVIEW_LIGHT
                 .mapStyle(.standard)
 #else
-                .mapStyle(.hybrid(elevation: .realistic, showsTraffic: false))
+                .mapStyle(use2DMap ? .standard : .hybrid(elevation: .realistic, showsTraffic: false))
 #endif
                 .onTapGesture { location in
                 // Handle map tap based on current flow
@@ -4758,7 +4747,7 @@ struct MapViewProduction: View {
                     centerCoordinate: currentCoord,
                     distance: clampedZoom,
                     heading: heading,
-                    pitch: fixedPitchAlt
+                    pitch: activePitch
                 )
             )
         }
@@ -5159,6 +5148,18 @@ struct MapViewProduction: View {
                     cubeHoldNavPath = NavigationPath()
                 }
             }
+            .onChange(of: use2DMap) { _, is2D in
+                guard !layoutPreviewMode else { return }
+                guard let coord = camera.camera?.centerCoordinate else { return }
+                withAnimation(.easeInOut(duration: 0.5)) {
+                    camera = .camera(MapCamera(
+                        centerCoordinate: coord,
+                        distance: fixedDistanceAlt,
+                        heading: camera.camera?.heading ?? 0,
+                        pitch: is2D ? 0 : fixedPitchAlt
+                    ))
+                }
+            }
             .onReceive(NotificationCenter.default.publisher(for: .CubeGlobalTap)) { _ in
                 guard !layoutPreviewMode else { return }
                 // If menu is open, pop sub-screen or close root; otherwise center on location
@@ -5302,7 +5303,7 @@ struct MapViewProduction: View {
                                     centerCoordinate: pendingCoordinate,
                                     distance: fixedDistanceAlt,
                                     heading: 0,
-                                    pitch: fixedPitchAlt
+                                    pitch: activePitch
                                 )
                             )
                         }
@@ -5512,11 +5513,11 @@ struct MapViewProduction: View {
                                 centerCoordinate: coordinate,
                                 distance: fixedDistanceAlt,
                                 heading: 0,
-                                pitch: fixedPitchAlt
+                                pitch: activePitch
                             )
                         )
                     }
-                    
+
                     print("📸 [MapView] Camera snapped to target coordinate")
 
                     // Use the tour-style transition for smooth navigation with radius
@@ -5808,7 +5809,7 @@ struct MapViewProduction: View {
                 centerCoordinate: coordinate,
                 distance: fixedDistanceAlt,
                 heading: 0,
-                pitch: fixedPitchAlt
+                pitch: activePitch
             ))
         }
 
@@ -5892,7 +5893,7 @@ struct MapViewProduction: View {
                     centerCoordinate: pendingCoordinate,
                     distance: fixedDistanceAlt,
                     heading: 0,
-                    pitch: fixedPitchAlt
+                    pitch: activePitch
                 ))
             }
             navigateWithTourTransition(to: pendingCoordinate, cityName: "Post Location")
@@ -6007,7 +6008,7 @@ struct MapViewProduction: View {
             centerCoordinate: newLocation.coordinate,
             distance: fixedDistanceAlt,
             heading: 0,
-            pitch: fixedPitchAlt
+            pitch: activePitch
         ))
 
         if mapState.hasRunFirstLaunchSequence {

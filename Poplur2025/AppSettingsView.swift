@@ -15,6 +15,8 @@ struct AppSettingsView: View {
     @State private var pageIndex: Int = 0
     @State private var isPrivateAccount = false
     @State private var notificationsEnabled = true
+    @AppStorage("poplur_use2DMap") private var use2DMap: Bool = false
+    @AppStorage("poplur_phoneXLMode") private var phoneXLMode: Bool = true
 
     @State private var posts: [Post] = []
     @State private var isLoadingStats = true
@@ -190,6 +192,8 @@ struct AppSettingsView: View {
                 VStack(spacing: 14) {
                     settingsToggleRow(title: "Private Account", isOn: $isPrivateAccount)
                     settingsToggleRow(title: "Notifications", isOn: $notificationsEnabled)
+                    settingsToggleRow(title: "2D Map", isOn: $use2DMap)
+                    settingsToggleRow(title: "XL Phone", isOn: $phoneXLMode)
                     settingsToggleRow(
                         title: "HUD Sleep Timer",
                         isOn: Binding(

@@ -8,10 +8,6 @@ private let isRunningInPreviews: Bool = {
     ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1"
 }()
 
-// Auto-export cube faces on file load
-private let _autoExport: Void = {
-    CubeFaceExporter.exportToProjectRoot()
-}()
 
 private enum CubeFaceImageCache {
     private static var cache: [String: UIImage] = [:]
@@ -1057,7 +1053,8 @@ private struct CubeSceneView: UIViewRepresentable {
 
         private var rotationSpeedMultiplier: Double { parent.rotationSpeedMultiplier }
 
-        private var popAudioSource: SCNAudioSource? = {
+        // Loaded lazily on first pop to avoid synchronous disk I/O + audio decode at Coordinator.init time.
+        private lazy var popAudioSource: SCNAudioSource? = {
             let candidates: [(name: String, ext: String?)] = [
                 ("pop", "mp3"),
                 ("pop", "caf"),
@@ -1071,17 +1068,15 @@ private struct CubeSceneView: UIViewRepresentable {
                         src.shouldStream = false
                         src.loops = false
                         src.load()
-                        print("[CubeTabView] Loaded pop audio from bundle: \(url.lastPathComponent)")
                         return src
                     }
                 }
             }
-            print("[CubeTabView] Failed to load 'pop' audio (mp3/caf/wav) from bundle")
             return nil
         }()
-        
+
         #if DEBUG
-        private var popAVPlayer: AVAudioPlayer? = {
+        private lazy var popAVPlayer: AVAudioPlayer? = {
             let candidates: [(name: String, ext: String?)] = [
                 ("pop", "mp3"),
                 ("pop", "caf"),
@@ -1089,19 +1084,14 @@ private struct CubeSceneView: UIViewRepresentable {
             ]
             for cand in candidates {
                 if let url = Bundle.main.url(forResource: cand.name, withExtension: cand.ext) {
-                    do {
-                        let player = try AVAudioPlayer(contentsOf: url)
+                    if let player = try? AVAudioPlayer(contentsOf: url) {
                         player.volume = 0.9
                         player.numberOfLoops = 0
                         player.prepareToPlay()
-                        print("[CubeTabView] AVAudioPlayer prepared: \(url.lastPathComponent)")
                         return player
-                    } catch {
-                        print("[CubeTabView] AVAudioPlayer init failed for \(url.lastPathComponent): \(error)")
                     }
                 }
             }
-            print("[CubeTabView] AVAudioPlayer fallback not available for 'pop'")
             return nil
         }()
         #endif
@@ -1443,19 +1433,6 @@ private struct CubeSceneView: UIViewRepresentable {
             // Pop sound exactly at peak
             var peakSound: SCNAction = .wait(duration: 0)
             if let src = popAudioSource {
-                #if DEBUG
-                if !isRunningInPreviews {
-                    do {
-                        try AVAudioSession.sharedInstance().setCategory(.ambient, options: [.mixWithOthers])
-                        try AVAudioSession.sharedInstance().setActive(true)
-                        print("[CubeTabView] AVAudioSession ensured active for long-press slow pop")
-                    } catch {
-                        print("[CubeTabView] AVAudioSession ensure active failed: \(error)")
-                    }
-                } else {
-                    print("[CubeTabView] Skipping AVAudioSession ensure active in previews")
-                }
-                #endif
                 peakSound = SCNAction.playAudio(src, waitForCompletion: false)
             }
 

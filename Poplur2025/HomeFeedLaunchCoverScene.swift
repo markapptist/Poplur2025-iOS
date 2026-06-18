@@ -5,6 +5,8 @@ class HomeFeedLaunchCoverScene: SKScene {
 
     private var logoNode: SKSpriteNode?
     private var popPlayer: AVAudioPlayer?
+    // Pre-computed once at scene creation — WAV synthesis is the same every call.
+    private lazy var cachedPopWAV: Data? = synthesisePopWAV()
 
     // MARK: - Setup
 
@@ -17,6 +19,9 @@ class HomeFeedLaunchCoverScene: SKScene {
 
     override func didMove(to view: SKView) {
         backgroundColor = .white
+        // Configure audio session once here rather than on every pop sound call.
+        try? AVAudioSession.sharedInstance().setCategory(.ambient, options: .mixWithOthers)
+        try? AVAudioSession.sharedInstance().setActive(true)
         setupLogo()
         startPopLoop()
     }
@@ -141,17 +146,11 @@ class HomeFeedLaunchCoverScene: SKScene {
     // MARK: - Pop Sound (synthesised bubble-pop)
 
     private func playPopSound() {
-        guard let data = synthesisePopWAV() else { return }
-        do {
-            try AVAudioSession.sharedInstance().setCategory(.ambient, options: .mixWithOthers)
-            try AVAudioSession.sharedInstance().setActive(true)
-        } catch {}
-        do {
-            let player = try AVAudioPlayer(data: data)
-            player.volume = 0.62
-            player.play()
-            popPlayer = player // retain until playback finishes
-        } catch {}
+        guard let data = cachedPopWAV else { return }
+        guard let player = try? AVAudioPlayer(data: data) else { return }
+        player.volume = 0.62
+        player.play()
+        popPlayer = player // retain until playback finishes
     }
 
     private func synthesisePopWAV() -> Data? {

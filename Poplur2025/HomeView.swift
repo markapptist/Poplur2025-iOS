@@ -386,18 +386,6 @@ struct HomeView: View {
     @ObservedObject private var callManager = CallSessionManager.shared
     @State private var incomingCallInfo: (callerName: String, channelId: String, documentId: String)? = nil
 
-    init() {
-        let appearance = UITabBarAppearance()
-        appearance.configureWithTransparentBackground()
-        appearance.backgroundEffect = nil
-        appearance.backgroundColor = .clear
-        UITabBar.appearance().standardAppearance = appearance
-        if #available(iOS 15.0, *) {
-            UITabBar.appearance().scrollEdgeAppearance = appearance
-        }
-        UITabBar.appearance().isTranslucent = true
-    }
-
     @ViewBuilder
     private var mapTabContent: some View {
         // LOCKED: MapViewProduction is the ONLY map view used in production.
@@ -511,10 +499,11 @@ struct HomeView: View {
     private func ensureCameraRunningIfNeeded() {
         Task { @MainActor in
             guard !PreviewEnvHomeView.isPreview else { return }
-            guard selectedTab == .record else {
-                return
-            }
+            guard selectedTab == .record else { return }
             let cameraController = cameraControllerHolder.resolve()
+            // Skip if already running — resumePreviewAfterInterruption flushes the display layer
+            // and re-wires the session, causing a visible freeze when called unnecessarily.
+            guard !cameraController.captureSession.isRunning else { return }
             let status = AVCaptureDevice.authorizationStatus(for: .video)
             switch status {
             case .authorized:
@@ -525,7 +514,6 @@ struct HomeView: View {
                     await cameraController.resumePreviewAfterInterruption()
                 }
             default:
-                // denied or restricted — optionally present guidance UI
                 break
             }
         }

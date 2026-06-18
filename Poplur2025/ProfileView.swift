@@ -937,7 +937,35 @@ struct ProfileView: View {
 
                     if isOwnProfile {
                         print("✅ [ProfileView] Showing cube menu wheel")
-                        cubeMenuWheel.beginHold(items: cubeSubmenuItems)
+                        let backItem = CubeSubmenuItem(
+                            id: "back",
+                            title: "Back",
+                            systemImage: "arrow.backward",
+                            tint: .white
+                        ) {
+                            closeProfileSubroutes()
+                        }
+                        if showPopularPhone {
+                            let colorwayItems = PoplurPhoneColorway.all.map { cw in
+                                CubeSubmenuItem(
+                                    id: cw.id,
+                                    title: cw.title,
+                                    systemImage: "circle.fill",
+                                    tint: cw.swatch
+                                ) {
+                                    NotificationCenter.default.post(
+                                        name: .phoneOverlayApplyColorway,
+                                        object: nil,
+                                        userInfo: ["assetName": cw.bootupSpritesheetName]
+                                    )
+                                }
+                            }
+                            cubeMenuWheel.beginHold(items: [backItem] + colorwayItems)
+                        } else if isShowingMainTabChildRoute {
+                            cubeMenuWheel.beginHold(items: [backItem])
+                        } else {
+                            cubeMenuWheel.beginHold(items: cubeSubmenuItems)
+                        }
                         postProfileCubeIconOverride(cubeMenuWheel.selectedItem)
                     } else {
                         print("⚠️ [ProfileView] Not showing cube menu wheel - not own profile")
@@ -2050,15 +2078,7 @@ private final class PoplurCreditCardSpriteScene: SKScene {
     private func layoutSprite() {
         guard let cardNode else { return }
         cardNode.position = CGPoint(x: size.width / 2, y: size.height / 2)
-
-        let aspect = cardSize.width / cardSize.height
-        var width = size.width
-        var height = width / aspect
-        if height > size.height {
-            height = size.height
-            width = height * aspect
-        }
-        cardNode.size = CGSize(width: width, height: height)
+        cardNode.size = size
     }
 }
 
