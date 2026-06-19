@@ -56,6 +56,11 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
             PoplurNotificationCenter.shared.configure()
         }
 
+        // Replicate API key — sourced from Secrets.swift (gitignored, never committed)
+        if UserDefaults.standard.string(forKey: "poplur_replicate_key") == nil {
+            UserDefaults.standard.set(Secrets.replicateAPIKey, forKey: "poplur_replicate_key")
+        }
+
         return true
     }
 }
