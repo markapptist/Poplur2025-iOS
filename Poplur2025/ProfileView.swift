@@ -108,6 +108,7 @@ struct ProfileView: View {
     @State private var navigateToMessages = false
     @State private var showPopularPhone = false
     @State private var showNotifications = false
+    @State private var showStats = false
     @State private var hasUncheckedNotifications = true
     @StateObject private var notificationCenter = PoplurNotificationCenter.shared
     @State private var showRadiusStore = false
@@ -125,6 +126,7 @@ struct ProfileView: View {
     @State private var barHeightFactor: CGFloat = 1.0
     @State private var isHoldingCube: Bool = false
     @StateObject private var cubeMenuWheel = CubeMenuWheelController()
+    @StateObject private var headCycler = ProfileHeadCycler()
 
     @State private var isLoadingMore = false
     @State private var canLoadMore = true
@@ -137,10 +139,11 @@ struct ProfileView: View {
         case notifications
         case phone
         case store
+        case stats
     }
 
     private var isShowingMainTabChildRoute: Bool {
-        showSettings || navigateToMessages || showNotifications || showRadiusStore || navigateToScanner || navigateToViewer
+        showSettings || navigateToMessages || showNotifications || showRadiusStore || showStats || navigateToScanner || navigateToViewer
     }
 
     private func postMainTabChildRouteVisibility() {
@@ -178,6 +181,8 @@ struct ProfileView: View {
             postProfileCubeIconOverride(forSubmenuID: "mail")
         } else if showSettings {
             postProfileCubeIconOverride(forSubmenuID: "settings")
+        } else if showStats {
+            postProfileCubeIconOverride(forSubmenuID: "stats")
         } else if showNotifications {
             postProfileCubeIconOverride(forSubmenuID: "notifications")
         } else if showRadiusStore {
@@ -195,6 +200,7 @@ struct ProfileView: View {
         showNotifications = route == .notifications
         showPopularPhone = route == .phone
         showRadiusStore = route == .store
+        showStats = route == .stats
 
         if route == .notifications {
             hasUncheckedNotifications = false
@@ -209,6 +215,7 @@ struct ProfileView: View {
         navigateToMessages = false
         showNotifications = false
         showRadiusStore = false
+        showStats = false
         navigateToScanner = false
         navigateToViewer = false
     }
@@ -230,6 +237,14 @@ struct ProfileView: View {
                 tint: .indigo
             ) {
                 openProfileSubmenuRoute(.settings)
+            },
+            CubeSubmenuItem(
+                id: "stats",
+                title: "Stats",
+                systemImage: "chart.pie.fill",
+                tint: .cyan
+            ) {
+                openProfileSubmenuRoute(.stats)
             },
             CubeSubmenuItem(
                 id: "notifications",
@@ -653,6 +668,12 @@ struct ProfileView: View {
                         .zIndex(50)
                 }
 
+                if showStats {
+                    ProfileStatsView(userID: effectiveUserID)
+                        .transition(.opacity)
+                        .zIndex(50)
+                }
+
                 if navigateToMessages {
                     MessagesRootView()
                         .transition(.opacity)
@@ -1031,6 +1052,7 @@ struct ProfileView: View {
                 // Reset radius bar when leaving profile view
                 print("📊 [ProfileView] onDisappear - notifying to restore feed radius")
                 cubeMenuWheel.endHold(activateSelected: false)
+                headCycler.stop()
                 postProfileCubeIconOverride(nil)
                 NotificationCenter.default.post(name: Notification.Name("ProfileViewDismissed"), object: nil)
                 NotificationCenter.default.post(name: .MainTabChildRouteVisibilityChanged, object: false)
@@ -1041,6 +1063,10 @@ struct ProfileView: View {
                 }
             }
             .onChange(of: showSettings) { _, _ in
+                postMainTabChildRouteVisibility()
+                syncProfileCubeIconToActiveRoute()
+            }
+            .onChange(of: showStats) { _, _ in
                 postMainTabChildRouteVisibility()
                 syncProfileCubeIconToActiveRoute()
             }
@@ -1129,12 +1155,59 @@ struct ProfileView: View {
     }
     
     private var avatarContent: some View {
+        let showing3D = headCycler.is3DActive && headCycler.modelURL != nil
+        let size: CGFloat = showing3D ? 180 : 96
+
+        return ZStack {
+            // 2D photo — fades out when 3D is active
+            photoAvatar
+                .opacity(showing3D ? 0 : 1)
+
+            // 3D head — fades in when 3D is active
+            if let url = headCycler.modelURL {
+                HeadPreviewView(modelURL: url)
+                    .opacity(showing3D ? 1 : 0)
+            }
+
+            // Subtle "generating" pulse ring while Replicate is working
+            if headCycler.isGenerating {
+                Circle()
+                    .strokeBorder(
+                        AngularGradient(colors: [.cyan, .purple, .cyan], center: .center),
+                        lineWidth: 2.5
+                    )
+                    .opacity(0.75)
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
+        .shadow(color: Color.black.opacity(0.08), radius: 6, x: 0, y: 4)
+        .animation(.spring(response: 0.55, dampingFraction: 0.72), value: showing3D)
+        .zIndex(showing3D ? 10 : 0)
+        .overlay(alignment: .bottomTrailing) {
+            if lastHeadModelURL != nil && isOwnProfile && !showing3D {
+                Button {
+                    navigateToViewer = true
+                } label: {
+                    Image(systemName: "eye.fill")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(.white)
+                        .padding(6)
+                        .background(Circle().fill(Color.black.opacity(0.6)))
+                }
+                .buttonStyle(.plain)
+                .padding(4)
+            }
+        }
+    }
+
+    private var photoAvatar: some View {
         ZStack {
             if let localImage = profileImage {
                 Image(uiImage: localImage)
                     .resizable()
                     .scaledToFill()
-            } else if let url = profileImageURL, // load persisted local file on appear
+            } else if let url = profileImageURL,
                       let data = try? Data(contentsOf: url),
                       let img = UIImage(data: data) {
                 Image(uiImage: img)
@@ -1166,24 +1239,6 @@ struct ProfileView: View {
                     .overlay(Image(systemName: "person.fill").foregroundColor(.white))
             }
         }
-        .frame(width: 96, height: 96)
-        .clipShape(Circle())
-        .shadow(color: Color.black.opacity(0.08), radius: 6, x: 0, y: 4)
-        .overlay(alignment: .bottomTrailing) {
-            if lastHeadModelURL != nil && isOwnProfile {
-                Button {
-                    navigateToViewer = true
-                } label: {
-                    Image(systemName: "eye.fill")
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundColor(.white)
-                        .padding(6)
-                        .background(Circle().fill(Color.black.opacity(0.6)))
-                }
-                .buttonStyle(.plain)
-                .padding(4)
-            }
-        }
     }
 
     private var usernameRow: some View {
@@ -1195,6 +1250,18 @@ struct ProfileView: View {
                 // Fetch username for the profile being viewed (re-runs when effectiveUserID changes)
                 if let uid = effectiveUserID ?? Auth.auth().currentUser?.uid {
                     displayUsername = await UsernameCache.shared.username(for: uid)
+                }
+            }
+            .onChange(of: userProfile) { _, profile in
+                guard let profile else { return }
+                let uid = effectiveUserID ?? Auth.auth().currentUser?.uid ?? "unknown"
+                headCycler.stop()
+                Task {
+                    await headCycler.start(
+                        profileImageURL: profile.profilePictureURL,
+                        localModelURL: isOwnProfile ? lastHeadModelURL : nil,
+                        userID: uid
+                    )
                 }
             }
     }
@@ -2096,6 +2163,42 @@ private struct PoplurCreditCardSpriteView: View {
     }
 }
 
+private struct ProfileStoreCreditCardCarousel: View {
+    let cards: [PoplurCreditCardProduct]
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        GeometryReader { proxy in
+            let cardWidth = min(max(proxy.size.width * 0.68, 228), 348)
+            let cardHeight = cardWidth / (482.0 / 320.0)
+            let spacing: CGFloat = 18
+            let cycleWidth = CGFloat(cards.count) * (cardWidth + spacing)
+            let speed: CGFloat = 34
+            let cycleDuration = max(1, Double(cycleWidth / speed))
+            let repeatedCards = Array(repeating: cards, count: 3).flatMap { $0 }
+
+            TimelineView(.animation) { context in
+                let elapsed = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: cycleDuration)
+                let offset = reduceMotion ? 0 : -CGFloat(elapsed) * speed
+
+                HStack(spacing: spacing) {
+                    ForEach(Array(repeatedCards.enumerated()), id: \.offset) { _, card in
+                        PoplurCreditCardSpriteView(card: card)
+                            .frame(width: cardWidth, height: cardHeight)
+                            .accessibilityLabel(card.name)
+                    }
+                }
+                .offset(x: offset)
+                .frame(width: proxy.size.width, height: proxy.size.height, alignment: .leading)
+            }
+        }
+        .frame(height: 270)
+        .clipped()
+        .background(Color.white)
+    }
+}
+
 private struct RadiusStoreView: View {
     @Binding var purchasedRadiusMeters: Int
     let userID: String?
@@ -2104,8 +2207,7 @@ private struct RadiusStoreView: View {
     @State private var orderMessage: String?
 
     private let columns = [
-        GridItem(.flexible(), spacing: 12),
-        GridItem(.flexible(), spacing: 12)
+        GridItem(.adaptive(minimum: 168), spacing: 14)
     ]
 
     private var selectedCard: PoplurCreditCardProduct {
@@ -2113,29 +2215,39 @@ private struct RadiusStoreView: View {
     }
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 22) {
-                storeHeader
-                    .padding(.top, 24)
+        MockBrowser(urlString: "www.poplurstore.ca") {
+            VStack(spacing: 0) {
+                profileStoreNavigation
 
-                featuredCard
+                ProfileStoreCreditCardCarousel(cards: PoplurCreditCardProduct.catalog)
+                    .padding(.top, 8)
 
-                finishPicker
+                profileStoreHero
 
-                LazyVGrid(columns: columns, spacing: 12) {
-                    ForEach(PoplurCreditCardProduct.catalog) { card in
-                        creditCardTile(card)
+                VStack(alignment: .leading, spacing: 22) {
+                    featuredCard
+
+                    finishPicker
+
+                    LazyVGrid(columns: columns, spacing: 14) {
+                        ForEach(PoplurCreditCardProduct.catalog) { card in
+                            creditCardTile(card)
+                        }
                     }
+
+                    checkoutSummary
+
+                    radiusAddOns
                 }
-
-                checkoutSummary
-
-                radiusAddOns
+                .padding(.horizontal, 20)
+                .padding(.vertical, 36)
+                .frame(maxWidth: 1080)
+                .frame(maxWidth: .infinity)
+                .background(Color(red: 0.965, green: 0.965, blue: 0.975))
             }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 40)
+            .frame(maxWidth: .infinity)
+            .background(Color.white)
         }
-        .background(Color.white.ignoresSafeArea())
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .task {
@@ -2145,6 +2257,55 @@ private struct RadiusStoreView: View {
                 purchasedRadiusMeters += delivered
             }
         }
+    }
+
+    private var profileStoreNavigation: some View {
+        HStack(spacing: 22) {
+            Text("Poplur")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundColor(.black)
+
+            if UIDevice.current.userInterfaceIdiom != .phone {
+                HStack(spacing: 22) {
+                    ForEach(["Store", "Cards", "Radius", "Phone", "Support"], id: \.self) { item in
+                        Text(item)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.black.opacity(0.64))
+                    }
+                }
+            }
+
+            Spacer(minLength: 8)
+
+            Image(systemName: "bag")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundColor(.black.opacity(0.76))
+                .frame(width: 34, height: 34)
+        }
+        .padding(.horizontal, UIDevice.current.userInterfaceIdiom == .phone ? 18 : 38)
+        .frame(height: 54)
+        .background(.ultraThinMaterial)
+    }
+
+    private var profileStoreHero: some View {
+        VStack(spacing: 12) {
+            Text("Poplur Store")
+                .font(.system(size: 54, weight: .semibold))
+                .minimumScaleFactor(0.65)
+                .lineLimit(1)
+                .foregroundColor(.black)
+
+            Text("World Service cards, radius boosts, and Poplur hardware.")
+                .font(.system(size: 20, weight: .regular))
+                .multilineTextAlignment(.center)
+                .foregroundColor(.black.opacity(0.64))
+                .frame(maxWidth: 620)
+        }
+        .padding(.horizontal, 24)
+        .padding(.top, 38)
+        .padding(.bottom, 44)
+        .frame(maxWidth: .infinity)
+        .background(Color.white)
     }
 
     private var storeHeader: some View {
