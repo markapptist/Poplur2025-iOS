@@ -19,14 +19,17 @@ struct FeedFullscreenPageView: View {
     let channelNumber: Int
     let channelCategory: String
     let channelEmoji: String
+    let channelIconAssetName: String?
     let isTVGuideVisible: Bool
     var onMediaReady: () -> Void = {}
+    var onCreditsVisibilityChanged: (Bool) -> Void = { _ in }
     var onUserTapped: (String) -> Void
 
     @State private var imagePhaseDebug: String = ""
     @State private var debugPlayerTimeControl: AVPlayer.TimeControlStatus = .waitingToPlayAtSpecifiedRate
     @State private var debugItemStatus: AVPlayerItem.Status = .unknown
     @State private var didReportMediaReady = false
+    @State private var imageLifecycleTask: Task<Void, Never>? = nil
 
     // Added for playback stuck detection and UI overlay
     @State private var forceVideoPlaceholder: Bool = false
@@ -34,6 +37,7 @@ struct FeedFullscreenPageView: View {
 
     // Auto-cycles the username ↔ channel-number display like a TV ticker
     @State private var showChannelMode: Bool = false
+    @ObservedObject private var settings = SettingsStore.shared
     private var displayAsChannel: Bool { showChannelMode || isTVGuideVisible }
 
     private var coordinateText: String {
@@ -109,6 +113,7 @@ struct FeedFullscreenPageView: View {
         @Binding var hudItemStatus: AVPlayerItem.Status
         @Binding var playbackStuck: Bool
         let onReadyToDisplay: () -> Void
+        let onCreditsVisibilityChanged: (Bool) -> Void
         @State private var player: AVPlayer? = nil
         @State private var itemObservation: NSKeyValueObservation? = nil
 
@@ -119,6 +124,7 @@ struct FeedFullscreenPageView: View {
 
         @State private var itemFailed: Bool = false
         @State private var isReadyToDisplay: Bool = false
+        @State private var creditsVisible: Bool = false
 
         private func setupPlayer() {
             guard player == nil else { return }
@@ -165,7 +171,7 @@ struct FeedFullscreenPageView: View {
                         self.itemFailed = true
                         self.playbackStuck = true
                         if let err = item.error { print("[Video] Item failed: \(err)") }
-                        NotificationCenter.default.post(name: Notification.Name("FeedAdvanceOnMediaFailure"), object: nil)
+                        NotificationCenter.default.post(name: .FeedAdvanceOnMediaFailure, object: nil)
                     case .unknown:
                         break
                     @unknown default:
@@ -179,8 +185,8 @@ struct FeedFullscreenPageView: View {
                 object: item,
                 queue: .main
             ) { _ in
-                p.seek(to: .zero)
-                p.playImmediately(atRate: 1.0)
+                self.setCreditsVisible(false)
+                NotificationCenter.default.post(name: .FeedAdvanceToNextPost, object: nil)
             }
 
             player = p
@@ -195,6 +201,11 @@ struct FeedFullscreenPageView: View {
                     self.playbackStuck = false
                     self.onReadyToDisplay()
                 }
+                let duration = p.currentItem?.duration.seconds ?? 0
+                guard duration.isFinite, duration > 2.0, time.seconds.isFinite else { return }
+                let remaining = duration - time.seconds
+                let leadTime = min(4.2, max(2.0, duration * 0.22))
+                self.setCreditsVisible(remaining <= leadTime && remaining > 0.12)
             }
 
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { self.hudTimeControl = p.timeControlStatus }
@@ -280,6 +291,7 @@ struct FeedFullscreenPageView: View {
         }
 
         private func teardownPlayer() {
+            setCreditsVisible(false)
             if let token = pauseObserver {
                 NotificationCenter.default.removeObserver(token)
                 pauseObserver = nil
@@ -298,6 +310,12 @@ struct FeedFullscreenPageView: View {
             player?.pause()
             player?.replaceCurrentItem(with: nil)
             player = nil
+        }
+
+        private func setCreditsVisible(_ visible: Bool) {
+            guard creditsVisible != visible else { return }
+            creditsVisible = visible
+            onCreditsVisibilityChanged(visible)
         }
     }
 
@@ -523,6 +541,10 @@ struct FeedFullscreenPageView: View {
                 .onChange(of: post.mediaURL) { _, _ in
                     // Reset readiness so freshly recorded media triggers playback/display
                     didReportMediaReady = false
+                    cancelImageLifecycle()
+                }
+                .onDisappear {
+                    cancelImageLifecycle()
                 }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -546,46 +568,73 @@ struct FeedFullscreenPageView: View {
                 .ignoresSafeArea()
                 .zIndex(0)
 
-            switch mediaType {
-            case .video:
-                if let videoURL = directVideoURL {
-                    videoContent(size: size, videoURL: videoURL)
-                        .id("video_\(post.id)_\(videoURL.absoluteString)")
-                } else {
-                    unavailableMediaView(isVideo: true)
-                        .onAppear { reportMediaReady() }
+            // Compute primary media view with reduced builder complexity
+            let mediaView: AnyView = {
+                switch mediaType {
+                case .video:
+                    if let videoURL = directVideoURL {
+                        return AnyView(
+                            videoContent(size: size, videoURL: videoURL)
+                                .id("video_\(post.id)_\(videoURL.absoluteString)")
+                        )
+                    } else {
+                        return AnyView(
+                            unavailableMediaView(isVideo: true)
+                                .onAppear { reportMediaReady() }
+                        )
+                    }
+                case .image:
+                    if let assetName = localAssetName {
+                        return AnyView(
+                            localAssetImageContent(size: size, assetName: assetName)
+                                .id("asset_\(post.id)_\(assetName)")
+                        )
+                    } else if let url = URL(string: post.mediaURL) {
+                        return AnyView(
+                            imageContent(size: size, url: url)
+                                .id("image_\(post.id)_\(url.absoluteString)")
+                        )
+                    } else {
+                        return AnyView(
+                            unavailableMediaView(isVideo: false)
+                                .onAppear { reportMediaReady() }
+                        )
+                    }
+                case .unknown:
+                    if let videoURL = directVideoURL {
+                        return AnyView(
+                            videoContent(size: size, videoURL: videoURL)
+                                .id("video_\(post.id)_\(videoURL.absoluteString)")
+                        )
+                    } else if let assetName = localAssetName {
+                        return AnyView(
+                            localAssetImageContent(size: size, assetName: assetName)
+                                .id("asset_\(post.id)_\(assetName)")
+                        )
+                    } else if let url = URL(string: post.mediaURL) {
+                        return AnyView(
+                            imageContent(size: size, url: url)
+                                .id("image_\(post.id)_\(url.absoluteString)")
+                        )
+                    } else {
+                        return AnyView(
+                            unavailableMediaView(isVideo: false)
+                                .onAppear { reportMediaReady() }
+                        )
+                    }
                 }
-            case .image:
-                if let assetName = localAssetName {
-                    localAssetImageContent(size: size, assetName: assetName)
-                        .id("asset_\(post.id)_\(assetName)")
-                } else if let url = URL(string: post.mediaURL) {
-                    imageContent(size: size, url: url)
-                        .id("image_\(post.id)_\(url.absoluteString)")
-                } else {
-                    unavailableMediaView(isVideo: false)
-                        .onAppear { reportMediaReady() }
-                }
-            case .unknown:
-                // Prefer trying video first when unknown (recorded assets often are video)
-                if let videoURL = directVideoURL {
-                    videoContent(size: size, videoURL: videoURL)
-                        .id("video_\(post.id)_\(videoURL.absoluteString)")
-                } else if let assetName = localAssetName {
-                    localAssetImageContent(size: size, assetName: assetName)
-                        .id("asset_\(post.id)_\(assetName)")
-                } else if let url = URL(string: post.mediaURL) {
-                    imageContent(size: size, url: url)
-                        .id("image_\(post.id)_\(url.absoluteString)")
-                } else {
-                    unavailableMediaView(isVideo: false)
-                        .onAppear { reportMediaReady() }
-                }
-            }
+            }()
+
+            mediaView
 
             // Username overlay in top-right corner
             topRightInfo(size: size)
                 .zIndex(10)
+
+            if shouldShowCaptions {
+                aiCaptionOverlay(size: size)
+                    .zIndex(12)
+            }
 
             if post.isPoplurAd {
                 poplurAdInfo
@@ -598,11 +647,7 @@ struct FeedFullscreenPageView: View {
         let mediaKey: String
 
         var body: some View {
-            ZStack {
-                Color.black
-                ProgressView()
-                    .tint(.white)
-            }
+            Color.black
         }
     }
 
@@ -614,7 +659,8 @@ struct FeedFullscreenPageView: View {
             hudTimeControl: $debugPlayerTimeControl,
             hudItemStatus: $debugItemStatus,
             playbackStuck: $playbackStuck,
-            onReadyToDisplay: reportMediaReady
+            onReadyToDisplay: reportMediaReady,
+            onCreditsVisibilityChanged: onCreditsVisibilityChanged
         )
             .id(videoURL.absoluteString)
             .frame(width: size.width, height: size.height)
@@ -655,6 +701,32 @@ struct FeedFullscreenPageView: View {
         guard !didReportMediaReady else { return }
         didReportMediaReady = true
         onMediaReady()
+        scheduleImageLifecycleIfNeeded()
+    }
+
+    private func scheduleImageLifecycleIfNeeded() {
+        guard mediaType != .video else {
+            cancelImageLifecycle()
+            return
+        }
+        imageLifecycleTask?.cancel()
+        onCreditsVisibilityChanged(false)
+        imageLifecycleTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 6_300_000_000)
+            guard !Task.isCancelled else { return }
+            onCreditsVisibilityChanged(true)
+
+            try? await Task.sleep(nanoseconds: 3_700_000_000)
+            guard !Task.isCancelled else { return }
+            onCreditsVisibilityChanged(false)
+            NotificationCenter.default.post(name: .FeedAdvanceToNextPost, object: post.id)
+        }
+    }
+
+    private func cancelImageLifecycle() {
+        imageLifecycleTask?.cancel()
+        imageLifecycleTask = nil
+        onCreditsVisibilityChanged(false)
     }
 
     private var playerHUD: some View {
@@ -687,6 +759,47 @@ struct FeedFullscreenPageView: View {
             .overlay(Capsule().stroke(Color.white.opacity(0.25), lineWidth: 1))
     }
 
+    private var shouldShowCaptions: Bool {
+        settings.closedCaptionsEnabled && !post.isPoplurAd && mediaType == .video
+    }
+
+    private func aiCaptionOverlay(size: CGSize) -> some View {
+        VStack(spacing: 6) {
+            Text(AITranslationCaptionProvider.caption(
+                for: post,
+                channelCategory: channelCategory,
+                preferredLanguage: settings.preferredLanguage
+            ))
+            .font(.system(size: min(size.width * 0.045, 19), weight: .bold, design: .rounded))
+            .multilineTextAlignment(.center)
+            .foregroundStyle(.white)
+            .lineLimit(3)
+            .fixedSize(horizontal: false, vertical: true)
+            .shadow(color: .black.opacity(0.85), radius: 4, x: 0, y: 2)
+
+            Text(AITranslationCaptionProvider.translationBadge(
+                for: post,
+                preferredLanguage: settings.preferredLanguage
+            ))
+            .font(.system(size: 10, weight: .black, design: .monospaced))
+            .foregroundStyle(.white.opacity(0.72))
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .frame(maxWidth: min(size.width - 40, 520))
+        .background(Color.black.opacity(0.58), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.white.opacity(0.18), lineWidth: 1)
+        )
+        .padding(.horizontal, 20)
+        .padding(.bottom, 126)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+        .allowsHitTesting(false)
+        .animation(.easeInOut(duration: 0.2), value: settings.preferredLanguage)
+        .animation(.easeInOut(duration: 0.2), value: settings.closedCaptionsEnabled)
+    }
+
     private func topRightInfo(size: CGSize) -> some View {
         HStack(spacing: 12) {
             // Left side: Flag + Channel emoji
@@ -695,8 +808,12 @@ struct FeedFullscreenPageView: View {
                     Text(flag)
                         .font(.system(size: 32))
                 }
-                Text(post.isPoplurAd ? "AD" : channelEmoji)
-                    .font(.system(size: post.isPoplurAd ? 22 : 32, weight: .black, design: .rounded))
+                if post.isPoplurAd {
+                    Text("AD")
+                        .font(.system(size: 22, weight: .black, design: .rounded))
+                } else {
+                    ChannelAssetIcon(assetName: channelIconAssetName, fallbackEmoji: channelEmoji, size: 38, fallbackFontSize: 32)
+                }
             }
             
             // Right side: Username and coordinates
@@ -802,14 +919,14 @@ private struct FullBleedRemoteImage: View {
 
             switch loadState {
             case .loading:
-                ProgressView()
-                    .tint(.white)
+                EmptyView()
             case .loaded(let image):
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
                     .frame(width: size.width, height: size.height)
                     .clipped()
+                    .transition(.opacity)
             case .failed:
                 Image(systemName: "photo")
                     .font(.system(size: 42, weight: .semibold))
@@ -845,7 +962,7 @@ private struct FullBleedRemoteImage: View {
                     loadState = .failed
                     onReady()
                     NotificationCenter.default.post(
-                        name: Notification.Name("FeedAdvanceOnMediaFailure"),
+                        name: .FeedAdvanceOnMediaFailure,
                         object: nil
                     )
                 }
@@ -853,7 +970,9 @@ private struct FullBleedRemoteImage: View {
             }
 
             await MainActor.run {
-                loadState = .loaded(image)
+                withAnimation(.easeIn(duration: 0.35)) {
+                    loadState = .loaded(image)
+                }
                 onReady()
             }
         } catch {

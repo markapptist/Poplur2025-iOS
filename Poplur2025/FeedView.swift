@@ -33,6 +33,8 @@ struct FeedView: View {
     @State private var isFeedReady = false  // Added as per instruction
     @State private var isVideoLoading = false  // Track video loading state for logo indicator
     @State private var showInitialLoadingScreen = true
+    @State private var showFeedEntryLogo = true
+    @State private var feedEntryLogoTask: Task<Void, Never>? = nil
     // Only true once the first post's media fires onMediaReady — gates hideInitialLoadingScreen
     @State private var firstMediaReady = false
 
@@ -70,9 +72,13 @@ struct FeedView: View {
     @State private var showTVGuide: Bool = false
     @State private var tvGuideActivePlayer: AVPlayer? = nil
     @State private var breakingNewsConfettiTrigger: Int = 0
-    
-    // Comment section overlay
-    @State private var showCommentSection: Bool = false
+    @State private var showCommentCredits: Bool = false
+    @State private var postComments: [String: [FeedCommentCredit]] = [:]
+    @State private var isTVTransitionVisible: Bool = false
+    @State private var tvTransitionOpacity: Double = 0.0
+    @State private var tvTransitionChannelNumber: Int = 101
+    @State private var tvTransitionChannelCategory: String = "Food"
+    @State private var tvTransitionToken: Int = 0
 
     // Country paging (horizontal swipe)
     @State private var selectedCountryIndex: Int = 0
@@ -82,16 +88,17 @@ struct FeedView: View {
     
     // Channel/Category paging (vertical swipe)
     @State private var selectedChannelIndex: Int = 0
-    private let channels: [(id: String, name: String, emoji: String)] = [
-        ("food", "Food", "🍔"),
-        ("fitness", "Fitness", "💪"),
-        ("beauty", "Beauty", "💄"),
-        ("sports", "Sports", "⚽"),
-        ("modelling", "Modelling", "📸"),
-        ("fashion", "Fashion", "👗"),
-        ("music", "Music", "🎵"),
-        ("tech", "Tech", "💻"),
-        ("news", "News", "📰")
+    private let channels: [(id: String, number: Int, name: String, emoji: String, iconAssetName: String)] = [
+        ("food", 101, "Food", "🍔", "poplur_channel_101_food"),
+        ("beauty", 103, "Beauty", "💄", "poplur_channel_103_beauty"),
+        ("sports", 104, "Sports", "⚽", "poplur_channel_104_sports"),
+        ("modelling", 105, "Modelling", "📸", "poplur_channel_105_modelling"),
+        ("fashion", 106, "Fashion", "👗", "poplur_channel_106_fashion"),
+        ("music", 107, "Music", "🎵", "poplur_channel_107_music"),
+        ("tech", 108, "Tech", "💻", "poplur_channel_108_tech"),
+        ("news", 109, "News", "📰", "poplur_channel_109_news"),
+        ("french", 110, "French", "🇫🇷", "poplur_channel_110_french"),
+        ("spanish", 111, "Spanish", "🇪🇸", "poplur_channel_111_spanish")
     ]
 
     private func countryIndex(for coordinate: CLLocationCoordinate2D?) -> Int {
@@ -198,38 +205,33 @@ struct FeedView: View {
                 .animation(.spring(response: 0.48, dampingFraction: 0.82), value: showTimelineView)
                 .animation(.easeInOut(duration: 0.24), value: isFlippingTimeline)
 
-                if showInitialLoadingScreen {
-                    FeedLaunchLoadingScreen()
+                if showFeedEntryLogo {
+                    FeedEntryLogoPopView()
                         .zIndex(100)
                         .transition(.opacity)
                 }
 
-                // Comment section overlay
-                if showCommentSection, let currentPost = posts[safe: currentIndex] {
-                    CommentSectionView(
-                        postID: currentPost.id,
-                        onDismiss: {
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                                showCommentSection = false
-                            }
-                        }
-                    )
-                    .zIndex(999999) // Extremely high z-index to ensure it's in front of absolutely everything
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
-
-                if homeChromeInactive,
+                if showCommentCredits,
                    !showTimelineView,
                    !showTVGuide,
-                   !showCommentSection,
                    let currentPost = posts[safe: currentIndex] {
-                    FeedLiveCommentsOverlay(
-                        postID: currentPost.id,
-                        displayName: displayName(for: currentPost),
-                        onInteraction: noteFeedInteraction
+                    FeedCommentCreditsOverlay(
+                        comments: commentsForCredits(for: currentPost),
+                        displayName: displayName(for: currentPost)
                     )
+                    .id("\(currentPost.id)-\(postComments[currentPost.id]?.count ?? 0)")
                     .zIndex(850_000)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .transition(.opacity)
+                }
+
+                if isTVTransitionVisible {
+                    PoplurTransitionFlash(
+                        channelNumber: tvTransitionChannelNumber,
+                        channelCategory: tvTransitionChannelCategory
+                    )
+                        .id(tvTransitionToken)
+                        .opacity(tvTransitionOpacity)
+                        .zIndex(1_200_000)
                 }
 
                 if showTVGuide {
@@ -263,18 +265,16 @@ struct FeedView: View {
                 applyPreviewFeedData()
                 return
             }
-            if showInitialLoadingScreen {
-                NotificationCenter.default.post(name: Notification.Name("FeedLaunchLoadingDidStart"), object: nil)
+            // If the cover is already gone (returning to feed from another tab), nothing to do.
+            guard showInitialLoadingScreen else { return }
+            NotificationCenter.default.post(name: Notification.Name("FeedLaunchLoadingDidStart"), object: nil)
+            if !didBootstrap {
+                await runStrictBootstrap()
             }
-            if !posts.isEmpty {
-                hideInitialLoadingScreen()
-                return
-            }
-            guard didBootstrap == false else {
-                hideInitialLoadingScreen()
-                return
-            }
-            await runStrictBootstrap()
+            // Minimum cover display time — let the animation play for at least 1.5 s.
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            firstMediaReady = true
+            hideInitialLoadingScreen()
         }
         .onReceive(NotificationCenter.default.publisher(for: .LoadFeedNow)) { _ in
             Task {
@@ -292,15 +292,11 @@ struct FeedView: View {
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("FeedRefreshRequested"))) { _ in
             Task { await reload() }
         }
-        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("FeedAdvanceOnMediaFailure"))) { _ in
-            // Advance to next post on media failure
-            if !posts.isEmpty {
-                if currentIndex < max(0, posts.count - 1) {
-                    currentIndex += 1
-                } else {
-                    currentIndex = 0
-                }
-            }
+        .onReceive(NotificationCenter.default.publisher(for: .FeedAdvanceOnMediaFailure)) { _ in
+            advanceToNextPost()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .FeedAdvanceToNextPost)) { _ in
+            advanceToNextPost()
         }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ProfileViewDismissed"))) { _ in
             // Restore feed radius when returning from profile
@@ -326,114 +322,141 @@ struct FeedView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .FeedOpenNews)) { _ in
             guard !posts.isEmpty else { return }
-            noteFeedInteraction()
-            showTVGuide = false
-            if !showTimelineView {
-                toggleTimelineFlip()
-            }
+            openNewsTimelineWithoutSpin()
         }
-        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("CubeTapped"))) { _ in
-            // Tap cube to show comment section (only when NOT in timeline view)
-            guard !posts.isEmpty, !showTimelineView else { return }
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                showCommentSection = true
-            }
-            // Haptic feedback
-            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        .onReceive(NotificationCenter.default.publisher(for: .FeedLikeCurrentPost)) { _ in
+            guard !showTimelineView else { return }
+            likeCurrentPost()
         }
-        .onChange(of: currentIndex) { _, newIndex in
-            guard newIndex >= 0, newIndex < posts.count else {
-                print("[Feed] currentIndex out of range: \(newIndex) posts=\(posts.count)")
-                return
-            }
-            let uid = posts[newIndex].userID
-            maybeResolveUsername(for: uid)
+        .onReceive(NotificationCenter.default.publisher(for: .FeedOpenCurrentPostProfile)) { _ in
+            openCurrentPostUserProfile()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .FeedCommentSubmitted)) { notification in
+            guard let text = notification.object as? String else { return }
+            addCommentToCurrentPost(text)
+        }
+        .background(feedNotificationReceivers)
+    }
 
-            // Animate the radius bar to match the current post's radius
-            let post = posts[newIndex]
-            print("📱 [Feed] Showing post at index \(newIndex), radius: \(post.radius)m")
-            publishCurrentPostMetrics(duration: 0.6)
-        }
-        .onAppear {
-            guard !layoutPreviewMode else { return }
-            triggerBreakingNewsArrival()
-            // Removed duplicate reload here as per instruction
-            hapticGenerator.prepare()
-            notifHaptics.prepare()
-            
-            // Quick synchronous check - only reload if truly empty
-            if posts.isEmpty {
-                // Synchronous reload for instant response
-                let newPosts = Self.generateDemoPostsForCountryAndChannel(
-                    country: countries[selectedCountryIndex].code,
-                    channel: channels[selectedChannelIndex].id,
-                    start: 0,
-                    count: pageSize
-                )
-                posts = newPosts
-                isFeedReady = !newPosts.isEmpty
-                hideInitialLoadingScreen()
-                
-                if newPosts.first != nil {
-                    publishCurrentPostMetrics(duration: 0.0)
-                }
-                
-                // Background storage only
-                Task.detached(priority: .utility) {
-                    DemoPostStore.shared.store(newPosts)
-                }
-            }
-            
-            // Ensure feed is ready when returning from navigation
-            if !posts.isEmpty && !isFeedReady {
-                print("[Feed] onAppear - restoring feed ready state")
-                isFeedReady = true
-            }
-            publishCurrentPostMetrics(duration: 0.35)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
-            // INSTANT: Only reload if truly empty - avoid unnecessary async overhead
-            if posts.isEmpty {
-                let newPosts = Self.generateDemoPostsForCountryAndChannel(
-                    country: countries[selectedCountryIndex].code,
-                    channel: channels[selectedChannelIndex].id,
-                    start: 0,
-                    count: pageSize
-                )
-                posts = newPosts
-                isFeedReady = !newPosts.isEmpty
-                hideInitialLoadingScreen()
-                
-                if newPosts.first != nil {
-                    publishCurrentPostMetrics(duration: 0.0)
-                }
-                
-                Task.detached(priority: .utility) {
-                    DemoPostStore.shared.store(newPosts)
-                }
-            }
-        }
-        .onChange(of: coordinateKey) {
-            Task { @MainActor in
-                guard let coord = self.activeLocationProvider.coordinate else { return }
-                let finalIdx = self.countryIndex(for: coord)
-                guard finalIdx != self.selectedCountryIndex else { return }
+    // MARK: - Notification receivers (split to help Swift type-checker)
 
-                self.selectedCountryIndex = finalIdx
-                await self.reloadForCountry()
+    private var feedNotificationReceivers: some View {
+        Color.clear
+            .onChange(of: currentIndex) { _, newIndex in
+                showCommentCredits = false
+                guard newIndex >= 0, newIndex < posts.count else {
+                    print("[Feed] currentIndex out of range: \(newIndex) posts=\(posts.count)")
+                    return
+                }
+                let uid = posts[newIndex].userID
+                maybeResolveUsername(for: uid)
+
+                let post = posts[newIndex]
+                print("📱 [Feed] Showing post at index \(newIndex), radius: \(post.radius)m")
+                publishCurrentPostMetrics(duration: 0.6)
             }
+            .onAppear {
+                handleFeedReceiversAppear()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+                if posts.isEmpty {
+                    let newPosts = Self.generateDemoPostsForCountryAndChannel(
+                        country: countries[selectedCountryIndex].code,
+                        channel: channels[selectedChannelIndex].id,
+                        start: 0,
+                        count: pageSize
+                    )
+                    posts = newPosts
+                    isFeedReady = !newPosts.isEmpty
+                    hideInitialLoadingScreen()
+                    if newPosts.first != nil {
+                        publishCurrentPostMetrics(duration: 0.0)
+                    }
+                    let postsToStore = newPosts
+                    Task.detached(priority: .utility) {
+                        DemoPostStore.shared.store(postsToStore)
+                    }
+                }
+            }
+            .onChange(of: coordinateKey) {
+                Task { @MainActor in
+                    guard let coord = self.activeLocationProvider.coordinate else { return }
+                    let finalIdx = self.countryIndex(for: coord)
+                    guard finalIdx != self.selectedCountryIndex else { return }
+                    self.selectedCountryIndex = finalIdx
+                    await self.reloadForCountry()
+                }
+            }
+            .onChange(of: selectedChannelIndex) { _, idx in
+                let ch = channels[safe: idx] ?? channels[0]
+                NotificationCenter.default.post(
+                    name: .FeedChannelDidChange,
+                    object: nil,
+                    userInfo: ["id": ch.id, "name": ch.name, "emoji": ch.emoji]
+                )
+            }
+            .onChange(of: showTVGuide) { _, visible in
+                tvGuideActivePlayer = visible ? FeedAudioManager.shared.activePlayer : nil
+                NotificationCenter.default.post(name: .MainTabChildRouteVisibilityChanged, object: visible)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .ActiveFeedPlayerDidChange)) { notification in
+                guard showTVGuide else { return }
+                tvGuideActivePlayer = notification.object as? AVPlayer
+            }
+            .onDisappear {
+                feedEntryLogoTask?.cancel()
+                feedEntryLogoTask = nil
+                showFeedEntryLogo = false
+                tvGuideActivePlayer = nil
+                NotificationCenter.default.post(name: .MainTabChildRouteVisibilityChanged, object: false)
+            }
+    }
+
+    private func handleFeedReceiversAppear() {
+        guard !layoutPreviewMode else { return }
+        publishSelectedChannel()
+        showBriefFeedEntryLogo()
+        triggerBreakingNewsArrival()
+        hapticGenerator.prepare()
+        notifHaptics.prepare()
+        seedPostsForActiveSelectionIfNeeded()
+
+        if !posts.isEmpty && !isFeedReady {
+            print("[Feed] onAppear - restoring feed ready state")
+            isFeedReady = true
         }
-        .onChange(of: showTVGuide) { _, visible in
-            tvGuideActivePlayer = visible ? FeedAudioManager.shared.activePlayer : nil
-            NotificationCenter.default.post(name: .MainTabChildRouteVisibilityChanged, object: visible)
+        publishCurrentPostMetrics(duration: 0.35)
+    }
+
+    private func publishSelectedChannel() {
+        let ch = channels[safe: selectedChannelIndex] ?? channels[0]
+        NotificationCenter.default.post(
+            name: .FeedChannelDidChange,
+            object: nil,
+            userInfo: ["id": ch.id, "name": ch.name, "emoji": ch.emoji]
+        )
+    }
+
+    private func seedPostsForActiveSelectionIfNeeded() {
+        guard posts.isEmpty else { return }
+        let newPosts = Self.generateDemoPostsForCountryAndChannel(
+            country: countries[selectedCountryIndex].code,
+            channel: channels[selectedChannelIndex].id,
+            start: 0,
+            count: pageSize
+        )
+        posts = newPosts
+        isFeedReady = !newPosts.isEmpty
+        hideInitialLoadingScreen()
+        if newPosts.first != nil {
+            publishCurrentPostMetrics(duration: 0.0)
         }
-        .onReceive(NotificationCenter.default.publisher(for: .ActiveFeedPlayerDidChange)) { notification in
-            guard showTVGuide else { return }
-            tvGuideActivePlayer = notification.object as? AVPlayer
-        }
-        .onDisappear {
-            tvGuideActivePlayer = nil
-            NotificationCenter.default.post(name: .MainTabChildRouteVisibilityChanged, object: false)
+        storeDemoPosts(newPosts)
+    }
+
+    private func storeDemoPosts(_ posts: [FeedPost]) {
+        Task.detached(priority: .utility) {
+            DemoPostStore.shared.store(posts)
         }
     }
 
@@ -462,8 +485,8 @@ struct FeedView: View {
         currentIndex = 0
         isVideoLoading = false
         poleModel.position = PolePosition(x: 0.5, y: 0.5)
-        hideInitialLoadingScreen()
-        
+        // Note: hideInitialLoadingScreen() is called by the .task after a minimum display time
+
         // Update radius bar immediately
         if newPosts.first != nil {
             publishCurrentPostMetrics(duration: 0.0)
@@ -525,6 +548,7 @@ struct FeedView: View {
                                     case .horizontal:
                                         if value.translation.width <= -horizontalThreshold {
                                             // swipe left -> next country
+                                            flashTransition()
                                             selectedCountryIndex = (selectedCountryIndex + 1) % countries.count
                                             currentIndex = 0
                                             Task {
@@ -544,6 +568,7 @@ struct FeedView: View {
                                             maybeShowAd()
                                         } else if value.translation.width >= horizontalThreshold {
                                             // swipe right -> previous country
+                                            flashTransition()
                                             selectedCountryIndex = (selectedCountryIndex - 1 + countries.count) % countries.count
                                             currentIndex = 0
                                             Task {
@@ -566,6 +591,7 @@ struct FeedView: View {
                                         if value.translation.height <= -verticalThreshold {
                                             // swipe up -> next post
                                             if !posts.isEmpty {
+                                                flashTransition()
                                                 currentIndex = min(currentIndex + 1, posts.count - 1)
                                                 maybeLoadMoreIfNeeded(appearingIndex: currentIndex)
                                             }
@@ -583,7 +609,9 @@ struct FeedView: View {
                                             maybeShowAd()
                                         } else if value.translation.height >= verticalThreshold {
                                             // swipe down -> previous channel
-                                            selectedChannelIndex = (selectedChannelIndex - 1 + channels.count) % channels.count
+                                            let nextChannelIndex = (selectedChannelIndex - 1 + channels.count) % channels.count
+                                            flashTransition(targetChannelIndex: nextChannelIndex)
+                                            selectedChannelIndex = nextChannelIndex
                                             currentIndex = 0
                                             Task {
                                                 await reloadForChannel()
@@ -609,9 +637,6 @@ struct FeedView: View {
                                 }
                             }
                     )
-                    .onTapGesture(count: 2) {
-                        likeCurrentPost()
-                    }
             } else {
                 populatedFeedView(in: size)
                     .onAppear { }
@@ -643,6 +668,7 @@ struct FeedView: View {
                                     case .horizontal:
                                         if value.translation.width <= -horizontalThreshold {
                                             // swipe left -> next country
+                                            flashTransition()
                                             selectedCountryIndex = (selectedCountryIndex + 1) % countries.count
                                             currentIndex = 0
                                             Task {
@@ -663,6 +689,7 @@ struct FeedView: View {
                                             maybeShowAd()
                                         } else if value.translation.width >= horizontalThreshold {
                                             // swipe right -> previous country
+                                            flashTransition()
                                             selectedCountryIndex = (selectedCountryIndex - 1 + countries.count) % countries.count
                                             currentIndex = 0
                                             Task {
@@ -685,6 +712,7 @@ struct FeedView: View {
                                         if value.translation.height <= -verticalThreshold {
                                             // swipe up -> next post
                                             if !posts.isEmpty {
+                                                flashTransition()
                                                 currentIndex = min(currentIndex + 1, posts.count - 1)
                                                 maybeLoadMoreIfNeeded(appearingIndex: currentIndex)
                                             }
@@ -703,6 +731,7 @@ struct FeedView: View {
                                         } else if value.translation.height >= verticalThreshold {
                                             // swipe down -> previous post
                                             if !posts.isEmpty {
+                                                flashTransition()
                                                 currentIndex = max(currentIndex - 1, 0)
                                             }
                                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
@@ -726,9 +755,6 @@ struct FeedView: View {
                                 }
                             }
                     )
-                    .onTapGesture(count: 2) {
-                        likeCurrentPost()
-                    }
                     .onLongPressGesture(minimumDuration: 0.5) {
                         // Long press to show post location on map with user annotation
                         if let post = posts[safe: currentIndex] {
@@ -847,17 +873,8 @@ struct FeedView: View {
     }
 
     private func emptyFeedView(in size: CGSize) -> some View {
-        ZStack {
-            Color.black
-                .frame(width: size.width, height: size.height)
-
-            ProgressView()
-                .tint(.white)
-        }
-        .frame(width: size.width, height: size.height)
-        .onTapGesture(count: 2) {
-            likeCurrentPost()
-        }
+        Color.black
+            .frame(width: size.width, height: size.height)
     }
 
     private func populatedFeedView(in size: CGSize) -> some View {
@@ -869,10 +886,15 @@ struct FeedView: View {
                     channelNumber: currentChannelNumber,
                     channelCategory: currentChannel.name,
                     channelEmoji: currentChannel.emoji,
+                    channelIconAssetName: currentChannel.iconAssetName,
                     isTVGuideVisible: showTVGuide,
                     onMediaReady: {
                         firstMediaReady = true
                         hideInitialLoadingScreen()
+                    },
+                    onCreditsVisibilityChanged: { visible in
+                        guard posts[safe: currentIndex]?.id == post.id else { return }
+                        setCommentCreditsVisible(visible)
                     },
                     onUserTapped: { uid in
                         print("👤 [FeedView] User tapped - userID: '\(uid)'")
@@ -925,25 +947,31 @@ struct FeedView: View {
             let resolvedName = post.map { displayName(for: $0) }
             let username = post?.isPoplurAd == true ? "Poplur" : ((resolvedName?.isEmpty == false && resolvedName != "Sponsored") ? (resolvedName ?? fallbackUser) : fallbackUser)
 
+            let language = AITranslationCaptionProvider.sourceLanguage(for: channel.id)
+            let program = language == .english
+                ? programs[index % programs.count]
+                : "\(language.displayName) language reel"
+
             return FeedTVGuideChannel(
                 id: channel.id,
-                number: 101 + index,
+                number: channel.number,
                 emoji: channel.emoji,
                 category: channel.name,
+                iconAssetName: channel.iconAssetName,
                 userID: userID,
                 username: username,
-                program: programs[index % programs.count],
+                program: program,
                 videoURL: post.flatMap { URL(string: $0.mediaURL) }
             )
         }
     }
 
-    private var currentChannel: (id: String, name: String, emoji: String) {
+    private var currentChannel: (id: String, number: Int, name: String, emoji: String, iconAssetName: String) {
         channels[safe: selectedChannelIndex] ?? channels[0]
     }
 
     private var currentChannelNumber: Int {
-        101 + selectedChannelIndex
+        currentChannel.number
     }
 
     private var currentPostDisplayName: String {
@@ -964,6 +992,22 @@ struct FeedView: View {
             }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.34) {
+            isFlippingTimeline = false
+        }
+    }
+
+    private func openNewsTimelineWithoutSpin() {
+        noteFeedInteraction()
+        showTVGuide = false
+        guard !showTimelineView else { return }
+
+        playOneShotPop()
+        UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.7)
+
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            showTimelineView = true
             isFlippingTimeline = false
         }
     }
@@ -995,9 +1039,68 @@ struct FeedView: View {
         }
     }
 
+    private func addCommentToCurrentPost(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let post = posts[safe: currentIndex] else { return }
+        noteFeedInteraction()
+        postComments[post.id, default: []].append(
+            FeedCommentCredit(username: "You", text: trimmed)
+        )
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+    }
+
+    private func commentsForCredits(for post: FeedPost) -> [FeedCommentCredit] {
+        FeedCommentCredit.seedComments(for: post.id, displayName: displayName(for: post)) +
+        postComments[post.id, default: []]
+    }
+
+    private func setCommentCreditsVisible(_ visible: Bool) {
+        guard showCommentCredits != visible else { return }
+        withAnimation(.easeInOut(duration: 0.28)) {
+            showCommentCredits = visible
+        }
+    }
+
+    /// Flashes the Poplur TV static tune card to mask post/channel/country changes.
+    private func flashTransition(targetChannelIndex: Int? = nil) {
+        let channelIndex = targetChannelIndex ?? selectedChannelIndex
+        let targetChannel = channels[safe: channelIndex] ?? channels[0]
+        tvTransitionChannelNumber = 101 + channelIndex
+        tvTransitionChannelCategory = targetChannel.name
+        tvTransitionToken += 1
+        isTVTransitionVisible = true
+        tvTransitionOpacity = 1.0
+
+        let token = tvTransitionToken
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.34) {
+            guard token == tvTransitionToken else { return }
+            withAnimation(.easeOut(duration: 0.22)) {
+                tvTransitionOpacity = 0.0
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.24) {
+                guard token == tvTransitionToken else { return }
+                isTVTransitionVisible = false
+            }
+        }
+    }
+
+    private func advanceToNextPost() {
+        guard !posts.isEmpty else { return }
+        showCommentCredits = false
+        flashTransition()
+        if currentIndex < max(0, posts.count - 1) {
+            currentIndex += 1
+            maybeLoadMoreIfNeeded(appearingIndex: currentIndex)
+        } else {
+            currentIndex = 0
+            publishCurrentPostMetrics(duration: 0.3)
+        }
+    }
+
     private func openTVGuideChannel(_ channel: FeedTVGuideChannel) {
         noteFeedInteraction()
         if let index = channels.firstIndex(where: { $0.id == channel.id }) {
+            flashTransition(targetChannelIndex: index)
             selectedChannelIndex = index
             Task { @MainActor in
                 await reloadForChannel()
@@ -1009,13 +1112,25 @@ struct FeedView: View {
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
     }
 
+    @MainActor
+    private func showBriefFeedEntryLogo() {
+        feedEntryLogoTask?.cancel()
+        showFeedEntryLogo = true
+        feedEntryLogoTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 850_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.18)) {
+                showFeedEntryLogo = false
+            }
+            feedEntryLogoTask = nil
+        }
+    }
+
     // MARK: - Username helpers
 
     @MainActor
     private func hideInitialLoadingScreen() {
         guard showInitialLoadingScreen else { return }
-        // Hold the veil until the first post's media signals it is ready to display.
-        // The HomeView 3-second timeout is the safety-net fallback if media never fires.
         guard firstMediaReady else { return }
         withAnimation(.easeOut(duration: 0.45)) {
             showInitialLoadingScreen = false
@@ -1125,6 +1240,23 @@ struct FeedView: View {
     }
 
     private var currentCoordinate: CLLocationCoordinate2D? { activeLocationProvider.coordinate }
+
+    private func openCurrentPostUserProfile() {
+        guard !showTimelineView else { return }
+        guard let post = posts[safe: currentIndex] else { return }
+        let uid = post.userID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !post.isPoplurAd, !uid.hasPrefix("poplur_ad_"), !uid.hasPrefix("sponsored_ad_") else {
+            print("📢 [FeedView] Current feed item is an ad - skipping profile navigation")
+            return
+        }
+        guard !uid.isEmpty else {
+            print("⚠️ [FeedView] Cannot open current post profile - userID is empty")
+            return
+        }
+        noteFeedInteraction()
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        NotificationCenter.default.post(name: .ShowUserProfile, object: uid)
+    }
 
     private func triggerBreakingNewsArrival() {
         breakingNewsConfettiTrigger &+= 1
@@ -1349,14 +1481,16 @@ struct FeedView: View {
     }
 
     // MARK: - Demo data generator (local fallback)
+    // Videos with people speaking — required for closed-caption testing
     nonisolated private static let reliableDemoVideoURLs: [String] = [
-        "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_4x3/gear1/prog_index.m3u8",
-        "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_16x9/gear1/prog_index.m3u8",
-        "https://media.w3.org/2010/05/sintel/trailer.mp4",
-        "https://media.w3.org/2010/05/bunny/trailer.mp4",
-        "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4",
-        "https://download.samplelib.com/mp4/sample-10s.mp4",
-        "https://download.samplelib.com/mp4/sample-15s.mp4"
+        "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
+        "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
+        "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
+        "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFuns.mp4",
+        "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4",
+        "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4",
+        "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/SubaruOutbackOnStreetAndDirt.mp4",
+        "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4"
     ]
 
     private struct PoplurAdCreative: Sendable {
@@ -1478,6 +1612,19 @@ struct FeedView: View {
         case .ad:
             return poplurAdCreative(for: index, namespace: namespace).mediaURL
         }
+    }
+
+    nonisolated private static func languageDemoVideoURL(for index: Int, language: PoplurLanguage) -> String {
+        let offset: Int
+        switch language {
+        case .english:
+            offset = 0
+        case .french:
+            offset = 1
+        case .spanish:
+            offset = 3
+        }
+        return reliableDemoVideoURLs[abs(index + offset) % reliableDemoVideoURLs.count]
     }
 
     nonisolated private static func demoUserID(regular regularUserID: String, for index: Int) -> String {
@@ -1605,10 +1752,21 @@ struct FeedView: View {
                 userID = "\(channel)_user_\(userIndex)"
                 userIDForIndex[userIndex] = userID
             }
-            let adCreative = demoMediaKind(for: i) == .ad ? poplurAdCreative(for: i, namespace: "\(country)_\(channel)") : nil
+            let channelLanguage = AITranslationCaptionProvider.sourceLanguage(for: channel)
+            let isLanguageChannel = channelLanguage != .english
+            // For language channels, alternate: even indices are native-language videos,
+            // odd indices are English videos that get auto-captioned into the channel language.
+            let postSourceLanguage: PoplurLanguage = isLanguageChannel
+                ? (i % 2 == 0 ? channelLanguage : .english)
+                : .english
+            let adCreative: PoplurAdCreative? = (!isLanguageChannel && demoMediaKind(for: i) == .ad)
+                ? poplurAdCreative(for: i, namespace: "\(country)_\(channel)")
+                : nil
             let feedUserID = adCreative.map { "poplur_ad_\($0.id)" } ?? demoUserID(regular: userID, for: i)
-            
-            let mediaURL = balancedDemoMediaURL(for: i, namespace: "\(country)_\(channel)")
+
+            let mediaURL: String = isLanguageChannel
+                ? languageDemoVideoURL(for: i, language: postSourceLanguage)
+                : balancedDemoMediaURL(for: i, namespace: "\(country)_\(channel)")
             
             // ✅ USE GLOBAL CITIES for coordinates - posts now come from all over the world!
             let city = globalCities[i % globalCities.count]
@@ -1656,6 +1814,7 @@ struct FeedView: View {
                 cityName: city.name,
                 countryName: city.country,
                 countryFlag: city.flag,
+                sourceLanguageCode: postSourceLanguage.rawValue,
                 isPoplurAd: adCreative != nil,
                 adHeadline: adCreative?.headline,
                 adBody: adCreative?.body,
@@ -1788,10 +1947,30 @@ fileprivate struct FeedTVGuideChannel: Identifiable, Hashable {
     let number: Int
     let emoji: String
     let category: String
+    let iconAssetName: String
     let userID: String
     let username: String
     let program: String
     var videoURL: URL? = nil
+}
+
+struct ChannelAssetIcon: View {
+    let assetName: String?
+    let fallbackEmoji: String
+    let size: CGFloat
+    let fallbackFontSize: CGFloat
+
+    var body: some View {
+        if let assetName, UIImage(named: assetName) != nil {
+            Image(assetName)
+                .resizable()
+                .scaledToFit()
+                .frame(width: size, height: size)
+        } else {
+            Text(fallbackEmoji)
+                .font(.system(size: fallbackFontSize))
+        }
+    }
 }
 
 private struct FeedTVGuideView: View {
@@ -1861,7 +2040,7 @@ private struct FeedTVGuideView: View {
     private var previewedChannel: FeedTVGuideChannel {
         channels.first { $0.id == previewedChannelID }
             ?? channels.first
-            ?? FeedTVGuideChannel(id: "feed", number: 101, emoji: "▶", category: "Feed",
+            ?? FeedTVGuideChannel(id: "feed", number: 101, emoji: "▶", category: "Feed", iconAssetName: "poplur_channel_101_food",
                                   userID: "", username: currentPostName, program: "Live posts")
     }
 
@@ -1925,8 +2104,7 @@ private struct FeedTVGuideView: View {
                     onChannelSelected(channel)
                 } label: {
                     HStack(spacing: 10) {
-                        Text(channel.emoji)
-                            .font(.system(size: 22))
+                        ChannelAssetIcon(assetName: channel.iconAssetName, fallbackEmoji: channel.emoji, size: 34, fallbackFontSize: 22)
 
                         Text("\(channel.number)")
                             .font(.system(size: 18, weight: .black, design: .rounded))
@@ -2018,8 +2196,7 @@ private struct FeedTVGuideRow: View {
     var body: some View {
         HStack(spacing: 0) {
             HStack(spacing: 10) {
-                Text(channel.emoji)
-                    .font(.system(size: 26))
+                ChannelAssetIcon(assetName: channel.iconAssetName, fallbackEmoji: channel.emoji, size: 42, fallbackFontSize: 26)
                 Text("\(channel.number)")
                     .font(.system(size: 28, weight: .black, design: .rounded))
                     .foregroundStyle(guideGreen)
@@ -2101,8 +2278,7 @@ private struct GuidePipVideoPane: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 5) {
-                    Text(channel.emoji)
-                        .font(.system(size: 13))
+                    ChannelAssetIcon(assetName: channel.iconAssetName, fallbackEmoji: channel.emoji, size: 22, fallbackFontSize: 13)
                     Text("CH \(channel.number)")
                         .font(.system(size: 13, weight: .black, design: .rounded))
                         .foregroundStyle(guideGreen)
@@ -2258,111 +2434,87 @@ private struct FeedBreakingNewsConfettiOverlay: UIViewRepresentable {
     }
 }
 
-private struct FeedLiveComment: Identifiable, Hashable {
+private struct FeedCommentCredit: Identifiable, Hashable {
     let id = UUID()
     let username: String
     let text: String
-}
 
-private struct FeedLiveCommentsOverlay: View {
-    let postID: String
-    let displayName: String
-    let onInteraction: () -> Void
-
-    @State private var comments: [FeedLiveComment] = []
-    @State private var draft = ""
-    @FocusState private var isFocused: Bool
-
-    var body: some View {
-        GeometryReader { proxy in
-            VStack {
-                Spacer()
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(comments.suffix(5)) { comment in
-                        HStack(alignment: .top, spacing: 7) {
-                            Circle()
-                                .fill(Color.white.opacity(0.22))
-                                .frame(width: 24, height: 24)
-                                .overlay {
-                                    Text(String(comment.username.prefix(1)).uppercased())
-                                        .font(.system(size: 11, weight: .black, design: .rounded))
-                                        .foregroundStyle(.white)
-                                }
-
-                            Text("\(comment.username)  ")
-                                .font(.system(size: 13, weight: .black, design: .rounded))
-                                .foregroundStyle(.white)
-                            + Text(comment.text)
-                                .font(.system(size: 13, weight: .semibold, design: .rounded))
-                                .foregroundStyle(.white.opacity(0.92))
-                        }
-                        .shadow(color: .black.opacity(0.65), radius: 5, x: 0, y: 2)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                    }
-
-                    HStack(spacing: 10) {
-                        TextField("Comment", text: $draft)
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 14, weight: .semibold, design: .rounded))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 13)
-                            .padding(.vertical, 9)
-                            .background(Color.black.opacity(0.34), in: Capsule())
-                            .overlay(
-                                Capsule().stroke(Color.white.opacity(0.42), lineWidth: 1)
-                            )
-                            .focused($isFocused)
-                            .onSubmit(addComment)
-
-                        Button(action: addComment) {
-                            Image(systemName: "paperplane.fill")
-                                .font(.system(size: 17, weight: .black))
-                                .foregroundStyle(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .white.opacity(0.38) : .white)
-                                .frame(width: 38, height: 38)
-                                .background(Color.black.opacity(0.34), in: Circle())
-                                .overlay(Circle().stroke(Color.white.opacity(0.34), lineWidth: 1))
-                        }
-                        .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    }
-                    .padding(.top, 4)
-                }
-                .frame(maxWidth: min(proxy.size.width - 26, 360), alignment: .leading)
-                .padding(.horizontal, 13)
-                .padding(.bottom, proxy.safeAreaInsets.bottom + 18)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-        }
-        .onAppear {
-            if comments.isEmpty {
-                comments = Self.seedComments(for: postID, displayName: displayName)
-            }
-        }
-        .onChange(of: postID) { _, newPostID in
-            comments = Self.seedComments(for: newPostID, displayName: displayName)
-            draft = ""
-        }
-    }
-
-    private func addComment() {
-        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        withAnimation(.spring(response: 0.26, dampingFraction: 0.78)) {
-            comments.append(FeedLiveComment(username: "You", text: trimmed))
-        }
-        draft = ""
-        isFocused = false
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-    }
-
-    private static func seedComments(for postID: String, displayName: String) -> [FeedLiveComment] {
+    static func seedComments(for postID: String, displayName: String) -> [FeedCommentCredit] {
         let samples = [
-            FeedLiveComment(username: "vi.xi.mmvi", text: "this is live right now"),
-            FeedLiveComment(username: "leurdavoir", text: "keep the camera there"),
-            FeedLiveComment(username: "monsekee", text: "the radius is going crazy"),
-            FeedLiveComment(username: "poplur", text: "watching \(displayName)")
+            FeedCommentCredit(username: "vi.xi.mmvi", text: "this is live right now"),
+            FeedCommentCredit(username: "leurdavoir", text: "keep the camera there"),
+            FeedCommentCredit(username: "monsekee", text: "the radius is going crazy"),
+            FeedCommentCredit(username: "poplur", text: "watching \(displayName)")
         ]
         let offset = abs(postID.hashValue) % samples.count
         return Array(samples[offset...]) + Array(samples[..<offset])
+    }
+}
+
+private struct FeedCommentCreditsOverlay: View {
+    let comments: [FeedCommentCredit]
+    let displayName: String
+
+    @State private var isRolling = false
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack {
+                LinearGradient(
+                    colors: [
+                        .clear,
+                        .black.opacity(0.18),
+                        .black.opacity(0.42),
+                        .clear
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .ignoresSafeArea()
+
+                VStack(spacing: 18) {
+                    Text("Comments")
+                        .font(.system(size: 22, weight: .black, design: .rounded))
+                        .foregroundStyle(.white)
+                        .shadow(color: .black.opacity(0.7), radius: 8, x: 0, y: 4)
+
+                    Text(displayName)
+                        .font(.system(size: 13, weight: .heavy, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.76))
+                        .textCase(.uppercase)
+
+                    ForEach(comments) { comment in
+                        VStack(spacing: 5) {
+                            Text(comment.username)
+                                .font(.system(size: 15, weight: .black, design: .rounded))
+                                .foregroundStyle(.cyan)
+                                .shadow(color: .black.opacity(0.75), radius: 5, x: 0, y: 2)
+
+                            Text(comment.text)
+                                .font(.system(size: 20, weight: .bold, design: .rounded))
+                                .multilineTextAlignment(.center)
+                                .foregroundStyle(.white)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .shadow(color: .black.opacity(0.78), radius: 7, x: 0, y: 3)
+                        }
+                        .frame(maxWidth: min(proxy.size.width - 52, 430))
+                    }
+                }
+                .frame(width: min(proxy.size.width - 36, 460))
+                .position(
+                    x: proxy.size.width / 2,
+                    y: isRolling ? -proxy.size.height * 0.22 : proxy.size.height + 190
+                )
+                .animation(.linear(duration: 7.2), value: isRolling)
+            }
+        }
+        .allowsHitTesting(false)
+        .onAppear {
+            isRolling = false
+            DispatchQueue.main.async {
+                isRolling = true
+            }
+        }
     }
 }
 
@@ -2441,12 +2593,32 @@ struct FeedViewHost: View {
     }
 }
 
-private struct FeedLaunchLoadingScreen: View {
-    @State private var scene = HomeFeedLaunchCoverScene.make()
+private struct FeedEntryLogoPopView: View {
+    @State private var scale: CGFloat = 0.72
+    @State private var opacity: Double = 0
 
     var body: some View {
-        SpriteView(scene: scene)
-            .ignoresSafeArea()
+        Image("logo")
+            .resizable()
+            .scaledToFit()
+            .frame(width: 150, height: 150)
+            .scaleEffect(scale)
+            .opacity(opacity)
+            .shadow(color: .black.opacity(0.25), radius: 16, y: 8)
             .allowsHitTesting(false)
+            .task {
+                await MainActor.run {
+                    withAnimation(.spring(response: 0.20, dampingFraction: 0.55)) {
+                        opacity = 1
+                        scale = 1.22
+                    }
+                }
+                try? await Task.sleep(nanoseconds: 180_000_000)
+                await MainActor.run {
+                    withAnimation(.spring(response: 0.18, dampingFraction: 0.72)) {
+                        scale = 1.0
+                    }
+                }
+            }
     }
 }
