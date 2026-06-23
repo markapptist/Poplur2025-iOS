@@ -197,7 +197,6 @@ class PhoneScene: SKScene, ObservableObject {
     private var wasShowingCallStatusBeforeBootup = false
     private var deviceBatteryLevel: Float = 1.0
     private var batteryObserverTokens: [NSObjectProtocol] = []
-    private var isPhoneButtonActive = true
     private var isLCDActive = false
     private var screenNode: SKSpriteNode?
     private var screenTextLabel: SKLabelNode?
@@ -319,10 +318,8 @@ class PhoneScene: SKScene, ObservableObject {
     }
 
     func setPhoneButtonActive(_ isActive: Bool, announce: Bool = true) {
-        isPhoneButtonActive = isActive
-        guard announce else { return }
-        generateHapticFeedback()
-        flashMenuDetail(isActive ? "BUTTON\nACTIVE" : "BUTTON\nLOCKED")
+        _ = isActive
+        _ = announce
     }
 
     func activateLCD() {
@@ -589,14 +586,18 @@ class PhoneScene: SKScene, ObservableObject {
 
         let frames = currentBootupFrames()
         guard !frames.isEmpty else {
+            isBootingUp = false
             phoneArtworkNode.texture = restingPhoneTexture()
-            updateSignalStatusVisibility()
-            scheduleNextIdleSignalAnimation()
+            isLCDActive = true
+            setInteractiveContentHiddenForBootup(false)
+            showPhoneMenu(.main)
+            onLCDActivated?()
             return
         }
 
         isBootingUp = true
         stopIdleSignalAnimation()
+        removeAction(forKey: "menuFlash")
         setInteractiveContentHiddenForBootup(true)
         phoneArtworkNode.removeAction(forKey: "bootup")
         phoneArtworkNode.setScale(1.0)
@@ -613,13 +614,16 @@ class PhoneScene: SKScene, ObservableObject {
             guard let self else { return }
             self.isBootingUp = false
             self.phoneArtworkNode?.texture = self.restingPhoneTexture()
+            self.isLCDActive = true
             self.setInteractiveContentHiddenForBootup(false)
-            self.hideLCDContent()
+            self.showPhoneMenu(.main)
+            self.onLCDActivated?()
         }
 
         phoneArtworkNode.run(.sequence([bootupFrames, finish]), withKey: "bootup")
         runBootupVibration(duration: bootupDuration)
         runBootupHaptics(duration: bootupDuration)
+        runBootupTorchFlash()
     }
 
     private func currentBootupFrames() -> [SKTexture] {
@@ -749,10 +753,11 @@ class PhoneScene: SKScene, ObservableObject {
     private func setInteractiveContentHiddenForBootup(_ hidden: Bool) {
         if hidden {
             wasShowingCallStatusBeforeBootup = callStatusLabel?.isHidden == false
-            // Keep lcd_fill, screenNode, and menuLayer visible so the main menu
-            // remains on-screen during the bootup animation.
+            childNode(withName: "lcd_fill")?.isHidden = true
+            screenNode?.isHidden = true
             screenTextLabel?.isHidden = true
             callStatusLabel?.isHidden = true
+            menuLayer?.isHidden = true
             snakeLayer?.isHidden = true
             signalStatusNode?.isHidden = true
             batteryStatusNode?.isHidden = true
@@ -843,11 +848,51 @@ class PhoneScene: SKScene, ObservableObject {
 
     private func runBootupHaptics(duration: TimeInterval) {
         #if os(iOS)
+        let thump = SKAction.run {
+            let gen = UIImpactFeedbackGenerator(style: .heavy)
+            gen.impactOccurred(intensity: 1.0)
+        }
         let tick = SKAction.sequence([
-            .run { [weak self] in self?.generateHapticFeedback() },
-            .wait(forDuration: 0.28)
+            .run {
+                let gen = UIImpactFeedbackGenerator(style: .medium)
+                gen.impactOccurred()
+            },
+            .wait(forDuration: 0.22)
         ])
-        run(.repeat(tick, count: max(1, Int(duration / 0.28))), withKey: "bootupHaptics")
+        let tickCount = max(1, Int((duration - 0.18) / 0.22))
+        let sequence = SKAction.sequence([
+            thump,
+            .wait(forDuration: 0.08),
+            thump,
+            .wait(forDuration: 0.10),
+            .repeat(tick, count: tickCount)
+        ])
+        run(sequence, withKey: "bootupHaptics")
+        #endif
+    }
+
+    private func runBootupTorchFlash() {
+        #if os(iOS)
+        guard let device = AVCaptureDevice.default(for: .video),
+              device.hasTorch, device.isTorchAvailable else { return }
+        Task.detached(priority: .userInitiated) {
+            let pulses: [(onNs: UInt64, offNs: UInt64)] = [
+                (90_000_000, 130_000_000),
+                (70_000_000, 0)
+            ]
+            for (i, pulse) in pulses.enumerated() {
+                try? device.lockForConfiguration()
+                try? device.setTorchModeOn(level: 1.0)
+                device.unlockForConfiguration()
+                try? await Task.sleep(nanoseconds: pulse.onNs)
+                try? device.lockForConfiguration()
+                device.torchMode = .off
+                device.unlockForConfiguration()
+                if i < pulses.count - 1 {
+                    try? await Task.sleep(nanoseconds: pulse.offNs)
+                }
+            }
+        }
         #endif
     }
 
@@ -1195,10 +1240,12 @@ class PhoneScene: SKScene, ObservableObject {
     }
 
     private func showPhoneMenu(_ screen: PhoneMenuScreen, selectedIndex: Int = 0) {
-        guard !isSnakeActive else { return }
+        guard !isBootingUp, !isSnakeActive else { return }
         menuScreen = screen
         let items = menuItems(for: screen)
         selectedMenuIndex = min(max(0, selectedIndex), max(0, items.count - 1))
+        childNode(withName: "lcd_fill")?.isHidden = false
+        screenNode?.isHidden = false
         screenTextLabel?.isHidden = true
         callStatusLabel?.isHidden = true
         renderPhoneMenu(items: items)
@@ -1498,12 +1545,6 @@ class PhoneScene: SKScene, ObservableObject {
             return
         }
 
-        guard isPhoneButtonActive else {
-            generateHapticFeedback()
-            flashMenuDetail("BUTTON\nLOCKED")
-            return
-        }
-
         if menuLayer != nil {
             activateSelectedMenuItem()
             return
@@ -1529,11 +1570,6 @@ class PhoneScene: SKScene, ObservableObject {
     private func handleButtonPress(digit: String, button: SKNode) {
         guard isLCDActive else { return }
         playDialTone(for: digit)
-
-        guard isPhoneButtonActive else {
-            flashMenuDetail("BUTTON\nLOCKED")
-            return
-        }
 
         // Visual feedback
         let scaleDown = SKAction.scale(to: 0.85, duration: 0.1)

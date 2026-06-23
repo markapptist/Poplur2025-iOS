@@ -31,11 +31,13 @@ final class FakePostService: ObservableObject {
         "https://images.unsplash.com/photo-1482192596544-9eb780fc7f66?w=1600",
         "https://images.unsplash.com/photo-1491553895911-0055eca6402d?w=1600"
     ]
-    // Public sample videos (ensure CORS allows streaming)
+    // Public-domain human TV drama/soap clips with dialogue for closed-caption testing.
     private let videoPool: [String] = [
-        "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
-        "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
-        "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4"
+        "https://archive.org/download/Guiding_Light/GuidingLightMarch4-1953.mp4",
+        "https://archive.org/download/Love_Of_Life_Soap/LoveofLifeMarch20-1953.mp4",
+        "https://archive.org/download/Valiant_Lady/Valiant_Lady.mp4",
+        "https://archive.org/download/GuidingLight9April1953/GuidingLight9April1953.mp4",
+        "https://archive.org/download/1967_PD_Soapie/LoveisaManySplenderedThing1967.mp4"
     ]
 
     private var mixedMediaPool: [String] {
@@ -372,4 +374,3 @@ final class FakePostService: ObservableObject {
         return ca.distance(from: cb)
     }
 }
-

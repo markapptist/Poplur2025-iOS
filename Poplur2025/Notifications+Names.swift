@@ -14,6 +14,7 @@ extension Notification.Name {
     // Tab and navigation
     static let ResetTabToTop = Notification.Name("ResetTabToTop")
     static let RecordTabBecameActive = Notification.Name("RecordTabBecameActive")
+    static let StopMapAudio = Notification.Name("StopMapAudio")
     static let ShowUserProfile = Notification.Name("ShowUserProfile")
     
     // Cube interactions
@@ -26,19 +27,29 @@ extension Notification.Name {
     static let cameraCubeHoldBegan = Notification.Name("cameraCubeHoldBegan")
     static let cameraCubeHoldEnded = Notification.Name("cameraCubeHoldEnded")
     static let cameraCubeTabViewTapped = Notification.Name("cameraCubeTabViewTapped")
+    static let showCameraRollWindow = Notification.Name("ShowCameraRollWindow")
     static let CubeStartFlashing = Notification.Name("CubeStartFlashing")
     static let CubeStopFlashing = Notification.Name("CubeStopFlashing")
     static let CubeProfileIconOverrideChanged = Notification.Name("CubeProfileIconOverrideChanged")
     static let CenterMapOnUser = Notification.Name("CenterMapOnUser")
     
     // Feed and audio
+    static let FeedChannelDidChange = Notification.Name("FeedChannelDidChange")
     static let PauseFeedAudio = Notification.Name("PauseFeedAudio")
     static let ResumeFeedAudio = Notification.Name("ResumeFeedAudio")
     static let PauseGlobalFeedAudio = Notification.Name("PauseGlobalFeedAudio")
     static let ActiveFeedPlayerDidChange = Notification.Name("ActiveFeedPlayerDidChange")
     static let FeedUserInteraction = Notification.Name("FeedUserInteraction")
     static let FeedOpenTVGuide = Notification.Name("FeedOpenTVGuide")
+    static let FeedTVGuideBecameVisible = Notification.Name("FeedTVGuideBecameVisible")
+    static let FeedTVGuideBecameHidden  = Notification.Name("FeedTVGuideBecameHidden")
     static let FeedOpenNews = Notification.Name("FeedOpenNews")
+    static let FeedLikeCurrentPost = Notification.Name("FeedLikeCurrentPost")
+    static let FeedOpenCommentComposer = Notification.Name("FeedOpenCommentComposer")
+    static let FeedOpenCurrentPostProfile = Notification.Name("FeedOpenCurrentPostProfile")
+    static let FeedCommentSubmitted = Notification.Name("FeedCommentSubmitted")
+    static let FeedAdvanceOnMediaFailure = Notification.Name("FeedAdvanceOnMediaFailure")
+    static let FeedAdvanceToNextPost = Notification.Name("FeedAdvanceToNextPost")
     
     // Map and location
     static let CenterMapOnUserLocation = Notification.Name("CenterMapOnUserLocation")

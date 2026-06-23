@@ -644,117 +644,192 @@ private let fixedPitchAlt: CGFloat = 60 // Changed to 60 degrees for 3D perspect
 
 // MARK: - Poplur Map Radio
 
+// Thin wrapper so the map radio host can call ElevenLabsService with the same interface as before.
+private final class PoplurHumanVoiceSpeechService {
+    static let shared = PoplurHumanVoiceSpeechService()
+
+    func speechData(for script: String) async throws -> Data {
+        let text = script.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { throw ElevenLabsService.ElevenLabsError.badResponse }
+        return try await ElevenLabsService.shared.audioData(for: text, voice: .english)
+    }
+}
+
 @MainActor
-private final class PoplurMapRadioHost: NSObject, ObservableObject, AVSpeechSynthesizerDelegate {
+final class PoplurMapRadioHost: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDelegate {
+    static let shared = PoplurMapRadioHost()
+
     @Published private(set) var isLive = false
-    @Published private(set) var currentScript = "Tap Radio to hear what is happening on the map."
+    @Published private(set) var currentScript = "Poplur Radio is ready."
 
     private let synth = AVSpeechSynthesizer()
+    private var generatedVoicePlayer: AVAudioPlayer?
+    private var generatedVoiceTask: Task<Void, Never>?
+    private var speechToken = UUID()
     private var onSpeechFinished: (() -> Void)?
+    private var prewarmTask: Task<Void, Never>?
 
     override init() {
         super.init()
         synth.delegate = self
     }
 
-    func toggle(script: String) {
-        if isLive {
-            stop()
-        } else {
-            speak(script)
+    // Pre-fetches TTS audio for the generic "your area" opening script so it is
+    // cached in PoplurHumanVoiceSpeechService before the map tab is first opened.
+    func prewarm() async {
+        guard prewarmTask == nil else { return }
+        let genericScript = "Welcome to Poplur Radio, live and direct from your area. The music scene here is absolutely on fire. Stay with us."
+        prewarmTask = Task {
+            _ = try? await PoplurHumanVoiceSpeechService.shared.speechData(for: genericScript)
         }
+        await prewarmTask?.value
     }
 
     func speak(_ script: String, onFinished: (() -> Void)? = nil) {
+        stop(notifyFinished: false)
         synth.stopSpeaking(at: .immediate)
         currentScript = script
         onSpeechFinished = onFinished
 
-        let utterance = AVSpeechUtterance(string: script)
-        utterance.voice = Self.preferredRadioVoice()
-        utterance.rate = 0.52          // slightly above default — more natural conversational pace
-        utterance.pitchMultiplier = 1.05  // slight lift makes voice less flat/monotone
-        utterance.volume = 1.0
-        utterance.preUtteranceDelay = 0.05  // shorter startup gap = less robotic
-        utterance.postUtteranceDelay = 0.15
-
         isLive = true
-        synth.speak(utterance)
+        let token = UUID()
+        speechToken = token
+
+        generatedVoiceTask = Task { [weak self] in
+            do {
+                let data = try await PoplurHumanVoiceSpeechService.shared.speechData(for: script)
+                try Task.checkCancellation()
+                try await MainActor.run {
+                    guard let self, self.speechToken == token else { return }
+                    try self.playGeneratedVoice(data, token: token)
+                }
+            } catch {
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    guard let self, self.speechToken == token else { return }
+                    self.speakWithSystemVoice(script, token: token)
+                }
+            }
+        }
     }
 
     private static func preferredRadioVoice() -> AVSpeechSynthesisVoice? {
         let voices = AVSpeechSynthesisVoice.speechVoices()
-        // "Ava" (US) and "Siri" premium voices are the most natural-sounding on iOS.
-        // Fall through quality tiers so we always return something audible.
-        let enUS = voices.filter { $0.language == "en-US" }
-        if let ava = enUS.first(where: { $0.quality == .premium && $0.name.lowercased().contains("ava") }) {
-            return ava
+        let britishVoices = voices.filter { $0.language == "en-GB" }
+        let preferredNames = ["serena", "daniel", "martha", "arthur", "kate"]
+        if let named = britishVoices.first(where: { voice in
+            preferredNames.contains { voice.name.lowercased().contains($0) }
+        }) {
+            return named
         }
-        if let premium = enUS.first(where: { $0.quality == .premium }) {
+        if let premium = britishVoices.first(where: { $0.quality == .premium }) {
             return premium
         }
-        if let enhanced = enUS.first(where: { $0.quality == .enhanced }) {
+        if let enhanced = britishVoices.first(where: { $0.quality == .enhanced }) {
             return enhanced
         }
-        // Try any English premium/enhanced before falling back to system default
         if let anyPremium = voices.first(where: { $0.language.hasPrefix("en") && $0.quality == .premium }) {
             return anyPremium
         }
         if let anyEnhanced = voices.first(where: { $0.language.hasPrefix("en") && $0.quality == .enhanced }) {
             return anyEnhanced
         }
-        return AVSpeechSynthesisVoice(language: "en-US")
+        return AVSpeechSynthesisVoice(language: "en-GB")
     }
 
     func stop() {
+        stop(notifyFinished: false)
+    }
+
+    private func stop(notifyFinished: Bool) {
+        speechToken = UUID()
+        generatedVoiceTask?.cancel()
+        generatedVoiceTask = nil
+        generatedVoicePlayer?.stop()
+        generatedVoicePlayer?.delegate = nil
+        generatedVoicePlayer = nil
         synth.stopSpeaking(at: .immediate)
         isLive = false
+        let completion = onSpeechFinished
         onSpeechFinished = nil
+        if notifyFinished {
+            completion?()
+        }
+    }
+
+    private func playGeneratedVoice(_ data: Data, token: UUID) throws {
+        guard speechToken == token else { return }
+        try configureVoiceSession()
+        let player = try AVAudioPlayer(data: data)
+        player.delegate = self
+        player.volume = 1.0
+        player.prepareToPlay()
+        generatedVoicePlayer = player
+        if !player.play() {
+            throw URLError(.cannotOpenFile)
+        }
+    }
+
+    private func speakWithSystemVoice(_ script: String, token: UUID) {
+        guard speechToken == token else { return }
+        try? configureVoiceSession()
+
+        let utterance = AVSpeechUtterance(string: script)
+        utterance.voice = Self.preferredRadioVoice()
+        utterance.rate = 0.49
+        utterance.pitchMultiplier = 0.98
+        utterance.volume = 1.0
+        utterance.preUtteranceDelay = 0.04
+        utterance.postUtteranceDelay = 0.12
+
+        synth.speak(utterance)
+    }
+
+    private func configureVoiceSession() throws {
+        let session = AVAudioSession.sharedInstance()
+        try session.setCategory(.playback, mode: .spokenAudio, options: [.mixWithOthers])
+        try session.setActive(true, options: [])
+    }
+
+    private func finishSpeech() {
+        generatedVoiceTask?.cancel()
+        generatedVoiceTask = nil
+        generatedVoicePlayer?.delegate = nil
+        generatedVoicePlayer = nil
+        isLive = false
+        let completion = onSpeechFinished
+        onSpeechFinished = nil
+        completion?()
     }
 
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
                                        didFinish utterance: AVSpeechUtterance) {
         Task { @MainActor in
-            self.isLive = false
-            self.onSpeechFinished?()
-            self.onSpeechFinished = nil
+            self.finishSpeech()
         }
     }
 
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
                                        didCancel utterance: AVSpeechUtterance) {
         Task { @MainActor in
+            guard self.generatedVoiceTask == nil,
+                  self.generatedVoicePlayer == nil,
+                  !self.synth.isSpeaking else { return }
             self.isLive = false
             self.onSpeechFinished = nil
         }
     }
-}
 
-private struct PoplurMapRadioOverlay: View {
-    @ObservedObject var host: PoplurMapRadioHost
-    let script: String
-
-    var body: some View {
-        Button {
-            host.toggle(script: script)
-        } label: {
-            ZStack {
-                Circle()
-                    .fill(Color.green.opacity(host.isLive ? 0.24 : 0.12))
-                    .frame(width: 48, height: 48)
-                    .overlay(
-                        Circle()
-                            .stroke(Color.green.opacity(host.isLive ? 0.9 : 0.45), lineWidth: 1.4)
-                    )
-
-                Image(systemName: host.isLive ? "pause.fill" : "antenna.radiowaves.left.and.right")
-                    .font(.system(size: 18, weight: .black))
-                    .foregroundStyle(.green)
-                    .shadow(color: .green.opacity(host.isLive ? 0.8 : 0.35), radius: host.isLive ? 8 : 3)
-            }
+    nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        Task { @MainActor in
+            self.finishSpeech()
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(host.isLive ? "Stop Poplur Radio" : "Play Poplur Radio")
+    }
+
+    nonisolated func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
+        Task { @MainActor in
+            self.finishSpeech()
+        }
     }
 }
 
@@ -974,6 +1049,17 @@ private let trendPopCountMin = 10
 private let trendPopCountRange = 6
 private let musicLookupTimeout: TimeInterval = 5
 private let musicTopTrackChoices = 5
+
+private enum PoplurAudioMix {
+    static let musicFullVolume: Float = 0.92
+    static let voiceDuckVolume: Float = 0.10
+    static let rainDuckMultiplier: Float = 0.32
+    static let rainFadeDuration: TimeInterval = 1.35
+    static let rainVoiceDuckDuration: TimeInterval = 0.55
+    static let musicFadeDuration: TimeInterval = 1.8
+    static let musicDuckDuration: TimeInterval = 0.45
+    static let musicUnduckDuration: TimeInterval = 1.25
+}
 
 private let PoplurTourStops: [PoplurTourStop] = [
     PoplurTourStop(cityName: "Paris", storefront: "fr", coordinate: CLLocationCoordinate2D(latitude: 48.8584, longitude: 2.2945), bearing: 28, radiusMeters: 105_000, distance: 900, description: "Eiffel Tower energy"),
@@ -1455,6 +1541,8 @@ private func makeLocalTrendInsight(for cityName: String) -> AiTourInsight {
 @MainActor
 private final class RainAmbientAudioService: ObservableObject {
     private var player: AVAudioPlayer?
+    private var targetVolume: Float = 0
+    private var isDuckedForVoice = false
 
     func update(for weatherState: WeatherVisualizationState) {
         switch weatherState.kind {
@@ -1466,8 +1554,10 @@ private final class RainAmbientAudioService: ObservableObject {
     }
 
     func play(volume: Float) {
+        targetVolume = volume
+        let mixedVolume = outputVolume(for: volume)
         if let player, player.isPlaying {
-            player.setVolume(volume, fadeDuration: 0.25)
+            player.setVolume(mixedVolume, fadeDuration: PoplurAudioMix.rainFadeDuration)
             return
         }
         do {
@@ -1475,15 +1565,24 @@ private final class RainAmbientAudioService: ObservableObject {
             try configureAudioSession()
             let player = try AVAudioPlayer(contentsOf: url)
             player.numberOfLoops = -1
-            player.volume = volume
+            player.volume = 0
             player.prepareToPlay()
             if !player.play() {
                 print("[RainAmbientAudio] AVAudioPlayer refused to start")
             }
+            player.setVolume(mixedVolume, fadeDuration: PoplurAudioMix.rainFadeDuration)
             self.player = player
         } catch {
             print("[RainAmbientAudio] Failed to start rain audio: \(error)")
         }
+    }
+
+    func setVoiceDucked(_ ducked: Bool) {
+        isDuckedForVoice = ducked
+        player?.setVolume(
+            outputVolume(for: targetVolume),
+            fadeDuration: ducked ? PoplurAudioMix.rainVoiceDuckDuration : PoplurAudioMix.rainFadeDuration
+        )
     }
 
     private func rainVolume(for state: WeatherVisualizationState) -> Float {
@@ -1492,8 +1591,14 @@ private final class RainAmbientAudioService: ObservableObject {
         return Float(min(0.28, baseVolume + clampedIntensity * 0.08))
     }
 
+    private func outputVolume(for volume: Float) -> Float {
+        isDuckedForVoice ? volume * PoplurAudioMix.rainDuckMultiplier : volume
+    }
+
     func stop() {
-        player?.fadeOutAndStop()
+        targetVolume = 0
+        let stoppingPlayer = player
+        stoppingPlayer?.fadeOutAndStop(duration: 0.65)
         player = nil
     }
 
@@ -1560,10 +1665,11 @@ private final class RainAmbientAudioService: ObservableObject {
 }
 
 private extension AVAudioPlayer {
-    func fadeOutAndStop() {
-        setVolume(0, fadeDuration: 0.35)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
-            self?.stop()
+    func fadeOutAndStop(duration: TimeInterval = 0.35) {
+        setVolume(0, fadeDuration: duration)
+        let player = self
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration + 0.05) {
+            player.stop()
         }
     }
 }
@@ -1582,10 +1688,15 @@ private final class CityTourMusicPlayerService: ObservableObject {
     private var radioTrackCache: [String: [CityMusicTrack]] = [:]
     private var sportsRadioTrackCache: [String: [CityMusicTrack]] = [:]
     private var loadTask: Task<Void, Never>?
-    private var lastPlayerVolume: Float = 1.0
+    private var volumeFadeTask: Task<Void, Never>?
+    private var lastPlayerVolume: Float = PoplurAudioMix.musicFullVolume
+    private var activeStopID: String?
+    private var preparingStopID: String?
+    private var isPreparingPlayback = false
     private var interruptionObserver: NSObjectProtocol?
 
     var isPlaybackActive: Bool {
+        if isPreparingPlayback { return true }
         guard let player else { return false }
         return player.timeControlStatus == .playing || player.rate != 0
     }
@@ -1610,17 +1721,27 @@ private final class CityTourMusicPlayerService: ObservableObject {
         }
     }
 
-    func play(for stop: PoplurTourStop, insight: AiTourInsight?, preferPreviewTracks: Bool = false) {
+    func play(for stop: PoplurTourStop, insight: AiTourInsight?, preferPreviewTracks: Bool = false, fadeIn: Bool = true) {
         guard !previewOnly else { return }
+        let stopID = stop.id
+        guard activeStopID != stopID || !isPlaybackActive else { return }
+        guard preparingStopID != stopID else { return }
+
         configureCallFriendlyAudioSession()
-        startPlayback(tracks: [FallbackCityMusicTracks[stop.cityName] ?? DefaultFallbackCityMusicTrack], index: 0)
         loadTask?.cancel()
+        playbackFallbackTask?.cancel()
+        isPreparingPlayback = true
+        preparingStopID = stopID
+        activeStopID = stopID
         loadTask = Task { [weak self] in
             guard let self else { return }
             let tracks = await self.resolveTrackQueue(for: stop, insight: insight, preferPreviewTracks: preferPreviewTracks)
             guard !Task.isCancelled, !tracks.isEmpty else { return }
             await MainActor.run {
-                self.startPlayback(tracks: tracks, index: 0)
+                guard self.preparingStopID == stopID else { return }
+                self.isPreparingPlayback = false
+                self.preparingStopID = nil
+                self.startPlayback(tracks: tracks, index: 0, fadeIn: fadeIn)
             }
         }
     }
@@ -1628,8 +1749,13 @@ private final class CityTourMusicPlayerService: ObservableObject {
     func stop() {
         loadTask?.cancel()
         loadTask = nil
+        volumeFadeTask?.cancel()
+        volumeFadeTask = nil
         playbackFallbackTask?.cancel()
         playbackFallbackTask = nil
+        activeStopID = nil
+        preparingStopID = nil
+        isPreparingPlayback = false
         clearPlaybackObservers()
         activeTracks = []
         activeTrackIndex = 0
@@ -1640,39 +1766,41 @@ private final class CityTourMusicPlayerService: ObservableObject {
 
     func duckForRadio() {
         lastPlayerVolume = 0.10
-        player?.volume = 0.10
+        fadePlayerVolume(to: PoplurAudioMix.voiceDuckVolume, duration: PoplurAudioMix.musicDuckDuration)
     }
 
     func unduckAfterRadio() {
-        lastPlayerVolume = 1.0
-        player?.volume = 1.0
+        lastPlayerVolume = PoplurAudioMix.musicFullVolume
         // AVSpeechSynthesizer can interrupt AVPlayer even with .mixWithOthers; the interruption
         // handler only resumes if shouldResume is set (often absent for TTS). Force-resume here.
         if let p = player, p.rate == 0, p.currentItem?.status == .readyToPlay {
             p.play()
         }
+        fadePlayerVolume(to: PoplurAudioMix.musicFullVolume, duration: PoplurAudioMix.musicUnduckDuration)
     }
 
-    private func startPlayback(tracks: [CityMusicTrack], index: Int) {
+    private func startPlayback(tracks: [CityMusicTrack], index: Int, fadeIn: Bool = true) {
         guard tracks.indices.contains(index) else { return }
         let track = tracks[index]
         guard let url = URL(string: track.assetURI) else {
-            startPlayback(tracks: tracks, index: index + 1)
+            startPlayback(tracks: tracks, index: index + 1, fadeIn: fadeIn)
             return
         }
 
         playbackFallbackTask?.cancel()
+        volumeFadeTask?.cancel()
         clearPlaybackObservers()
         // Silence the old player before releasing it to prevent an audible pop/click
-        player?.volume = 0
-        player?.pause()
+        let previousPlayer = player
+        previousPlayer?.volume = 0
+        previousPlayer?.pause()
 
         activeTracks = tracks
         activeTrackIndex = index
 
         let item = AVPlayerItem(url: url)
         let newPlayer = AVPlayer(playerItem: item)
-        newPlayer.volume = lastPlayerVolume
+        newPlayer.volume = fadeIn ? 0 : lastPlayerVolume
         newPlayer.isMuted = false
         // Keep default stalling behaviour (true) so streaming URLs buffer properly
         player = newPlayer
@@ -1689,9 +1817,10 @@ private final class CityTourMusicPlayerService: ObservableObject {
                 switch observedItem.status {
                 case .readyToPlay:
                     self.player?.play()
+                    self.fadePlayerVolume(to: self.lastPlayerVolume, duration: fadeIn ? PoplurAudioMix.musicFadeDuration : 0.2)
                 case .failed:
                     print("[MapTourAudio] Failed to play \(track.assetURI): \(observedItem.error?.localizedDescription ?? "unknown error")")
-                    self.playNextTrack()
+                    self.playNextTrack(fadeIn: fadeIn)
                 case .unknown:
                     break
                 @unknown default:
@@ -1706,7 +1835,7 @@ private final class CityTourMusicPlayerService: ObservableObject {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in
-                self?.playNextTrack(loopAtEnd: true)
+                self?.playNextTrack(loopAtEnd: false, fadeIn: true)
             }
         }
 
@@ -1722,17 +1851,43 @@ private final class CityTourMusicPlayerService: ObservableObject {
                     item.status != .readyToPlay || self.player?.timeControlStatus == .waitingToPlayAtSpecifiedRate
                 else { return }
                 print("[MapTourAudio] Playback did not become audible quickly; trying next source")
-                self.playNextTrack()
+                self.playNextTrack(fadeIn: fadeIn)
             }
         }
     }
 
-    private func playNextTrack(loopAtEnd: Bool = false) {
+    private func playNextTrack(loopAtEnd: Bool = false, fadeIn: Bool = true) {
         let nextIndex = activeTrackIndex + 1
         if activeTracks.indices.contains(nextIndex) {
-            startPlayback(tracks: activeTracks, index: nextIndex)
+            startPlayback(tracks: activeTracks, index: nextIndex, fadeIn: fadeIn)
         } else if loopAtEnd, !activeTracks.isEmpty {
-            startPlayback(tracks: activeTracks, index: 0)
+            startPlayback(tracks: activeTracks, index: 0, fadeIn: fadeIn)
+        } else {
+            clearPlaybackObservers()
+            player?.pause()
+            player = nil
+            currentTrackTitle = nil
+            activeTracks = []
+            activeTrackIndex = 0
+            activeStopID = nil
+        }
+    }
+
+    private func fadePlayerVolume(to targetVolume: Float, duration: TimeInterval) {
+        guard let player else { return }
+        volumeFadeTask?.cancel()
+        let startVolume = player.volume
+        let steps = max(1, Int(duration * 30))
+        volumeFadeTask = Task { [weak self, weak player] in
+            for step in 1...steps {
+                guard !Task.isCancelled else { return }
+                let progress = Float(step) / Float(steps)
+                await MainActor.run {
+                    guard let self, let player, self.player === player else { return }
+                    player.volume = startVolume + (targetVolume - startVolume) * progress
+                }
+                try? await Task.sleep(nanoseconds: UInt64((duration / Double(steps)) * 1_000_000_000))
+            }
         }
     }
 
@@ -2528,7 +2683,6 @@ private struct MapRadioSearchChecklistView: View {
     let radioScript: String
     let onClose: () -> Void
     let onSelectSearchResult: (MKMapItem) -> Void
-    let onToggleRadio: () -> Void
     let onToggleTour: () -> Void
 
     var body: some View {
@@ -2644,23 +2798,13 @@ private struct MapRadioSearchChecklistView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
 
-            HStack(spacing: 10) {
-                Button(action: onToggleRadio) {
-                    Label("Radio", systemImage: "antenna.radiowaves.left.and.right")
-                        .font(.system(size: 14, weight: .black, design: .rounded))
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(.green)
-
-                Button(action: onToggleTour) {
-                    Label(isTouring ? "Stop Tour" : "Start Tour", systemImage: isTouring ? "pause.fill" : "play.fill")
-                        .font(.system(size: 14, weight: .black, design: .rounded))
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(.black)
+            Button(action: onToggleTour) {
+                Label(isTouring ? "Stop Tour" : "Start Tour", systemImage: isTouring ? "pause.fill" : "play.fill")
+                    .font(.system(size: 14, weight: .black, design: .rounded))
+                    .frame(maxWidth: .infinity, minHeight: 44)
             }
+            .buttonStyle(.borderedProminent)
+            .tint(.black)
         }
         .padding(16)
     }
@@ -3414,7 +3558,7 @@ struct MapViewProduction: View {
     @StateObject private var flowManager = CaptureFlowManager.shared
     @StateObject private var mapState = MapStateManager.shared
     @StateObject private var musicPlayer: CityTourMusicPlayerService
-    @StateObject private var mapRadioHost = PoplurMapRadioHost()
+    @ObservedObject private var mapRadioHost = PoplurMapRadioHost.shared
 
     @AppStorage("poplur_use2DMap") private var use2DMap: Bool = false
     private var activePitch: CGFloat { use2DMap ? 0 : fixedPitchAlt }
@@ -3463,6 +3607,7 @@ struct MapViewProduction: View {
     @State private var locationContextTask: Task<Void, Never>? = nil
     @State private var liveUserCoordinate: CLLocationCoordinate2D? = nil
     @State private var lastUserCenterRequestAt: Date = .distantPast
+    @State private var lastContextRefreshLocation: CLLocation? = nil
     @State private var isCameraTransitionInProgress: Bool = false
 
     private let mapZoomSliderHeight: CGFloat = 400
@@ -3498,6 +3643,8 @@ struct MapViewProduction: View {
     @State private var cubeHoldStartY: CGFloat? = nil // Track cube hold drag start position
     @State private var initialZoomLevel: Double = 700 // Store zoom level when cube hold starts
     @State private var showIndoorMap: Bool = false
+    @State private var indoorVenues: [MappedinVenue] = []
+    @State private var selectedVenueSlug: String? = nil
     @State private var cubeHoldNavPath = NavigationPath()
     
     // Weather overlay state
@@ -3833,26 +3980,20 @@ struct MapViewProduction: View {
             return
         }
         
-        print("[MapView] Uploading post to coordinate: \(coordinate.latitude), \(coordinate.longitude)")
-        
-        // Post notification to upload the pending media to this location
-        var userInfo: [String: Any] = [
-            "latitude": coordinate.latitude,
-            "longitude": coordinate.longitude
-        ]
-        
-        if let image = pendingPostImage {
-            userInfo["image"] = image
-        }
-        
-        if let videoURL = pendingPostVideoURL {
-            userInfo["videoURL"] = videoURL
-        }
-        
+        print("[MapView] Confirmed legacy post placement coordinate: \(coordinate.latitude), \(coordinate.longitude)")
+
+        flowManager.startCameraToMapFlow(image: pendingPostImage, videoURL: pendingPostVideoURL)
+        flowManager.confirmLocation(coordinate)
+
         NotificationCenter.default.post(
-            name: Notification.Name("UploadPostToCoordinate"),
+            name: .showPostCaptureEditor,
             object: nil,
-            userInfo: userInfo
+            userInfo: [
+                "image": pendingPostImage as Any,
+                "videoURL": pendingPostVideoURL as Any,
+                "latitude": coordinate.latitude,
+                "longitude": coordinate.longitude
+            ]
         )
         
         // Exit post placement mode
@@ -3864,7 +4005,7 @@ struct MapViewProduction: View {
         if let location = locationManager.location {
             refreshLocalContext(for: location)
         } else {
-            aiRecommendation = "Post uploaded successfully!"
+            aiRecommendation = "Choose a filter, trim if needed, then pick a channel"
         }
     }
 
@@ -3927,12 +4068,7 @@ struct MapViewProduction: View {
             distance: max(850, fixedDistanceAlt),
             description: "Current location"
         )
-        guard currentLocationMusicStopID != stop.id else {
-            if !musicPlayer.isPlaybackActive {
-                musicPlayer.play(for: stop, insight: insight, preferPreviewTracks: true)
-            }
-            return
-        }
+        guard currentLocationMusicStopID != stop.id else { return }
         currentLocationMusicStopID = stop.id
         musicPlayer.play(for: stop, insight: insight, preferPreviewTracks: true)
     }
@@ -3940,6 +4076,7 @@ struct MapViewProduction: View {
     private func ensureCurrentLocationMusicAfterLaunch(delayNanoseconds: UInt64 = 1_200_000_000) {
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: delayNanoseconds)
+            guard !isInitialMapLaunchActive, !musicPlayer.isPlaybackActive else { return }
             guard !mapState.isInTourMode, !(flowManager.currentFlow?.isCameraFirst ?? false), !isPostPlacementMode else { return }
             guard lockToPostUntil == nil || lockToPostUntil! <= Date() else { return }
 
@@ -4399,6 +4536,18 @@ struct MapViewProduction: View {
                         }
                     }
                 }
+
+                ForEach(indoorVenues) { venue in
+                    Annotation("", coordinate: venue.coordinate) {
+                        Button {
+                            selectedVenueSlug = venue.slug
+                            showIndoorMap = true
+                        } label: {
+                            MappedinVenue3DButton(venue: venue)
+                        }
+                        .accessibilityLabel("Look inside \(venue.name)")
+                    }
+                }
                 }
 #if POP_PREVIEW_LIGHT
                 .mapStyle(.standard)
@@ -4625,20 +4774,25 @@ struct MapViewProduction: View {
                 Button(action: {
                     // Check which flow we're in
                     if let flow = flowManager.currentFlow, flow.isCameraFirst {
-                        // Flow 2: Camera -> Map -> Complete upload
-                        print("📸 [MapView] Completing Camera -> Map flow, uploading to: \(coordinate.latitude), \(coordinate.longitude)")
-                        flowManager.completeFlow(finalCoordinate: coordinate)
+                        // Camera-first flow: confirm location, then continue to filters/channel selection.
+                        print("📸 [MapView] Confirmed Camera -> Map location: \(coordinate.latitude), \(coordinate.longitude)")
+                        flowManager.confirmLocation(coordinate)
+
+                        NotificationCenter.default.post(
+                            name: .showPostCaptureEditor,
+                            object: nil,
+                            userInfo: [
+                                "image": flowManager.capturedImage as Any,
+                                "videoURL": flowManager.capturedVideoURL as Any,
+                                "latitude": coordinate.latitude,
+                                "longitude": coordinate.longitude
+                            ]
+                        )
                         
                         // Reset UI
                         showPostPrompt = false
                         clickedCoordinate = nil
-                        aiRecommendation = "Post uploaded successfully!"
-                        
-                        // Return to feed or profile after a delay
-                        Task { @MainActor in
-                            try? await Task.sleep(nanoseconds: 1_500_000_000)
-                            NotificationCenter.default.post(name: Notification.Name("SwitchToFeedTab"), object: nil)
-                        }
+                        aiRecommendation = "Choose a filter, trim if needed, then pick a channel"
                     } else {
                         // Flow 1: Map -> Camera -> Open camera at this location
                         print("📍 [MapView] Starting Map -> Camera flow at: \(coordinate.latitude), \(coordinate.longitude)")
@@ -4667,7 +4821,7 @@ struct MapViewProduction: View {
                         if let flow = flowManager.currentFlow, flow.isCameraFirst {
                             Image(systemName: "checkmark.circle.fill")
                                 .font(.system(size: 16, weight: .semibold))
-                            Text("Confirm & Post")
+                            Text("Confirm Location")
                                 .font(.system(size: 16, weight: .bold, design: .rounded))
                         } else {
                             Image(systemName: "camera.fill")
@@ -4944,15 +5098,12 @@ struct MapViewProduction: View {
 
             mapSearchButtonOverlay
 
-            PoplurMapRadioOverlay(host: mapRadioHost, script: mapRadioScript)
-                .padding(.leading, 86)
-                .padding(.bottom, 132)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-                .zIndex(1003)
-
-            if fixedDistanceAlt < 300 {
-                Button { showIndoorMap = true } label: {
-                    Label("Indoor", systemImage: "building.2.fill")
+            if fixedDistanceAlt < 500, let nearestVenue = indoorVenues.first {
+                Button {
+                    selectedVenueSlug = nearestVenue.slug
+                    showIndoorMap = true
+                } label: {
+                    Label("View Inside", systemImage: "building.2.fill")
                         .font(.caption)
                         .fontWeight(.semibold)
                         .padding(.horizontal, 12)
@@ -4965,7 +5116,7 @@ struct MapViewProduction: View {
                 .padding(.bottom, 200)
                 .zIndex(1004)
                 .transition(.scale.combined(with: .opacity))
-                .animation(.spring(response: 0.35), value: fixedDistanceAlt < 300)
+                .animation(.spring(response: 0.35), value: fixedDistanceAlt < 500 && !indoorVenues.isEmpty)
             }
             }
         }
@@ -5122,6 +5273,13 @@ struct MapViewProduction: View {
                 isCameraTransitionInProgress = false
                 mapRadioHost.stop()
                 musicPlayer.stop()
+                currentLocationMusicStopID = nil
+                rainAmbientAudio.stop()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .StopMapAudio)) { _ in
+                mapRadioHost.stop()
+                musicPlayer.stop()
+                currentLocationMusicStopID = nil
                 rainAmbientAudio.stop()
             }
             .onChange(of: locationManager.location) { _, newLocation in
@@ -5579,8 +5737,8 @@ struct MapViewProduction: View {
                 // Check if we're in Map -> Camera flow
                 if let flow = flowManager.currentFlow, flow.isMapFirst, 
                    let coordinate = flow.preselectedCoordinate {
-                    // Flow 1: Map -> Camera -> Auto-post to preselected coordinate
-                    print("📍 [MapView] Capture complete in Map -> Camera flow, uploading to preselected coordinate")
+                    // Map-first fallback path: continue to filters/channel selection.
+                    print("📍 [MapView] Capture complete in Map -> Camera flow, opening editor")
                     
                     let image = userInfo["image"] as? UIImage
                     let videoURL = userInfo["videoURL"] as? URL
@@ -5588,13 +5746,21 @@ struct MapViewProduction: View {
                     // Store the captured media in flow manager
                     flowManager.capturedImage = image
                     flowManager.capturedVideoURL = videoURL
+                    flowManager.confirmLocation(coordinate)
                     
-                    // Complete the flow automatically
-                    flowManager.completeFlow(finalCoordinate: coordinate)
+                    NotificationCenter.default.post(
+                        name: .showPostCaptureEditor,
+                        object: nil,
+                        userInfo: [
+                            "image": image as Any,
+                            "videoURL": videoURL as Any,
+                            "latitude": coordinate.latitude,
+                            "longitude": coordinate.longitude
+                        ]
+                    )
                     
-                    // Show success message
-                    currentCity = "Post Uploaded"
-                    aiRecommendation = "Your post has been shared at the selected location!"
+                    currentCity = "Edit Post"
+                    aiRecommendation = "Choose a filter, trim if needed, then pick a channel"
                 }
             }
             .task {
@@ -5607,10 +5773,29 @@ struct MapViewProduction: View {
             }
             .onChange(of: mapRadioHost.isLive) { _, isLive in
                 guard !layoutPreviewMode else { return }
-                if isLive { musicPlayer.duckForRadio() } else { musicPlayer.unduckAfterRadio() }
+                if isLive {
+                    rainAmbientAudio.setVoiceDucked(true)
+                    musicPlayer.duckForRadio()
+                } else {
+                    rainAmbientAudio.setVoiceDucked(false)
+                    musicPlayer.unduckAfterRadio()
+                }
             }
-            .sheet(isPresented: $showIndoorMap) {
+            .sheet(isPresented: $showIndoorMap, onDismiss: { selectedVenueSlug = nil }) {
                 indoorMapSheet
+            }
+            .onChange(of: fixedDistanceAlt) { _, newDist in
+                if newDist >= 800 {
+                    indoorVenues = []
+                    return
+                }
+                guard let center = camera.camera?.centerCoordinate ?? locationManager.location?.coordinate else { return }
+                let lat = center.latitude
+                let lng = center.longitude
+                Task {
+                    let venues = await MappedinVenueSearch.nearbyVenues(lat: lat, lng: lng)
+                    await MainActor.run { indoorVenues = venues }
+                }
             }
     }
 
@@ -5677,15 +5862,18 @@ struct MapViewProduction: View {
     @ViewBuilder
     private var indoorMapSheet: some View {
         NavigationStack {
-            IndoorMapContainer(coordinate: locationManager.location?.coordinate)
-                .ignoresSafeArea(edges: .bottom)
-                .navigationTitle("Indoor Map")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Done") { showIndoorMap = false }
-                    }
+            IndoorMapContainer(
+                coordinate: locationManager.location?.coordinate,
+                presetSlug: selectedVenueSlug
+            )
+            .ignoresSafeArea(edges: .bottom)
+            .navigationTitle("Indoor Map")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { showIndoorMap = false }
                 }
+            }
         }
     }
 
@@ -5708,9 +5896,6 @@ struct MapViewProduction: View {
                         let name = item.name ?? "Selected Location"
                         navigateWithTourTransition(to: coord, cityName: name)
                     }
-                },
-                onToggleRadio: {
-                    mapRadioHost.toggle(script: mapRadioScript)
                 },
                 onToggleTour: {
                     if mapState.isInTourMode {
@@ -5773,6 +5958,7 @@ struct MapViewProduction: View {
             }
             isInitialMapLaunchActive = false
             isCameraTransitionInProgress = false
+            rainAmbientAudio.setVoiceDucked(false)
         }
 
         fixedDistanceAlt = 700
@@ -5821,14 +6007,18 @@ struct MapViewProduction: View {
         try? await Task.sleep(nanoseconds: 700_000_000)
         guard !Task.isCancelled else { return }
 
+        await fetchWeatherForCurrentLocation()
+        rainAmbientAudio.setVoiceDucked(true)
+
         let script = generateLaunchRadioScript(cityName: cityName, insight: launchInsight)
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             mapRadioHost.speak(script) {
                 continuation.resume()
             }
         }
+        rainAmbientAudio.setVoiceDucked(false)
 
-        try? await Task.sleep(nanoseconds: 450_000_000)
+        try? await Task.sleep(nanoseconds: 650_000_000)
         guard !Task.isCancelled, !mapState.isInTourMode else { return }
 
         let storefront = normalizedStorefront(countryCode)
@@ -5845,18 +6035,18 @@ struct MapViewProduction: View {
             description: "Current location"
         )
         currentLocationMusicStopID = stop.id
-        musicPlayer.play(for: stop, insight: launchInsight, preferPreviewTracks: true)
+        musicPlayer.play(for: stop, insight: launchInsight, preferPreviewTracks: true, fadeIn: true)
 
         didCompleteLaunch = true
         mapState.hasRunFirstLaunchSequence = true
-
-        await fetchWeatherForCurrentLocation()
     }
 
     // MARK: - Event Handlers
 
     private func handleOnAppear() {
-        rainAmbientAudio.update(for: weatherState)
+        if mapState.hasRunFirstLaunchSequence {
+            rainAmbientAudio.update(for: weatherState)
+        }
 
         if let location = locationManager.location {
             liveUserCoordinate = location.coordinate
@@ -5981,10 +6171,18 @@ struct MapViewProduction: View {
                 print("⏭️ [MapView] handleLocationChange deferred during initial launch")
                 return
             }
-            // Only refresh context after the launch sequence has fully run
+            // Only refresh context after the launch sequence has fully run.
+            // Guard against the 10m distanceFilter firing too often — only re-trigger
+            // pops/music/radio when the user has moved at least 5km from the last refresh.
             if mapState.hasRunFirstLaunchSequence &&
                (currentLocationMusicStopID == nil || !musicPlayer.isPlaybackActive) {
-                refreshLocalContext(for: newLocation)
+                let shouldRefresh = lastContextRefreshLocation.map {
+                    newLocation.distance(from: $0) > 5_000
+                } ?? true
+                if shouldRefresh {
+                    lastContextRefreshLocation = newLocation
+                    refreshLocalContext(for: newLocation)
+                }
             }
         }
 
@@ -6012,10 +6210,11 @@ struct MapViewProduction: View {
         ))
 
         if mapState.hasRunFirstLaunchSequence {
+            lastContextRefreshLocation = newLocation
             refreshLocalContext(for: newLocation)
         }
     }
-    
+
     private func runTourLoop() async {
         // Note initial user interaction - this starts the idle timer internally
         await MainActor.run {
@@ -6192,6 +6391,7 @@ private struct MapTabLayoutPreview: View {
 
 private struct IndoorMapContainer: View {
     let coordinate: CLLocationCoordinate2D?
+    var presetSlug: String? = nil
 
     @State private var venueURL: URL? = nil
     @State private var isSearching = true
@@ -6221,7 +6421,9 @@ private struct IndoorMapContainer: View {
             }
         }
         .task {
-            if let coord = coordinate {
+            if let slug = presetSlug {
+                venueURL = URL(string: "https://app.mappedin.com/map/\(slug)")
+            } else if let coord = coordinate {
                 let slug = await MappedinVenueSearch.nearestVenue(lat: coord.latitude, lng: coord.longitude)
                 venueURL = slug.flatMap { URL(string: "https://app.mappedin.com/map/\($0)") }
             } else {
@@ -6249,6 +6451,38 @@ private struct MappedInWebView: UIViewRepresentable {
     }
 }
 
+struct MappedinVenue: Identifiable {
+    let slug: String
+    let name: String
+    let coordinate: CLLocationCoordinate2D
+    var id: String { slug }
+    var mapURL: URL { URL(string: "https://app.mappedin.com/map/\(slug)")! }
+}
+
+private struct MappedinVenue3DButton: View {
+    let venue: MappedinVenue
+
+    var body: some View {
+        VStack(spacing: 2) {
+            Image(systemName: "building.2.fill")
+                .font(.system(size: 13, weight: .bold))
+            Text("3D")
+                .font(.system(size: 12, weight: .heavy, design: .rounded))
+            Text("Inside")
+                .font(.system(size: 8, weight: .bold, design: .rounded))
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 6)
+        .background(Color.indigo.gradient, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(.white.opacity(0.28), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.35), radius: 4, y: 2)
+    }
+}
+
 private enum MappedinVenueSearch {
     // Sign up at developer.mappedin.com and replace these with your own credentials.
     static let clientId = "5eab30aa91b055001a68e996"
@@ -6257,25 +6491,46 @@ private enum MappedinVenueSearch {
 
     /// Returns the slug of the nearest Mappedin-indexed venue, or nil if none is nearby.
     static func nearestVenue(lat: Double, lng: Double) async -> String? {
-        guard var comps = URLComponents(string: "https://api.mappedin.com/1/venue") else { return nil }
+        await nearbyVenues(lat: lat, lng: lng).first?.slug
+    }
+
+    /// Returns all Mappedin-indexed venues near the given coordinate.
+    static func nearbyVenues(lat: Double, lng: Double) async -> [MappedinVenue] {
+        guard var comps = URLComponents(string: "https://api.mappedin.com/1/venue") else { return [] }
         comps.queryItems = [
             .init(name: "venue", value: "nearby"),
             .init(name: "lat", value: String(lat)),
             .init(name: "lng", value: String(lng))
         ]
-        guard let url = comps.url else { return nil }
+        guard let url = comps.url else { return [] }
         var request = URLRequest(url: url, timeoutInterval: 6)
         let token = Data("\(clientId):\(clientSecret)".utf8).base64EncodedString()
         request.setValue("Basic \(token)", forHTTPHeaderField: "Authorization")
         do {
             let (data, _) = try await URLSession.shared.data(for: request)
             if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let arr = json["data"] as? [[String: Any]],
-               let first = arr.first,
-               let slug = first["slug"] as? String, !slug.isEmpty {
-                return slug
+               let arr = json["data"] as? [[String: Any]] {
+                return arr.compactMap { venue -> MappedinVenue? in
+                    guard let slug = venue["slug"] as? String, !slug.isEmpty else { return nil }
+                    let name = venue["name"] as? String ?? slug
+                    // Coordinates may be at top level or nested under "location"
+                    let vLat: Double
+                    let vLng: Double
+                    if let loc = venue["location"] as? [String: Any],
+                       let la = loc["lat"] as? Double,
+                       let lo = (loc["lon"] as? Double) ?? (loc["lng"] as? Double) {
+                        vLat = la; vLng = lo
+                    } else if let la = venue["lat"] as? Double,
+                              let lo = (venue["lon"] as? Double) ?? (venue["lng"] as? Double) {
+                        vLat = la; vLng = lo
+                    } else {
+                        vLat = lat; vLng = lng
+                    }
+                    return MappedinVenue(slug: slug, name: name,
+                                        coordinate: CLLocationCoordinate2D(latitude: vLat, longitude: vLng))
+                }
             }
         } catch {}
-        return nil
+        return []
     }
 }

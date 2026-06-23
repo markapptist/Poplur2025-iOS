@@ -1,0 +1,4 @@
+module grpcWrapper {
+umbrella "/Users/matrix/Library/Developer/Xcode/DerivedData/Poplur2025-diqgmvbjbirjgbdzqftmwbjrdvor/SourcePackages/checkouts/grpc-binary/grpc-Wrapper/include"
+export *
+}

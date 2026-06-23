@@ -3,6 +3,7 @@ import SwiftUI
 struct ChatThreadListView: View {
     @StateObject private var chatStore: FakeChatStore
     @State private var navigateToThread: FakeChatThread? = nil
+    @State private var activeVideoCallUser: FakeUser? = nil
 
     init() {
         _chatStore = StateObject(wrappedValue: FakeChatStore())
@@ -63,7 +64,7 @@ struct ChatThreadListView: View {
                         // FaceTime video button
                         Button(action: {
                             if let user = item.participants.first(where: { $0.name != "Alice" }) {
-                                FaceTimeLauncher.startVideoCall(to: user)
+                                activeVideoCallUser = user
                             }
                         }) {
                             Image(systemName: "video.fill")
@@ -82,6 +83,11 @@ struct ChatThreadListView: View {
 
         }
         .background(Color.white)
+        .fullScreenCover(item: $activeVideoCallUser) { user in
+            DMCallCoordinatorView(calleeName: user.name, isVideo: true) {
+                activeVideoCallUser = nil
+            }
+        }
         .navigationDestination(isPresented: Binding(
             get: { navigateToThread != nil },
             set: { newValue in if !newValue { navigateToThread = nil } }
@@ -164,6 +170,7 @@ struct DMDetailView: View {
 
     @State private var messages: [Message] = []
     @State private var draft: String = ""
+    @State private var activeVideoCallUser: FakeUser? = nil
 
     var body: some View {
         VStack(spacing: 0) {
@@ -210,10 +217,10 @@ struct DMDetailView: View {
         .onAppear { seedConversation() }
         .safeAreaInset(edge: .top) {
             HStack {
-                Spacer()
+            Spacer()
                 Button {
                     if let user = videoCallUser {
-                        FaceTimeLauncher.startVideoCall(to: user)
+                        activeVideoCallUser = user
                     }
                 } label: {
                     Image(systemName: "video.fill")
@@ -228,6 +235,11 @@ struct DMDetailView: View {
                 .padding(.top, 8)
             }
             .background(Color.white)
+        }
+        .fullScreenCover(item: $activeVideoCallUser) { user in
+            DMCallCoordinatorView(calleeName: user.name, isVideo: true) {
+                activeVideoCallUser = nil
+            }
         }
     }
 

@@ -151,6 +151,9 @@ See "Android-Specific Implementation Notes" sections in each doc
    - 3D buildings, hybrid style
    - AI recommendations overlay
    - Long-press coordinate selection
+   - First-launch Poplur voice is automatic only: no visible AI/radio button
+   - Use API-rendered natural British TTS audio with Android `TextToSpeech(Locale.UK)` only as fallback
+   - Coordinate voice, weather ambience, and music through one Media3/ExoPlayer mixer with ducking/crossfades
 
 4. **CameraView** (Record tab)
    - AVFoundation → CameraX
@@ -163,6 +166,7 @@ See "Android-Specific Implementation Notes" sections in each doc
    - Mixed photos/videos/sponsored ads
    - Video playback → Media3/ExoPlayer
    - White launch loading screen with animated centered Poplur logo
+   - Default Feed transition is full-screen real TV static with static hiss, centered Poplur logo, and green `CH ###` + category text for the destination channel
    - Custom volume bars on hardware volume up/down after Feed loading completes
    - Country/channel navigation
    - Full-screen TV Guide overlay with PiP layout; videos keep playing audibly behind it
@@ -174,6 +178,7 @@ See "Android-Specific Implementation Notes" sections in each doc
    - Reusable hold-cube rainbow menu wheel for mail, settings, phone, notifications, and store
    - PopularPhone opens from the phone submenu action as a constructed, aspect-fit Compose/Canvas phone
    - Statistics display
+   - Stats Trophy Room renders a real 3D trophy showcase with metallic unlocked trophies and gray locked trophies
    - Navigation to other profiles
 
 7. **IsometricRadiusBar** (Global UI component)
@@ -315,6 +320,7 @@ Both apps use **Firebase Authentication** with email/password
 - [ ] Feed launch uses white Poplur-logo loading screen, not black
 - [ ] Feed UI starts in final positions and fades only; no corner-to-position animation
 - [ ] Feed first page includes images, videos, and sponsored ads
+- [ ] Feed transitions use TV static + static hiss with centered Poplur logo and destination green channel/category text
 - [ ] Feed volume bars appear on volume up and volume down, and stay hidden during launch loading
 - [ ] Feed videos resume/reload after app background and foreground
 - [ ] TV Guide covers the whole Feed UI, keeps Feed video audio playing behind it, uses green channel numbers, and uses a tablet hamburger channel rail
@@ -350,6 +356,7 @@ Both apps use **Firebase Authentication** with email/password
 
 ### Audio
 - [ ] `pop.mp3` (cube tap sound, ~0.1s)
+- [ ] Feed TV static transition hiss is generated at runtime; no bundled static audio asset is required
 
 ### Icons
 All icons are **SF Symbols** on iOS. Map to **Material Icons** on Android:
@@ -385,6 +392,7 @@ All icons are **SF Symbols** on iOS. Map to **Material Icons** on Android:
    - Post grid with RecyclerView
    - Profile header with stats
    - Constructed PopularPhone screen for the phone action
+   - Stats page includes a 3D Trophy Room backed by stable achievement IDs and lock/unlock criteria
    - Navigation to other profiles
    
 3. **Map Tab**:

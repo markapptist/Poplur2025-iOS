@@ -518,25 +518,26 @@ struct MapView: View {
                                     )
                                 }
                             } else if flow.isCameraFirst {
-                                // Flow 2: Camera -> Map flow - "Confirm & Post" button
+                                // Camera-first flow: confirm location, then continue to filters/channel selection.
                                 Button {
-                                    flowManager.completeFlow(finalCoordinate: coord)
+                                    flowManager.confirmLocation(coord)
+                                    NotificationCenter.default.post(
+                                        name: .showPostCaptureEditor,
+                                        object: nil,
+                                        userInfo: [
+                                            "image": flowManager.capturedImage as Any,
+                                            "videoURL": flowManager.capturedVideoURL as Any,
+                                            "latitude": coord.latitude,
+                                            "longitude": coord.longitude
+                                        ]
+                                    )
                                     showPostPrompt = false
                                     clickedCoordinate = nil
-                                    aiMessage = "Uploading your post..."
-                                    
-                                    // Return to feed after upload starts
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                                        NotificationCenter.default.post(
-                                            name: Notification.Name("SwitchToFeedTab"),
-                                            object: nil
-                                        )
-                                        aiMessage = nil
-                                    }
+                                    aiMessage = "Choose a filter, trim if needed, then pick a channel"
                                 } label: {
                                     HStack(spacing: 8) {
                                         Image(systemName: "checkmark.circle.fill")
-                                        Text("Confirm & Post")
+                                        Text("Confirm Location")
                                             .font(.system(size: 16, weight: .bold, design: .rounded))
                                     }
                                     .foregroundColor(.white)

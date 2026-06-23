@@ -40,6 +40,13 @@ private struct HomeCapturePreviewItem: Identifiable {
     let videoURL: URL?
 }
 
+private struct HomePostCaptureComposerItem: Identifiable {
+    let id = UUID()
+    let image: UIImage?
+    let videoURL: URL?
+    let coordinate: CLLocationCoordinate2D
+}
+
 private struct HiddenSystemVolumeBridge: UIViewRepresentable {
     func makeUIView(context: Context) -> MPVolumeView {
         let view = MPVolumeView(frame: .zero)
@@ -53,12 +60,272 @@ private struct HiddenSystemVolumeBridge: UIViewRepresentable {
     func updateUIView(_ uiView: MPVolumeView, context: Context) {}
 }
 
-private struct HomeFeedLaunchCover: View {
-    @State private var scene = HomeFeedLaunchCoverScene.make()
+// MARK: - HomeFeedLaunchCover
+// Uses Core Animation exclusively: CAEmitterLayer (GPU confetti), CABasicAnimation /
+// CAKeyframeAnimation (render-server transforms). These run in Apple's backboardd
+// render-server process — completely immune to main-thread stalls during feed loading.
 
+private struct HomeFeedLaunchCover: View {
+    let showSlowDetails: Bool
     var body: some View {
-        SpriteView(scene: scene)
+        _LaunchCoverRep()
             .ignoresSafeArea()
+    }
+}
+
+private struct _LaunchCoverRep: UIViewRepresentable {
+    func makeUIView(context: Context) -> _LaunchCoverView { _LaunchCoverView() }
+    func updateUIView(_ uiView: _LaunchCoverView, context: Context) {}
+}
+
+private final class _LaunchCoverView: UIView {
+
+    // MARK: Sublayers / subviews
+    private let emitter       = CAEmitterLayer()
+    private let logoImageView = UIImageView(image: UIImage(named: "logo"))
+    private let trackLayer    = CALayer()
+    private let fillLayer     = CALayer()
+    private let phaseLabel    = UILabel()
+
+    private let loadingBarWidth:  CGFloat = 200
+    private let loadingBarHeight: CGFloat = 4
+
+    // MARK: Phase cycling (main-thread timer — only text updates, not animation frames)
+    private var phaseIdx   = 0
+    private let phases: [String] = ([
+        "scanning your social radius",
+        "calibrating your neural feed",
+        "learning local creator signals",
+        "mapping nearby content",
+        "ranking posts by proximity",
+        "discovering your community",
+        "processing social graph data",
+        "tuning your experience",
+        "building your intelligent feed",
+        "syncing real-time signals",
+        "personalizing your world",
+        "analyzing nearby activity",
+        "warming up AI radio voice",
+        "loading radio voice model",
+        "preparing Poplur Radio",
+        "priming map voice system",
+        "caching AI voice patterns",
+        "preloading city radio scripts",
+        "tuning the AI broadcast",
+        "syncing radio to your area",
+        "connecting to local broadcasts",
+        "loading ambient map audio",
+        "indexing creator sound profiles",
+        "fetching area audio landscape",
+        "streaming radio AI model",
+        "loading proximity sound data",
+        "loading area content signals",
+        "building your map experience",
+        "fetching live location data",
+        "resolving nearby creators",
+        "compiling your local scene",
+        "loading discovery engine",
+        "wiring up real-time feeds",
+        "computing social clusters",
+        "preparing AI insights",
+    ] as [String]).shuffled()
+    private var phaseTimer: Timer?
+    private var popTimer:   Timer?
+    private var started = false
+
+    // MARK: Palette
+    private static let palette: [UIColor] = [
+        UIColor(red: 0.98, green: 0.24, blue: 0.24, alpha: 1),
+        UIColor(red: 1.00, green: 0.58, blue: 0.00, alpha: 1),
+        UIColor(red: 1.00, green: 0.88, blue: 0.00, alpha: 1),
+        UIColor(red: 0.18, green: 0.80, blue: 0.24, alpha: 1),
+        UIColor(red: 0.20, green: 0.52, blue: 0.98, alpha: 1),
+        UIColor(red: 0.76, green: 0.18, blue: 0.90, alpha: 1),
+        UIColor(red: 0.98, green: 0.28, blue: 0.65, alpha: 1),
+        UIColor(red: 0.00, green: 0.78, blue: 0.80, alpha: 1),
+    ]
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .white
+        setupSubviews()
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    deinit { phaseTimer?.invalidate(); popTimer?.invalidate() }
+
+    // MARK: - Setup
+
+    private func setupSubviews() {
+        // Confetti — GPU particle system, never touches the main thread per frame
+        emitter.emitterShape = .line
+        emitter.renderMode   = .unordered
+        emitter.emitterCells = makeConfettiCells()
+        layer.addSublayer(emitter)
+
+        logoImageView.contentMode = .scaleAspectFit
+        logoImageView.alpha = 0
+        addSubview(logoImageView)
+
+        trackLayer.backgroundColor = UIColor.black.withAlphaComponent(0.12).cgColor
+        trackLayer.cornerRadius = 2
+        layer.addSublayer(trackLayer)
+
+        // anchorPoint=(0, 0.5) keeps the left edge fixed while bounds.width animates rightward
+        fillLayer.backgroundColor = UIColor(red: 0, green: 0.471, blue: 1, alpha: 1).cgColor
+        fillLayer.cornerRadius    = 2
+        fillLayer.anchorPoint     = CGPoint(x: 0, y: 0.5)
+        layer.addSublayer(fillLayer)
+
+        phaseLabel.textAlignment = .center
+        phaseLabel.font          = .systemFont(ofSize: 14, weight: .medium)
+        phaseLabel.textColor     = UIColor.black.withAlphaComponent(0.60)
+        phaseLabel.numberOfLines = 2
+        phaseLabel.text          = "AI \(phases[0])"
+        addSubview(phaseLabel)
+    }
+
+    // MARK: - Layout
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard bounds.width > 1 else { return }
+
+        let cx = bounds.midX, cy = bounds.midY
+        let logoSz: CGFloat = 200
+        let barY    = cy + logoSz / 2 + 28
+        let barLeft = cx - loadingBarWidth / 2
+
+        emitter.frame           = bounds
+        emitter.emitterPosition = CGPoint(x: cx, y: -12)
+        emitter.emitterSize     = CGSize(width: bounds.width + 60, height: 2)
+
+        logoImageView.frame = CGRect(x: cx - logoSz/2, y: cy - logoSz/2, width: logoSz, height: logoSz)
+        trackLayer.frame    = CGRect(x: barLeft, y: barY, width: loadingBarWidth, height: loadingBarHeight)
+
+        if !started {
+            // Set initial fill-layer geometry once, before the animation begins
+            fillLayer.bounds   = CGRect(x: 0, y: 0, width: 8, height: loadingBarHeight)
+            fillLayer.position = CGPoint(x: barLeft, y: barY + loadingBarHeight / 2)
+        }
+
+        phaseLabel.frame = CGRect(x: cx - 100, y: barY + loadingBarHeight + 10, width: 200, height: 44)
+
+        if !started {
+            started = true
+            startAnimations()
+        }
+    }
+
+    // MARK: - Confetti cells
+
+    private func makeConfettiCells() -> [CAEmitterCell] {
+        Self.palette.enumerated().map { i, color in
+            let cell = CAEmitterCell()
+            cell.birthRate         = 1.8
+            cell.lifetime          = 4.0
+            cell.lifetimeRange     = 1.0
+            cell.velocity          = 150
+            cell.velocityRange     = 60
+            cell.emissionLongitude = .pi      // straight down
+            cell.emissionRange     = .pi / 7
+            cell.spin              = 4
+            cell.spinRange         = 8
+            cell.yAcceleration     = 18       // gentle gravity effect
+            cell.alphaSpeed        = -0.22
+            cell.contents          = confettiCGImage(color: color, circle: i % 6 == 0)
+            return cell
+        }
+    }
+
+    private func confettiCGImage(color: UIColor, circle: Bool) -> CGImage? {
+        let w: CGFloat = circle ? 8 : 12, h: CGFloat = circle ? 8 : 7
+        return UIGraphicsImageRenderer(size: CGSize(width: w, height: h)).image { _ in
+            color.setFill()
+            if circle {
+                UIBezierPath(ovalIn: CGRect(x: 0, y: 0, width: w, height: h)).fill()
+            } else {
+                UIBezierPath(roundedRect: CGRect(x: 0, y: 0, width: w, height: h), cornerRadius: 2).fill()
+            }
+        }.cgImage
+    }
+
+    // MARK: - Animations
+
+    private func startAnimations() {
+        animateLogo()
+        startLoadingLoop()
+    }
+
+    private func animateLogo() {
+        UIView.animate(withDuration: 0.35) { self.logoImageView.alpha = 1 }
+
+        let lyr = logoImageView.layer
+
+        // Continuous rotation — render server, never pauses due to main-thread load
+        let rot = CABasicAnimation(keyPath: "transform.rotation.z")
+        rot.toValue     = Double.pi * 2
+        rot.duration    = 12
+        rot.repeatCount = .infinity
+        rot.isRemovedOnCompletion = false
+        lyr.add(rot, forKey: "rotation")
+
+        // Entrance bounce: 0.35 → overshoot → settle at 1.0
+        let entrance = CAKeyframeAnimation(keyPath: "transform.scale")
+        entrance.values   = [0.35, 1.16, 0.91, 1.04, 1.0]
+        entrance.keyTimes = [0,    0.56,  0.75, 0.88,  1.0]
+        entrance.duration = 0.75
+        entrance.isRemovedOnCompletion = true
+        lyr.add(entrance, forKey: "entrance")
+
+        // Pop loop — trigger is on the main thread, but the CAKeyframeAnimation
+        // itself executes on the render server with no further main-thread involvement
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            self?.firePop()
+            self?.popTimer = Timer.scheduledTimer(withTimeInterval: 2.5, repeats: true) { [weak self] _ in
+                self?.firePop()
+            }
+        }
+    }
+
+    private func firePop() {
+        let pop = CAKeyframeAnimation(keyPath: "transform.scale")
+        pop.values   = [1.0, 1.42, 0.82, 1.12, 0.94, 1.0, 1.05, 0.95, 1.0]
+        pop.keyTimes = [0,   0.045, 0.085, 0.12, 0.15, 0.18, 0.50, 0.77, 1.0]
+        pop.duration = 2.0
+        pop.isRemovedOnCompletion = true
+        logoImageView.layer.add(pop, forKey: "pop")
+    }
+
+    // Bar cycles over and over until the loading screen is dismissed.
+    // Each cycle the text advances to a new loading message.
+    private func startLoadingLoop() {
+        runBarCycle()
+        phaseTimer = Timer.scheduledTimer(withTimeInterval: 2.5, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            self.phaseIdx = (self.phaseIdx + 1) % self.phases.count
+            UIView.transition(with: self.phaseLabel, duration: 0.2, options: .transitionCrossDissolve) {
+                self.phaseLabel.text = "AI \(self.phases[self.phaseIdx])"
+            }
+            self.runBarCycle()
+        }
+    }
+
+    private func runBarCycle() {
+        fillLayer.removeAnimation(forKey: "fill")
+        // Reset width to near-zero without animation
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        fillLayer.bounds = CGRect(x: 0, y: 0, width: 8, height: loadingBarHeight)
+        CATransaction.commit()
+
+        let fill = CABasicAnimation(keyPath: "bounds")
+        fill.fromValue      = NSValue(cgRect: CGRect(x: 0, y: 0, width: 8,              height: loadingBarHeight))
+        fill.toValue        = NSValue(cgRect: CGRect(x: 0, y: 0, width: loadingBarWidth, height: loadingBarHeight))
+        fill.duration       = 2.4
+        fill.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        fill.fillMode       = .forwards
+        fill.isRemovedOnCompletion = false
+        fillLayer.add(fill, forKey: "fill")
     }
 }
 
@@ -294,6 +561,7 @@ private final class LazyHomeCameraControllerHolder: ObservableObject {
 struct HomeView: View {
     @EnvironmentObject private var auth: AuthViewModel
     @Environment(\.scenePhase) private var scenePhase
+    @ObservedObject private var settings = SettingsStore.shared
 
     @Environment(\.homeViewIsPreviewRuntime) private var isPreviewRuntime
     @Environment(\.previewSelectedTab) private var previewSelectedTab
@@ -323,8 +591,10 @@ struct HomeView: View {
     @State private var enableLowerHitArea: Bool = false
     @State private var didApplyDefaultBarSettings = false
     @State private var didRunLaunchSequence = false
+    @State private var showAppInitializationCover = true
+    @State private var showSlowInitializationDetails = false
     @State private var bottomChromeVisible = false
-    @State private var isFeedLaunchLoading = true
+    @State private var isFeedLaunchLoading = false
     @State private var feedLaunchSuppressionTask: Task<Void, Never>? = nil
     @State private var isMainTabChildRouteVisible = false
 
@@ -342,12 +612,16 @@ struct HomeView: View {
     @State private var isRecordHolding: Bool = false
     @StateObject private var feedCubeMenuWheel = CubeMenuWheelController()
     @StateObject private var cameraCubeMenuWheel = CubeMenuWheelController()
+    @State private var showFeedCommentComposer = false
+    @State private var showLiveLocationPicker = false
 
     // Recording countdown state
     @State private var isRecording: Bool = false
     @State private var recordingSecondsRemaining: Int = 10
     @State private var recordingTimer: Timer? = nil
     @State private var capturePreviewItem: HomeCapturePreviewItem? = nil
+    @State private var postCaptureComposerItem: HomePostCaptureComposerItem? = nil
+    @State private var showCameraRollWindow = false
     @StateObject private var deviceVolumeObserver = DeviceVolumeObserver()
 
     // Post count state (for displaying user's total posts)
@@ -370,6 +644,10 @@ struct HomeView: View {
         isCubeVisibleOnCurrentRoute && !isMainTabChildRouteVisible
     }
 
+    private var shouldSleepChromeForCurrentTab: Bool {
+        selectedTab == .feed && isChromeAsleep
+    }
+
     // Added state for cube yaw angle
     @State private var cubeYawDegrees: Double = 90
 
@@ -385,6 +663,104 @@ struct HomeView: View {
     // In-app call
     @ObservedObject private var callManager = CallSessionManager.shared
     @State private var incomingCallInfo: (callerName: String, channelId: String, documentId: String)? = nil
+
+    // Channel object animation (fires twice/minute while on feed tab)
+    @State private var channelLogoVisible: Bool = false
+    @State private var cubeHiddenForChannelLogo: Bool = false
+    @State private var channelLogoInfo: (id: String, name: String, emoji: String) = ("music", "Music", "🎵")
+    @State private var channelLogoObjectId: String = "star"
+    @State private var channelLogoPeriodicTask: Task<Void, Never>? = nil
+    @State private var channelLogoAnimTask: Task<Void, Never>? = nil
+    @State private var channelLogoPopPlayer: AVAudioPlayer? = nil
+
+    // MARK: - Channel Object Animation
+
+    private func startChannelLogoTimer() {
+        stopChannelLogoTimer()
+        channelLogoPeriodicTask = Task { @MainActor in
+            // First firing after 30 seconds
+            try? await Task.sleep(nanoseconds: 30_000_000_000)
+            while !Task.isCancelled {
+                triggerChannelLogoAnimation()
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
+            }
+        }
+    }
+
+    private func stopChannelLogoTimer() {
+        channelLogoPeriodicTask?.cancel()
+        channelLogoPeriodicTask = nil
+        channelLogoAnimTask?.cancel()
+        channelLogoAnimTask = nil
+        channelLogoVisible = false
+        cubeHiddenForChannelLogo = false
+    }
+
+    private func triggerChannelLogoAnimation() {
+        guard selectedTab == .feed, !channelLogoVisible else { return }
+        channelLogoObjectId = Self.randomChannelObject(for: channelLogoInfo.id)
+        playChannelLogoPopSound()
+        withAnimation(.spring(response: 0.26, dampingFraction: 0.65)) {
+            cubeHiddenForChannelLogo = true
+        }
+        channelLogoAnimTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 340_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeIn(duration: 0.12)) { channelLogoVisible = true }
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.18)) { channelLogoVisible = false }
+            try? await Task.sleep(nanoseconds: 210_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.72)) {
+                cubeHiddenForChannelLogo = false
+            }
+            channelLogoAnimTask = nil
+        }
+    }
+
+    private static func randomChannelObject(for channelId: String) -> String {
+        let options: [String]
+        switch channelId.lowercased() {
+        case "food":
+            options = ["banana", "cake", "fruit"]
+        case "beauty", "style":
+            options = ["lipstick", "compact", "sparkle"]
+        case "sports", "fitness":
+            options = ["ball", "trophy", "dumbbell"]
+        case "modelling":
+            options = ["camera", "spotlight", "star"]
+        case "fashion", "shopping":
+            options = ["dress", "shoe", "bag"]
+        case "music":
+            options = ["microphone", "note", "speaker"]
+        case "tech", "gaming":
+            options = ["laptop", "chip", "controller"]
+        case "news":
+            options = ["newspaper", "globe", "camera"]
+        case "french":
+            options = ["eiffel", "croissant", "beret"]
+        case "spanish":
+            options = ["guitar", "sun", "fan"]
+        default:
+            options = ["star", "globe", "sparkle"]
+        }
+        return options.randomElement() ?? "star"
+    }
+
+    private func playChannelLogoPopSound() {
+        guard let url = Bundle.main.url(forResource: "pop", withExtension: "mp3")
+            ?? Bundle.main.url(forResource: "pop", withExtension: "caf")
+            ?? Bundle.main.url(forResource: "pop", withExtension: "wav") else { return }
+        do {
+            let player = try AVAudioPlayer(contentsOf: url)
+            player.numberOfLoops = 0
+            player.volume = 0.85
+            player.prepareToPlay()
+            player.play()
+            channelLogoPopPlayer = player
+        } catch {}
+    }
 
     @ViewBuilder
     private var mapTabContent: some View {
@@ -548,6 +924,7 @@ struct HomeView: View {
         guard !didRunLaunchSequence else { return }
         didRunLaunchSequence = true
         triggerFeedInitialLoadIfNeeded()
+        Task { await PoplurMapRadioHost.shared.prewarm() }
     }
 
     private func revealBottomChromeIfNeeded() {
@@ -678,12 +1055,30 @@ struct HomeView: View {
     private var feedCubeMenuItems: [CubeSubmenuItem] {
         [
             CubeSubmenuItem(
-                id: "feed-tv-guide",
-                title: "TV Guide",
-                systemImage: "tv.fill",
-                tint: .green,
+                id: "feed-like",
+                title: "Like",
+                systemImage: "heart.fill",
+                tint: .pink,
                 action: {
-                    NotificationCenter.default.post(name: .FeedOpenTVGuide, object: nil)
+                    NotificationCenter.default.post(name: .FeedLikeCurrentPost, object: nil)
+                }
+            ),
+            CubeSubmenuItem(
+                id: "feed-comment",
+                title: "Comment",
+                systemImage: "bubble.left.and.bubble.right.fill",
+                tint: .cyan,
+                action: {
+                    NotificationCenter.default.post(name: .FeedOpenCommentComposer, object: nil)
+                }
+            ),
+            CubeSubmenuItem(
+                id: "feed-profile",
+                title: "Profile",
+                systemImage: "person.crop.circle.fill",
+                tint: .indigo,
+                action: {
+                    NotificationCenter.default.post(name: .FeedOpenCurrentPostProfile, object: nil)
                 }
             ),
             CubeSubmenuItem(
@@ -694,8 +1089,56 @@ struct HomeView: View {
                 action: {
                     NotificationCenter.default.post(name: .FeedOpenNews, object: nil)
                 }
+            ),
+            CubeSubmenuItem(
+                id: "feed-tv-guide",
+                title: "TV Guide",
+                systemImage: "tv.fill",
+                tint: .green,
+                action: {
+                    NotificationCenter.default.post(name: .FeedOpenTVGuide, object: nil)
+                }
+            ),
+            CubeSubmenuItem(
+                id: "feed-captions",
+                title: settings.closedCaptionsEnabled ? "CC On" : "CC Off",
+                systemImage: "text.bubble.fill",
+                tint: settings.closedCaptionsEnabled ? .mint : .gray,
+                action: {
+                    settings.toggleClosedCaptions()
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                }
             )
         ]
+    }
+
+    @MainActor
+    private func openFeedCommentComposer() {
+        guard selectedTab == .feed else { return }
+        chromeSleepTask?.cancel()
+        chromeSleepTask = nil
+        isMainTabChildRouteVisible = true
+        withAnimation(.spring(response: 0.36, dampingFraction: 0.78)) {
+            isChromeAsleep = true
+            showFeedCommentComposer = true
+        }
+    }
+
+    @MainActor
+    private func closeFeedCommentComposer() {
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+            showFeedCommentComposer = false
+        }
+        isMainTabChildRouteVisible = false
+        resetChromeSleepTimer()
+    }
+
+    @MainActor
+    private func submitFeedComment(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        NotificationCenter.default.post(name: .FeedCommentSubmitted, object: trimmed)
+        closeFeedCommentComposer()
     }
 
     @MainActor
@@ -727,7 +1170,69 @@ struct HomeView: View {
         }
         stopRecordHoldRamp(reset: true)
         ensureCameraRunningIfNeeded()
-        controller.toggleLiveVideo()
+        if controller.isLiveVideoActive {
+            controller.stopLiveVideo()
+            LiveVideoSessionStore.shared.stopLocalSession()
+            isMainTabChildRouteVisible = false
+        } else {
+            openLiveLocationPicker()
+        }
+    }
+
+    @MainActor
+    private func openLiveLocationPicker() {
+        locationProvider.request()
+        isMainTabChildRouteVisible = true
+        withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
+            showLiveLocationPicker = true
+        }
+    }
+
+    @MainActor
+    private func closeLiveLocationPicker() {
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.84)) {
+            showLiveLocationPicker = false
+        }
+        isMainTabChildRouteVisible = false
+    }
+
+    @MainActor
+    private func startLiveVideo(at location: LiveBroadcastLocation) {
+        let controller = cameraControllerHolder.resolve()
+        ensureCameraRunningIfNeeded()
+        if isRecording {
+            stopRecordingCountdown()
+        }
+        stopRecordHoldRamp(reset: true)
+        controller.startLiveVideo(
+            at: location.coordinate,
+            locationName: location.title,
+            radiusMeters: location.radiusMeters,
+            initialViewers: 128
+        )
+        _ = LiveVideoSessionStore.shared.startLocalSession(
+            at: location,
+            viewerCount: controller.liveViewerCount
+        )
+        closeLiveLocationPicker()
+    }
+
+    private var liveLocationChoices: [LiveBroadcastLocation] {
+        var choices: [LiveBroadcastLocation] = []
+        if let coordinate = locationProvider.coordinate {
+            choices.append(
+                LiveBroadcastLocation(
+                    id: "current-location",
+                    title: "Current Spot",
+                    subtitle: "Use your current camera location",
+                    latitude: coordinate.latitude,
+                    longitude: coordinate.longitude,
+                    radiusMeters: max(isometricBarModel.radius, 5_000)
+                )
+            )
+        }
+        choices.append(contentsOf: LiveVideoSessionStore.defaultLocationChoices)
+        return choices
     }
 
     @MainActor
@@ -874,9 +1379,14 @@ struct HomeView: View {
     private func resetChromeSleepTimer() {
         chromeSleepTask?.cancel()
         chromeSleepTask = nil
-        guard SettingsStore.shared.hudSleepTimerEnabled,
-              selectedTab == .feed,
-              !isMainTabChildRouteVisible else {
+        if showFeedCommentComposer {
+            if !isChromeAsleep {
+                withAnimation(.easeOut(duration: 0.35)) { isChromeAsleep = true }
+            }
+            return
+        }
+        // Only auto-sleep on the feed tab; on all other tabs keep chrome awake
+        guard selectedTab == .feed, !isMainTabChildRouteVisible else {
             if isChromeAsleep {
                 withAnimation(.easeIn(duration: 0.35)) { isChromeAsleep = false }
             }
@@ -886,16 +1396,10 @@ struct HomeView: View {
             withAnimation(.easeIn(duration: 0.35)) { isChromeAsleep = false }
         }
         chromeSleepTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 30_000_000_000)
+            try? await Task.sleep(nanoseconds: 60_000_000_000) // 1 minute
             guard !Task.isCancelled else { return }
             withAnimation(.easeOut(duration: 0.8)) { isChromeAsleep = true }
         }
-    }
-
-    private func putChromeToSleepImmediately() {
-        guard selectedTab == .feed else { return }
-        chromeSleepTask?.cancel()
-        withAnimation(.easeOut(duration: 0.5)) { isChromeAsleep = true }
     }
 
     // MARK: - Body split for type-checker performance
@@ -1008,6 +1512,19 @@ struct HomeView: View {
                 .zIndex(7200)
             }
 
+            if let item = postCaptureComposerItem {
+                PostCaptureComposerOverlay(
+                    image: item.image,
+                    videoURL: item.videoURL,
+                    coordinate: item.coordinate,
+                    onDismiss: {
+                        postCaptureComposerItem = nil
+                    }
+                )
+                .transition(.opacity)
+                .zIndex(7250)
+            }
+
             CubeMenuWheelOverlay(controller: cameraCubeMenuWheel)
                 .opacity(selectedTab == .record ? 1 : 0)
                 .zIndex(6100)
@@ -1027,41 +1544,58 @@ struct HomeView: View {
             }
 
             if isCubeVisibleOnCurrentRoute {
-                // 3D Cube tab control overlay
-                VStack {
+                // 3D Cube tab control overlay — pinned to bottom
+                VStack(alignment: .center) {
                     Spacer()
-                    CubeTabView(
-                        selectedTab: $selectedTab,
-                        tintColor: .indigo,
-                        onSwipeUp: {
-                            if selectedTab == .record {
-                                NotificationCenter.default.post(name: Notification.Name("TriggerCameraCapture"), object: nil)
-                            } else {
-                                NotificationCenter.default.post(name: Notification.Name("ShowRecordCaptureUI"), object: nil)
+                    ZStack(alignment: .center) {
+                        CubeTabView(
+                            selectedTab: $selectedTab,
+                            tintColor: .indigo,
+                            onSwipeUp: {
+                                if selectedTab == .record {
+                                    NotificationCenter.default.post(name: Notification.Name("TriggerCameraCapture"), object: nil)
+                                } else {
+                                    NotificationCenter.default.post(name: Notification.Name("ShowRecordCaptureUI"), object: nil)
+                                }
+                            },
+                            onCubeTap: {
+                                if selectedTab == .map {
+                                    NotificationCenter.default.post(
+                                        name: Notification.Name("CenterMapOnUser"),
+                                        object: nil,
+                                        userInfo: nil
+                                    )
+                                } else if selectedTab == .profile {
+                                    NotificationCenter.default.post(
+                                        name: .CubeGlobalTap,
+                                        object: nil
+                                    )
+                                }
                             }
-                        },
-                        onCubeTap: {
-                            if selectedTab == .map {
-                                NotificationCenter.default.post(
-                                    name: Notification.Name("CenterMapOnUser"),
-                                    object: nil,
-                                    userInfo: nil
-                                )
-                            } else if selectedTab == .profile {
-                                NotificationCenter.default.post(
-                                    name: .CubeGlobalTap,
-                                    object: nil
-                                )
-                            }
+                        )
+                        .tint(.white)
+                        .scaleEffect(cubeHiddenForChannelLogo ? 0.01 : 1.0)
+                        .opacity(cubeHiddenForChannelLogo ? 0 : 1)
+                        .animation(.spring(response: 0.26, dampingFraction: 0.65), value: cubeHiddenForChannelLogo)
+
+                        if channelLogoVisible {
+                            ChannelObjectSceneView(
+                                channelId: channelLogoInfo.id,
+                                objectId: channelLogoObjectId
+                            )
+                            .allowsHitTesting(false)
+                            .frame(width: 200, height: 200)
+                            .transition(.scale(scale: 0.01).combined(with: .opacity))
                         }
-                    )
-                    .tint(.white)
-                    .frame(height: 230)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 230, maxHeight: 230)
+                    .animation(.easeInOut(duration: 0.15), value: channelLogoVisible)
                     .padding(.bottom, 8)
-                    .padding(.trailing, 8)
                 }
+                .frame(maxWidth: .infinity)
                 .padding(.bottom, 24)
                 .ignoresSafeArea(edges: .bottom)
+                .animation(.easeInOut(duration: 0.15), value: channelLogoVisible)
                 .allowsHitTesting(true)
                 .zIndex(6000)
                 .gesture(
@@ -1085,8 +1619,8 @@ struct HomeView: View {
                             }
                         }
                 )
-                .opacity(isChromeAsleep ? 0.2 : 1)
-                .allowsHitTesting(!isChromeAsleep)
+                .opacity(shouldSleepChromeForCurrentTab ? 0.2 : 1)
+                .allowsHitTesting(!shouldSleepChromeForCurrentTab)
             }
 
 #if DEBUG
@@ -1171,15 +1705,15 @@ struct HomeView: View {
                         // Option 4: Icon-centered style
                         // RadiusDisplayWithIcon(radiusMeters: $isometricBarModel.radius)
                     }
-                    .padding(.leading, safe.leading + (selectedTab == .map ? 0 : 16))
-                    .padding(.trailing, safe.trailing + (selectedTab == .map ? 0 : 16))
+                    .padding(.leading, safe.leading + 16)
+                    .padding(.trailing, safe.trailing + 16)
                     .padding(.bottom, safe.bottom + 20)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                 .transaction { transaction in
                     transaction.animation = nil
                 }
-                .opacity(bottomChromeVisible && !isMainTabChildRouteVisible ? (isChromeAsleep ? 0.2 : 1) : 0)
+                .opacity(bottomChromeVisible && !isMainTabChildRouteVisible ? (shouldSleepChromeForCurrentTab ? 0.2 : 1) : 0)
                 .onAppear {
                     revealBottomChromeIfNeeded()
                 }
@@ -1188,14 +1722,14 @@ struct HomeView: View {
             .zIndex(1001)
             .allowsHitTesting(false)
 
-            if selectedTab == .feed && deviceVolumeObserver.isShowing && !isMainTabChildRouteVisible {
+            if deviceVolumeObserver.isShowing {
                 GeometryReader { proxy in
                     VStack {
                         Spacer()
                         HStack {
                             Spacer()
 
-                            FeedVolumeBars(volumeLevel: deviceVolumeObserver.level)
+                            PoplurVolumeBars(volumeLevel: deviceVolumeObserver.level)
                                 .frame(width: 64, height: 320)
                                 .accessibilityElement(children: .ignore)
                                 .accessibilityLabel("Volume \(Int(deviceVolumeObserver.level * 100)) percent")
@@ -1208,6 +1742,46 @@ struct HomeView: View {
                 }
                 .zIndex(1002)
                 .allowsHitTesting(false)
+            }
+
+            if showFeedCommentComposer {
+                FeedCommentComposerOverlay(
+                    onSubmit: submitFeedComment,
+                    onDismiss: closeFeedCommentComposer
+                )
+                .transition(.asymmetric(
+                    insertion: .scale(scale: 0.84).combined(with: .opacity),
+                    removal: .scale(scale: 0.94).combined(with: .opacity)
+                ))
+                .zIndex(7000)
+            }
+
+            if showLiveLocationPicker {
+                LiveLocationPickerOverlay(
+                    locations: liveLocationChoices,
+                    onSelect: startLiveVideo,
+                    onDismiss: closeLiveLocationPicker
+                )
+                .transition(.asymmetric(
+                    insertion: .scale(scale: 0.88).combined(with: .opacity),
+                    removal: .scale(scale: 0.96).combined(with: .opacity)
+                ))
+                .zIndex(7060)
+            }
+
+            if showCameraRollWindow && selectedTab == .record {
+                CameraRollWindowOverlay(
+                    onDismiss: {
+                        withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
+                            showCameraRollWindow = false
+                        }
+                    }
+                )
+                .transition(.asymmetric(
+                    insertion: .scale(scale: 0.9).combined(with: .opacity),
+                    removal: .move(edge: .bottom).combined(with: .opacity)
+                ))
+                .zIndex(7080)
             }
 
             if selectedTab == .record && !isRecording {
@@ -1232,238 +1806,22 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - Body (split into steps to help Swift type-checker)
-    var body: some View {
-        // Step 1: apply environment values and lifecycle modifiers
-        let step1 = rootStack
-            .environment(\.isometricRadiusBarDistance, isometricBarSettings.horizontalOffset)
-            .environment(\.isometricBarModel, isometricBarModel)
-            .task {
-                // Startup tasks deferred; nothing to do here
-            }
-            .onAppear {
-                CallSessionManager.shared.startListeningForIncomingCalls()
-                runLaunchSequenceIfNeeded()
-                if selectedTab != .feed {
-                    NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
-                }
-                if selectedTab == .profile {
-                    NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
-                }
-                if !didSetInitialCubeYaw {
-                    didSetInitialCubeYaw = true
-                    cubeYawDegrees = yawForTab(.feed)
-                }
-                Task { @MainActor in
-                    try? await Task.sleep(nanoseconds: 120_000_000)
-                    await Task.yield()
-                    enableLowerHitArea = false
-                    if !didApplyDefaultBarSettings {
-                        didApplyDefaultBarSettings = true
-                        isometricBarSettings.horizontalOffset = 40
-                        isometricBarSettings.bottomOffset = -80
-                        isometricBarSettings.barWidth = 98
-                        isometricBarSettings.barHeight = 390
-                        isometricBarSettings.barTiltDegrees = -8
-                    }
-                }
-                resetChromeSleepTimer()
-            }
-            .onChange(of: selectedTab) { _, newTab in
-                if !didSetInitialCubeYaw {
-                    didSetInitialCubeYaw = true
-                    cubeYawDegrees = yawForTab(selectedTab)
-                } else {
-                    animateYaw(to: yawForTab(selectedTab), duration: 0.45, direction: nil)
-                }
-                if !([AppTab.map, .record, .feed, .profile].contains(selectedTab)) {
-                    selectedTab = .feed
-                }
-                if newTab != .profile {
-                    withAnimation(.easeInOut(duration: 0.6)) {
-                        isometricBarModel.radius = 0
-                    }
-                }
-                if selectedTab == .feed {
-                    NotificationCenter.default.post(name: .ResumeFeedAudio, object: nil)
-                } else {
-                    NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
-                }
-                if selectedTab == .record {
-                    ensureCameraRunningIfNeeded()
-                }
-                if selectedTab == .profile {
-                    if !PreviewEnvHomeView.isPreview {
-                        cameraControllerHolder.stopIfLoaded()
-                    }
-                }
-                NotificationCenter.default.post(name: .ResetTabToTop, object: nil)
-                if selectedTab != .record {
-                    isRecordHolding = false
-                    cameraCubeMenuWheel.endHold(activateSelected: false)
-                    stopRecordHoldRamp(reset: false)
-                }
-                if selectedTab != .feed {
-                    feedCubeMenuWheel.endHold(activateSelected: false)
-                }
-                enableLowerHitArea = (selectedTab != .record)
-                resetChromeSleepTimer()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("FeedLaunchLoadingDidStart"))) { _ in
-                isFeedLaunchLoading = true
-                deviceVolumeObserver.setSuppressed(true)
-                feedLaunchSuppressionTask?.cancel()
-                feedLaunchSuppressionTask = Task { @MainActor in
-                    try? await Task.sleep(nanoseconds: 3_000_000_000)
-                    guard !Task.isCancelled else { return }
-                    withAnimation(.easeOut(duration: 0.50)) {
-                        isFeedLaunchLoading = false
-                    }
-                    deviceVolumeObserver.setSuppressed(false)
-                    feedLaunchSuppressionTask = nil
-                }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("FeedLaunchLoadingDidFinish"))) { _ in
-                feedLaunchSuppressionTask?.cancel()
-                feedLaunchSuppressionTask = nil
-                withAnimation(.easeOut(duration: 0.50)) {
-                    isFeedLaunchLoading = false
-                }
-                deviceVolumeObserver.setSuppressed(false)
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .MainTabChildRouteVisibilityChanged)) { notification in
-                isMainTabChildRouteVisible = (notification.object as? Bool) ?? false
-                resetChromeSleepTimer()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .feedHardwareVolumeChanged)) { notification in
-                guard selectedTab == .feed else { return }
-                if isFeedLaunchLoading {
-                    feedLaunchSuppressionTask?.cancel()
-                    feedLaunchSuppressionTask = nil
-                    isFeedLaunchLoading = false
-                    deviceVolumeObserver.setSuppressed(false)
-                }
-                let rawLevel = notification.userInfo?["level"]
-                let level = (rawLevel as? Float) ?? (rawLevel as? Double).map(Float.init)
-                deviceVolumeObserver.showForHardwareVolumePress(level: level)
-            }
-            .onChange(of: auth.isAuthenticated) { _, authed in
-                if authed {
-                    DispatchQueue.main.async {
-                        selectedTab = .feed
-                        runLaunchSequenceIfNeeded()
-                    }
-                }
-            }
-            .onChange(of: scenePhase) { _, phase in
-                switch phase {
-                case .active:
-                    if selectedTab == .record {
-                        ensureCameraRunningIfNeeded()
-                    }
-                case .background:
-                    cameraControllerHolder.stopIfLoaded()
-                    NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
-                    NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
-                case .inactive:
-                    NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
-                    NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
-                @unknown default:
-                    break
-                }
-            }
-            .onChange(of: isPreviewRuntime) { _, isPreview in
-                if isPreview {
-                    if let mapped = AppTab(fromPreview: previewSelectedTab) {
-                        selectedTab = mapped
-                    }
-                }
-            }
-            .onChange(of: previewSelectedTab) { _, tab in
-                guard isPreviewRuntime else { return }
-                if let mapped = AppTab(fromPreview: tab) {
-                    selectedTab = mapped
-                }
-            }
-            .onChange(of: selectedTab) { _, newTab in
-                if newTab != .profile && routedUserID != nil {
-                    routedUserID = nil
-                }
-            }
+    // MARK: - Notification receivers (split to help Swift type-checker)
 
-        // Step 2: apply notification receivers and remaining tasks
-        return step1
-            .onReceive(NotificationCenter.default.publisher(for: .SharedRadiusDidChange)) { note in
-                if let value = note.userInfo?["radius"] as? Double {
-                    isometricBarModel.radius = min(value, 3_323_000.0)
-                }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("UserRecognizedInCamera"))) { note in
-                if let radiusMeters = note.userInfo?["radius"] as? Double {
-                    NotificationCenter.default.post(
-                        name: .SharedRadiusDidChange,
-                        object: nil,
-                        userInfo: ["radius": radiusMeters]
-                    )
-                }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("InlinePreviewDismissRequested"))) { _ in
-                isometricBarModel.radius = 0
-                NotificationCenter.default.post(name: .SharedRadiusDidChange, object: nil, userInfo: ["radius": 0.0])
-            }
-            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ToggleARFilters"))) { _ in
-                withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
-                    if selectedTab == .record {
-                        _ = cameraControllerHolder.resolve()
-                        _ = ensureRecordSupportManagers()
-                    }
-                    showARFilters.toggle()
-                    UserDefaults.standard.set(showARFilters, forKey: "ARFiltersShown")
-                    NotificationCenter.default.post(
-                        name: Notification.Name("ARFiltersStateChanged"),
-                        object: nil,
-                        userInfo: ["isShown": showARFilters]
-                    )
-                }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .cameraCubeHoldBegan)) { _ in
-                guard selectedTab == .record else { return }
-                isRecordHolding = true
-                ensureCameraRunningIfNeeded()
-                cameraCubeMenuWheel.beginHold(items: cameraCubeMenuItems)
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .cameraCubeHoldEnded)) { _ in
-                guard selectedTab == .record else { return }
-                isRecordHolding = false
-                cameraCubeMenuWheel.endHold(activateSelected: true)
-                if !isRecording {
-                    stopRecordHoldRamp(reset: true)
-                }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("RecordingOutputReady"))) { notification in
-                guard let url = notification.userInfo?["url"] as? URL else { return }
-                showCompletedVideoPreview(url: url)
-            }
-            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ShowCapturePreviewOverlay"))) { notification in
-                if let image = notification.object as? UIImage {
-                    capturePreviewItem = HomeCapturePreviewItem(image: image, videoURL: nil)
-                } else if let url = notification.object as? URL {
-                    showCompletedVideoPreview(url: url)
-                }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("OpenCameraAtCoordinate"))) { notification in
+    private var notificationReceiversB: some View {
+        Color.clear
+            .onReceive(NotificationCenter.default.publisher(for: .showPostCaptureEditor)) { notification in
                 guard let userInfo = notification.userInfo,
                       let latitude = userInfo["latitude"] as? Double,
                       let longitude = userInfo["longitude"] as? Double else { return }
-                selectedTab = .record
-                NotificationCenter.default.post(
-                    name: Notification.Name("SetCameraCoordinate"),
-                    object: nil,
-                    userInfo: ["latitude": latitude, "longitude": longitude]
+                let image = userInfo["image"] as? UIImage
+                let videoURL = userInfo["videoURL"] as? URL
+                let coordinate = CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+                postCaptureComposerItem = HomePostCaptureComposerItem(
+                    image: image,
+                    videoURL: videoURL,
+                    coordinate: coordinate
                 )
-            }
-            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("OpenMapToSelectPostLocation"))) { _ in
-                selectedTab = .map
             }
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ShowLocationOnMap"))) { notification in
                 guard notification.userInfo?["coordinate"] is CLLocationCoordinate2D else { return }
@@ -1482,7 +1840,11 @@ struct HomeView: View {
                 guard let userInfo = notification.userInfo,
                       let latitude = userInfo["latitude"] as? Double,
                       let longitude = userInfo["longitude"] as? Double else { return }
-                uploadStatusMessage = "Uploading your post..."
+                if userInfo["channelID"] is String || userInfo["filterID"] is String {
+                    uploadStatusMessage = "AI feed service is preparing your Poplur TV post..."
+                } else {
+                    uploadStatusMessage = "Uploading your post..."
+                }
                 uploadStatusIcon = "arrow.up.circle.fill"
                 uploadStatusColor = .blue
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { showUploadStatus = true }
@@ -1532,8 +1894,13 @@ struct HomeView: View {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { showUploadStatus = false }
                 }
             }
-            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("SwitchToFeedTab"))) { _ in }
-            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("SwitchToProfileTab"))) { _ in }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("SwitchToFeedTab"))) { _ in
+                selectedTab = .feed
+            }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("SwitchToProfileTab"))) { _ in
+                selectedTab = .profile
+                NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
+            }
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("SwitchToMapTab"))) { _ in }
             .onReceive(NotificationCenter.default.publisher(for: .ShowUserProfile)) { note in
                 if let uid = note.object as? String {
@@ -1613,7 +1980,6 @@ struct HomeView: View {
                     userPostCount = count
                 }
             }
-            // ── In-app incoming call presentation ────────────────────────────
             .onChange(of: callManager.callState) { _, newState in
                 if case .incoming(let callerName, let channelId, let documentId) = newState {
                     incomingCallInfo = (callerName, channelId, documentId)
@@ -1621,11 +1987,297 @@ struct HomeView: View {
                     incomingCallInfo = nil
                 }
             }
-            // ─────────────────────────────────────────────────────────────────
-            // ── HUD sleep timer ──────────────────────────────────────────────
             .onReceive(NotificationCenter.default.publisher(for: .popularPhoneDidPresent)) { _ in
-                putChromeToSleepImmediately()
+                resetChromeSleepTimer()
             }
+    }
+
+    // MARK: - Body (split into steps to help Swift type-checker)
+    var body: some View {
+        // Step 1: apply environment values and lifecycle modifiers
+        let step1 = rootStack
+            .environment(\.isometricRadiusBarDistance, isometricBarSettings.horizontalOffset)
+            .environment(\.isometricBarModel, isometricBarModel)
+            .task {
+                guard showAppInitializationCover else { return }
+                // Show loading bar + text immediately
+                withAnimation(.easeOut(duration: 0.18)) {
+                    showSlowInitializationDetails = true
+                }
+                // Long safety-net only; the feed-ready notification should dismiss the cover.
+                try? await Task.sleep(nanoseconds: 15_000_000_000)
+                withAnimation(.easeOut(duration: 0.30)) {
+                    showAppInitializationCover = false
+                    showSlowInitializationDetails = false
+                }
+            }
+            .onAppear {
+                CallSessionManager.shared.startListeningForIncomingCalls()
+                runLaunchSequenceIfNeeded()
+                if selectedTab != .feed {
+                    NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
+                }
+                if selectedTab == .profile {
+                    NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
+                }
+                if !didSetInitialCubeYaw {
+                    didSetInitialCubeYaw = true
+                    cubeYawDegrees = yawForTab(.feed)
+                }
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 120_000_000)
+                    await Task.yield()
+                    enableLowerHitArea = false
+                    if !didApplyDefaultBarSettings {
+                        didApplyDefaultBarSettings = true
+                        isometricBarSettings.horizontalOffset = 40
+                        isometricBarSettings.bottomOffset = -80
+                        isometricBarSettings.barWidth = 98
+                        isometricBarSettings.barHeight = 390
+                        isometricBarSettings.barTiltDegrees = -8
+                    }
+                }
+                resetChromeSleepTimer()
+                if selectedTab == .feed {
+                    startChannelLogoTimer()
+                }
+            }
+            .onChange(of: selectedTab) { _, newTab in
+                if !didSetInitialCubeYaw {
+                    didSetInitialCubeYaw = true
+                    cubeYawDegrees = yawForTab(selectedTab)
+                } else {
+                    animateYaw(to: yawForTab(selectedTab), duration: 0.45, direction: nil)
+                }
+                if !([AppTab.map, .record, .feed, .profile].contains(selectedTab)) {
+                    selectedTab = .feed
+                }
+                if newTab != .profile {
+                    withAnimation(.easeInOut(duration: 0.6)) {
+                        isometricBarModel.radius = 0
+                    }
+                }
+                if selectedTab == .feed {
+                    NotificationCenter.default.post(name: .ResumeFeedAudio, object: nil)
+                } else {
+                    NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
+                }
+                if selectedTab == .record {
+                    ensureCameraRunningIfNeeded()
+                    NotificationCenter.default.post(name: .StopMapAudio, object: nil)
+                }
+                if selectedTab == .profile {
+                    if !PreviewEnvHomeView.isPreview {
+                        cameraControllerHolder.stopIfLoaded()
+                    }
+                }
+                NotificationCenter.default.post(name: .ResetTabToTop, object: nil)
+                if selectedTab != .record {
+                    isRecordHolding = false
+                    showCameraRollWindow = false
+                    cameraCubeMenuWheel.endHold(activateSelected: false)
+                    stopRecordHoldRamp(reset: false)
+                }
+                if selectedTab != .feed {
+                    feedCubeMenuWheel.endHold(activateSelected: false)
+                    if showFeedCommentComposer {
+                        showFeedCommentComposer = false
+                        isMainTabChildRouteVisible = false
+                    }
+                    stopChannelLogoTimer()
+                } else {
+                    startChannelLogoTimer()
+                }
+                enableLowerHitArea = (selectedTab != .record)
+                resetChromeSleepTimer()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("FeedLaunchLoadingDidStart"))) { _ in
+                isFeedLaunchLoading = true
+                deviceVolumeObserver.setSuppressed(true)
+                feedLaunchSuppressionTask?.cancel()
+                feedLaunchSuppressionTask = Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 3_000_000_000)
+                    guard !Task.isCancelled else { return }
+                    withAnimation(.easeOut(duration: 0.50)) {
+                        isFeedLaunchLoading = false
+                    }
+                    deviceVolumeObserver.setSuppressed(false)
+                    feedLaunchSuppressionTask = nil
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("FeedLaunchLoadingDidFinish"))) { _ in
+                feedLaunchSuppressionTask?.cancel()
+                feedLaunchSuppressionTask = nil
+                withAnimation(.easeOut(duration: 0.50)) {
+                    isFeedLaunchLoading = false
+                }
+                deviceVolumeObserver.setSuppressed(false)
+                withAnimation(.easeOut(duration: 0.40)) {
+                    showAppInitializationCover = false
+                    showSlowInitializationDetails = false
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .MainTabChildRouteVisibilityChanged)) { notification in
+                isMainTabChildRouteVisible = (notification.object as? Bool) ?? false
+                resetChromeSleepTimer()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .FeedChannelDidChange)) { notification in
+                if let info = notification.userInfo,
+                   let id = info["id"] as? String,
+                   let name = info["name"] as? String,
+                   let emoji = info["emoji"] as? String {
+                    channelLogoInfo = (id: id, name: name, emoji: emoji)
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .feedHardwareVolumeChanged)) { notification in
+                if isFeedLaunchLoading {
+                    feedLaunchSuppressionTask?.cancel()
+                    feedLaunchSuppressionTask = nil
+                    isFeedLaunchLoading = false
+                    deviceVolumeObserver.setSuppressed(false)
+                }
+                let rawLevel = notification.userInfo?["level"]
+                let level = (rawLevel as? Float) ?? (rawLevel as? Double).map(Float.init)
+                deviceVolumeObserver.showForHardwareVolumePress(level: level)
+            }
+            .onChange(of: auth.isAuthenticated) { _, authed in
+                if authed {
+                    DispatchQueue.main.async {
+                        selectedTab = .feed
+                        runLaunchSequenceIfNeeded()
+                    }
+                }
+            }
+            .onChange(of: scenePhase) { _, phase in
+                switch phase {
+                case .active:
+                    if selectedTab == .record {
+                        ensureCameraRunningIfNeeded()
+                    }
+                    if selectedTab == .feed {
+                        NotificationCenter.default.post(name: .ResumeFeedAudio, object: nil)
+                    }
+                case .background:
+                    cameraControllerHolder.stopIfLoaded()
+                    NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
+                    NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
+                case .inactive:
+                    NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
+                    NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
+                @unknown default:
+                    break
+                }
+            }
+            .onChange(of: isPreviewRuntime) { _, isPreview in
+                if isPreview {
+                    if let mapped = AppTab(fromPreview: previewSelectedTab) {
+                        selectedTab = mapped
+                    }
+                }
+            }
+            .onChange(of: previewSelectedTab) { _, tab in
+                guard isPreviewRuntime else { return }
+                if let mapped = AppTab(fromPreview: tab) {
+                    selectedTab = mapped
+                }
+            }
+            .onChange(of: selectedTab) { _, newTab in
+                if newTab != .profile && routedUserID != nil {
+                    routedUserID = nil
+                }
+            }
+
+        // Step 2: apply notification receivers and remaining tasks
+        return step1
+            .onReceive(NotificationCenter.default.publisher(for: .FeedOpenCommentComposer)) { _ in
+                openFeedCommentComposer()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .SharedRadiusDidChange)) { note in
+                if let value = note.userInfo?["radius"] as? Double {
+                    isometricBarModel.radius = min(value, 3_323_000.0)
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("UserRecognizedInCamera"))) { note in
+                if let radiusMeters = note.userInfo?["radius"] as? Double {
+                    NotificationCenter.default.post(
+                        name: .SharedRadiusDidChange,
+                        object: nil,
+                        userInfo: ["radius": radiusMeters]
+                    )
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("InlinePreviewDismissRequested"))) { _ in
+                isometricBarModel.radius = 0
+                NotificationCenter.default.post(name: .SharedRadiusDidChange, object: nil, userInfo: ["radius": 0.0])
+            }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ToggleARFilters"))) { _ in
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                    if selectedTab == .record {
+                        _ = cameraControllerHolder.resolve()
+                        _ = ensureRecordSupportManagers()
+                    }
+                    showARFilters.toggle()
+                    UserDefaults.standard.set(showARFilters, forKey: "ARFiltersShown")
+                    NotificationCenter.default.post(
+                        name: Notification.Name("ARFiltersStateChanged"),
+                        object: nil,
+                        userInfo: ["isShown": showARFilters]
+                    )
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("LiveVideoNeedsLocation"))) { _ in
+                guard selectedTab == .record else { return }
+                openLiveLocationPicker()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("LiveVideoDidStop"))) { _ in
+                LiveVideoSessionStore.shared.stopLocalSession()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .showCameraRollWindow)) { _ in
+                guard selectedTab == .record else { return }
+                withAnimation(.spring(response: 0.36, dampingFraction: 0.82)) {
+                    showCameraRollWindow = true
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .cameraCubeHoldBegan)) { _ in
+                guard selectedTab == .record else { return }
+                isRecordHolding = true
+                ensureCameraRunningIfNeeded()
+                cameraCubeMenuWheel.beginHold(items: cameraCubeMenuItems)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .cameraCubeHoldEnded)) { _ in
+                guard selectedTab == .record else { return }
+                isRecordHolding = false
+                cameraCubeMenuWheel.endHold(activateSelected: true)
+                if !isRecording {
+                    stopRecordHoldRamp(reset: true)
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("RecordingOutputReady"))) { notification in
+                guard let url = notification.userInfo?["url"] as? URL else { return }
+                showCompletedVideoPreview(url: url)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ShowCapturePreviewOverlay"))) { notification in
+                if let image = notification.object as? UIImage {
+                    capturePreviewItem = HomeCapturePreviewItem(image: image, videoURL: nil)
+                } else if let url = notification.object as? URL {
+                    showCompletedVideoPreview(url: url)
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("OpenCameraAtCoordinate"))) { notification in
+                guard let userInfo = notification.userInfo,
+                      let latitude = userInfo["latitude"] as? Double,
+                      let longitude = userInfo["longitude"] as? Double else { return }
+                selectedTab = .record
+                NotificationCenter.default.post(
+                    name: Notification.Name("SetCameraCoordinate"),
+                    object: nil,
+                    userInfo: ["latitude": latitude, "longitude": longitude]
+                )
+            }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("OpenMapToSelectPostLocation"))) { _ in
+                selectedTab = .map
+            }
+            .background(notificationReceiversB)
             .simultaneousGesture(
                 TapGesture().onEnded {
                     if selectedTab == .feed && isChromeAsleep {
@@ -1634,20 +2286,394 @@ struct HomeView: View {
                     resetChromeSleepTimer()
                 }
             )
-            // Feed launch cover sits ABOVE the TabView UIKit boundary so it
-            // truly occludes all content including the black safe-area fill.
             .overlay {
-                if selectedTab == .feed && isFeedLaunchLoading {
-                    HomeFeedLaunchCover()
+                if showAppInitializationCover {
+                    HomeFeedLaunchCover(showSlowDetails: showSlowInitializationDetails)
                         .ignoresSafeArea()
                         .transition(.opacity)
                         .allowsHitTesting(false)
                 }
             }
-            .animation(.easeOut(duration: 0.50), value: isFeedLaunchLoading)
+            .animation(.easeOut(duration: 0.30), value: showAppInitializationCover)
+            .animation(.easeOut(duration: 0.18), value: showSlowInitializationDetails)
+            .preferredColorScheme(settings.colorSchemePreference.colorScheme)
             // ─────────────────────────────────────────────────────────────────
     }
 }
+
+private struct FeedCommentComposerOverlay: View {
+    let onSubmit: (String) -> Void
+    let onDismiss: () -> Void
+
+    @ObservedObject private var settings = SettingsStore.shared
+    @State private var draft = ""
+    @State private var isPresented = false
+    @State private var glitterScene = FeedCommentComposerGlitterScene.make()
+    @FocusState private var isFocused: Bool
+
+    private var canSubmit: Bool {
+        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack {
+                Color.black.opacity(0.46)
+                    .ignoresSafeArea()
+                    .onTapGesture {
+                        onDismiss()
+                    }
+
+                VStack(spacing: 16) {
+                    composerCard(in: proxy.size)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.horizontal, 20)
+                .padding(.bottom, proxy.safeAreaInsets.bottom + 74)
+                .modifier(
+                    ComposerTransitionMotion(
+                        style: settings.transitionStylePreference,
+                        isPresented: isPresented
+                    )
+                )
+                .animation(.spring(response: 0.42, dampingFraction: 0.72), value: isPresented)
+            }
+        }
+        .onAppear {
+            isPresented = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                isFocused = true
+            }
+        }
+    }
+
+    private func composerCard(in size: CGSize) -> some View {
+        let width = min(size.width - 40, 430)
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 12) {
+                Image(systemName: "bubble.left.and.sparkles.fill")
+                    .font(.system(size: 20, weight: .black))
+                    .foregroundStyle(.cyan)
+
+                Text("Comment")
+                    .font(.system(size: 22, weight: .black, design: .rounded))
+                    .foregroundStyle(.white)
+
+                Spacer()
+
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 15, weight: .black))
+                        .foregroundStyle(.white)
+                        .frame(width: 34, height: 34)
+                        .background(Color.black.opacity(0.36), in: Circle())
+                        .overlay(Circle().stroke(Color.white.opacity(0.18), lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+            }
+
+            ZStack(alignment: .topLeading) {
+                SpriteView(scene: glitterScene, options: [.allowsTransparency])
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .allowsHitTesting(false)
+
+                TextEditor(text: $draft)
+                    .focused($isFocused)
+                    .font(.system(size: 18, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .tint(.cyan)
+                    .scrollContentBackground(.hidden)
+                    .background(Color.clear)
+                    .padding(14)
+
+                if draft.isEmpty {
+                    Text("Say it like the lights are still rolling...")
+                        .font(.system(size: 17, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.44))
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 24)
+                        .allowsHitTesting(false)
+                }
+            }
+            .frame(height: 168)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.05, green: 0.04, blue: 0.09).opacity(0.94),
+                                Color(red: 0.12, green: 0.03, blue: 0.11).opacity(0.86),
+                                Color(red: 0.02, green: 0.10, blue: 0.13).opacity(0.88)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(
+                        LinearGradient(
+                            colors: [.cyan.opacity(0.95), .pink.opacity(0.84), .yellow.opacity(0.72)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 2
+                    )
+            )
+            .shadow(color: .cyan.opacity(0.34), radius: 24, x: -10, y: 10)
+            .shadow(color: .pink.opacity(0.3), radius: 26, x: 12, y: 16)
+
+            HStack(spacing: 12) {
+                Button(action: onDismiss) {
+                    Image(systemName: "arrow.down.right.and.arrow.up.left")
+                        .font(.system(size: 17, weight: .heavy))
+                        .foregroundStyle(.white.opacity(0.84))
+                        .frame(width: 46, height: 46)
+                        .background(Color.black.opacity(0.34), in: Circle())
+                        .overlay(Circle().stroke(Color.white.opacity(0.18), lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+
+                Spacer()
+
+                Button {
+                    onSubmit(draft)
+                } label: {
+                    Image(systemName: "paperplane.fill")
+                        .font(.system(size: 18, weight: .black))
+                        .foregroundStyle(canSubmit ? .black : .white.opacity(0.42))
+                        .frame(width: 52, height: 46)
+                        .background(canSubmit ? Color.cyan : Color.white.opacity(0.13), in: Capsule())
+                        .overlay(Capsule().stroke(Color.white.opacity(canSubmit ? 0.0 : 0.18), lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .disabled(!canSubmit)
+            }
+        }
+        .frame(width: width)
+        .padding(18)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .stroke(Color.white.opacity(0.18), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.42), radius: 38, x: 0, y: 28)
+    }
+}
+
+private struct ComposerTransitionMotion: ViewModifier {
+    let style: TransitionStylePreference
+    let isPresented: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        switch style {
+        case .twoD:
+            content
+                .scaleEffect(isPresented ? 1 : 0.88)
+                .opacity(isPresented ? 1 : 0)
+        case .threeD:
+            content
+                .rotation3DEffect(
+                    .degrees(isPresented ? 0 : 22),
+                    axis: (x: 1, y: -0.18, z: 0),
+                    anchor: .center,
+                    perspective: 0.72
+                )
+                .scaleEffect(isPresented ? 1 : 0.82)
+                .opacity(isPresented ? 1 : 0)
+        }
+    }
+}
+
+private struct LiveLocationPickerOverlay: View {
+    let locations: [LiveBroadcastLocation]
+    let onSelect: (LiveBroadcastLocation) -> Void
+    let onDismiss: () -> Void
+
+    @State private var isPresented = false
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack {
+                Color.black.opacity(0.38)
+                    .ignoresSafeArea()
+                    .onTapGesture {
+                        onDismiss()
+                    }
+
+                VStack(spacing: 14) {
+                    HStack(spacing: 12) {
+                        ZStack {
+                            Circle()
+                                .fill(Color.red.opacity(0.22))
+                                .frame(width: 42, height: 42)
+                            Image(systemName: "dot.radiowaves.left.and.right")
+                                .font(.system(size: 18, weight: .black))
+                                .foregroundStyle(.red)
+                        }
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Go Live")
+                                .font(.system(size: 24, weight: .black, design: .rounded))
+                                .foregroundStyle(.white)
+                            Text("Choose where the live radius starts")
+                                .font(.system(size: 13, weight: .bold, design: .rounded))
+                                .foregroundStyle(.white.opacity(0.62))
+                        }
+
+                        Spacer()
+
+                        Button(action: onDismiss) {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 15, weight: .black))
+                                .foregroundStyle(.white)
+                                .frame(width: 36, height: 36)
+                                .background(Color.black.opacity(0.32), in: Circle())
+                                .overlay(Circle().stroke(Color.white.opacity(0.18), lineWidth: 1))
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    VStack(spacing: 9) {
+                        ForEach(locations.prefix(6)) { location in
+                            Button {
+                                onSelect(location)
+                            } label: {
+                                HStack(spacing: 12) {
+                                    Image(systemName: "location.fill")
+                                        .font(.system(size: 16, weight: .black))
+                                        .foregroundStyle(Color(red: 0.36, green: 1.0, blue: 0.42))
+                                        .frame(width: 34, height: 34)
+                                        .background(Color.black.opacity(0.34), in: Circle())
+
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(location.title)
+                                            .font(.system(size: 17, weight: .black, design: .rounded))
+                                            .foregroundStyle(.white)
+                                        Text("\(location.subtitle) - \(formatRadius(location.radiusMeters))")
+                                            .font(.system(size: 12, weight: .bold, design: .rounded))
+                                            .foregroundStyle(.white.opacity(0.58))
+                                            .lineLimit(1)
+                                    }
+
+                                    Spacer()
+
+                                    Image(systemName: "arrow.up.forward")
+                                        .font(.system(size: 14, weight: .black))
+                                        .foregroundStyle(.white.opacity(0.72))
+                                }
+                                .padding(.horizontal, 13)
+                                .frame(height: 60)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                        .fill(Color.white.opacity(0.08))
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                        .stroke(Color.white.opacity(0.12), lineWidth: 1)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .frame(width: min(proxy.size.width - 34, 430))
+                .padding(18)
+                .background(
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color(red: 0.02, green: 0.02, blue: 0.04).opacity(0.96),
+                                    Color(red: 0.13, green: 0.02, blue: 0.04).opacity(0.94),
+                                    Color(red: 0.02, green: 0.10, blue: 0.08).opacity(0.94)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .stroke(
+                            LinearGradient(
+                                colors: [.red.opacity(0.9), .cyan.opacity(0.55), .white.opacity(0.18)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 1.5
+                        )
+                )
+                .shadow(color: .red.opacity(0.28), radius: 28, x: 0, y: 18)
+                .shadow(color: .black.opacity(0.52), radius: 34, x: 0, y: 24)
+                .position(x: proxy.size.width / 2, y: proxy.size.height - proxy.safeAreaInsets.bottom - 265)
+                .scaleEffect(isPresented ? 1 : 0.86)
+                .opacity(isPresented ? 1 : 0)
+                .animation(.spring(response: 0.38, dampingFraction: 0.74), value: isPresented)
+            }
+        }
+        .onAppear { isPresented = true }
+    }
+
+    private func formatRadius(_ meters: Double) -> String {
+        if meters >= 1_000_000 {
+            return String(format: "%.1fM m", meters / 1_000_000)
+        }
+        if meters >= 1_000 {
+            return String(format: "%.0fk m", meters / 1_000)
+        }
+        return "\(Int(meters)) m"
+    }
+}
+
+private final class FeedCommentComposerGlitterScene: SKScene {
+    static func make() -> FeedCommentComposerGlitterScene {
+        FeedCommentComposerGlitterScene(size: CGSize(width: 430, height: 168))
+    }
+
+    override init(size: CGSize) {
+        super.init(size: size)
+        backgroundColor = .clear
+        scaleMode = .resizeFill
+        addGlitterField()
+    }
+
+    required init?(coder aDecoder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    private func addGlitterField() {
+        let colors: [UIColor] = [.systemCyan, .systemPink, .systemYellow, .white]
+        for index in 0..<34 {
+            let node = SKShapeNode(circleOfRadius: CGFloat.random(in: 1.4...3.6))
+            node.fillColor = colors[index % colors.count].withAlphaComponent(CGFloat.random(in: 0.56...0.92))
+            node.strokeColor = .clear
+            node.position = CGPoint(
+                x: CGFloat.random(in: 0...size.width),
+                y: CGFloat.random(in: 0...size.height)
+            )
+            node.glowWidth = CGFloat.random(in: 1...4)
+            node.alpha = CGFloat.random(in: 0.38...0.95)
+            addChild(node)
+
+            let drift = SKAction.moveBy(
+                x: CGFloat.random(in: -28...28),
+                y: CGFloat.random(in: 18...56),
+                duration: TimeInterval.random(in: 2.1...4.4)
+            )
+            drift.timingMode = .easeInEaseOut
+            let fade = SKAction.sequence([
+                .fadeAlpha(to: 0.18, duration: TimeInterval.random(in: 0.6...1.2)),
+                .fadeAlpha(to: 0.95, duration: TimeInterval.random(in: 0.8...1.5))
+            ])
+            let wander = SKAction.sequence([drift, drift.reversed()])
+            node.run(.repeatForever(.group([wander, fade])))
+        }
+    }
+}
+
 final class BarCubePreviewTuning: ObservableObject {
     // Removed barHorizontalOffset, barBottomOffset, barTiltDegrees, barWidth, barHeight per instructions (no longer used)
 }
@@ -1871,8 +2897,8 @@ struct HomeBarPlacementPreview: View {
                         }
                 )
                 .padding(.bottom, 8)
-                .padding(.trailing, 8)
             }
+            .padding(.bottom, 24)
             .ignoresSafeArea(edges: .bottom)
 
             CubeAndBarOverlay(radius: $radius)
@@ -1973,7 +2999,8 @@ private struct RecordCameraControlsOverlay: View {
             if controller.isLiveVideoActive {
                 LiveVideoStatusBadge(
                     seconds: controller.liveVideoSeconds,
-                    viewers: controller.liveViewerCount
+                    viewers: controller.liveViewerCount,
+                    locationName: controller.liveLocationName
                 )
                 .padding(.top, 12)
             }
@@ -1986,6 +3013,7 @@ private struct RecordCameraControlsOverlay: View {
 private struct LiveVideoStatusBadge: View {
     let seconds: Int
     let viewers: Int
+    let locationName: String?
 
     var body: some View {
         HStack(spacing: 10) {
@@ -2008,6 +3036,15 @@ private struct LiveVideoStatusBadge: View {
             Text("\(viewers) watching")
                 .font(.system(size: 13, weight: .black))
                 .foregroundStyle(Color(red: 0.36, green: 1.0, blue: 0.42))
+
+            if let locationName, !locationName.isEmpty {
+                Text(locationName)
+                    .font(.system(size: 12, weight: .black, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.76))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: 118, alignment: .leading)
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 9)
@@ -2373,7 +3410,7 @@ private struct LiveMLDetectionOverlay: View {
     }
 }
 
-private struct FeedVolumeBars: View {
+private struct PoplurVolumeBars: View {
     let volumeLevel: Float
 
     private let barCount = 18

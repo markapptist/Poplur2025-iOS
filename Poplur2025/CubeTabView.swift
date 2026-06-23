@@ -261,7 +261,7 @@ struct CubeTabView: View {
     @Binding var previewHoldActive: Bool
     @Environment(\.renderingConfig) private var renderingConfig
     var tintColor: Color = .indigo
-    var baseColor: Color = Color(white: 0.2)
+    var baseColor: Color = Color(red: 0.04, green: 0.03, blue: 0.10)
     var glowColor: Color = .orange
     var glowOpacity: CGFloat = 0.8
     var useNormalMap: Bool = true
@@ -333,8 +333,7 @@ struct CubeTabView: View {
             enablePreviewSpin: enablePreviewSpin,
             enableGlow: enableGlow
         )
-        .frame(height: 200)
-        .aspectRatio(1, contentMode: .fit)
+        .frame(width: 200, height: 200)
         .background(.clear)
         .accessibilityHidden(true)
         .onAppear {
@@ -442,11 +441,14 @@ private struct CubeSceneView: UIViewRepresentable {
             guard let v = scnView else { return }
             v.scene = makeScene()
             v.preferredFramesPerSecond = 120
+            v.isPlaying = true
+            v.rendersContinuously = self.selectedTab == .record || self.selectedTab == .map
             // Removed: v.antialiasingMode = .multisampling4X
 
             if let cube = v.scene?.rootNode.childNode(withName: "cube", recursively: true), let box = cube.geometry as? SCNBox {
                 context.coordinator.cubeMaterials = box.materials
                 context.coordinator.applyCurrentProfileIconOverride()
+                context.coordinator.setInitialYaw(for: self.selectedTab)
             }
             // Defer normal map and glow attachment one more pass in previews
             if isRunningInPreviews {
@@ -530,21 +532,27 @@ private struct CubeSceneView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: SCNView, context: Context) {
+        let shouldKeepRendererHot = selectedTab == .record || selectedTab == .map
+        if uiView.rendersContinuously != shouldKeepRendererHot {
+            uiView.rendersContinuously = shouldKeepRendererHot
+        }
+        if !uiView.isPlaying {
+            uiView.isPlaying = true
+        }
+
         // Keep tab state in sync
         context.coordinator.syncToSelectedTab(selectedTab)
 
-        // Propagate live tint updates to materials so previews reflect changes immediately
+        if selectedTab == .record {
+            context.coordinator.resumeForCameraTab()
+        }
+
+        // Keep multiply white (neon style — emission carries all color)
         if let cube = uiView.scene?.rootNode.childNode(withName: "cube", recursively: true),
            let box = cube.geometry as? SCNBox {
-            let uiTint = UIColor(tintColor)
-            let tabFaces: [AppTab] = [
-                .map, .record, .feed, .profile, .map, .record
-            ]
             let mats = context.coordinator.cubeMaterials.isEmpty ? box.materials : context.coordinator.cubeMaterials
-            for (i, mat) in mats.enumerated() where i < tabFaces.count {
-                let tab = tabFaces[i]
-                mat.diffuse.contents = faceBackgroundOnly(for: tab, baseColor: baseColor)
-                mat.multiply.contents = uiTint
+            for mat in mats {
+                mat.multiply.contents = UIColor.white
                 if useNormalMap, let normal = UIImage(named: "CubeNormalMap") {
                     mat.normal.contents = normal
                     mat.normal.intensity = isRunningInPreviews ? 2.0 : 0.6
@@ -552,11 +560,9 @@ private struct CubeSceneView: UIViewRepresentable {
                     mat.normal.contents = nil
                 }
             }
-            // If we used cached materials, ensure the box still points to them (only once). Avoid resetting each frame.
             if context.coordinator.cubeMaterials.isEmpty == false {
                 box.materials = context.coordinator.cubeMaterials
             }
-            // Nudge SceneKit to redraw this frame
             uiView.sceneTime = uiView.sceneTime
         }
 
@@ -746,66 +752,39 @@ private struct CubeSceneView: UIViewRepresentable {
     private func uiColor(_ c: Color) -> UIColor { UIColor(c) }
 
     private func makeMaterials(baseColor: Color) -> [SCNMaterial] {
-        // Build exactly six faces in +X, -X, +Y, -Y, +Z, -Z order
-        // Repeat app tabs to fill all six faces so each side renders content
-        let tabFaces: [AppTab] = [
-            .map,     // +X
-            .record,  // -X
-            .feed,    // +Y
-            .profile, // -Y
-            .map,     // +Z
-            .record   // -Z
+        // Correct SCNBox face order for SceneKit:
+        // 0: +X (right)  — profile tab visible at yaw=-270°
+        // 1: -X (left)   — record tab  visible at yaw=-90°
+        // 2: +Y (top)    — decorative (fork+knife)
+        // 3: -Y (bottom) — decorative (Poplur P)
+        // 4: +Z (front)  — map tab     visible at yaw=0°
+        // 5: -Z (back)   — feed tab    visible at yaw=-180°
+        let faceSpecs: [(String, String)] = [
+            ("Profile",  "person.fill"),
+            ("Camera",   "camera.fill"),
+            ("",         "fork.knife"),
+            ("",         "p.circle.fill"),
+            ("Map",      "map.fill"),
+            ("Feed",     "tv.fill"),
         ]
 
-        return tabFaces.map { tab in
+        return faceSpecs.map { (title, icon) in
             let mat = SCNMaterial()
-            // Face content
-            let bgMask = faceBackgroundOnly(for: tab, baseColor: baseColor)
-            let emissionMask = faceEmissionMask(for: tab)
-            // Use white background mask in diffuse so geometry shows the shape
-            mat.diffuse.contents = bgMask
+            mat.diffuse.contents = faceBackgroundOnly(for: .feed, baseColor: baseColor)
             mat.diffuse.intensity = 1.0
-            // Apply live tint via multiply color
-            mat.multiply.contents = uiColor(tintColor)
-            mat.multiply.intensity = 0.75
-            // Removed preview override for multiply intensity:
-            /*
-            if isRunningInPreviews {
-                mat.multiply.intensity = 0.9
-            }
-            */
-            // Boost emission for better icon readability
-            mat.emission.intensity = 0.5
-            if isRunningInPreviews {
-                mat.emission.intensity = 0.4
-            }
-            mat.emission.contents = emissionMask
-            // Normal map if available - only if NOT in previews
+            mat.multiply.contents = UIColor.white
+            mat.multiply.intensity = 1.0
+            mat.emission.intensity = 0.88
+            mat.emission.contents = faceEmissionMask(title: title, systemImage: icon)
             if useNormalMap && !isRunningInPreviews, let normal = UIImage(named: "CubeNormalMap") {
                 mat.normal.contents = normal
                 mat.normal.intensity = 0.6
-            } else if !useNormalMap {
-                mat.normal.contents = nil
             }
-            // Apply chosen lighting model
             mat.lightingModel = lightingModel
-
-            if lightingModel != .constant {
-                mat.metalness.contents = 0.15
-                mat.roughness.contents = 0.8
-                // Removed mat.fresnelExponent = 0.7 completely
-                if useNormalMap {
-                    mat.normal.intensity = 1.3
-                }
-                mat.selfIllumination.contents = UIColor.black
-            } else {
-                mat.metalness.contents = 0.0
-                mat.roughness.contents = 1.0
-            }
-
+            mat.metalness.contents = 0.0
+            mat.roughness.contents = 1.0
             mat.isDoubleSided = false
             mat.locksAmbientWithDiffuse = false
-
             return mat
         }
     }
@@ -866,74 +845,99 @@ private struct CubeSceneView: UIViewRepresentable {
     }
 
     private func faceEmissionMask(for tab: AppTab) -> UIImage {
-        faceEmissionMask(title: tab.title, systemImage: tab.systemImage)
+        switch tab {
+        case .feed:    return faceEmissionMask(title: "Feed",     systemImage: "tv.fill")
+        case .map:     return faceEmissionMask(title: "Map",      systemImage: "map.fill")
+        case .record:  return faceEmissionMask(title: "Camera",   systemImage: "camera.fill")
+        case .profile: return faceEmissionMask(title: "Profile",  systemImage: "person.fill")
+        case .settings:return faceEmissionMask(title: "Settings", systemImage: "gearshape.fill")
+        }
     }
 
     private func faceEmissionMask(title: String, systemImage: String) -> UIImage {
-        let key = "face_emission_v2_\(title)_\(systemImage)"
+        let key = "face_emission_neon_\(title)_\(systemImage)"
         return CubeFaceImageCache.image(for: key) {
             let size = CGSize(width: 300, height: 300)
             let renderer = UIGraphicsImageRenderer(size: size)
             return renderer.image { ctx in
-                // Transparent background
                 UIColor.clear.setFill()
                 ctx.fill(CGRect(origin: .zero, size: size))
 
-                // Icon (white)
-                let symbolName = systemImage
+                // Purple neon border glow — drawn from outer edge inward
+                let borderRect = CGRect(origin: .zero, size: size)
+                let purple = UIColor(red: 0.55, green: 0.30, blue: 1.0, alpha: 1.0)
+                for i in 1...18 {
+                    let lineWidth = CGFloat(19 - i) * 1.3
+                    let alpha = CGFloat(i) / 18.0 * 0.62
+                    purple.withAlphaComponent(alpha).setStroke()
+                    let inset = lineWidth / 2.0 + 2.0
+                    let path = UIBezierPath(
+                        roundedRect: borderRect.insetBy(dx: inset, dy: inset),
+                        cornerRadius: max(4.0, 22.0 - lineWidth * 0.4)
+                    )
+                    path.lineWidth = lineWidth
+                    path.stroke()
+                }
+                // Crisp bright inner border line
+                UIColor(red: 0.76, green: 0.55, blue: 1.0, alpha: 0.92).setStroke()
+                let crispPath = UIBezierPath(roundedRect: borderRect.insetBy(dx: 5, dy: 5), cornerRadius: 20)
+                crispPath.lineWidth = 2.5
+                crispPath.stroke()
+
+                // Icon
                 let isPhoneIcon = title == "Phone" || systemImage.contains("phone")
                 let pointSize: CGFloat = isPhoneIcon ? 118 : 80
                 let iconWidth: CGFloat = isPhoneIcon ? 132 : 90
                 let iconHeight: CGFloat = isPhoneIcon ? 132 : 90
-                let iconY: CGFloat = isPhoneIcon ? 48 : 70
+                let iconY: CGFloat = isPhoneIcon ? 48 : 68
                 let config = UIImage.SymbolConfiguration(pointSize: pointSize, weight: .bold)
                 let imgRect = CGRect(x: (size.width - iconWidth) / 2, y: iconY, width: iconWidth, height: iconHeight)
 
-                // Stronger glow for emission
-                let glowConfig = UIImage.SymbolConfiguration(pointSize: pointSize + (isPhoneIcon ? 18 : 10), weight: .bold)
-                let glowImage = UIImage(systemName: symbolName, withConfiguration: glowConfig) ?? UIImage()
-                let glowRect = imgRect.insetBy(dx: isPhoneIcon ? -10 : -6, dy: isPhoneIcon ? -10 : -6)
-                glowImage.withTintColor(.white, renderingMode: .alwaysOriginal).draw(in: glowRect, blendMode: .normal, alpha: 0.55)
+                // Multi-pass glow behind icon (white, decreasing size/alpha outward→in)
+                for i in stride(from: 5, through: 1, by: -1) {
+                    let glowSize = pointSize + CGFloat(i) * 7
+                    let glowConfig = UIImage.SymbolConfiguration(pointSize: glowSize, weight: .bold)
+                    let glowImg = UIImage(systemName: systemImage, withConfiguration: glowConfig) ?? UIImage()
+                    let expand = CGFloat(i) * 3.5
+                    glowImg.withTintColor(.white, renderingMode: .alwaysOriginal)
+                        .draw(in: imgRect.insetBy(dx: -expand, dy: -expand), blendMode: .normal, alpha: 0.07 * CGFloat(6 - i))
+                }
 
-                let image = UIImage(systemName: symbolName, withConfiguration: config) ?? UIImage()
+                let image = UIImage(systemName: systemImage, withConfiguration: config) ?? UIImage()
                 image.withTintColor(.white, renderingMode: .alwaysOriginal).draw(in: imgRect)
 
-                // Title (white)
+                guard !title.isEmpty else { return }
+
+                // Label text (white, double-drawn for neon thickness)
                 let paragraph = NSMutableParagraphStyle()
                 paragraph.alignment = .center
-                let title = title as NSString
+                let titleNS = title as NSString
                 let titleRect = CGRect(x: 0, y: 180, width: size.width, height: 40)
-                // Bold pass to thicken emission mask
-                let boldAttrs: [NSAttributedString.Key: Any] = [
+                let glowAttrs: [NSAttributedString.Key: Any] = [
+                    .font: UIFont.systemFont(ofSize: 27, weight: .black),
+                    .foregroundColor: UIColor.white.withAlphaComponent(0.38),
+                    .paragraphStyle: paragraph
+                ]
+                titleNS.draw(in: titleRect.insetBy(dx: -1, dy: -1), withAttributes: glowAttrs)
+                let mainAttrs: [NSAttributedString.Key: Any] = [
                     .font: UIFont.systemFont(ofSize: 26, weight: .black),
                     .foregroundColor: UIColor.white,
                     .paragraphStyle: paragraph
                 ]
-                title.draw(in: titleRect, withAttributes: boldAttrs)
-                // Regular pass for crisp edges
-                let regularAttrs: [NSAttributedString.Key: Any] = [
-                    .font: UIFont.systemFont(ofSize: 24, weight: .heavy),
-                    .foregroundColor: UIColor.white,
-                    .paragraphStyle: paragraph
-                ]
-                title.draw(in: titleRect, withAttributes: regularAttrs)
+                titleNS.draw(in: titleRect, withAttributes: mainAttrs)
             }
         }
     }
 
     private func faceBackgroundOnly(for tab: AppTab, baseColor: Color) -> UIImage {
-        // Include baseColor components in cache key so live changes are reflected
-        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
-        UIColor(baseColor).getRed(&r, green: &g, blue: &b, alpha: &a)
-        let key = String(format: "face_bg_only_%@_r%.3f_g%.3f_b%.3f_a%.3f", tab.title, r, g, b, a)
+        // Neon style: near-black for all faces; baseColor ignored for visual consistency
+        let key = "face_bg_neon_v2"
         return CubeFaceImageCache.image(for: key) {
             let size = CGSize(width: 300, height: 300)
             let renderer = UIGraphicsImageRenderer(size: size)
-            return renderer.image { ctx in
-                // White background shape (to be tinted via material multiply)
-                UIColor(baseColor).setFill()
-                let rect = CGRect(origin: .zero, size: size)
-                UIBezierPath(roundedRect: rect.insetBy(dx: 8, dy: 8), cornerRadius: 24).fill()
+            return renderer.image { _ in
+                UIColor(red: 0.04, green: 0.03, blue: 0.10, alpha: 1.0).setFill()
+                UIBezierPath(roundedRect: CGRect(origin: .zero, size: size).insetBy(dx: 8, dy: 8), cornerRadius: 24).fill()
             }
         }
     }
@@ -1008,6 +1012,8 @@ private struct CubeSceneView: UIViewRepresentable {
         private var holdObservers: [NSObjectProtocol] = []
         private var profileIconOverrideObserver: NSObjectProtocol?
         private var profileIconOverride: (title: String, systemImage: String)?
+        private var tvGuideObservers: [NSObjectProtocol] = []
+        private var isTVGuideOpen: Bool = false
         private var isBlinking: Bool = false
         var cubeMaterials: [SCNMaterial] = []
 
@@ -1024,6 +1030,7 @@ private struct CubeSceneView: UIViewRepresentable {
 
         // New stored property for preview sim observer
         private var previewSimObserver: NSObjectProtocol?
+        private var resignActiveToken: NSObjectProtocol?
 
         // New stored property for continuous yaw state (radians)
         private var currentYaw: Float = -Float.pi
@@ -1053,29 +1060,8 @@ private struct CubeSceneView: UIViewRepresentable {
 
         private var rotationSpeedMultiplier: Double { parent.rotationSpeedMultiplier }
 
-        // Loaded lazily on first pop to avoid synchronous disk I/O + audio decode at Coordinator.init time.
-        private lazy var popAudioSource: SCNAudioSource? = {
-            let candidates: [(name: String, ext: String?)] = [
-                ("pop", "mp3"),
-                ("pop", "caf"),
-                ("pop", "wav")
-            ]
-            for cand in candidates {
-                if let url = Bundle.main.url(forResource: cand.name, withExtension: cand.ext) {
-                    if let src = SCNAudioSource(url: url) {
-                        src.volume = 0.9
-                        src.isPositional = false
-                        src.shouldStream = false
-                        src.loops = false
-                        src.load()
-                        return src
-                    }
-                }
-            }
-            return nil
-        }()
-
-        #if DEBUG
+        // Safe AVAudioPlayer — used in place of SCNAction.playAudio/SCNAudioPlayer which
+        // crash when AVAudioEngine is interrupted (app background) or scene tears down (tab switch).
         private lazy var popAVPlayer: AVAudioPlayer? = {
             let candidates: [(name: String, ext: String?)] = [
                 ("pop", "mp3"),
@@ -1094,7 +1080,6 @@ private struct CubeSceneView: UIViewRepresentable {
             }
             return nil
         }()
-        #endif
 
         init(_ parent: CubeSceneView) {
             self.parent = parent
@@ -1144,6 +1129,29 @@ private struct CubeSceneView: UIViewRepresentable {
                 }
                 self.applyCurrentProfileIconOverride()
             }
+
+            // TV Guide open/close → swap feed face icon (material[5] = -Z back = feed at yaw=-180°)
+            let tvOpenToken = NotificationCenter.default.addObserver(forName: .FeedTVGuideBecameVisible, object: nil, queue: .main) { [weak self] _ in
+                guard let self else { return }
+                self.isTVGuideOpen = true
+                self.applyFeedFaceIcon()
+            }
+            let tvHideToken = NotificationCenter.default.addObserver(forName: .FeedTVGuideBecameHidden, object: nil, queue: .main) { [weak self] _ in
+                guard let self else { return }
+                self.isTVGuideOpen = false
+                self.applyFeedFaceIcon()
+            }
+            tvGuideObservers = [tvOpenToken, tvHideToken]
+            resignActiveToken = NotificationCenter.default.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
+                self?.endBlink()
+                self?.stopFlashing()
+            }
+            NotificationCenter.default.addObserver(forName: Notification.Name("RecordingStarted"), object: nil, queue: .main) { [weak self] _ in
+                self?.view?.rendersContinuously = false
+            }
+            NotificationCenter.default.addObserver(forName: Notification.Name("RecordingStopped"), object: nil, queue: .main) { [weak self] _ in
+                self?.view?.rendersContinuously = true
+            }
         }
 
         deinit {
@@ -1155,19 +1163,44 @@ private struct CubeSceneView: UIViewRepresentable {
                 NotificationCenter.default.removeObserver(token)
                 profileIconOverrideObserver = nil
             }
+            if let token = resignActiveToken {
+                NotificationCenter.default.removeObserver(token)
+                resignActiveToken = nil
+            }
+            tvGuideObservers.forEach { NotificationCenter.default.removeObserver($0) }
+            tvGuideObservers = []
             stopObservingMotion()
             stopObservingHold()
             stopAccelerometerSimulation()
         }
 
         func applyCurrentProfileIconOverride() {
-            let profileMaterialIndex = 3
+            // Profile face is material index 0 (+X right face, visible at yaw=-270°)
+            let profileMaterialIndex = 0
             guard cubeMaterials.indices.contains(profileMaterialIndex) else { return }
-            let descriptor = profileIconOverride ?? (title: AppTab.profile.title, systemImage: AppTab.profile.systemImage)
+            let title = profileIconOverride?.title ?? "Profile"
+            let icon  = profileIconOverride?.systemImage ?? "person.fill"
             cubeMaterials[profileMaterialIndex].emission.contents = parent.faceEmissionMask(
-                title: descriptor.title,
-                systemImage: descriptor.systemImage
+                title: title,
+                systemImage: icon
             )
+        }
+
+        func applyFeedFaceIcon() {
+            // Feed face is material index 5 (-Z back face, visible at yaw=-180°)
+            let feedMaterialIndex = 5
+            guard cubeMaterials.indices.contains(feedMaterialIndex) else { return }
+            if isTVGuideOpen {
+                cubeMaterials[feedMaterialIndex].emission.contents = parent.faceEmissionMask(
+                    title: "TV Guide",
+                    systemImage: "list.and.film"
+                )
+            } else {
+                cubeMaterials[feedMaterialIndex].emission.contents = parent.faceEmissionMask(
+                    title: "Feed",
+                    systemImage: "tv.fill"
+                )
+            }
         }
 
         func setInitialYaw(for tab: AppTab) {
@@ -1326,6 +1359,23 @@ private struct CubeSceneView: UIViewRepresentable {
             }
         }
 
+        func resumeForCameraTab() {
+            guard let scnView = view,
+                  let cube = scnView.scene?.rootNode.childNode(withName: "cube", recursively: true) else { return }
+            scnView.isPlaying = true
+            scnView.rendersContinuously = true
+            if !isBlinking {
+                cube.removeAction(forKey: "recordBlink")
+                cube.scale = SCNVector3(1.0, 1.0, 1.0)
+            }
+            // Skip eulerAngles snap while a pan/bounce animation is in progress —
+            // otherwise directly setting eulerAngles cancels the SCNAction and the
+            // cube freezes instead of animating into the camera face.
+            if !isInteracting {
+                applyCombinedRotation(to: cube)
+            }
+        }
+
         private func animateToYaw(_ yaw: Float, bouncy: Bool = false) {
             guard let scnView = view, let cube = scnView.scene?.rootNode.childNode(withName: "cube", recursively: true) else { return }
 
@@ -1430,12 +1480,11 @@ private struct CubeSceneView: UIViewRepresentable {
             down.timingMode = .easeInEaseOut
             let rest = SCNAction.wait(duration: 0.35)
 
-            // Pop sound exactly at peak — skip on record tab because SCNAction.playAudio
-            // uses AVAudioEngine internally; calling setActive() while AVCaptureSession
-            // holds the audio session interrupts the camera and crashes the preview.
-            var peakSound: SCNAction = .wait(duration: 0)
-            if let src = popAudioSource, parent.selectedTab != .record {
-                peakSound = SCNAction.playAudio(src, waitForCompletion: false)
+            // Pop sound at peak — use AVAudioPlayer via SCNAction.run to avoid the
+            // SCNAction.playAudio crash when AVAudioEngine is interrupted (background or tab switch).
+            let peakSound: SCNAction = SCNAction.run { [weak self] _ in
+                guard let self, self.parent.selectedTab != .record else { return }
+                DispatchQueue.main.async { self.playPopSafely() }
             }
 
             let peakGroup = SCNAction.group([peakHold, peakSound])
@@ -1450,7 +1499,14 @@ private struct CubeSceneView: UIViewRepresentable {
             cube.removeAction(forKey: "recordBlink")
             cube.scale = SCNVector3(1.0, 1.0, 1.0)
         }
-        
+
+        private func playPopSafely() {
+            guard let player = popAVPlayer else { return }
+            if player.isPlaying { player.stop() }
+            player.currentTime = 0
+            player.play()
+        }
+
         // MARK: - Flash/Torch Illumination
         
         /// Start illuminating cube when flashlight is ON - makes icons glow from within
@@ -1550,48 +1606,8 @@ private struct CubeSceneView: UIViewRepresentable {
             cube.runAction(SCNAction.sequence([up, down]), forKey: "previewPop")
             
             if shouldPlaySound {
-                print("[CubeTabView] Pop sound requested")
-                guard let src = popAudioSource else { print("[CubeTabView] No audio source available"); return }
-                #if DEBUG
-                if !isRunningInPreviews {
-                    do {
-                        try AVAudioSession.sharedInstance().setCategory(.ambient, options: [.mixWithOthers])
-                        try AVAudioSession.sharedInstance().setActive(true)
-                        print("[CubeTabView] AVAudioSession ensured active for pop")
-                    } catch {
-                        print("[CubeTabView] AVAudioSession ensure active failed: \(error)")
-                    }
-                } else {
-                    print("[CubeTabView] Skipping AVAudioSession ensure active for pop in previews")
-                }
-                #endif
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                    if cube.parent == nil { print("[CubeTabView] Cube node missing parent; skipping audio"); return }
-                    let player = SCNAudioPlayer(source: src)
-                    cube.addAudioPlayer(player)
-                    print("[CubeTabView] Added SCNAudioPlayer to cube")
-                    // Fallback: also run a playAudio action in case player is ignored in previews
-                    let playAction = SCNAction.playAudio(src, waitForCompletion: false)
-                    cube.runAction(playAction)
-                    print("[CubeTabView] Triggered playAudio action fallback")
-                    
-                    #if DEBUG
-                    if let player = self.popAVPlayer {
-                        player.currentTime = 0
-                        if !player.isPlaying {
-                            player.play()
-                            print("[CubeTabView] AVAudioPlayer played pop")
-                        } else {
-                            // Restart to ensure audible response
-                            player.stop()
-                            player.currentTime = 0
-                            player.play()
-                            print("[CubeTabView] AVAudioPlayer restarted pop")
-                        }
-                    } else {
-                        print("[CubeTabView] AVAudioPlayer fallback not available")
-                    }
-                    #endif
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+                    self?.playPopSafely()
                 }
             }
         }

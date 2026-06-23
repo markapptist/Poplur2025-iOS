@@ -11,12 +11,15 @@ import FirebaseFirestore
 
 struct AppSettingsView: View {
     @Environment(\.layoutPreviewMode) private var layoutPreviewMode
+    @ObservedObject private var settings = SettingsStore.shared
 
     @State private var pageIndex: Int = 0
     @State private var isPrivateAccount = false
     @State private var notificationsEnabled = true
     @AppStorage("poplur_use2DMap") private var use2DMap: Bool = false
     @AppStorage("poplur_phoneXLMode") private var phoneXLMode: Bool = true
+    @AppStorage("poplur_tvGuideFlipAnimation") private var tvGuideFlipAnimation: Bool = true
+    @AppStorage("poplur_feedChannelButtonsSpriteKit2D") private var feedChannelButtonsSpriteKit2D: Bool = false
 
     @State private var posts: [Post] = []
     @State private var isLoadingStats = true
@@ -56,18 +59,26 @@ struct AppSettingsView: View {
             VStack(spacing: 0) {
                 // Start content at the very top – no top Spacer
                 ScrollViewReader { proxy in
-                    TicketCard(
-                        pageIndex: $pageIndex,
-                        isPrivateAccount: $isPrivateAccount,
-                        notificationsEnabled: $notificationsEnabled,
-                        isLoadingStats: $isLoadingStats,
-                        statsHeaderTitle: "Statistics",
-                        settingsHeaderTitle: "Settings",
-                        statsPage: { statsPage.id("top") },
-                        settingsPage: { settingsPage.id("top") },
-                        brandPink: brandPink
-                    )
+                    VStack(spacing: 0) {
+                        Text("Settings")
+                            .font(.system(size: 28, weight: .black, design: .rounded))
+                            .foregroundColor(.black)
+                            .padding(.top, 22)
+                            .padding(.bottom, 4)
+
+                        settingsPage.id("top")
+                    }
                     .frame(width: ticketWidth, height: ticketHeight)
+                    .background(
+                        RoundedRectangle(cornerRadius: 28, style: .continuous)
+                            .fill(Color.white.opacity(0.18))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 28, style: .continuous)
+                            .stroke(Color.black.opacity(0.08), lineWidth: 1)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+                    .shadow(color: .black.opacity(0.08), radius: 18, x: 0, y: 12)
                     .onReceive(NotificationCenter.default.publisher(for: .ResetTabToTop)) { _ in
                         withAnimation(.easeInOut(duration: 0.25)) {
                             proxy.scrollTo("top", anchor: .top)
@@ -77,20 +88,10 @@ struct AppSettingsView: View {
             }
         }
         .task {
-            if layoutPreviewMode {
-                applyPreviewStats()
-            } else {
-                await loadStats()
-            }
-            maxDurationDisplay = SettingsStore.shared.maxVideoDurationSeconds
+            maxDurationDisplay = settings.maxVideoDurationSeconds
         }
         .onAppear {
-            if layoutPreviewMode {
-                applyPreviewStats()
-            } else {
-                Task { await loadStats() }
-            }
-            maxDurationDisplay = SettingsStore.shared.maxVideoDurationSeconds
+            maxDurationDisplay = settings.maxVideoDurationSeconds
         }
     }
 
@@ -193,23 +194,112 @@ struct AppSettingsView: View {
                     settingsToggleRow(title: "Private Account", isOn: $isPrivateAccount)
                     settingsToggleRow(title: "Notifications", isOn: $notificationsEnabled)
                     settingsToggleRow(title: "2D Map", isOn: $use2DMap)
+                    settingsToggleRow(title: "2D Feed Buttons", isOn: $feedChannelButtonsSpriteKit2D)
                     settingsToggleRow(title: "XL Phone", isOn: $phoneXLMode)
                     settingsToggleRow(
                         title: "HUD Sleep Timer",
                         isOn: Binding(
-                            get: { SettingsStore.shared.hudSleepTimerEnabled },
-                            set: { SettingsStore.shared.hudSleepTimerEnabled = $0 }
+                            get: { settings.hudSleepTimerEnabled },
+                            set: { settings.hudSleepTimerEnabled = $0 }
                         )
                     )
+                    settingsToggleRow(
+                        title: "Closed Captions",
+                        isOn: Binding(
+                            get: { settings.closedCaptionsEnabled },
+                            set: { settings.closedCaptionsEnabled = $0 }
+                        )
+                    )
+                    settingsToggleRow(title: "TV Guide Flip Animation", isOn: $tvGuideFlipAnimation)
                     settingsNavRow(title: "Email Address") { /* push email editor */ }
                     settingsNavRow(title: "Password") { /* push password editor */ }
                 }
                 .frame(maxWidth: .infinity)
 
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Preferred Language")
+                        .font(.system(size: 18, weight: .heavy, design: .rounded))
+                        .foregroundColor(.black)
+
+                    Picker(
+                        "Preferred Language",
+                        selection: Binding(
+                            get: { settings.preferredLanguage },
+                            set: { settings.preferredLanguage = $0 }
+                        )
+                    ) {
+                        ForEach(PoplurLanguage.allCases) { language in
+                            Text("\(language.flag) \(language.shortName)").tag(language)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Appearance")
+                        .font(.system(size: 18, weight: .heavy, design: .rounded))
+                        .foregroundColor(.black)
+
+                    Picker(
+                        "Appearance",
+                        selection: Binding(
+                            get: { settings.colorSchemePreference },
+                            set: { settings.colorSchemePreference = $0 }
+                        )
+                    ) {
+                        ForEach(ColorSchemePreference.allCases) { pref in
+                            Text(pref.label).tag(pref)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Hold Menu")
+                        .font(.system(size: 18, weight: .heavy, design: .rounded))
+                        .foregroundColor(.black)
+
+                    Picker(
+                        "Hold Menu",
+                        selection: Binding(
+                            get: { settings.holdMenuLayoutPreference },
+                            set: { settings.holdMenuLayoutPreference = $0 }
+                        )
+                    ) {
+                        ForEach(HoldMenuLayoutPreference.allCases) { pref in
+                            Text(pref.label).tag(pref)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Transitions")
+                        .font(.system(size: 18, weight: .heavy, design: .rounded))
+                        .foregroundColor(.black)
+
+                    Picker(
+                        "Transitions",
+                        selection: Binding(
+                            get: { settings.transitionStylePreference },
+                            set: { settings.transitionStylePreference = $0 }
+                        )
+                    ) {
+                        ForEach(TransitionStylePreference.allCases) { pref in
+                            Text(pref.label).tag(pref)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
                 // Video duration quick action
                 VStack(alignment: .center, spacing: 8) {
                     Button {
-                        SettingsStore.shared.maxVideoDurationSeconds = 10.0
+                        settings.maxVideoDurationSeconds = 10.0
                         maxDurationDisplay = 10.0
                     } label: {
                         Text("Limit videos to 10 seconds")

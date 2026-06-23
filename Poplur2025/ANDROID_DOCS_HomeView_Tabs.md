@@ -91,6 +91,17 @@ When user long-presses on the map:
 - Lazy loads: Map is not initialized until first access
 - Audio handling: Pauses all feed audio when entering map
 
+#### Map Launch Audio Contract
+- The first Map launch has no visible AI voice/radio button. Narration is automatic only.
+- Android should request natural speech audio from the same TTS backend/OpenAI speech endpoint used by iOS, with a warm human British presenter style. Keep Android `TextToSpeech(Locale.UK)` only as an offline fallback.
+- Use a single audio coordinator with three channels: voice, weather ambience, and music. Do not let independent composables/services call `setVolume` or replace players during launch.
+- Launch order: reveal/zoom map, fetch weather, fade weather ambience from 0 to its target, duck weather under the voice, play the Poplur voice once, then unduck weather and fade music from 0 to full.
+- Resolve/cache the music source while the voice is playing. Do not start fallback music and then swap to another track; that creates the audible pop/restart.
+- Treat music `preparing` and `buffering` as active so location updates cannot restart the same city soundtrack.
+- Do not loop short preview tracks forever. Play the queue once or advance to the next unique source; stop cleanly at the end.
+- Release any launch-cover/cube pop sound loops on screen disposal so a pop SFX cannot bleed into the Map launch.
+- Recommended Android stack: Media3/ExoPlayer players per channel, one mixer/coordinator state machine (`preparing -> speaking -> crossfadingToMusic -> playing`), and 300-1800 ms volume ramps for ducking/crossfades.
+
 ---
 
 ### 2. RECORD/CAMERA TAB
@@ -245,6 +256,16 @@ Each post displays:
 - **Channel changes**: Trigger from the channel selector/cube action, not from the populated vertical post swipe
 - Each combination (country × channel) has its own feed
 
+#### Default TV Static Tune Transition
+- Use this as the default Feed transition for post advances, country changes, and channel/TV Guide tuning.
+- Render it as a full-screen top layer above Feed and above the TV Guide during row selection.
+- Visual: generated black-and-white TV snow/static at 24-30 fps, horizontal scan lines, and a few short glitch bands. Do not use color bars for this transition.
+- Audio: play a generated white-noise static burst for about 0.6 seconds. Mix it with existing app audio; do not pause or rebuild the active Feed player just for the transition.
+- Center the Poplur logo on the static.
+- Under the logo, show the destination channel as `CH ###` and the destination category in uppercase using the same green TV font/color as the Feed header (`#4DFF40` / rounded bold TV label).
+- Trigger the transition with the target channel metadata before mutating/reloading Feed state. For post and country changes, use the current channel; for channel changes and TV Guide row selection, use the destination channel.
+- Timing should match iOS: show instantly, hold roughly 340 ms, then fade out over roughly 220 ms.
+
 #### Timeline View (Instagram-style)
 - Toggle between single-post and grid timeline view
 - Shows all posts in chronological order
@@ -274,6 +295,12 @@ Display user's posts in a grid layout with statistics and profile information.
   - Average radius stat
   - Post count
   - Edit button (own profile only)
+- **Stats trophy room**:
+  - The Profile Stats route includes a gamified Trophy Room area.
+  - Render it as a real 3D showcase, not a flat image: room/floor/wall, shelves, lights, trophy meshes, and camera orbit/pan.
+  - Show all trophies in the room. Unlocked trophies use bright metallic materials; locked trophies stay matte gray.
+  - Current unlock inputs: post count, accumulated radius, max single-post radius, total views, unique posting areas, and dominated zones.
+  - Keep trophy IDs stable so Android can later sync server-persisted achievements with iOS.
 - **Cube submenu**:
   - Remove the old fixed top action icons from the profile screen
   - Push the profile header upward to use the reclaimed vertical space
@@ -345,6 +372,7 @@ When navigating from Feed by tapping username:
 - Firebase Storage for media files
 - Lazy image loading with caching
 - Pagination with QueryDocumentSnapshot cursors
+- Stats Trophy Room: use Filament, SceneView, or OpenGL/Compose 3D primitives. Avoid stretching a bitmap trophy room. Locked trophies must be rendered from the same mesh with gray material.
 
 ---
 
@@ -510,8 +538,31 @@ The app uses notifications to coordinate audio playback:
 
 ## Gesture Conflict Resolution
 
+### Cube Position
+The cube is pinned to the **bottom center** of the screen at all times, on every tab and every child route.
+
+```kotlin
+// Compose layout — cube always at bottom
+Box(Modifier.fillMaxSize()) {
+    // Tab content fills the full screen behind the cube
+    tabContent()
+
+    // Cube pinned to bottom, 24dp above nav bar / home indicator
+    CubeNavView(
+        modifier = Modifier
+            .align(Alignment.BottomCenter)
+            .padding(bottom = 24.dp)
+            .height(230.dp)
+    )
+}
+```
+
+- `Alignment.BottomCenter` — horizontally centered, at the screen bottom
+- `padding(bottom = 24.dp)` — clears the home indicator / navigation bar
+- The cube height is always **230dp** regardless of tab or child route
+
 ### Cube Gestures vs Tab Content
-The cube area (bottom 230pt) has gesture priority:
+The cube area (bottom 230dp) has gesture priority:
 - Swipe gestures on cube rotate tabs
 - Content gestures (scroll, zoom) work above cube
 - Long-press on cube triggers recording
@@ -597,19 +648,119 @@ Camera gestures work anywhere on screen:
 - WorkManager for background uploads
 
 ### Android Feed Parity Requirements
-- Implement the Feed launch overlay as a top-level Compose layer:
-  - `Box(Modifier.fillMaxSize().background(Color.White))`
-  - Center the Poplur logo.
-  - Animate logo alpha/scale subtly while loading.
-  - Fade the layer out after first image draw or first video frame render.
-- Use `AnimatedVisibility`, `Crossfade`, or `animateFloatAsState` for opacity only. Feed controls must be measured and laid out at their final coordinates from the first frame.
-- For videos, prefer Media3 `Player.Listener` plus a `PlayerView`/surface callback:
-  - Start playback muted/unmuted according to app policy.
-  - Treat `onRenderedFirstFrame` as the signal to hide the launch overlay.
-  - Do not show a play icon over auto-playing Feed videos.
-  - On `Lifecycle.Event.ON_STOP`, pause/release active Feed players.
-  - On `Lifecycle.Event.ON_START`, recreate the active player and call `prepare()`/`play()` so videos load after returning to the app.
-- For images, hide the launch overlay only from the image loader success path after the composable is ready to draw.
+
+#### Loading Overlay Dismissal — CRITICAL
+
+**The overlay must always dismiss.** The most common cause of a stuck screen is a deadlock — see anti-patterns below before implementing.
+
+##### THE DEADLOCK (most common bug)
+
+```
+// ❌ WRONG — classic deadlock
+if (showOverlay) {
+    LoadingOverlay()        // overlay shows, waiting for a frame...
+} else {
+    FeedContent()           // ...but feed never starts because overlay is showing
+}
+```
+
+The overlay waits for `onRenderedFirstFrame` / image `onSuccess`. If the feed content is not rendered and the player not started while the overlay is visible, those callbacks never fire. The overlay never dismisses. **Always render the feed behind the overlay, never after.**
+
+##### Correct implementation
+
+```kotlin
+class FeedViewModel : ViewModel() {
+    private val _showLaunchOverlay = MutableStateFlow(true)
+    val showLaunchOverlay: StateFlow<Boolean> = _showLaunchOverlay
+
+    // Minimum display time so the loading animation is actually seen (matches iOS 1.5 s).
+    private val overlayShownAt = System.currentTimeMillis()
+
+    init {
+        // Safety-net: force-dismiss after 3 s regardless of media state.
+        // If this is your only dismissal path, you have a bug — fix paths 1 & 2 below.
+        viewModelScope.launch {
+            delay(3_000)
+            dismissOverlay()
+        }
+    }
+
+    fun onFirstMediaReady() {
+        // Enforce minimum 1.5 s display time so the animation is visible.
+        val elapsed = System.currentTimeMillis() - overlayShownAt
+        val remaining = maxOf(0L, 1_500L - elapsed)
+        if (remaining > 0) {
+            viewModelScope.launch {
+                delay(remaining)
+                dismissOverlay()
+            }
+        } else {
+            dismissOverlay()
+        }
+    }
+
+    private fun dismissOverlay() {
+        _showLaunchOverlay.value = false
+    }
+}
+
+// Composable — overlay is always on top; feed always renders underneath
+@Composable
+fun FeedScreen(viewModel: FeedViewModel = hiltViewModel()) {
+    val showOverlay by viewModel.showLaunchOverlay.collectAsState()
+
+    Box(Modifier.fillMaxSize()) {
+        // ✅ Feed content renders immediately, ALWAYS — never conditional on showOverlay
+        FeedContent(
+            onFirstVideoFrame = { viewModel.onFirstMediaReady() },
+            onFirstImageLoaded = { viewModel.onFirstMediaReady() }
+        )
+
+        // Overlay sits on top and fades away — feed is already playing underneath
+        AnimatedVisibility(
+            visible = showOverlay,
+            exit = fadeOut(animationSpec = tween(450))
+        ) {
+            Box(
+                Modifier.fillMaxSize().background(Color.White),
+                contentAlignment = Alignment.Center
+            ) {
+                PoplurLogoAnimation()
+            }
+        }
+    }
+}
+```
+
+##### Dismissal paths — implement all three
+
+1. **Video first item** — wire `Player.Listener.onRenderedFirstFrame()` → `viewModel.onFirstMediaReady()`. Do NOT use `STATE_READY` — player ready ≠ frame on screen.
+2. **Image first item** — wire Coil `AsyncImage` `onSuccess` or Glide `into(object : CustomTarget)` success → `viewModel.onFirstMediaReady()`. The image-type post never triggers an ExoPlayer callback.
+3. **Safety timeout** — `delay(3_000)` in `init` (above). This is the last resort; if it's the only path firing, debug paths 1 and 2.
+
+##### Common mistakes that cause permanent stuck state
+
+| Mistake | Why it sticks |
+|---|---|
+| `if (showOverlay) Overlay() else FeedContent()` | Feed never renders → no callbacks → deadlock |
+| Player started inside `LaunchedEffect(!showOverlay)` | Player waits for overlay to dismiss first → deadlock |
+| Only wiring `onRenderedFirstFrame`, no image path | Image-first posts never fire the callback |
+| No safety timeout | Any failure leaves the screen stuck forever |
+| `viewModel` scoped to the composable (not NavGraph/Activity) | ViewModel recreated on recompose, `_showLaunchOverlay` resets to `true` |
+| Safety timeout in `lifecycleScope` | Cancelled if app backgrounds before 3 s, never fires on return |
+
+**Without all three paths, the overlay will get stuck** if:
+- The first post is an image (ExoPlayer `onRenderedFirstFrame` never fires for images)
+- Media fails to load (network error — neither callback fires)
+- Feed returns zero items (no media to signal ready at all)
+
+Additional rules:
+- Use `AnimatedVisibility` with `fadeOut` only — no slide or scale exit
+- Feed controls must be laid out at their final positions from the first frame; only their opacity changes
+- Do not show the custom volume bars while `showLaunchOverlay == true`
+- On `Lifecycle.Event.ON_STOP`, pause/release active Feed players
+- On `Lifecycle.Event.ON_START`, recreate the active player and call `prepare()`/`play()` so videos load after returning to the app
+- Do not show a play icon over auto-playing Feed videos
 - Feed pagination should request or synthesize a balanced mix:
   - `index % 5 == 0`: image
   - `index % 5 == 1`: video

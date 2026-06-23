@@ -1,0 +1,4 @@
+module GoogleMaps3DTarget {
+header "GoogleMaps3DTarget-Swift.h"
+export *
+}

@@ -32,6 +32,15 @@ struct RecordingCountdownView: View {
     private var shouldShowPostCount: Bool {
         !isRecording && [AppTab.map, .feed, .profile].contains(selectedTab)
     }
+
+    private var postCountAccentColor: Color {
+        if showLikesMode { return .red }
+        switch radiusTrend {
+        case .up: return .green
+        case .down: return .red
+        case .neutral: return .white.opacity(0.9)
+        }
+    }
     
     var body: some View {
         Group {
@@ -95,14 +104,15 @@ struct RecordingCountdownView: View {
                     .monospacedDigit()
                     .minimumScaleFactor(0.4)
                     .lineLimit(1)
-                    .poplurMetalNumberShader(intensity: 1.18)
+                    .poplurMetalNumberShader(intensity: 1.05)
                     .shadow(color: .red.opacity(0.3), radius: 6, x: 0, y: 2)
                     .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
                     .contentTransition(.numericText(value: Double(max(secondsRemaining, 0))))
 
                 Rectangle()
-                    .fill(.white)
+                    .fill(.red)
                     .frame(width: 90, height: 2)
+                    .shadow(color: .red.opacity(0.5), radius: 2, x: 0, y: 0)
                     .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 1)
                     .alignmentGuide(.counterSeparator) { dimensions in
                         dimensions[VerticalAlignment.center]
@@ -113,8 +123,8 @@ struct RecordingCountdownView: View {
                     .foregroundStyle(.white.opacity(0.9))
                     .minimumScaleFactor(0.4)
                     .lineLimit(1)
-                    .poplurMetalNumberShader(intensity: 0.60)
                     .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
+                    .poplurMetalNumberShader(intensity: 0.72)
             }
             .frame(width: 90, alignment: .center)
 
@@ -147,7 +157,7 @@ struct RecordingCountdownView: View {
                             .monospacedDigit()
                             .minimumScaleFactor(0.4)
                             .lineLimit(1)
-                            .poplurMetalNumberShader(intensity: 1.12)
+                            .poplurMetalNumberShader(intensity: 1.05)
                             .shadow(color: .red.opacity(0.3), radius: 6, x: 0, y: 2)
                             .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
                             .transition(.opacity.combined(with: .scale(scale: 0.8)))
@@ -162,6 +172,8 @@ struct RecordingCountdownView: View {
                                 .repeatForever(autoreverses: true),
                                 value: arrowAnimation
                             )
+                            .poplurMetalNumberShader(intensity: 1.05)
+                            .shadow(color: (radiusTrend == .up ? Color.green : Color.red).opacity(0.3), radius: 6, x: 0, y: 2)
                             .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
                             .transition(.opacity.combined(with: .scale(scale: 0.8)))
                     } else {
@@ -171,8 +183,9 @@ struct RecordingCountdownView: View {
                 }
 
                 Rectangle()
-                    .fill(.white)
+                    .fill(postCountAccentColor)
                     .frame(width: 90, height: 2)
+                    .shadow(color: postCountAccentColor.opacity(0.5), radius: 2, x: 0, y: 0)
                     .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 1)
                     .alignmentGuide(.counterSeparator) { dimensions in
                         dimensions[VerticalAlignment.center]
@@ -180,12 +193,12 @@ struct RecordingCountdownView: View {
 
                 Text("\(postCount)")
                     .font(.system(size: 28, weight: .bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.white.opacity(0.9))
                     .monospacedDigit()
                     .minimumScaleFactor(0.4)
                     .lineLimit(1)
-                    .poplurMetalNumberShader(intensity: 0.78)
                     .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
+                    .poplurMetalNumberShader(intensity: 0.72)
             }
             .frame(width: 90, alignment: .center)
             
@@ -194,7 +207,6 @@ struct RecordingCountdownView: View {
                 .foregroundStyle(.white.opacity(0.7))
                 .minimumScaleFactor(0.5)
                 .lineLimit(1)
-                .poplurMetalNumberShader(intensity: 0.45)
                 .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
         }
         .padding(.horizontal, 20)

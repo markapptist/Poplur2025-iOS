@@ -34,6 +34,7 @@ struct FeedFullscreenPageView: View {
     // Added for playback stuck detection and UI overlay
     @State private var forceVideoPlaceholder: Bool = false
     @State private var playbackStuck: Bool = false
+    @State private var captionPlaybackSeconds: Double = 0
 
     // Auto-cycles the username ↔ channel-number display like a TV ticker
     @State private var showChannelMode: Bool = false
@@ -45,6 +46,7 @@ struct FeedFullscreenPageView: View {
     }
 
     private var directVideoURL: URL? {
+        guard !post.isLiveStream else { return nil }
         guard localAssetName == nil else { return nil }
         guard let url = URL(string: post.mediaURL) else { return nil }
         let lower = url.absoluteString.lowercased()
@@ -84,6 +86,7 @@ struct FeedFullscreenPageView: View {
 
     private enum MediaType { case video, image, unknown }
     private var mediaType: MediaType {
+        if post.isLiveStream { return .unknown }
         if localAssetName != nil { return .image }
         if directVideoURL != nil { return .video }
         guard let url = URL(string: post.mediaURL) else { return .unknown }
@@ -114,6 +117,7 @@ struct FeedFullscreenPageView: View {
         @Binding var playbackStuck: Bool
         let onReadyToDisplay: () -> Void
         let onCreditsVisibilityChanged: (Bool) -> Void
+        let onPlaybackTimeChanged: (Double) -> Void
         @State private var player: AVPlayer? = nil
         @State private var itemObservation: NSKeyValueObservation? = nil
 
@@ -164,6 +168,7 @@ struct FeedFullscreenPageView: View {
                         self.itemFailed = false
                         self.playbackStuck = false
                         p.seek(to: CMTime(seconds: 0.01, preferredTimescale: 600))
+                        FeedAudioManager.shared.enableAudiblePlayback()
                         FeedAudioManager.shared.playExclusively(p)
                         p.playImmediately(atRate: 1.0)
                         self.hudTimeControl = p.timeControlStatus
@@ -196,6 +201,9 @@ struct FeedFullscreenPageView: View {
                 forInterval: CMTime(seconds: 0.1, preferredTimescale: 600),
                 queue: .main
             ) { time in
+                if time.seconds.isFinite {
+                    self.onPlaybackTimeChanged(time.seconds)
+                }
                 if time.seconds > 0.05 || p.timeControlStatus == .playing {
                     self.isReadyToDisplay = true
                     self.playbackStuck = false
@@ -244,10 +252,12 @@ struct FeedFullscreenPageView: View {
                         .animation(.easeOut(duration: 0.2), value: isReadyToDisplay)
                         .onAppear {
                             if player.timeControlStatus != .playing {
+                                FeedAudioManager.shared.enableAudiblePlayback()
                                 player.playImmediately(atRate: 1.0)
                             }
                             DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
                                 if let p = self.player, p.timeControlStatus != .playing {
+                                    FeedAudioManager.shared.enableAudiblePlayback()
                                     p.playImmediately(atRate: 1.0)
                                     self.hudTimeControl = p.timeControlStatus
                                     if p.timeControlStatus == .playing {
@@ -283,6 +293,7 @@ struct FeedFullscreenPageView: View {
 
         private func resumePlayer() {
             if let player {
+                FeedAudioManager.shared.enableAudiblePlayback()
                 player.playImmediately(atRate: 1.0)
                 hudTimeControl = player.timeControlStatus
             } else {
@@ -541,6 +552,7 @@ struct FeedFullscreenPageView: View {
                 .onChange(of: post.mediaURL) { _, _ in
                     // Reset readiness so freshly recorded media triggers playback/display
                     didReportMediaReady = false
+                    captionPlaybackSeconds = 0
                     cancelImageLifecycle()
                 }
                 .onDisappear {
@@ -570,6 +582,13 @@ struct FeedFullscreenPageView: View {
 
             // Compute primary media view with reduced builder complexity
             let mediaView: AnyView = {
+                if post.isLiveStream {
+                    return AnyView(
+                        FeedLiveStreamCard(post: post, displayName: displayName)
+                            .frame(width: size.width, height: size.height)
+                            .onAppear { reportMediaReady() }
+                    )
+                }
                 switch mediaType {
                 case .video:
                     if let videoURL = directVideoURL {
@@ -660,7 +679,13 @@ struct FeedFullscreenPageView: View {
             hudItemStatus: $debugItemStatus,
             playbackStuck: $playbackStuck,
             onReadyToDisplay: reportMediaReady,
-            onCreditsVisibilityChanged: onCreditsVisibilityChanged
+            onCreditsVisibilityChanged: onCreditsVisibilityChanged,
+            onPlaybackTimeChanged: { seconds in
+                let wholeSeconds = floor(max(seconds, 0))
+                if wholeSeconds != captionPlaybackSeconds {
+                    captionPlaybackSeconds = wholeSeconds
+                }
+            }
         )
             .id(videoURL.absoluteString)
             .frame(width: size.width, height: size.height)
@@ -705,6 +730,10 @@ struct FeedFullscreenPageView: View {
     }
 
     private func scheduleImageLifecycleIfNeeded() {
+        guard !post.isLiveStream else {
+            cancelImageLifecycle()
+            return
+        }
         guard mediaType != .video else {
             cancelImageLifecycle()
             return
@@ -760,7 +789,14 @@ struct FeedFullscreenPageView: View {
     }
 
     private var shouldShowCaptions: Bool {
-        settings.closedCaptionsEnabled && !post.isPoplurAd && mediaType == .video
+        !post.isPoplurAd && mediaType == .video && (settings.closedCaptionsEnabled || isDemoCaptionTestPost)
+    }
+
+    private var isDemoCaptionTestPost: Bool {
+        let lowerID = post.id.lowercased()
+        let lowerURL = post.mediaURL.lowercased()
+        return lowerID.contains("demo")
+            || lowerURL.contains("archive.org/download/")
     }
 
     private func aiCaptionOverlay(size: CGSize) -> some View {
@@ -768,7 +804,8 @@ struct FeedFullscreenPageView: View {
             Text(AITranslationCaptionProvider.caption(
                 for: post,
                 channelCategory: channelCategory,
-                preferredLanguage: settings.preferredLanguage
+                preferredLanguage: settings.preferredLanguage,
+                playbackSeconds: captionPlaybackSeconds
             ))
             .font(.system(size: min(size.width * 0.045, 19), weight: .bold, design: .rounded))
             .multilineTextAlignment(.center)
@@ -829,7 +866,7 @@ struct FeedFullscreenPageView: View {
                     .offset(y: displayAsChannel ? -10 : 0)
 
                     Text("CH \(channelNumber)")
-                        .font(.system(size: 22, weight: .black, design: .rounded))
+                        .font(.system(size: 22, weight: .black, design: .monospaced))
                         .foregroundColor(Color(red: 0.31, green: 1.0, blue: 0.25))
                         .opacity(displayAsChannel ? 1 : 0)
                         .offset(y: displayAsChannel ? 0 : 10)
@@ -844,7 +881,7 @@ struct FeedFullscreenPageView: View {
                         .offset(y: displayAsChannel ? -8 : 0)
 
                     Text(channelCategory.uppercased())
-                        .font(.system(size: 16, weight: .heavy, design: .rounded))
+                        .font(.system(size: 16, weight: .heavy, design: .monospaced))
                         .foregroundColor(Color(red: 0.31, green: 1.0, blue: 0.25))
                         .opacity(displayAsChannel ? 1 : 0)
                         .offset(y: displayAsChannel ? 0 : 8)

@@ -2,6 +2,7 @@ import SwiftUI
 import CoreLocation
 import MapKit
 
+@MainActor
 final class LocationManager: NSObject, ObservableObject {
     @Published var location: CLLocation? = nil
     private let manager = CLLocationManager()
@@ -34,27 +35,29 @@ final class LocationManager: NSObject, ObservableObject {
 }
 
 extension LocationManager: CLLocationManagerDelegate {
-    @MainActor
-    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
-        let status = manager.authorizationStatus
-        switch status {
-        case .authorizedAlways, .authorizedWhenInUse:
-            manager.startUpdatingLocation()
-        case .denied, .restricted:
-            break
-        case .notDetermined:
-            break
-        @unknown default:
-            break
+    nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        Task { @MainActor in
+            let status = manager.authorizationStatus
+            switch status {
+            case .authorizedAlways, .authorizedWhenInUse:
+                manager.startUpdatingLocation()
+            case .denied, .restricted:
+                break
+            case .notDetermined:
+                break
+            @unknown default:
+                break
+            }
         }
     }
     
-    @MainActor
-    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        self.location = locations.last
+    nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        Task { @MainActor in
+            self.location = locations.last
+        }
     }
     
-    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+    nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         print("LocationManager error: \(error)")
     }
 }

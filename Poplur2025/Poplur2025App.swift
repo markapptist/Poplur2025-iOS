@@ -18,6 +18,26 @@ private enum PreviewEnv {
     }
 }
 
+private enum FirebaseBootstrap {
+    static func configureIfNeeded() {
+        guard !PreviewEnv.isPreview else {
+            print("[FirebaseBootstrap] Preview mode - skipping Firebase initialization")
+            return
+        }
+
+        guard FirebaseApp.app() == nil else { return }
+
+        FirebaseApp.configure()
+
+        // Disable Firestore offline persistence in simulator to avoid disk space issues.
+        #if targetEnvironment(simulator)
+        let settings = FirestoreSettings()
+        settings.isPersistenceEnabled = false
+        Firestore.firestore().settings = settings
+        #endif
+    }
+}
+
 // AppDelegate: configure SDKs
 final class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication,
@@ -29,17 +49,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
             return true
         }
 
-        // Always configure Firebase (needed for Auth)
-        if FirebaseApp.app() == nil {
-            FirebaseApp.configure()
-
-            // Disable Firestore offline persistence in simulator to avoid disk space issues
-            #if targetEnvironment(simulator)
-            let settings = FirestoreSettings()
-            settings.isPersistenceEnabled = false
-            Firestore.firestore().settings = settings
-            #endif
-        }
+        // Always configure Firebase (needed for Auth).
+        FirebaseBootstrap.configureIfNeeded()
 
         // Defer ad SDK init to after first frame — MobileAds.shared.start() is synchronous
         // and can block the main thread for 100–300 ms, delaying first render.
@@ -54,11 +65,22 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
 
         Task { @MainActor in
             PoplurNotificationCenter.shared.configure()
+            WatchRadiusSync.shared.start()
         }
 
         // Replicate API key — sourced from Secrets.swift (gitignored, never committed)
         if UserDefaults.standard.string(forKey: "poplur_replicate_key") == nil {
             UserDefaults.standard.set(Secrets.replicateAPIKey, forKey: "poplur_replicate_key")
+        }
+
+        // Claude API key for AI bumper scripts
+        if !Secrets.claudeAPIKey.isEmpty {
+            UserDefaults.standard.set(Secrets.claudeAPIKey, forKey: "poplur_claude_key")
+        }
+
+        // ElevenLabs TTS key — free tier, no card needed (elevenlabs.io)
+        if !Secrets.elevenLabsAPIKey.isEmpty {
+            UserDefaults.standard.set(Secrets.elevenLabsAPIKey, forKey: "poplur_elevenlabs_key")
         }
 
         return true
@@ -76,7 +98,12 @@ struct Poplur2025App: App {
     // Attach AppDelegate to SwiftUI lifecycle
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
-    @StateObject private var auth = AuthViewModel()
+    @StateObject private var auth: AuthViewModel
+
+    init() {
+        FirebaseBootstrap.configureIfNeeded()
+        _auth = StateObject(wrappedValue: AuthViewModel())
+    }
     
     @StateObject private var isometricBarSettings: IsometricBarSettings = {
         let s = IsometricBarSettings()
@@ -97,6 +124,7 @@ struct Poplur2025App: App {
                         .environmentObject(isometricBarSettings)
                         .task(id: auth.currentUser?.uid) {
                             await PoplurNotificationCenter.shared.refreshDailyNotificationForCurrentUser()
+                            WatchRadiusSync.shared.refreshAndSendRadius()
                         }
                 } else {
                     WelcomeView()

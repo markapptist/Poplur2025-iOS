@@ -25,13 +25,11 @@ final class FeedViewModel: ObservableObject {
     // Services
     // Demo content
     private let demoVideoURLs: [String] = [
-        "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_4x3/gear1/prog_index.m3u8",
-        "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_16x9/gear1/prog_index.m3u8",
-        "https://media.w3.org/2010/05/sintel/trailer.mp4",
-        "https://media.w3.org/2010/05/bunny/trailer.mp4",
-        "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4",
-        "https://download.samplelib.com/mp4/sample-10s.mp4",
-        "https://download.samplelib.com/mp4/sample-15s.mp4"
+        "https://archive.org/download/Guiding_Light/GuidingLightMarch4-1953.mp4",
+        "https://archive.org/download/Love_Of_Life_Soap/LoveofLifeMarch20-1953.mp4",
+        "https://archive.org/download/Valiant_Lady/Valiant_Lady.mp4",
+        "https://archive.org/download/GuidingLight9April1953/GuidingLight9April1953.mp4",
+        "https://archive.org/download/1967_PD_Soapie/LoveisaManySplenderedThing1967.mp4"
     ]
     private let demoImageIDs: [Int] = [
         10, 20, 28, 37, 42, 58, 64, 82, 96, 102, 103, 106, 119, 128, 133, 164, 175, 184, 190, 1025
@@ -168,9 +166,10 @@ extension FeedViewModel {
             let adBody: String?
             let adCallToAction: String?
             let adCreativeKind: String?
+            let sourceLanguageCode: String
 
             switch i % 5 {
-            case 1, 4:
+            case 0, 1, 4:
                 mediaURL = demoVideoURLs[i % demoVideoURLs.count]
                 userID = demoUserIDs[i % demoUserIDs.count]
                 isPoplurAd = false
@@ -178,6 +177,7 @@ extension FeedViewModel {
                 adBody = nil
                 adCallToAction = nil
                 adCreativeKind = nil
+                sourceLanguageCode = posts[i].sourceLanguageCode
             case 2:
                 mediaURL = demoAdMediaURLs[i % demoAdMediaURLs.count]
                 userID = "poplur_ad_demo_\(i)"
@@ -186,6 +186,7 @@ extension FeedViewModel {
                 adBody = "Poplur-owned creative slot for real human scenes and dimensional 3D figures."
                 adCallToAction = "Open Poplur"
                 adCreativeKind = i % 2 == 0 ? "Human creative" : "3D figure creative"
+                sourceLanguageCode = posts[i].sourceLanguageCode
             default:
                 mediaURL = demoImageURL(for: i)
                 userID = posts[i].userID
@@ -194,6 +195,7 @@ extension FeedViewModel {
                 adBody = nil
                 adCallToAction = nil
                 adCreativeKind = nil
+                sourceLanguageCode = posts[i].sourceLanguageCode
             }
 
             posts[i] = FeedPost(
@@ -207,6 +209,7 @@ extension FeedViewModel {
                 cityName: posts[i].cityName,
                 countryName: posts[i].countryName,
                 countryFlag: posts[i].countryFlag,
+                sourceLanguageCode: sourceLanguageCode,
                 isPoplurAd: isPoplurAd,
                 adHeadline: adHeadline,
                 adBody: adBody,

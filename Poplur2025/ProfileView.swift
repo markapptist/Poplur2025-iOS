@@ -146,6 +146,15 @@ struct ProfileView: View {
         showSettings || navigateToMessages || showNotifications || showRadiusStore || showStats || navigateToScanner || navigateToViewer
     }
 
+    @ViewBuilder
+    private var profileStatsOverlay: some View {
+        if showStats {
+            ProfileStatsView(userID: effectiveUserID ?? Auth.auth().currentUser?.uid ?? "")
+                .transition(.opacity)
+                .zIndex(50)
+        }
+    }
+
     private func postMainTabChildRouteVisibility() {
         NotificationCenter.default.post(
             name: .MainTabChildRouteVisibilityChanged,
@@ -435,8 +444,11 @@ struct ProfileView: View {
                                                         .onLongPressGesture(minimumDuration: 0.5) {
                                                             // Long press to show post location on map with user annotation
                                                             let coordinate = CLLocationCoordinate2D(latitude: post.latitude, longitude: post.longitude)
-                                                            print("📍 [ProfileView Grid] Long press - showing post location: \(coordinate.latitude), \(coordinate.longitude)")
-                                                            print("   Post radius: \(post.radius)m")
+                                                            let latitude = coordinate.latitude
+                                                            let longitude = coordinate.longitude
+                                                            let postRadius = post.radius
+                                                            print("📍 [ProfileView Grid] Long press - showing post location: \(latitude), \(longitude)")
+                                                            print("   Post radius: \(postRadius)m")
                                                             
                                                             // Haptic feedback
                                                             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
@@ -668,11 +680,7 @@ struct ProfileView: View {
                         .zIndex(50)
                 }
 
-                if showStats {
-                    ProfileStatsView(userID: effectiveUserID)
-                        .transition(.opacity)
-                        .zIndex(50)
-                }
+                profileStatsOverlay
 
                 if navigateToMessages {
                     MessagesRootView()
@@ -967,23 +975,9 @@ struct ProfileView: View {
                             closeProfileSubroutes()
                         }
                         if showPopularPhone {
-                            let colorwayItems = PoplurPhoneColorway.all.map { cw in
-                                CubeSubmenuItem(
-                                    id: cw.id,
-                                    title: cw.title,
-                                    systemImage: "circle.fill",
-                                    tint: cw.swatch
-                                ) {
-                                    NotificationCenter.default.post(
-                                        name: .phoneOverlayApplyColorway,
-                                        object: nil,
-                                        userInfo: ["assetName": cw.bootupSpritesheetName]
-                                    )
-                                }
-                            }
-                            cubeMenuWheel.beginHold(items: [backItem] + colorwayItems)
-                        } else if isShowingMainTabChildRoute {
                             cubeMenuWheel.beginHold(items: [backItem])
+                        } else if isShowingMainTabChildRoute {
+                            cubeMenuWheel.beginHold(items: [backItem] + cubeSubmenuItems)
                         } else {
                             cubeMenuWheel.beginHold(items: cubeSubmenuItems)
                         }
@@ -2149,17 +2143,26 @@ private final class PoplurCreditCardSpriteScene: SKScene {
     }
 }
 
+private final class CreditCardSceneHolder: ObservableObject {
+    let scene: PoplurCreditCardSpriteScene
+    init(sheetName: String) {
+        scene = PoplurCreditCardSpriteScene(sheetName: sheetName)
+    }
+}
+
 private struct PoplurCreditCardSpriteView: View {
     let card: PoplurCreditCardProduct
+    @StateObject private var holder: CreditCardSceneHolder
+
+    init(card: PoplurCreditCardProduct) {
+        self.card = card
+        _holder = StateObject(wrappedValue: CreditCardSceneHolder(sheetName: card.spriteSheetName))
+    }
 
     var body: some View {
-        SpriteView(
-            scene: PoplurCreditCardSpriteScene(sheetName: card.spriteSheetName),
-            options: [.allowsTransparency]
-        )
-        .id(card.id)
-        .aspectRatio(482.0 / 320.0, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        SpriteView(scene: holder.scene, options: [.allowsTransparency])
+            .aspectRatio(482.0 / 320.0, contentMode: .fit)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 }
 

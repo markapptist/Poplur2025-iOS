@@ -70,7 +70,7 @@ final class CameraPreviewViewController: UIViewController {
         if displayLayer == nil {
             let layer = AVSampleBufferDisplayLayer()
             layer.videoGravity = .resizeAspectFill
-            layer.opacity = 1.0
+            layer.opacity = 0.0
             view.layer.insertSublayer(layer, at: 0)
             displayLayer = layer
         } else if let layer = displayLayer, layer.superlayer == nil {
@@ -88,8 +88,8 @@ final class CameraPreviewViewController: UIViewController {
             print("[PreviewVC] AR displayLayer installed, frame: \(overlay.frame), opacity: \(overlay.opacity)")
         }
 
-        // Temporarily hide displayLayer to validate base preview
-        displayLayer?.opacity = 1.0
+        // Keep the raw camera layer visible until an AR filter is actively selected.
+        displayLayer?.opacity = 0.0
 
         installCameraGestures()
         
@@ -116,6 +116,18 @@ final class CameraPreviewViewController: UIViewController {
             self,
             selector: #selector(handlePreviewGeometryChanged),
             name: UIDevice.orientationDidChangeNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleARFiltersStateChanged(_:)),
+            name: Notification.Name("ARFiltersStateChanged"),
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleARFilterChanged(_:)),
+            name: Notification.Name("ARFilterChanged"),
             object: nil
         )
     }
@@ -147,6 +159,24 @@ final class CameraPreviewViewController: UIViewController {
 
     @objc private func handlePreviewGeometryChanged() {
         forcePreviewLayout()
+    }
+
+    @objc private func handleARFiltersStateChanged(_ notification: Notification) {
+        let isShown = notification.userInfo?["isShown"] as? Bool ?? false
+        setFilteredPreviewVisible(isShown)
+    }
+
+    @objc private func handleARFilterChanged(_ notification: Notification) {
+        let rawValue = (notification.userInfo?["filter"] as? String) ?? "None"
+        setFilteredPreviewVisible(rawValue.caseInsensitiveCompare("None") != .orderedSame)
+    }
+
+    private func setFilteredPreviewVisible(_ visible: Bool) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        previewLayer?.opacity = visible ? 0.0 : 1.0
+        displayLayer?.opacity = visible ? 1.0 : 0.0
+        CATransaction.commit()
     }
 
     private func layoutPreviewLayers() {

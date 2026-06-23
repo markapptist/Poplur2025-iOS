@@ -362,6 +362,49 @@ private enum CubeFaceImageCache {
 
 **Recommendation**: Start with Filament, optimize with OpenGL ES if needed
 
+### 1b. Opaque Surface Setup (critical — do this before anything else)
+
+The GL surface **must be opaque**. If left at the default translucent config the cube will appear semi-transparent and bleed into content behind it.
+
+**OpenGL ES / GLSurfaceView:**
+```kotlin
+glSurfaceView.apply {
+    // Opaque pixel format — no alpha channel in the surface
+    holder.setFormat(PixelFormat.OPAQUE)
+    // Keep below other views (not on top of window)
+    setZOrderOnTop(false)
+    setEGLConfigChooser(8, 8, 8, 0, 16, 0) // RGB, no alpha, depth 16
+}
+
+// In your Renderer.onSurfaceCreated:
+GLES20.glClearColor(0f, 0f, 0f, 1f)  // alpha = 1.0, never 0
+GLES20.glDisable(GLES20.GL_BLEND)     // disable blending so nothing bleeds through
+```
+
+**Filament / SurfaceView:**
+```kotlin
+// In your Filament setup, clear to a solid color (match app background)
+renderer.clearOptions = Renderer.ClearOptions().apply {
+    clear = true
+    clearColor = floatArrayOf(0.04f, 0.06f, 0.04f, 1.0f) // fully opaque
+}
+```
+
+**In Compose (AndroidView wrapper):**
+```kotlin
+AndroidView(
+    factory = { ctx ->
+        CubeGLSurfaceView(ctx).apply {
+            // Solid background behind the GL view — prevents see-through flash
+            setBackgroundColor(android.graphics.Color.BLACK)
+        }
+    },
+    modifier = Modifier
+        .size(115.dp)
+        .clip(RoundedCornerShape(16.dp)) // optional: round the container corners
+)
+```
+
 ### 2. Geometry Creation
 
 ```kotlin
@@ -452,26 +495,31 @@ cubeView.setOnTouchListener { v, event ->
 fun generateFaceTexture(tab: AppTab): Bitmap {
     val width = 300
     val height = 300
-    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+    // RGB_565 has no alpha channel — guaranteed opaque, smaller memory footprint
+    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.RGB_565)
     val canvas = Canvas(bitmap)
-    
-    // 1. Draw rounded rect background
-    val rect = RectF(8f, 8f, width - 8f, height - 8f)
     val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    // 0. Fill entire canvas with the face background color (no transparent corners)
+    canvas.drawColor(Color.parseColor("#5856D6")) // indigo tint — matches iOS default
+
+    // 1. Draw rounded rect (the white card)
+    val rect = RectF(8f, 8f, width - 8f, height - 8f)
     paint.color = Color.WHITE
     canvas.drawRoundRect(rect, 24f, 24f, paint)
-    
+
     // 2. Draw icon (use vector drawable)
     val icon = getIconForTab(tab) // Material Icon
     icon.setBounds(105, 70, 195, 160)
     icon.draw(canvas)
-    
+
     // 3. Draw title text
+    paint.color = Color.parseColor("#5856D6")
     paint.textSize = 24f
     paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
     paint.textAlign = Paint.Align.CENTER
     canvas.drawText(tab.title, width / 2f, 200f, paint)
-    
+
     return bitmap
 }
 ```

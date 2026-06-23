@@ -6,7 +6,10 @@
 //
 
 import SwiftUI
+import UIKit
 import Photos
+import PhotosUI
+import UniformTypeIdentifiers
 
 /// Camera roll button showing latest photo thumbnail
 /// Tapping opens photo picker to select image or video to upload
@@ -14,14 +17,9 @@ struct CameraRollButton: View {
     @State private var latestPhoto: UIImage? = nil
     
     var body: some View {
-        NavigationLink(destination: PhotoPickerNavigationView(
-            onImageSelected: { image in
-                handleSelectedImage(image)
-            },
-            onVideoSelected: { url in
-                handleSelectedVideo(url)
-            }
-        )) {
+        Button {
+            NotificationCenter.default.post(name: .showCameraRollWindow, object: nil)
+        } label: {
             ZStack {
                 // Background with photo preview or placeholder
                 if let photo = latestPhoto {
@@ -79,46 +77,6 @@ struct CameraRollButton: View {
             }
         }
     }
-    
-    // MARK: - Media Handling
-    
-    private func handleSelectedImage(_ image: UIImage) {
-        print("[CameraRollButton] Image selected from camera roll")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-            NotificationCenter.default.post(
-                name: Notification.Name("ShowCapturePreviewOverlay"),
-                object: image
-            )
-        }
-    }
-    
-    private func handleSelectedVideo(_ url: URL) {
-        print("[CameraRollButton] Video selected from camera roll: \(url)")
-        let previewVideoURL = copyVideoToTemporaryFileIfNeeded(url)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-            NotificationCenter.default.post(
-                name: Notification.Name("ShowCapturePreviewOverlay"),
-                object: previewVideoURL
-            )
-        }
-    }
-
-    private func copyVideoToTemporaryFileIfNeeded(_ url: URL) -> URL {
-        guard url.isFileURL else { return url }
-
-        let fileExtension = url.pathExtension.isEmpty ? "mov" : url.pathExtension
-        let destination = FileManager.default.temporaryDirectory
-            .appendingPathComponent("camera-roll-\(UUID().uuidString)")
-            .appendingPathExtension(fileExtension)
-
-        do {
-            try FileManager.default.copyItem(at: url, to: destination)
-            return destination
-        } catch {
-            print("[CameraRollButton] Failed to copy selected video: \(error)")
-            return url
-        }
-    }
 }
 
 // MARK: - Camera Roll Button Style
@@ -131,53 +89,167 @@ struct CameraRollButtonStyle: ButtonStyle {
     }
 }
 
-// MARK: - Photo Picker Navigation View
+// MARK: - Camera Roll Window
 
-/// Navigation wrapper for photo picker - shows picker in navigation stack instead of sheet
-struct PhotoPickerNavigationView: View {
-    let onImageSelected: (UIImage) -> Void
-    let onVideoSelected: (URL) -> Void
-    
-    @Environment(\.dismiss) private var dismiss
-    
+struct CameraRollWindowOverlay: View {
+    let onDismiss: () -> Void
+
+    @State private var dragOffset: CGSize = .zero
+
     var body: some View {
-        PhotoPickerRepresentable(
-            onImageSelected: { image in
-                onImageSelected(image)
-                dismiss()
-            },
-            onVideoSelected: { url in
-                onVideoSelected(url)
-                dismiss()
-            },
-            onCancel: {
-                dismiss()
+        GeometryReader { proxy in
+            let safe = proxy.safeAreaInsets
+            let width = min(max(proxy.size.width - 28, 290), 470)
+            let height = min(max(proxy.size.height - safe.top - safe.bottom - 72, 420), 720)
+
+            ZStack {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture(perform: onDismiss)
+
+                VStack(spacing: 0) {
+                    header
+                        .gesture(windowDragGesture)
+
+                    CameraRollPickerRepresentable(
+                        onImageSelected: { image in
+                            onDismiss()
+                            CameraRollSelectionDispatcher.showPreview(image: image)
+                        },
+                        onVideoSelected: { url in
+                            onDismiss()
+                            CameraRollSelectionDispatcher.showPreview(videoURL: url)
+                        },
+                        onCancel: onDismiss
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 10)
+                }
+                .frame(width: width, height: height)
+                .background(windowBackground)
+                .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 30, style: .continuous)
+                        .strokeBorder(
+                            LinearGradient(
+                                colors: [
+                                    .white.opacity(0.5),
+                                    .green.opacity(0.58),
+                                    .purple.opacity(0.55),
+                                    .white.opacity(0.24)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 1.5
+                        )
+                )
+                .shadow(color: .black.opacity(0.62), radius: 24, x: 0, y: 16)
+                .shadow(color: .green.opacity(0.22), radius: 18, x: 0, y: 0)
+                .offset(dragOffset)
+                .simultaneousGesture(swipeDownToCloseGesture)
             }
-        )
-        .navigationTitle("Camera Roll")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar(.hidden, for: .navigationBar)
-        .navigationBarBackButtonHidden(true)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
         .ignoresSafeArea()
+    }
+
+    private var header: some View {
+        HStack(spacing: 12) {
+            Capsule()
+                .fill(.white.opacity(0.58))
+                .frame(width: 42, height: 5)
+
+            Text("Camera Roll")
+                .font(.system(size: 15, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white)
+
+            Spacer(minLength: 0)
+
+            Button(action: onDismiss) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 30, height: 30)
+                    .background(.white.opacity(0.14), in: Circle())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .contentShape(Rectangle())
+    }
+
+    private var windowBackground: some View {
+        ZStack {
+            LinearGradient(
+                colors: [
+                    Color(red: 0.02, green: 0.03, blue: 0.03).opacity(0.98),
+                    Color(red: 0.05, green: 0.02, blue: 0.08).opacity(0.96),
+                    Color(red: 0.01, green: 0.08, blue: 0.06).opacity(0.94)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+
+            RoundedRectangle(cornerRadius: 30, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .opacity(0.18)
+        }
+    }
+
+    private var windowDragGesture: some Gesture {
+        DragGesture(minimumDistance: 4, coordinateSpace: .global)
+            .onChanged { value in
+                dragOffset = value.translation
+            }
+            .onEnded { value in
+                if shouldClose(for: value) {
+                    onDismiss()
+                } else {
+                    withAnimation(.spring(response: 0.36, dampingFraction: 0.8)) {
+                        dragOffset = .zero
+                    }
+                }
+            }
+    }
+
+    private var swipeDownToCloseGesture: some Gesture {
+        DragGesture(minimumDistance: 24, coordinateSpace: .global)
+            .onEnded { value in
+                if shouldClose(for: value) {
+                    onDismiss()
+                }
+            }
+    }
+
+    private func shouldClose(for value: DragGesture.Value) -> Bool {
+        let downPull = value.translation.height > 130 && abs(value.translation.width) < 150
+        let downFling = value.predictedEndTranslation.height > 240 && value.translation.height > 60
+        return downPull || downFling
     }
 }
 
 // MARK: - Photo Picker Representable
 
-struct PhotoPickerRepresentable: UIViewControllerRepresentable {
+private struct CameraRollPickerRepresentable: UIViewControllerRepresentable {
     let onImageSelected: (UIImage) -> Void
     let onVideoSelected: (URL) -> Void
     let onCancel: () -> Void
     
-    func makeUIViewController(context: Context) -> UIImagePickerController {
-        let picker = UIImagePickerController()
-        picker.sourceType = .photoLibrary
-        picker.mediaTypes = ["public.image", "public.movie"]
+    func makeUIViewController(context: Context) -> PHPickerViewController {
+        var configuration = PHPickerConfiguration(photoLibrary: .shared())
+        configuration.filter = .any(of: [.images, .videos])
+        configuration.selectionLimit = 1
+        configuration.preferredAssetRepresentationMode = .current
+
+        let picker = PHPickerViewController(configuration: configuration)
         picker.delegate = context.coordinator
         return picker
     }
     
-    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
+    func updateUIViewController(_ uiViewController: PHPickerViewController, context: Context) {}
     
     func makeCoordinator() -> Coordinator {
         Coordinator(
@@ -187,7 +259,7 @@ struct PhotoPickerRepresentable: UIViewControllerRepresentable {
         )
     }
     
-    class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+    final class Coordinator: NSObject, PHPickerViewControllerDelegate {
         let onImageSelected: (UIImage) -> Void
         let onVideoSelected: (URL) -> Void
         let onCancel: () -> Void
@@ -198,16 +270,96 @@ struct PhotoPickerRepresentable: UIViewControllerRepresentable {
             self.onCancel = onCancel
         }
         
-        func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any]) {
-            if let image = info[.originalImage] as? UIImage {
-                onImageSelected(image)
-            } else if let videoURL = info[.mediaURL] as? URL {
-                onVideoSelected(videoURL)
+        func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
+            guard let provider = results.first?.itemProvider else {
+                onCancel()
+                return
+            }
+
+            if let videoType = firstSupportedVideoType(for: provider) {
+                loadVideo(from: provider, typeIdentifier: videoType)
+            } else if provider.canLoadObject(ofClass: UIImage.self) {
+                provider.loadObject(ofClass: UIImage.self) { [onImageSelected, onCancel] object, error in
+                    DispatchQueue.main.async {
+                        if let image = object as? UIImage {
+                            onImageSelected(image)
+                        } else {
+                            if let error {
+                                print("[CameraRollButton] Failed to load selected image: \(error)")
+                            }
+                            onCancel()
+                        }
+                    }
+                }
+            } else {
+                onCancel()
             }
         }
-        
-        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
-            onCancel()
+
+        private func firstSupportedVideoType(for provider: NSItemProvider) -> String? {
+            [
+                UTType.movie.identifier,
+                UTType.video.identifier,
+                UTType.mpeg4Movie.identifier,
+                "com.apple.quicktime-movie"
+            ]
+            .first { provider.hasItemConformingToTypeIdentifier($0) }
+        }
+
+        private func loadVideo(from provider: NSItemProvider, typeIdentifier: String) {
+            provider.loadFileRepresentation(forTypeIdentifier: typeIdentifier) { [onVideoSelected, onCancel] url, error in
+                guard let url else {
+                    DispatchQueue.main.async {
+                        if let error {
+                            print("[CameraRollButton] Failed to load selected video: \(error)")
+                        }
+                        onCancel()
+                    }
+                    return
+                }
+
+                let fileExtension = url.pathExtension.isEmpty ? "mov" : url.pathExtension
+                let destination = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("camera-roll-\(UUID().uuidString)")
+                    .appendingPathExtension(fileExtension)
+
+                do {
+                    if FileManager.default.fileExists(atPath: destination.path) {
+                        try FileManager.default.removeItem(at: destination)
+                    }
+                    try FileManager.default.copyItem(at: url, to: destination)
+                    DispatchQueue.main.async {
+                        onVideoSelected(destination)
+                    }
+                } catch {
+                    DispatchQueue.main.async {
+                        print("[CameraRollButton] Failed to copy selected video: \(error)")
+                        onCancel()
+                    }
+                }
+            }
+        }
+    }
+}
+
+private enum CameraRollSelectionDispatcher {
+    static func showPreview(image: UIImage) {
+        print("[CameraRollButton] Image selected from camera roll")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+            NotificationCenter.default.post(
+                name: Notification.Name("ShowCapturePreviewOverlay"),
+                object: image
+            )
+        }
+    }
+
+    static func showPreview(videoURL: URL) {
+        print("[CameraRollButton] Video selected from camera roll: \(videoURL)")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+            NotificationCenter.default.post(
+                name: Notification.Name("ShowCapturePreviewOverlay"),
+                object: videoURL
+            )
         }
     }
 }

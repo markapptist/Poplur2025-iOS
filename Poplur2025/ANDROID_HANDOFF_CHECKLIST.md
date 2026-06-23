@@ -260,6 +260,7 @@ android_documentation_package/
 - [ ] Feed UI starts in final positions; any entry animation is opacity-only
 - [ ] Feed first page includes a balanced mix of images, videos, and sponsored ads
 - [ ] Feed videos auto-play without a play icon overlay
+- [ ] Feed default transition uses full-screen real TV static with static hiss, centered Poplur logo, and green destination `CH ###` + category text
 - [ ] Feed videos reload/resume correctly after app background and foreground
 - [ ] Feed custom volume bars appear for hardware volume up and volume down, but not during launch loading
 - [ ] Feed TV Guide is full-screen, uses PiP layout, keeps current video audio playing, has green channel numbers, and exposes a tablet hamburger channel rail
@@ -267,12 +268,17 @@ android_documentation_package/
 - [ ] Profile removes the fixed top action icons, moves the header upward, and exposes mail/settings/phone/notifications/store through a reusable hold-cube rainbow menu wheel
 - [ ] Cube menu wheel dims the background with translucent white, cycles focused items while held, plays a pop on each tick, and release-selects the focused item
 - [ ] Profile phone action opens a constructed PopularPhone UI that aspect-fits on Android and uses a dynamic LCD content area instead of a stretched full-phone bitmap
+- [ ] Profile Stats includes a 3D Trophy Room with stable achievement IDs, metallic unlocked trophies, and gray locked trophies
 - [ ] Radius Store uses Google Play Billing real checkout, not fake local radius grants
 - [ ] Radius Store writes verified purchase ledger and increments purchased radius in Firestore
 - [ ] Notifications appear both on device and inside the app
 - [ ] Daily AI radius notification covers growth, decline, strongest area, or area takeover
 - [ ] Camera tab captures and uploads
 - [ ] Map tab shows Google Maps
+- [ ] Map first launch has no visible AI voice/radio button; Poplur voice plays automatically
+- [ ] Map uses API-rendered natural British TTS audio, with Android UK TTS only as offline fallback
+- [ ] Map audio coordinator fades weather under voice, then crossfades music in once after speech
+- [ ] Map music treats preparing/buffering as active and never loops the same preview/pop sound indefinitely
 
 ### Phase 3: Cube (Week 5-6) ✅
 - [ ] 3D cube renders with correct geometry

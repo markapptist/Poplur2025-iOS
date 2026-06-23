@@ -2,16 +2,14 @@ import SwiftUI
 import SpriteKit
 
 /// Shown when a DM phone or video call button is tapped.
-/// Displays the Poplur phone UI with the callee's name on the LCD + ringtone,
-/// then transitions to InAppVideoCallView when the call connects (video mode)
-/// or remains on the phone showing call duration (audio mode).
+/// Video calls open directly into the in-app FaceTime-style camera surface;
+/// audio calls keep the Poplur phone UI with the callee's name on the LCD.
 struct DMCallCoordinatorView: View {
     let calleeName: String
     let isVideo: Bool
     let onDismiss: () -> Void
 
     @State private var phoneScene: PhoneScene
-    @State private var showVideoCall = false
     @State private var elapsed = 0
     @State private var connectTask: Task<Void, Never>?
     @State private var timerTask: Task<Void, Never>?
@@ -27,40 +25,35 @@ struct DMCallCoordinatorView: View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            SpriteView(scene: phoneScene, options: [.allowsTransparency])
-                .ignoresSafeArea()
+            if isVideo {
+                InAppVideoCallView(calleeName: calleeName, onEnd: endVideoCall)
+            } else {
+                SpriteView(scene: phoneScene, options: [.allowsTransparency])
+                    .ignoresSafeArea()
 
-            // Hang-up button
-            VStack {
-                Spacer()
-                Button(action: endCall) {
-                    Image(systemName: "phone.down.fill")
-                        .font(.system(size: 28, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 72, height: 72)
-                        .background(Color.red, in: Circle())
+                VStack {
+                    Spacer()
+                    Button(action: endCall) {
+                        Image(systemName: "phone.down.fill")
+                            .font(.system(size: 28, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 72, height: 72)
+                            .background(Color.red, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.bottom, 56)
                 }
-                .buttonStyle(.plain)
-                .padding(.bottom, 56)
-            }
-
-            // Video overlay when connected
-            if showVideoCall {
-                InAppVideoCallView(calleeName: calleeName, onEnd: endCall)
             }
         }
         .statusBarHidden()
         .onAppear {
+            guard !isVideo else { return }
             phoneScene.applyCallState(.outgoing(calleeName: calleeName), elapsed: 0)
             connectTask = Task {
                 try? await Task.sleep(for: .seconds(3))
                 guard !Task.isCancelled else { return }
                 phoneScene.applyCallState(.connected(calleeName: calleeName, channelId: ""), elapsed: 0)
-                if isVideo {
-                    showVideoCall = true
-                } else {
-                    startDurationTimer()
-                }
+                startDurationTimer()
             }
         }
         .onDisappear {
@@ -88,5 +81,11 @@ struct DMCallCoordinatorView: View {
             try? await Task.sleep(for: .milliseconds(700))
             onDismiss()
         }
+    }
+
+    private func endVideoCall() {
+        connectTask?.cancel()
+        timerTask?.cancel()
+        onDismiss()
     }
 }

@@ -60,3 +60,20 @@ using namespace metal;
 
     return half4(half3(boosted), color.a);
 }
+
+[[ stitchable ]] half4 poplurBrowserGlass(float2 position, half4 color, float time, float intensity) {
+    if (color.a <= 0.01h) return color;
+
+    float shimmer = sin(position.x * 0.025 + position.y * 0.045 + time * 1.2) * 0.5 + 0.5;
+    float scan = sin(position.y * 0.95 + time * 5.2) * 0.5 + 0.5;
+    float diagonal = sin((position.x + position.y * 0.72) * 0.018 - time * 1.5) * 0.5 + 0.5;
+    float sheen = (pow(shimmer, 5.0) * 0.055 + pow(diagonal, 12.0) * 0.12 + scan * 0.014) * intensity;
+
+    float3 base = float3(color.r, color.g, color.b);
+    float3 cool = float3(0.82, 0.90, 1.00);
+    float3 warm = float3(1.00, 0.94, 0.82);
+    float3 highlight = mix(cool, warm, shimmer);
+    float3 boosted = mix(base, max(base, highlight), sheen);
+
+    return half4(half3(boosted), color.a);
+}

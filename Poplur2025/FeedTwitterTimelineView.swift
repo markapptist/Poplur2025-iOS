@@ -64,6 +64,7 @@ struct UserPostArticle: Identifiable {
     let latitude: Double
     let longitude: Double
     let timeAgo: String
+    let mediaURL: String?
 }
 
 enum NewspaperSection {
@@ -300,6 +301,318 @@ private struct NewspaperScrollOffsetKey: PreferenceKey {
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
+// MARK: - Map snapshot helpers
+
+private final class MapSnapshotCache: @unchecked Sendable {
+    static let shared = MapSnapshotCache()
+    private var dict: [String: UIImage] = [:]
+    private let lock = NSLock()
+
+    func get(_ key: String) -> UIImage? { lock.lock(); defer { lock.unlock() }; return dict[key] }
+    func set(_ key: String, _ img: UIImage) { lock.lock(); defer { lock.unlock() }; dict[key] = img }
+}
+
+private struct MapSnapshotImage: View {
+    let latitude: Double
+    let longitude: Double
+    let mapType: MKMapType
+    let tint: Color?
+
+    @State private var snapshot: UIImage?
+
+    var body: some View {
+        ZStack {
+            if let img = snapshot {
+                Image(uiImage: img)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .clipped()
+                if let t = tint { t.opacity(0.28) }
+            } else {
+                Color(red: 0.06, green: 0.06, blue: 0.12)
+                ProgressView().tint(.white.opacity(0.35))
+            }
+        }
+        .task(id: "\(latitude)\(longitude)\(mapType.rawValue)") {
+            let key = "\(latitude)_\(longitude)_\(mapType.rawValue)"
+            if let cached = MapSnapshotCache.shared.get(key) { snapshot = cached; return }
+            let opts = MKMapSnapshotter.Options()
+            opts.region = MKCoordinateRegion(
+                center: CLLocationCoordinate2D(latitude: latitude, longitude: longitude),
+                span: MKCoordinateSpan(latitudeDelta: 0.08, longitudeDelta: 0.08)
+            )
+            opts.size = CGSize(width: 420, height: 180)
+            opts.mapType = mapType
+            let img: UIImage? = await withCheckedContinuation { cont in
+                MKMapSnapshotter(options: opts).start { r, _ in cont.resume(returning: r?.image) }
+            }
+            guard let img else { return }
+            MapSnapshotCache.shared.set(key, img)
+            snapshot = img
+        }
+    }
+}
+
+private enum NewspaperVisualStyle {
+    case mapEvent
+    case trending
+    case dominance
+    case userPost
+}
+
+private struct NewspaperGeneratedVisual: View {
+    let style: NewspaperVisualStyle
+    let latitude: Double
+    let longitude: Double
+    let city: String
+    let flag: String
+    let headline: String
+    let accent: Color
+    let username: String?
+    let mediaURL: String?
+
+    private var mapType: MKMapType {
+        switch style {
+        case .mapEvent: return .hybridFlyover
+        case .trending: return .standard
+        case .dominance: return .satellite
+        case .userPost: return .mutedStandard
+        }
+    }
+
+    private var fallbackTint: Color? {
+        switch style {
+        case .userPost: return nil
+        default: return accent
+        }
+    }
+
+    private var visualLabel: String {
+        switch style {
+        case .dominance: return "LIVE MAP CAPTURE"
+        case .userPost: return "AI STORY IMAGE"
+        default: return "AI GENERATED"
+        }
+    }
+
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            background
+
+            LinearGradient(
+                colors: [.black.opacity(0.05), .black.opacity(0.78)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+
+            NewspaperVisualOverlay(
+                style: style,
+                seed: "\(headline)-\(city)-\(username ?? "")",
+                accent: accent
+            )
+            .allowsHitTesting(false)
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 7) {
+                    Text(visualLabel)
+                        .font(.system(size: 10, weight: .black, design: .monospaced))
+                        .foregroundStyle(style == .dominance ? .white : .black)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 4)
+                        .background(accent)
+                        .clipShape(Capsule())
+
+                    Text("\(flag) \(city)")
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.72))
+                }
+
+                if style == .dominance, let username {
+                    Text("@\(username) territory lock")
+                        .font(.system(size: 16, weight: .black, design: .rounded))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                } else {
+                    Text(headline)
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .lineLimit(2)
+                }
+            }
+            .shadow(color: .black.opacity(0.45), radius: 8, x: 0, y: 3)
+            .padding(14)
+        }
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(.white.opacity(0.18), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    @ViewBuilder
+    private var background: some View {
+        if style == .userPost, let assetName = localAssetName(from: mediaURL), let image = UIImage(named: assetName) {
+            Image(uiImage: image)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .saturation(1.25)
+                .contrast(1.08)
+        } else if style == .userPost, let mediaURL, let url = URL(string: mediaURL) {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let image):
+                    image
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .saturation(1.25)
+                        .contrast(1.08)
+                default:
+                    MapSnapshotImage(
+                        latitude: latitude,
+                        longitude: longitude,
+                        mapType: mapType,
+                        tint: fallbackTint
+                    )
+                }
+            }
+        } else {
+            MapSnapshotImage(
+                latitude: latitude,
+                longitude: longitude,
+                mapType: mapType,
+                tint: fallbackTint
+            )
+        }
+    }
+
+    private func localAssetName(from mediaURL: String?) -> String? {
+        let prefix = "asset://"
+        guard let mediaURL, mediaURL.hasPrefix(prefix) else { return nil }
+        let name = String(mediaURL.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? nil : name
+    }
+}
+
+private struct NewspaperVisualOverlay: View {
+    let style: NewspaperVisualStyle
+    let seed: String
+    let accent: Color
+
+    var body: some View {
+        Canvas { context, size in
+            let seedValue = NewspaperVisualSeed.value(for: seed)
+            let base = min(size.width, size.height)
+            drawLightBeams(in: context, size: size, seed: seedValue)
+
+            switch style {
+            case .dominance:
+                drawTakeoverRings(in: context, size: size, base: base, seed: seedValue)
+            case .mapEvent:
+                drawSignalCluster(in: context, size: size, base: base, seed: seedValue)
+            case .trending:
+                drawTrendGrid(in: context, size: size, base: base, seed: seedValue)
+            case .userPost:
+                drawStoryParticles(in: context, size: size, base: base, seed: seedValue)
+            }
+        }
+    }
+
+    private func drawLightBeams(in context: GraphicsContext, size: CGSize, seed: UInt64) {
+        for index in 0..<4 {
+            let phase = CGFloat((seed >> UInt64(index * 6)) & 63) / 63
+            var path = Path()
+            let x = size.width * (0.12 + phase * 0.76)
+            path.move(to: CGPoint(x: x, y: -18))
+            path.addLine(to: CGPoint(x: x + CGFloat(index - 1) * 38, y: size.height + 24))
+            context.stroke(path, with: .color(.white.opacity(0.08)), lineWidth: 1.2)
+        }
+    }
+
+    private func drawTakeoverRings(in context: GraphicsContext, size: CGSize, base: CGFloat, seed: UInt64) {
+        let center = CGPoint(x: size.width * 0.58, y: size.height * 0.46)
+        for index in 0..<4 {
+            let radius = base * (0.18 + CGFloat(index) * 0.16)
+            let rect = CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)
+            context.stroke(Path(ellipseIn: rect), with: .color(accent.opacity(0.95 - Double(index) * 0.16)), lineWidth: index == 0 ? 4 : 2)
+        }
+
+        for index in 0..<9 {
+            let angle = CGFloat(index) / 9 * .pi * 2 + CGFloat(seed % 29) / 29
+            let radius = base * (0.24 + CGFloat((seed >> UInt64(index)) & 7) / 60)
+            let point = CGPoint(x: center.x + cos(angle) * radius, y: center.y + sin(angle) * radius)
+            context.fill(Path(ellipseIn: CGRect(x: point.x - 3, y: point.y - 3, width: 6, height: 6)), with: .color(.white.opacity(0.75)))
+            context.stroke(Path { path in
+                path.move(to: center)
+                path.addLine(to: point)
+            }, with: .color(accent.opacity(0.36)), lineWidth: 1)
+        }
+    }
+
+    private func drawSignalCluster(in context: GraphicsContext, size: CGSize, base: CGFloat, seed: UInt64) {
+        for index in 0..<14 {
+            let x = size.width * CGFloat((seed >> UInt64((index % 8) * 7)) & 127) / 127
+            let y = size.height * CGFloat((seed >> UInt64((index % 6) * 9)) & 127) / 127
+            let radius = base * (0.045 + CGFloat(index % 4) * 0.012)
+            context.fill(Path(ellipseIn: CGRect(x: x - radius, y: y - radius, width: radius * 2, height: radius * 2)), with: .color(accent.opacity(0.16)))
+            context.stroke(Path(ellipseIn: CGRect(x: x - radius, y: y - radius, width: radius * 2, height: radius * 2)), with: .color(.white.opacity(0.13)), lineWidth: 1)
+        }
+    }
+
+    private func drawTrendGrid(in context: GraphicsContext, size: CGSize, base: CGFloat, seed: UInt64) {
+        let rows = 4
+        let cols = 7
+        let cellW = size.width / CGFloat(cols)
+        let cellH = size.height / CGFloat(rows)
+        for row in 0..<rows {
+            for col in 0..<cols {
+                let mix = CGFloat(((row * cols + col) * 37 + Int(seed % 97)) % 100) / 100
+                let rect = CGRect(
+                    x: CGFloat(col) * cellW + 4,
+                    y: CGFloat(row) * cellH + 4,
+                    width: cellW - 8,
+                    height: cellH - 8
+                )
+                context.fill(Path(roundedRect: rect, cornerRadius: 8), with: .color(accent.opacity(0.05 + Double(mix) * 0.18)))
+            }
+        }
+
+        var path = Path()
+        for index in 0..<8 {
+            let x = CGFloat(index) / 7 * size.width
+            let y = size.height * (0.78 - CGFloat(index) * 0.07 + CGFloat((seed >> UInt64(index)) & 3) * 0.018)
+            if index == 0 { path.move(to: CGPoint(x: x, y: y)) } else { path.addLine(to: CGPoint(x: x, y: y)) }
+        }
+        context.stroke(path, with: .color(accent.opacity(0.92)), lineWidth: 4)
+    }
+
+    private func drawStoryParticles(in context: GraphicsContext, size: CGSize, base: CGFloat, seed: UInt64) {
+        let center = CGPoint(x: size.width * 0.5, y: size.height * 0.5)
+        for index in 0..<18 {
+            let angle = CGFloat(index) / 18 * .pi * 2 + CGFloat(seed % 31) / 31
+            let radius = base * (0.13 + CGFloat(index % 5) * 0.042)
+            let point = CGPoint(x: center.x + cos(angle) * radius, y: center.y + sin(angle) * radius)
+            context.fill(Path(ellipseIn: CGRect(x: point.x - 2, y: point.y - 2, width: 4, height: 4)), with: .color(.white.opacity(0.7)))
+            context.stroke(Path { path in
+                path.move(to: center)
+                path.addLine(to: point)
+            }, with: .color(accent.opacity(0.18)), lineWidth: 1)
+        }
+
+        let rect = CGRect(x: center.x - base * 0.24, y: center.y - base * 0.24, width: base * 0.48, height: base * 0.48)
+        context.stroke(Path(roundedRect: rect, cornerRadius: 18), with: .color(accent.opacity(0.68)), lineWidth: 2.5)
+    }
+}
+
+private enum NewspaperVisualSeed {
+    static func value(for text: String) -> UInt64 {
+        var result: UInt64 = 5_381
+        for scalar in text.unicodeScalars {
+            result = ((result << 5) &+ result) &+ UInt64(scalar.value)
+        }
+        return result
+    }
+}
+
 // MARK: - Full-page article card
 
 private struct NewspaperArticleCard: View {
@@ -390,6 +703,20 @@ private struct NewspaperArticleCard: View {
                         city: a.city, flag: a.flag, timeAgo: a.timeAgo)
             headlineText(a.headline)
             divider
+            NewspaperGeneratedVisual(
+                style: .mapEvent,
+                latitude: a.latitude,
+                longitude: a.longitude,
+                city: a.city,
+                flag: a.flag,
+                headline: a.headline,
+                accent: Color(red: 1.0, green: 0.85, blue: 0.10),
+                username: nil,
+                mediaURL: nil
+            )
+                .frame(height: 172)
+                .padding(.horizontal, 26)
+                .padding(.top, 12)
             bodyText(a.detail)
             statsRow(
                 stat1: (icon: "person.2.fill",   value: briefCount(a.userCount) + " users nearby"),
@@ -407,6 +734,20 @@ private struct NewspaperArticleCard: View {
                         city: a.city, flag: a.flag, timeAgo: a.timeAgo)
             headlineText(a.headline)
             divider
+            NewspaperGeneratedVisual(
+                style: .trending,
+                latitude: a.latitude,
+                longitude: a.longitude,
+                city: a.city,
+                flag: a.flag,
+                headline: a.headline,
+                accent: Color(red: 0.18, green: 0.90, blue: 0.50),
+                username: nil,
+                mediaURL: nil
+            )
+                .frame(height: 172)
+                .padding(.horizontal, 26)
+                .padding(.top, 12)
             bodyText(a.detail)
             statsRow(
                 stat1: (icon: "chart.line.uptrend.xyaxis", value: "+\(a.growthPercent)% engagement"),
@@ -436,6 +777,20 @@ private struct NewspaperArticleCard: View {
 
             headlineText(a.headline, size: 32)
             divider
+            NewspaperGeneratedVisual(
+                style: .dominance,
+                latitude: a.latitude,
+                longitude: a.longitude,
+                city: a.city,
+                flag: a.flag,
+                headline: a.headline,
+                accent: Color(red: 0.85, green: 0.10, blue: 0.10),
+                username: a.username,
+                mediaURL: nil
+            )
+                .frame(height: 172)
+                .padding(.horizontal, 26)
+                .padding(.top, 12)
             bodyText(a.detail)
             statsRow(
                 stat1: (icon: "scope",     value: a.radiusText + " radius"),
@@ -460,6 +815,20 @@ private struct NewspaperArticleCard: View {
 
             headlineText(a.headline)
             divider
+            NewspaperGeneratedVisual(
+                style: .userPost,
+                latitude: a.latitude,
+                longitude: a.longitude,
+                city: a.city,
+                flag: a.flag,
+                headline: a.headline,
+                accent: .white,
+                username: a.username,
+                mediaURL: a.mediaURL
+            )
+                .frame(height: 172)
+                .padding(.horizontal, 26)
+                .padding(.top, 12)
             bodyText(a.detail)
             statsRow(
                 stat1: (icon: "heart.fill",      value: briefCount(a.likes) + " likes"),
@@ -791,7 +1160,8 @@ struct NewspaperGenerator {
                     comments: fakeComments[gi % fakeComments.count],
                     latitude: realPost?.latitude ?? (city.lat + jitter()),
                     longitude: realPost?.longitude ?? (city.lon + jitter()),
-                    timeAgo: timeAgo
+                    timeAgo: timeAgo,
+                    mediaURL: realPost?.mediaURL
                 ))
             }
         }

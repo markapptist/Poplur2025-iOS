@@ -10,6 +10,17 @@ import SpriteKit
 import GoogleMobileAds
 #endif
 
+private actor GeocodeCountryCache {
+    private var values: [String: String] = [:]
+
+    func value(for key: String) -> String? {
+        values[key]
+    }
+
+    func store(_ value: String, for key: String) {
+        values[key] = value
+    }
+}
 
 // MARK: - PERFORMANCE OPTIMIZATION STRATEGY
 // 1. INSTANT INITIALIZATION: Bootstrap is fully synchronous - no async/await delays
@@ -22,6 +33,7 @@ struct FeedView: View {
     @Environment(\.layoutPreviewMode) private var layoutPreviewMode
     var homeChromeInactive: Bool = false
 
+    @ObservedObject private var settings = SettingsStore.shared
     @StateObject private var fallbackLocationProvider = LocationProvider()
     @StateObject private var poleModel = PolePositionModel()
     private var activeLocationProvider: LocationProvider { fallbackLocationProvider }
@@ -80,6 +92,10 @@ struct FeedView: View {
     @State private var tvTransitionChannelCategory: String = "Food"
     @State private var tvTransitionToken: Int = 0
 
+    // AI host bumper
+    @ObservedObject private var bumper = BumperService.shared
+    @State private var activeBumperData: Data? = nil
+
     // Country paging (horizontal swipe)
     @State private var selectedCountryIndex: Int = 0
     private let countries: [(code: String, name: String, flag: String)] = [
@@ -88,6 +104,9 @@ struct FeedView: View {
     
     // Channel/Category paging (vertical swipe)
     @State private var selectedChannelIndex: Int = 0
+    @State private var activeFeedChannelButton: FeedChannelButtonKind? = nil
+    @State private var feedChannelButtonPressToken: Int = 0
+    @AppStorage("poplur_feedChannelButtonsSpriteKit2D") private var useSpriteKitFeedChannelButtons: Bool = false
     private let channels: [(id: String, number: Int, name: String, emoji: String, iconAssetName: String)] = [
         ("food", 101, "Food", "🍔", "poplur_channel_101_food"),
         ("beauty", 103, "Beauty", "💄", "poplur_channel_103_beauty"),
@@ -135,8 +154,7 @@ struct FeedView: View {
     }
     
     // Simple cache for geocoding results to avoid redundant network calls
-    private static var geocodeCache: [String: String] = [:]
-    private static let geocodeCacheLock = NSLock()
+    private static let geocodeCache = GeocodeCountryCache()
     
     // Resolve ISO country code from coordinate using reverse geocoding (with caching)
     private func geocodeCountry(from coordinate: CLLocationCoordinate2D) async -> String? {
@@ -144,11 +162,7 @@ struct FeedView: View {
         let cacheKey = String(format: "%.2f,%.2f", coordinate.latitude, coordinate.longitude)
         
         // Check cache first
-        Self.geocodeCacheLock.lock()
-        let cached = Self.geocodeCache[cacheKey]
-        Self.geocodeCacheLock.unlock()
-        
-        if let cached {
+        if let cached = await Self.geocodeCache.value(for: cacheKey) {
             print("[Geocode] Using cached result for \(cacheKey): \(cached)")
             return cached
         }
@@ -158,10 +172,7 @@ struct FeedView: View {
         do {
             let placemarks = try await geocoder.reverseGeocodeLocation(location)
             if let pm = placemarks.first, let isoCode = pm.isoCountryCode {
-                // Store in cache
-                Self.geocodeCacheLock.lock()
-                Self.geocodeCache[cacheKey] = isoCode
-                Self.geocodeCacheLock.unlock()
+                await Self.geocodeCache.store(isoCode, for: cacheKey)
                 return isoCode
             }
         } catch {
@@ -201,12 +212,18 @@ struct FeedView: View {
                             .transition(.opacity.combined(with: .scale(scale: 0.96)))
                     }
                 }
-                .rotation3DEffect(.degrees(isFlippingTimeline ? 180 : 0), axis: (x: 0, y: 1, z: 0), perspective: 0.72)
+                .modifier(
+                    FeedTimelineTransitionMotion(
+                        style: settings.transitionStylePreference,
+                        isFlipping: isFlippingTimeline
+                    )
+                )
                 .animation(.spring(response: 0.48, dampingFraction: 0.82), value: showTimelineView)
                 .animation(.easeInOut(duration: 0.24), value: isFlippingTimeline)
 
                 if showFeedEntryLogo {
                     FeedEntryLogoPopView()
+                        .allowsHitTesting(false)
                         .zIndex(100)
                         .transition(.opacity)
                 }
@@ -319,6 +336,7 @@ struct FeedView: View {
                 showTVGuide = true
             }
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            NotificationCenter.default.post(name: .FeedTVGuideBecameVisible, object: nil)
         }
         .onReceive(NotificationCenter.default.publisher(for: .FeedOpenNews)) { _ in
             guard !posts.isEmpty else { return }
@@ -336,6 +354,15 @@ struct FeedView: View {
             addCommentToCurrentPost(text)
         }
         .background(feedNotificationReceivers)
+        // AI host bumper overlay — shown before each post when ready
+        .fullScreenCover(item: Binding(
+            get: { activeBumperData.map { BumperItem(audioData: $0) } },
+            set: { if $0 == nil { activeBumperData = nil } }
+        )) { item in
+            FeedBumperView(audioData: item.audioData) {
+                activeBumperData = nil
+            }
+        }
     }
 
     // MARK: - Notification receivers (split to help Swift type-checker)
@@ -354,6 +381,19 @@ struct FeedView: View {
                 let post = posts[newIndex]
                 print("📱 [Feed] Showing post at index \(newIndex), radius: \(post.radius)m")
                 publishCurrentPostMetrics(duration: 0.6)
+
+                // Show bumper if ready for this post, then pre-fetch next two
+                if let audio = bumper.bumpers[post.id]?.audioData {
+                    activeBumperData = audio
+                }
+                let ch = channels[safe: selectedChannelIndex]
+                let channelName = ch?.name ?? "General"
+                let channelID   = ch?.id   ?? ""
+                for offset in 1...2 {
+                    if let next = posts[safe: newIndex + offset] {
+                        bumper.prefetch(next, channelName: channelName, channelID: channelID)
+                    }
+                }
             }
             .onAppear {
                 handleFeedReceiversAppear()
@@ -398,6 +438,9 @@ struct FeedView: View {
             .onChange(of: showTVGuide) { _, visible in
                 tvGuideActivePlayer = visible ? FeedAudioManager.shared.activePlayer : nil
                 NotificationCenter.default.post(name: .MainTabChildRouteVisibilityChanged, object: visible)
+                if !visible {
+                    NotificationCenter.default.post(name: .FeedTVGuideBecameHidden, object: nil)
+                }
             }
             .onReceive(NotificationCenter.default.publisher(for: .ActiveFeedPlayerDidChange)) { notification in
                 guard showTVGuide else { return }
@@ -590,6 +633,7 @@ struct FeedView: View {
                                     case .vertical:
                                         if value.translation.height <= -verticalThreshold {
                                             // swipe up -> next post
+                                            pulseFeedChannelButton(.up)
                                             if !posts.isEmpty {
                                                 flashTransition()
                                                 currentIndex = min(currentIndex + 1, posts.count - 1)
@@ -609,6 +653,7 @@ struct FeedView: View {
                                             maybeShowAd()
                                         } else if value.translation.height >= verticalThreshold {
                                             // swipe down -> previous channel
+                                            pulseFeedChannelButton(.down)
                                             let nextChannelIndex = (selectedChannelIndex - 1 + channels.count) % channels.count
                                             flashTransition(targetChannelIndex: nextChannelIndex)
                                             selectedChannelIndex = nextChannelIndex
@@ -711,6 +756,7 @@ struct FeedView: View {
                                     case .vertical:
                                         if value.translation.height <= -verticalThreshold {
                                             // swipe up -> next post
+                                            pulseFeedChannelButton(.up)
                                             if !posts.isEmpty {
                                                 flashTransition()
                                                 currentIndex = min(currentIndex + 1, posts.count - 1)
@@ -730,6 +776,7 @@ struct FeedView: View {
                                             maybeShowAd()
                                         } else if value.translation.height >= verticalThreshold {
                                             // swipe down -> previous post
+                                            pulseFeedChannelButton(.down)
                                             if !posts.isEmpty {
                                                 flashTransition()
                                                 currentIndex = max(currentIndex - 1, 0)
@@ -853,6 +900,37 @@ struct FeedView: View {
                     }
             }
 
+            if !showTVGuide {
+                GeometryReader { proxy in
+                    Group {
+                        if useSpriteKitFeedChannelButtons {
+                            FeedChannelStepperSpriteKit2D(
+                                activeButton: activeFeedChannelButton,
+                                pressToken: feedChannelButtonPressToken,
+                                onUp: { changeFeedChannel(.up) },
+                                onDown: { changeFeedChannel(.down) }
+                            )
+                        } else {
+                            FeedChannelStepper3D(
+                                activeButton: activeFeedChannelButton,
+                                pressToken: feedChannelButtonPressToken,
+                                onUp: { changeFeedChannel(.up) },
+                                onDown: { changeFeedChannel(.down) }
+                            )
+                        }
+                    }
+                    .frame(width: 86, height: 208)
+                    .shadow(color: .black.opacity(0.45), radius: 12, x: 0, y: 6)
+                    .position(
+                        x: proxy.safeAreaInsets.leading + 28 + 43,
+                        y: proxy.size.height * 0.5
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                    .allowsHitTesting(true)
+                }
+                .zIndex(26)
+            }
+
             // Wrap overlays in a separate ZStack with allowsHitTesting(false) to avoid gesture conflicts and ensure no offset
             ZStack {
                 if showHeart {
@@ -931,21 +1009,44 @@ struct FeedView: View {
     }
 
     private var tvGuideChannels: [FeedTVGuideChannel] {
-        let usernames = [
+        let fallbackNames = [
             "Mia", "Jay", "Alex Johnson", "Samira Khan", "Diego Morales",
-            "Mina Park", "Noah Lee", "Ava Chen", "Kai Brooks"
+            "Mina Park", "Noah Lee", "Ava Chen", "Kai Brooks", "Leo Vance",
+            "Priya Sen", "Carlos R", "Yuki T", "Fatima Al"
         ]
         let programs = [
             "Live posts", "Street check-in", "Creator spotlight", "Radius live",
             "City pulse", "Trending now", "Late feed", "Local signal", "Fresh uploads"
         ]
+        let channelCount = channels.count
 
         return channels.enumerated().map { index, channel in
-            let post = posts[safe: index]
-            let fallbackUser = usernames[index % usernames.count]
-            let userID = post?.isPoplurAd == true ? "tv_\(channel.id)_user" : (post?.userID ?? "tv_\(channel.id)_user")
-            let resolvedName = post.map { displayName(for: $0) }
-            let username = post?.isPoplurAd == true ? "Poplur" : ((resolvedName?.isEmpty == false && resolvedName != "Sponsored") ? (resolvedName ?? fallbackUser) : fallbackUser)
+            // Primary post (one per channel, in order)
+            let primaryPost = posts[safe: index]
+            let fallbackUser = fallbackNames[index % fallbackNames.count]
+            let userID = primaryPost?.isPoplurAd == true ? "tv_\(channel.id)_user" : (primaryPost?.userID ?? "tv_\(channel.id)_user")
+            let resolvedPrimary = primaryPost.map { displayName(for: $0) }
+            let primaryName = primaryPost?.isPoplurAd == true
+                ? "Poplur"
+                : ((resolvedPrimary?.isEmpty == false && resolvedPrimary != "Sponsored") ? (resolvedPrimary ?? fallbackUser) : fallbackUser)
+
+            // Additional names: round-robin through remaining posts
+            var collectedNames: [String] = [primaryName]
+            var round = 1
+            while collectedNames.count < 5 {
+                let postIndex = index + round * channelCount
+                if let post = posts[safe: postIndex] {
+                    let name = post.isPoplurAd ? "Poplur" : displayName(for: post)
+                    if !name.isEmpty && name != "Sponsored" && !collectedNames.contains(name) {
+                        collectedNames.append(name)
+                    }
+                } else {
+                    let fb = fallbackNames[(index + round * 3) % fallbackNames.count]
+                    if !collectedNames.contains(fb) { collectedNames.append(fb) }
+                }
+                round += 1
+                if round > 6 { break }
+            }
 
             let language = AITranslationCaptionProvider.sourceLanguage(for: channel.id)
             let program = language == .english
@@ -959,9 +1060,10 @@ struct FeedView: View {
                 category: channel.name,
                 iconAssetName: channel.iconAssetName,
                 userID: userID,
-                username: username,
+                username: primaryName,
+                usernames: collectedNames,
                 program: program,
-                videoURL: post.flatMap { URL(string: $0.mediaURL) }
+                videoURL: primaryPost.flatMap { URL(string: $0.mediaURL) }
             )
         }
     }
@@ -1014,6 +1116,40 @@ struct FeedView: View {
 
     private func noteFeedInteraction() {
         NotificationCenter.default.post(name: .FeedUserInteraction, object: nil)
+    }
+
+    private func pulseFeedChannelButton(_ button: FeedChannelButtonKind) {
+        feedChannelButtonPressToken += 1
+        let token = feedChannelButtonPressToken
+        activeFeedChannelButton = button
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.26) {
+            guard token == feedChannelButtonPressToken else { return }
+            activeFeedChannelButton = nil
+        }
+    }
+
+    private func changeFeedChannel(_ direction: FeedChannelButtonKind) {
+        guard direction != .ch else { return }
+        noteFeedInteraction()
+        showCommentCredits = false
+        pulseFeedChannelButton(direction)
+
+        let step = direction == .up ? 1 : -1
+        let nextChannelIndex = (selectedChannelIndex + step + channels.count) % channels.count
+        flashTransition(targetChannelIndex: nextChannelIndex)
+        selectedChannelIndex = nextChannelIndex
+        currentIndex = 0
+
+        Task { @MainActor in
+            await reloadForChannel()
+        }
+
+        UIImpactFeedbackGenerator(style: .heavy).impactOccurred(intensity: 0.95)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        }
+        playOneShotPop()
     }
 
     private func likeCurrentPost() {
@@ -1323,9 +1459,11 @@ struct FeedView: View {
             player.play()
             popPlayer = player
             // Auto release after it finishes (~0.5s typical)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak popPlayer] in
-                self.popPlayer?.stop()
-                self.popPlayer = nil
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                if self.popPlayer === player {
+                    player.stop()
+                    self.popPlayer = nil
+                }
             }
         } catch {
             print("[PopSound] Failed to play: \(error)")
@@ -1950,6 +2088,7 @@ fileprivate struct FeedTVGuideChannel: Identifiable, Hashable {
     let iconAssetName: String
     let userID: String
     let username: String
+    let usernames: [String]
     let program: String
     var videoURL: URL? = nil
 }
@@ -1982,6 +2121,7 @@ private struct FeedTVGuideView: View {
     let onChannelSelected: (FeedTVGuideChannel) -> Void
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @AppStorage("poplur_tvGuideFlipAnimation") private var useFlipAnimation: Bool = true
     @State private var isTabletMenuOpen = true
     @State private var previewedChannelID: String
 
@@ -2022,11 +2162,10 @@ private struct FeedTVGuideView: View {
                                     .frame(width: 220)
                                     .transition(.move(edge: .leading).combined(with: .opacity))
                             }
-
-                            guideListWithPip(isTablet: true)
+                            guideContent
                         }
                     } else {
-                        guideListWithPip(isTablet: false)
+                        guideContent
                     }
                 }
                 .padding(.top, proxy.safeAreaInsets.top)
@@ -2040,49 +2179,76 @@ private struct FeedTVGuideView: View {
     private var previewedChannel: FeedTVGuideChannel {
         channels.first { $0.id == previewedChannelID }
             ?? channels.first
-            ?? FeedTVGuideChannel(id: "feed", number: 101, emoji: "▶", category: "Feed", iconAssetName: "poplur_channel_101_food",
-                                  userID: "", username: currentPostName, program: "Live posts")
+            ?? FeedTVGuideChannel(id: "feed", number: 101, emoji: "▶", category: "Feed",
+                                  iconAssetName: "poplur_channel_101_food",
+                                  userID: "", username: currentPostName,
+                                  usernames: [currentPostName], program: "Live posts")
     }
 
-    /// Channel list with floating PiP corner overlay
-    private func guideListWithPip(isTablet: Bool) -> some View {
-        let pipWidth: CGFloat = isTablet ? 200 : 148
-        let pipHeight: CGFloat = pipWidth * (16.0 / 9.0)
-
-        return ZStack(alignment: .topTrailing) {
-            guideList
-
-            // Real PiP video corner
+    // PiP in its own band above the list — never overlaps rows
+    private var pipPreviewBand: some View {
+        let pip = previewedChannel
+        return HStack(spacing: 12) {
             GuidePipVideoPane(
-                channel: previewedChannel,
+                channel: pip,
                 currentPostName: previewedChannelID == currentChannelID ? currentPostName : "",
                 activeFeedPlayer: activeFeedPlayer,
                 guideGreen: guideGreen
             )
-            .frame(width: pipWidth, height: pipHeight)
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .shadow(color: .black.opacity(0.55), radius: 10, x: 0, y: 4)
-            .padding(.top, 8)
-            .padding(.trailing, 12)
+            .frame(width: 62, height: 110)
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .shadow(color: .black.opacity(0.55), radius: 8, x: 0, y: 3)
             .animation(.spring(response: 0.28, dampingFraction: 0.82), value: previewedChannelID)
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    ChannelAssetIcon(assetName: pip.iconAssetName, fallbackEmoji: pip.emoji, size: 22, fallbackFontSize: 14)
+                    Text("CH \(pip.number)")
+                        .font(.system(size: 16, weight: .black, design: .monospaced))
+                        .foregroundStyle(guideGreen)
+                }
+                Text(pip.category.uppercased())
+                    .font(.system(size: 11, weight: .black, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.62))
+                    .kerning(0.8)
+                Text(pip.program)
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.42))
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            Text("LIVE")
+                .font(.system(size: 10, weight: .black, design: .monospaced))
+                .foregroundStyle(.black)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(guideGreen, in: Capsule())
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(Color.black.opacity(0.62))
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(guideGreen.opacity(0.22)).frame(height: 1)
         }
     }
 
-    private var guideList: some View {
+    // Dedicated PiP band + scrollable channel list
+    private var guideContent: some View {
         VStack(spacing: 0) {
+            pipPreviewBand
             columnHeader
-
             ScrollView(.vertical, showsIndicators: false) {
                 LazyVStack(spacing: 0) {
                     ForEach(channels) { channel in
                         FeedTVGuideRow(
                             channel: channel,
                             isSelected: channel.id == previewedChannelID,
-                            guideGreen: guideGreen
+                            guideGreen: guideGreen,
+                            useFlipAnimation: useFlipAnimation
                         )
-                        .onTapGesture(count: 2) {
-                            onChannelSelected(channel)
-                        }
+                        .onTapGesture(count: 2) { onChannelSelected(channel) }
                         .onTapGesture(count: 1) {
                             withAnimation(.spring(response: 0.24, dampingFraction: 0.80)) {
                                 previewedChannelID = channel.id
@@ -2105,11 +2271,9 @@ private struct FeedTVGuideView: View {
                 } label: {
                     HStack(spacing: 10) {
                         ChannelAssetIcon(assetName: channel.iconAssetName, fallbackEmoji: channel.emoji, size: 34, fallbackFontSize: 22)
-
                         Text("\(channel.number)")
-                            .font(.system(size: 18, weight: .black, design: .rounded))
+                            .font(.system(size: 18, weight: .black, design: .monospaced))
                             .foregroundStyle(guideGreen)
-
                         Text(channel.category.uppercased())
                             .font(.system(size: 12, weight: .black))
                             .foregroundStyle(.white.opacity(channel.id == currentChannelID ? 1 : 0.62))
@@ -2128,55 +2292,55 @@ private struct FeedTVGuideView: View {
     }
 
     private func guideHeader(isTablet: Bool) -> some View {
-        VStack(spacing: 0) {
-            HStack {
-                if isTablet {
-                    Button {
-                        withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
-                            isTabletMenuOpen.toggle()
-                        }
-                    } label: {
-                        Image(systemName: "line.3.horizontal")
-                            .font(.system(size: 20, weight: .black))
-                            .foregroundStyle(.white)
-                            .frame(width: 44, height: 44)
+        HStack {
+            if isTablet {
+                Button {
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                        isTabletMenuOpen.toggle()
                     }
-                    .buttonStyle(.plain)
-                }
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("TV GUIDE")
-                        .font(.system(size: isTablet ? 34 : 28, weight: .black))
-                        .foregroundStyle(.white)
-                    Text("LIVE CHANNELS")
-                        .font(.system(size: 12, weight: .heavy))
-                        .foregroundStyle(guideGreen)
-                }
-
-                Spacer()
-
-                Button(action: onDismiss) {
-                    Image(systemName: "xmark")
+                } label: {
+                    Image(systemName: "line.3.horizontal")
                         .font(.system(size: 20, weight: .black))
                         .foregroundStyle(.white)
-                        .frame(width: 52, height: 52)
-                        .background(Color.white.opacity(0.1), in: Circle())
+                        .frame(width: 44, height: 44)
                 }
                 .buttonStyle(.plain)
             }
-            .padding(.horizontal, isTablet ? 24 : 18)
-            .padding(.top, 14)
-            .padding(.bottom, 14)
-            .background(Color.black.opacity(0.86))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("TV GUIDE")
+                    .font(.system(size: isTablet ? 34 : 28, weight: .black, design: .monospaced))
+                    .foregroundStyle(guideGreen)
+                Text("LIVE CHANNELS")
+                    .font(.system(size: 12, weight: .heavy, design: .monospaced))
+                    .foregroundStyle(guideGreen.opacity(0.72))
+                    .kerning(1.2)
+            }
+
+            Spacer()
+
+            Button(action: onDismiss) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 20, weight: .black))
+                    .foregroundStyle(.white)
+                    .frame(width: 52, height: 52)
+                    .background(Color.white.opacity(0.1), in: Circle())
+            }
+            .buttonStyle(.plain)
         }
+        .padding(.horizontal, isTablet ? 24 : 18)
+        .padding(.top, 14)
+        .padding(.bottom, 14)
+        .background(Color.black.opacity(0.86))
     }
 
+    // CH=80, CATEGORY=90 (narrowed from 134), ON NOW=flex
     private var columnHeader: some View {
         HStack(spacing: 0) {
             Text("CH")
-                .frame(width: 96, alignment: .leading)
+                .frame(width: 80, alignment: .leading)
             Text("CATEGORY")
-                .frame(width: 134, alignment: .leading)
+                .frame(width: 90, alignment: .leading)
             Text("ON NOW")
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -2188,50 +2352,120 @@ private struct FeedTVGuideView: View {
     }
 }
 
+// Continuous left-scrolling marquee for TV guide username rows
+private struct TVGuideMarquee: View {
+    let text: String
+    let font: Font
+    let color: Color
+
+    @State private var offset: CGFloat = 0
+    @State private var textWidth: CGFloat = 0
+    @State private var containerWidth: CGFloat = 0
+    @State private var animating = false
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Text(text)
+                    .font(font)
+                    .fixedSize()
+                    .hidden()
+                    .background(
+                        GeometryReader { tw in
+                            Color.clear
+                                .onAppear {
+                                    textWidth = tw.size.width
+                                    containerWidth = geo.size.width
+                                    triggerIfNeeded()
+                                }
+                                .onChange(of: text) { _, _ in
+                                    textWidth = tw.size.width
+                                    containerWidth = geo.size.width
+                                    offset = 0
+                                    animating = false
+                                    triggerIfNeeded()
+                                }
+                        }
+                    )
+                Text(text)
+                    .font(font)
+                    .foregroundStyle(color)
+                    .fixedSize()
+                    .offset(x: offset)
+            }
+            .clipped()
+            .frame(width: geo.size.width, alignment: .leading)
+        }
+    }
+
+    private func triggerIfNeeded() {
+        guard !animating, textWidth > containerWidth else { return }
+        animating = true
+        let gap: CGFloat = 36
+        let scroll = textWidth - containerWidth + gap
+        let duration = Double(scroll) / 44.0
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
+            withAnimation(.linear(duration: duration)) {
+                offset = -scroll
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + duration + 1.2) {
+                withAnimation(.none) { offset = 0 }
+                animating = false
+                triggerIfNeeded()
+            }
+        }
+    }
+}
+
 private struct FeedTVGuideRow: View {
     let channel: FeedTVGuideChannel
     let isSelected: Bool
     let guideGreen: Color
+    let useFlipAnimation: Bool
+
+    // Marquee ticker: all usernames joined — scrolls left continuously
+    private var tickerText: String {
+        let names = channel.usernames.isEmpty ? [channel.username] : channel.usernames
+        return names.joined(separator: "  ▶  ")
+    }
 
     var body: some View {
         HStack(spacing: 0) {
-            HStack(spacing: 10) {
-                ChannelAssetIcon(assetName: channel.iconAssetName, fallbackEmoji: channel.emoji, size: 42, fallbackFontSize: 26)
+            // CH column (80pt)
+            HStack(spacing: 8) {
+                ChannelAssetIcon(assetName: channel.iconAssetName, fallbackEmoji: channel.emoji, size: 34, fallbackFontSize: 22)
                 Text("\(channel.number)")
-                    .font(.system(size: 28, weight: .black, design: .rounded))
-                    .foregroundStyle(guideGreen)
+                    .font(.system(size: 22, weight: .black, design: .monospaced))
+                    .foregroundStyle(isSelected ? guideGreen : .white)
+                    .monospacedDigit()
             }
-            .frame(width: 96, alignment: .leading)
+            .frame(width: 80, alignment: .leading)
 
+            // CATEGORY column (90pt)
             Text(channel.category.uppercased())
-                .font(.system(size: 15, weight: .black))
-                .foregroundStyle(Color.white.opacity(0.86))
+                .font(.system(size: 12, weight: .black, design: .monospaced))
+                .foregroundStyle(isSelected ? guideGreen : Color.white.opacity(0.72))
                 .lineLimit(1)
-                .frame(width: 134, alignment: .leading)
+                .frame(width: 90, alignment: .leading)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(channel.username)
-                    .font(.system(size: 20, weight: .black))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
+            // ON NOW — scrolling marquee of all users in this channel
+            TVGuideMarquee(
+                text: tickerText,
+                font: .system(size: 16, weight: .black, design: .monospaced),
+                color: .white
+            )
 
-                Text(channel.program)
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(Color.white.opacity(0.58))
-                    .lineLimit(1)
-            }
-
-            Spacer(minLength: 8)
-
+            // LIVE badge
             Text("LIVE")
-                .font(.system(size: 10, weight: .black, design: .monospaced))
-                .foregroundStyle(Color.black)
-                .padding(.horizontal, 7)
-                .padding(.vertical, 4)
+                .font(.system(size: 9, weight: .black, design: .monospaced))
+                .foregroundStyle(.black)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
                 .background(guideGreen, in: Capsule())
+                .padding(.leading, 8)
         }
         .padding(.horizontal, 20)
-        .frame(height: 78)
+        .frame(height: 62)
         .background(rowBackground)
         .overlay(alignment: .bottom) {
             Rectangle()
@@ -2280,7 +2514,7 @@ private struct GuidePipVideoPane: View {
                 HStack(spacing: 5) {
                     ChannelAssetIcon(assetName: channel.iconAssetName, fallbackEmoji: channel.emoji, size: 22, fallbackFontSize: 13)
                     Text("CH \(channel.number)")
-                        .font(.system(size: 13, weight: .black, design: .rounded))
+                        .font(.system(size: 13, weight: .black, design: .monospaced))
                         .foregroundStyle(guideGreen)
                 }
 
@@ -2434,6 +2668,11 @@ private struct FeedBreakingNewsConfettiOverlay: UIViewRepresentable {
     }
 }
 
+private struct BumperItem: Identifiable {
+    let id = UUID()
+    let audioData: Data
+}
+
 private struct FeedCommentCredit: Identifiable, Hashable {
     let id = UUID()
     let username: String
@@ -2580,6 +2819,28 @@ private final class FeedBreakingNewsConfettiScene: SKScene {
         return UIGraphicsImageRenderer(size: size).image { context in
             UIColor.white.setFill()
             context.fill(CGRect(origin: .zero, size: size))
+        }
+    }
+}
+
+private struct FeedTimelineTransitionMotion: ViewModifier {
+    let style: TransitionStylePreference
+    let isFlipping: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        switch style {
+        case .twoD:
+            content
+                .scaleEffect(isFlipping ? 0.96 : 1.0)
+                .opacity(isFlipping ? 0.76 : 1.0)
+        case .threeD:
+            content
+                .rotation3DEffect(
+                    .degrees(isFlipping ? 180 : 0),
+                    axis: (x: 0, y: 1, z: 0),
+                    perspective: 0.72
+                )
         }
     }
 }

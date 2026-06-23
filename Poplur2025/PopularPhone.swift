@@ -7,15 +7,11 @@ struct PopularPhone: View {
     let user: FakeUser
 
     @State private var phoneScene: PhoneScene
-    @StateObject private var colorWheel = CubeMenuWheelController()
     @ObservedObject private var callManager = CallSessionManager.shared
     @Environment(\.dismiss) private var dismiss
     @AppStorage("poplur_phoneXLMode") private var phoneXLMode: Bool = true
     @State private var selectedColorway = PoplurPhoneColorway.all[0]
-    @State private var isPhoneButtonActive = true
     @State private var isLCDActive = false
-    @State private var holdWorkItem: DispatchWorkItem?
-    @State private var isHoldingColorWheel = false
 
     init(user: FakeUser) {
         self.user = user
@@ -33,14 +29,13 @@ struct PopularPhone: View {
                 .background(Color.black)
                 .ignoresSafeArea()
 
-            phoneColorButtonHitArea
+            phoneColorSwipeArrows
                 .zIndex(10)
-
-            CubeMenuWheelOverlay(controller: colorWheel)
-                .zIndex(12)
         }
         .background(Color.black)
         .ignoresSafeArea()
+        .contentShape(Rectangle())
+        .simultaneousGesture(phoneColorSwipeGesture)
         .onChange(of: phoneXLMode) { _, xl in
             phoneScene.applyPhoneSize(xl)
         }
@@ -49,7 +44,6 @@ struct PopularPhone: View {
             NotificationCenter.default.post(name: Notification.Name("CubeInteractionDisabled"), object: nil)
             phoneScene.applyPhoneSize(phoneXLMode)
             phoneScene.applyColorway(selectedColorway.bootupSpritesheetName)
-            phoneScene.setPhoneButtonActive(isPhoneButtonActive, announce: false)
             phoneScene.onDismiss = { dismiss() }
             phoneScene.onLCDActivated = { isLCDActive = true }
             phoneScene.onLCDDeactivated = { isLCDActive = false }
@@ -68,8 +62,6 @@ struct PopularPhone: View {
             }
         }
         .onDisappear {
-            cancelColorHold()
-            colorWheel.endHold(activateSelected: false)
             NotificationCenter.default.post(name: Notification.Name("CubeInteractionEnabled"), object: nil)
             phoneScene.stopAllSounds()
             Task { await callManager.endCall() }
@@ -87,107 +79,39 @@ struct PopularPhone: View {
         }
     }
 
-    private var phoneColorButtonHitArea: some View {
-        GeometryReader { proxy in
-            let frame = fittedPhoneFrame(in: proxy.size)
-            let button = CGRect(
-                x: frame.minX + frame.width * 0.335,
-                y: frame.minY + frame.height * 0.485,
-                width: frame.width * 0.330,
-                height: frame.height * 0.080
-            )
-
-            Color.clear
-                .frame(width: button.width, height: button.height)
-                .position(x: button.midX, y: button.midY)
-                .contentShape(Ellipse())
-                .gesture(
-                    DragGesture(minimumDistance: 0)
-                        .onChanged { _ in
-                            scheduleColorHold()
-                        }
-                        .onEnded { _ in
-                            finishColorButtonGesture()
-                        }
-                )
+    private var phoneColorSwipeArrows: some View {
+        HStack {
+            swipeArrow(systemName: "chevron.left")
+            Spacer()
+            swipeArrow(systemName: "chevron.right")
         }
+        .padding(.horizontal, 14)
+        .allowsHitTesting(false)
     }
 
-    private func fittedPhoneFrame(in container: CGSize) -> CGRect {
-        let aspect = 1024.0 / 1536.0
-        let availableWidth = max(1, container.width)
-        let availableHeight = max(1, container.height)
-
-        let phoneWidth: CGFloat
-        if phoneXLMode {
-            phoneWidth = max(availableWidth, availableHeight * aspect)
-        } else {
-            let normalHeight = availableHeight * 0.65
-            let normalWidth = normalHeight * aspect
-            phoneWidth = min(normalWidth, availableWidth * 0.88)
-        }
-        let phoneHeight = phoneWidth / aspect
-
-        return CGRect(
-            x: (container.width - phoneWidth) / 2,
-            y: (container.height - phoneHeight) / 2,
-            width: phoneWidth,
-            height: phoneHeight
-        )
+    private func swipeArrow(systemName: String) -> some View {
+        Image(systemName: systemName)
+            .font(.system(size: 34, weight: .black))
+            .foregroundStyle(Color.white.opacity(0.38))
+            .shadow(color: .black.opacity(0.55), radius: 8, x: 0, y: 2)
     }
 
-    private func scheduleColorHold() {
-        guard isLCDActive else { return }
-        guard holdWorkItem == nil, !isHoldingColorWheel else { return }
-        let workItem = DispatchWorkItem {
-            isHoldingColorWheel = true
-            phoneScene.animatePhoneButtonPress("call")
-            colorWheel.beginHold(items: colorWheelItems)
-        }
-        holdWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: workItem)
-    }
-
-    private func finishColorButtonGesture() {
-        if isHoldingColorWheel {
-            colorWheel.endHold(activateSelected: true)
-            isHoldingColorWheel = false
-            holdWorkItem = nil
-        } else {
-            cancelColorHold()
-            if isLCDActive {
-                togglePhoneButtonActive()
-            } else {
-                phoneScene.activateLCD()
-                isLCDActive = true
+    private var phoneColorSwipeGesture: some Gesture {
+        DragGesture(minimumDistance: 44, coordinateSpace: .local)
+            .onEnded { value in
+                let horizontal = value.translation.width
+                let vertical = value.translation.height
+                guard abs(horizontal) > 56, abs(horizontal) > abs(vertical) * 1.35 else { return }
+                stepPhoneColor(by: horizontal < 0 ? 1 : -1)
             }
-        }
     }
 
-    private func cancelColorHold() {
-        holdWorkItem?.cancel()
-        holdWorkItem = nil
-        isHoldingColorWheel = false
-    }
-
-    private func togglePhoneButtonActive() {
-        phoneScene.animatePhoneButtonPress("call")
-        isPhoneButtonActive.toggle()
-        phoneScene.setPhoneButtonActive(isPhoneButtonActive)
-    }
-
-    private var colorWheelItems: [CubeSubmenuItem] {
-        PoplurPhoneColorway.all.map { colorway in
-            CubeSubmenuItem(
-                id: colorway.bootupSpritesheetName,
-                title: colorway.title,
-                systemImage: "circle.fill",
-                tint: colorway.swatch
-            ) {
-                selectedColorway = colorway
-                phoneScene.applyColorway(colorway.bootupSpritesheetName)
-            }
-        }
+    private func stepPhoneColor(by direction: Int) {
+        guard let currentIndex = PoplurPhoneColorway.all.firstIndex(of: selectedColorway) else { return }
+        let count = PoplurPhoneColorway.all.count
+        let nextIndex = (currentIndex + direction + count) % count
+        selectedColorway = PoplurPhoneColorway.all[nextIndex]
+        phoneScene.applyColorway(selectedColorway.bootupSpritesheetName)
     }
 }
 

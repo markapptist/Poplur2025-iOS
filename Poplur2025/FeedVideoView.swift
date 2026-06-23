@@ -27,9 +27,8 @@ public struct FeedVideoView: View {
                     .onAppear { /* playback controlled by FeedAudioManager */ }
                     .onDisappear { player.pause() }
                     .modifier(AspectFillModifier(aspectRatio: aspectRatio))
-            } else {
-                ProgressView()
-                    .tint(.white)
+                    .opacity(ready ? 1 : 0)
+                    .animation(.easeIn(duration: 0.18), value: ready)
             }
         }
         .clipped()

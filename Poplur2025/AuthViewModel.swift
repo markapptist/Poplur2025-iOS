@@ -1,5 +1,6 @@
 // AuthViewModel.swift
 import Foundation
+import FirebaseCore
 import FirebaseAuth
 
 @MainActor
@@ -10,6 +11,11 @@ final class AuthViewModel: ObservableObject {
     private var authHandle: AuthStateDidChangeListenerHandle?
 
     init() {
+        guard FirebaseApp.app() != nil else {
+            print("AuthViewModel: Firebase is not configured yet; starting signed out.")
+            return
+        }
+
         // Seed initial state
         let user = Auth.auth().currentUser
         self.currentUser = user
