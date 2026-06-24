@@ -12,6 +12,7 @@ import FirebaseFirestore
 struct AppSettingsView: View {
     @Environment(\.layoutPreviewMode) private var layoutPreviewMode
     @ObservedObject private var settings = SettingsStore.shared
+    @ObservedObject private var cubeSkinStore = CubeSkinStore.shared
 
     @State private var pageIndex: Int = 0
     @State private var isPrivateAccount = false
@@ -364,6 +365,39 @@ struct AppSettingsView: View {
                     .padding(.top, 4)
                 }
 
+                // Cube Skin
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Cube Skin")
+                        .font(.system(size: 18, weight: .heavy, design: .rounded))
+                        .foregroundColor(.black)
+
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 12) {
+                            ForEach(CubeSkin.allCases) { skin in
+                                Button {
+                                    cubeSkinStore.apply(skin)
+                                } label: {
+                                    VStack(spacing: 5) {
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .fill(cubeSkinPreviewColor(skin))
+                                            .frame(width: 58, height: 58)
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 12)
+                                                    .stroke(cubeSkinStore.current == skin ? Color.black : Color.black.opacity(0.18), lineWidth: cubeSkinStore.current == skin ? 3 : 1)
+                                            )
+                                        Text(skin.displayName)
+                                            .font(.system(size: 10, weight: .semibold, design: .rounded))
+                                            .foregroundColor(.black)
+                                            .lineLimit(1)
+                                    }
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 2)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
                 // Sign out
                 Button(action: signOut) {
                     Text("Sign Out")
@@ -553,6 +587,19 @@ struct AppSettingsView: View {
     private func signOut() {
         do { try Auth.auth().signOut() } catch {
             print("Sign out failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func cubeSkinPreviewColor(_ skin: CubeSkin) -> Color {
+        switch skin {
+        case .rainbow:     return Color(red: 0.55, green: 0.10, blue: 0.95)
+        case .sparklePink: return Color(red: 1.0,  green: 0.40, blue: 0.70)
+        case .gold:        return Color(red: 0.88, green: 0.68, blue: 0.10)
+        case .toy:         return Color(red: 0.95, green: 0.20, blue: 0.20)
+        case .chocolate:   return Color(red: 0.45, green: 0.25, blue: 0.08)
+        case .camo:        return Color(red: 0.30, green: 0.48, blue: 0.18)
+        case .rubber:      return Color(red: 0.20, green: 0.65, blue: 0.90)
+        case .ice:         return Color(red: 0.75, green: 0.92, blue: 1.00)
         }
     }
 

@@ -387,7 +387,7 @@ private final class TVStaticSoundPlayer: ObservableObject {
             let data = Self.makeStaticWAV(duration: duration)
             let player = try AVAudioPlayer(data: data)
             player.numberOfLoops = 0
-            player.volume = 0.52
+            player.volume = 0.18
             player.prepareToPlay()
             player.play()
             self.player = player
@@ -414,7 +414,7 @@ private final class TVStaticSoundPlayer: ObservableObject {
             let fadeIn  = min(1.0, Double(i) / 520.0)
             let fadeOut = min(1.0, Double(sampleCount - i) / 1_350.0)
             let env     = min(fadeIn, fadeOut)
-            let hiss    = Double.random(in: -1.0...1.0) * 0.88
+            let hiss    = Double.random(in: -1.0...1.0) * 0.45
             let crackle = Double.random(in: 0...1) > 0.992 ? Double.random(in: -1.0...1.0) * 0.55 : 0
             let lowHum  = sin(2.0 * .pi * 59.94 * t) * 0.08
             let value   = max(-1.0, min(1.0, (hiss + crackle + lowHum) * env))

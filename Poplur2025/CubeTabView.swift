@@ -17,6 +17,9 @@ private enum CubeFaceImageCache {
         cache[key] = img
         return img
     }
+    static func clearSkinCache() {
+        cache = cache.filter { !$0.key.hasPrefix("face_bg_skin_") }
+    }
 }
 
 // MARK: - Cube Face Exporter
@@ -752,16 +755,16 @@ private struct CubeSceneView: UIViewRepresentable {
     private func uiColor(_ c: Color) -> UIColor { UIColor(c) }
 
     private func makeMaterials(baseColor: Color) -> [SCNMaterial] {
-        // Correct SCNBox face order for SceneKit:
-        // 0: +X (right)  — profile tab visible at yaw=-270°
-        // 1: -X (left)   — record tab  visible at yaw=-90°
+        // SCNBox face order — eulerAngles.y maps each tab to its face:
+        // 0: +X (right)  — record tab    visible at yaw=-90°
+        // 1: -X (left)   — profile tab   visible at yaw=-270°
         // 2: +Y (top)    — decorative (fork+knife)
-        // 3: -Y (bottom) — decorative (Poplur P)
-        // 4: +Z (front)  — map tab     visible at yaw=0°
-        // 5: -Z (back)   — feed tab    visible at yaw=-180°
+        // 3: -Y (bottom) — Poplur P  (P-logo peek face, pitch=-90°)
+        // 4: +Z (front)  — map tab       visible at yaw=0°
+        // 5: -Z (back)   — feed tab      visible at yaw=-180°
         let faceSpecs: [(String, String)] = [
-            ("Profile",  "person.fill"),
             ("Camera",   "camera.fill"),
+            ("Profile",  "person.fill"),
             ("",         "fork.knife"),
             ("",         "p.circle.fill"),
             ("Map",      "map.fill"),
@@ -930,9 +933,11 @@ private struct CubeSceneView: UIViewRepresentable {
     }
 
     private func faceBackgroundOnly(for tab: AppTab, baseColor: Color) -> UIImage {
-        // Neon style: near-black for all faces; baseColor ignored for visual consistency
-        let key = "face_bg_neon_v2"
-        return CubeFaceImageCache.image(for: key) {
+        let skin = CubeSkinStore.shared.current
+        if let skinImage = UIImage(named: skin.diffuseAssetName) {
+            return CubeFaceImageCache.image(for: "face_bg_skin_\(skin.rawValue)") { skinImage }
+        }
+        return CubeFaceImageCache.image(for: "face_bg_neon_v2") {
             let size = CGSize(width: 300, height: 300)
             let renderer = UIGraphicsImageRenderer(size: size)
             return renderer.image { _ in
@@ -1048,6 +1053,14 @@ private struct CubeSceneView: UIViewRepresentable {
         private var suspendSpin: Bool = false
         var isSpinSuspended: Bool { suspendSpin }
 
+        // P-logo periodic peek
+        private var peekPitch: Float = 0
+        private var peekActive: Bool = false
+        private var peekTimer: Timer?
+
+        // Skin change observer
+        private var skinChangeObserver: NSObjectProtocol?
+
         // Added helper functions as per instructions
         private func deg2rad(_ degrees: Float) -> Float { degrees * .pi / 180 }
         private func clamp(_ value: Float, min minVal: Float, max maxVal: Float) -> Float { max(minVal, min(maxVal, value)) }
@@ -1086,6 +1099,10 @@ private struct CubeSceneView: UIViewRepresentable {
             super.init()
             startObservingHold()
             startAccelerometerSimulation()
+            startPeriodicPLogoTimer()
+            skinChangeObserver = NotificationCenter.default.addObserver(forName: .CubeSkinDidChange, object: nil, queue: .main) { [weak self] _ in
+                self?.refreshMaterialsForSkinChange()
+            }
             previewSimObserver = NotificationCenter.default.addObserver(forName: Notification.Name("CubePreviewSimulateMotionEnabled"), object: nil, queue: .main) { [weak self] notif in
                 guard let self = self else { return }
                 let enabled = (notif.userInfo?["enabled"] as? Bool) ?? false
@@ -1155,6 +1172,12 @@ private struct CubeSceneView: UIViewRepresentable {
         }
 
         deinit {
+            peekTimer?.invalidate()
+            peekTimer = nil
+            if let token = skinChangeObserver {
+                NotificationCenter.default.removeObserver(token)
+                skinChangeObserver = nil
+            }
             if let token = previewSimObserver {
                 NotificationCenter.default.removeObserver(token)
                 previewSimObserver = nil
@@ -1175,8 +1198,8 @@ private struct CubeSceneView: UIViewRepresentable {
         }
 
         func applyCurrentProfileIconOverride() {
-            // Profile face is material index 0 (+X right face, visible at yaw=-270°)
-            let profileMaterialIndex = 0
+            // Profile face is material index 1 (-X left face, visible at yaw=-270°)
+            let profileMaterialIndex = 1
             guard cubeMaterials.indices.contains(profileMaterialIndex) else { return }
             let title = profileIconOverride?.title ?? "Profile"
             let icon  = profileIconOverride?.systemImage ?? "person.fill"
@@ -1208,7 +1231,9 @@ private struct CubeSceneView: UIViewRepresentable {
             currentIndex = idx
             currentYaw = Float(idx) * (-Float.pi / 2)
             guard let scnView = view, let cube = scnView.scene?.rootNode.childNode(withName: "cube", recursively: true) else { return }
-            cube.eulerAngles = SCNVector3(0, currentYaw, 0)
+            cube.removeAction(forKey: "peekPLogo")
+            peekPitch = 0; peekActive = false
+            applyCombinedRotation(to: cube)
         }
 
         @objc func handleSwipe(_ gesture: UISwipeGestureRecognizer) {
@@ -1310,8 +1335,9 @@ private struct CubeSceneView: UIViewRepresentable {
                 // Update currentYaw by pan offset scaled by radiansPerPoint
                 currentYaw = panStartYaw + Float(panAccumulated) * radiansPerPoint
 
-                // Apply rotation immediately
-                cube.eulerAngles = SCNVector3(0, currentYaw, 0)
+                // Cancel any active peek so pan takes full control
+                if peekActive { cube.removeAction(forKey: "peekPLogo"); peekPitch = 0; peekActive = false }
+                applyCombinedRotation(to: cube)
 
                 // Clear liveRotation to avoid fighting motion tilt during pan
                 self.liveRotation = SCNVector3Zero
@@ -1575,10 +1601,54 @@ private struct CubeSceneView: UIViewRepresentable {
             print("💤 [CubeTabView] Cube returned to normal emission intensity (flash OFF)")
         }
 
+        private func startPeriodicPLogoTimer() {
+            peekTimer?.invalidate()
+            peekTimer = Timer.scheduledTimer(withTimeInterval: 25, repeats: true) { [weak self] _ in
+                DispatchQueue.main.async { self?.triggerPLogoPeek() }
+            }
+        }
+
+        private func triggerPLogoPeek() {
+            guard !isInteracting, !isBlinking, !peekActive else { return }
+            guard let scnView = view,
+                  let cube = scnView.scene?.rootNode.childNode(withName: "cube", recursively: true) else { return }
+            peekActive = true
+            let tiltDur = 0.45, holdDur = 2.0, returnDur = 0.45
+            let totalDur = tiltDur + holdDur + returnDur
+            let action = SCNAction.customAction(duration: totalDur) { [weak self] _, elapsed in
+                guard let self else { return }
+                let t = Float(elapsed)
+                let target = -Float.pi / 2  // -90° shows the -Y (P logo) bottom face
+                if t < Float(tiltDur) {
+                    self.peekPitch = target * (t / Float(tiltDur))
+                } else if t < Float(tiltDur + holdDur) {
+                    self.peekPitch = target
+                } else {
+                    let rt = t - Float(tiltDur + holdDur)
+                    self.peekPitch = target * max(0, 1 - rt / Float(returnDur))
+                }
+                self.applyCombinedRotation(to: cube)
+            }
+            cube.runAction(action, forKey: "peekPLogo") { [weak self] in
+                self?.peekPitch = 0
+                self?.peekActive = false
+            }
+        }
+
+        private func refreshMaterialsForSkinChange() {
+            guard let scnView = view,
+                  let cube = scnView.scene?.rootNode.childNode(withName: "cube", recursively: true),
+                  let box = cube.geometry as? SCNBox else { return }
+            CubeFaceImageCache.clearSkinCache()
+            let mats = parent.makeMaterials(baseColor: parent.baseColor)
+            box.materials = mats
+            cubeMaterials = mats
+            applyCurrentProfileIconOverride()
+            applyFeedFaceIcon()
+        }
+
         private func applyCombinedRotation(to node: SCNNode) {
-            // Lock cube to yaw-only so faces stay square to the screen
-            let y = currentYaw
-            node.eulerAngles = SCNVector3(0, y, 0)
+            node.eulerAngles = SCNVector3(peekPitch, currentYaw, 0)
         }
 
         func applyPreviewHover(_ enabled: Bool) {

@@ -1,194 +1,287 @@
 import SwiftUI
 import WatchKit
+import SceneKit
+import AVFoundation
 @preconcurrency import WatchConnectivity
 
 // MARK: - Types
 
 enum RadiusTrend { case up, down, stable }
 
-// MARK: - Layout constants (fractions of rendered image)
+// MARK: - Static audio helpers (free functions — no actor isolation needed)
 
-private let LCD_LEFT:   CGFloat = 0.087
-private let LCD_RIGHT:  CGFloat = 0.913
-private let LCD_TOP:    CGFloat = 0.096
-private let LCD_BOTTOM: CGFloat = 0.906
-private let IMG_ASPECT: CGFloat = 1136.0 / 1385.0
-
-// MARK: - Watch face artwork
-
-private enum WatchFaceArtwork: String, CaseIterable {
-    case closeup, silver, gold, rose, sapphire, ruby, frost
-
-    var imageName: String {
-        switch self {
-        case .closeup:  return "poplur_watch_face_closeup"
-        case .silver:   return "poplur_watch_face_silver"
-        case .gold:     return "poplur_watch_face_gold"
-        case .rose:     return "poplur_watch_face_rose"
-        case .sapphire: return "poplur_watch_face_sapphire"
-        case .ruby:     return "poplur_watch_face_ruby"
-        case .frost:    return "poplur_watch_face_frost"
-        }
+private func makeStaticWAV(duration: TimeInterval) -> Data {
+    let sampleRate  = 22_050
+    let sampleCount = max(1, Int(Double(sampleRate) * duration))
+    var samples: [Int16] = []
+    samples.reserveCapacity(sampleCount)
+    for i in 0..<sampleCount {
+        let fadeIn  = min(1.0, Double(i) / 440.0)
+        let fadeOut = min(1.0, Double(sampleCount - i) / 880.0)
+        let env     = fadeIn * fadeOut
+        let noise   = Double.random(in: -1.0...1.0) * 0.62 * env
+        let raw     = Int(noise * Double(Int16.max))
+        samples.append(Int16(min(Int(Int16.max), max(Int(Int16.min), raw))))
     }
-
-    var accent: Color {
-        switch self {
-        case .closeup, .silver: return Color(white: 0.92)
-        case .gold:     return Color(red: 1.0, green: 0.76, blue: 0.11)
-        case .rose:     return Color(red: 1.0, green: 0.56, blue: 0.47)
-        case .sapphire: return Color(red: 0.20, green: 0.68, blue: 1.0)
-        case .ruby:     return Color(red: 1.0, green: 0.19, blue: 0.19)
-        case .frost:    return Color(red: 0.85, green: 0.96, blue: 1.0)
-        }
-    }
+    return makeWAVBytes(samples, sampleRate: sampleRate)
 }
 
-// MARK: - Browse arrow
-
-private struct BrowseArrow: View {
-    let isLeft: Bool
-    let color: Color
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Canvas { ctx, size in
-                var path = Path()
-                if isLeft {
-                    path.move(to: CGPoint(x: size.width * 0.72, y: size.height * 0.12))
-                    path.addLine(to: CGPoint(x: size.width * 0.24, y: size.height * 0.50))
-                    path.addLine(to: CGPoint(x: size.width * 0.72, y: size.height * 0.88))
-                } else {
-                    path.move(to: CGPoint(x: size.width * 0.28, y: size.height * 0.12))
-                    path.addLine(to: CGPoint(x: size.width * 0.76, y: size.height * 0.50))
-                    path.addLine(to: CGPoint(x: size.width * 0.28, y: size.height * 0.88))
-                }
-                ctx.stroke(path, with: .color(color.opacity(0.86)), lineWidth: 4)
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
+private func makeWAVBytes(_ samples: [Int16], sampleRate: Int) -> Data {
+    var d = Data()
+    func u16(_ v: UInt16) { var b = v.littleEndian; withUnsafeBytes(of: &b) { d.append(contentsOf: $0) } }
+    func u32(_ v: UInt32) { var b = v.littleEndian; withUnsafeBytes(of: &b) { d.append(contentsOf: $0) } }
+    let ch: UInt16 = 1, bps: UInt16 = 16
+    let ds = UInt32(samples.count * 2)
+    d.append(contentsOf: "RIFF".utf8); u32(36 + ds)
+    d.append(contentsOf: "WAVE".utf8)
+    d.append(contentsOf: "fmt ".utf8); u32(16); u16(1); u16(ch)
+    u32(UInt32(sampleRate)); u32(UInt32(sampleRate) * UInt32(ch * bps / 8)); u16(ch * bps / 8); u16(bps)
+    d.append(contentsOf: "data".utf8); u32(ds)
+    for s in samples { var b = s.littleEndian; withUnsafeBytes(of: &b) { d.append(contentsOf: $0) } }
+    return d
 }
 
-// MARK: - Spinning globe + trend indicator
+// MARK: - 3D SceneKit globe
+
+private func makeEarthTexture() -> UIImage {
+    let size = CGSize(width: 512, height: 256)
+    UIGraphicsBeginImageContextWithOptions(size, true, 1.0)
+    guard let c = UIGraphicsGetCurrentContext() else {
+        UIGraphicsBeginImageContextWithOptions(size, true, 1.0)
+        let ctx = UIGraphicsGetCurrentContext()
+        ctx?.setFillColor(UIColor(red: 0.06, green: 0.28, blue: 0.68, alpha: 1).cgColor)
+        ctx?.fill(CGRect(origin: .zero, size: size))
+        let fallback = UIGraphicsGetImageFromCurrentImageContext() ?? UIImage()
+        UIGraphicsEndImageContext()
+        return fallback
+    }
+
+    let w = size.width, h = size.height
+
+    c.setFillColor(UIColor(red: 0.06, green: 0.28, blue: 0.68, alpha: 1).cgColor)
+    c.fill(CGRect(origin: .zero, size: size))
+
+    c.setFillColor(UIColor(red: 0.20, green: 0.52, blue: 0.18, alpha: 1).cgColor)
+    c.fillEllipse(in: CGRect(x: w*0.04, y: h*0.08, width: w*0.17, height: h*0.30))
+    c.fillEllipse(in: CGRect(x: w*0.10, y: h*0.36, width: w*0.05, height: h*0.08))
+    c.fillEllipse(in: CGRect(x: w*0.12, y: h*0.48, width: w*0.11, height: h*0.34))
+    c.fillEllipse(in: CGRect(x: w*0.22, y: h*0.02, width: w*0.06, height: h*0.10))
+    c.fillEllipse(in: CGRect(x: w*0.46, y: h*0.07, width: w*0.07, height: h*0.16))
+    c.fillEllipse(in: CGRect(x: w*0.46, y: h*0.28, width: w*0.10, height: h*0.40))
+    c.fillEllipse(in: CGRect(x: w*0.53, y: h*0.28, width: w*0.06, height: h*0.14))
+    c.fillEllipse(in: CGRect(x: w*0.54, y: h*0.04, width: w*0.30, height: h*0.38))
+    c.fillEllipse(in: CGRect(x: w*0.60, y: h*0.35, width: w*0.07, height: h*0.18))
+    c.fillEllipse(in: CGRect(x: w*0.72, y: h*0.36, width: w*0.07, height: h*0.14))
+    c.fillEllipse(in: CGRect(x: w*0.76, y: h*0.56, width: w*0.10, height: h*0.14))
+    c.setFillColor(UIColor(red: 0.88, green: 0.93, blue: 1.0, alpha: 1).cgColor)
+    c.fill(CGRect(x: 0, y: h*0.88, width: w, height: h*0.12))
+    c.fill(CGRect(x: 0, y: 0,      width: w, height: h*0.03))
+
+    let image = UIGraphicsGetImageFromCurrentImageContext() ?? UIImage()
+    UIGraphicsEndImageContext()
+    return image
+}
+
+private struct Globe3DSceneView: WKInterfaceObjectRepresentable {
+    typealias WKInterfaceObjectType = WKInterfaceSCNScene
+
+    func makeWKInterfaceObject(context: Context) -> WKInterfaceSCNScene {
+        let scene = SCNScene()
+        scene.background.contents = UIColor.black
+
+        let sphere = SCNSphere(radius: 1.0)
+        sphere.segmentCount = 48
+
+        let mat = SCNMaterial()
+        mat.diffuse.contents  = makeEarthTexture()
+        mat.specular.contents = UIColor.white.withAlphaComponent(0.25)
+        mat.shininess = 0.4
+        mat.isDoubleSided = false
+        sphere.materials = [mat]
+
+        let globeNode = SCNNode(geometry: sphere)
+        globeNode.eulerAngles = SCNVector3(0, 0, Float(-23.5 * .pi / 180))
+        scene.rootNode.addChildNode(globeNode)
+
+        let spin = SCNAction.repeatForever(
+            SCNAction.rotateBy(x: 0, y: 2 * .pi, z: 0, duration: 12)
+        )
+        globeNode.runAction(spin)
+
+        let cameraNode = SCNNode()
+        cameraNode.camera = SCNCamera()
+        cameraNode.position = SCNVector3(0, 0.2, 3.0)
+        cameraNode.eulerAngles = SCNVector3(-0.06, 0, 0)
+        scene.rootNode.addChildNode(cameraNode)
+
+        let sunNode = SCNNode()
+        let sun = SCNLight()
+        sun.type = .directional
+        sun.intensity = 900
+        sun.color = UIColor(red: 1.0, green: 0.97, blue: 0.90, alpha: 1)
+        sunNode.light = sun
+        sunNode.eulerAngles = SCNVector3(-0.4, -0.6, 0)
+        scene.rootNode.addChildNode(sunNode)
+
+        let ambientNode = SCNNode()
+        let ambient = SCNLight()
+        ambient.type = .ambient
+        ambient.intensity = 200
+        ambientNode.light = ambient
+        scene.rootNode.addChildNode(ambientNode)
+
+        let scnScene = WKInterfaceSCNScene()
+        scnScene.scene = scene
+        scnScene.preferredFramesPerSecond = 30
+        return scnScene
+    }
+
+    func updateWKInterfaceObject(_ wkInterfaceObject: WKInterfaceSCNScene, context: Context) {}
+}
+
+// MARK: - Globe + trend indicator
 
 private struct GlobeTrendView: View {
-    let globePhase: Double   // 0–1, longitude rotation
     let trend: RadiusTrend
-    let arrowPhase: Double   // 0–1 sinusoidal bounce cycle
+    let arrowPhase: Double
 
     private let green  = Color(red: 0.20, green: 1.00, blue: 0.15)
     private let red    = Color(red: 1.00, green: 0.18, blue: 0.12)
-    private let yellow = Color(red: 1.00, green: 0.86, blue: 0.10)
 
     var body: some View {
-        Canvas { ctx, size in
-            let w = size.width, h = size.height
-            let cx = w * 0.50
-            let globeBottom = h * 0.68
-            let r = min(w * 0.42, globeBottom * 0.48)
-            let cy = globeBottom - r
+        GeometryReader { geo in
+            let globeH = geo.size.height * 0.76
+            let arrowH = geo.size.height - globeH
 
-            // ── Globe shell ──────────────────────────────────────────────
-            let globeColor = GraphicsContext.Shading.color(green.opacity(0.85))
-            let dimColor   = GraphicsContext.Shading.color(green.opacity(0.45))
-            ctx.stroke(Path(ellipseIn: CGRect(x: cx-r, y: cy-r, width: r*2, height: r*2)),
-                       with: globeColor, lineWidth: 1.5)
+            VStack(spacing: 0) {
+                Globe3DSceneView()
+                    .frame(width: geo.size.width, height: globeH)
 
-            // Latitude lines
-            for frac in [CGFloat(0.28), 0.50, 0.72] {
-                let ly  = (cy - r) + r * 2 * frac
-                let sinV = sqrt(max(0, 1 - pow(frac * 2 - 1, 2)))
-                let hw  = r * sinV
-                let lh  = r * 0.13
-                if hw > 1 {
-                    ctx.stroke(Path(ellipseIn: CGRect(x: cx-hw, y: ly-lh/2,
-                                                      width: hw*2, height: lh)),
-                               with: dimColor, lineWidth: 0.8)
+                Canvas { ctx, size in
+                    let w = size.width, h = size.height
+                    let cx    = w * 0.50
+                    let arrowW  = w * 0.28
+                    let arrowH2 = h * 0.38
+                    let al = cx - arrowW / 2
+                    let ar = cx + arrowW / 2
+
+                    switch trend {
+                    case .up:
+                        let bounce  = CGFloat(sin(arrowPhase * .pi * 2)) * 2.5
+                        let arrowCY = h * 0.42 + bounce
+                        var p = Path()
+                        p.move(to:    CGPoint(x: cx, y: arrowCY - arrowH2))
+                        p.addLine(to: CGPoint(x: ar, y: arrowCY + arrowH2 * 0.2))
+                        p.addLine(to: CGPoint(x: cx + arrowW * 0.18, y: arrowCY + arrowH2 * 0.2))
+                        p.addLine(to: CGPoint(x: cx + arrowW * 0.18, y: arrowCY + arrowH2))
+                        p.addLine(to: CGPoint(x: cx - arrowW * 0.18, y: arrowCY + arrowH2))
+                        p.addLine(to: CGPoint(x: cx - arrowW * 0.18, y: arrowCY + arrowH2 * 0.2))
+                        p.addLine(to: CGPoint(x: al, y: arrowCY + arrowH2 * 0.2))
+                        p.closeSubpath()
+                        ctx.fill(p, with: .color(green))
+                    case .down:
+                        let bounce  = CGFloat(sin(arrowPhase * .pi * 2)) * 2.5
+                        let arrowCY = h * 0.42 + bounce
+                        var p = Path()
+                        p.move(to:    CGPoint(x: cx, y: arrowCY + arrowH2))
+                        p.addLine(to: CGPoint(x: ar, y: arrowCY - arrowH2 * 0.2))
+                        p.addLine(to: CGPoint(x: cx + arrowW * 0.18, y: arrowCY - arrowH2 * 0.2))
+                        p.addLine(to: CGPoint(x: cx + arrowW * 0.18, y: arrowCY - arrowH2))
+                        p.addLine(to: CGPoint(x: cx - arrowW * 0.18, y: arrowCY - arrowH2))
+                        p.addLine(to: CGPoint(x: cx - arrowW * 0.18, y: arrowCY - arrowH2 * 0.2))
+                        p.addLine(to: CGPoint(x: al, y: arrowCY - arrowH2 * 0.2))
+                        p.closeSubpath()
+                        ctx.fill(p, with: .color(red))
+                    case .stable:
+                        // No bounce — static dash
+                        let cy    = h * 0.42
+                        let dashW = arrowW * 0.70
+                        var p = Path()
+                        p.move(to:    CGPoint(x: cx - dashW / 2, y: cy))
+                        p.addLine(to: CGPoint(x: cx + dashW / 2, y: cy))
+                        ctx.stroke(p, with: .color(green.opacity(0.75)), lineWidth: 2.5)
+                    }
+                }
+                .frame(width: geo.size.width, height: arrowH)
+            }
+        }
+    }
+}
+
+// MARK: - Poplur logo mark (drawn — no asset needed)
+
+private struct PoplurLogoMark: View {
+    private let pink = Color(red: 0.95, green: 0.20, blue: 0.58)
+    private let bg   = Color(red: 0.05, green: 0.02, blue: 0.08)
+
+    // Four petal offsets (diagonal quadrants)
+    private let offsets: [(CGFloat, CGFloat)] = [(-11, -11), (11, -11), (-11, 11), (11, 11)]
+
+    var body: some View {
+        ZStack {
+            // Dark circle background with pink glow
+            Circle()
+                .fill(bg)
+                .frame(width: 70, height: 70)
+                .shadow(color: pink.opacity(0.55), radius: 14)
+
+            // 4-petal clover clipped to the circle
+            ZStack {
+                ForEach(0..<offsets.count, id: \.self) { i in
+                    Circle()
+                        .fill(pink.opacity(0.88))
+                        .frame(width: 40, height: 40)
+                        .offset(x: offsets[i].0, y: offsets[i].1)
                 }
             }
+            .frame(width: 70, height: 70)
+            .clipShape(Circle())
 
-            // Rotating longitude ellipse
-            let lonAngle = globePhase * .pi * 2
-            let lonHW = r * abs(cos(lonAngle))
-            if lonHW > 0.5 {
-                ctx.stroke(Path(ellipseIn: CGRect(x: cx-lonHW, y: cy-r,
-                                                  width: lonHW*2, height: r*2)),
-                           with: dimColor, lineWidth: 0.8)
-            }
+            // White P centred on petals
+            Text("P")
+                .font(.system(size: 32, weight: .black, design: .rounded))
+                .foregroundColor(.white)
+        }
+    }
+}
 
-            // ── Continent dot pattern (rotates with longitude) ────────────
-            let cosA = cos(lonAngle), sinA = sin(lonAngle)
-            let continentDots: [(CGFloat, CGFloat)] = [
-                // North America-ish
-                (-0.45, -0.40), (-0.55, -0.25), (-0.35, -0.55), (-0.60, -0.10),
-                (-0.20, -0.60), (-0.50, -0.50), (-0.30, -0.30),
-                // Europe / Africa
-                (0.15, -0.55),  (0.25, -0.40),  (0.20, -0.20),  (0.10, -0.05),
-                (0.30, -0.60),  (0.12,  0.10),  (0.05,  0.25),
-                // Asia
-                (0.40, -0.50),  (0.55, -0.35),  (0.50, -0.15),  (0.45,  0.05),
-            ]
-            for (dx, dz) in continentDots {
-                let rotX = dx * cosA               // longitude rotation
-                let depthZ = dx * sinA + dz * 0   // depth for culling
-                if depthZ > 0.15 { continue }      // back hemisphere → skip
-                let sx = cx + rotX * r
-                let sy = cy + dz  * r
-                let sz = CGFloat(max(0.3, min(1.0, 1.0 - depthZ * 0.5)))
-                let ds = 2.0 * sz
-                ctx.fill(Path(ellipseIn: CGRect(x: sx-ds/2, y: sy-ds/2, width: ds, height: ds)),
-                         with: globeColor)
-            }
+// MARK: - TV static overlay
 
-            // ── Trend arrow / indicator ──────────────────────────────────
-            let bounce = CGFloat(sin(arrowPhase * .pi * 2)) * 2.5
-            let arrowCY = globeBottom + (h - globeBottom) * 0.35 + bounce
-            let arrowW  = w * 0.28
-            let arrowH  = (h - globeBottom) * 0.30
-            let al = cx - arrowW / 2
-            let ar = cx + arrowW / 2
+private struct StaticOverlay: View {
+    let seed: Int
+    @State private var pulse = false
 
-            switch trend {
-            case .up:
-                let arrowShading = GraphicsContext.Shading.color(green)
-                var p = Path()
-                p.move(to:    CGPoint(x: cx, y: arrowCY - arrowH))
-                p.addLine(to: CGPoint(x: ar, y: arrowCY + arrowH * 0.2))
-                p.addLine(to: CGPoint(x: cx + arrowW * 0.18, y: arrowCY + arrowH * 0.2))
-                p.addLine(to: CGPoint(x: cx + arrowW * 0.18, y: arrowCY + arrowH))
-                p.addLine(to: CGPoint(x: cx - arrowW * 0.18, y: arrowCY + arrowH))
-                p.addLine(to: CGPoint(x: cx - arrowW * 0.18, y: arrowCY + arrowH * 0.2))
-                p.addLine(to: CGPoint(x: al, y: arrowCY + arrowH * 0.2))
-                p.closeSubpath()
-                ctx.fill(p, with: arrowShading)
-
-            case .down:
-                let arrowShading = GraphicsContext.Shading.color(red)
-                var p = Path()
-                p.move(to:    CGPoint(x: cx, y: arrowCY + arrowH))
-                p.addLine(to: CGPoint(x: ar, y: arrowCY - arrowH * 0.2))
-                p.addLine(to: CGPoint(x: cx + arrowW * 0.18, y: arrowCY - arrowH * 0.2))
-                p.addLine(to: CGPoint(x: cx + arrowW * 0.18, y: arrowCY - arrowH))
-                p.addLine(to: CGPoint(x: cx - arrowW * 0.18, y: arrowCY - arrowH))
-                p.addLine(to: CGPoint(x: cx - arrowW * 0.18, y: arrowCY - arrowH * 0.2))
-                p.addLine(to: CGPoint(x: al, y: arrowCY - arrowH * 0.2))
-                p.closeSubpath()
-                ctx.fill(p, with: arrowShading)
-
-            case .stable:
-                // Three pulsing dots
-                let pulse = CGFloat(0.55 + 0.45 * sin(arrowPhase * .pi * 2))
-                let dotShading = GraphicsContext.Shading.color(yellow.opacity(pulse))
-                let dotR: CGFloat = 3.5
-                for i in [-1, 0, 1] {
-                    let dx = cx + CGFloat(i) * dotR * 2.8
-                    ctx.fill(Path(ellipseIn: CGRect(x: dx-dotR, y: arrowCY-dotR,
-                                                    width: dotR*2, height: dotR*2)),
-                             with: dotShading)
+    var body: some View {
+        ZStack {
+            // Animated noise background
+            Canvas { ctx, size in
+                let block: CGFloat = 4
+                let cols = Int(size.width  / block) + 1
+                let rows = Int(size.height / block) + 1
+                var s = UInt64(bitPattern: Int64(seed &+ 1)) ^ 6_364_136_223_846_793_005
+                for row in 0..<rows {
+                    for col in 0..<cols {
+                        s = s &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+                        let v = Double(s >> 33) / Double(UInt32.max)
+                        ctx.fill(
+                            Path(CGRect(x: CGFloat(col) * block,
+                                        y: CGFloat(row)  * block,
+                                        width: block, height: block)),
+                            with: .color(Color(white: v, opacity: 0.90))
+                        )
+                    }
                 }
             }
+            .ignoresSafeArea()
+
+            // Poplur logo centred, gently pulsing
+            PoplurLogoMark()
+                .scaleEffect(pulse ? 1.06 : 0.94)
+                .animation(
+                    .easeInOut(duration: 0.55).repeatForever(autoreverses: true),
+                    value: pulse
+                )
+                .onAppear { pulse = true }
         }
     }
 }
@@ -197,17 +290,13 @@ private struct GlobeTrendView: View {
 
 private struct LCDOverlay: View {
     @ObservedObject var store: WatchRadiusStore
-    let globePhase: Double
     let arrowPhase: Double
-
-    @State private var showKm = true
+    let showKm: Bool
 
     private let lcdGreen  = Color(red: 0.22, green: 1.00, blue: 0.15)
     private let lcdOrange = Color(red: 1.00, green: 0.58, blue: 0.04)
     private let lcdBlue   = Color(red: 0.24, green: 0.78, blue: 1.00)
     private let divider   = Color(red: 0.10, green: 0.45, blue: 0.10)
-
-    private let switchTimer = Timer.publish(every: 4, on: .main, in: .common).autoconnect()
 
     var body: some View {
         GeometryReader { geo in
@@ -218,13 +307,10 @@ private struct LCDOverlay: View {
                 Color.black
 
                 VStack(spacing: 0) {
-                    // ── Header ──────────────────────────────────────────
                     header(w: w, h: h * 0.115)
 
-                    // ── Main: globe (left) + data (right) ───────────────
                     HStack(alignment: .top, spacing: 0) {
-                        GlobeTrendView(globePhase: globePhase,
-                                       trend: store.trend,
+                        GlobeTrendView(trend: store.trend,
                                        arrowPhase: arrowPhase)
                             .frame(width: w * 0.54, height: h * 0.635)
 
@@ -233,18 +319,13 @@ private struct LCDOverlay: View {
 
                     Spacer(minLength: 0)
 
-                    // ── Tab bar ──────────────────────────────────────────
                     Rectangle().fill(divider).frame(height: 0.5)
                     tabBar(w: w, h: h * 0.115)
 
-                    // ── Stats ────────────────────────────────────────────
                     Rectangle().fill(divider).frame(height: 0.5)
                     statsBar(w: w, h: h * 0.105)
                 }
             }
-        }
-        .onReceive(switchTimer) { _ in
-            withAnimation(.easeInOut(duration: 0.35)) { showKm.toggle() }
         }
     }
 
@@ -261,6 +342,7 @@ private struct LCDOverlay: View {
                 .foregroundColor(lcdBlue)
                 .lineLimit(1).minimumScaleFactor(0.6)
         }
+        .padding(.horizontal, 8)
         .frame(width: w, height: h)
     }
 
@@ -268,7 +350,6 @@ private struct LCDOverlay: View {
 
     @ViewBuilder private func dataColumn(w: CGFloat, h: CGFloat) -> some View {
         VStack(alignment: .trailing, spacing: 0) {
-            // World time
             VStack(alignment: .trailing, spacing: 0) {
                 Text("WORLD TIME")
                     .font(.system(size: w * 0.115, weight: .medium, design: .monospaced))
@@ -281,48 +362,47 @@ private struct LCDOverlay: View {
                     .lineLimit(1).minimumScaleFactor(0.6)
             }
             .frame(width: w, height: h * 0.28, alignment: .trailing)
-            .padding(.trailing, 2)
+            .padding(.trailing, 8)
 
             Rectangle().fill(divider).frame(height: 0.5)
 
-            // Radius label
             Text("RADIUS")
                 .font(.system(size: w * 0.115, weight: .medium, design: .monospaced))
                 .foregroundColor(lcdBlue)
                 .frame(width: w, alignment: .trailing)
-                .padding(.trailing, 2)
+                .padding(.trailing, 8)
                 .padding(.top, 2)
 
-            // Main radius number
             Text(showKm ? store.displayValue(metric: true)
                         : store.displayValue(metric: false))
+                .id("radius_\(showKm)")
                 .font(.system(size: w * 0.360, weight: .bold, design: .monospaced))
                 .foregroundColor(lcdGreen)
                 .lineLimit(1).minimumScaleFactor(0.5)
                 .frame(width: w, alignment: .trailing)
-                .padding(.trailing, 2)
+                .padding(.trailing, 8)
                 .transition(.opacity)
 
-            // Post count
             Text("\(store.postCount)")
                 .font(.system(size: w * 0.230, weight: .bold, design: .monospaced))
                 .foregroundColor(lcdGreen.opacity(0.75))
                 .frame(width: w, alignment: .trailing)
-                .padding(.trailing, 2)
+                .padding(.trailing, 8)
 
-            // Earth radius denominator + unit
             Text(showKm ? "/6371" : "/3959")
+                .id("denom_\(showKm)")
                 .font(.system(size: w * 0.155, weight: .medium, design: .monospaced))
                 .foregroundColor(lcdGreen.opacity(0.85))
                 .frame(width: w, alignment: .trailing)
-                .padding(.trailing, 2)
+                .padding(.trailing, 8)
                 .transition(.opacity)
 
             Text(showKm ? "km" : "mi")
+                .id("unit_\(showKm)")
                 .font(.system(size: w * 0.120, weight: .regular, design: .monospaced))
                 .foregroundColor(lcdGreen.opacity(0.70))
                 .frame(width: w, alignment: .trailing)
-                .padding(.trailing, 2)
+                .padding(.trailing, 8)
                 .transition(.opacity)
 
             Spacer(minLength: 0)
@@ -348,7 +428,7 @@ private struct LCDOverlay: View {
         Text(label)
             .font(.system(size: w * 0.165, weight: .medium, design: .monospaced))
             .foregroundColor(lcdGreen)
-            .lineLimit(1).minimumScaleFactor(0.5)
+            .lineLimit(1).minimumScaleFactor(0.4)
             .frame(width: w)
     }
 
@@ -358,10 +438,10 @@ private struct LCDOverlay: View {
         let battery = store.batteryPercent
         let posts   = store.postCount
         HStack(spacing: 0) {
-            statChip("↑\(posts)",    w: w * 0.28)
-            statChip("◾84°F",       w: w * 0.27)
-            statChip("🔋\(battery)%", w: w * 0.25)
-            statChip("♥75",          w: w * 0.20)
+            statChip("↑\(posts)",      w: w * 0.28)
+            statChip("◾84°F",         w: w * 0.27)
+            statChip("🔋\(battery)%",  w: w * 0.25)
+            statChip("♥75",            w: w * 0.20)
         }
         .frame(height: h)
     }
@@ -370,7 +450,7 @@ private struct LCDOverlay: View {
         Text(label)
             .font(.system(size: w * 0.220, weight: .regular, design: .monospaced))
             .foregroundColor(lcdGreen.opacity(0.80))
-            .lineLimit(1).minimumScaleFactor(0.5)
+            .lineLimit(1).minimumScaleFactor(0.4)
             .frame(width: w)
     }
 
@@ -387,95 +467,64 @@ private struct LCDOverlay: View {
 
 struct RadiusWatchView: View {
     @EnvironmentObject private var store: WatchRadiusStore
-    @AppStorage("watchFaceArtwork") private var faceRaw = WatchFaceArtwork.closeup.rawValue
 
-    private var face: WatchFaceArtwork {
-        WatchFaceArtwork(rawValue: faceRaw) ?? .closeup
-    }
+    @State private var showKm         = true
+    @State private var isShowingStatic = false
+    @State private var staticPlayer:  AVAudioPlayer?
+
+    private let switchTimer = Timer.publish(every: 4, on: .main, in: .common).autoconnect()
 
     var body: some View {
         TimelineView(.animation) { tl in
             let t          = tl.date.timeIntervalSinceReferenceDate
-            let globePhase = (t / 8.0).truncatingRemainder(dividingBy: 1.0)
             let arrowPhase = (t / 1.4).truncatingRemainder(dividingBy: 1.0)
-            let shinePhase = (t / 4.8).truncatingRemainder(dividingBy: 1.0)
 
-            GeometryReader { proxy in
-                let pw = proxy.size.width, ph = proxy.size.height
-                let fw = min(pw, ph * IMG_ASPECT)
-                let fh = fw / IMG_ASPECT
-                let cx = pw / 2, cy = ph / 2
+            ZStack {
+                LCDOverlay(store: store,
+                           arrowPhase: arrowPhase,
+                           showKm: showKm)
 
-                // LCD rect in screen-space
-                let imgLeft = cx - fw / 2
-                let imgTop  = cy - fh / 2
-                let lcdX = imgLeft + fw * LCD_LEFT
-                let lcdY = imgTop  + fh * LCD_TOP
-                let lcdW = fw * (LCD_RIGHT  - LCD_LEFT)
-                let lcdH = fh * (LCD_BOTTOM - LCD_TOP)
-
-                ZStack {
-                    Color.black.ignoresSafeArea()
-
-                    // Bezel image
-                    Image(face.imageName)
-                        .resizable()
-                        .interpolation(.high)
-                        .frame(width: fw, height: fh)
-                        .position(x: cx, y: cy)
-
-                    // Live LCD overlay
-                    LCDOverlay(store: store,
-                               globePhase: globePhase,
-                               arrowPhase: arrowPhase)
-                        .frame(width: lcdW, height: lcdH)
-                        .position(x: lcdX + lcdW / 2, y: lcdY + lcdH / 2)
-                        .clipped()
-
-                    // Shine sweep
-                    Canvas { ctx, size in
-                        var sc = ctx
-                        sc.blendMode = .plusLighter
-                        let sweep = shinePhase * 2.25 - 0.55
-                        let sx = size.width * sweep
-                        var canvas = Path()
-                        canvas.addRect(CGRect(origin: .zero, size: size))
-                        sc.fill(canvas, with: .linearGradient(
-                            Gradient(stops: [
-                                .init(color: .clear,                     location: 0),
-                                .init(color: .white.opacity(0),          location: 0.42),
-                                .init(color: .white.opacity(0.38),       location: 0.50),
-                                .init(color: face.accent.opacity(0.16),  location: 0.58),
-                                .init(color: .clear,                     location: 1)
-                            ]),
-                            startPoint: CGPoint(x: sx - size.width * 0.34, y: size.height * 1.08),
-                            endPoint:   CGPoint(x: sx + size.width * 0.34, y: -size.height * 0.08)
-                        ))
-                    }
-                    .ignoresSafeArea()
-                    .allowsHitTesting(false)
-
-                    // Browse arrows
-                    BrowseArrow(isLeft: true, color: face.accent) { browse(-1) }
-                        .frame(width: 27, height: 54)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-
-                    BrowseArrow(isLeft: false, color: face.accent) { browse(1) }
-                        .frame(width: 27, height: 54)
-                        .frame(maxWidth: .infinity, alignment: .trailing)
+                if isShowingStatic {
+                    StaticOverlay(seed: Int(t * 22) & 0x7FFF_FFFF)
                 }
             }
-            .ignoresSafeArea()
         }
         .ignoresSafeArea()
-        .accessibilityLabel("Poplur watch face")
+        // Touch: show static + audio while held; toggle km/mi on release
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in
+                    if !isShowingStatic {
+                        isShowingStatic = true
+                        playStatic()
+                    }
+                }
+                .onEnded { _ in
+                    isShowingStatic = false
+                    staticPlayer?.stop()
+                    staticPlayer = nil
+                    withAnimation(.easeInOut(duration: 0.35)) { showKm.toggle() }
+                }
+        )
+        // Auto-switch km/mi every 4 s (separate from tap)
+        .onReceive(switchTimer) { _ in
+            withAnimation(.easeInOut(duration: 0.35)) { showKm.toggle() }
+        }
+        .accessibilityLabel("Poplur watch face — tap to toggle km/mi")
     }
 
-    private func browse(_ direction: Int) {
-        let all = WatchFaceArtwork.allCases
-        let current = all.firstIndex(of: face) ?? 0
-        faceRaw = all[(current + direction + all.count) % all.count].rawValue
-        WKInterfaceDevice.current().play(.click)
+    private func playStatic() {
+        let wavData = makeStaticWAV(duration: 0.65)
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.mixWithOthers])
+            try AVAudioSession.sharedInstance().setActive(true)
+            let player = try AVAudioPlayer(data: wavData)
+            player.volume = 0.65
+            player.play()
+            staticPlayer = player
+        } catch {
+            // Silently continue — visual static still shows
+        }
     }
 }
 
@@ -556,18 +605,18 @@ final class WatchRadiusStore: NSObject, ObservableObject {
     }
 
     private static func dbl(_ key: String, _ p: [String: Any]) -> Double? {
-        if let v = p[key] as? Double    { return v }
-        if let v = p[key] as? Int       { return Double(v) }
-        if let v = p[key] as? NSNumber  { return v.doubleValue }
-        if let v = p[key] as? String    { return Double(v) }
+        if let v = p[key] as? Double   { return v }
+        if let v = p[key] as? Int      { return Double(v) }
+        if let v = p[key] as? NSNumber { return v.doubleValue }
+        if let v = p[key] as? String   { return Double(v) }
         return nil
     }
 
     private static func int(_ key: String, _ p: [String: Any]) -> Int? {
-        if let v = p[key] as? Int       { return v }
-        if let v = p[key] as? Double    { return Int(v) }
-        if let v = p[key] as? NSNumber  { return v.intValue }
-        if let v = p[key] as? String    { return Int(v) }
+        if let v = p[key] as? Int      { return v }
+        if let v = p[key] as? Double   { return Int(v) }
+        if let v = p[key] as? NSNumber { return v.intValue }
+        if let v = p[key] as? String   { return Int(v) }
         return nil
     }
 }

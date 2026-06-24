@@ -559,7 +559,23 @@ Box(Modifier.fillMaxSize()) {
 
 - `Alignment.BottomCenter` — horizontally centered, at the screen bottom
 - `padding(bottom = 24.dp)` — clears the home indicator / navigation bar
-- The cube height is always **230dp** regardless of tab or child route
+- The cube height is always **230dp** regardless of tab or child route — matches iOS exactly
+
+#### Cube Clipping Fix (GL viewport must match view size)
+
+If the 3D cube overflows its bounds, the GL viewport is not being set correctly. In your `GLSurfaceView.Renderer`:
+
+```kotlin
+override fun onSurfaceChanged(gl: GL10, width: Int, height: Int) {
+    // Lock the viewport to exactly the view dimensions — nothing renders outside this
+    GLES20.glViewport(0, 0, width, height)
+    // Update projection matrix to match new aspect ratio
+    val ratio = width.toFloat() / height.toFloat()
+    Matrix.frustumM(projectionMatrix, 0, -ratio, ratio, -1f, 1f, 2f, 12f)
+}
+```
+
+Do **not** set `setZOrderOnTop(true)` without also setting `holder.setFormat(PixelFormat.OPAQUE)` — the combination causes the GL surface to ignore its bounds. Keep the GL surface below other views (`setZOrderOnTop(false)`) and let the Compose layout clip it naturally.
 
 ### Cube Gestures vs Tab Content
 The cube area (bottom 230dp) has gesture priority:
@@ -702,6 +718,38 @@ class FeedViewModel : ViewModel() {
     private fun dismissOverlay() {
         _showLaunchOverlay.value = false
     }
+}
+
+// Loading logo — matches iOS: UIImage(named: "logo"), 200×200pt, centered on white
+// The asset must be named exactly `logo` in res/drawable (logo.png or logo.xml).
+// Do NOT use the app icon, a text wordmark, or any other asset — the "logo" drawable only.
+@Composable
+fun PoplurLogoAnimation() {
+    val scale = remember { Animatable(0.85f) }
+    val alpha = remember { Animatable(0f) }
+
+    LaunchedEffect(Unit) {
+        // Fade in + pop scale — mirrors iOS UIView.animate + CAKeyframeAnimation
+        launch { alpha.animateTo(1f, animationSpec = tween(350)) }
+        launch {
+            scale.animateTo(1.08f, animationSpec = tween(300, easing = FastOutSlowInEasing))
+            scale.animateTo(0.96f, animationSpec = tween(120))
+            scale.animateTo(1.00f, animationSpec = tween(100))
+        }
+    }
+
+    Image(
+        painter = painterResource(id = R.drawable.logo),
+        contentDescription = "Poplur",
+        modifier = Modifier
+            .size(200.dp)                       // matches iOS 200×200pt
+            .graphicsLayer {
+                scaleX = scale.value
+                scaleY = scale.value
+                this.alpha = alpha.value
+            }
+            .clip(RoundedCornerShape(36.dp))    // matches iOS clipsToBounds on logoImageView
+    )
 }
 
 // Composable — overlay is always on top; feed always renders underneath

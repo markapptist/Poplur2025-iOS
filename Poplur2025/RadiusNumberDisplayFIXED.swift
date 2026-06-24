@@ -101,17 +101,15 @@ struct RadiusNumberDisplay: View {
                     .contentTransition(.numericText(value: currentPostRadius))
                 
                 // Fraction bar - matches width of denominator
-                HStack {
-                    Spacer()
-                    Rectangle()
-                        .fill(rank.color)
-                        .frame(width: 90, height: 2)
-                        .shadow(color: rank.color.opacity(0.5), radius: 2, x: 0, y: 0)
-                        .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 1)
-                        .alignmentGuide(.counterSeparator) { dimensions in
-                            dimensions[VerticalAlignment.center]
-                        }
-                }
+                Rectangle()
+                    .fill(rank.color)
+                    .frame(width: 90, height: 2)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .shadow(color: rank.color.opacity(0.5), radius: 2, x: 0, y: 0)
+                    .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 1)
+                    .alignmentGuide(.counterSeparator) { dimensions in
+                        dimensions[VerticalAlignment.center]
+                    }
                 
                 // Denominator (Earth's radius - constant)
                 Text(String(format: "%.0f", currentEarthRadius))

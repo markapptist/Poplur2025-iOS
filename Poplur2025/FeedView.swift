@@ -1454,7 +1454,7 @@ struct FeedView: View {
         do {
             let player = try AVAudioPlayer(contentsOf: url)
             player.numberOfLoops = 0
-            player.volume = 0.9
+            player.volume = 0.40
             player.prepareToPlay()
             player.play()
             popPlayer = player
