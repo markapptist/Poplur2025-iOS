@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UIKit
 
 public enum CubeSkin: String, CaseIterable, Identifiable, Codable {
     case rainbow
@@ -38,6 +39,20 @@ public enum CubeSkin: String, CaseIterable, Identifiable, Codable {
         case .camo: return "Camo"
         case .rubber: return "Rubber"
         case .ice: return "Ice"
+        }
+    }
+
+    /// Primary theme color used for code-generated cube face textures.
+    public var themeUIColor: UIColor {
+        switch self {
+        case .rainbow:     return UIColor(red: 0.55, green: 0.10, blue: 0.95, alpha: 1)
+        case .sparklePink: return UIColor(red: 1.00, green: 0.40, blue: 0.70, alpha: 1)
+        case .gold:        return UIColor(red: 0.88, green: 0.68, blue: 0.10, alpha: 1)
+        case .toy:         return UIColor(red: 0.95, green: 0.20, blue: 0.20, alpha: 1)
+        case .chocolate:   return UIColor(red: 0.45, green: 0.25, blue: 0.08, alpha: 1)
+        case .camo:        return UIColor(red: 0.30, green: 0.48, blue: 0.18, alpha: 1)
+        case .rubber:      return UIColor(red: 0.20, green: 0.65, blue: 0.90, alpha: 1)
+        case .ice:         return UIColor(red: 0.75, green: 0.92, blue: 1.00, alpha: 1)
         }
     }
 }

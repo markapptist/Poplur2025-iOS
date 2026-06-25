@@ -934,16 +934,49 @@ private struct CubeSceneView: UIViewRepresentable {
 
     private func faceBackgroundOnly(for tab: AppTab, baseColor: Color) -> UIImage {
         let skin = CubeSkinStore.shared.current
+        let cacheKey = "face_bg_skin_\(skin.rawValue)"
         if let skinImage = UIImage(named: skin.diffuseAssetName) {
-            return CubeFaceImageCache.image(for: "face_bg_skin_\(skin.rawValue)") { skinImage }
+            return CubeFaceImageCache.image(for: cacheKey) { skinImage }
         }
-        return CubeFaceImageCache.image(for: "face_bg_neon_v2") {
-            let size = CGSize(width: 300, height: 300)
-            let renderer = UIGraphicsImageRenderer(size: size)
-            return renderer.image { _ in
-                UIColor(red: 0.04, green: 0.03, blue: 0.10, alpha: 1.0).setFill()
-                UIBezierPath(roundedRect: CGRect(origin: .zero, size: size).insetBy(dx: 8, dy: 8), cornerRadius: 24).fill()
-            }
+        // No asset — generate a gradient tile from the skin's theme color
+        return CubeFaceImageCache.image(for: cacheKey) {
+            makeSkinTexture(skin)
+        }
+    }
+
+    private func makeSkinTexture(_ skin: CubeSkin) -> UIImage {
+        let size = CGSize(width: 300, height: 300)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        return renderer.image { ctx in
+            let cgCtx = ctx.cgContext
+            let base = skin.themeUIColor
+            var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+            base.getHue(&h, saturation: &s, brightness: &b, alpha: &a)
+            let light = UIColor(hue: h, saturation: max(0, s - 0.15), brightness: min(1, b + 0.30), alpha: 1)
+            let dark  = UIColor(hue: h, saturation: min(1, s + 0.10), brightness: max(0, b - 0.35), alpha: 1)
+            let gradient = CGGradient(
+                colorsSpace: CGColorSpaceCreateDeviceRGB(),
+                colors: [light.cgColor, base.cgColor, dark.cgColor] as CFArray,
+                locations: [0.0, 0.5, 1.0]
+            )!
+            let rect = CGRect(origin: .zero, size: size)
+            // Rounded tile
+            UIBezierPath(roundedRect: rect.insetBy(dx: 6, dy: 6), cornerRadius: 22).addClip()
+            cgCtx.drawLinearGradient(gradient,
+                                     start: CGPoint(x: 0, y: 0),
+                                     end: CGPoint(x: size.width, y: size.height),
+                                     options: [])
+            // Subtle gloss highlight in top-left quadrant
+            let glossGrad = CGGradient(
+                colorsSpace: CGColorSpaceCreateDeviceRGB(),
+                colors: [UIColor.white.withAlphaComponent(0.18).cgColor,
+                         UIColor.white.withAlphaComponent(0.0).cgColor] as CFArray,
+                locations: [0.0, 1.0]
+            )!
+            cgCtx.drawRadialGradient(glossGrad,
+                                     startCenter: CGPoint(x: 80, y: 80), startRadius: 0,
+                                     endCenter: CGPoint(x: 80, y: 80), endRadius: 160,
+                                     options: [])
         }
     }
 
