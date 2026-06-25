@@ -558,10 +558,11 @@ struct PostCaptureComposerOverlay: View {
 
     private var headerStepTitle: String {
         switch step {
-        case .filters:  return "Edit capture"
-        case .channel:  return "Choose channel"
-        case .adPrompt: return "Describe your ad"
-        case .adPreview: return "Your TV ad"
+        case .filters:       return "Edit capture"
+        case .channel:       return "Choose channel"
+        case .adPrompt:      return "Describe your ad"
+        case .adPreview:     return "Your TV ad"
+        case .adVideoPreview: return "Your video ad"
         }
     }
 
@@ -582,6 +583,8 @@ struct PostCaptureComposerOverlay: View {
                 case .adPrompt:
                     withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) { step = .channel }
                 case .adPreview:
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) { step = .adPrompt }
+                case .adVideoPreview:
                     withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) { step = .adPrompt }
                 }
             } label: {
@@ -1404,6 +1407,10 @@ private extension PostCaptureFilter {
         }
     }
 
+}
+
+// CIImage-based filter application — internal so OutputMusicMixer can use it.
+extension PostCaptureFilter {
     func apply(to input: CIImage) -> CIImage {
         switch self {
         case .original:
@@ -1527,7 +1534,7 @@ private enum VideoAdGenerationService {
         req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try JSONSerialization.data(withJSONObject: [
-            "input": ["prompt": prompt, "num_frames": 81] as [String: Any]
+            "input": ["prompt": prompt, "num_frames": 81, "size": "480*832"] as [String: Any]
         ])
 
         let (data, _) = try await URLSession.shared.data(for: req)

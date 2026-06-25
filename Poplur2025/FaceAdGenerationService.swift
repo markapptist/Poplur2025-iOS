@@ -20,8 +20,8 @@ enum FaceAdGenerationService {
                     "image": dataURI,
                     "prompt": prompt,
                     "negative_prompt": "low quality, blurry, bad anatomy, multiple people, text, watermark",
-                    "width": 1024,
-                    "height": 1024,
+                    "width": 768,
+                    "height": 1344,
                     "num_inference_steps": 30,
                     "guidance_scale": 5.0,
                     "style_strength_ratio": 20,
@@ -51,7 +51,8 @@ enum FaceAdGenerationService {
                 "input": [
                     "image": dataURI,
                     "prompt": prompt,
-                    "num_frames": 81
+                    "num_frames": 81,
+                    "size": "480*832"
                 ] as [String: Any]
             ]
         )
