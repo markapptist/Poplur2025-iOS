@@ -445,6 +445,7 @@ struct PostCaptureComposerOverlay: View {
         case channel
         case adPrompt
         case adPreview(UIImage)
+        case adVideoPreview(URL)
     }
 
     @StateObject private var flowManager = CaptureFlowManager.shared
@@ -480,6 +481,12 @@ struct PostCaptureComposerOverlay: View {
                 if let meta = generatedMeta {
                     TVOverlayView(metadata: meta)
                 }
+            } else if case .adVideoPreview(let adVideoURL) = step {
+                CaptureVideoPlayer(url: adVideoURL)
+                    .ignoresSafeArea()
+                if let meta = generatedMeta {
+                    TVOverlayView(metadata: meta)
+                }
             } else {
                 mediaPreview
                     .ignoresSafeArea()
@@ -497,6 +504,8 @@ struct PostCaptureComposerOverlay: View {
                     adPromptPanel
                 case .adPreview(let adImage):
                     adPreviewControls(adImage: adImage)
+                case .adVideoPreview(let adVideoURL):
+                    adVideoPreviewControls(adVideoURL: adVideoURL)
                 }
             }
 
@@ -851,72 +860,12 @@ struct PostCaptureComposerOverlay: View {
     // MARK: - Ad preview controls
 
     private func adPreviewControls(adImage: UIImage) -> some View {
-        VStack(spacing: 14) {
-            if let meta = generatedMeta {
-                HStack(spacing: 10) {
-                    Text(adChannelEmoji(meta.channel))
-                        .font(.system(size: 20))
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(meta.broadcastName)
-                            .font(.system(size: 12, weight: .black, design: .rounded))
-                            .foregroundStyle(.white)
-                            .tracking(0.8)
-                        Text(meta.adConcept)
-                            .font(.system(size: 10, weight: .semibold, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.70))
-                            .lineLimit(1)
-                    }
-                    Spacer()
-                    Image(systemName: "sparkles")
-                        .foregroundStyle(.yellow)
-                        .font(.system(size: 16))
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .padding(.horizontal, 18)
-            }
-
-            HStack(spacing: 24) {
-                Button {
-                    withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) { step = .adPrompt }
-                } label: {
-                    VStack(spacing: 8) {
-                        Image(systemName: "arrow.counterclockwise.circle.fill")
-                            .font(.system(size: 40))
-                            .foregroundStyle(.white.opacity(0.8))
-                        Text("Redo")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.8))
-                    }
-                }
-                .disabled(isPosting)
-
-                Spacer()
-
-                Button { broadcastAd(adImage) } label: {
-                    VStack(spacing: 8) {
-                        if isPosting {
-                            ProgressView()
-                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                .scaleEffect(1.4)
-                                .frame(width: 40, height: 40)
-                        } else {
-                            Image(systemName: "dot.radiowaves.right")
-                                .font(.system(size: 34, weight: .bold))
-                                .foregroundStyle(Color(red: 1, green: 0.22, blue: 0.22))
-                        }
-                        Text(isPosting ? "Broadcasting…" : "Broadcast Now")
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundStyle(.white)
-                    }
-                }
-                .disabled(isPosting)
-            }
-            .padding(.horizontal, 48)
-        }
-        .padding(.top, 16)
-        .padding(.bottom, 48)
+        adPreviewControlsLayout(
+            onRedo: {
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) { step = .adPrompt }
+            },
+            onBroadcast: { broadcastAd(adImage) }
+        )
     }
 
     private func adChannelEmoji(_ channel: String) -> String {
@@ -945,14 +894,27 @@ struct PostCaptureComposerOverlay: View {
                     throw AdGenerationError.noMedia
                 }
 
-                let fluxPrompt = buildAdPrompt(meta: meta)
-                let adImage = try await AdGenerationService.generate(prompt: fluxPrompt)
+                let prompt = buildAdPrompt(meta: meta)
 
-                await MainActor.run {
-                    generatedMeta = meta
-                    isGenerating = false
-                    withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) {
-                        step = .adPreview(adImage)
+                if isVideo {
+                    // Video input → generate video
+                    let adVideoURL = try await VideoAdGenerationService.generate(prompt: prompt)
+                    await MainActor.run {
+                        generatedMeta = meta
+                        isGenerating = false
+                        withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) {
+                            step = .adVideoPreview(adVideoURL)
+                        }
+                    }
+                } else {
+                    // Photo input → generate image
+                    let adImage = try await AdGenerationService.generate(prompt: prompt)
+                    await MainActor.run {
+                        generatedMeta = meta
+                        isGenerating = false
+                        withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) {
+                            step = .adPreview(adImage)
+                        }
                     }
                 }
             } catch TVAnalyzerError.noAPIKey {
@@ -1003,7 +965,7 @@ struct PostCaptureComposerOverlay: View {
     private func broadcastAd(_ adImage: UIImage) {
         guard !isPosting else { return }
         isPosting = true
-        statusText = "Broadcasting your Poplur TV ad…"
+        statusText = "Uploading your post..."
 
         let metadata = generatedMeta ?? fallbackMetadata()
         let edits = PostCaptureEdits(
@@ -1018,6 +980,121 @@ struct PostCaptureComposerOverlay: View {
         flowManager.completeFlow(finalCoordinate: coordinate, edits: edits)
         onDismiss?()
         NotificationCenter.default.post(name: Notification.Name("SwitchToProfileTab"), object: nil)
+    }
+
+    private func adVideoPreviewControls(adVideoURL: URL) -> some View {
+        adPreviewControlsLayout(
+            onRedo: {
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) { step = .adPrompt }
+            },
+            onBroadcast: { broadcastAdVideo(adVideoURL) }
+        )
+    }
+
+    private func broadcastAdVideo(_ adVideoURL: URL) {
+        guard !isPosting else { return }
+        isPosting = true
+        statusText = "Uploading your post..."
+
+        let metadata = generatedMeta ?? fallbackMetadata()
+        let edits = PostCaptureEdits(
+            filter: .original,
+            videoTrimSeconds: nil,
+            channel: selectedChannel,
+            tvMetadata: metadata
+        )
+
+        // Download the remote video to a local temp file before handing to flow manager
+        Task {
+            do {
+                let (localURL, _) = try await URLSession.shared.download(from: adVideoURL)
+                let dest = FileManager.default.temporaryDirectory
+                    .appendingPathComponent(UUID().uuidString + ".mp4")
+                try FileManager.default.moveItem(at: localURL, to: dest)
+                await MainActor.run {
+                    flowManager.capturedImage = nil
+                    flowManager.capturedVideoURL = dest
+                    flowManager.completeFlow(finalCoordinate: coordinate, edits: edits)
+                    onDismiss?()
+                    NotificationCenter.default.post(name: Notification.Name("SwitchToProfileTab"), object: nil)
+                }
+            } catch {
+                await MainActor.run {
+                    isPosting = false
+                    statusText = "Uploading your post..."
+                    generationError = "Video download failed — try again."
+                }
+            }
+        }
+    }
+
+    // Shared button layout used by both image and video ad previews
+    private func adPreviewControlsLayout(onRedo: @escaping () -> Void,
+                                         onBroadcast: @escaping () -> Void) -> some View {
+        VStack(spacing: 14) {
+            if let meta = generatedMeta {
+                HStack(spacing: 10) {
+                    Text(adChannelEmoji(meta.channel))
+                        .font(.system(size: 20))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(meta.broadcastName)
+                            .font(.system(size: 12, weight: .black, design: .rounded))
+                            .foregroundStyle(.white)
+                            .tracking(0.8)
+                        Text(meta.adConcept)
+                            .font(.system(size: 10, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.70))
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                    Image(systemName: "sparkles")
+                        .foregroundStyle(.yellow)
+                        .font(.system(size: 16))
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .padding(.horizontal, 18)
+            }
+
+            HStack(spacing: 24) {
+                Button(action: onRedo) {
+                    VStack(spacing: 8) {
+                        Image(systemName: "arrow.counterclockwise.circle.fill")
+                            .font(.system(size: 40))
+                            .foregroundStyle(.white.opacity(0.8))
+                        Text("Redo")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.8))
+                    }
+                }
+                .disabled(isPosting)
+
+                Spacer()
+
+                Button(action: onBroadcast) {
+                    VStack(spacing: 8) {
+                        if isPosting {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                .scaleEffect(1.4)
+                                .frame(width: 40, height: 40)
+                        } else {
+                            Image(systemName: "dot.radiowaves.right")
+                                .font(.system(size: 34, weight: .bold))
+                                .foregroundStyle(Color(red: 1, green: 0.22, blue: 0.22))
+                        }
+                        Text(isPosting ? "Broadcasting…" : "Broadcast Now")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(.white)
+                    }
+                }
+                .disabled(isPosting)
+            }
+            .padding(.horizontal, 48)
+        }
+        .padding(.top, 16)
+        .padding(.bottom, 48)
     }
 
     private func configureVideoDuration() {
@@ -1245,7 +1322,7 @@ private extension UIImage {
 // MARK: - Ad generation service
 
 private enum AdGenerationError: Error {
-    case noMedia, generationFailed, downloadFailed
+    case noMedia, generationFailed, downloadFailed, noAPIKey
 }
 
 private enum AdGenerationService {
@@ -1262,5 +1339,57 @@ private enum AdGenerationService {
               let image = UIImage(data: data)
         else { throw AdGenerationError.downloadFailed }
         return image
+    }
+}
+
+private enum VideoAdGenerationService {
+    /// Generates an ad video via Replicate (wan-ai/wan2.1-t2v-480p).
+    /// Returns a remote URL pointing to the generated MP4.
+    static func generate(prompt: String) async throws -> URL {
+        let apiKey = UserDefaults.standard.string(forKey: "poplur_replicate_key") ?? ""
+        guard !apiKey.isEmpty else { throw AdGenerationError.noAPIKey }
+
+        guard let endpoint = URL(string: "https://api.replicate.com/v1/models/wan-ai/wan2.1-t2v-480p/predictions")
+        else { throw AdGenerationError.generationFailed }
+
+        var req = URLRequest(url: endpoint, timeoutInterval: 30)
+        req.httpMethod = "POST"
+        req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONSerialization.data(withJSONObject: [
+            "input": ["prompt": prompt, "num_frames": 81] as [String: Any]
+        ])
+
+        let (data, _) = try await URLSession.shared.data(for: req)
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let id = json["id"] as? String
+        else { throw AdGenerationError.generationFailed }
+
+        return try await poll(id: id, apiKey: apiKey)
+    }
+
+    private static func poll(id: String, apiKey: String) async throws -> URL {
+        guard let url = URL(string: "https://api.replicate.com/v1/predictions/\(id)") else {
+            throw AdGenerationError.generationFailed
+        }
+        var req = URLRequest(url: url)
+        req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+
+        for _ in 0..<90 {                          // max ~4.5 min
+            try await Task.sleep(nanoseconds: 3_000_000_000)
+            try Task.checkCancellation()
+            let (data, _) = try await URLSession.shared.data(for: req)
+            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
+            switch json["status"] as? String {
+            case "succeeded":
+                if let arr = json["output"] as? [String], let s = arr.first, let u = URL(string: s) { return u }
+                if let s = json["output"] as? String, let u = URL(string: s) { return u }
+                throw AdGenerationError.downloadFailed
+            case "failed", "canceled":
+                throw AdGenerationError.generationFailed
+            default: continue
+            }
+        }
+        throw AdGenerationError.generationFailed
     }
 }
