@@ -684,7 +684,13 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
             mlDetectionManager = SimplifiedMLDetectionManager()
         }
         mlDetectionManager?.isEnabled = true
-        mlDetectionManager?.onDetection = onDetection
+        mlDetectionManager?.onDetection = onDetection ?? { objects in
+            NotificationCenter.default.post(
+                name: NSNotification.Name("MLObjectsDetected"),
+                object: nil,
+                userInfo: ["objects": objects]
+            )
+        }
         isMLDetectionEnabled = true
     }
     
