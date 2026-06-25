@@ -54,7 +54,7 @@ actor TVStyleAnalyzer {
     }
 
     private func callClaude(imageData: Data) async throws -> TVStyleMetadata {
-        let key = UserDefaults.standard.string(forKey: "poplur_claude_key") ?? ""
+        let key = UserDefaults.standard.string(forKey: "poplur_claude_key") ?? Secrets.claudeAPIKey
         guard !key.isEmpty else { throw TVAnalyzerError.noAPIKey }
 
         let prompt = """
@@ -87,15 +87,25 @@ Analyze this image and respond ONLY with a JSON object — no extra text, no mar
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
         req.timeoutInterval = 20
 
-        let (data, _) = try await URLSession.shared.data(for: req)
+        let (data, response) = try await URLSession.shared.data(for: req)
+        if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+            let body = String(data: data, encoding: .utf8) ?? ""
+            print("🎬 [TVStyleAnalyzer] HTTP \(http.statusCode): \(body)")
+            throw TVAnalyzerError.httpError(http.statusCode)
+        }
 
         guard
-            let outer    = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-            let content  = (outer["content"] as? [[String: Any]])?.first,
-            let text     = content["text"] as? String,
-            let jsonData = text.data(using: .utf8)
+            let outer   = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let content = (outer["content"] as? [[String: Any]])?.first,
+            var text    = content["text"] as? String
         else { throw TVAnalyzerError.parseError }
 
+        // Strip markdown code fences Claude sometimes adds
+        if let range = text.range(of: "{"), let end = text.range(of: "}", options: .backwards) {
+            text = String(text[range.lowerBound...end.upperBound])
+        }
+
+        guard let jsonData = text.data(using: .utf8) else { throw TVAnalyzerError.parseError }
         return try JSONDecoder().decode(TVStyleMetadata.self, from: jsonData)
     }
 }
@@ -103,4 +113,5 @@ Analyze this image and respond ONLY with a JSON object — no extra text, no mar
 enum TVAnalyzerError: Error {
     case noAPIKey
     case parseError
+    case httpError(Int)
 }

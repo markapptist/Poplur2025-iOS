@@ -2,6 +2,7 @@ import SwiftUI
 import AVKit
 import CoreLocation
 import CoreImage
+import UniformTypeIdentifiers
 
 // MARK: - TV analysis state
 
@@ -464,6 +465,10 @@ struct PostCaptureComposerOverlay: View {
     @State private var isGenerating = false
     @State private var generationError: String? = nil
     @State private var adPulseScale: CGFloat = 1.0
+    @State private var selectedMusicURL: URL? = nil
+    @State private var showMusicPicker = false
+    @State private var adVideoTrimSeconds: Double = 10
+    @State private var adVideoMaxSeconds: Double = 10
 
     private var isVideo: Bool { videoURL != nil }
 
@@ -516,6 +521,19 @@ struct PostCaptureComposerOverlay: View {
         .onAppear(perform: configureVideoDuration)
         .toolbar(.hidden, for: .navigationBar)
         .navigationBarBackButtonHidden(true)
+        .sheet(isPresented: $showMusicPicker) {
+            MusicDocumentPicker { url in
+                selectedMusicURL = url
+            }
+        }
+        .onChange(of: step) { _, newStep in
+            if case .adVideoPreview(let url) = newStep {
+                let dur = CMTimeGetSeconds(AVURLAsset(url: url).duration)
+                let safe = dur.isFinite && dur > 0 ? dur : 10
+                adVideoMaxSeconds = max(1, min(safe, 60))
+                adVideoTrimSeconds = min(adVideoMaxSeconds, 10)
+            }
+        }
     }
 
     @ViewBuilder
@@ -864,7 +882,9 @@ struct PostCaptureComposerOverlay: View {
             onRedo: {
                 withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) { step = .adPrompt }
             },
-            onBroadcast: { broadcastAd(adImage) }
+            onBroadcast: { broadcastAd(adImage) },
+            showFilterStrip: true,
+            showTrimSlider: false
         )
     }
 
@@ -897,8 +917,13 @@ struct PostCaptureComposerOverlay: View {
                 let prompt = buildAdPrompt(meta: meta)
 
                 if isVideo {
-                    // Video input → generate video
-                    let adVideoURL = try await VideoAdGenerationService.generate(prompt: prompt)
+                    // Use face image (first frame of capture) for image-to-video when available
+                    let adVideoURL: URL
+                    if let faceImage = image {
+                        adVideoURL = try await FaceAdGenerationService.generateVideo(faceImage: faceImage, prompt: prompt)
+                    } else {
+                        adVideoURL = try await VideoAdGenerationService.generate(prompt: prompt)
+                    }
                     await MainActor.run {
                         generatedMeta = meta
                         isGenerating = false
@@ -907,8 +932,13 @@ struct PostCaptureComposerOverlay: View {
                         }
                     }
                 } else {
-                    // Photo input → generate image
-                    let adImage = try await AdGenerationService.generate(prompt: prompt)
+                    // Face-preserving image generation when a selfie is available
+                    let adImage: UIImage
+                    if let faceImage = image {
+                        adImage = try await FaceAdGenerationService.generateImage(faceImage: faceImage, prompt: prompt)
+                    } else {
+                        adImage = try await AdGenerationService.generate(prompt: prompt)
+                    }
                     await MainActor.run {
                         generatedMeta = meta
                         isGenerating = false
@@ -975,11 +1005,33 @@ struct PostCaptureComposerOverlay: View {
             tvMetadata: metadata
         )
 
-        flowManager.capturedImage = adImage
-        flowManager.capturedVideoURL = nil
-        flowManager.completeFlow(finalCoordinate: coordinate, edits: edits)
-        onDismiss?()
-        NotificationCenter.default.post(name: Notification.Name("SwitchToProfileTab"), object: nil)
+        Task {
+            // Burn filter into the output image
+            let filteredImage = adImage.applyingPostCaptureFilter(selectedFilter)
+
+            if let musicURL = selectedMusicURL {
+                // Image + music → bake into a video
+                await MainActor.run { statusText = "Adding music…" }
+                if let videoWithMusic = await OutputMusicMixer.imageWithAudio(filteredImage, audioURL: musicURL, filter: .original) {
+                    await MainActor.run {
+                        flowManager.capturedImage = nil
+                        flowManager.capturedVideoURL = videoWithMusic
+                        flowManager.completeFlow(finalCoordinate: coordinate, edits: edits)
+                        onDismiss?()
+                        NotificationCenter.default.post(name: Notification.Name("SwitchToProfileTab"), object: nil)
+                    }
+                    return
+                }
+            }
+
+            await MainActor.run {
+                flowManager.capturedImage = filteredImage
+                flowManager.capturedVideoURL = nil
+                flowManager.completeFlow(finalCoordinate: coordinate, edits: edits)
+                onDismiss?()
+                NotificationCenter.default.post(name: Notification.Name("SwitchToProfileTab"), object: nil)
+            }
+        }
     }
 
     private func adVideoPreviewControls(adVideoURL: URL) -> some View {
@@ -987,7 +1039,9 @@ struct PostCaptureComposerOverlay: View {
             onRedo: {
                 withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) { step = .adPrompt }
             },
-            onBroadcast: { broadcastAdVideo(adVideoURL) }
+            onBroadcast: { broadcastAdVideo(adVideoURL) },
+            showFilterStrip: true,
+            showTrimSlider: true
         )
     }
 
@@ -998,19 +1052,36 @@ struct PostCaptureComposerOverlay: View {
 
         let metadata = generatedMeta ?? fallbackMetadata()
         let edits = PostCaptureEdits(
-            filter: .original,
-            videoTrimSeconds: nil,
+            filter: selectedFilter,
+            videoTrimSeconds: adVideoTrimSeconds,
             channel: selectedChannel,
             tvMetadata: metadata
         )
 
-        // Download the remote video to a local temp file before handing to flow manager
         Task {
             do {
+                // Download generated video to a local temp file
+                await MainActor.run { statusText = "Preparing video…" }
                 let (localURL, _) = try await URLSession.shared.download(from: adVideoURL)
-                let dest = FileManager.default.temporaryDirectory
+                let raw = FileManager.default.temporaryDirectory
                     .appendingPathComponent(UUID().uuidString + ".mp4")
-                try FileManager.default.moveItem(at: localURL, to: dest)
+                try FileManager.default.moveItem(at: localURL, to: raw)
+
+                // Apply filter + trim to the output
+                await MainActor.run { statusText = "Applying filter…" }
+                let processed = await PostCaptureMediaProcessor.exportVideo(
+                    url: raw,
+                    filter: selectedFilter,
+                    trimSeconds: adVideoTrimSeconds
+                ) ?? raw
+
+                // Mix in music if selected
+                var dest = processed
+                if let musicURL = selectedMusicURL {
+                    await MainActor.run { statusText = "Adding music…" }
+                    dest = await OutputMusicMixer.mixAudio(musicURL, intoVideo: processed, trimSeconds: nil) ?? processed
+                }
+
                 await MainActor.run {
                     flowManager.capturedImage = nil
                     flowManager.capturedVideoURL = dest
@@ -1029,9 +1100,80 @@ struct PostCaptureComposerOverlay: View {
     }
 
     // Shared button layout used by both image and video ad previews
-    private func adPreviewControlsLayout(onRedo: @escaping () -> Void,
-                                         onBroadcast: @escaping () -> Void) -> some View {
+    private func adPreviewControlsLayout(
+        onRedo: @escaping () -> Void,
+        onBroadcast: @escaping () -> Void,
+        showFilterStrip: Bool = false,
+        showTrimSlider: Bool = false
+    ) -> some View {
         VStack(spacing: 14) {
+            // Filter strip (shown for image output)
+            if showFilterStrip {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(PostCaptureFilter.allCases) { filter in
+                            Button {
+                                withAnimation(.spring(response: 0.22, dampingFraction: 0.86)) {
+                                    selectedFilter = filter
+                                }
+                            } label: {
+                                VStack(spacing: 5) {
+                                    Circle()
+                                        .fill(filter.swatch)
+                                        .frame(width: 36, height: 36)
+                                        .overlay(
+                                            selectedFilter == filter
+                                            ? Circle().stroke(.white, lineWidth: 2.5)
+                                            : nil
+                                        )
+                                    Text(filter.displayName)
+                                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                                        .foregroundStyle(selectedFilter == filter ? .white : .white.opacity(0.55))
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, 18)
+                }
+            }
+
+            // Trim slider (shown for video output)
+            if showTrimSlider {
+                VStack(spacing: 4) {
+                    HStack {
+                        Text("Trim")
+                            .font(.system(size: 11, weight: .black, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.55))
+                            .tracking(1)
+                            .textCase(.uppercase)
+                        Spacer()
+                        Text("\(Int(adVideoTrimSeconds))s")
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white)
+                    }
+                    Slider(value: $adVideoTrimSeconds, in: 1...adVideoMaxSeconds, step: 1)
+                        .tint(.white)
+                }
+                .padding(.horizontal, 18)
+            }
+
+            // Music button
+            Button { showMusicPicker = true } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: selectedMusicURL == nil ? "music.note" : "music.note.list")
+                        .font(.system(size: 15, weight: .bold))
+                    Text(selectedMusicURL == nil ? "Add Music" : "Music Added ✓")
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                }
+                .foregroundStyle(selectedMusicURL == nil ? .white.opacity(0.75) : Color(red: 0.3, green: 1, blue: 0.5))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 11)
+                .background(Color.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 18)
+
             if let meta = generatedMeta {
                 HStack(spacing: 10) {
                     Text(adChannelEmoji(meta.channel))
@@ -1323,6 +1465,34 @@ private extension UIImage {
 
 private enum AdGenerationError: Error {
     case noMedia, generationFailed, downloadFailed, noAPIKey
+}
+
+// MARK: - Music picker
+
+private struct MusicDocumentPicker: UIViewControllerRepresentable {
+    let onPick: (URL) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(onPick: onPick) }
+
+    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        let types: [UTType] = [.audio, .movie]
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: types, asCopy: true)
+        picker.delegate = context.coordinator
+        picker.allowsMultipleSelection = false
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: UIDocumentPickerViewController, context: Context) {}
+
+    final class Coordinator: NSObject, UIDocumentPickerDelegate {
+        let onPick: (URL) -> Void
+        init(onPick: @escaping (URL) -> Void) { self.onPick = onPick }
+
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+            guard let url = urls.first else { return }
+            onPick(url)
+        }
+    }
 }
 
 private enum AdGenerationService {
