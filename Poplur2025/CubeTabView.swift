@@ -1169,6 +1169,10 @@ private struct CubeSceneView: UIViewRepresentable {
             NotificationCenter.default.addObserver(forName: Notification.Name("RecordingStopped"), object: nil, queue: .main) { [weak self] _ in
                 self?.view?.rendersContinuously = true
             }
+            // ML object detection → one-shot pop when camera finds something new
+            NotificationCenter.default.addObserver(forName: Notification.Name("MLCubePopTrigger"), object: nil, queue: .main) { [weak self] _ in
+                self?.triggerPreviewPop()
+            }
         }
 
         deinit {

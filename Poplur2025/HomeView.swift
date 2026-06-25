@@ -784,6 +784,10 @@ struct HomeView: View {
                             .transition(.opacity)
                             .zIndex(7)
                     }
+
+                    MLCameraShaderOverlay()
+                        .allowsHitTesting(false)
+                        .zIndex(8)
                 }
                 .animation(.easeInOut(duration: 0.18), value: cameraController.isScreenFlashOn)
             } else {
@@ -3457,5 +3461,137 @@ private struct RecognizedUserCard: View {
         .shadow(color: .black.opacity(0.3), radius: 12, x: 0, y: 6)
         .padding(.top, 60)
         .padding(.horizontal, 16)
+    }
+}
+
+// MARK: - ML Camera Shader Overlay
+
+/// Real-time ML object detection overlay shown at top center of the camera view.
+/// Fires a cube pop when new objects are detected.
+private struct MLCameraShaderOverlay: View {
+    @State private var detectedObjects: [DetectedObject] = []
+    @State private var lastDetectionKey: String = ""
+    @State private var lastPopTime: Date = .distantPast
+
+    private let popCooldown: TimeInterval = 2.5
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if !detectedObjects.isEmpty {
+                mlBanner
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .animation(.spring(response: 0.32, dampingFraction: 0.72), value: detectedObjects.map(\.identifier))
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("MLObjectsDetected"))) { note in
+            guard let objects = note.userInfo?["objects"] as? [DetectedObject] else { return }
+            detectedObjects = objects
+            let key = objects.prefix(3).map(\.identifier).joined(separator: ",")
+            if key != lastDetectionKey, !objects.isEmpty {
+                let now = Date()
+                if now.timeIntervalSince(lastPopTime) >= popCooldown {
+                    lastPopTime = now
+                    NotificationCenter.default.post(name: Notification.Name("MLCubePopTrigger"), object: nil)
+                }
+                lastDetectionKey = key
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var mlBanner: some View {
+        VStack(spacing: 8) {
+            if let primary = detectedObjects.first {
+                MLShaderLabel(text: primary.identifier.uppercased())
+            }
+            if detectedObjects.count > 1 {
+                HStack(spacing: 7) {
+                    ForEach(Array(detectedObjects.dropFirst().prefix(3).enumerated()), id: \.offset) { idx, obj in
+                        MLFloat3DChip(text: obj.identifier.capitalized, delay: Double(idx) * 0.2)
+                    }
+                }
+            }
+        }
+        .padding(.top, 54)
+        .frame(maxWidth: .infinity)
+    }
+}
+
+private struct MLShaderLabel: View {
+    let text: String
+    @State private var glowPhase: Double = 0
+
+    var body: some View {
+        ZStack {
+            // Outer bloom
+            Text(text)
+                .font(.system(size: 19, weight: .black, design: .monospaced))
+                .foregroundStyle(Color.cyan.opacity(0.3))
+                .blur(radius: 14)
+            // Mid glow
+            Text(text)
+                .font(.system(size: 19, weight: .black, design: .monospaced))
+                .foregroundStyle(Color.white.opacity(0.4))
+                .blur(radius: 5)
+            // Animated shimmer gradient
+            Text(text)
+                .font(.system(size: 19, weight: .black, design: .monospaced))
+                .tracking(3)
+                .foregroundStyle(
+                    LinearGradient(
+                        colors: [
+                            .white,
+                            Color.cyan.opacity(0.9),
+                            Color.white.opacity(0.55 + sin(glowPhase) * 0.45),
+                            Color.cyan,
+                            .white
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                )
+        }
+        .shadow(color: .cyan.opacity(0.75), radius: 10)
+        .shadow(color: .white.opacity(0.35), radius: 4)
+        .onAppear {
+            withAnimation(.linear(duration: 1.8).repeatForever(autoreverses: true)) {
+                glowPhase = .pi * 2
+            }
+        }
+    }
+}
+
+private struct MLFloat3DChip: View {
+    let text: String
+    let delay: Double
+    @State private var floatOffset: CGFloat = 0
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+            .foregroundStyle(.white.opacity(0.9))
+            .tracking(1.1)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 5)
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(Color.cyan.opacity(0.45), lineWidth: 0.8)
+            )
+            .rotation3DEffect(.degrees(9), axis: (x: 1, y: 0, z: 0))
+            .offset(y: floatOffset)
+            .shadow(color: .cyan.opacity(0.35), radius: 6)
+            .onAppear {
+                withAnimation(
+                    .easeInOut(duration: 1.1 + delay * 0.3)
+                    .repeatForever(autoreverses: true)
+                    .delay(delay)
+                ) {
+                    floatOffset = -5
+                }
+            }
     }
 }
