@@ -255,6 +255,7 @@ struct CubeFaceExporter {
 }
 
 struct CubeTabView: View {
+    @ObservedObject private var cubeSkinStore = CubeSkinStore.shared
     @Binding var selectedTab: AppTab
     @Binding var previewHover: Bool
     @Binding var previewPopTrigger: Int
@@ -334,7 +335,8 @@ struct CubeTabView: View {
             onCubeTap: onCubeTap,
             baseColor: baseColor,
             enablePreviewSpin: enablePreviewSpin,
-            enableGlow: enableGlow
+            enableGlow: enableGlow,
+            currentSkin: cubeSkinStore.current
         )
         .frame(width: 200, height: 200)
         .background(.clear)
@@ -378,6 +380,7 @@ private struct FloatingCube: View {
     var baseColor: Color
     var enablePreviewSpin: Bool
     var enableGlow: Bool
+    var currentSkin: CubeSkin = CubeSkinStore.shared.current
 
     @State private var bob: CGFloat = 0
     @State private var tilt: Double = 0
@@ -402,7 +405,8 @@ private struct FloatingCube: View {
             parentSwipeUpHandler: onSwipeUp,
             parentCubeTapHandler: onCubeTap,
             enablePreviewSpin: enablePreviewSpin,
-            enableGlow: enableGlow
+            enableGlow: enableGlow,
+            currentSkin: currentSkin
         )
     }
 }
@@ -427,6 +431,7 @@ private struct CubeSceneView: UIViewRepresentable {
     var parentCubeTapHandler: (() -> Void)? = nil
     var enablePreviewSpin: Bool
     var enableGlow: Bool
+    var currentSkin: CubeSkin = CubeSkinStore.shared.current
 
     func makeUIView(context: Context) -> SCNView {
         let scnView = SCNView()
@@ -548,6 +553,19 @@ private struct CubeSceneView: UIViewRepresentable {
 
         if selectedTab == .record {
             context.coordinator.resumeForCameraTab()
+        }
+
+        // Rebuild materials when the cube skin changes
+        if currentSkin != context.coordinator.lastAppliedSkin,
+           let cube = uiView.scene?.rootNode.childNode(withName: "cube", recursively: true),
+           let box = cube.geometry as? SCNBox {
+            context.coordinator.lastAppliedSkin = currentSkin
+            CubeFaceImageCache.clearSkinCache()
+            let newMats = makeMaterials(baseColor: baseColor)
+            box.materials = newMats
+            context.coordinator.cubeMaterials = newMats
+            context.coordinator.applyCurrentProfileIconOverride()
+            context.coordinator.applyFeedFaceIcon()
         }
 
         // Keep multiply white (neon style — emission carries all color)
@@ -1054,6 +1072,7 @@ private struct CubeSceneView: UIViewRepresentable {
         private var isTVGuideOpen: Bool = false
         private var isBlinking: Bool = false
         var cubeMaterials: [SCNMaterial] = []
+        var lastAppliedSkin: CubeSkin = CubeSkinStore.shared.current
 
         var lastPopTrigger: Int = 0
         var lastYawRightStep: Int = 0
