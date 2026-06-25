@@ -1810,11 +1810,7 @@ struct HomeView: View {
                 guard let userInfo = notification.userInfo,
                       let latitude = userInfo["latitude"] as? Double,
                       let longitude = userInfo["longitude"] as? Double else { return }
-                if userInfo["channelID"] is String || userInfo["filterID"] is String {
-                    uploadStatusMessage = "AI feed service is preparing your Poplur TV post..."
-                } else {
-                    uploadStatusMessage = "Uploading your post..."
-                }
+                uploadStatusMessage = "Uploading your post..."
                 uploadStatusIcon = "arrow.up.circle.fill"
                 uploadStatusColor = .blue
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { showUploadStatus = true }
@@ -1832,10 +1828,14 @@ struct HomeView: View {
                     try? await Task.sleep(nanoseconds: 1_000_000_000)
                     selectedTab = .profile
                     NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
+                    // Auto-dismiss after navigating to profile — PostUploadSuccess is never
+                    // guaranteed to fire, so don't leave the banner stuck.
+                    try? await Task.sleep(nanoseconds: 3_000_000_000)
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { showUploadStatus = false }
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("PostUploadStarted"))) { notification in
-                uploadStatusMessage = notification.userInfo?["message"] as? String ?? "Uploading..."
+                uploadStatusMessage = "Uploading your post..."
                 uploadStatusIcon = "arrow.up.circle.fill"
                 uploadStatusColor = .blue
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { showUploadStatus = true }

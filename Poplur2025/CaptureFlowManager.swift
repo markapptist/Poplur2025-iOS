@@ -168,12 +168,11 @@ final class CaptureFlowManager: ObservableObject {
             userInfo: userInfo
         )
         
-        // Show success notification
         NotificationCenter.default.post(
             name: Notification.Name("PostUploadStarted"),
             object: nil,
             userInfo: [
-                "message": "AI feed service is preparing your Poplur TV post...",
+                "message": "Uploading your post...",
                 "coordinate": finalCoordinate
             ]
         )

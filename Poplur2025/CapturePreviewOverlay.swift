@@ -454,7 +454,7 @@ struct PostCaptureComposerOverlay: View {
     @State private var videoTrimSeconds: Double = 10
     @State private var maxVideoTrimSeconds: Double = 10
     @State private var isPosting = false
-    @State private var statusText = "AI feed service is preparing your Poplur TV post..."
+    @State private var statusText = "Uploading your post..."
     @State private var whoText: String = ""
     @State private var whatText: String = ""
     @State private var whereText: String = ""
@@ -955,6 +955,21 @@ struct PostCaptureComposerOverlay: View {
                         step = .adPreview(adImage)
                     }
                 }
+            } catch TVAnalyzerError.noAPIKey {
+                await MainActor.run {
+                    isGenerating = false
+                    generationError = "Claude API key missing — add it to Secrets.swift."
+                }
+            } catch TVAnalyzerError.httpError(let code) {
+                await MainActor.run {
+                    isGenerating = false
+                    generationError = "AI analysis failed (HTTP \(code)) — check your API key."
+                }
+            } catch TVAnalyzerError.parseError {
+                await MainActor.run {
+                    isGenerating = false
+                    generationError = "AI response couldn't be parsed — try again."
+                }
             } catch {
                 print("🎬 [AdGeneration] Failed: \(error)")
                 await MainActor.run {
@@ -1016,7 +1031,7 @@ struct PostCaptureComposerOverlay: View {
     private func post() {
         guard !isPosting else { return }
         isPosting = true
-        statusText = "AI feed service is turning this into Poplur TV content..."
+        statusText = "Uploading your post..."
 
         Task {
             let processedImage = image?.applyingPostCaptureFilter(selectedFilter)
