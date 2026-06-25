@@ -44,42 +44,47 @@ private func makeWAVBytes(_ samples: [Int16], sampleRate: Int) -> Data {
 // MARK: - 3D SceneKit globe
 
 private func makeEarthTexture() -> UIImage {
-    let size = CGSize(width: 512, height: 256)
-    UIGraphicsBeginImageContextWithOptions(size, true, 1.0)
-    guard let c = UIGraphicsGetCurrentContext() else {
-        UIGraphicsBeginImageContextWithOptions(size, true, 1.0)
-        let ctx = UIGraphicsGetCurrentContext()
-        ctx?.setFillColor(UIColor(red: 0.06, green: 0.28, blue: 0.68, alpha: 1).cgColor)
-        ctx?.fill(CGRect(origin: .zero, size: size))
-        let fallback = UIGraphicsGetImageFromCurrentImageContext() ?? UIImage()
-        UIGraphicsEndImageContext()
-        return fallback
-    }
+    let width = 512
+    let height = 256
+    guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else { return UIImage() }
+    guard let ctx = CGContext(
+        data: nil,
+        width: width,
+        height: height,
+        bitsPerComponent: 8,
+        bytesPerRow: 0,
+        space: colorSpace,
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+    ) else { return UIImage() }
 
-    let w = size.width, h = size.height
+    let w = CGFloat(width)
+    let h = CGFloat(height)
 
-    c.setFillColor(UIColor(red: 0.06, green: 0.28, blue: 0.68, alpha: 1).cgColor)
-    c.fill(CGRect(origin: .zero, size: size))
+    // Background ocean
+    ctx.setFillColor(UIColor(red: 0.06, green: 0.28, blue: 0.68, alpha: 1).cgColor)
+    ctx.fill(CGRect(x: 0, y: 0, width: w, height: h))
 
-    c.setFillColor(UIColor(red: 0.20, green: 0.52, blue: 0.18, alpha: 1).cgColor)
-    c.fillEllipse(in: CGRect(x: w*0.04, y: h*0.08, width: w*0.17, height: h*0.30))
-    c.fillEllipse(in: CGRect(x: w*0.10, y: h*0.36, width: w*0.05, height: h*0.08))
-    c.fillEllipse(in: CGRect(x: w*0.12, y: h*0.48, width: w*0.11, height: h*0.34))
-    c.fillEllipse(in: CGRect(x: w*0.22, y: h*0.02, width: w*0.06, height: h*0.10))
-    c.fillEllipse(in: CGRect(x: w*0.46, y: h*0.07, width: w*0.07, height: h*0.16))
-    c.fillEllipse(in: CGRect(x: w*0.46, y: h*0.28, width: w*0.10, height: h*0.40))
-    c.fillEllipse(in: CGRect(x: w*0.53, y: h*0.28, width: w*0.06, height: h*0.14))
-    c.fillEllipse(in: CGRect(x: w*0.54, y: h*0.04, width: w*0.30, height: h*0.38))
-    c.fillEllipse(in: CGRect(x: w*0.60, y: h*0.35, width: w*0.07, height: h*0.18))
-    c.fillEllipse(in: CGRect(x: w*0.72, y: h*0.36, width: w*0.07, height: h*0.14))
-    c.fillEllipse(in: CGRect(x: w*0.76, y: h*0.56, width: w*0.10, height: h*0.14))
-    c.setFillColor(UIColor(red: 0.88, green: 0.93, blue: 1.0, alpha: 1).cgColor)
-    c.fill(CGRect(x: 0, y: h*0.88, width: w, height: h*0.12))
-    c.fill(CGRect(x: 0, y: 0,      width: w, height: h*0.03))
+    // Landmasses
+    ctx.setFillColor(UIColor(red: 0.20, green: 0.52, blue: 0.18, alpha: 1).cgColor)
+    ctx.fillEllipse(in: CGRect(x: w*0.04, y: h*0.08, width: w*0.17, height: h*0.30))
+    ctx.fillEllipse(in: CGRect(x: w*0.10, y: h*0.36, width: w*0.05, height: h*0.08))
+    ctx.fillEllipse(in: CGRect(x: w*0.12, y: h*0.48, width: w*0.11, height: h*0.34))
+    ctx.fillEllipse(in: CGRect(x: w*0.22, y: h*0.02, width: w*0.06, height: h*0.10))
+    ctx.fillEllipse(in: CGRect(x: w*0.46, y: h*0.07, width: w*0.07, height: h*0.16))
+    ctx.fillEllipse(in: CGRect(x: w*0.46, y: h*0.28, width: w*0.10, height: h*0.40))
+    ctx.fillEllipse(in: CGRect(x: w*0.53, y: h*0.28, width: w*0.06, height: h*0.14))
+    ctx.fillEllipse(in: CGRect(x: w*0.54, y: h*0.04, width: w*0.30, height: h*0.38))
+    ctx.fillEllipse(in: CGRect(x: w*0.60, y: h*0.35, width: w*0.07, height: h*0.18))
+    ctx.fillEllipse(in: CGRect(x: w*0.72, y: h*0.36, width: w*0.07, height: h*0.14))
+    ctx.fillEllipse(in: CGRect(x: w*0.76, y: h*0.56, width: w*0.10, height: h*0.14))
 
-    let image = UIGraphicsGetImageFromCurrentImageContext() ?? UIImage()
-    UIGraphicsEndImageContext()
-    return image
+    // Polar caps / clouds
+    ctx.setFillColor(UIColor(red: 0.88, green: 0.93, blue: 1.0, alpha: 1).cgColor)
+    ctx.fill(CGRect(x: 0, y: h*0.88, width: w, height: h*0.12))
+    ctx.fill(CGRect(x: 0, y: 0,      width: w, height: h*0.03))
+
+    guard let cgImage = ctx.makeImage() else { return UIImage() }
+    return UIImage(cgImage: cgImage)
 }
 
 private struct Globe3DSceneView: WKInterfaceObjectRepresentable {
@@ -208,42 +213,7 @@ private struct GlobeTrendView: View {
     }
 }
 
-// MARK: - Poplur logo mark (drawn — no asset needed)
-
-private struct PoplurLogoMark: View {
-    private let pink = Color(red: 0.95, green: 0.20, blue: 0.58)
-    private let bg   = Color(red: 0.05, green: 0.02, blue: 0.08)
-
-    // Four petal offsets (diagonal quadrants)
-    private let offsets: [(CGFloat, CGFloat)] = [(-11, -11), (11, -11), (-11, 11), (11, 11)]
-
-    var body: some View {
-        ZStack {
-            // Dark circle background with pink glow
-            Circle()
-                .fill(bg)
-                .frame(width: 70, height: 70)
-                .shadow(color: pink.opacity(0.55), radius: 14)
-
-            // 4-petal clover clipped to the circle
-            ZStack {
-                ForEach(0..<offsets.count, id: \.self) { i in
-                    Circle()
-                        .fill(pink.opacity(0.88))
-                        .frame(width: 40, height: 40)
-                        .offset(x: offsets[i].0, y: offsets[i].1)
-                }
-            }
-            .frame(width: 70, height: 70)
-            .clipShape(Circle())
-
-            // White P centred on petals
-            Text("P")
-                .font(.system(size: 32, weight: .black, design: .rounded))
-                .foregroundColor(.white)
-        }
-    }
-}
+// MARK: - Poplur logo mark (actual app icon, circle-clipped, no border)
 
 // MARK: - TV static overlay
 
@@ -274,8 +244,12 @@ private struct StaticOverlay: View {
             }
             .ignoresSafeArea()
 
-            // Poplur logo centred, gently pulsing
-            PoplurLogoMark()
+            // Poplur logo centred, gently pulsing — clipped to circle, no border
+            Image("poplur_logo")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 68, height: 68)
+                .clipShape(Circle())
                 .scaleEffect(pulse ? 1.06 : 0.94)
                 .animation(
                     .easeInOut(duration: 0.55).repeatForever(autoreverses: true),
@@ -510,6 +484,7 @@ struct RadiusWatchView: View {
         .onReceive(switchTimer) { _ in
             withAnimation(.easeInOut(duration: 0.35)) { showKm.toggle() }
         }
+        .persistentSystemOverlays(.hidden)
         .accessibilityLabel("Poplur watch face — tap to toggle km/mi")
     }
 

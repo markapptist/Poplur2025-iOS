@@ -105,23 +105,12 @@ struct Poplur2025App: App {
         _auth = StateObject(wrappedValue: AuthViewModel())
     }
     
-    @StateObject private var isometricBarSettings: IsometricBarSettings = {
-        let s = IsometricBarSettings()
-        s.horizontalOffset = 24
-        s.bottomOffset = 12
-        s.barWidth = 98
-        s.barHeight = 390
-        s.barTiltDegrees = -8
-        return s
-    }()
-
     var body: some Scene {
         WindowGroup {
             NavigationStack {
                 if auth.isAuthenticated {
                     HomeView()
                         .environmentObject(auth)
-                        .environmentObject(isometricBarSettings)
                         .task(id: auth.currentUser?.uid) {
                             await PoplurNotificationCenter.shared.refreshDailyNotificationForCurrentUser()
                             WatchRadiusSync.shared.refreshAndSendRadius()
@@ -129,7 +118,6 @@ struct Poplur2025App: App {
                 } else {
                     WelcomeView()
                         .environmentObject(auth)
-                        .environmentObject(isometricBarSettings)
                 }
             }
             .toolbar(.hidden, for: .navigationBar)

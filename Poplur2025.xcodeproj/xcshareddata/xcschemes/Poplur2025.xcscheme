@@ -70,12 +70,12 @@
       useCustomWorkingDirectory = "NO"
       ignoresPersistentStateOnLaunch = "NO"
       debugDocumentVersioning = "YES"
-      debugServiceExtension = "internal"
+      debugServiceExtension = "external"
       enableGPUFrameCaptureMode = "3"
-      enableGPUValidationMode = "1"
+      enableGPUValidationMode = "0"
       allowLocationSimulation = "YES">
       <BuildableProductRunnable
-         runnableDebuggingMode = "0">
+         runnableDebuggingMode = "2">
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "391605C02E3F48FF000ACB3E"

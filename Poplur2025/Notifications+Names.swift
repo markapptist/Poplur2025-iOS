@@ -72,9 +72,6 @@ extension Notification.Name {
     static let currentPostRadiusDidChange = Notification.Name("CurrentPostRadiusDidChange")
     static let showCapturedPreviewRequested = Notification.Name("ShowCapturedPreviewRequested")
     static let capturePreviewDidDismiss = Notification.Name("CapturePreviewDidDismiss")
-    static let radiusBarGlobeTap = Notification.Name("RadiusBarGlobeTap")
-    static let radiusBarHoldBegan = Notification.Name("RadiusBarHoldBegan")
-    static let radiusBarHoldEnded = Notification.Name("RadiusBarHoldEnded")
     static let animateRadiusBarToValue = Notification.Name("AnimateRadiusBarToValue")
 
     // In-app calling

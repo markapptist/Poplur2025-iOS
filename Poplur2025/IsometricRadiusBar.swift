@@ -92,13 +92,6 @@ public struct IsometricRadiusBar: View {
             }
         )
         // Removed currentPostRadiusDidChange and ForceRadiusBarUpdate handlers - HomeView manages these via binding
-        .onReceive(NotificationCenter.default.publisher(for: .radiusBarHoldBegan)) { _ in
-            stopDrain()
-            startHoldIncrease()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .radiusBarHoldEnded)) { _ in
-            stopHoldIncrease()
-        }
         .onReceive(NotificationCenter.default.publisher(for: .animateRadiusBarToValue)) { note in
             if let targetRadius = note.userInfo?["radius"] as? Double {
                 print("🔵 [RadiusBar] Received animateRadiusBarToValue: \(targetRadius)m")
@@ -677,9 +670,7 @@ private struct RadiusBarSceneView: UIViewRepresentable {
             startFollowingGlobe()
             // Removed startLoopingBar() call here as per instructions
             
-            tapObserver = NotificationCenter.default.addObserver(forName: .radiusBarGlobeTap, object: nil, queue: .main) { [weak self] _ in
-                self?.globePop()
-            }
+            tapObserver = nil
         }
 
         func markInitialAnimationRun() {

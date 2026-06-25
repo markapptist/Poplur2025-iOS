@@ -183,6 +183,7 @@ class UserRecognitionManager: ObservableObject {
     
     /// Detect faces in the camera frame
     func detectFaces(in pixelBuffer: CVPixelBuffer) {
+        guard !isRecognizing else { return }
         guard let request = faceDetectionRequest else { return }
         
         isRecognizing = true

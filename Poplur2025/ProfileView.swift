@@ -12,6 +12,14 @@ import ARKit
 // - PostCreated: ["id": String, "userID": String, "latitude": Double, "longitude": Double, "mediaURL": String, "radius": Double, "viewCount": Int] to insert newly published posts immediately
 // Long-press on a post will emit OpenCameraAtCoordinate with both coordinate and lat/lon for map navigation.
 
+private func animateRadius(to meters: Double, duration: Double) {
+    NotificationCenter.default.post(
+        name: .animateRadiusBarToValue,
+        object: nil,
+        userInfo: ["radius": meters, "duration": duration]
+    )
+}
+
 private var isRunningInPreviews: Bool {
     let env = ProcessInfo.processInfo.environment
     return env["XCODE_RUNNING_FOR_PREVIEWS"] == "1" || env["XCODE_RUNNING_FOR_PLAYGROUNDS"] == "1"
@@ -785,7 +793,7 @@ struct ProfileView: View {
                         // Animate radius bar to show total accumulated radius after loading
                         if self.averageRadius > 0 {
                             print("📊 [ProfileView] Posts loaded, animating radius bar to total: \(self.averageRadius)m")
-                            RadiusBarAnimator.animate(to: self.averageRadius, duration: 1.2)
+                            animateRadius(to:self.averageRadius, duration: 1.2)
                         } else {
                             print("📊 [ProfileView] No posts loaded, radius stays at 0")
                         }
@@ -808,7 +816,7 @@ struct ProfileView: View {
                 
                 // Immediately set radius to 0 when profile appears (before posts load)
                 print("📊 [ProfileView] onAppear - setting radius to 0")
-                RadiusBarAnimator.animate(to: 0, duration: 0.3)
+                animateRadius(to:0, duration: 0.3)
                 
                 // ALWAYS reload posts when appearing to ensure we show the correct user's posts
                 print("📊 [ProfileView] onAppear - reloading posts for userID: \(effectiveUserID ?? "nil")")
@@ -820,11 +828,11 @@ struct ProfileView: View {
                         self.averageRadius = Double(self.averagePostRadius())
                         if self.averageRadius > 0 {
                             print("📊 [ProfileView] onAppear - posts loaded, animating radius bar to: \(self.averageRadius)m")
-                            RadiusBarAnimator.animate(to: self.averageRadius, duration: 1.2)
+                            animateRadius(to:self.averageRadius, duration: 1.2)
                         } else {
                             print("📊 [ProfileView] onAppear - no posts, keeping radius at 0")
                             // Ensure radius stays at 0 if no posts
-                            RadiusBarAnimator.animate(to: 0, duration: 0.3)
+                            animateRadius(to:0, duration: 0.3)
                         }
                         self.refreshDailyNotificationsFromCurrentPosts()
                     }
@@ -850,7 +858,7 @@ struct ProfileView: View {
                     loadedImages = [:]
                     hasLoadedOnce = false
                     averageRadius = 0
-                    RadiusBarAnimator.animate(to: 0, duration: 0.3)
+                    animateRadius(to:0, duration: 0.3)
                     Task {
                         // Temporarily override by using the parameter initializer path
                         // We can't change routedUserID here, so load posts for uid directly
@@ -864,7 +872,7 @@ struct ProfileView: View {
                       let radius = info["radius"] as? Double else { return }
                 if uid == effectiveUserID {
                     print("📏 [ProfileView] Updating radius bar for current user to \(radius)m from feed context")
-                    RadiusBarAnimator.animate(to: radius, duration: 0.6)
+                    animateRadius(to:radius, duration: 0.6)
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ProfileShowUserContext"))) { notif in
@@ -885,13 +893,13 @@ struct ProfileView: View {
                     loadedImages = [:]
                     hasLoadedOnce = false
                     averageRadius = 0
-                    RadiusBarAnimator.animate(to: 0, duration: 0.3)
+                    animateRadius(to:0, duration: 0.3)
                     Task { await loadPostsForSpecificUser(uid) }
                 }
 
                 // Apply incoming radius to the global bar if provided and matches the viewed user
                 if let r = radius, uid == effectiveUserID {
-                    RadiusBarAnimator.animate(to: r, duration: 0.6)
+                    animateRadius(to:r, duration: 0.6)
                 }
 
                 // If a current post was specified, try to bring it into view after posts are loaded
@@ -956,7 +964,7 @@ struct ProfileView: View {
                 Task.detached { await prefetchImages(for: [newPost]) }
                 // Update radius bar to reflect new total
                 averageRadius = Double(averagePostRadius())
-                RadiusBarAnimator.animate(to: averageRadius, duration: 0.8)
+                animateRadius(to:averageRadius, duration: 0.8)
                 refreshDailyNotificationsFromCurrentPosts()
             }
             .onReceive(NotificationCenter.default.publisher(for: .cubeHoldBegan)) { _ in
@@ -1099,7 +1107,7 @@ struct ProfileView: View {
                 averageRadius = 0  // Reset average radius to 0 when switching users
                 
                 // Reset radius bar to 0 when switching users
-                RadiusBarAnimator.animate(to: 0, duration: 0.3)
+                animateRadius(to:0, duration: 0.3)
                 
                 Task {
                     // Reload posts for the new user
@@ -1120,11 +1128,11 @@ struct ProfileView: View {
                         self.averageRadius = Double(self.averagePostRadius())
                         if self.averageRadius > 0 {
                             print("📊 [ProfileView] User switched, animating radius bar to: \(self.averageRadius)m")
-                            RadiusBarAnimator.animate(to: self.averageRadius, duration: 1.2)
+                            animateRadius(to:self.averageRadius, duration: 1.2)
                         } else {
                             print("📊 [ProfileView] User switched, no posts - keeping radius at 0")
                             // Ensure radius stays at 0 if no posts
-                            RadiusBarAnimator.animate(to: 0, duration: 0.3)
+                            animateRadius(to:0, duration: 0.3)
                         }
                     }
                 }
@@ -1441,7 +1449,7 @@ struct ProfileView: View {
             await MainActor.run {
                 self.averageRadius = 0
             }
-            RadiusBarAnimator.animate(to: 0, duration: 0.3)
+            animateRadius(to:0, duration: 0.3)
         }
 
         await MainActor.run {
@@ -1470,7 +1478,7 @@ struct ProfileView: View {
             if page.posts.isEmpty {
                 await MainActor.run {
                     self.averageRadius = 0
-                    RadiusBarAnimator.animate(to: 0, duration: 0.3)
+                    animateRadius(to:0, duration: 0.3)
                 }
             }
         } catch {
@@ -1493,7 +1501,7 @@ struct ProfileView: View {
                     self.canLoadMore = false
                     self.averageRadius = 0
                 }
-                RadiusBarAnimator.animate(to: 0, duration: 0.3)
+                animateRadius(to:0, duration: 0.3)
             }
         }
     }
@@ -1532,7 +1540,7 @@ struct ProfileView: View {
             await MainActor.run {
                 self.averageRadius = 0
             }
-            RadiusBarAnimator.animate(to: 0, duration: 0.3)
+            animateRadius(to:0, duration: 0.3)
         }
 
         await MainActor.run {
@@ -1560,7 +1568,7 @@ struct ProfileView: View {
             if page.posts.isEmpty {
                 await MainActor.run {
                     self.averageRadius = 0
-                    RadiusBarAnimator.animate(to: 0, duration: 0.3)
+                    animateRadius(to:0, duration: 0.3)
                 }
             }
         } catch {
@@ -1583,7 +1591,7 @@ struct ProfileView: View {
                     self.canLoadMore = false
                     self.averageRadius = 0
                 }
-                RadiusBarAnimator.animate(to: 0, duration: 0.3)
+                animateRadius(to:0, duration: 0.3)
             }
         }
     }

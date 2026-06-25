@@ -22,13 +22,6 @@ enum PreviewAppTab: Hashable, CaseIterable {
 // Verified: no references to deprecated map2 remain.
 
 // Usage elsewhere:
-// @Environment(\.isometricRadiusBarDistance) private var isometricRadiusBarDistance
-// Use `isometricRadiusBarDistance` to position your isometric radius bar from the screen center
-// Or use the shared settings object:
-// @Environment(\.isometricBarSettings) private var barSettings
-// barSettings.horizontalOffset / barSettings.bottomOffset
-
-// Shared model for the isometric bar radius value
 final class IsometricBarModel: ObservableObject {
     @Published var radius: Double
     init(radius: Double = 0) { self.radius = radius }
@@ -471,15 +464,6 @@ private final class DeviceVolumeObserver: ObservableObject {
     }
 }
 
-private struct IsometricBarModelKey: EnvironmentKey {
-    static let defaultValue: IsometricBarModel = IsometricBarModel()
-}
-
-// Deprecated: prefer using `isometricBarSettings.horizontalOffset` and `.bottomOffset`
-private struct IsometricRadiusBarDistanceKey: EnvironmentKey {
-    static let defaultValue: CGFloat = 2000 // default distance in points; adjust as needed
-}
-
 private struct HomeViewIsPreviewRuntimeKey: EnvironmentKey {
     static let defaultValue: Bool = false
 }
@@ -489,16 +473,6 @@ private struct PreviewSelectedTabKey: EnvironmentKey {
 }
 
 extension EnvironmentValues {
-
-    var isometricRadiusBarDistance: CGFloat {
-        get { self[IsometricRadiusBarDistanceKey.self] }
-        set { self[IsometricRadiusBarDistanceKey.self] = newValue }
-    }
-
-    var isometricBarModel: IsometricBarModel {
-        get { self[IsometricBarModelKey.self] }
-        set { self[IsometricBarModelKey.self] = newValue }
-    }
 
     var homeViewIsPreviewRuntime: Bool {
         get { self[HomeViewIsPreviewRuntimeKey.self] }
@@ -566,9 +540,6 @@ struct HomeView: View {
     @Environment(\.homeViewIsPreviewRuntime) private var isPreviewRuntime
     @Environment(\.previewSelectedTab) private var previewSelectedTab
 
-    // Changed per instructions to use EnvironmentObject
-    @EnvironmentObject private var isometricBarSettings: IsometricBarSettings
-
     // Start on feed tab instead of record tab
     @State private var selectedTab: AppTab = .feed
 
@@ -589,7 +560,6 @@ struct HomeView: View {
     @State private var didTriggerMapInitialLoad = false
     @State private var didTriggerProfileInitialLoad = false
     @State private var enableLowerHitArea: Bool = false
-    @State private var didApplyDefaultBarSettings = false
     @State private var didRunLaunchSequence = false
     @State private var showAppInitializationCover = true
     @State private var showSlowInitializationDetails = false
@@ -1996,8 +1966,6 @@ struct HomeView: View {
     var body: some View {
         // Step 1: apply environment values and lifecycle modifiers
         let step1 = rootStack
-            .environment(\.isometricRadiusBarDistance, isometricBarSettings.horizontalOffset)
-            .environment(\.isometricBarModel, isometricBarModel)
             .task {
                 guard showAppInitializationCover else { return }
                 // Show loading bar + text immediately
@@ -2028,14 +1996,6 @@ struct HomeView: View {
                     try? await Task.sleep(nanoseconds: 120_000_000)
                     await Task.yield()
                     enableLowerHitArea = false
-                    if !didApplyDefaultBarSettings {
-                        didApplyDefaultBarSettings = true
-                        isometricBarSettings.horizontalOffset = 40
-                        isometricBarSettings.bottomOffset = -80
-                        isometricBarSettings.barWidth = 98
-                        isometricBarSettings.barHeight = 390
-                        isometricBarSettings.barTiltDegrees = -8
-                    }
                 }
                 resetChromeSleepTimer()
                 if selectedTab == .feed {
@@ -2704,8 +2664,6 @@ private struct FeedChromeNotificationBridge: View {
 
 private struct CubeAndBarOverlay: View {
     @Binding var radius: Double
-    // Changed per instructions to EnvironmentObject
-    @EnvironmentObject private var isometricBarSettings: IsometricBarSettings
 
     var body: some View {
         GeometryReader { proxy in
@@ -2745,9 +2703,6 @@ struct HomeBarPlacementPreview: View {
     // Inserted states as per instructions:
     @State private var isPreviewRotating: Bool = false
     @State private var queuedPreviewTab: AppTab? = nil
-
-    // Changed per instructions to EnvironmentObject
-    @EnvironmentObject private var isometricBarSettings: IsometricBarSettings
 
     var usesImperial: Bool { Locale.current.measurementSystem != .metric }
     var earthMaxUnit: Double { usesImperial ? 3958.8 : 6371.0 }
@@ -2936,17 +2891,6 @@ struct HomeBarPlacementPreview: View {
     }
 }
 
-struct HomePreviewSettings {
-    static let settings: IsometricBarSettings = {
-        let s = IsometricBarSettings()
-        s.horizontalOffset = 40
-        s.bottomOffset = -113
-        s.barWidth = 98
-        s.barHeight = 390
-        s.barTiltDegrees = -8
-        return s
-    }()
-}
 
 private extension AppTab {
     init?(fromPreview tab: PreviewAppTab) {

@@ -541,7 +541,8 @@ extension ARFilterManager: ARSCNViewDelegate {
     
     private func updateFaceNode(node: SCNNode, faceAnchor: ARFaceAnchor) {
         if currentFaceNode == nil {
-            let faceGeometry = ARSCNFaceGeometry(device: MTLCreateSystemDefaultDevice()!)
+            guard let device = MTLCreateSystemDefaultDevice(),
+                  let faceGeometry = ARSCNFaceGeometry(device: device) else { return }
             let faceNode = SCNNode(geometry: faceGeometry)
             node.addChildNode(faceNode)
             currentFaceNode = faceNode

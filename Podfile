@@ -6,11 +6,6 @@ target 'Poplur2025' do
   # pod 'Firebase/Auth'
   # pod 'Firebase/Firestore'
   # pod 'Firebase/Storage'
-
-  # Snap Kit
-  pod 'SCCameraKit'
-  
-  
 end
 
 post_install do |installer|
