@@ -108,7 +108,11 @@ struct Poplur2025App: App {
     var body: some Scene {
         WindowGroup {
             NavigationStack {
-                if auth.isAuthenticated {
+                if auth.isResolvingAuthState {
+                    // Hold a white screen while Firebase validates the persisted token.
+                    // Prevents flashing WelcomeView for users who are already signed in.
+                    Color.white.ignoresSafeArea()
+                } else if auth.isAuthenticated {
                     HomeView()
                         .environmentObject(auth)
                         .task(id: auth.currentUser?.uid) {
