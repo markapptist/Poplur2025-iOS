@@ -1,4 +1,5 @@
 import SwiftUI
+import AVFoundation
 import AVKit
 import CoreLocation
 import CoreImage
@@ -441,7 +442,7 @@ struct PostCaptureComposerOverlay: View {
     let coordinate: CLLocationCoordinate2D
     var onDismiss: (() -> Void)? = nil
 
-    private enum Step {
+    private enum Step: Equatable {
         case filters
         case channel
         case adPrompt
@@ -919,11 +920,13 @@ struct PostCaptureComposerOverlay: View {
 
                 let prompt = buildAdPrompt(meta: meta)
 
+                // Resolve the best face reference: captured photo first, then first frame of video
+                let faceImage: UIImage? = image ?? (videoURL.flatMap { firstFrame(of: $0) })
+
                 if isVideo {
-                    // Use face image (first frame of capture) for image-to-video when available
                     let adVideoURL: URL
-                    if let faceImage = image {
-                        adVideoURL = try await FaceAdGenerationService.generateVideo(faceImage: faceImage, prompt: prompt)
+                    if let face = faceImage {
+                        adVideoURL = try await FaceAdGenerationService.generateVideo(faceImage: face, prompt: prompt)
                     } else {
                         adVideoURL = try await VideoAdGenerationService.generate(prompt: prompt)
                     }
@@ -935,10 +938,9 @@ struct PostCaptureComposerOverlay: View {
                         }
                     }
                 } else {
-                    // Face-preserving image generation when a selfie is available
                     let adImage: UIImage
-                    if let faceImage = image {
-                        adImage = try await FaceAdGenerationService.generateImage(faceImage: faceImage, prompt: prompt)
+                    if let face = faceImage {
+                        adImage = try await FaceAdGenerationService.generateImage(faceImage: face, prompt: prompt)
                     } else {
                         adImage = try await AdGenerationService.generate(prompt: prompt)
                     }
@@ -973,6 +975,15 @@ struct PostCaptureComposerOverlay: View {
                 }
             }
         }
+    }
+
+    private func firstFrame(of url: URL) -> UIImage? {
+        let asset = AVURLAsset(url: url)
+        let gen = AVAssetImageGenerator(asset: asset)
+        gen.appliesPreferredTrackTransform = true
+        gen.maximumSize = CGSize(width: 1024, height: 1024)
+        guard let cg = try? gen.copyCGImage(at: .zero, actualTime: nil) else { return nil }
+        return UIImage(cgImage: cg)
     }
 
     private func buildAdPrompt(meta: TVStyleMetadata) -> String {

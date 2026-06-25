@@ -2,30 +2,26 @@ import Foundation
 import UIKit
 
 // Face-preserving AI generation via Replicate.
-// Image ads: zsxkib/instant-id  — generates a styled portrait that looks like you.
-// Video ads: wan-ai/wan2.1-i2v-480p — animates your face image into a video.
+// Image ads: fofr/face-to-many — identity-preserving portrait in any scenario.
+// Video ads: wan-ai/wan2.1-i2v-480p — animates the face image into a video.
 enum FaceAdGenerationService {
 
     static func generateImage(faceImage: UIImage, prompt: String) async throws -> UIImage {
-        let apiKey = UserDefaults.standard.string(forKey: "poplur_replicate_key") ?? ""
-        guard !apiKey.isEmpty else { throw FaceAdError.noAPIKey }
-
+        let apiKey = try resolvedKey()
         let dataURI = try encodeImage(faceImage)
 
         var req = try makeRequest(
-            url: "https://api.replicate.com/v1/models/zsxkib/instant-id/predictions",
+            url: "https://api.replicate.com/v1/models/fofr/face-to-many/predictions",
             apiKey: apiKey,
             body: [
                 "input": [
                     "image": dataURI,
-                    "prompt": prompt,
-                    "negative_prompt": "low quality, blurry, bad anatomy, multiple people, text, watermark",
-                    "width": 768,
-                    "height": 1344,
+                    "prompt": prompt + ", cinematic TV advertisement, broadcast quality, vivid professional lighting",
+                    "negative_prompt": "low quality, blurry, bad anatomy, multiple people, text, watermark, cartoon",
+                    "style": "None",
+                    "guidance_scale": 7.5,
                     "num_inference_steps": 30,
-                    "guidance_scale": 5.0,
-                    "style_strength_ratio": 20,
-                    "enhance_face_region": true
+                    "disable_safety_checker": true
                 ] as [String: Any]
             ]
         )
@@ -39,9 +35,7 @@ enum FaceAdGenerationService {
     }
 
     static func generateVideo(faceImage: UIImage, prompt: String) async throws -> URL {
-        let apiKey = UserDefaults.standard.string(forKey: "poplur_replicate_key") ?? ""
-        guard !apiKey.isEmpty else { throw FaceAdError.noAPIKey }
-
+        let apiKey = try resolvedKey()
         let dataURI = try encodeImage(faceImage)
 
         var req = try makeRequest(
@@ -63,6 +57,14 @@ enum FaceAdGenerationService {
     }
 
     // MARK: - Private helpers
+
+    // UserDefaults override first; falls back to the key bundled in Secrets.swift.
+    private static func resolvedKey() throws -> String {
+        let stored = UserDefaults.standard.string(forKey: "poplur_replicate_key") ?? ""
+        let key = stored.isEmpty ? Secrets.replicateAPIKey : stored
+        guard !key.isEmpty else { throw FaceAdError.noAPIKey }
+        return key
+    }
 
     private static func encodeImage(_ image: UIImage) throws -> String {
         guard let data = image.jpegData(compressionQuality: 0.82) else { throw FaceAdError.encodingFailed }
