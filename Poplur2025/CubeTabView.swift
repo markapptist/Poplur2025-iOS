@@ -785,20 +785,18 @@ private struct CubeSceneView: UIViewRepresentable {
     private func uiColor(_ c: Color) -> UIColor { UIColor(c) }
 
     private func makeMaterials(baseColor: Color) -> [SCNMaterial] {
-        // SCNBox face order — eulerAngles.y maps each tab to its face:
-        // 0: +X (right)  — record tab    visible at yaw=-90°
-        // 1: -X (left)   — profile tab   visible at yaw=-270°
-        // 2: +Y (top)    — decorative (fork+knife)
-        // 3: -Y (bottom) — Poplur P  (P-logo peek face, pitch=-90°)
-        // 4: +Z (front)  — map tab       visible at yaw=0°
-        // 5: -Z (back)   — feed tab      visible at yaw=-180°
+        // SCNBox material order (Apple docs): 0=front(+Z) 1=right(+X) 2=back(-Z) 3=left(-X) 4=top(+Y) 5=bottom(-Y)
+        // yaw=0°   → front (+Z) = index 0 = Map
+        // yaw=-90° → right (+X) = index 1 = Camera
+        // yaw=-180°→ back  (-Z) = index 2 = Feed
+        // yaw=-270°→ left  (-X) = index 3 = Profile
         let faceSpecs: [(String, String)] = [
-            ("Camera",   "camera.fill"),
-            ("Profile",  "person.fill"),
-            ("",         "fork.knife"),
-            ("",         "p.circle.fill"),
-            ("Map",      "map.fill"),
-            ("Feed",     "tv.fill"),
+            ("Map",      "map.fill"),         // 0: +Z front  — map tab
+            ("Camera",   "camera.fill"),      // 1: +X right  — record tab
+            ("Feed",     "tv.fill"),          // 2: -Z back   — feed tab
+            ("Profile",  "person.fill"),      // 3: -X left   — profile tab
+            ("",         "fork.knife"),       // 4: +Y top    — decorative
+            ("",         "p.circle.fill"),    // 5: -Y bottom — P logo peek
         ]
 
         return faceSpecs.map { (title, icon) in
@@ -1267,8 +1265,8 @@ private struct CubeSceneView: UIViewRepresentable {
         }
 
         func applyCurrentProfileIconOverride() {
-            // Profile face is material index 1 (-X left face, visible at yaw=-270°)
-            let profileMaterialIndex = 1
+            // Profile face is material index 3 (-X left face, visible at yaw=-270°)
+            let profileMaterialIndex = 3
             guard cubeMaterials.indices.contains(profileMaterialIndex) else { return }
             let title = profileIconOverride?.title ?? "Profile"
             let icon  = profileIconOverride?.systemImage ?? "person.fill"
@@ -1279,8 +1277,8 @@ private struct CubeSceneView: UIViewRepresentable {
         }
 
         func applyFeedFaceIcon() {
-            // Feed face is material index 5 (-Z back face, visible at yaw=-180°)
-            let feedMaterialIndex = 5
+            // Feed face is material index 2 (-Z back face, visible at yaw=-180°)
+            let feedMaterialIndex = 2
             guard cubeMaterials.indices.contains(feedMaterialIndex) else { return }
             if isTVGuideOpen {
                 cubeMaterials[feedMaterialIndex].emission.contents = parent.faceEmissionMask(
