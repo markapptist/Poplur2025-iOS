@@ -49,7 +49,6 @@
 			membershipExceptions = (
 				CityTourMusicPlayerService.swift,
 				Enhanced3DBeaconMarker.swift,
-				"HomeView 2.swift",
 				Info.plist,
 				SceneKitMarkers.swift,
 				TrendOverlays.swift,

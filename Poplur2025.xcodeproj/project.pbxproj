@@ -50,7 +50,6 @@
 				CityTourMusicPlayerService.swift,
 				Enhanced3DBeaconMarker.swift,
 				"FeedFullscreenPage 2.swift",
-				"HomeView 2.swift",
 				Info.plist,
 				SceneKitMarkers.swift,
 				TrendOverlays.swift,

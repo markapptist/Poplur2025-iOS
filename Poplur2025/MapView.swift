@@ -5879,35 +5879,63 @@ struct MapViewProduction: View {
 
     @ViewBuilder
     private var mapHoldRadioMenuSheet: some View {
-        NavigationStack(path: $cubeHoldNavPath) {
-            MapRadioSearchChecklistView(
-                query: $searchQuery,
-                results: $searchResults,
-                isSearching: $isSearching,
-                selectedTopics: $selectedRadioTopics,
-                isTouring: mapState.isInTourMode,
-                radioScript: mapRadioScript,
-                onClose: {
+        VStack(spacing: 0) {
+            Capsule()
+                .fill(Color.white.opacity(0.22))
+                .frame(width: 36, height: 4)
+                .padding(.top, 12)
+                .padding(.bottom, 8)
+
+            ForEach(mapHoldMenuItems, id: \.label) { item in
+                Button {
                     showCubeHoldSearch = false
-                },
-                onSelectSearchResult: { item in
-                    showCubeHoldSearch = false
-                    if let coord = item.placemark.location?.coordinate {
-                        let name = item.name ?? "Selected Location"
-                        navigateWithTourTransition(to: coord, cityName: name)
+                    item.action()
+                } label: {
+                    HStack(spacing: 16) {
+                        Text(item.emoji)
+                            .font(.system(size: 22))
+                            .frame(width: 32)
+                        Text(item.label)
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(.white)
+                        Spacer()
                     }
-                },
-                onToggleTour: {
-                    if mapState.isInTourMode {
-                        stopTour()
-                    } else {
-                        startTour()
-                    }
-                    showCubeHoldSearch = false
+                    .padding(.horizontal, 22)
+                    .padding(.vertical, 18)
                 }
-            )
-            .toolbar(.hidden, for: .navigationBar)
+                .buttonStyle(.plain)
+            }
+
+            Spacer().frame(height: 12)
         }
+        .background(Color(white: 0.07))
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+
+    private struct HoldMenuItem {
+        let emoji: String
+        let label: String
+        let action: () -> Void
+    }
+
+    private var mapHoldMenuItems: [HoldMenuItem] {
+        [
+            HoldMenuItem(emoji: "🔍", label: "Search") {
+                showAddressSearch = true
+            },
+            HoldMenuItem(emoji: "📍", label: "Current location") {
+                centerOnUserLocation()
+            },
+            HoldMenuItem(emoji: "📸", label: "Post to map") {
+                isPostPlacementMode = true
+            },
+            HoldMenuItem(emoji: "🗂️", label: "Post multiple to map") {
+                isPostPlacementMode = true
+            },
+            HoldMenuItem(emoji: "🗺️", label: "Start tour") {
+                if mapState.isInTourMode { stopTour() } else { startTour() }
+            }
+        ]
     }
     
     // MARK: - First Launch Sequence
