@@ -5252,12 +5252,16 @@ struct MapViewProduction: View {
                     .zIndex(51)
                 }
 
-                if showCubeHoldSearch {
-                    mapOverlayPanel {
-                        mapHoldRadioMenuSheet
-                    }
-                    .zIndex(52)
+            }
+            .confirmationDialog("", isPresented: $showCubeHoldSearch, titleVisibility: .hidden) {
+                Button("Post to map") { isPostPlacementMode = true }
+                Button("Post multiple to map") { isPostPlacementMode = true }
+                Button("Current location") { centerOnUserLocation() }
+                Button("Search") { showAddressSearch = true }
+                Button(mapState.isInTourMode ? "Stop tour" : "Start tour") {
+                    if mapState.isInTourMode { stopTour() } else { startTour() }
                 }
+                Button("Cancel", role: .cancel) {}
             }
             .onAppear {
                 guard !layoutPreviewMode else { return }
@@ -5877,68 +5881,6 @@ struct MapViewProduction: View {
         }
     }
 
-    @ViewBuilder
-    private var mapHoldRadioMenuSheet: some View {
-        VStack(spacing: 0) {
-            Capsule()
-                .fill(Color.white.opacity(0.22))
-                .frame(width: 36, height: 4)
-                .padding(.top, 12)
-                .padding(.bottom, 8)
-
-            ForEach(mapHoldMenuItems, id: \.label) { item in
-                Button {
-                    showCubeHoldSearch = false
-                    item.action()
-                } label: {
-                    HStack(spacing: 16) {
-                        Text(item.emoji)
-                            .font(.system(size: 22))
-                            .frame(width: 32)
-                        Text(item.label)
-                            .font(.system(size: 17, weight: .semibold))
-                            .foregroundStyle(.white)
-                        Spacer()
-                    }
-                    .padding(.horizontal, 22)
-                    .padding(.vertical, 18)
-                }
-                .buttonStyle(.plain)
-            }
-
-            Spacer().frame(height: 12)
-        }
-        .frame(maxWidth: .infinity)
-        .background(Color(white: 0.07))
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-    }
-
-    private struct HoldMenuItem {
-        let emoji: String
-        let label: String
-        let action: () -> Void
-    }
-
-    private var mapHoldMenuItems: [HoldMenuItem] {
-        [
-            HoldMenuItem(emoji: "🔍", label: "Search") {
-                showAddressSearch = true
-            },
-            HoldMenuItem(emoji: "📍", label: "Current location") {
-                centerOnUserLocation()
-            },
-            HoldMenuItem(emoji: "📸", label: "Post to map") {
-                isPostPlacementMode = true
-            },
-            HoldMenuItem(emoji: "🗂️", label: "Post multiple to map") {
-                isPostPlacementMode = true
-            },
-            HoldMenuItem(emoji: "🗺️", label: "Start tour") {
-                if mapState.isInTourMode { stopTour() } else { startTour() }
-            }
-        ]
-    }
-    
     // MARK: - First Launch Sequence
 
     private func generateLaunchRadioScript(cityName: String, insight: AiTourInsight?) -> String {
