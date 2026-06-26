@@ -5252,16 +5252,21 @@ struct MapViewProduction: View {
                     .zIndex(51)
                 }
 
-            }
-            .confirmationDialog("", isPresented: $showCubeHoldSearch, titleVisibility: .hidden) {
-                Button("Post to map") { isPostPlacementMode = true }
-                Button("Post multiple to map") { isPostPlacementMode = true }
-                Button("Current location") { centerOnUserLocation() }
-                Button("Search") { showAddressSearch = true }
-                Button(mapState.isInTourMode ? "Stop tour" : "Start tour") {
-                    if mapState.isInTourMode { stopTour() } else { startTour() }
+                if showCubeHoldSearch {
+                    Color.black.opacity(0.58)
+                        .ignoresSafeArea()
+                        .onTapGesture { withAnimation { showCubeHoldSearch = false } }
+                        .overlay(alignment: .bottom) {
+                            mapHoldMenuContent
+                                .frame(maxWidth: .infinity)
+                                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                                .padding(.horizontal, 16)
+                                .padding(.bottom, 18)
+                                .onTapGesture {}
+                        }
+                        .transition(.opacity)
+                        .zIndex(52)
                 }
-                Button("Cancel", role: .cancel) {}
             }
             .onAppear {
                 guard !layoutPreviewMode else { return }
@@ -5879,6 +5884,60 @@ struct MapViewProduction: View {
                 }
             }
         }
+    }
+
+    // MARK: - Hold Menu
+
+    private var mapHoldMenuContent: some View {
+        VStack(spacing: 0) {
+            Capsule()
+                .fill(Color.secondary.opacity(0.35))
+                .frame(width: 36, height: 4)
+                .padding(.top, 10)
+                .padding(.bottom, 4)
+            holdMenuRow(icon: "magnifyingglass", label: "Search") {
+                showAddressSearch = true
+            }
+            Divider().padding(.leading, 56)
+            holdMenuRow(icon: "location.fill", label: "Current location") {
+                centerOnUserLocation()
+            }
+            Divider().padding(.leading, 56)
+            holdMenuRow(icon: "camera.fill", label: "Post to map") {
+                isPostPlacementMode = true
+            }
+            Divider().padding(.leading, 56)
+            holdMenuRow(icon: "square.stack.fill", label: "Post multiple to map") {
+                isPostPlacementMode = true
+            }
+            Divider().padding(.leading, 56)
+            holdMenuRow(icon: "map.fill", label: mapState.isInTourMode ? "Stop tour" : "Start tour") {
+                if mapState.isInTourMode { stopTour() } else { startTour() }
+            }
+            Spacer().frame(height: 8)
+        }
+    }
+
+    private func holdMenuRow(icon: String, label: String, action: @escaping () -> Void) -> some View {
+        Button {
+            showCubeHoldSearch = false
+            action()
+        } label: {
+            HStack(spacing: 14) {
+                Image(systemName: icon)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(.primary)
+                    .frame(width: 28, alignment: .center)
+                Text(label)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(.primary)
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - First Launch Sequence
