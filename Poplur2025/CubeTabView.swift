@@ -551,6 +551,18 @@ private struct CubeSceneView: UIViewRepresentable {
         // Keep tab state in sync
         context.coordinator.syncToSelectedTab(selectedTab)
 
+        // Drive profile face icon when on the settings tab
+        let onSettings = (selectedTab == .settings)
+        if onSettings != context.coordinator.wasOnSettingsTab {
+            context.coordinator.wasOnSettingsTab = onSettings
+            if onSettings {
+                NotificationCenter.default.post(name: .CubeProfileIconOverrideChanged, object: nil,
+                    userInfo: ["title": "Settings", "systemImage": "gearshape.fill"])
+            } else {
+                NotificationCenter.default.post(name: .CubeProfileIconOverrideChanged, object: nil)
+            }
+        }
+
         if selectedTab == .record {
             context.coordinator.resumeForCameraTab()
         }
@@ -1073,6 +1085,7 @@ private struct CubeSceneView: UIViewRepresentable {
         private var isBlinking: Bool = false
         var cubeMaterials: [SCNMaterial] = []
         var lastAppliedSkin: CubeSkin = CubeSkinStore.shared.current
+        var wasOnSettingsTab: Bool = false
 
         var lastPopTrigger: Int = 0
         var lastYawRightStep: Int = 0
@@ -1293,15 +1306,8 @@ private struct CubeSceneView: UIViewRepresentable {
         }
 
         @objc func handleSwipe(_ gesture: UISwipeGestureRecognizer) {
-            guard let scnView = view, let cube = scnView.scene?.rootNode.childNode(withName: "cube", recursively: true) else { return }
-
-            if gesture.direction == .up {
-                let flip = SCNAction.rotateBy(x: CGFloat.pi, y: 0, z: 0, duration: 0.28)
-                flip.timingMode = .easeInEaseOut
-                cube.runAction(flip)
-                if parent.selectedTab == .record {
-                    onSwipeUp?()
-                }
+            if gesture.direction == .up, parent.selectedTab == .record {
+                onSwipeUp?()
             }
         }
 
@@ -1426,16 +1432,18 @@ private struct CubeSceneView: UIViewRepresentable {
         }
 
         func syncToSelectedTab(_ tab: AppTab) {
+            // .settings is a profile sub-screen — show the Profile face
+            let resolvedTab: AppTab = (tab == .settings) ? .profile : tab
             guard let scnView = view, let _ = scnView.scene?.rootNode.childNode(withName: "cube", recursively: true) else { return }
-            if let idx = tabs.firstIndex(of: tab), idx != currentIndex {
+            if let idx = tabs.firstIndex(of: resolvedTab), idx != currentIndex {
                 currentIndex = idx
                 currentYaw = Float(idx) * (-Float.pi / 2)
                 animateToYaw(currentYaw)
 
-                if tab != .feed {
+                if resolvedTab != .feed {
                     NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
                 }
-                if tab == .record {
+                if resolvedTab == .record {
                     NotificationCenter.default.post(name: Notification.Name("RecordTabBecameActive"), object: nil)
                 }
             }
@@ -1701,6 +1709,7 @@ private struct CubeSceneView: UIViewRepresentable {
             cubeMaterials = mats
             applyCurrentProfileIconOverride()
             applyFeedFaceIcon()
+            scnView.isPlaying = true
         }
 
         private func applyCombinedRotation(to node: SCNNode) {

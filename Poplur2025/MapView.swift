@@ -5908,6 +5908,7 @@ struct MapViewProduction: View {
 
             Spacer().frame(height: 12)
         }
+        .frame(maxWidth: .infinity)
         .background(Color(white: 0.07))
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
