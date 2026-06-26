@@ -3366,16 +3366,16 @@ private struct RotatingEarthGlobePreview: View {
 // MARK: - Cube Hold Search Overlay (Available in all builds)
 
 /// Search overlay that appears when cube is held down - similar styling to AI text window
-private struct CubeHoldSearchOverlay: View {
+private struct CubeHoldSearchOverlay_UNUSED: View {
     @Binding var query: String
     @Binding var results: [MKMapItem]
     @Binding var isSearching: Bool
     @FocusState private var isSearchFieldFocused: Bool
-    
+
     let tourPlaces: [(name: String, coordinate: CLLocationCoordinate2D, description: String)]
     let onSelectPlace: ((name: String, coordinate: CLLocationCoordinate2D, description: String)) -> Void
     let onSelectMapItem: (MKMapItem) -> Void
-    
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             // Search field
@@ -3577,7 +3577,7 @@ struct MapViewProduction: View {
     @State private var aiRecommendation: String = "Finding what is trending where you are..."
     @State private var showPlacesList: Bool = false
     @State private var showAddressSearch: Bool = false
-    @State private var showCubeHoldSearch: Bool = false  // NEW: For long-press search
+    @StateObject private var mapCubeMenuWheel = CubeMenuWheelController()
     @State private var searchQuery: String = ""
     @State private var searchResults: [MKMapItem] = []
     @State private var isSearching: Bool = false
@@ -3645,7 +3645,6 @@ struct MapViewProduction: View {
     @State private var showIndoorMap: Bool = false
     @State private var indoorVenues: [MappedinVenue] = []
     @State private var selectedVenueSlug: String? = nil
-    @State private var cubeHoldNavPath = NavigationPath()
     
     // Weather overlay state
     @State private var weatherState = WeatherVisualizationState(
@@ -4398,12 +4397,8 @@ struct MapViewProduction: View {
     
     private var tapGesture: some Gesture {
         TapGesture()
-            .onEnded { 
-                // If menu is open, close it on map tap
-                if showCubeHoldSearch {
-                    showCubeHoldSearch = false
-                }
-                noteInteraction() 
+            .onEnded {
+                noteInteraction()
             }
     }
     
@@ -4571,21 +4566,16 @@ struct MapViewProduction: View {
                         print("[MapView] Camera -> Map flow: Selected coordinate \(coordinate.latitude), \(coordinate.longitude)")
                     } else {
                         // Flow 1: Map -> Camera OR normal browsing
-                        if showCubeHoldSearch {
-                            showCubeHoldSearch = false
-                        } else {
-                            // Store clicked coordinate and show prompt
-                            clickedCoordinate = coordinate
-                            showPostPrompt = true
-                            
-                            // Update AI text to show coordinate
-                            currentCity = "Location Selected"
-                            aiRecommendation = String(format: "📍 %.4f°, %.4f° — Want to post here?", 
-                                                     coordinate.latitude, 
-                                                     coordinate.longitude)
-                            print("✅ [MapView] Set clickedCoordinate: \(coordinate.latitude), \(coordinate.longitude)")
-                            print("   showPostPrompt: \(showPostPrompt)")
-                        }
+                        // Store clicked coordinate and show prompt
+                        clickedCoordinate = coordinate
+                        showPostPrompt = true
+
+                        currentCity = "Location Selected"
+                        aiRecommendation = String(format: "📍 %.4f°, %.4f° — Want to post here?",
+                                                 coordinate.latitude,
+                                                 coordinate.longitude)
+                        print("✅ [MapView] Set clickedCoordinate: \(coordinate.latitude), \(coordinate.longitude)")
+                        print("   showPostPrompt: \(showPostPrompt)")
                         noteInteraction()
                     }
                 } else {
@@ -4729,13 +4719,13 @@ struct MapViewProduction: View {
                     
                     Text(titleText)
                         .font(.headline)
-                        .foregroundStyle(.primary)
-                        .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
+                        .foregroundStyle(LinearGradient(colors: [.white, .white.opacity(0.9)], startPoint: .leading, endPoint: .trailing))
+                        .shadow(color: .black.opacity(0.55), radius: 4, x: 0, y: 1)
                     Text(recommendationText)
                         .font(.subheadline)
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(LinearGradient(colors: [.white.opacity(0.92), .white.opacity(0.78)], startPoint: .leading, endPoint: .trailing))
                         .lineLimit(2)
-                        .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
+                        .shadow(color: .black.opacity(0.55), radius: 4, x: 0, y: 1)
                         .id(recommendationText)
                         .transition(.asymmetric(
                             insertion: .move(edge: .bottom).combined(with: .opacity),
@@ -4936,7 +4926,6 @@ struct MapViewProduction: View {
                 HStack {
                     Spacer()
                     Button {
-                        showCubeHoldSearch = false
                         showAddressSearch = true
                     } label: {
                         Image(systemName: "magnifyingglass")
@@ -5252,19 +5241,8 @@ struct MapViewProduction: View {
                     .zIndex(51)
                 }
 
-                if showCubeHoldSearch {
-                    Color.black.opacity(0.58)
-                        .ignoresSafeArea()
-                        .onTapGesture { withAnimation { showCubeHoldSearch = false } }
-                        .overlay(alignment: .bottom) {
-                            mapHoldMenuContent
-                                .frame(maxWidth: .infinity)
-                                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                                .padding(.horizontal, 16)
-                                .padding(.bottom, 18)
-                                .onTapGesture {}
-                        }
-                        .transition(.opacity)
+                if mapCubeMenuWheel.isOnScreen {
+                    CubeMenuWheelOverlay(controller: mapCubeMenuWheel)
                         .zIndex(52)
                 }
             }
@@ -5303,16 +5281,11 @@ struct MapViewProduction: View {
                 guard !layoutPreviewMode else { return }
                 rainAmbientAudio.update(for: weatherState)
             }
-            .onChange(of: showCubeHoldSearch) { _, isShowing in
+            .onChange(of: mapCubeMenuWheel.isOnScreen) { _, isOnScreen in
                 guard !layoutPreviewMode else { return }
-                // Pause tour when menu is showing
-                if isShowing {
-                    mapState.stopTour()
-                } else {
-                    // Clear search and reset nav stack when menu closes
+                if !isOnScreen {
                     searchQuery = ""
                     searchResults = []
-                    cubeHoldNavPath = NavigationPath()
                 }
             }
             .onChange(of: use2DMap) { _, is2D in
@@ -5329,42 +5302,34 @@ struct MapViewProduction: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: .CubeGlobalTap)) { _ in
                 guard !layoutPreviewMode else { return }
-                // If menu is open, pop sub-screen or close root; otherwise center on location
-                if showCubeHoldSearch {
-                    if !cubeHoldNavPath.isEmpty {
-                        cubeHoldNavPath.removeLast()
-                    } else {
-                        showCubeHoldSearch = false
-                    }
-                } else {
-                    // Respect lock/suppression windows after jumping to a post location
-                    if let until = lockToPostUntil, until > Date() {
-                        print("⛔️ [MapView] CubeGlobalTap centering ignored during lockToPost window")
-                        return
-                    }
-                    if let until = suppressUserCenteringUntil, until > Date() {
-                        print("⛔️ [MapView] CubeGlobalTap centering ignored during suppression window")
-                        return
-                    }
-                    // Clear post prompt when centering on user
-                    showPostPrompt = false
-                    clickedCoordinate = nil
-                    centerOnUserLocation()
+                if mapCubeMenuWheel.isOnScreen {
+                    mapCubeMenuWheel.endHold(activateSelected: false)
+                    return
                 }
+                if let until = lockToPostUntil, until > Date() {
+                    print("⛔️ [MapView] CubeGlobalTap centering ignored during lockToPost window")
+                    return
+                }
+                if let until = suppressUserCenteringUntil, until > Date() {
+                    print("⛔️ [MapView] CubeGlobalTap centering ignored during suppression window")
+                    return
+                }
+                showPostPrompt = false
+                clickedCoordinate = nil
+                centerOnUserLocation()
             }
-            .onReceive(NotificationCenter.default.publisher(for: .cameraCubeHoldBegan)) { notification in
+            .onReceive(NotificationCenter.default.publisher(for: .cameraCubeHoldBegan)) { _ in
                 guard !layoutPreviewMode else { return }
-                print("[MapView] Cube hold began - opening radio search menu")
+                mapState.stopTour()
                 showAddressSearch = false
-                showCubeHoldSearch = true
+                mapCubeMenuWheel.beginHold(items: mapCubeMenuItems)
             }
-            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("CameraCubeHoldMoved"))) { notification in
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("CameraCubeHoldMoved"))) { _ in
                 guard !layoutPreviewMode else { return }
-                // No action during drag - slider handles zoom now
             }
             .onReceive(NotificationCenter.default.publisher(for: .cameraCubeHoldEnded)) { _ in
                 guard !layoutPreviewMode else { return }
-                // No action on end - menu stays open
+                mapCubeMenuWheel.endHold(activateSelected: true)
             }
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("SwitchToMapTab"))) { _ in
                 guard !layoutPreviewMode else { return }
@@ -5888,56 +5853,24 @@ struct MapViewProduction: View {
 
     // MARK: - Hold Menu
 
-    private var mapHoldMenuContent: some View {
-        VStack(spacing: 0) {
-            Capsule()
-                .fill(Color.secondary.opacity(0.35))
-                .frame(width: 36, height: 4)
-                .padding(.top, 10)
-                .padding(.bottom, 4)
-            holdMenuRow(icon: "magnifyingglass", label: "Search") {
+    private var mapCubeMenuItems: [CubeSubmenuItem] {
+        [
+            CubeSubmenuItem(id: "search", title: "Search", systemImage: "magnifyingglass", tint: .white) {
                 showAddressSearch = true
-            }
-            Divider().padding(.leading, 56)
-            holdMenuRow(icon: "location.fill", label: "Current location") {
+            },
+            CubeSubmenuItem(id: "location", title: "Location", systemImage: "location.fill", tint: .white) {
                 centerOnUserLocation()
-            }
-            Divider().padding(.leading, 56)
-            holdMenuRow(icon: "camera.fill", label: "Post to map") {
+            },
+            CubeSubmenuItem(id: "post", title: "Post Here", systemImage: "camera.fill", tint: .white) {
                 isPostPlacementMode = true
-            }
-            Divider().padding(.leading, 56)
-            holdMenuRow(icon: "square.stack.fill", label: "Post multiple to map") {
+            },
+            CubeSubmenuItem(id: "multi-post", title: "Post Multiple", systemImage: "square.stack.fill", tint: .white) {
                 isPostPlacementMode = true
-            }
-            Divider().padding(.leading, 56)
-            holdMenuRow(icon: "map.fill", label: mapState.isInTourMode ? "Stop tour" : "Start tour") {
+            },
+            CubeSubmenuItem(id: "tour", title: mapState.isInTourMode ? "Stop Tour" : "Start Tour", systemImage: "map.fill", tint: .white) {
                 if mapState.isInTourMode { stopTour() } else { startTour() }
             }
-            Spacer().frame(height: 8)
-        }
-    }
-
-    private func holdMenuRow(icon: String, label: String, action: @escaping () -> Void) -> some View {
-        Button {
-            showCubeHoldSearch = false
-            action()
-        } label: {
-            HStack(spacing: 14) {
-                Image(systemName: icon)
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(.primary)
-                    .frame(width: 28, alignment: .center)
-                Text(label)
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(.primary)
-                Spacer()
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
+        ]
     }
 
     // MARK: - First Launch Sequence
