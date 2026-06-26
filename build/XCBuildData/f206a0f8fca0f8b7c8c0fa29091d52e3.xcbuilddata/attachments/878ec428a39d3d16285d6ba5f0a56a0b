@@ -1,4 +1,0 @@
-module FirebaseFirestoreCombineSwift {
-header "FirebaseFirestoreCombineSwift-Swift.h"
-export *
-}

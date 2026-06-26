@@ -1,4 +1,0 @@
-module abslWrapper {
-umbrella "/Users/matrix/Library/Developer/Xcode/DerivedData/Poplur2025-diqgmvbjbirjgbdzqftmwbjrdvor/SourcePackages/checkouts/abseil-cpp-binary/absl-Wrapper/include"
-export *
-}

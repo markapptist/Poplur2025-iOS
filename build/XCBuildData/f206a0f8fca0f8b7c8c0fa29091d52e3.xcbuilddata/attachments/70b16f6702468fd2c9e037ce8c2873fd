@@ -1,4 +1,0 @@
-module FirebaseFirestoreTarget {
-umbrella "/Users/matrix/Library/Developer/Xcode/DerivedData/Poplur2025-diqgmvbjbirjgbdzqftmwbjrdvor/SourcePackages/checkouts/firebase-ios-sdk/SwiftPM-PlatformExclude/FirebaseFirestoreWrap/include"
-export *
-}

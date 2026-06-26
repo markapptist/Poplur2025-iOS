@@ -1,4 +1,0 @@
-module third_party_IsAppEncrypted {
-umbrella "/Users/matrix/Library/Developer/Xcode/DerivedData/Poplur2025-diqgmvbjbirjgbdzqftmwbjrdvor/SourcePackages/checkouts/GoogleUtilities/third_party/IsAppEncrypted/Public"
-export *
-}

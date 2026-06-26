@@ -1,6 +1,9 @@
 # Secrets — never commit
 Poplur2025/Secrets.swift
 
+# Xcode build artifacts — never commit these, they contain stale incremental build caches
+build/
+
 # Xcode
 *.xcuserstate
 xcuserdata/

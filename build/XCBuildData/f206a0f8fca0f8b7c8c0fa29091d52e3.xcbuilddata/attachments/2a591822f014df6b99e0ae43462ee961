@@ -1,4 +1,0 @@
-module GoogleUtilities_Environment {
-umbrella "/Users/matrix/Library/Developer/Xcode/DerivedData/Poplur2025-diqgmvbjbirjgbdzqftmwbjrdvor/SourcePackages/checkouts/GoogleUtilities/GoogleUtilities/Environment/Public"
-export *
-}
