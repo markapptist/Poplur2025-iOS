@@ -5,6 +5,23 @@ import UIKit
 struct ChannelObjectSceneView: UIViewRepresentable {
     let channelId: String
     let objectId: String
+    let sourceLabel: String?
+    let assetName: String?
+    let isGeneratedFallback: Bool
+
+    init(
+        channelId: String,
+        objectId: String,
+        sourceLabel: String? = nil,
+        assetName: String? = nil,
+        isGeneratedFallback: Bool = false
+    ) {
+        self.channelId = channelId
+        self.objectId = objectId
+        self.sourceLabel = sourceLabel
+        self.assetName = assetName
+        self.isGeneratedFallback = isGeneratedFallback
+    }
 
     func makeUIView(context: Context) -> SCNView {
         let view = SCNView()
@@ -65,6 +82,10 @@ struct ChannelObjectSceneView: UIViewRepresentable {
     func updateUIView(_ uiView: SCNView, context: Context) {}
 
     private func makeObjectNode() -> SCNNode {
+        if let assetName, let image = UIImage(named: assetName) {
+            return texturedAssetObject(image: image)
+        }
+
         switch objectId {
         case "banana", "croissant", "guitar", "shoe":
             return capsuleObject(color: objectColor(), radius: 0.17, height: 1.45, zRotation: .pi / 2, xRotation: 0.18)
@@ -82,8 +103,10 @@ struct ChannelObjectSceneView: UIViewRepresentable {
             return boxObject(color: objectColor(), width: 1.34, height: 0.18, length: 0.92, chamfer: 0.08)
         case "camera", "speaker", "chip", "controller", "bag":
             return boxObject(color: objectColor(), width: 1.18, height: 0.86, length: 0.72, chamfer: 0.10)
+        case "phone":
+            return phoneObject()
         default:
-            return sphereObject(color: channelFallbackColor(), radius: 0.68)
+            return generatedFallbackObject(label: sourceLabel ?? objectId)
         }
     }
 
@@ -145,6 +168,90 @@ struct ChannelObjectSceneView: UIViewRepresentable {
         return root
     }
 
+    private func phoneObject() -> SCNNode {
+        let root = SCNNode()
+
+        let body = SCNBox(width: 0.72, height: 1.28, length: 0.16, chamferRadius: 0.10)
+        body.materials = [material(UIColor(red: 0.10, green: 0.16, blue: 0.28, alpha: 1))]
+        let bodyNode = SCNNode(geometry: body)
+        bodyNode.eulerAngles.x = -0.15
+        root.addChildNode(bodyNode)
+
+        let screen = SCNBox(width: 0.58, height: 1.04, length: 0.018, chamferRadius: 0.05)
+        let screenMaterial = material(UIColor(red: 0.08, green: 0.72, blue: 1.0, alpha: 1))
+        screenMaterial.emission.contents = UIColor(red: 0.0, green: 0.34, blue: 0.75, alpha: 1)
+        screen.materials = [screenMaterial]
+        let screenNode = SCNNode(geometry: screen)
+        screenNode.position.z = 0.092
+        screenNode.eulerAngles.x = -0.15
+        root.addChildNode(screenNode)
+
+        return root
+    }
+
+    private func texturedAssetObject(image: UIImage) -> SCNNode {
+        let geometry = SCNBox(width: 1.18, height: 1.18, length: 0.18, chamferRadius: 0.08)
+        let front = material(.white)
+        front.diffuse.contents = image
+        front.lightingModel = .physicallyBased
+
+        let side = material(channelFallbackColor())
+        side.lightingModel = .physicallyBased
+        geometry.materials = [front, side, side, side, side, side]
+
+        let node = SCNNode(geometry: geometry)
+        node.eulerAngles.x = -0.14
+        return node
+    }
+
+    private func generatedFallbackObject(label: String) -> SCNNode {
+        let seed = stableSeed(label)
+        let root = SCNNode()
+        let primary = seededColor(seed: seed)
+        let secondary = seededColor(seed: seed &* 31 &+ 7)
+        let accent = seededColor(seed: seed &* 17 &+ 41)
+
+        let coreNode: SCNNode
+        switch abs(seed) % 4 {
+        case 0:
+            coreNode = sphereObject(color: primary, radius: 0.54)
+        case 1:
+            coreNode = boxObject(color: primary, width: 0.96, height: 0.78, length: 0.78, chamfer: 0.16)
+        case 2:
+            coreNode = cylinderObject(color: primary, radius: 0.38, height: 1.0)
+            coreNode.eulerAngles = SCNVector3(0.32, 0.2, Float.pi / 2)
+        default:
+            coreNode = coneObject(color: primary, topRadius: 0.16, bottomRadius: 0.58, height: 1.08)
+            coreNode.eulerAngles.x = 0.16
+        }
+        root.addChildNode(coreNode)
+
+        let ring = SCNTorus(ringRadius: 0.64, pipeRadius: 0.035)
+        ring.ringSegmentCount = 56
+        ring.pipeSegmentCount = 12
+        ring.materials = [material(secondary)]
+        let ringNode = SCNNode(geometry: ring)
+        ringNode.eulerAngles = SCNVector3(0.74, 0.26, 0.18)
+        root.addChildNode(ringNode)
+
+        let satelliteCount = 2 + abs(seed % 3)
+        for index in 0..<satelliteCount {
+            let satellite = SCNSphere(radius: 0.11 + CGFloat(index % 2) * 0.025)
+            satellite.segmentCount = 20
+            satellite.materials = [material(accent)]
+            let node = SCNNode(geometry: satellite)
+            let angle = Float(index) / Float(satelliteCount) * Float.pi * 2
+            node.position = SCNVector3(
+                Float(cos(Double(angle))) * 0.74,
+                Float(sin(Double(angle))) * 0.36,
+                Float(sin(Double(angle + 0.7))) * 0.38
+            )
+            root.addChildNode(node)
+        }
+
+        return root
+    }
+
     private func coneObject(color: UIColor, topRadius: CGFloat, bottomRadius: CGFloat, height: CGFloat) -> SCNNode {
         let geometry = SCNCone(topRadius: topRadius, bottomRadius: bottomRadius, height: height)
         geometry.radialSegmentCount = 48
@@ -163,7 +270,9 @@ struct ChannelObjectSceneView: UIViewRepresentable {
     private func material(_ color: UIColor) -> SCNMaterial {
         let material = SCNMaterial()
         material.diffuse.contents = color
-        material.lightingModel = .lambert
+        material.lightingModel = .physicallyBased
+        material.metalness.contents = 0.18
+        material.roughness.contents = 0.36
         return material
     }
 
@@ -196,8 +305,24 @@ struct ChannelObjectSceneView: UIViewRepresentable {
         case "guitar": return UIColor(red: 0.94, green: 0.45, blue: 0.15, alpha: 1)
         case "sun": return UIColor(red: 1.0, green: 0.82, blue: 0.18, alpha: 1)
         case "fan": return UIColor(red: 1.0, green: 0.22, blue: 0.30, alpha: 1)
+        case "phone": return UIColor(red: 0.12, green: 0.64, blue: 1.0, alpha: 1)
         default: return channelFallbackColor()
         }
+    }
+
+    private func stableSeed(_ value: String) -> Int {
+        var hash = 5381
+        for scalar in value.unicodeScalars {
+            hash = ((hash << 5) &+ hash) &+ Int(scalar.value)
+        }
+        return hash == Int.min ? 0 : abs(hash)
+    }
+
+    private func seededColor(seed: Int) -> UIColor {
+        let hue = CGFloat(abs(seed % 360)) / 360.0
+        let saturation = 0.72 + CGFloat(abs(seed / 7) % 18) / 100.0
+        let brightness = 0.78 + CGFloat(abs(seed / 13) % 18) / 100.0
+        return UIColor(hue: hue, saturation: saturation, brightness: brightness, alpha: 1)
     }
 
     private func channelFallbackColor() -> UIColor {

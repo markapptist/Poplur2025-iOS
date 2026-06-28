@@ -94,7 +94,8 @@ struct FeedView: View {
 
     // AI host bumper
     @ObservedObject private var bumper = BumperService.shared
-    @State private var activeBumperData: Data? = nil
+    @State private var activeBumperPayload: BumperPayload? = nil
+    @State private var presentedBumperPostIDs: Set<String> = []
 
     // Country paging (horizontal swipe)
     @State private var selectedCountryIndex: Int = 0
@@ -360,11 +361,11 @@ struct FeedView: View {
         .background(feedNotificationReceivers)
         // AI host bumper overlay — shown before each post when ready
         .fullScreenCover(item: Binding(
-            get: { activeBumperData.map { BumperItem(audioData: $0) } },
-            set: { if $0 == nil { activeBumperData = nil } }
-        )) { item in
-            FeedBumperView(audioData: item.audioData) {
-                activeBumperData = nil
+            get: { activeBumperPayload },
+            set: { if $0 == nil { activeBumperPayload = nil } }
+        )) { payload in
+            FeedBumperView(payload: payload) {
+                activeBumperPayload = nil
             }
         }
     }
@@ -386,18 +387,8 @@ struct FeedView: View {
                 print("📱 [Feed] Showing post at index \(newIndex), radius: \(post.radius)m")
                 publishCurrentPostMetrics(duration: 0.6)
 
-                // Show bumper if ready for this post, then pre-fetch next two
-                if let audio = bumper.bumpers[post.id]?.audioData {
-                    activeBumperData = audio
-                }
-                let ch = channels[safe: selectedChannelIndex]
-                let channelName = ch?.name ?? "General"
-                let channelID   = ch?.id   ?? ""
-                for offset in 1...2 {
-                    if let next = posts[safe: newIndex + offset] {
-                        bumper.prefetch(next, channelName: channelName, channelID: channelID)
-                    }
-                }
+                presentBumper(for: post)
+                prefetchUpcomingBumpers(from: newIndex)
             }
             .onAppear {
                 handleFeedReceiversAppear()
@@ -467,6 +458,7 @@ struct FeedView: View {
         hapticGenerator.prepare()
         notifHaptics.prepare()
         seedPostsForActiveSelectionIfNeeded()
+        presentBumperForCurrentPostIfNeeded()
 
         if !posts.isEmpty && !isFeedReady {
             print("[Feed] onAppear - restoring feed ready state")
@@ -499,6 +491,37 @@ struct FeedView: View {
             publishCurrentPostMetrics(duration: 0.0)
         }
         storeDemoPosts(newPosts)
+    }
+
+    private func presentBumperForCurrentPostIfNeeded() {
+        guard let post = posts[safe: currentIndex] else { return }
+        presentBumper(for: post)
+        prefetchUpcomingBumpers(from: currentIndex)
+    }
+
+    private func presentBumper(for post: FeedPost) {
+        guard !showTimelineView, !showTVGuide else { return }
+        guard !presentedBumperPostIDs.contains(post.id) else { return }
+        presentedBumperPostIDs.insert(post.id)
+
+        let channel = channels[safe: selectedChannelIndex]
+        let payload = bumper.activate(
+            post,
+            channelName: channel?.name ?? "General",
+            channelID: channel?.id ?? ""
+        )
+        activeBumperPayload = payload
+    }
+
+    private func prefetchUpcomingBumpers(from index: Int) {
+        let channel = channels[safe: selectedChannelIndex]
+        let channelName = channel?.name ?? "General"
+        let channelID = channel?.id ?? ""
+        for offset in 1...2 {
+            if let next = posts[safe: index + offset] {
+                bumper.prefetch(next, channelName: channelName, channelID: channelID)
+            }
+        }
     }
 
     private func storeDemoPosts(_ posts: [FeedPost]) {
@@ -1242,12 +1265,12 @@ struct FeedView: View {
         tvTransitionOpacity = 1.0
 
         let token = tvTransitionToken
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.34) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.50) {
             guard token == tvTransitionToken else { return }
-            withAnimation(.easeOut(duration: 0.22)) {
+            withAnimation(.easeOut(duration: 0.20)) {
                 tvTransitionOpacity = 0.0
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.24) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
                 guard token == tvTransitionToken else { return }
                 isTVTransitionVisible = false
             }
@@ -1552,6 +1575,7 @@ struct FeedView: View {
         } else {
             publishEmptyPostMetrics(duration: 0.3)
         }
+        presentBumperForCurrentPostIfNeeded()
         
         // Background tasks only
         Task.detached(priority: .utility) {
@@ -1582,6 +1606,7 @@ struct FeedView: View {
         if newPosts.first != nil {
             publishCurrentPostMetrics(duration: 0.3)
         }
+        presentBumperForCurrentPostIfNeeded()
         
         // Background only
         Task.detached(priority: .utility) {
@@ -1610,6 +1635,7 @@ struct FeedView: View {
         if newPosts.first != nil {
             publishCurrentPostMetrics(duration: 0.3)
         }
+        presentBumperForCurrentPostIfNeeded()
         
         // Background only
         Task.detached(priority: .utility) {
@@ -2700,11 +2726,6 @@ private struct FeedBreakingNewsConfettiOverlay: UIViewRepresentable {
         weak var scene: FeedBreakingNewsConfettiScene?
         var lastTrigger: Int = 0
     }
-}
-
-private struct BumperItem: Identifiable {
-    let id = UUID()
-    let audioData: Data
 }
 
 private struct FeedCommentCredit: Identifiable, Hashable {

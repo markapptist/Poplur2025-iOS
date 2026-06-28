@@ -1022,7 +1022,7 @@ struct PostCaptureComposerOverlay: View {
             Button { generateAd() } label: {
                 HStack(spacing: 9) {
                     Image(systemName: "sparkles")
-                    Text("Generate Ad")
+                    Text("Generate Poplur AI")
                         .font(.system(size: 16, weight: .black, design: .rounded))
                 }
                 .foregroundStyle(.black)

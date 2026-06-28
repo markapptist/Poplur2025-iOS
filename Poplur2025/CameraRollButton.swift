@@ -164,6 +164,7 @@ struct CameraRollWindowOverlay: View {
             Text("Camera Roll")
                 .font(.system(size: 15, weight: .semibold, design: .rounded))
                 .foregroundStyle(.white)
+                .poplurTextShader(intensity: 0.8)
 
             Spacer(minLength: 0)
 

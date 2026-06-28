@@ -63,6 +63,7 @@ struct RadiusNumberDisplay: View {
                 Text("RADIUS")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.6))
+                    .poplurTextShader(intensity: 0.72)
                     .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
                     .kerning(1.2)
                 
@@ -88,6 +89,7 @@ struct RadiusNumberDisplay: View {
                 Text(currentUnit)
                     .font(.system(size: 16, weight: .heavy))
                     .foregroundStyle(.white.opacity(0.9))
+                    .poplurTextShader(intensity: 0.85)
                     .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
                     .transition(.scale.combined(with: .opacity))
                     .id(currentUnit)

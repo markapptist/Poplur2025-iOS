@@ -482,6 +482,8 @@ extension Double {
 struct Enhanced3DBeaconMarker: UIViewRepresentable {
     let color: Color
     let intensity: Double // 0.0 to 1.0 for heat/activity level
+    var skin: CubeSkin = .standard
+    var role: ThemedMapMarkerRole = .post
     
     func makeUIView(context: Context) -> SCNView {
         let view = SCNView()
@@ -510,11 +512,15 @@ struct Enhanced3DBeaconMarker: UIViewRepresentable {
         omniLight.position = SCNVector3(0, 5, 2)
         scene.rootNode.addChildNode(omniLight)
         
+        let markerMaterial = skin.mapMarkerMaterial(for: role, baseColor: color)
+        let highlightColor = markerMaterial.highlight
+        let glassAlpha = markerMaterial.glassAlpha
+
         // Spotlight for dramatic glow
         let spotlight = SCNNode()
         spotlight.light = SCNLight()
         spotlight.light?.type = .spot
-        spotlight.light?.color = UIColor(color)
+        spotlight.light?.color = UIColor(highlightColor)
         spotlight.light?.intensity = 2000 * intensity
         spotlight.light?.spotInnerAngle = 30
         spotlight.light?.spotOuterAngle = 60
@@ -527,8 +533,8 @@ struct Enhanced3DBeaconMarker: UIViewRepresentable {
         // Ground glow ring - pulsing base
         let groundRing = SCNTorus(ringRadius: 1.2, pipeRadius: 0.15)
         let groundMaterial = SCNMaterial()
-        groundMaterial.diffuse.contents = UIColor(color.opacity(0.2))
-        groundMaterial.emission.contents = UIColor(color.opacity(0.8 * intensity))
+        groundMaterial.diffuse.contents = UIColor(highlightColor.opacity(0.20 + glassAlpha * 0.18))
+        groundMaterial.emission.contents = UIColor(highlightColor.opacity(0.8 * intensity))
         groundMaterial.lightingModel = .constant
         groundMaterial.transparency = 0.6
         groundRing.materials = [groundMaterial]
@@ -541,8 +547,8 @@ struct Enhanced3DBeaconMarker: UIViewRepresentable {
         // Middle ring - smaller, brighter
         let midRing = SCNTorus(ringRadius: 0.8, pipeRadius: 0.1)
         let midMaterial = SCNMaterial()
-        midMaterial.diffuse.contents = UIColor(color.opacity(0.3))
-        midMaterial.emission.contents = UIColor(color)
+        midMaterial.diffuse.contents = UIColor(highlightColor.opacity(0.3 + glassAlpha * 0.12))
+        midMaterial.emission.contents = UIColor(highlightColor)
         midMaterial.lightingModel = .constant
         midMaterial.transparency = 0.7
         midRing.materials = [midMaterial]
@@ -555,12 +561,12 @@ struct Enhanced3DBeaconMarker: UIViewRepresentable {
         // Central crystal/diamond
         let crystal = SCNPyramid(width: 0.6, height: 2.0, length: 0.6)
         let crystalMaterial = SCNMaterial()
-        crystalMaterial.diffuse.contents = UIColor(color.opacity(0.4))
-        crystalMaterial.emission.contents = UIColor(color.opacity(intensity))
+        crystalMaterial.diffuse.contents = UIColor(markerMaterial.body.opacity(0.40 + glassAlpha * 0.18))
+        crystalMaterial.emission.contents = UIColor(highlightColor.opacity(intensity))
         crystalMaterial.lightingModel = .physicallyBased
-        crystalMaterial.metalness.contents = 0.9
-        crystalMaterial.roughness.contents = 0.1
-        crystalMaterial.transparency = 0.7
+        crystalMaterial.metalness.contents = markerMaterial.metalness
+        crystalMaterial.roughness.contents = markerMaterial.roughness
+        crystalMaterial.transparency = markerMaterial.transparency
         crystal.materials = [crystalMaterial]
         
         let crystalNode = SCNNode(geometry: crystal)
@@ -570,8 +576,8 @@ struct Enhanced3DBeaconMarker: UIViewRepresentable {
         // Vertical light beam
         let beam = SCNCylinder(radius: 0.25, height: 3.5)
         let beamMaterial = SCNMaterial()
-        beamMaterial.diffuse.contents = UIColor(color.opacity(0.1))
-        beamMaterial.emission.contents = UIColor(color.opacity(0.5 * intensity))
+        beamMaterial.diffuse.contents = UIColor(highlightColor.opacity(0.10))
+        beamMaterial.emission.contents = UIColor(highlightColor.opacity(0.5 * intensity))
         beamMaterial.lightingModel = .constant
         beamMaterial.transparency = 0.3
         beam.materials = [beamMaterial]
@@ -583,7 +589,7 @@ struct Enhanced3DBeaconMarker: UIViewRepresentable {
         // Particle ring at top
         let particleRing = SCNTorus(ringRadius: 0.4, pipeRadius: 0.05)
         let particleMaterial = SCNMaterial()
-        particleMaterial.emission.contents = UIColor(color)
+        particleMaterial.emission.contents = UIColor(highlightColor)
         particleMaterial.lightingModel = .constant
         particleRing.materials = [particleMaterial]
         
@@ -631,6 +637,239 @@ struct Enhanced3DBeaconMarker: UIViewRepresentable {
     
     func updateUIView(_ uiView: SCNView, context: Context) {
         uiView.backgroundColor = .clear
+    }
+}
+
+enum ThemedMapMarkerRole {
+    case user
+    case selected
+    case placement
+    case post
+    case dominance
+    case tour
+}
+
+private struct ThemedMapMarkerMaterial {
+    let body: Color
+    let highlight: Color
+    let metalness: CGFloat
+    let roughness: CGFloat
+    let transparency: CGFloat
+    let glassAlpha: Double
+}
+
+private extension CubeSkin {
+    func mapMarkerColor(role: ThemedMapMarkerRole, seed: Int = 0) -> Color {
+        let theme = appTheme
+        switch self {
+        case .toy:
+            switch role {
+            case .user: return Color(red: 0.02, green: 0.28, blue: 0.74)
+            case .selected, .placement: return Color(red: 0.92, green: 0.12, blue: 0.12)
+            case .dominance: return Color(red: 1.00, green: 0.73, blue: 0.02)
+            case .tour: return Color(red: 0.02, green: 0.36, blue: 0.82)
+            case .post:
+                let palette = [
+                    Color(red: 0.92, green: 0.12, blue: 0.12),
+                    Color(red: 0.02, green: 0.36, blue: 0.82),
+                    Color(red: 1.00, green: 0.72, blue: 0.02)
+                ]
+                return palette[abs(seed) % palette.count]
+            }
+        case .rainbow:
+            let palette = [
+                Color(red: 1.00, green: 0.18, blue: 0.18),
+                Color(red: 1.00, green: 0.82, blue: 0.05),
+                Color(red: 0.05, green: 0.88, blue: 0.34),
+                Color(red: 0.02, green: 0.78, blue: 1.00),
+                Color(red: 1.00, green: 0.18, blue: 0.82)
+            ]
+            if role == .user { return palette[3] }
+            if role == .selected || role == .placement { return palette[4] }
+            return palette[abs(seed) % palette.count]
+        case .sparklePink:
+            switch role {
+            case .user: return Color(red: 1.00, green: 0.36, blue: 0.78)
+            case .selected, .placement: return Color(red: 1.00, green: 0.54, blue: 0.88)
+            case .dominance: return Color(red: 1.00, green: 0.18, blue: 0.74)
+            case .tour: return Color(red: 1.00, green: 0.72, blue: 0.90)
+            case .post: return [theme.accent, theme.accent2, Color(red: 1.00, green: 0.20, blue: 0.92)][abs(seed) % 3]
+            }
+        case .gold:
+            switch role {
+            case .user: return Color(red: 1.00, green: 0.90, blue: 0.34)
+            case .selected, .placement: return Color(red: 1.00, green: 0.78, blue: 0.10)
+            case .dominance: return Color(red: 1.00, green: 0.96, blue: 0.58)
+            default: return [theme.accent, theme.accent2, Color(red: 0.82, green: 0.55, blue: 0.08)][abs(seed) % 3]
+            }
+        case .chocolate:
+            switch role {
+            case .user: return Color(red: 0.98, green: 0.62, blue: 0.24)
+            case .selected, .placement: return Color(red: 1.00, green: 0.74, blue: 0.42)
+            case .dominance: return Color(red: 0.88, green: 0.42, blue: 0.12)
+            default: return [theme.accent, theme.accent2, Color(red: 0.56, green: 0.23, blue: 0.05)][abs(seed) % 3]
+            }
+        case .camo:
+            switch role {
+            case .user: return Color(red: 0.70, green: 0.76, blue: 0.34)
+            case .selected, .placement: return Color(red: 0.90, green: 0.82, blue: 0.42)
+            case .dominance: return Color(red: 0.48, green: 0.62, blue: 0.25)
+            default: return [theme.accent, theme.accent2, Color(red: 0.33, green: 0.44, blue: 0.20)][abs(seed) % 3]
+            }
+        case .ice:
+            switch role {
+            case .user: return Color(red: 0.56, green: 0.90, blue: 1.00)
+            case .selected, .placement: return Color(red: 0.82, green: 0.96, blue: 1.00)
+            case .dominance: return Color.white
+            default: return [theme.accent, theme.accent2, Color(red: 0.35, green: 0.72, blue: 1.00)][abs(seed) % 3]
+            }
+        case .rubber, .standard:
+            switch role {
+            case .user: return Color(red: 0.30, green: 0.88, blue: 1.00)
+            case .selected, .placement: return Color(red: 0.55, green: 0.20, blue: 1.00)
+            case .dominance: return Color(red: 0.76, green: 0.24, blue: 1.00)
+            default: return [theme.accent, theme.accent2, Color(red: 0.32, green: 0.96, blue: 0.58)][abs(seed) % 3]
+            }
+        }
+    }
+
+    func mapMarkerMaterial(for role: ThemedMapMarkerRole, baseColor: Color) -> ThemedMapMarkerMaterial {
+        switch self {
+        case .ice:
+            return ThemedMapMarkerMaterial(body: Color.white.opacity(0.92), highlight: mapMarkerColor(role: role), metalness: 0.16, roughness: 0.18, transparency: 0.54, glassAlpha: 0.78)
+        case .gold:
+            return ThemedMapMarkerMaterial(body: Color(red: 1.00, green: 0.78, blue: 0.18), highlight: mapMarkerColor(role: role), metalness: 1.0, roughness: 0.08, transparency: 0.70, glassAlpha: 0.18)
+        case .chocolate:
+            return ThemedMapMarkerMaterial(body: Color(red: 0.52, green: 0.20, blue: 0.05), highlight: mapMarkerColor(role: role), metalness: 0.22, roughness: 0.18, transparency: 0.76, glassAlpha: 0.12)
+        case .camo:
+            return ThemedMapMarkerMaterial(body: Color(red: 0.22, green: 0.30, blue: 0.13), highlight: mapMarkerColor(role: role), metalness: 0.20, roughness: 0.58, transparency: 0.78, glassAlpha: 0.06)
+        case .toy:
+            return ThemedMapMarkerMaterial(body: mapMarkerColor(role: role), highlight: Color.white, metalness: 0.34, roughness: 0.12, transparency: 0.82, glassAlpha: 0.10)
+        case .sparklePink, .rainbow:
+            return ThemedMapMarkerMaterial(body: baseColor, highlight: mapMarkerColor(role: role), metalness: 0.62, roughness: 0.06, transparency: 0.66, glassAlpha: 0.32)
+        case .rubber, .standard:
+            return ThemedMapMarkerMaterial(body: baseColor, highlight: mapMarkerColor(role: role), metalness: 0.46, roughness: 0.18, transparency: 0.70, glassAlpha: 0.18)
+        }
+    }
+
+    var mapCircleFill: Color {
+        appTheme.accent.opacity(self == .toy ? 0.10 : 0.16)
+    }
+
+    var mapCircleStroke: Color {
+        switch self {
+        case .toy: return appTheme.accent2.opacity(0.58)
+        case .ice: return Color.white.opacity(0.72)
+        default: return appTheme.accent.opacity(0.62)
+        }
+    }
+
+    func mapActionBackground(role: ThemedMapMarkerRole) -> AnyShapeStyle {
+        switch self {
+        case .toy:
+            return AnyShapeStyle(
+                LinearGradient(
+                    colors: [mapMarkerColor(role: role), appTheme.accent2],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+        case .rainbow:
+            return AnyShapeStyle(
+                LinearGradient(
+                    colors: [.red, .yellow, .green, .cyan, .pink],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+        case .ice:
+            return AnyShapeStyle(
+                LinearGradient(
+                    colors: [Color.white.opacity(0.62), appTheme.accent.opacity(0.82), appTheme.surface.opacity(0.92)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+        case .camo, .gold, .chocolate:
+            return AnyShapeStyle(
+                LinearGradient(
+                    colors: [appTheme.surface, mapMarkerColor(role: role).opacity(0.72), appTheme.surfaceStrong],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+        case .sparklePink, .rubber, .standard:
+            return AnyShapeStyle(
+                LinearGradient(
+                    colors: [appTheme.accent, appTheme.accent2],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+        }
+    }
+
+    func mapActionForeground(role: ThemedMapMarkerRole) -> Color {
+        switch self {
+        case .toy:
+            return .white
+        case .ice:
+            return Color.white
+        default:
+            return appTheme.primaryText
+        }
+    }
+}
+
+private struct ThemedMapActionPin: View {
+    let skin: CubeSkin
+    let systemName: String
+    let role: ThemedMapMarkerRole
+    var size: CGFloat = 64
+
+    private var theme: CubeSkinAppTheme { skin.appTheme }
+    private var iconColor: Color { skin.mapMarkerColor(role: role) }
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(iconColor.opacity(skin == .ice ? 0.24 : 0.18))
+                .frame(width: size * 1.34, height: size * 1.34)
+                .blur(radius: 1.2)
+
+            ThemedSkinPlate(
+                skin: skin,
+                tab: .map,
+                cornerRadius: skin == .camo || skin == .chocolate || skin == .gold ? 13 : 20,
+                isPressed: false,
+                borderWidth: skin == .ice ? 2.6 : 2,
+                glowRadius: skin == .camo ? 5 : 14
+            )
+            .frame(width: size, height: size)
+            .overlay {
+                Image(systemName: systemName)
+                    .font(.system(size: size * 0.48, weight: .black, design: .rounded))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(iconForeground)
+                    .shadow(color: iconColor.opacity(skin == .camo ? 0.25 : 0.9), radius: skin == .camo ? 1 : 9)
+                    .shadow(color: Color.black.opacity(theme.prefersLightContent ? 0.18 : 0.62), radius: 2, x: 0, y: 1)
+            }
+        }
+        .frame(width: size * 1.48, height: size * 1.48)
+        .accessibilityHidden(true)
+    }
+
+    private var iconForeground: AnyShapeStyle {
+        switch skin {
+        case .toy:
+            return AnyShapeStyle(role == .selected || role == .placement ? Color(red: 0.92, green: 0.12, blue: 0.12) : Color(red: 0.02, green: 0.28, blue: 0.74))
+        case .rainbow:
+            return AnyShapeStyle(
+                LinearGradient(colors: [.yellow, .green, .cyan, .pink], startPoint: .topLeading, endPoint: .bottomTrailing)
+            )
+        default:
+            return AnyShapeStyle(theme.primaryText)
+        }
     }
 }
 
@@ -2169,6 +2408,7 @@ private struct ArcShape: Shape {
 private struct TrendPopMarker: View {
     let object: TrendPopObject
     let category: TrendCategory
+    var skin: CubeSkin = .standard
     @State private var startDate = Date()
 
     var body: some View {
@@ -2187,7 +2427,8 @@ private struct TrendPopMarker: View {
                     .scaleEffect(popScale)
                     .offset(y: bob)
                     .opacity(popPhase <= 0 ? 0 : 1)
-                    .shadow(color: category.tint.opacity(0.50), radius: 14, x: 0, y: 0)
+                    .shadow(color: skin.mapMarkerColor(role: .tour, seed: object.seed).opacity(0.55), radius: 14, x: 0, y: 0)
+                    .shadow(color: category.tint.opacity(skin == .toy ? 0.18 : 0.32), radius: 7, x: 0, y: 0)
             }
             .frame(width: 132, height: 132)
         }
@@ -2580,6 +2821,8 @@ private struct CubeMenuBackButton: View {
 }
 
 private struct MapRadioSearchChecklistView: View {
+    @ObservedObject private var cubeSkinStore = CubeSkinStore.shared
+
     @Binding var query: String
     @Binding var results: [MKMapItem]
     @Binding var isSearching: Bool
@@ -2643,7 +2886,7 @@ private struct MapRadioSearchChecklistView: View {
                             } label: {
                                 HStack(spacing: 10) {
                                     Image(systemName: "mappin.circle.fill")
-                                        .foregroundStyle(.indigo)
+                                        .foregroundStyle(cubeSkinStore.current.mapMarkerColor(role: .selected))
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(item.name ?? "Unknown place")
                                             .font(.system(size: 14, weight: .heavy, design: .rounded))
@@ -3464,6 +3707,7 @@ struct MapViewProduction: View {
     @StateObject private var mapState = MapStateManager.shared
     @StateObject private var musicPlayer: CityTourMusicPlayerService
     @ObservedObject private var mapRadioHost = PoplurMapRadioHost.shared
+    @ObservedObject private var cubeSkinStore = CubeSkinStore.shared
 
     @AppStorage("poplur_use2DMap") private var use2DMap: Bool = false
     private var activePitch: CGFloat { use2DMap ? 0 : fixedPitchAlt }
@@ -3516,12 +3760,16 @@ struct MapViewProduction: View {
     @State private var lastContextRefreshLocation: CLLocation? = nil
     @State private var isCameraTransitionInProgress: Bool = false
 
-    private let mapZoomSliderHeight: CGFloat = 400
+    private let mapZoomSliderHeight: CGFloat = 200
     private let mapLeftOverlayPadding: CGFloat = 28
     
     @State private var longPressLocation: CGPoint? = nil  // Track long press location
     @State private var selectedCoordinate: CLLocationCoordinate2D? = nil  // Track selected coordinate for long-press
     
+    // Message composer
+    @State private var showAddMessage: Bool = false
+    @State private var addMessageText: String = ""
+
     // Post placement mode - when user needs to select location for captured media
     @State private var isPostPlacementMode: Bool = false
     @State private var pendingPostImage: UIImage? = nil
@@ -4355,7 +4603,13 @@ struct MapViewProduction: View {
                 // Show user annotation with 3D blue pin when location is available
                 if let userCoord = liveUserCoordinate ?? locationManager.location?.coordinate {
                     Annotation("", coordinate: userCoord) {
-                        Enhanced3DBeaconMarker(color: Color.blue, intensity: 0.9)
+                        Enhanced3DBeaconMarker(
+                            color: cubeSkinStore.current.mapMarkerColor(role: .user),
+                            intensity: 0.9,
+                            skin: cubeSkinStore.current,
+                            role: .user
+                        )
+                            .id("map-user-\(cubeSkinStore.current.rawValue)")
                             .frame(width: 100, height: 120)
                     }
                 }
@@ -4363,32 +4617,13 @@ struct MapViewProduction: View {
                 // Show marker when user clicks a coordinate
                 if showPostPrompt, let coord = clickedCoordinate {
                     Annotation("Selected Location", coordinate: coord) {
-                        ZStack {
-                            // Outer glow ring
-                            Circle()
-                                .fill(Color.indigo.opacity(0.2))
-                                .frame(width: 80, height: 80)
-                            
-                            // Inner circle
-                            Circle()
-                                .fill(Color.indigo.opacity(0.5))
-                                .frame(width: 60, height: 60)
-                            
-                            // Icon
-                            if flowManager.currentFlow?.isCameraFirst ?? false {
-                                // Camera -> Map: Show upload/checkmark icon
-                                Image(systemName: "checkmark.circle.fill")
-                                    .font(.system(size: 40))
-                                    .foregroundStyle(.white, .indigo)
-                                    .shadow(color: .black.opacity(0.3), radius: 2)
-                            } else {
-                                // Map -> Camera: Show camera icon
-                                Image(systemName: "camera.circle.fill")
-                                    .font(.system(size: 40))
-                                    .foregroundStyle(.white, .indigo)
-                                    .shadow(color: .black.opacity(0.3), radius: 2)
-                            }
-                        }
+                        ThemedMapActionPin(
+                            skin: cubeSkinStore.current,
+                            systemName: (flowManager.currentFlow?.isCameraFirst ?? false) ? "checkmark.circle.fill" : "camera.fill",
+                            role: .selected,
+                            size: 64
+                        )
+                        .id("map-selected-\(cubeSkinStore.current.rawValue)-\(flowManager.currentFlow?.isCameraFirst ?? false)")
                         .animation(.easeInOut(duration: 0.3), value: showPostPrompt)
                     }
                 }
@@ -4396,14 +4631,13 @@ struct MapViewProduction: View {
                 // Show placement marker when in post placement mode
                 if isPostPlacementMode, let coord = postPlacementCoordinate {
                     Annotation("", coordinate: coord) {
-                        ZStack {
-                            Circle()
-                                .fill(Color.indigo.opacity(0.3))
-                                .frame(width: 50, height: 50)
-                            Image(systemName: "mappin.circle.fill")
-                                .font(.system(size: 36))
-                                .foregroundStyle(.indigo, .white)
-                        }
+                        ThemedMapActionPin(
+                            skin: cubeSkinStore.current,
+                            systemName: "mappin.and.ellipse",
+                            role: .placement,
+                            size: 56
+                        )
+                        .id("map-placement-\(cubeSkinStore.current.rawValue)")
                     }
                 }
                 
@@ -4412,39 +4646,39 @@ struct MapViewProduction: View {
                     // Show radius circle if available
                     if let radius = shownPostRadius {
                         MapCircle(center: coord, radius: radius)
-                            .foregroundStyle(Color.purple.opacity(0.15))
-                            .stroke(Color.purple.opacity(0.5), lineWidth: 2)
+                            .foregroundStyle(cubeSkinStore.current.mapCircleFill)
+                            .stroke(cubeSkinStore.current.mapCircleStroke, lineWidth: cubeSkinStore.current == .ice ? 3 : 2)
                     }
                     
                     // Show detailed pin annotation - no background, text only
                     Annotation("", coordinate: coord) {
                         // Pin marker only - no information card
-                        ZStack {
-                            Circle()
-                                .fill(Color.purple.opacity(0.3))
-                                .frame(width: 60, height: 60)
-                            
-                            Image(systemName: "mappin.circle.fill")
-                                .font(.system(size: 44))
-                                .foregroundStyle(.purple, .white)
-                                .shadow(radius: 3)
-                        }
+                        ThemedMapActionPin(
+                            skin: cubeSkinStore.current,
+                            systemName: "mappin.circle.fill",
+                            role: .selected,
+                            size: 60
+                        )
+                        .id("map-post-location-\(cubeSkinStore.current.rawValue)")
                     }
                 }
                 
                 ForEach(filteredPosts()) { post in
                     Annotation("", coordinate: post.coordinate) {
-                        // Use different colors for variety
-                        let colors: [Color] = [.orange, .blue, .green, .yellow, .pink]
-                        let colorIndex = abs(post.title.hashValue) % colors.count
-                        Enhanced3DBeaconMarker(color: colors[colorIndex], intensity: 0.6)
+                        Enhanced3DBeaconMarker(
+                            color: cubeSkinStore.current.mapMarkerColor(role: .post, seed: post.title.hashValue),
+                            intensity: 0.6,
+                            skin: cubeSkinStore.current,
+                            role: .post
+                        )
+                            .id("map-post-\(post.id)-\(cubeSkinStore.current.rawValue)")
                             .frame(width: 80, height: 100)
                     }
                     
                     // Glowing circle with vibrant colors
                     MapCircle(center: post.coordinate, radius: post.radius)
-                        .foregroundStyle(Color.orange.opacity(0.15))
-                        .stroke(Color.orange.opacity(0.6), lineWidth: 2)
+                        .foregroundStyle(cubeSkinStore.current.mapCircleFill)
+                        .stroke(cubeSkinStore.current.mapCircleStroke, lineWidth: cubeSkinStore.current == .ice ? 3 : 2)
                 }
                 
                 ForEach(dominance) { dom in
@@ -4453,7 +4687,13 @@ struct MapViewProduction: View {
                             DominancePin(profileURL: url)
                         } else {
                             // High-intensity purple beacons for dominance locations
-                            Enhanced3DBeaconMarker(color: .purple, intensity: 1.0)
+                            Enhanced3DBeaconMarker(
+                                color: cubeSkinStore.current.mapMarkerColor(role: .dominance, seed: dom.city.hashValue),
+                                intensity: 1.0,
+                                skin: cubeSkinStore.current,
+                                role: .dominance
+                            )
+                                .id("map-dominance-\(dom.id)-\(cubeSkinStore.current.rawValue)")
                                 .frame(width: 110, height: 130)
                         }
                     }
@@ -4461,7 +4701,10 @@ struct MapViewProduction: View {
 
                 if let stop = activeTourStop {
                     Annotation("", coordinate: stop.coordinate) {
-                        MusicWaveMarker(frame: musicWaveFrame, tint: activeTourInsight?.category.tint ?? .cyan)
+                        MusicWaveMarker(
+                            frame: musicWaveFrame,
+                            tint: cubeSkinStore.current.mapMarkerColor(role: .tour, seed: stop.cityName.hashValue)
+                        )
                             .offset(x: 38, y: -72)
                     }
                 }
@@ -4469,7 +4712,7 @@ struct MapViewProduction: View {
                 if let insight = activeTourInsight ?? (mapState.isInTourMode ? nil : localTrendInsight) {
                     ForEach(trendPopObjects) { object in
                         Annotation("", coordinate: object.coordinate) {
-                            TrendPopMarker(object: object, category: insight.category)
+                            TrendPopMarker(object: object, category: insight.category, skin: cubeSkinStore.current)
                         }
                     }
                 }
@@ -4768,10 +5011,10 @@ struct MapViewProduction: View {
                                 .font(.system(size: 16, weight: .bold, design: .rounded))
                         }
                     }
-                    .foregroundColor(.white)
+                    .foregroundStyle(cubeSkinStore.current.mapActionForeground(role: .selected))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
-                    .background(Color.indigo, in: Capsule())
+                    .background(cubeSkinStore.current.mapActionBackground(role: .selected), in: Capsule())
                 }
                 .buttonStyle(.plain)
                 .shadow(color: .black.opacity(0.35), radius: 10, x: 0, y: 5)
@@ -4790,10 +5033,10 @@ struct MapViewProduction: View {
                         Text("Post Here")
                             .font(.system(size: 16, weight: .bold, design: .rounded))
                     }
-                    .foregroundColor(.white)
+                    .foregroundStyle(cubeSkinStore.current.mapActionForeground(role: .placement))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
-                    .background(Color.indigo, in: Capsule())
+                    .background(cubeSkinStore.current.mapActionBackground(role: .placement), in: Capsule())
                 }
                 .buttonStyle(.plain)
                 .shadow(color: .black.opacity(0.35), radius: 10, x: 0, y: 5)
@@ -4815,8 +5058,8 @@ struct MapViewProduction: View {
                     AnimatedZoomSlider(zoomLevel: $zoomLevel) { newZoom in
                         updateMapZoom(to: newZoom)
                     }
-                    .frame(width: 60, height: mapZoomSliderHeight)
-                    .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 2)
+                    .frame(width: 44, height: mapZoomSliderHeight)
+                    .shadow(color: .black.opacity(0.3), radius: 6, x: 0, y: 2)
 
                     Spacer()
                 }
@@ -5154,10 +5397,10 @@ struct MapViewProduction: View {
             Button {} label: {
                 Label("Post Here", systemImage: "camera.fill")
                     .font(.system(size: 16, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(cubeSkinStore.current.mapActionForeground(role: .selected))
                     .padding(.horizontal, 18)
                     .padding(.vertical, 12)
-                    .background(Color.indigo, in: Capsule())
+                    .background(cubeSkinStore.current.mapActionBackground(role: .selected), in: Capsule())
             }
             .buttonStyle(.plain)
             .shadow(color: .black.opacity(0.35), radius: 10, x: 0, y: 5)
@@ -5181,6 +5424,13 @@ struct MapViewProduction: View {
                 if showAddressSearch {
                     mapOverlayPanel {
                         locationSearchSheet
+                    }
+                    .zIndex(51)
+                }
+
+                if showAddMessage {
+                    mapOverlayPanel {
+                        addMessageSheet
                     }
                     .zIndex(51)
                 }
@@ -5831,13 +6081,70 @@ struct MapViewProduction: View {
             CubeSubmenuItem(id: "post", title: "Post Here", systemImage: "camera.fill", tint: .white) {
                 isPostPlacementMode = true
             },
-            CubeSubmenuItem(id: "multi-post", title: "Post Multiple", systemImage: "square.stack.fill", tint: .white) {
-                isPostPlacementMode = true
+            CubeSubmenuItem(id: "view-mode", title: use2DMap ? "3D Map" : "2D Map", systemImage: use2DMap ? "cube.fill" : "square.on.square.fill", tint: .blue) {
+                use2DMap.toggle()
             },
             CubeSubmenuItem(id: "tour", title: mapState.isInTourMode ? "Stop Tour" : "Start Tour", systemImage: "map.fill", tint: .white) {
                 if mapState.isInTourMode { stopTour() } else { startTour() }
+            },
+            CubeSubmenuItem(id: "message", title: "Add Message", systemImage: "message.fill", tint: .white) {
+                showAddMessage = true
             }
         ]
+    }
+
+    // MARK: - Message Composer
+
+    @ViewBuilder
+    private var addMessageSheet: some View {
+        VStack(spacing: 16) {
+            HStack {
+                Text("Add Message")
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                Spacer()
+                Button("Cancel") {
+                    showAddMessage = false
+                    addMessageText = ""
+                }
+                .foregroundStyle(.white.opacity(0.7))
+            }
+
+            Label(currentCity, systemImage: "location.fill")
+                .font(.caption)
+                .foregroundStyle(.white.opacity(0.6))
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            TextField("Type your message...", text: $addMessageText, axis: .vertical)
+                .lineLimit(3...6)
+                .padding(10)
+                .background(.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 10))
+                .foregroundStyle(.white)
+                .tint(.white)
+
+            Button {
+                postMapMessage()
+                showAddMessage = false
+                addMessageText = ""
+            } label: {
+                Text("Post Message")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(cubeSkinStore.current.mapActionBackground(role: .placement), in: RoundedRectangle(cornerRadius: 12))
+                    .foregroundStyle(cubeSkinStore.current.mapActionForeground(role: .placement))
+            }
+            .disabled(addMessageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .opacity(addMessageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.5 : 1)
+        }
+        .padding(20)
+    }
+
+    private func postMapMessage() {
+        let text = addMessageText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        let coordinate = selectedCoordinate ?? locationManager.location?.coordinate
+        print("📍 Map message posted at \(currentCity) (\(coordinate?.latitude ?? 0), \(coordinate?.longitude ?? 0)): \(text)")
     }
 
     // MARK: - First Launch Sequence
@@ -6390,6 +6697,8 @@ struct MappedinVenue: Identifiable {
 }
 
 private struct MappedinVenue3DButton: View {
+    @ObservedObject private var cubeSkinStore = CubeSkinStore.shared
+
     let venue: MappedinVenue
 
     var body: some View {
@@ -6401,10 +6710,10 @@ private struct MappedinVenue3DButton: View {
             Text("Inside")
                 .font(.system(size: 8, weight: .bold, design: .rounded))
         }
-        .foregroundStyle(.white)
+        .foregroundStyle(cubeSkinStore.current.mapActionForeground(role: .selected))
         .padding(.horizontal, 9)
         .padding(.vertical, 6)
-        .background(Color.indigo.gradient, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(cubeSkinStore.current.mapActionBackground(role: .selected), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .stroke(.white.opacity(0.28), lineWidth: 1)

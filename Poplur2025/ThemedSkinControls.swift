@@ -31,7 +31,7 @@ struct ThemedSkinPlate: View {
                     .blendMode(.screen)
             }
 
-            if skin == .rubber {
+            if skin == .standard || skin == .rubber {
                 RubberDotField(color: Color.white.opacity(0.12))
             }
 
@@ -112,7 +112,7 @@ struct ThemedSkinPlate: View {
                 theme.accent.opacity(0.16),
                 Color.black.opacity(0.30)
             ]
-        case .rubber:
+        case .standard, .rubber:
             return [
                 Color.white.opacity(0.10),
                 Color.black.opacity(0.20),

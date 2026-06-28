@@ -32,6 +32,7 @@ private struct RecordPreviewSkeleton: View {
                             .font(.system(size: 54, weight: .semibold))
                         Text("Record Preview")
                             .font(.system(size: 26, weight: .heavy, design: .rounded))
+                            .poplurTextShader(intensity: 0.9)
                     }
                     .foregroundStyle(.white.opacity(0.72))
                 }
@@ -40,6 +41,7 @@ private struct RecordPreviewSkeleton: View {
                 Text("Hold to capture")
                     .font(.system(size: 17, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white)
+                    .poplurTextShader(intensity: 0.8)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 8)
                     .background(.black.opacity(0.42), in: Capsule())

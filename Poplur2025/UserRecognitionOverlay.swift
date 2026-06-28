@@ -60,6 +60,7 @@ struct UserRecognitionOverlay: View {
                     Text("@\(user.profile.username)")
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundColor(.white)
+                        .poplurTextShader(intensity: 0.95)
                     
                     // Verified checkmark
                     Image(systemName: "checkmark.seal.fill")
@@ -74,6 +75,7 @@ struct UserRecognitionOverlay: View {
                             .font(.system(size: 12))
                         Text("\(Int(user.confidence * 100))%")
                             .font(.system(size: 12, weight: .medium))
+                            .poplurTextShader(intensity: 0.75)
                     }
                     .foregroundColor(.green)
 
@@ -84,6 +86,7 @@ struct UserRecognitionOverlay: View {
                             .font(.system(size: 12))
                         Text(user.formattedRadius)
                             .font(.system(size: 12, weight: .medium))
+                            .poplurTextShader(intensity: 0.85)
                     }
                     .foregroundColor(.orange)
 
@@ -94,6 +97,7 @@ struct UserRecognitionOverlay: View {
                             .font(.system(size: 12))
                         Text("\(user.postCount) posts")
                             .font(.system(size: 12, weight: .medium))
+                            .poplurTextShader(intensity: 0.75)
                     }
                     .foregroundColor(.cyan)
                 }
@@ -107,6 +111,7 @@ struct UserRecognitionOverlay: View {
                 HStack(spacing: 4) {
                     Text("View Profile")
                         .font(.system(size: 13, weight: .semibold))
+                        .poplurTextShader(intensity: 0.8)
                     Image(systemName: "arrow.right")
                         .font(.system(size: 11, weight: .semibold))
                 }
@@ -164,6 +169,7 @@ struct UserRecognitionOverlay: View {
             Text("Scanning...")
                 .font(.system(size: 14, weight: .medium))
                 .foregroundColor(.white)
+                .poplurTextShader(intensity: 0.8)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
@@ -231,4 +237,3 @@ struct UserRecognitionOverlay_Previews: PreviewProvider {
     }
 }
 #endif
-

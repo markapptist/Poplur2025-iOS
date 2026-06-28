@@ -1,5 +1,60 @@
 import SwiftUI
 
+@available(iOS 17.0, macOS 14.0, tvOS 17.0, watchOS 10.0, *)
+private struct PoplurShaderTextRenderer: TextRenderer {
+    var time: Double
+    var intensity: Double
+
+    var animatableData: AnimatablePair<Double, Double> {
+        get { AnimatablePair(time, intensity) }
+        set {
+            time = newValue.first
+            intensity = newValue.second
+        }
+    }
+
+    func draw(layout: Text.Layout, in context: inout GraphicsContext) {
+        context.addFilter(
+            .colorShader(
+                ShaderLibrary.poplurNumberGlow(
+                    .float(Float(time)),
+                    .float(Float(intensity))
+                )
+            )
+        )
+
+        for line in layout {
+            context.draw(line)
+        }
+    }
+}
+
+struct PoplurTextShaderScope: ViewModifier {
+    var intensity: Float = 0.75
+
+    @State private var epoch = Date()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 17.0, macOS 14.0, tvOS 17.0, watchOS 10.0, *) {
+            TimelineView(.periodic(from: epoch, by: 1.0 / 30.0)) { timeline in
+                let time = reduceMotion ? 0 : timeline.date.timeIntervalSince(epoch)
+
+                content
+                    .textRenderer(
+                        PoplurShaderTextRenderer(
+                            time: time,
+                            intensity: Double(intensity)
+                        )
+                    )
+            }
+        } else {
+            content
+        }
+    }
+}
+
 struct MetalNumberShader: ViewModifier {
     var intensity: Float = 1.0
 
@@ -31,8 +86,16 @@ struct MetalNumberShader: ViewModifier {
 }
 
 extension View {
+    func poplurTextShaderScope(intensity: Float = 0.75) -> some View {
+        modifier(PoplurTextShaderScope(intensity: intensity))
+    }
+
     func poplurMetalNumberShader(intensity: Float = 1.0) -> some View {
         modifier(MetalNumberShader(intensity: intensity))
+    }
+
+    func poplurTextShader(intensity: Float = 1.0) -> some View {
+        poplurMetalNumberShader(intensity: intensity)
     }
 }
 

@@ -60,8 +60,9 @@ struct CubeSkinSettingsView: View {
 private struct SkinThumbnailView: View {
     let skin: CubeSkin
     var body: some View {
-        let img = UIImage(named: skin.diffuseAssetName) ?? skin.makeTexture()
-        Image(uiImage: img).resizable().scaledToFill()
+        Image(skin.appIconPreviewAssetName)
+            .resizable()
+            .scaledToFill()
     }
 }
 

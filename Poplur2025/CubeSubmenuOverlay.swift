@@ -315,9 +315,7 @@ private struct CubeMenuWheelItem: View {
 
     var body: some View {
         VStack(spacing: selected ? 8 : 5) {
-            Image(systemName: item.systemImage)
-                .font(.system(size: selected ? 38 : 28, weight: .semibold))
-                .foregroundStyle(iconColor)
+            menuIcon
                 .shadow(color: accent.opacity(selected ? 0.95 : 0.72), radius: selected ? 9 : 5)
 
             Text(item.title)
@@ -340,6 +338,28 @@ private struct CubeMenuWheelItem: View {
             )
         }
         .accessibilityLabel(item.title)
+    }
+
+    @ViewBuilder
+    private var menuIcon: some View {
+        if item.id == "camera-object-detection" {
+            ZStack(alignment: .bottomTrailing) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: selected ? 38 : 28, weight: .semibold))
+                    .foregroundStyle(iconColor)
+                Image(systemName: "eye.fill")
+                    .font(.system(size: selected ? 17 : 13, weight: .bold))
+                    .foregroundStyle(iconColor)
+                    .padding(2)
+                    .background(.black.opacity(0.35), in: Circle())
+                    .offset(x: selected ? 6 : 5, y: selected ? 6 : 5)
+            }
+            .frame(width: selected ? 44 : 34, height: selected ? 44 : 34)
+        } else {
+            Image(systemName: item.systemImage)
+                .font(.system(size: selected ? 38 : 28, weight: .semibold))
+                .foregroundStyle(iconColor)
+        }
     }
 
     private var textureTab: AppTab {

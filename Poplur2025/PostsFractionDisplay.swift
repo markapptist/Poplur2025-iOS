@@ -43,6 +43,7 @@ struct PostsFractionDisplay: View {
             Text("\(postsCount) posts")
                 .font(.system(size: 16, weight: .bold))
                 .foregroundStyle(.white.opacity(0.9))
+                .poplurTextShader(intensity: 0.72)
                 .shadow(color: .black.opacity(0.6), radius: 4, x: 0, y: 2)
                 .frame(width: 90) // Match the line width so text is centered
         }

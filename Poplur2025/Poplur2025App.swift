@@ -66,6 +66,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         Task { @MainActor in
             PoplurNotificationCenter.shared.configure()
             WatchRadiusSync.shared.start()
+            CubeSkinStore.shared.syncAppIcon()
         }
 
         // Replicate API key — sourced from Secrets.swift (gitignored, never committed)
@@ -125,6 +126,7 @@ struct Poplur2025App: App {
                 }
             }
             .toolbar(.hidden, for: .navigationBar)
+            .poplurTextShaderScope(intensity: 0.72)
             .onAppear {
                 let appearance = UITabBarAppearance()
                 appearance.configureWithTransparentBackground()

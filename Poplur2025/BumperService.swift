@@ -5,7 +5,7 @@ import Foundation
 enum BumperState: Equatable {
     case idle
     case generating
-    case ready(audioData: Data)
+    case ready(BumperPayload)
     case failed
 
     static func == (lhs: BumperState, rhs: BumperState) -> Bool {
@@ -16,10 +16,16 @@ enum BumperState: Equatable {
         }
     }
 
-    var audioData: Data? {
-        if case .ready(let d) = self { return d }
+    var payload: BumperPayload? {
+        if case .ready(let payload) = self { return payload }
         return nil
     }
+}
+
+struct BumperPayload: Equatable, Identifiable {
+    let id: String
+    let script: String
+    let audioData: Data?
 }
 
 // MARK: - Bumper Service
@@ -38,15 +44,24 @@ final class BumperService: ObservableObject {
 
     // MARK: - Public API
 
-    func prefetch(_ post: FeedPost, channelName: String = "General", channelID: String = "") {
-        guard isConfigured else { return }
-        guard bumpers[post.id] == nil, !inFlight.contains(post.id) else { return }
-        inFlight.insert(post.id)
-        bumpers[post.id] = .generating
-
-        Task { [weak self] in
-            await self?.generate(post, channelName: channelName, channelID: channelID)
+    func activate(_ post: FeedPost, channelName: String = "General", channelID: String = "") -> BumperPayload {
+        if let payload = bumpers[post.id]?.payload {
+            return payload
         }
+
+        let language = resolveLanguage(post: post, channelID: channelID)
+        let fallback = BumperPayload(
+            id: post.id,
+            script: fallbackScript(for: post, channelName: channelName, language: language),
+            audioData: nil
+        )
+        bumpers[post.id] = .ready(fallback)
+        generateIfNeeded(post, channelName: channelName, channelID: channelID)
+        return fallback
+    }
+
+    func prefetch(_ post: FeedPost, channelName: String = "General", channelID: String = "") {
+        generateIfNeeded(post, channelName: channelName, channelID: channelID)
     }
 
     func reset(postID: String) {
@@ -56,16 +71,36 @@ final class BumperService: ObservableObject {
 
     // MARK: - Generation Pipeline
 
+    private func generateIfNeeded(_ post: FeedPost, channelName: String, channelID: String) {
+        guard !inFlight.contains(post.id) else { return }
+        inFlight.insert(post.id)
+
+        if bumpers[post.id] == nil {
+            bumpers[post.id] = .generating
+        }
+
+        Task { [weak self] in
+            await self?.generate(post, channelName: channelName, channelID: channelID)
+        }
+    }
+
     private func generate(_ post: FeedPost, channelName: String, channelID: String) async {
         defer { inFlight.remove(post.id) }
         let language = resolveLanguage(post: post, channelID: channelID)
         do {
             let script = try await generateScript(for: post, channelName: channelName, language: language)
-            let voice: ElevenLabsService.Voice = language == .french ? .french : .english
-            let data = try await ElevenLabsService.shared.audioData(for: script, voice: voice)
-            bumpers[post.id] = .ready(audioData: data)
+            let data: Data?
+            if isConfigured {
+                let voice: ElevenLabsService.Voice = language == .french ? .french : .english
+                data = try? await ElevenLabsService.shared.audioData(for: script, voice: voice)
+            } else {
+                data = nil
+            }
+            bumpers[post.id] = .ready(BumperPayload(id: post.id, script: script, audioData: data))
         } catch {
-            bumpers[post.id] = .failed
+            if bumpers[post.id]?.payload == nil {
+                bumpers[post.id] = .failed
+            }
         }
     }
 

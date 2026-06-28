@@ -87,6 +87,7 @@ struct RecordingCountdownView: View {
                 Text("RECORDING")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.6))
+                    .poplurTextShader(intensity: 0.72)
                     .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
                     .kerning(1.2)
 
@@ -135,6 +136,7 @@ struct RecordingCountdownView: View {
 
             Text("unit")
                 .font(.system(size: 14, weight: .medium))
+                .poplurTextShader(intensity: 0.45)
                 .hidden()
         }
         .padding(.horizontal, 20)
@@ -149,6 +151,7 @@ struct RecordingCountdownView: View {
             Text("DETECTED")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(Color.green.opacity(0.8))
+                .poplurTextShader(intensity: 0.8)
                 .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
                 .kerning(1.2)
 
@@ -179,6 +182,7 @@ struct RecordingCountdownView: View {
             Text(count == 1 ? "post" : "posts")
                 .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(.white.opacity(0.7))
+                .poplurTextShader(intensity: 0.65)
                 .minimumScaleFactor(0.5)
                 .lineLimit(1)
                 .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
@@ -195,6 +199,7 @@ struct RecordingCountdownView: View {
             Text(showLikesMode ? "LIKES" : "TRENDING")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.6))
+                .poplurTextShader(intensity: 0.72)
                 .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
                 .kerning(1.2)
                 .transition(.opacity.combined(with: .scale(scale: 0.8)))
@@ -230,6 +235,7 @@ struct RecordingCountdownView: View {
                     } else {
                         Text("")
                             .font(.system(size: 40, weight: .bold))
+                            .poplurTextShader(intensity: 0.45)
                     }
                 }
 
@@ -256,6 +262,7 @@ struct RecordingCountdownView: View {
             Text(postCount == 1 ? "post" : "posts")
                 .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(.white.opacity(0.7))
+                .poplurTextShader(intensity: 0.65)
                 .minimumScaleFactor(0.5)
                 .lineLimit(1)
                 .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)

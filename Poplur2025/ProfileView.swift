@@ -386,15 +386,16 @@ struct ProfileView: View {
     }
 
     private let gridCols = [
-        GridItem(.flexible(minimum: 86, maximum: 108), spacing: 10),
-        GridItem(.flexible(minimum: 86, maximum: 108), spacing: 10),
-        GridItem(.flexible(minimum: 86, maximum: 108), spacing: 10)
+        GridItem(.flexible(minimum: 60, maximum: 82), spacing: 5),
+        GridItem(.flexible(minimum: 60, maximum: 82), spacing: 5),
+        GridItem(.flexible(minimum: 60, maximum: 82), spacing: 5),
+        GridItem(.flexible(minimum: 60, maximum: 82), spacing: 5)
     ]
 
-    private let tileCorner: CGFloat = 18
-    private let tileSpacing: CGFloat = 10
-    private let profileGridMaxWidth: CGFloat = 348
-    private let profileGridHorizontalPadding: CGFloat = 28
+    private let tileCorner: CGFloat = 12
+    private let tileSpacing: CGFloat = 5
+    private let profileGridMaxWidth: CGFloat = 380
+    private let profileGridHorizontalPadding: CGFloat = 12
 
     private var skinTheme: CubeSkinAppTheme {
         cubeSkinStore.current.appTheme
@@ -2845,7 +2846,7 @@ private struct ProfileGridTile: View {
     let post: Post
     let preloadedImage: UIImage?
     let skin: CubeSkin
-    private let corner: CGFloat = 18
+    private let corner: CGFloat = 12
     private var theme: CubeSkinAppTheme { skin.appTheme }
 
     var body: some View {

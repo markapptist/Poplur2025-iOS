@@ -561,15 +561,27 @@ private struct RadiusBarSceneView: UIViewRepresentable {
         return [mFront, mRight, mBack, mLeft, mTop, mBottom]
     }
 
+    private func shaderedTextMaterial(color: UIColor, glow: Float) -> SCNMaterial {
+        let material = SCNMaterial()
+        material.diffuse.contents = color
+        material.emission.contents = color.withAlphaComponent(CGFloat(min(max(glow, 0), 1)))
+        material.lightingModel = .physicallyBased
+        material.shaderModifiers = [
+            .surface: """
+            #pragma body
+            _surface.emission.rgb += _surface.diffuse.rgb * \(glow);
+            _surface.diffuse.rgb = mix(_surface.diffuse.rgb, vec3(1.0), 0.16);
+            """
+        ]
+        return material
+    }
+
     private func makeBarLabelNode(text: String) -> SCNNode {
         // Use SCNText for crisp vector text with a small plane background to mimic a capsule
         let textGeom = SCNText(string: text, extrusionDepth: 0.2)
         textGeom.font = UIFont.systemFont(ofSize: 3.0, weight: .heavy)
         textGeom.flatness = 0.2
-        let textMat = SCNMaterial()
-        textMat.diffuse.contents = UIColor.white
-        textMat.lightingModel = .physicallyBased
-        textGeom.materials = [textMat]
+        textGeom.materials = [shaderedTextMaterial(color: .white, glow: 0.38)]
 
         // Center the text by using its bounding box
         let textNode = SCNNode(geometry: textGeom)
@@ -613,9 +625,7 @@ private struct RadiusBarSceneView: UIViewRepresentable {
     private func makeTickLabel(text: String) -> SCNNode {
         let textGeom = SCNText(string: text, extrusionDepth: 0.1)
         textGeom.font = UIFont.systemFont(ofSize: 1.6, weight: .semibold)
-        let m = SCNMaterial()
-        m.diffuse.contents = UIColor.white.withAlphaComponent(0.8)
-        textGeom.materials = [m]
+        textGeom.materials = [shaderedTextMaterial(color: UIColor.white.withAlphaComponent(0.8), glow: 0.24)]
         let node = SCNNode(geometry: textGeom)
         let (minB, maxB) = textGeom.boundingBox
         let cx = (minB.x + maxB.x) / 2.0

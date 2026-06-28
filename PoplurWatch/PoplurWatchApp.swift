@@ -9,6 +9,7 @@ struct PoplurWatchApp: App {
             RadiusWatchView()
                 .environmentObject(radiusStore)
                 .background(Color.black.ignoresSafeArea())
+                .poplurTextShaderScope(intensity: 0.75)
         }
     }
 }

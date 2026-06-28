@@ -40,6 +40,24 @@ private struct HomePostCaptureComposerItem: Identifiable {
     let coordinate: CLLocationCoordinate2D
 }
 
+private struct CameraCubePopObject: Equatable {
+    let channelId: String
+    let objectId: String
+    let sourceLabel: String
+    let assetName: String?
+    let isGeneratedFallback: Bool
+
+    var renderKey: String {
+        [
+            channelId,
+            objectId,
+            sourceLabel,
+            assetName ?? "no-asset",
+            isGeneratedFallback ? "generated" : "provided"
+        ].joined(separator: "|")
+    }
+}
+
 private struct HiddenSystemVolumeBridge: UIViewRepresentable {
     func makeUIView(context: Context) -> MPVolumeView {
         let view = MPVolumeView(frame: .zero)
@@ -557,6 +575,7 @@ struct HomeView: View {
     // AR Filters
     @State private var arFilterManager: ARFilterManager?
     @State private var showARFilters = false
+    @AppStorage("CameraObjectDetectionEnabled") private var objectDetectionEnabled = false
 
     // One-time flags to avoid doing heavy work repeatedly
     @State private var didTriggerFeedInitialLoad = false
@@ -596,6 +615,7 @@ struct HomeView: View {
     @State private var capturePreviewItem: HomeCapturePreviewItem? = nil
     @State private var postCaptureComposerItem: HomePostCaptureComposerItem? = nil
     @State private var showCameraRollWindow = false
+    @State private var showGames = false
     @StateObject private var deviceVolumeObserver = DeviceVolumeObserver()
 
     // Post count state (for displaying user's total posts)
@@ -646,8 +666,48 @@ struct HomeView: View {
     @State private var channelLogoPeriodicTask: Task<Void, Never>? = nil
     @State private var channelLogoAnimTask: Task<Void, Never>? = nil
     @State private var channelLogoPopPlayer: AVAudioPlayer? = nil
+    @State private var cameraObjectPopVisible: Bool = false
+    @State private var cubeHiddenForCameraObjectPop: Bool = false
+    @State private var cameraObjectPopInfo = CameraCubePopObject(
+        channelId: "tech",
+        objectId: "laptop",
+        sourceLabel: "object",
+        assetName: nil,
+        isGeneratedFallback: false
+    )
+    @State private var cameraObjectPopAnimTask: Task<Void, Never>? = nil
 
     // MARK: - Channel Object Animation
+
+    private var isCubeHiddenForObjectPop: Bool {
+        cubeHiddenForChannelLogo || cubeHiddenForCameraObjectPop
+    }
+
+    @ViewBuilder
+    private var activeCubePopObjectOverlay: some View {
+        if cameraObjectPopVisible {
+            ChannelObjectSceneView(
+                channelId: cameraObjectPopInfo.channelId,
+                objectId: cameraObjectPopInfo.objectId,
+                sourceLabel: cameraObjectPopInfo.sourceLabel,
+                assetName: cameraObjectPopInfo.assetName,
+                isGeneratedFallback: cameraObjectPopInfo.isGeneratedFallback
+            )
+            .id(cameraObjectPopInfo.renderKey)
+            .allowsHitTesting(false)
+            .frame(width: 210, height: 210)
+            .transition(.scale(scale: 0.01).combined(with: .opacity))
+        } else if channelLogoVisible {
+            ChannelObjectSceneView(
+                channelId: channelLogoInfo.id,
+                objectId: channelLogoObjectId
+            )
+            .id("\(channelLogoInfo.id)-\(channelLogoObjectId)")
+            .allowsHitTesting(false)
+            .frame(width: 200, height: 200)
+            .transition(.scale(scale: 0.01).combined(with: .opacity))
+        }
+    }
 
     private func startChannelLogoTimer() {
         stopChannelLogoTimer()
@@ -693,6 +753,48 @@ struct HomeView: View {
         }
     }
 
+    private func triggerCameraDetectionObjectPop(_ objects: [DetectedObject]) {
+        guard selectedTab == .record, let primary = objects.first else { return }
+
+        cameraObjectPopAnimTask?.cancel()
+        cameraObjectPopInfo = Self.cameraCubePopObject(for: primary.identifier)
+        playChannelLogoPopSound()
+
+        withAnimation(.spring(response: 0.24, dampingFraction: 0.62)) {
+            cameraObjectPopVisible = false
+            cubeHiddenForCameraObjectPop = true
+        }
+
+        cameraObjectPopAnimTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 260_000_000)
+            guard !Task.isCancelled, selectedTab == .record else {
+                stopCameraDetectionObjectPop()
+                return
+            }
+            withAnimation(.spring(response: 0.22, dampingFraction: 0.58)) {
+                cameraObjectPopVisible = true
+            }
+            try? await Task.sleep(nanoseconds: 1_700_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.16)) {
+                cameraObjectPopVisible = false
+            }
+            try? await Task.sleep(nanoseconds: 180_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.72)) {
+                cubeHiddenForCameraObjectPop = false
+            }
+            cameraObjectPopAnimTask = nil
+        }
+    }
+
+    private func stopCameraDetectionObjectPop() {
+        cameraObjectPopAnimTask?.cancel()
+        cameraObjectPopAnimTask = nil
+        cameraObjectPopVisible = false
+        cubeHiddenForCameraObjectPop = false
+    }
+
     private static func randomChannelObject(for channelId: String) -> String {
         let options: [String]
         switch channelId.lowercased() {
@@ -720,6 +822,101 @@ struct HomeView: View {
             options = ["star", "globe", "sparkle"]
         }
         return options.randomElement() ?? "star"
+    }
+
+    private static func cameraCubePopObject(for label: String) -> CameraCubePopObject {
+        let normalized = normalizedCameraObjectLabel(label)
+
+        if let provided = providedCameraObject(for: normalized) {
+            return CameraCubePopObject(
+                channelId: provided.channelId,
+                objectId: provided.objectId,
+                sourceLabel: label,
+                assetName: nil,
+                isGeneratedFallback: false
+            )
+        }
+
+        if let assetName = matchingCameraObjectAssetName(for: normalized) {
+            return CameraCubePopObject(
+                channelId: "ai",
+                objectId: "asset-\(assetName)",
+                sourceLabel: label,
+                assetName: assetName,
+                isGeneratedFallback: false
+            )
+        }
+
+        return CameraCubePopObject(
+            channelId: "ai",
+            objectId: "ai-\(normalized.isEmpty ? "object" : normalized)",
+            sourceLabel: label,
+            assetName: nil,
+            isGeneratedFallback: true
+        )
+    }
+
+    private static func providedCameraObject(for normalizedLabel: String) -> (channelId: String, objectId: String)? {
+        let rules: [([String], String, String)] = [
+            (["banana"], "food", "banana"),
+            (["cake", "dessert", "pastry"], "food", "cake"),
+            (["fruit", "apple", "orange", "food", "meal", "plate", "sandwich", "pizza"], "food", "fruit"),
+            (["ball", "soccer", "basketball", "football", "tennis", "sports"], "sports", "ball"),
+            (["trophy", "award", "medal"], "sports", "trophy"),
+            (["dumbbell", "barbell", "weight", "exercise", "fitness"], "sports", "dumbbell"),
+            (["dress", "clothing", "shirt", "jacket", "fashion"], "fashion", "dress"),
+            (["shoe", "sneaker", "footwear", "boot"], "fashion", "shoe"),
+            (["bag", "purse", "handbag", "backpack"], "fashion", "bag"),
+            (["microphone", "mic", "karaoke"], "music", "microphone"),
+            (["note", "music", "instrument", "song"], "music", "note"),
+            (["speaker", "audio", "sound"], "music", "speaker"),
+            (["laptop", "computer", "keyboard", "monitor", "screen", "consumer electronics", "electronic equipment", "machine", "television", "tv", "tablet"], "tech", "laptop"),
+            (["chip", "circuit", "processor", "semiconductor"], "tech", "chip"),
+            (["controller", "game controller", "joystick", "gaming"], "tech", "controller"),
+            (["phone", "mobile phone", "cell phone", "telephone", "smartphone"], "tech", "phone"),
+            (["camera", "lens", "photography"], "modelling", "camera"),
+            (["spotlight", "lamp", "light"], "modelling", "spotlight"),
+            (["person", "human", "face", "portrait", "selfie"], "modelling", "spotlight"),
+            (["newspaper", "paper", "document", "book", "magazine"], "news", "newspaper"),
+            (["globe", "world", "earth", "map"], "news", "globe"),
+            (["eiffel", "tower"], "french", "eiffel"),
+            (["croissant"], "french", "croissant"),
+            (["beret", "hat"], "french", "beret"),
+            (["guitar"], "spanish", "guitar"),
+            (["sun"], "spanish", "sun"),
+            (["fan"], "spanish", "fan")
+        ]
+
+        return rules.first { rule in
+            rule.0.contains { normalizedLabel.contains($0) }
+        }.map { rule in
+            (channelId: rule.1, objectId: rule.2)
+        }
+    }
+
+    private static func matchingCameraObjectAssetName(for normalizedLabel: String) -> String? {
+        let compact = normalizedLabel
+            .replacingOccurrences(of: " ", with: "_")
+            .replacingOccurrences(of: "-", with: "_")
+        let candidates = [
+            normalizedLabel,
+            compact,
+            "object_\(compact)",
+            "cube_\(compact)",
+            "ml_\(compact)",
+            "ai_\(compact)",
+            "poplur_\(compact)"
+        ]
+
+        return candidates.first { UIImage(named: $0) != nil }
+    }
+
+    private static func normalizedCameraObjectLabel(_ label: String) -> String {
+        label
+            .lowercased()
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func playChannelLogoPopSound() {
@@ -789,7 +986,7 @@ struct HomeView: View {
                             .zIndex(7)
                     }
 
-                    MLCameraShaderOverlay()
+                    MLCameraShaderOverlay(isEnabled: objectDetectionEnabled)
                         .allowsHitTesting(false)
                         .zIndex(8)
                 }
@@ -819,15 +1016,9 @@ struct HomeView: View {
                         )
                     }
 
-                    // Enable ML detection with user recognition
+                    // Configure object detection with user recognition support.
                     cameraController.userRecognitionManager = support.recognitionManager
-                    cameraController.enableMLDetection()
-
-                    // Setup user recognition callback
-                    cameraController.mlDetectionManager?.onFrameProcessed = { [weak recognitionManager = support.recognitionManager] pixelBuffer, objects in
-                        CameraAIAnnouncer.shared.announceMLObjects(objects)
-                        recognitionManager?.processDetectedObjects(objects, from: pixelBuffer)
-                    }
+                    applyObjectDetectionSetting(controller: cameraController, support: support)
 
                     // Start recognition session to pre-load user radius
                     await support.recognitionManager.startRecognitionSession()
@@ -849,6 +1040,9 @@ struct HomeView: View {
             showARFilters = false
             arFilterManager?.activeFilter = .none
             UserDefaults.standard.set(false, forKey: "ARFiltersShown")
+        }
+        .onChange(of: objectDetectionEnabled) { _, _ in
+            applyObjectDetectionSetting()
         }
     }
 
@@ -884,6 +1078,33 @@ struct HomeView: View {
             userRecognitionManager = UserRecognitionManager()
         }
         return (arFilterManager!, userRecognitionManager!)
+    }
+
+    @MainActor
+    private func applyObjectDetectionSetting(
+        controller: CameraKitController? = nil,
+        support: (filterManager: ARFilterManager, recognitionManager: UserRecognitionManager)? = nil
+    ) {
+        guard selectedTab == .record else { return }
+        let cameraController = controller ?? cameraControllerHolder.resolve()
+        let managers = support ?? ensureRecordSupportManagers()
+        cameraController.userRecognitionManager = managers.recognitionManager
+
+        if objectDetectionEnabled {
+            cameraController.enableMLDetection()
+            cameraController.mlDetectionManager?.onFrameProcessed = { [weak recognitionManager = managers.recognitionManager] pixelBuffer, objects in
+                CameraAIAnnouncer.shared.announceMLObjects(objects)
+                recognitionManager?.processDetectedObjects(objects, from: pixelBuffer)
+            }
+        } else {
+            cameraController.disableMLDetection()
+            CameraAIAnnouncer.shared.resetSession()
+            NotificationCenter.default.post(
+                name: NSNotification.Name("MLObjectsDetected"),
+                object: nil,
+                userInfo: ["objects": [DetectedObject]()]
+            )
+        }
     }
 
     private func deferUntilAfterLaunch(_ work: @escaping @Sendable () async -> Void) {
@@ -1028,6 +1249,20 @@ struct HomeView: View {
                 systemImage: "sparkles",
                 tint: .cyan,
                 action: openARFiltersFromCubeMenu
+            ),
+            CubeSubmenuItem(
+                id: "camera-object-detection",
+                title: objectDetectionEnabled ? "Detect On" : "Detect Off",
+                systemImage: "eye.magnifyingglass",
+                tint: objectDetectionEnabled ? .green : .orange,
+                action: toggleObjectDetectionFromCubeMenu
+            ),
+            CubeSubmenuItem(
+                id: "camera-games",
+                title: "Games",
+                systemImage: "gamecontroller.fill",
+                tint: .purple,
+                action: { showGames = true }
             )
         ]
     }
@@ -1138,6 +1373,14 @@ struct HomeView: View {
         ensureCameraRunningIfNeeded()
         startRecordHoldRamp()
         startRecordingCountdown()
+    }
+
+    @MainActor
+    private func toggleObjectDetectionFromCubeMenu() {
+        guard selectedTab == .record else { return }
+        objectDetectionEnabled.toggle()
+        ensureCameraRunningIfNeeded()
+        applyObjectDetectionSetting()
     }
 
     @MainActor
@@ -1496,6 +1739,7 @@ struct HomeView: View {
                         Text("Settings are not available from here.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
+                            .poplurTextShader(intensity: 0.55)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color.clear)
@@ -1536,6 +1780,7 @@ struct HomeView: View {
                             .font(.subheadline)
                             .fontWeight(.medium)
                             .foregroundStyle(.white)
+                            .poplurTextShader(intensity: 0.85)
                             .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
                     }
                     .padding(.horizontal, 20)
@@ -1643,32 +1888,24 @@ struct HomeView: View {
                                     )
                                 }
                             }
-                        )
-                        .tint(.white)
-                        .scaleEffect(cubeHiddenForChannelLogo ? 0.01 : 1.0)
-                        .opacity(cubeHiddenForChannelLogo ? 0 : 1)
-                        .animation(.spring(response: 0.26, dampingFraction: 0.65), value: cubeHiddenForChannelLogo)
-
-                        if channelLogoVisible {
-                            ChannelObjectSceneView(
-                                channelId: channelLogoInfo.id,
-                                objectId: channelLogoObjectId
                             )
-                            .allowsHitTesting(false)
-                            .frame(width: 200, height: 200)
-                            .transition(.scale(scale: 0.01).combined(with: .opacity))
-                        }
+                            .tint(.white)
+                            .scaleEffect(isCubeHiddenForObjectPop ? 0.01 : 1.0)
+                            .opacity(isCubeHiddenForObjectPop ? 0 : 1)
+                            .animation(.spring(response: 0.26, dampingFraction: 0.65), value: isCubeHiddenForObjectPop)
+
+                            activeCubePopObjectOverlay
                     }
                     .frame(maxWidth: .infinity, minHeight: 230, maxHeight: 230)
-                    .animation(.easeInOut(duration: 0.15), value: channelLogoVisible)
+                    .animation(.easeInOut(duration: 0.15), value: channelLogoVisible || cameraObjectPopVisible)
                     .padding(.bottom, 8)
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.bottom, 24)
-                .ignoresSafeArea(edges: .bottom)
-                .animation(.easeInOut(duration: 0.15), value: channelLogoVisible)
-                .allowsHitTesting(true)
-                .zIndex(6000)
+	                .ignoresSafeArea(edges: .bottom)
+	                .animation(.easeInOut(duration: 0.15), value: channelLogoVisible || cameraObjectPopVisible)
+	                .allowsHitTesting(true)
+	                .zIndex(6000)
                 .gesture(
                     DragGesture(minimumDistance: 20)
                         .onEnded { value in
@@ -1881,6 +2118,9 @@ struct HomeView: View {
             )
             .zIndex(9500)
 
+        }
+        .fullScreenCover(isPresented: $showGames) {
+            PoplurGameLaunchView()
         }
     }
 
@@ -2147,12 +2387,13 @@ struct HomeView: View {
                     }
                 }
                 NotificationCenter.default.post(name: .ResetTabToTop, object: nil)
-                if selectedTab != .record {
-                    isRecordHolding = false
-                    showCameraRollWindow = false
-                    cameraCubeMenuWheel.endHold(activateSelected: false)
-                    stopRecordHoldRamp(reset: false)
-                }
+	                if selectedTab != .record {
+	                    isRecordHolding = false
+	                    showCameraRollWindow = false
+	                    cameraCubeMenuWheel.endHold(activateSelected: false)
+	                    stopCameraDetectionObjectPop()
+	                    stopRecordHoldRamp(reset: false)
+	                }
                 if selectedTab != .feed {
                     feedCubeMenuWheel.endHold(activateSelected: false)
                     if showFeedCommentComposer {
@@ -2204,9 +2445,14 @@ struct HomeView: View {
                     channelLogoInfo = (id: id, name: name, emoji: emoji)
                 }
             }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("MLCubePopTrigger"))) { notification in
+                guard objectDetectionEnabled else { return }
+                guard let objects = notification.userInfo?["objects"] as? [DetectedObject] else { return }
+                triggerCameraDetectionObjectPop(objects)
+            }
             .onReceive(NotificationCenter.default.publisher(for: .feedHardwareVolumeChanged)) { notification in
-                if isFeedLaunchLoading {
-                    feedLaunchSuppressionTask?.cancel()
+	                if isFeedLaunchLoading {
+	                    feedLaunchSuppressionTask?.cancel()
                     feedLaunchSuppressionTask = nil
                     isFeedLaunchLoading = false
                     deviceVolumeObserver.setSuppressed(false)
@@ -2448,6 +2694,7 @@ private struct FeedCommentComposerOverlay: View {
                 Text("Comment")
                     .font(.system(size: 22, weight: .black, design: .rounded))
                     .foregroundStyle(.white)
+                    .poplurTextShader(intensity: 1.0)
 
                 Spacer()
 
@@ -2480,6 +2727,7 @@ private struct FeedCommentComposerOverlay: View {
                     Text("Say it like the lights are still rolling...")
                         .font(.system(size: 17, weight: .bold, design: .rounded))
                         .foregroundStyle(.white.opacity(0.44))
+                        .poplurTextShader(intensity: 0.55)
                         .padding(.horizontal, 20)
                         .padding(.vertical, 24)
                         .allowsHitTesting(false)
@@ -2608,9 +2856,11 @@ private struct LiveLocationPickerOverlay: View {
                             Text("Go Live")
                                 .font(.system(size: 24, weight: .black, design: .rounded))
                                 .foregroundStyle(.white)
+                                .poplurTextShader(intensity: 1.0)
                             Text("Choose where the live radius starts")
                                 .font(.system(size: 13, weight: .bold, design: .rounded))
                                 .foregroundStyle(.white.opacity(0.62))
+                                .poplurTextShader(intensity: 0.7)
                         }
 
                         Spacer()
@@ -2642,9 +2892,11 @@ private struct LiveLocationPickerOverlay: View {
                                         Text(location.title)
                                             .font(.system(size: 17, weight: .black, design: .rounded))
                                             .foregroundStyle(.white)
+                                            .poplurTextShader(intensity: 0.9)
                                         Text("\(location.subtitle) - \(formatRadius(location.radiusMeters))")
                                             .font(.system(size: 12, weight: .bold, design: .rounded))
                                             .foregroundStyle(.white.opacity(0.58))
+                                            .poplurTextShader(intensity: 0.65)
                                             .lineLimit(1)
                                     }
 
@@ -3101,20 +3353,24 @@ private struct LiveVideoStatusBadge: View {
                     .font(.system(size: 12, weight: .black))
                     .tracking(1.1)
                     .foregroundStyle(.white)
+                    .poplurTextShader(intensity: 1.0)
             }
 
             Text(formatDuration(seconds))
                 .font(.system(size: 13, weight: .bold, design: .monospaced))
                 .foregroundStyle(.white.opacity(0.9))
+                .poplurTextShader(intensity: 0.9)
 
             Text("\(viewers) watching")
                 .font(.system(size: 13, weight: .black))
                 .foregroundStyle(Color(red: 0.36, green: 1.0, blue: 0.42))
+                .poplurTextShader(intensity: 0.95)
 
             if let locationName, !locationName.isEmpty {
                 Text(locationName)
                     .font(.system(size: 12, weight: .black, design: .rounded))
                     .foregroundStyle(.white.opacity(0.76))
+                    .poplurTextShader(intensity: 0.75)
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .frame(maxWidth: 118, alignment: .leading)
@@ -3173,6 +3429,7 @@ private struct RecognizedFaceBoxOverlay: View {
                     Text("@\(user.profile.username)")
                         .font(.system(size: 11, weight: .black))
                         .foregroundStyle(.black)
+                        .poplurTextShader(intensity: 0.85)
                         .padding(.horizontal, 7)
                         .padding(.vertical, 3)
                         .background(Color(red: 0.36, green: 1.0, blue: 0.42), in: Capsule())
@@ -3284,11 +3541,13 @@ private struct CameraInstructionsOverlay: View {
                     Text(instructions[currentInstructionIndex].title)
                         .font(.headline)
                         .foregroundStyle(.white)
+                        .poplurTextShader(intensity: 0.95)
                         .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
 
                     Text(instructions[currentInstructionIndex].message)
                         .font(.subheadline)
                         .foregroundStyle(.white.opacity(0.9))
+                        .poplurTextShader(intensity: 0.72)
                         .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
                         .lineLimit(3)
                         .fixedSize(horizontal: false, vertical: true)
@@ -3358,15 +3617,18 @@ private struct LiveMLDetectionOverlay: View {
                             // Icon
                             Text(getIcon(for: primary.identifier))
                                 .font(.system(size: 32))
+                                .poplurTextShader(intensity: 0.7)
 
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(primary.identifier.capitalized)
                                     .font(.headline)
                                     .foregroundStyle(.white)
+                                    .poplurTextShader(intensity: 0.95)
 
                                 Text("\(primary.confidencePercentage)% confidence")
                                     .font(.caption)
                                     .foregroundStyle(.white.opacity(0.8))
+                                    .poplurTextShader(intensity: 0.72)
                             }
                         }
                         .padding(.horizontal, 16)
@@ -3386,6 +3648,7 @@ private struct LiveMLDetectionOverlay: View {
                             Text("Also seeing: \(detectedObjects.dropFirst().map { $0.identifier.capitalized }.joined(separator: ", "))")
                                 .font(.caption)
                                 .foregroundStyle(.white.opacity(0.9))
+                                .poplurTextShader(intensity: 0.72)
                                 .lineLimit(1)
                         }
                         .padding(.horizontal, 12)
@@ -3408,6 +3671,7 @@ private struct LiveMLDetectionOverlay: View {
                     Text("Scanning...")
                         .font(.subheadline)
                         .foregroundStyle(.white)
+                        .poplurTextShader(intensity: 0.8)
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
@@ -3535,10 +3799,12 @@ private struct RecognizedUserCard: View {
                     Text("@\(user.profile.username)")
                         .font(.headline)
                         .foregroundStyle(.white)
+                        .poplurTextShader(intensity: 0.95)
 
                     Text("Tap to view profile")
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.7))
+                        .poplurTextShader(intensity: 0.65)
                 }
 
                 Spacer()
@@ -3547,6 +3813,7 @@ private struct RecognizedUserCard: View {
                 Text("\(Int(user.confidence * 100))%")
                     .font(.caption.bold())
                     .foregroundStyle(.green)
+                    .poplurTextShader(intensity: 0.85)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
                     .background(Color.green.opacity(0.2))
@@ -3563,10 +3830,12 @@ private struct RecognizedUserCard: View {
                     Text("Radius")
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.7))
+                        .poplurTextShader(intensity: 0.65)
 
                     Text(user.formattedRadius)
                         .font(.title3.bold())
                         .foregroundStyle(.white)
+                        .poplurTextShader(intensity: 1.0)
                 }
 
                 Spacer()
@@ -3595,6 +3864,8 @@ private struct RecognizedUserCard: View {
 /// Real-time ML object detection overlay shown at top center of the camera view.
 /// Fires a cube pop when new objects are detected.
 private struct MLCameraShaderOverlay: View {
+    let isEnabled: Bool
+
     @State private var detectedObjects: [DetectedObject] = []
     @State private var lastDetectionKey: String = ""
     @State private var lastPopTime: Date = .distantPast
@@ -3603,7 +3874,7 @@ private struct MLCameraShaderOverlay: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if !detectedObjects.isEmpty {
+            if isEnabled && !detectedObjects.isEmpty {
                 mlBanner
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
@@ -3612,6 +3883,11 @@ private struct MLCameraShaderOverlay: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .animation(.spring(response: 0.32, dampingFraction: 0.72), value: detectedObjects.map(\.identifier))
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("MLObjectsDetected"))) { note in
+            guard isEnabled else {
+                detectedObjects = []
+                lastDetectionKey = ""
+                return
+            }
             guard let objects = note.userInfo?["objects"] as? [DetectedObject] else { return }
             detectedObjects = objects
             let key = objects.prefix(3).map(\.identifier).joined(separator: ",")
@@ -3619,9 +3895,19 @@ private struct MLCameraShaderOverlay: View {
                 let now = Date()
                 if now.timeIntervalSince(lastPopTime) >= popCooldown {
                     lastPopTime = now
-                    NotificationCenter.default.post(name: Notification.Name("MLCubePopTrigger"), object: nil)
+                    NotificationCenter.default.post(
+                        name: Notification.Name("MLCubePopTrigger"),
+                        object: nil,
+                        userInfo: ["objects": objects, "label": objects.first?.identifier ?? key]
+                    )
                 }
                 lastDetectionKey = key
+            }
+        }
+        .onChange(of: isEnabled) { _, enabled in
+            if !enabled {
+                detectedObjects = []
+                lastDetectionKey = ""
             }
         }
     }
@@ -3655,11 +3941,13 @@ private struct MLShaderLabel: View {
             Text(text)
                 .font(.system(size: 19, weight: .black, design: .monospaced))
                 .foregroundStyle(Color.cyan.opacity(0.3))
+                .poplurTextShader(intensity: 0.7)
                 .blur(radius: 14)
             // Mid glow
             Text(text)
                 .font(.system(size: 19, weight: .black, design: .monospaced))
                 .foregroundStyle(Color.white.opacity(0.4))
+                .poplurTextShader(intensity: 0.75)
                 .blur(radius: 5)
             // Animated shimmer gradient
             Text(text)
@@ -3678,6 +3966,7 @@ private struct MLShaderLabel: View {
                         endPoint: .trailing
                     )
                 )
+                .poplurTextShader(intensity: 1.15)
         }
         .shadow(color: .cyan.opacity(0.75), radius: 10)
         .shadow(color: .white.opacity(0.35), radius: 4)
@@ -3698,6 +3987,7 @@ private struct MLFloat3DChip: View {
         Text(text)
             .font(.system(size: 11, weight: .semibold, design: .monospaced))
             .foregroundStyle(.white.opacity(0.9))
+            .poplurTextShader(intensity: 0.85)
             .tracking(1.1)
             .padding(.horizontal, 9)
             .padding(.vertical, 5)

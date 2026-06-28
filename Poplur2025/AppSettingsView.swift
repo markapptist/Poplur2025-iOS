@@ -662,7 +662,9 @@ private struct CubeSkinPickerTile: View {
     var body: some View {
         VStack(spacing: 6) {
             ZStack {
-                CubeSkinTileBackground(skin: skin, tab: .profile, cornerRadius: 13)
+                Image(skin.appIconPreviewAssetName)
+                    .resizable()
+                    .scaledToFill()
                 if isSelected {
                     Image(systemName: "checkmark")
                         .font(.system(size: 18, weight: .black))

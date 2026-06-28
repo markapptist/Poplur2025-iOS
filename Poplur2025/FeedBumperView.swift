@@ -7,10 +7,11 @@ private let brandDark = Color(red: 0.05, green: 0.0, blue: 0.06)
 /// Full-screen Poplur-branded "Up Next" screen with ElevenLabs voice-over.
 /// Appears before each feed post; auto-advances when audio finishes.
 struct FeedBumperView: View {
-    let audioData: Data
+    let payload: BumperPayload
     let onFinished: () -> Void
 
     @State private var player: AVAudioPlayer?
+    @State private var speechSynthesizer: AVSpeechSynthesizer?
     @State private var showSkip = false
     @State private var barHeights: [CGFloat] = Array(repeating: 0.3, count: 7)
     @State private var waveTimer: Timer?
@@ -62,6 +63,14 @@ struct FeedBumperView: View {
                         .foregroundStyle(.white.opacity(0.45))
                         .tracking(5)
 
+                    Text(payload.script)
+                        .font(.system(size: 18, weight: .black, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.82))
+                        .multilineTextAlignment(.center)
+                        .lineLimit(3)
+                        .minimumScaleFactor(0.68)
+                        .padding(.horizontal, 30)
+
                     // Audio waveform equalizer bars
                     HStack(alignment: .bottom, spacing: 5) {
                         ForEach(0..<7, id: \.self) { i in
@@ -72,7 +81,7 @@ struct FeedBumperView: View {
                         }
                     }
                     .frame(height: 56)
-                    .opacity(player?.isPlaying == true ? 1 : 0.25)
+                    .opacity(isSpeaking ? 1 : 0.25)
                 }
 
                 Spacer()
@@ -122,23 +131,47 @@ struct FeedBumperView: View {
 
     private func setupPlayer() {
         do {
-            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
             try AVAudioSession.sharedInstance().setActive(true)
         } catch { }
 
-        guard let p = try? AVAudioPlayer(data: audioData) else {
-            finish(); return
+        if let audioData = payload.audioData,
+           let p = try? AVAudioPlayer(data: audioData) {
+            player = p
+            p.volume = 1.0
+            p.play()
+            DispatchQueue.main.asyncAfter(deadline: .now() + p.duration + 0.3) {
+                finish()
+            }
+        } else {
+            speakFallbackScript()
         }
-        player = p
-        p.play()
+
         animateBars()
         animateLogo()
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
             withAnimation(.easeInOut(duration: 0.3)) { showSkip = true }
         }
+    }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + p.duration + 0.3) {
+    private var isSpeaking: Bool {
+        player?.isPlaying == true || speechSynthesizer?.isSpeaking == true
+    }
+
+    private func speakFallbackScript() {
+        let synth = AVSpeechSynthesizer()
+        speechSynthesizer = synth
+
+        let utterance = AVSpeechUtterance(string: payload.script)
+        utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
+        utterance.rate = 0.46
+        utterance.pitchMultiplier = 1.02
+        utterance.volume = 1.0
+        synth.speak(utterance)
+
+        let estimatedDuration = max(3.0, min(12.0, Double(payload.script.split(separator: " ").count) / 2.5))
+        DispatchQueue.main.asyncAfter(deadline: .now() + estimatedDuration + 0.35) {
             finish()
         }
     }
@@ -162,6 +195,8 @@ struct FeedBumperView: View {
         waveTimer = nil
         player?.stop()
         player = nil
+        speechSynthesizer?.stopSpeaking(at: .immediate)
+        speechSynthesizer = nil
     }
 
     private func finish() {

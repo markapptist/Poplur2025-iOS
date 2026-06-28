@@ -3,6 +3,7 @@ import SwiftUI
 import UIKit
 
 public enum CubeSkin: String, CaseIterable, Identifiable, Codable {
+    case standard = "default"
     case rainbow
     case sparklePink
     case gold
@@ -18,6 +19,7 @@ public enum CubeSkin: String, CaseIterable, Identifiable, Codable {
     // If per-face variants exist later, you can extend this to provide an array of face-specific names.
     public var diffuseAssetName: String {
         switch self {
+        case .standard: return "SkinRubber"
         case .rainbow: return "SkinRainbow"
         case .sparklePink: return "SkinSparklePink"
         case .gold: return "SkinGold"
@@ -33,6 +35,7 @@ public enum CubeSkin: String, CaseIterable, Identifiable, Codable {
     /// Layout: top=(1,0), left=(0,1), center=(1,1), right=(2,1), far-right=(3,1), bottom=(1,2).
     public var cubemapAssetName: String {
         switch self {
+        case .standard:    return "cubemaps 4"
         case .rainbow:     return "cubemaps"
         case .sparklePink: return "cubemaps 5"
         case .gold:        return "cubemaps 1"
@@ -47,6 +50,7 @@ public enum CubeSkin: String, CaseIterable, Identifiable, Codable {
     /// Asset name for the hold-menu panel and tile background texture.
     public var holdMenuAssetName: String {
         switch self {
+        case .standard:    return "holdmenu 3"
         case .ice:         return "holdmenu"
         case .camo:        return "holdmenu 1"
         case .chocolate:   return "holdmenu 2"
@@ -60,6 +64,7 @@ public enum CubeSkin: String, CaseIterable, Identifiable, Codable {
 
     public var displayName: String {
         switch self {
+        case .standard: return "Default"
         case .rainbow: return "Rainbow"
         case .sparklePink: return "Sparkle Pink"
         case .gold: return "Gold"
@@ -74,6 +79,7 @@ public enum CubeSkin: String, CaseIterable, Identifiable, Codable {
     /// Asset name for the themed loading-screen logo image.
     public var logoAssetName: String {
         switch self {
+        case .standard:    return "logo"
         case .rainbow:     return "logo_rainbow"
         case .sparklePink: return "logo_sparkle_pink"
         case .gold:        return "logo_gold"
@@ -88,6 +94,7 @@ public enum CubeSkin: String, CaseIterable, Identifiable, Codable {
     /// Primary theme color used for code-generated cube face textures.
     public var themeUIColor: UIColor {
         switch self {
+        case .standard:    return UIColor(red: 0.20, green: 0.65, blue: 0.90, alpha: 1)
         case .rainbow:     return UIColor(red: 0.55, green: 0.10, blue: 0.95, alpha: 1)
         case .sparklePink: return UIColor(red: 1.00, green: 0.40, blue: 0.70, alpha: 1)
         case .gold:        return UIColor(red: 0.88, green: 0.68, blue: 0.10, alpha: 1)
@@ -102,6 +109,7 @@ public enum CubeSkin: String, CaseIterable, Identifiable, Codable {
     /// Border neon-glow color for the cube face emission mask.
     public var borderAccentColor: UIColor {
         switch self {
+        case .standard:    return UIColor(red: 0.16, green: 0.88, blue: 1.00, alpha: 1)
         case .rainbow:     return UIColor(red: 0.60, green: 0.28, blue: 1.00, alpha: 1)
         case .sparklePink: return UIColor(red: 1.00, green: 0.35, blue: 0.72, alpha: 1)
         case .gold:        return UIColor(red: 0.95, green: 0.78, blue: 0.18, alpha: 1)
@@ -116,11 +124,33 @@ public enum CubeSkin: String, CaseIterable, Identifiable, Codable {
     /// Icon and label fill color in the cube face emission mask.
     public var iconFillColor: UIColor {
         switch self {
+        case .standard: return .white
         case .rainbow, .sparklePink, .toy, .rubber: return .white
         case .gold:        return UIColor(red: 1.00, green: 0.95, blue: 0.60, alpha: 1)
         case .chocolate:   return UIColor(red: 0.92, green: 0.65, blue: 0.25, alpha: 1)
         case .camo:        return UIColor(red: 0.82, green: 0.84, blue: 0.56, alpha: 1)
         case .ice:         return UIColor(red: 0.82, green: 0.96, blue: 1.00, alpha: 1)
+        }
+    }
+
+    public var alternateAppIconName: String? {
+        switch self {
+        case .standard:    return nil
+        case .rainbow:     return "AppIconRainbow"
+        case .sparklePink: return "AppIconSparklePink"
+        case .gold:        return "AppIconGold"
+        case .toy:         return "AppIconToy"
+        case .chocolate:   return "AppIconChocolate"
+        case .camo:        return "AppIconCamo"
+        case .rubber:      return "AppIconRubber"
+        case .ice:         return "AppIconIce"
+        }
+    }
+
+    public var appIconPreviewAssetName: String {
+        switch self {
+        case .standard:    return "appicon_default"
+        default:           return logoAssetName
         }
     }
 
@@ -214,7 +244,7 @@ extension CubeSkin {
                 g.drawLinearGradient(rbGloss, start: .zero, end: CGPoint(x: 0, y: 155), options: [])
 
             // ── RUBBER ───────────────────────────────────────────────────────
-            case .rubber:
+            case .standard, .rubber:
                 let accent: UIColor = {
                     switch tab {
                     case .feed:     return UIColor(red: 0.61, green: 0.35, blue: 0.97, alpha: 1)
@@ -375,15 +405,30 @@ public final class CubeSkinStore: ObservableObject {
         if let raw = UserDefaults.standard.string(forKey: defaultsKey), let skin = CubeSkin(rawValue: raw) {
             current = skin
         } else {
-            current = .rainbow
+            current = .standard
         }
+        syncAppIcon()
     }
 
     public func apply(_ skin: CubeSkin) {
         guard current != skin else { return }
         current = skin
         UserDefaults.standard.set(skin.rawValue, forKey: defaultsKey)
+        syncAppIcon()
         NotificationCenter.default.post(name: .CubeSkinDidChange, object: skin)
+    }
+
+    public func syncAppIcon() {
+        let iconName = current.alternateAppIconName
+        DispatchQueue.main.async {
+            guard UIApplication.shared.supportsAlternateIcons else { return }
+            guard UIApplication.shared.alternateIconName != iconName else { return }
+            UIApplication.shared.setAlternateIconName(iconName) { error in
+                if let error {
+                    print("App icon update failed: \(error.localizedDescription)")
+                }
+            }
+        }
     }
 }
 
@@ -409,7 +454,7 @@ struct CubeSkinAppTheme {
 extension CubeSkin {
     var appTheme: CubeSkinAppTheme {
         switch self {
-        case .rainbow:
+        case .standard, .rainbow:
             return CubeSkinAppTheme(
                 background: Color(red: 0.02, green: 0.03, blue: 0.12),
                 backgroundMid: Color(red: 0.02, green: 0.18, blue: 0.16),

@@ -74,10 +74,11 @@ struct CameraViewWithML: View {
                     if let name = lastDetectedName {
                         Text(name.capitalized)
                             .font(.subheadline.weight(.semibold))
+                            .foregroundColor(.white)
+                            .poplurTextShader(intensity: 0.85)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 6)
                             .background(Color.black.opacity(0.7))
-                            .foregroundColor(.white)
                             .clipShape(Capsule())
                             .padding(.bottom, 6)
                     }
@@ -94,6 +95,7 @@ struct CameraViewWithML: View {
                     Text(name)
                         .font(.headline)
                         .foregroundColor(.white)
+                        .poplurTextShader(intensity: 0.9)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
                         .background(Color.black.opacity(0.6))
@@ -218,16 +220,19 @@ struct CameraViewWithMLExample: View {
                         Text("🔍 Currently Detecting")
                             .font(.headline)
                             .foregroundColor(.white)
+                            .poplurTextShader(intensity: 0.9)
                         
                         ForEach(detectedObjects.indices, id: \.self) { index in
                             HStack {
                                 Text(detectedObjects[index].identifier.capitalized)
                                     .font(.body)
                                     .foregroundColor(.white)
+                                    .poplurTextShader(intensity: 0.85)
                                 Spacer()
                                 Text("\(detectedObjects[index].confidencePercentage)%")
                                     .font(.caption)
                                     .foregroundColor(.white.opacity(0.8))
+                                    .poplurTextShader(intensity: 0.7)
                             }
                         }
                     }
@@ -290,40 +295,50 @@ struct MLSettingsView: View {
     var body: some View {
         NavigationView {
             Form {
-                Section(header: Text("Detection Settings")) {
-                    Toggle("Enable ML Detection", isOn: $isEnabled)
+                Section(header: Text("Detection Settings").poplurTextShader(intensity: 0.75)) {
+                    Toggle(isOn: $isEnabled) {
+                        Text("Enable ML Detection")
+                            .poplurTextShader(intensity: 0.75)
+                    }
                     
                     VStack(alignment: .leading) {
                         Text("Confidence Threshold: \(Int(confidenceThreshold * 100))%")
+                            .poplurTextShader(intensity: 0.75)
                         Slider(value: $confidenceThreshold, in: 0.1...0.9, step: 0.05)
                     }
                     
                     VStack(alignment: .leading) {
                         Text("Frame Skip: Every \(Int(frameSkip)) frames")
+                            .poplurTextShader(intensity: 0.75)
                         Slider(value: $frameSkip, in: 1...15, step: 1)
                     }
                 }
                 
-                Section(header: Text("Performance")) {
+                Section(header: Text("Performance").poplurTextShader(intensity: 0.75)) {
                     HStack {
                         Text("Battery Impact")
+                            .poplurTextShader(intensity: 0.7)
                         Spacer()
                         Text(batteryImpact)
                             .foregroundColor(batteryImpactColor)
+                            .poplurTextShader(intensity: 0.75)
                     }
                     
                     HStack {
                         Text("Responsiveness")
+                            .poplurTextShader(intensity: 0.7)
                         Spacer()
                         Text(responsiveness)
                             .foregroundColor(responsivenessColor)
+                            .poplurTextShader(intensity: 0.75)
                     }
                 }
                 
-                Section(header: Text("Info")) {
+                Section(header: Text("Info").poplurTextShader(intensity: 0.75)) {
                     Text("ML detection uses Apple's Vision framework to identify objects in real-time from the camera feed.")
                         .font(.caption)
                         .foregroundColor(.secondary)
+                        .poplurTextShader(intensity: 0.55)
                 }
             }
             .navigationTitle("ML Detection")

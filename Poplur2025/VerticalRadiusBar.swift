@@ -50,6 +50,7 @@ struct VerticalRadiusBar: View {
                 Text(labelFormat(radius))
                     .font(.caption2)
                     .foregroundColor(.secondary)
+                    .poplurTextShader(intensity: 0.65)
             }
         }
         .accessibilityLabel("Radius")

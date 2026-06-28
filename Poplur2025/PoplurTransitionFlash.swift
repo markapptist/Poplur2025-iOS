@@ -54,9 +54,9 @@ private struct PoplurTransitionFlash2D: View {
         .allowsHitTesting(false)
         .accessibilityHidden(true)
         .onAppear {
-            staticSound.play(duration: 0.64)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { logoVisible = true }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.26) { channelVisible = true }
+            staticSound.play(duration: 0.72)
+            logoVisible = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.04) { channelVisible = true }
         }
         .onDisappear { staticSound.stop() }
     }
@@ -152,7 +152,7 @@ private struct PoplurTransitionFlash2D: View {
                 .shadow(color: .white.opacity(0.28), radius: 2, x: 0, y: 0)
                 .scaleEffect(logoVisible ? 1.0 : 0.05)
                 .opacity(logoVisible ? 1.0 : 0.0)
-                .animation(.spring(response: 0.34, dampingFraction: 0.50), value: logoVisible)
+                .animation(.spring(response: 0.18, dampingFraction: 0.54), value: logoVisible)
 
             VStack(spacing: 3) {
                 Text("CH \(channelNumber)")
@@ -167,7 +167,7 @@ private struct PoplurTransitionFlash2D: View {
             .shadow(color: .black.opacity(0.82), radius: 2, x: 1, y: 1)
             .scaleEffect(channelVisible ? 1.0 : 0.05)
             .opacity(channelVisible ? 1.0 : 0.0)
-            .animation(.spring(response: 0.28, dampingFraction: 0.52), value: channelVisible)
+            .animation(.spring(response: 0.16, dampingFraction: 0.56), value: channelVisible)
         }
         .padding(.horizontal, 28)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -192,7 +192,7 @@ private struct PoplurTransitionFlash3D: View {
         .ignoresSafeArea()
         .allowsHitTesting(false)
         .accessibilityHidden(true)
-        .onAppear { sound.play(duration: 0.64) }
+        .onAppear { sound.play(duration: 0.72) }
         .onDisappear { sound.stop() }
     }
 }
@@ -216,11 +216,11 @@ private struct _TV3DViewRepresentable: UIViewRepresentable {
         scnView.scene = scene
         context.coordinator.scene = scene
 
-        // Sequence: logo flip at 0.08s, text tilt-in at 0.28s
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+        // Start the identity card immediately so it is visible before the channel swap settles.
+        DispatchQueue.main.async {
             context.coordinator.animateLogo()
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.04) {
             context.coordinator.animateText()
         }
 
@@ -235,14 +235,13 @@ private struct _TV3DViewRepresentable: UIViewRepresentable {
 
         func animateLogo() {
             guard let logo = scene?.rootNode.childNode(withName: "logo", recursively: false) else { return }
-            // Flip from π (back-face) to 0 (front-face) + spring bounce scale
-            let flip = SCNAction.rotateBy(x: 0, y: -.pi, z: 0, duration: 0.30)
+            let flip = SCNAction.rotateTo(x: 0, y: 0, z: 0, duration: 0.14, usesShortestUnitArc: true)
             flip.timingMode = .easeOut
             let bounce = SCNAction.sequence([
-                .scale(to: 1.22, duration: 0.12),
-                .scale(to: 0.88, duration: 0.09),
-                .scale(to: 1.04, duration: 0.07),
-                .scale(to: 1.0,  duration: 0.05)
+                .scale(to: 1.16, duration: 0.07),
+                .scale(to: 0.92, duration: 0.05),
+                .scale(to: 1.03, duration: 0.04),
+                .scale(to: 1.0,  duration: 0.03)
             ])
             logo.runAction(.group([flip, bounce]))
         }
@@ -250,13 +249,13 @@ private struct _TV3DViewRepresentable: UIViewRepresentable {
         func animateText() {
             for name in ["ch_text", "cat_text"] {
                 guard let node = scene?.rootNode.childNode(withName: name, recursively: false) else { continue }
-                let tiltIn = SCNAction.rotateTo(x: 0, y: 0, z: 0, duration: 0.26, usesShortestUnitArc: true)
+                let tiltIn = SCNAction.rotateTo(x: 0, y: 0, z: 0, duration: 0.12, usesShortestUnitArc: true)
                 tiltIn.timingMode = .easeOut
-                let fadeIn = SCNAction.fadeIn(duration: 0.06)
+                let fadeIn = SCNAction.fadeIn(duration: 0.03)
                 let bounce = SCNAction.sequence([
-                    .scale(to: 1.18, duration: 0.10),
-                    .scale(to: 0.92, duration: 0.07),
-                    .scale(to: 1.0,  duration: 0.06)
+                    .scale(to: 1.14, duration: 0.06),
+                    .scale(to: 0.94, duration: 0.04),
+                    .scale(to: 1.0,  duration: 0.03)
                 ])
                 node.runAction(.group([tiltIn, fadeIn, bounce]))
             }
@@ -295,7 +294,7 @@ private struct _TV3DViewRepresentable: UIViewRepresentable {
         ambNode.light = ambLight
         scene.rootNode.addChildNode(ambNode)
 
-        // Logo: SCNPlane with logo texture, starts facing away
+        // Logo starts only slightly angled so the first rendered frame already reads as Poplur.
         let logoPlane = SCNPlane(width: 3.0, height: 3.0)
         let logoMat = SCNMaterial()
         logoMat.diffuse.contents = UIImage(named: "logo")
@@ -305,7 +304,7 @@ private struct _TV3DViewRepresentable: UIViewRepresentable {
         let logoNode = SCNNode(geometry: logoPlane)
         logoNode.name = "logo"
         logoNode.position = SCNVector3(0, 0.8, 0)
-        logoNode.eulerAngles.y = .pi  // Start facing away; flip animation reverses this
+        logoNode.eulerAngles.y = .pi / 7
         scene.rootNode.addChildNode(logoNode)
 
         let green = UIColor(red: 0.306, green: 1.0, blue: 0.251, alpha: 1.0)
