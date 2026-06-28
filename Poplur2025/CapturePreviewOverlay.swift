@@ -145,10 +145,10 @@ struct CapturePreviewOverlay: View {
             Spacer()
             Button { continueFromPreview() } label: {
                 VStack(spacing: 8) {
-                    Image(systemName: flowManager.currentFlow?.isMapFirst == true ? "slider.horizontal.3" : "mappin.and.ellipse")
+                    Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 40, weight: .bold))
                         .foregroundStyle(Color(red: 1, green: 0.22, blue: 0.22))
-                    Text(flowManager.currentFlow?.isMapFirst == true ? "Filters" : "Location")
+                    Text("Keep")
                         .font(.system(size: 14, weight: .bold))
                         .foregroundStyle(.white)
                 }
@@ -444,10 +444,11 @@ struct PostCaptureComposerOverlay: View {
 
     private enum Step: Equatable {
         case filters
-        case channel
+        case creationChoice
         case adPrompt
         case adPreview(UIImage)
         case adVideoPreview(URL)
+        case channel
     }
 
     @StateObject private var flowManager = CaptureFlowManager.shared
@@ -458,20 +459,26 @@ struct PostCaptureComposerOverlay: View {
     @State private var maxVideoTrimSeconds: Double = 10
     @State private var isPosting = false
     @State private var statusText = "Uploading your post..."
-    @State private var whoText: String = ""
-    @State private var whatText: String = ""
-    @State private var whereText: String = ""
-    @State private var whyText: String = ""
+    @State private var usePoplurAI = false
+    @State private var adPromptText: String = ""
+    @State private var generatedAdImage: UIImage? = nil
+    @State private var generatedAdVideoURL: URL? = nil
     @State private var generatedMeta: TVStyleMetadata? = nil
     @State private var isGenerating = false
     @State private var generationError: String? = nil
     @State private var adPulseScale: CGFloat = 1.0
     @State private var selectedMusicURL: URL? = nil
+    @State private var selectedMusicTrack: MusicSearchTrack? = nil
     @State private var showMusicPicker = false
+    @State private var showMusicSearch = false
     @State private var adVideoTrimSeconds: Double = 10
     @State private var adVideoMaxSeconds: Double = 10
 
     private var isVideo: Bool { videoURL != nil }
+    private var isGeneratedChannelStep: Bool {
+        guard case .channel = step else { return false }
+        return usePoplurAI && (generatedAdImage != nil || generatedAdVideoURL != nil)
+    }
 
     var body: some View {
         ZStack {
@@ -493,6 +500,22 @@ struct PostCaptureComposerOverlay: View {
                 if let meta = generatedMeta {
                     TVOverlayView(metadata: meta)
                 }
+            } else if isGeneratedChannelStep, let adImage = generatedAdImage {
+                Image(uiImage: adImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
+                    .ignoresSafeArea()
+                if let meta = generatedMeta {
+                    TVOverlayView(metadata: meta)
+                }
+            } else if isGeneratedChannelStep, let adVideoURL = generatedAdVideoURL {
+                CaptureVideoPlayer(url: adVideoURL)
+                    .ignoresSafeArea()
+                if let meta = generatedMeta {
+                    TVOverlayView(metadata: meta)
+                }
             } else {
                 mediaPreview
                     .ignoresSafeArea()
@@ -504,14 +527,16 @@ struct PostCaptureComposerOverlay: View {
                 switch step {
                 case .filters:
                     filterPanel
-                case .channel:
-                    channelPanel
+                case .creationChoice:
+                    creationChoicePanel
                 case .adPrompt:
                     adPromptPanel
                 case .adPreview(let adImage):
                     adPreviewControls(adImage: adImage)
                 case .adVideoPreview(let adVideoURL):
                     adVideoPreviewControls(adVideoURL: adVideoURL)
+                case .channel:
+                    channelPanel
                 }
             }
 
@@ -525,7 +550,23 @@ struct PostCaptureComposerOverlay: View {
         .sheet(isPresented: $showMusicPicker) {
             MusicDocumentPicker { url in
                 selectedMusicURL = url
+                selectedMusicTrack = nil
             }
+        }
+        .sheet(isPresented: $showMusicSearch) {
+            MusicSearchSheet(
+                selectedTrack: selectedMusicTrack,
+                onSelect: { track in
+                    selectedMusicTrack = track
+                    selectedMusicURL = nil
+                },
+                onUseLocalFile: {
+                    showMusicSearch = false
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                        showMusicPicker = true
+                    }
+                }
+            )
         }
         .onChange(of: step) { _, newStep in
             if case .adVideoPreview(let url) = newStep {
@@ -559,11 +600,12 @@ struct PostCaptureComposerOverlay: View {
 
     private var headerStepTitle: String {
         switch step {
-        case .filters:       return "Edit capture"
-        case .channel:       return "Choose channel"
-        case .adPrompt:      return "Describe your ad"
-        case .adPreview:     return "Your TV ad"
-        case .adVideoPreview: return "Your video ad"
+        case .filters:        return "Edit capture"
+        case .creationChoice: return "Finish post"
+        case .adPrompt:       return "Describe Poplur AI"
+        case .adPreview:      return "Preview Poplur AI"
+        case .adVideoPreview: return "Preview Poplur AI"
+        case .channel:        return "Choose channel"
         }
     }
 
@@ -579,14 +621,22 @@ struct PostCaptureComposerOverlay: View {
                 case .filters:
                     flowManager.cancelFlow()
                     onDismiss?()
-                case .channel:
+                case .creationChoice:
                     withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) { step = .filters }
                 case .adPrompt:
-                    withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) { step = .channel }
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) { step = .creationChoice }
                 case .adPreview:
                     withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) { step = .adPrompt }
                 case .adVideoPreview:
                     withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) { step = .adPrompt }
+                case .channel:
+                    if usePoplurAI, let generatedAdImage {
+                        withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) { step = .adPreview(generatedAdImage) }
+                    } else if usePoplurAI, let generatedAdVideoURL {
+                        withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) { step = .adVideoPreview(generatedAdVideoURL) }
+                    } else {
+                        withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) { step = .creationChoice }
+                    }
                 }
             } label: {
                 Image(systemName: headerIsBack ? "chevron.left" : "xmark")
@@ -673,12 +723,14 @@ struct PostCaptureComposerOverlay: View {
                 .padding(.horizontal, 18)
             }
 
+            editMusicControls
+
             Button {
-                withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) { step = .channel }
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) { step = .creationChoice }
             } label: {
                 HStack(spacing: 9) {
-                    Image(systemName: "tv.fill")
-                    Text("Pick Channel")
+                    Image(systemName: "arrow.right.circle.fill")
+                    Text("Continue")
                         .font(.system(size: 16, weight: .black, design: .rounded))
                 }
                 .foregroundStyle(.black)
@@ -692,6 +744,93 @@ struct PostCaptureComposerOverlay: View {
         .padding(.top, 18)
         .padding(.bottom, 28)
         .background(.black.opacity(0.78))
+    }
+
+    private var editMusicControls: some View {
+        VStack(spacing: 10) {
+            Button { showMusicSearch = true } label: {
+                HStack(spacing: 9) {
+                    Image(systemName: selectedMusicURL == nil && selectedMusicTrack == nil ? "music.note" : "music.note.list")
+                        .font(.system(size: 15, weight: .bold))
+                    Text(musicButtonTitle)
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                    Spacer()
+                    Image(systemName: "plus.circle.fill")
+                        .font(.system(size: 14, weight: .bold))
+                }
+                .foregroundStyle(selectedMusicURL == nil && selectedMusicTrack == nil ? .white.opacity(0.78) : Color(red: 0.3, green: 1, blue: 0.5))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .background(Color.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+            .buttonStyle(.plain)
+
+            if let selectedMusicTrack {
+                musicTrackSummary(track: selectedMusicTrack)
+            }
+        }
+        .padding(.horizontal, 18)
+    }
+
+    private var creationChoicePanel: some View {
+        VStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Post original or add Poplur AI?")
+                    .font(.system(size: 18, weight: .black, design: .rounded))
+                    .foregroundStyle(.white)
+                Text("Your edits are ready. Choose the version you want to send to a channel.")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.62))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 18)
+
+            Button {
+                usePoplurAI = false
+                generatedAdImage = nil
+                generatedAdVideoURL = nil
+                generatedMeta = nil
+                generationError = nil
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) { step = .channel }
+            } label: {
+                HStack(spacing: 9) {
+                    Image(systemName: "paperplane.fill")
+                    Text("Post Original")
+                        .font(.system(size: 16, weight: .black, design: .rounded))
+                }
+                .foregroundStyle(.black)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 15)
+                .background(Color.white, in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 18)
+
+            Button {
+                usePoplurAI = true
+                generatedAdImage = nil
+                generatedAdVideoURL = nil
+                generatedMeta = nil
+                generationError = nil
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) { step = .adPrompt }
+            } label: {
+                HStack(spacing: 9) {
+                    Image(systemName: "sparkles")
+                    Text("Add Poplur AI")
+                        .font(.system(size: 16, weight: .black, design: .rounded))
+                }
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 15)
+                .background(Color(red: 1, green: 0.22, blue: 0.22), in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 18)
+        }
+        .padding(.top, 18)
+        .padding(.bottom, 28)
+        .background(.black.opacity(0.84))
     }
 
     private var channelPanel: some View {
@@ -739,25 +878,55 @@ struct PostCaptureComposerOverlay: View {
             }
             .frame(maxHeight: 360)
 
+            channelValidationNotice
+
             Button {
-                withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) { step = .adPrompt }
+                postSelectedOutput()
             } label: {
                 HStack(spacing: 9) {
-                    Image(systemName: "sparkles")
-                    Text("Create Ad")
+                    if isPosting {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: usePoplurAI ? .white : .black))
+                            .frame(width: 18, height: 18)
+                    } else {
+                        Image(systemName: "dot.radiowaves.right")
+                    }
+                    Text(isPosting ? "Posting..." : "Post to Channel")
                         .font(.system(size: 16, weight: .black, design: .rounded))
                 }
-                .foregroundStyle(.black)
+                .foregroundStyle(usePoplurAI ? .white : .black)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 15)
-                .background(Color.white, in: Capsule())
+                .background(usePoplurAI ? Color(red: 1, green: 0.22, blue: 0.22) : Color.white, in: Capsule())
             }
+            .disabled(isPosting)
             .buttonStyle(.plain)
             .padding(.horizontal, 18)
         }
         .padding(.top, 16)
         .padding(.bottom, 28)
         .background(.black.opacity(0.84))
+    }
+
+    private var channelValidationNotice: some View {
+        let recommendation = recommendedChannel(for: generatedMeta)
+        let shouldMove = usePoplurAI && recommendation != nil && recommendation != selectedChannel
+        return HStack(spacing: 10) {
+            Image(systemName: shouldMove ? "exclamationmark.triangle.fill" : "checkmark.shield.fill")
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(shouldMove ? Color.yellow : Color(red: 0.30, green: 1, blue: 0.34))
+            Text(shouldMove
+                 ? "AI check: this fits CH \(recommendation!.number) \(recommendation!.title). It will post there instead."
+                 : "AI will verify this content and move it to the right channel if needed.")
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.72))
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .padding(.horizontal, 18)
     }
 
     private var generatingOrPostingOverlay: some View {
@@ -791,7 +960,7 @@ struct PostCaptureComposerOverlay: View {
                     .padding(.horizontal, 28)
 
                 Text(isGenerating
-                     ? "AI is generating a custom \(selectedChannel.emoji) \(selectedChannel.title) ad from your content."
+                     ? "AI is generating custom Poplur TV content from your capture and prompt."
                      : "Your ad will be added to your profile.")
                     .font(.system(size: 12, weight: .semibold, design: .rounded))
                     .multilineTextAlignment(.center)
@@ -806,21 +975,40 @@ struct PostCaptureComposerOverlay: View {
     private var adPromptPanel: some View {
         VStack(spacing: 14) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Tell AI about your post")
+                Text("Tell Poplur AI what to make")
                     .font(.system(size: 18, weight: .black, design: .rounded))
                     .foregroundStyle(.white)
-                Text("Answer any or all — AI uses these to generate your \(selectedChannel.emoji) \(selectedChannel.title) ad.")
+                Text("Use one prompt. Photos generate photos, and videos generate videos.")
                     .font(.system(size: 11, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white.opacity(0.60))
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.horizontal, 18)
 
-            VStack(spacing: 10) {
-                adQuestionField(emoji: "👤", label: "Who", placeholder: "Who is this about?", text: $whoText)
-                adQuestionField(emoji: "⚡️", label: "What", placeholder: "What is happening?", text: $whatText)
-                adQuestionField(emoji: "📍", label: "Where", placeholder: "Where does this take place?", text: $whereText)
-                adQuestionField(emoji: "💡", label: "Why", placeholder: "Why does this matter?", text: $whyText)
+            ZStack(alignment: .topLeading) {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color.white.opacity(0.10))
+                if adPromptText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text("A cinematic Poplur TV ad about...")
+                        .font(.system(size: 15, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.34))
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 18)
+                }
+                TextEditor(text: $adPromptText)
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .tint(.white)
+                    .scrollContentBackground(.hidden)
+                    .background(Color.clear)
+                    .frame(minHeight: 132, maxHeight: 172)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .onChange(of: adPromptText) { _, newValue in
+                        if newValue.count > 500 {
+                            adPromptText = String(newValue.prefix(500))
+                        }
+                    }
             }
             .padding(.horizontal, 18)
 
@@ -840,9 +1028,9 @@ struct PostCaptureComposerOverlay: View {
                 .foregroundStyle(.black)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 15)
-                .background(adQuestionsEmpty ? Color.gray.opacity(0.6) : Color.white, in: Capsule())
+                .background(adPromptEmpty ? Color.gray.opacity(0.6) : Color.white, in: Capsule())
             }
-            .disabled(adQuestionsEmpty)
+            .disabled(adPromptEmpty)
             .buttonStyle(.plain)
             .padding(.horizontal, 18)
         }
@@ -851,32 +1039,8 @@ struct PostCaptureComposerOverlay: View {
         .background(.black.opacity(0.84))
     }
 
-    private var adQuestionsEmpty: Bool {
-        [whoText, whatText, whereText, whyText]
-            .allSatisfy { $0.trimmingCharacters(in: .whitespaces).isEmpty }
-    }
-
-    private func adQuestionField(emoji: String, label: String, placeholder: String, text: Binding<String>) -> some View {
-        HStack(spacing: 12) {
-            Text(emoji)
-                .font(.system(size: 20))
-                .frame(width: 28)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(label)
-                    .font(.system(size: 10, weight: .black, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.50))
-                    .tracking(1.2)
-                    .textCase(.uppercase)
-                TextField(placeholder, text: text)
-                    .font(.system(size: 14, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white)
-                    .tint(.white)
-                    .submitLabel(.next)
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .background(Color.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    private var adPromptEmpty: Bool {
+        adPromptText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     // MARK: - Ad preview controls
@@ -886,7 +1050,13 @@ struct PostCaptureComposerOverlay: View {
             onRedo: {
                 withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) { step = .adPrompt }
             },
-            onBroadcast: { broadcastAd(adImage) },
+            onBroadcast: {
+                generatedAdImage = adImage
+                generatedAdVideoURL = nil
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) { step = .channel }
+            },
+            primaryTitle: "Pick Channel",
+            primaryIcon: "tv.fill",
             showFilterStrip: true,
             showTrimSlider: false
         )
@@ -909,15 +1079,11 @@ struct PostCaptureComposerOverlay: View {
 
         Task {
             do {
-                let meta: TVStyleMetadata
-                if let image {
-                    meta = try await TVStyleAnalyzer.shared.analyze(image: image)
-                } else if let videoURL {
-                    meta = try await TVStyleAnalyzer.shared.analyze(videoURL: videoURL)
-                } else {
+                guard image != nil || videoURL != nil else {
                     throw AdGenerationError.noMedia
                 }
 
+                let meta = await analyzeTVMetadata(image: image, videoURL: videoURL)
                 let prompt = buildAdPrompt(meta: meta)
 
                 // Resolve the best face reference: captured photo first, then first frame of video
@@ -932,6 +1098,8 @@ struct PostCaptureComposerOverlay: View {
                     }
                     await MainActor.run {
                         generatedMeta = meta
+                        generatedAdVideoURL = adVideoURL
+                        generatedAdImage = nil
                         isGenerating = false
                         withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) {
                             step = .adVideoPreview(adVideoURL)
@@ -946,32 +1114,26 @@ struct PostCaptureComposerOverlay: View {
                     }
                     await MainActor.run {
                         generatedMeta = meta
+                        generatedAdImage = adImage
+                        generatedAdVideoURL = nil
                         isGenerating = false
                         withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) {
                             step = .adPreview(adImage)
                         }
                     }
                 }
-            } catch TVAnalyzerError.noAPIKey {
+            } catch AdGenerationError.noAPIKey {
                 await MainActor.run {
                     isGenerating = false
-                    generationError = "Claude API key missing — add it to Secrets.swift."
-                }
-            } catch TVAnalyzerError.httpError(let code) {
-                await MainActor.run {
-                    isGenerating = false
-                    generationError = "AI analysis failed (HTTP \(code)) — check your API key."
-                }
-            } catch TVAnalyzerError.parseError {
-                await MainActor.run {
-                    isGenerating = false
-                    generationError = "AI response couldn't be parsed — try again."
+                    generationError = "Video AI needs a Replicate key in Settings to generate a video."
                 }
             } catch {
                 print("🎬 [AdGeneration] Failed: \(error)")
                 await MainActor.run {
                     isGenerating = false
-                    generationError = "Generation failed — check your internet connection and try again."
+                    generationError = isVideo
+                        ? "Video generation failed — check the AI video key and try again."
+                        : "Image generation failed — check your internet connection and try again."
                 }
             }
         }
@@ -987,19 +1149,12 @@ struct PostCaptureComposerOverlay: View {
     }
 
     private func buildAdPrompt(meta: TVStyleMetadata) -> String {
-        let channelCtx = "\(selectedChannel.emoji) \(selectedChannel.title)"
+        let recommended = recommendedChannel(for: meta) ?? selectedChannel
+        let channelCtx = "\(recommended.emoji) \(recommended.title)"
         let coords = String(format: "%.2f°, %.2f°", coordinate.latitude, coordinate.longitude)
-        var parts: [String] = []
-        let who   = whoText.trimmingCharacters(in: .whitespaces)
-        let what  = whatText.trimmingCharacters(in: .whitespaces)
-        let where_ = whereText.trimmingCharacters(in: .whitespaces)
-        let why   = whyText.trimmingCharacters(in: .whitespaces)
-        if !who.isEmpty    { parts.append("Subject: \(who)") }
-        if !what.isEmpty   { parts.append("Action: \(what)") }
-        if !where_.isEmpty { parts.append("Setting: \(where_)") }
-        if !why.isEmpty    { parts.append("Message: \(why)") }
-        let userContext = parts.isEmpty ? "" : parts.joined(separator: ". ") + ". "
-        return "\(userContext)A stunning cinematic TV advertisement for \(meta.broadcastName). "
+        let userPrompt = adPromptText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let userContext = userPrompt.isEmpty ? "" : "User prompt: \(userPrompt). "
+        return "\(userContext)A stunning cinematic Poplur TV advertisement for \(meta.broadcastName). "
             + "\(meta.tvFormat.replacingOccurrences(of: "_", with: " ")) format. "
             + "Ad concept: \(meta.adConcept). Channel: \(channelCtx). Location: \(coords). "
             + "Ultra-high production value, broadcast television quality, vivid saturated colors, "
@@ -1012,11 +1167,13 @@ struct PostCaptureComposerOverlay: View {
         statusText = "Uploading your post..."
 
         let metadata = generatedMeta ?? fallbackMetadata()
+        let finalChannel = validatedChannel(for: metadata)
+        let finalMetadata = metadata.routed(to: finalChannel)
         let edits = PostCaptureEdits(
             filter: selectedFilter,
             videoTrimSeconds: nil,
-            channel: selectedChannel,
-            tvMetadata: metadata
+            channel: finalChannel,
+            tvMetadata: finalMetadata
         )
 
         Task {
@@ -1053,7 +1210,13 @@ struct PostCaptureComposerOverlay: View {
             onRedo: {
                 withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) { step = .adPrompt }
             },
-            onBroadcast: { broadcastAdVideo(adVideoURL) },
+            onBroadcast: {
+                generatedAdVideoURL = adVideoURL
+                generatedAdImage = nil
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) { step = .channel }
+            },
+            primaryTitle: "Pick Channel",
+            primaryIcon: "tv.fill",
             showFilterStrip: true,
             showTrimSlider: true
         )
@@ -1065,11 +1228,13 @@ struct PostCaptureComposerOverlay: View {
         statusText = "Uploading your post..."
 
         let metadata = generatedMeta ?? fallbackMetadata()
+        let finalChannel = validatedChannel(for: metadata)
+        let finalMetadata = metadata.routed(to: finalChannel)
         let edits = PostCaptureEdits(
             filter: selectedFilter,
             videoTrimSeconds: adVideoTrimSeconds,
-            channel: selectedChannel,
-            tvMetadata: metadata
+            channel: finalChannel,
+            tvMetadata: finalMetadata
         )
 
         Task {
@@ -1117,6 +1282,8 @@ struct PostCaptureComposerOverlay: View {
     private func adPreviewControlsLayout(
         onRedo: @escaping () -> Void,
         onBroadcast: @escaping () -> Void,
+        primaryTitle: String = "Broadcast Now",
+        primaryIcon: String = "dot.radiowaves.right",
         showFilterStrip: Bool = false,
         showTrimSlider: Bool = false
     ) -> some View {
@@ -1173,20 +1340,56 @@ struct PostCaptureComposerOverlay: View {
             }
 
             // Music button
-            Button { showMusicPicker = true } label: {
+            Button { showMusicSearch = true } label: {
                 HStack(spacing: 8) {
-                    Image(systemName: selectedMusicURL == nil ? "music.note" : "music.note.list")
+                    Image(systemName: selectedMusicURL == nil && selectedMusicTrack == nil ? "music.note" : "music.note.list")
                         .font(.system(size: 15, weight: .bold))
-                    Text(selectedMusicURL == nil ? "Add Music" : "Music Added ✓")
+                    Text(musicButtonTitle)
                         .font(.system(size: 13, weight: .bold, design: .rounded))
                 }
-                .foregroundStyle(selectedMusicURL == nil ? .white.opacity(0.75) : Color(red: 0.3, green: 1, blue: 0.5))
+                .foregroundStyle(selectedMusicURL == nil && selectedMusicTrack == nil ? .white.opacity(0.75) : Color(red: 0.3, green: 1, blue: 0.5))
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 11)
                 .background(Color.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
             .buttonStyle(.plain)
             .padding(.horizontal, 18)
+
+            if let selectedMusicTrack {
+                HStack(spacing: 10) {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(selectedMusicTrack.provider.accent.opacity(0.85))
+                        .frame(width: 34, height: 34)
+                        .overlay(
+                            Image(systemName: "music.note")
+                                .font(.system(size: 14, weight: .black))
+                                .foregroundStyle(.black.opacity(0.82))
+                        )
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(selectedMusicTrack.title)
+                            .font(.system(size: 12, weight: .black, design: .rounded))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                        Text("\(selectedMusicTrack.artist) • \(selectedMusicTrack.provider.rawValue)")
+                            .font(.system(size: 10, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.65))
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                    Button {
+                        self.selectedMusicTrack = nil
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundStyle(.white.opacity(0.48))
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(.black.opacity(0.58), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .padding(.horizontal, 18)
+            }
 
             if let meta = generatedMeta {
                 HStack(spacing: 10) {
@@ -1236,11 +1439,11 @@ struct PostCaptureComposerOverlay: View {
                                 .scaleEffect(1.4)
                                 .frame(width: 40, height: 40)
                         } else {
-                            Image(systemName: "dot.radiowaves.right")
+                            Image(systemName: primaryIcon)
                                 .font(.system(size: 34, weight: .bold))
                                 .foregroundStyle(Color(red: 1, green: 0.22, blue: 0.22))
                         }
-                        Text(isPosting ? "Broadcasting…" : "Broadcast Now")
+                        Text(isPosting ? "Broadcasting…" : primaryTitle)
                             .font(.system(size: 13, weight: .bold))
                             .foregroundStyle(.white)
                     }
@@ -1253,6 +1456,47 @@ struct PostCaptureComposerOverlay: View {
         .padding(.bottom, 48)
     }
 
+    private var musicButtonTitle: String {
+        if selectedMusicURL != nil { return "Music File Added" }
+        if selectedMusicTrack != nil { return "Track Linked" }
+        return "Add Music"
+    }
+
+    private func musicTrackSummary(track: MusicSearchTrack) -> some View {
+        HStack(spacing: 10) {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(track.provider.accent.opacity(0.85))
+                .frame(width: 34, height: 34)
+                .overlay(
+                    Image(systemName: "music.note")
+                        .font(.system(size: 14, weight: .black))
+                        .foregroundStyle(.black.opacity(0.82))
+                )
+            VStack(alignment: .leading, spacing: 2) {
+                Text(track.title)
+                    .font(.system(size: 12, weight: .black, design: .rounded))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                Text("\(track.artist) • \(track.provider.rawValue)")
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.65))
+                    .lineLimit(1)
+            }
+            Spacer()
+            Button {
+                selectedMusicTrack = nil
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.48))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(.black.opacity(0.58), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
     private func configureVideoDuration() {
         guard let videoURL else { return }
         let seconds = CMTimeGetSeconds(AVURLAsset(url: videoURL).duration)
@@ -1261,13 +1505,23 @@ struct PostCaptureComposerOverlay: View {
         videoTrimSeconds = min(maxVideoTrimSeconds, 10)
     }
 
+    private func postSelectedOutput() {
+        if usePoplurAI, let generatedAdImage {
+            broadcastAd(generatedAdImage)
+        } else if usePoplurAI, let generatedAdVideoURL {
+            broadcastAdVideo(generatedAdVideoURL)
+        } else {
+            post()
+        }
+    }
+
     private func post() {
         guard !isPosting else { return }
         isPosting = true
         statusText = "Uploading your post..."
 
         Task {
-            let processedImage = image?.applyingPostCaptureFilter(selectedFilter)
+            var processedImage = image?.applyingPostCaptureFilter(selectedFilter)
             var processedVideoURL = videoURL
 
             if let videoURL {
@@ -1279,12 +1533,27 @@ struct PostCaptureComposerOverlay: View {
                 ) ?? videoURL
             }
 
+            if let musicURL = selectedMusicURL {
+                if let videoURL = processedVideoURL {
+                    await MainActor.run { statusText = "Adding music..." }
+                    processedVideoURL = await OutputMusicMixer.mixAudio(musicURL, intoVideo: videoURL, trimSeconds: nil) ?? videoURL
+                } else if let image = processedImage {
+                    await MainActor.run { statusText = "Adding music..." }
+                    if let videoWithMusic = await OutputMusicMixer.imageWithAudio(image, audioURL: musicURL, filter: .original) {
+                        processedImage = nil
+                        processedVideoURL = videoWithMusic
+                    }
+                }
+            }
+
             let metadata = await analyzeTVMetadata(image: processedImage, videoURL: processedVideoURL)
+            let finalChannel = validatedChannel(for: metadata)
+            let finalMetadata = metadata.routed(to: finalChannel)
             let edits = PostCaptureEdits(
                 filter: selectedFilter,
-                videoTrimSeconds: isVideo ? videoTrimSeconds : nil,
-                channel: selectedChannel,
-                tvMetadata: metadata
+                videoTrimSeconds: processedVideoURL != nil ? videoTrimSeconds : nil,
+                channel: finalChannel,
+                tvMetadata: finalMetadata
             )
 
             await MainActor.run {
@@ -1320,6 +1589,45 @@ struct PostCaptureComposerOverlay: View {
             tagline: "A fresh Poplur moment is now live from the map.",
             broadcastName: "POPLUR \(selectedChannel.title.uppercased())"
         )
+    }
+
+    private func validatedChannel(for metadata: TVStyleMetadata?) -> PostCaptureChannel {
+        recommendedChannel(for: metadata) ?? selectedChannel
+    }
+
+    private func recommendedChannel(for metadata: TVStyleMetadata?) -> PostCaptureChannel? {
+        let text = [
+            metadata?.channel,
+            metadata?.adConcept,
+            metadata?.caption,
+            metadata?.tagline,
+            metadata?.broadcastName,
+            adPromptText
+        ]
+        .compactMap { $0 }
+        .joined(separator: " ")
+        .lowercased()
+
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+
+        let pairs: [(String, [String])] = [
+            ("food", ["food", "restaurant", "burger", "pizza", "recipe", "coffee", "drink", "meal", "kitchen"]),
+            ("gaming", ["gaming", "game", "stream", "console", "esport", "controller", "playthrough"]),
+            ("music", ["music", "song", "studio", "concert", "artist", "album", "beat", "dj"]),
+            ("sports", ["sports", "fitness", "workout", "training", "soccer", "basketball", "gym", "game day"]),
+            ("style", ["style", "fashion", "beauty", "makeup", "skincare", "outfit", "hair"]),
+            ("shopping", ["shopping", "shop", "buy", "haul", "drop", "deal", "store", "product"]),
+            ("city", ["city", "street", "local", "news", "neighborhood", "traffic", "downtown", "tech"]),
+            ("film", ["film", "movie", "cinema", "trailer", "show", "entertainment", "edit"]),
+            ("french", ["french", "français", "france"]),
+            ("spanish", ["spanish", "español", "spain", "latino"])
+        ]
+
+        let matchID = pairs.first { _, words in
+            words.contains { text.contains($0) }
+        }?.0
+
+        return matchID.flatMap { id in PostCaptureChannel.all.first { $0.id == id } }
     }
 }
 
@@ -1465,6 +1773,23 @@ private extension PostCaptureChannel {
         case "film": return "entertainment"
         default: return "entertainment"
         }
+    }
+}
+
+private extension TVStyleMetadata {
+    func routed(to channel: PostCaptureChannel) -> TVStyleMetadata {
+        let target = channel.tvAnalyzerChannel
+        guard self.channel != target || !broadcastName.localizedCaseInsensitiveContains(channel.title) else {
+            return self
+        }
+        return TVStyleMetadata(
+            channel: target,
+            tvFormat: tvFormat,
+            adConcept: adConcept,
+            caption: caption,
+            tagline: tagline,
+            broadcastName: "POPLUR \(channel.title.uppercased())"
+        )
     }
 }
 

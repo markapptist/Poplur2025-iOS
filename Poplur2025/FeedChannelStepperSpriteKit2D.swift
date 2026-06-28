@@ -8,35 +8,12 @@ struct FeedChannelStepperSpriteKit2D: View {
     let onDown: () -> Void
 
     var body: some View {
-        VStack(spacing: -2) {
-            FeedChannelButtonHitTarget(accessibilityLabel: "Channel up", action: onUp) {
-                FeedChannelButtonSpriteView(
-                    kind: .up,
-                    isPressed: activeButton == .up,
-                    pressToken: pressToken
-                )
-                .frame(width: 82, height: 74)
-            }
-
-            FeedChannelButtonSpriteView(
-                kind: .ch,
-                isPressed: activeButton != nil,
-                pressToken: pressToken
-            )
-            .frame(width: 82, height: 56)
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
-
-            FeedChannelButtonHitTarget(accessibilityLabel: "Channel down", action: onDown) {
-                FeedChannelButtonSpriteView(
-                    kind: .down,
-                    isPressed: activeButton == .down,
-                    pressToken: pressToken
-                )
-                .frame(width: 82, height: 78)
-            }
-        }
-        .frame(width: 86, height: 208)
+        FeedChannelStepper3D(
+            activeButton: activeButton,
+            pressToken: pressToken,
+            onUp: onUp,
+            onDown: onDown
+        )
     }
 }
 

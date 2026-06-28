@@ -21,6 +21,7 @@ struct AppSettingsView: View {
     @AppStorage("poplur_phoneXLMode") private var phoneXLMode: Bool = true
     @AppStorage("poplur_tvGuideFlipAnimation") private var tvGuideFlipAnimation: Bool = true
     @AppStorage("poplur_feedChannelButtonsSpriteKit2D") private var feedChannelButtonsSpriteKit2D: Bool = false
+    @AppStorage("poplur_profileAvatarIs3D") private var profileAvatarIs3D: Bool = false
 
     @State private var posts: [Post] = []
     @State private var isLoadingStats = true
@@ -47,7 +48,9 @@ struct AppSettingsView: View {
     private var ticketWidth: CGFloat { min(screenSize.width - 24, 700) }
     private var ticketHeight: CGFloat { screenSize.height * 0.78 }
 
-    private let brandPink = Color(red: 255.0/255.0, green: 255.0/255.0, blue: 255.0/255.0)
+    private var theme: CubeSkinAppTheme {
+        cubeSkinStore.current.appTheme
+    }
 
     init(initialPageIndex: Int = 0) {
         _pageIndex = State(initialValue: initialPageIndex)
@@ -55,7 +58,7 @@ struct AppSettingsView: View {
 
     var body: some View {
         ZStack {
-            brandPink.ignoresSafeArea()
+            CubeSkinThemedBackground(skin: cubeSkinStore.current)
 
             VStack(spacing: 0) {
                 // Start content at the very top – no top Spacer
@@ -63,7 +66,7 @@ struct AppSettingsView: View {
                     VStack(spacing: 0) {
                         Text("Settings")
                             .font(.system(size: 28, weight: .black, design: .rounded))
-                            .foregroundColor(.black)
+                            .foregroundColor(theme.primaryText)
                             .padding(.top, 22)
                             .padding(.bottom, 4)
 
@@ -72,14 +75,14 @@ struct AppSettingsView: View {
                     .frame(width: ticketWidth, height: ticketHeight)
                     .background(
                         RoundedRectangle(cornerRadius: 28, style: .continuous)
-                            .fill(Color.white.opacity(0.18))
+                            .fill(theme.surface)
                     )
                     .overlay(
                         RoundedRectangle(cornerRadius: 28, style: .continuous)
-                            .stroke(Color.black.opacity(0.08), lineWidth: 1)
+                            .stroke(theme.border, lineWidth: 1.2)
                     )
                     .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
-                    .shadow(color: .black.opacity(0.08), radius: 18, x: 0, y: 12)
+                    .shadow(color: theme.shadow, radius: 18, x: 0, y: 12)
                     .onReceive(NotificationCenter.default.publisher(for: .ResetTabToTop)) { _ in
                         withAnimation(.easeInOut(duration: 0.25)) {
                             proxy.scrollTo("top", anchor: .top)
@@ -104,7 +107,7 @@ struct AppSettingsView: View {
                 // Title
                 Text("Average Radius")
                     .font(.system(size: 22, weight: .heavy, design: .rounded))
-                    .foregroundColor(.black)
+                    .foregroundColor(theme.primaryText)
                     .padding(.top, 16)
                     .frame(maxWidth: .infinity, alignment: .center)
 
@@ -113,7 +116,7 @@ struct AppSettingsView: View {
                         Spacer()
                         ProgressView()
                             .progressViewStyle(.circular)
-                            .tint(.black)
+                            .tint(theme.accent)
                         Spacer()
                     }
                     .padding(.vertical, 16)
@@ -125,8 +128,8 @@ struct AppSettingsView: View {
                             value: averageRadius,
                             maxValue: ringMax,
                             unit: "KM",
-                            accentColor: .black,
-                            trackColor: .black.opacity(0.15),
+                            accentColor: theme.accent,
+                            trackColor: theme.border.opacity(0.24),
                             lineWidthFactor: 0.12
                         )
                         .frame(height: 260)
@@ -135,14 +138,14 @@ struct AppSettingsView: View {
                     }
                     Text("Posts counted: \(posts.count)")
                         .font(.system(size: 12, weight: .semibold, design: .rounded))
-                        .foregroundColor(.black.opacity(0.6))
-                    .padding(.bottom, 44)
+                        .foregroundColor(theme.secondaryText)
+                        .padding(.bottom, 44)
                 }
 
                 VStack(alignment: .center, spacing: 8) {
                     Text("Accumulated Radius")
                         .font(.system(size: 22, weight: .heavy, design: .rounded))
-                        .foregroundColor(.black)
+                        .foregroundColor(theme.primaryText)
                         .frame(maxWidth: .infinity, alignment: .center)
 
                     if isLoadingStats {
@@ -150,24 +153,24 @@ struct AppSettingsView: View {
                             Spacer()
                             ProgressView()
                                 .progressViewStyle(.circular)
-                                .tint(.black)
+                                .tint(theme.accent)
                             Spacer()
                         }
                         .padding(.vertical, 20)
                     } else {
                         Text("You’ve reached")
                             .font(.system(size: 16, weight: .semibold, design: .rounded))
-                            .foregroundColor(.black.opacity(0.9))
+                            .foregroundColor(theme.secondaryText)
                             .frame(maxWidth: .infinity, alignment: .center)
 
                         Text(formattedKM(totalRadius))
                             .font(.system(size: 44, weight: .heavy, design: .rounded))
-                            .foregroundColor(.black)
+                            .foregroundColor(theme.primaryText)
                             .frame(maxWidth: .infinity, alignment: .center)
 
                         Text("in total")
                             .font(.system(size: 16, weight: .semibold, design: .rounded))
-                            .foregroundColor(.black.opacity(0.9))
+                            .foregroundColor(theme.secondaryText)
                             .frame(maxWidth: .infinity, alignment: .center)
                     }
                 }
@@ -186,7 +189,7 @@ struct AppSettingsView: View {
                 // Title
                 Text("Account Options")
                     .font(.system(size: 22, weight: .heavy, design: .rounded))
-                    .foregroundColor(.black)
+                    .foregroundColor(theme.primaryText)
                     .padding(.top, 16)
                     .frame(maxWidth: .infinity, alignment: .center)
 
@@ -212,6 +215,14 @@ struct AppSettingsView: View {
                         )
                     )
                     settingsToggleRow(title: "TV Guide Flip Animation", isOn: $tvGuideFlipAnimation)
+                    settingsToggleRow(
+                        title: "Tilt Control",
+                        isOn: Binding(
+                            get: { settings.tiltControlEnabled },
+                            set: { settings.tiltControlEnabled = $0 }
+                        )
+                    )
+                    profileHeadModePicker
                     settingsNavRow(title: "Email Address") { /* push email editor */ }
                     settingsNavRow(title: "Password") { /* push password editor */ }
                 }
@@ -220,7 +231,7 @@ struct AppSettingsView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Preferred Language")
                         .font(.system(size: 18, weight: .heavy, design: .rounded))
-                        .foregroundColor(.black)
+                        .foregroundColor(theme.primaryText)
 
                     Picker(
                         "Preferred Language",
@@ -240,7 +251,7 @@ struct AppSettingsView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Appearance")
                         .font(.system(size: 18, weight: .heavy, design: .rounded))
-                        .foregroundColor(.black)
+                        .foregroundColor(theme.primaryText)
 
                     Picker(
                         "Appearance",
@@ -260,7 +271,7 @@ struct AppSettingsView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Hold Menu")
                         .font(.system(size: 18, weight: .heavy, design: .rounded))
-                        .foregroundColor(.black)
+                        .foregroundColor(theme.primaryText)
 
                     Picker(
                         "Hold Menu",
@@ -280,7 +291,7 @@ struct AppSettingsView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Transitions")
                         .font(.system(size: 18, weight: .heavy, design: .rounded))
-                        .foregroundColor(.black)
+                        .foregroundColor(theme.primaryText)
 
                     Picker(
                         "Transitions",
@@ -305,15 +316,15 @@ struct AppSettingsView: View {
                     } label: {
                         Text("Limit videos to 10 seconds")
                             .font(.system(size: 16, weight: .heavy, design: .rounded))
-                            .foregroundColor(.black)
+                            .foregroundColor(theme.primaryText)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 12)
-                            .background(Color.white, in: Capsule())
+                            .background(theme.controlFill, in: Capsule())
                     }
 
                     Text("Current limit: \(Int(maxDurationDisplay))s")
                         .font(.system(size: 14, weight: .semibold, design: .rounded))
-                        .foregroundColor(.black.opacity(0.9))
+                        .foregroundColor(theme.secondaryText)
                         .frame(maxWidth: .infinity, alignment: .center)
                 }
 
@@ -324,10 +335,10 @@ struct AppSettingsView: View {
                     } label: {
                         Text("Seed NA (1000)")
                             .font(.system(size: 16, weight: .heavy, design: .rounded))
-                            .foregroundColor(.black)
+                            .foregroundColor(theme.primaryText)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 12)
-                            .background(Color.white, in: Capsule())
+                            .background(theme.controlFill, in: Capsule())
                     }
 
                     Button {
@@ -335,10 +346,10 @@ struct AppSettingsView: View {
                     } label: {
                         Text("Start Simulator (dev: 120s/day)")
                             .font(.system(size: 16, weight: .heavy, design: .rounded))
-                            .foregroundColor(.black)
+                            .foregroundColor(theme.primaryText)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 12)
-                            .background(Color.white, in: Capsule())
+                            .background(theme.controlFill, in: Capsule())
                     }
                     
                     Button {
@@ -369,7 +380,7 @@ struct AppSettingsView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Cube Skin")
                         .font(.system(size: 18, weight: .heavy, design: .rounded))
-                        .foregroundColor(.black)
+                        .foregroundColor(theme.primaryText)
 
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 12) {
@@ -377,19 +388,10 @@ struct AppSettingsView: View {
                                 Button {
                                     cubeSkinStore.apply(skin)
                                 } label: {
-                                    VStack(spacing: 5) {
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .fill(cubeSkinPreviewColor(skin))
-                                            .frame(width: 58, height: 58)
-                                            .overlay(
-                                                RoundedRectangle(cornerRadius: 12)
-                                                    .stroke(cubeSkinStore.current == skin ? Color.black : Color.black.opacity(0.18), lineWidth: cubeSkinStore.current == skin ? 3 : 1)
-                                            )
-                                        Text(skin.displayName)
-                                            .font(.system(size: 10, weight: .semibold, design: .rounded))
-                                            .foregroundColor(.black)
-                                            .lineLimit(1)
-                                    }
+                                    CubeSkinPickerTile(
+                                        skin: skin,
+                                        isSelected: cubeSkinStore.current == skin
+                                    )
                                 }
                             }
                         }
@@ -402,11 +404,11 @@ struct AppSettingsView: View {
                 Button(action: signOut) {
                     Text("Sign Out")
                         .font(.system(size: 18, weight: .heavy, design: .rounded))
-                        .foregroundColor(.black)
+                        .foregroundColor(theme.primaryText)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 16)
-                        .background(Color.white, in: Capsule())
-                        .shadow(color: Color.black.opacity(0.12), radius: 10, x: 0, y: 6)
+                        .background(theme.controlFill, in: Capsule())
+                        .shadow(color: theme.shadow, radius: 10, x: 0, y: 6)
                 }
                 .padding(.top, 8)
 
@@ -420,15 +422,35 @@ struct AppSettingsView: View {
 
     // MARK: - Row components
 
+    private var profileHeadModePicker: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Profile Head")
+                .font(.system(size: 18, weight: .heavy, design: .rounded))
+                .foregroundColor(theme.primaryText)
+
+            Picker("Profile Head", selection: $profileAvatarIs3D) {
+                Text("2D").tag(false)
+                Text("3D").tag(true)
+            }
+            .pickerStyle(.segmented)
+
+            Text("Choose whether your profile uses the 2D speaking head or the 3D head.")
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundColor(theme.secondaryText)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 4)
+    }
+
     private func settingsToggleRow(title: String, isOn: Binding<Bool>) -> some View {
         HStack(alignment: .center, spacing: 12) {
             Text(title)
                 .font(.system(size: 18, weight: .heavy, design: .rounded))
-                .foregroundColor(.black)
+                .foregroundColor(theme.primaryText)
             Spacer(minLength: 12)
             Toggle("", isOn: isOn)
                 .labelsHidden()
-                .toggleStyle(SwitchToggleStyle(tint: Color(.systemIndigo)))
+                .toggleStyle(SwitchToggleStyle(tint: theme.accent))
         }
         .contentShape(Rectangle())
         .frame(maxWidth: .infinity, minHeight: 44)
@@ -439,11 +461,11 @@ struct AppSettingsView: View {
             HStack(alignment: .center, spacing: 12) {
                 Text(title)
                     .font(.system(size: 18, weight: .heavy, design: .rounded))
-                    .foregroundColor(.black)
+                    .foregroundColor(theme.primaryText)
                 Spacer(minLength: 12)
                 Image(systemName: "arrow.right")
                     .font(.system(size: 18, weight: .bold))
-                    .foregroundColor(Color(.systemIndigo))
+                    .foregroundColor(theme.accent)
             }
             .frame(minHeight: 44)
         }
@@ -590,19 +612,6 @@ struct AppSettingsView: View {
         }
     }
 
-    private func cubeSkinPreviewColor(_ skin: CubeSkin) -> Color {
-        switch skin {
-        case .rainbow:     return Color(red: 0.55, green: 0.10, blue: 0.95)
-        case .sparklePink: return Color(red: 1.0,  green: 0.40, blue: 0.70)
-        case .gold:        return Color(red: 0.88, green: 0.68, blue: 0.10)
-        case .toy:         return Color(red: 0.95, green: 0.20, blue: 0.20)
-        case .chocolate:   return Color(red: 0.45, green: 0.25, blue: 0.08)
-        case .camo:        return Color(red: 0.30, green: 0.48, blue: 0.18)
-        case .rubber:      return Color(red: 0.20, green: 0.65, blue: 0.90)
-        case .ice:         return Color(red: 0.75, green: 0.92, blue: 1.00)
-        }
-    }
-
     private func formattedKM(_ meters: Int) -> String {
         let km = Double(meters) / 1000.0
         let nf = NumberFormatter()
@@ -641,5 +650,40 @@ struct AppSettingsView: View {
         } catch {
             print("❌ Error fixing userIDs: \(error)")
         }
+    }
+}
+
+private struct CubeSkinPickerTile: View {
+    let skin: CubeSkin
+    let isSelected: Bool
+
+    private var theme: CubeSkinAppTheme { skin.appTheme }
+
+    var body: some View {
+        VStack(spacing: 6) {
+            ZStack {
+                CubeSkinTileBackground(skin: skin, tab: .profile, cornerRadius: 13)
+                if isSelected {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 18, weight: .black))
+                        .foregroundColor(theme.badgeText)
+                        .padding(8)
+                        .background(Circle().fill(theme.badgeFill))
+                }
+            }
+            .frame(width: 62, height: 62)
+            .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                    .stroke(isSelected ? theme.accent : theme.border.opacity(0.45), lineWidth: isSelected ? 3 : 1)
+            )
+
+            Text(skin.displayName)
+                .font(.system(size: 10, weight: .black, design: .rounded))
+                .foregroundColor(isSelected ? theme.accent : CubeSkinStore.shared.current.appTheme.secondaryText)
+                .lineLimit(1)
+                .frame(width: 76)
+        }
+        .padding(.vertical, 4)
     }
 }

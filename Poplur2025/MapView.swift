@@ -890,6 +890,8 @@ private struct ShoppingSaleVenue {
 private struct TrendPopObject: Identifiable {
     let id = UUID()
     let coordinate: CLLocationCoordinate2D
+    let channelId: String
+    let objectId: String
     let scale: CGFloat
     let delay: Double
     let seed: Int
@@ -1483,6 +1485,34 @@ private func stableTourSeed(parts: String...) -> Int {
     return Int(value % 1_000_000)
 }
 
+private func trendChannelObject(category: TrendCategory, seed: Int) -> (channelId: String, objectId: String) {
+    let channelId: String
+    let options: [String]
+
+    switch category {
+    case .food:
+        channelId = "food"
+        options = ["banana", "cake", "fruit"]
+    case .sports:
+        channelId = "sports"
+        options = ["ball", "trophy", "dumbbell"]
+    case .clothes:
+        channelId = "fashion"
+        options = ["dress", "shoe", "bag"]
+    case .nightlife:
+        channelId = "music"
+        options = ["sparkle", "spotlight", "microphone"]
+    case .music:
+        channelId = "music"
+        options = ["microphone", "note", "speaker"]
+    case .travel:
+        channelId = "news"
+        options = ["globe", "eiffel", "camera"]
+    }
+
+    return (channelId, options[abs(seed) % options.count])
+}
+
 private func buildTrendPopObjects(stop: PoplurTourStop, insight: AiTourInsight) -> [TrendPopObject] {
     let seed = stableTourSeed(parts: stop.cityName, insight.id, insight.category.rawValue)
     let count = trendPopCountMin + seed % trendPopCountRange
@@ -1492,14 +1522,18 @@ private func buildTrendPopObjects(stop: PoplurTourStop, insight: AiTourInsight) 
     return (0..<count).map { index in
         let angle = 2.0 * Double.pi * Double(index) / Double(count) + Double(seed % 360) * Double.pi / 180.0
         let radius = 0.36 + Double((index * 29 + seed) % 100) / 145.0
+        let objectSeed = (seed + index * 97) % 1_000_000
+        let channelObject = trendChannelObject(category: insight.category, seed: objectSeed)
         return TrendPopObject(
             coordinate: CLLocationCoordinate2D(
                 latitude: stop.coordinate.latitude + sin(angle) * latScale * radius,
                 longitude: stop.coordinate.longitude + cos(angle) * lngScale * radius
             ),
+            channelId: channelObject.channelId,
+            objectId: channelObject.objectId,
             scale: 0.9 + CGFloat((index * 17 + seed) % 28) / 100.0,
             delay: Double(index) * 0.26,
-            seed: (seed + index * 97) % 1_000_000
+            seed: objectSeed
         )
     }
 }
@@ -1513,14 +1547,18 @@ private func buildTrendPopObjects(center: CLLocationCoordinate2D, cityName: Stri
     return (0..<count).map { index in
         let angle = 2.0 * Double.pi * Double(index) / Double(count) + Double(seed % 180) * Double.pi / 180.0
         let radius = 0.34 + Double((index * 31 + seed) % 120) / 145.0
+        let objectSeed = (seed + index * 83) % 1_000_000
+        let channelObject = trendChannelObject(category: insight.category, seed: objectSeed)
         return TrendPopObject(
             coordinate: CLLocationCoordinate2D(
                 latitude: center.latitude + sin(angle) * latScale * radius,
                 longitude: center.longitude + cos(angle) * lngScale * radius
             ),
+            channelId: channelObject.channelId,
+            objectId: channelObject.objectId,
             scale: 0.92 + CGFloat((index * 13 + seed) % 30) / 100.0,
             delay: Double(index) * 0.1,
-            seed: (seed + index * 83) % 1_000_000
+            seed: objectSeed
         )
     }
 }
@@ -2144,11 +2182,12 @@ private struct TrendPopMarker: View {
 
             ZStack {
                 TrendObjectConfetti(seed: object.seed, elapsed: elapsed)
-                TrendObjectGlyph(category: category)
-                    .frame(width: 72, height: 72)
+                ChannelObjectSceneView(channelId: object.channelId, objectId: object.objectId)
+                    .frame(width: 92, height: 92)
                     .scaleEffect(popScale)
                     .offset(y: bob)
                     .opacity(popPhase <= 0 ? 0 : 1)
+                    .shadow(color: category.tint.opacity(0.50), radius: 14, x: 0, y: 0)
             }
             .frame(width: 132, height: 132)
         }
@@ -2197,140 +2236,6 @@ private struct TrendObjectConfetti: View {
         case 3: return Color(red: 0.44, green: 1.0, blue: 0.56)
         case 4: return Color(red: 0.67, green: 0.46, blue: 1.0)
         default: return .white
-        }
-    }
-}
-
-private struct TrendObjectGlyph: View {
-    let category: TrendCategory
-
-    var body: some View {
-        Canvas { context, size in
-            let scale = min(size.width, size.height) / 144
-
-            context.fill(
-                Path(ellipseIn: CGRect(x: 22 * scale, y: 102 * scale, width: 100 * scale, height: 30 * scale)),
-                with: .color(.black.opacity(0.30))
-            )
-
-            for depth in 0..<7 {
-                var depthContext = context
-                depthContext.translateBy(x: (CGFloat(depth) * 2.2 + 10) * scale, y: (CGFloat(depth) * 2.5 + 10) * scale)
-                drawTrendShape(in: &depthContext, size: size, category: category, fill: .color(Color(red: 0.09, green: 0.07, blue: 0.19).opacity(0.32)))
-            }
-
-            var glowContext = context
-            glowContext.translateBy(x: 5 * scale, y: 6 * scale)
-            drawTrendShape(in: &glowContext, size: size, category: category, fill: .color(Color(red: 0.28, green: 0.16, blue: 0.45).opacity(0.60)))
-
-            let gradient = GraphicsContext.Shading.linearGradient(
-                Gradient(colors: [.white, category.tint, category.darkTint]),
-                startPoint: CGPoint(x: 36 * scale, y: 22 * scale),
-                endPoint: CGPoint(x: 112 * scale, y: 112 * scale)
-            )
-            drawTrendShape(in: &context, size: size, category: category, fill: gradient)
-            drawTrendStroke(in: &context, size: size, category: category)
-        }
-        .shadow(color: .black.opacity(0.48), radius: 10, x: 0, y: 8)
-        .shadow(color: category.tint.opacity(0.50), radius: 14, x: 0, y: 0)
-    }
-}
-
-private func drawTrendShape(in context: inout GraphicsContext, size: CGSize, category: TrendCategory, fill: GraphicsContext.Shading) {
-    let scale = min(size.width, size.height) / 144
-    context.fill(trendPath(category: category, scale: scale), with: fill)
-
-    guard category == .sports else { return }
-    context.stroke(
-        Path { path in
-            path.move(to: CGPoint(x: 43 * scale, y: 47 * scale))
-            path.addLine(to: CGPoint(x: 101 * scale, y: 82 * scale))
-            path.addArc(center: CGPoint(x: 72 * scale, y: 64.5 * scale), radius: 34 * scale, startAngle: .degrees(-70), endAngle: .degrees(70), clockwise: false)
-            path.addArc(center: CGPoint(x: 77 * scale, y: 64 * scale), radius: 36 * scale, startAngle: .degrees(110), endAngle: .degrees(240), clockwise: false)
-        },
-        with: .color(Color(red: 0.12, green: 0.09, blue: 0.20).opacity(0.72)),
-        lineWidth: 4 * scale
-    )
-}
-
-private func drawTrendStroke(in context: inout GraphicsContext, size: CGSize, category: TrendCategory) {
-    let scale = min(size.width, size.height) / 144
-    let strokePath: Path
-    switch category {
-    case .sports:
-        strokePath = Path(ellipseIn: CGRect(x: 38 * scale, y: 30 * scale, width: 68 * scale, height: 68 * scale))
-    case .food:
-        strokePath = Path(roundedRect: CGRect(x: 38 * scale, y: 54 * scale, width: 68 * scale, height: 42 * scale), cornerRadius: 18 * scale)
-    default:
-        strokePath = trendPath(category: category, scale: scale)
-    }
-
-    context.stroke(strokePath, with: .color(.white.opacity(0.86)), lineWidth: 4 * scale)
-}
-
-private func trendPath(category: TrendCategory, scale: CGFloat) -> Path {
-    switch category {
-    case .clothes:
-        return Path { path in
-            path.move(to: CGPoint(x: 42 * scale, y: 38 * scale))
-            path.addLine(to: CGPoint(x: 57 * scale, y: 24 * scale))
-            path.addLine(to: CGPoint(x: 72 * scale, y: 34 * scale))
-            path.addLine(to: CGPoint(x: 87 * scale, y: 24 * scale))
-            path.addLine(to: CGPoint(x: 104 * scale, y: 39 * scale))
-            path.addLine(to: CGPoint(x: 118 * scale, y: 60 * scale))
-            path.addLine(to: CGPoint(x: 100 * scale, y: 72 * scale))
-            path.addLine(to: CGPoint(x: 94 * scale, y: 116 * scale))
-            path.addLine(to: CGPoint(x: 50 * scale, y: 116 * scale))
-            path.addLine(to: CGPoint(x: 44 * scale, y: 72 * scale))
-            path.addLine(to: CGPoint(x: 26 * scale, y: 60 * scale))
-            path.closeSubpath()
-        }
-    case .sports:
-        return Path(ellipseIn: CGRect(x: 38 * scale, y: 30 * scale, width: 68 * scale, height: 68 * scale))
-    case .food:
-        return Path { path in
-            path.addRoundedRect(in: CGRect(x: 38 * scale, y: 54 * scale, width: 68 * scale, height: 42 * scale), cornerSize: CGSize(width: 18 * scale, height: 18 * scale))
-            path.addEllipse(in: CGRect(x: 30 * scale, y: 42 * scale, width: 84 * scale, height: 24 * scale))
-            path.addRect(CGRect(x: 52 * scale, y: 96 * scale, width: 40 * scale, height: 16 * scale))
-        }
-    case .nightlife:
-        return Path { path in
-            path.move(to: CGPoint(x: 42 * scale, y: 30 * scale))
-            path.addLine(to: CGPoint(x: 104 * scale, y: 30 * scale))
-            path.addLine(to: CGPoint(x: 91 * scale, y: 74 * scale))
-            path.addLine(to: CGPoint(x: 78 * scale, y: 86 * scale))
-            path.addLine(to: CGPoint(x: 78 * scale, y: 112 * scale))
-            path.addLine(to: CGPoint(x: 102 * scale, y: 118 * scale))
-            path.addLine(to: CGPoint(x: 44 * scale, y: 118 * scale))
-            path.addLine(to: CGPoint(x: 68 * scale, y: 112 * scale))
-            path.addLine(to: CGPoint(x: 68 * scale, y: 86 * scale))
-            path.addLine(to: CGPoint(x: 55 * scale, y: 74 * scale))
-            path.closeSubpath()
-        }
-    case .music:
-        return Path { path in
-            path.move(to: CGPoint(x: 58 * scale, y: 28 * scale))
-            path.addLine(to: CGPoint(x: 98 * scale, y: 20 * scale))
-            path.addLine(to: CGPoint(x: 98 * scale, y: 86 * scale))
-            path.addLine(to: CGPoint(x: 88 * scale, y: 86 * scale))
-            path.addLine(to: CGPoint(x: 88 * scale, y: 42 * scale))
-            path.addLine(to: CGPoint(x: 66 * scale, y: 46 * scale))
-            path.addLine(to: CGPoint(x: 66 * scale, y: 94 * scale))
-            path.addLine(to: CGPoint(x: 56 * scale, y: 94 * scale))
-            path.closeSubpath()
-            path.addEllipse(in: CGRect(x: 38 * scale, y: 88 * scale, width: 28 * scale, height: 28 * scale))
-            path.addEllipse(in: CGRect(x: 78 * scale, y: 80 * scale, width: 28 * scale, height: 28 * scale))
-        }
-    case .travel:
-        return Path { path in
-            path.move(to: CGPoint(x: 24 * scale, y: 68 * scale))
-            path.addLine(to: CGPoint(x: 120 * scale, y: 30 * scale))
-            path.addLine(to: CGPoint(x: 92 * scale, y: 76 * scale))
-            path.addLine(to: CGPoint(x: 108 * scale, y: 108 * scale))
-            path.addLine(to: CGPoint(x: 78 * scale, y: 90 * scale))
-            path.addLine(to: CGPoint(x: 52 * scale, y: 118 * scale))
-            path.addLine(to: CGPoint(x: 56 * scale, y: 80 * scale))
-            path.closeSubpath()
         }
     }
 }
@@ -3584,6 +3489,7 @@ struct MapViewProduction: View {
     @State private var selectedRadioTopics: Set<PoplurRadioTopic> = Set(PoplurRadioTopic.allCases.filter(\.defaultEnabled))
     @State private var clickedCoordinate: CLLocationCoordinate2D? = nil  // Track clicked coordinate
     @State private var showPostPrompt: Bool = false  // Show "Post Here?" prompt
+    @State private var isPoplurAIPostMode: Bool = false
     @State private var isInitialMapLaunchPreparing: Bool
     @State private var isInitialMapLaunchActive: Bool = false
     @State private var mapLaunchTask: Task<Void, Never>? = nil
@@ -3592,7 +3498,7 @@ struct MapViewProduction: View {
     @State private var dominance: [CityDominance] = []
     @State private var radiusMeters: Double = 5_000
     
-    @State private var currentTourIndex: Int = 0
+    @State private var currentTourIndex: Int = Int.random(in: 0..<PoplurTourStops.count)
     @State private var tourZoomOutDistance: CLLocationDistance = 25_000_000 // Distance for zoom out
     @State private var isZoomedOut: Bool = false
     @State private var hasSetInitialLocation: Bool = false  // Track if we've set initial location
@@ -3924,12 +3830,48 @@ struct MapViewProduction: View {
     }
     
     private func startTour() {
+        currentTourIndex = Int.random(in: 0..<PoplurTourStops.count)
         mapState.startTour()
     }
     
     private func stopTour() {
         mapState.stopTour()
         clearTourEffects()
+    }
+
+    private func beginPoplurAIMapPost(location: String?) {
+        mapState.stopTour()
+        clearTourEffects()
+        mapCubeMenuWheel.endHold(activateSelected: false)
+        isPostPlacementMode = false
+        isPoplurAIPostMode = true
+        showPostPrompt = false
+        clickedCoordinate = nil
+        postPlacementCoordinate = nil
+
+        let trimmedLocation = location?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if trimmedLocation.isEmpty {
+            currentCity = "Select Post Location"
+            aiRecommendation = "Tap the map where you want to post, then choose Post Here"
+        } else {
+            currentCity = "Post to \(trimmedLocation)"
+            aiRecommendation = "Pick a search result or tap the map, then choose Post Here"
+            searchQuery = trimmedLocation
+            searchResults = []
+            showAddressSearch = true
+        }
+    }
+
+    private func selectPoplurAIMapPostCoordinate(_ coordinate: CLLocationCoordinate2D) {
+        isPoplurAIPostMode = true
+        clickedCoordinate = coordinate
+        showPostPrompt = true
+        currentCity = "Location Selected"
+        aiRecommendation = String(
+            format: "%.4f, %.4f - choose Post Here to open the camera",
+            coordinate.latitude,
+            coordinate.longitude
+        )
     }
     
     private func centerOnUserLocation() {
@@ -4554,7 +4496,10 @@ struct MapViewProduction: View {
                 if let coordinate = proxy.convert(location, from: .local) {
                     print("🗺️ [MapView] Map tapped at screen: \(location), converted to: \(coordinate.latitude), \(coordinate.longitude)")
                     
-                    if let flow = flowManager.currentFlow, flow.isCameraFirst {
+                    if isPoplurAIPostMode {
+                        selectPoplurAIMapPostCoordinate(coordinate)
+                        noteInteraction()
+                    } else if let flow = flowManager.currentFlow, flow.isCameraFirst {
                         // Flow 2: Camera -> Map - User already captured, now selecting location
                         clickedCoordinate = coordinate
                         showPostPrompt = true
@@ -4742,6 +4687,7 @@ struct MapViewProduction: View {
                         if flowManager.currentFlow?.isCameraFirst ?? false {
                             flowManager.cancelFlow()
                         }
+                        isPoplurAIPostMode = false
                         showPostPrompt = false
                         clickedCoordinate = nil
                         if let location = locationManager.location {
@@ -4780,6 +4726,7 @@ struct MapViewProduction: View {
                         )
                         
                         // Reset UI
+                        isPoplurAIPostMode = false
                         showPostPrompt = false
                         clickedCoordinate = nil
                         aiRecommendation = "Choose a filter, trim if needed, then pick a channel"
@@ -4800,6 +4747,7 @@ struct MapViewProduction: View {
                         )
                         
                         // Reset prompt
+                        isPoplurAIPostMode = false
                         showPostPrompt = false
                         clickedCoordinate = nil
                         if let location = locationManager.location {
@@ -5087,26 +5035,22 @@ struct MapViewProduction: View {
 
             mapSearchButtonOverlay
 
-            if fixedDistanceAlt < 500, let nearestVenue = indoorVenues.first {
-                Button {
-                    selectedVenueSlug = nearestVenue.slug
-                    showIndoorMap = true
-                } label: {
-                    Label("View Inside", systemImage: "building.2.fill")
-                        .font(.caption)
-                        .fontWeight(.semibold)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(.ultraThinMaterial, in: Capsule())
-                        .foregroundStyle(.white)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-                .padding(.trailing, 20)
-                .padding(.bottom, 200)
-                .zIndex(1004)
-                .transition(.scale.combined(with: .opacity))
-                .animation(.spring(response: 0.35), value: fixedDistanceAlt < 500 && !indoorVenues.isEmpty)
+            Button {
+                selectedVenueSlug = indoorVenues.first?.slug ?? MappedinVenueSearch.demoSlug
+                showIndoorMap = true
+            } label: {
+                Label("View Inside", systemImage: "building.2.fill")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .foregroundStyle(.white)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+            .padding(.trailing, 20)
+            .padding(.bottom, 200)
+            .zIndex(1004)
             }
         }
         .animation(.easeOut(duration: 0.28), value: shouldObscureMapForInitialLaunch)
@@ -5494,6 +5438,24 @@ struct MapViewProduction: View {
                 }
                 centerOnUserLocation()
             }
+            .onReceive(NotificationCenter.default.publisher(for: .PoplurAIStartMapPost)) { notification in
+                guard !layoutPreviewMode else { return }
+                beginPoplurAIMapPost(location: notification.userInfo?["location"] as? String)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .PoplurAISetTourActive)) { notification in
+                guard !layoutPreviewMode else { return }
+                let shouldStart = (notification.userInfo?["active"] as? Bool) ?? true
+                if shouldStart {
+                    if !mapState.isInTourMode {
+                        startTour()
+                    }
+                } else if mapState.isInTourMode {
+                    stopTour()
+                } else {
+                    mapState.stopTour()
+                    clearTourEffects()
+                }
+            }
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ShowLocationOnMap"))) { notification in
                 guard !layoutPreviewMode else { return }
                 print("🔔 [MapView] ShowLocationOnMap notification received!")
@@ -5822,6 +5784,11 @@ struct MapViewProduction: View {
         ) { item in
             showAddressSearch = false
             if let coord = item.placemark.location?.coordinate {
+                if isPoplurAIPostMode {
+                    selectPoplurAIMapPostCoordinate(coord)
+                    panTo(coord)
+                    return
+                }
                 if isPostPlacementMode {
                     postPlacementCoordinate = coord
                     panTo(coord)

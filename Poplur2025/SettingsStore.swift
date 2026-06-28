@@ -127,6 +127,7 @@ final class SettingsStore: ObservableObject {
         static let colorSchemePreference = "settings.colorSchemePreference"
         static let holdMenuLayoutPreference = "settings.holdMenuLayoutPreference"
         static let transitionStylePreference = "settings.transitionStylePreference"
+        static let tiltControlEnabled = "settings.tiltControlEnabled"
     }
 
     // MARK: - Video duration limit
@@ -216,6 +217,21 @@ final class SettingsStore: ObservableObject {
         set {
             objectWillChange.send()
             defaults.set(newValue.rawValue, forKey: Keys.holdMenuLayoutPreference)
+        }
+    }
+
+    // MARK: - Tilt control
+
+    var tiltControlEnabled: Bool {
+        get { defaults.object(forKey: Keys.tiltControlEnabled) as? Bool ?? false }
+        set {
+            objectWillChange.send()
+            defaults.set(newValue, forKey: Keys.tiltControlEnabled)
+            if newValue {
+                CubeMotionPoster.shared.start()
+            } else {
+                CubeMotionPoster.shared.stop()
+            }
         }
     }
 

@@ -1,293 +1,289 @@
 import SwiftUI
-import SpriteKit
-import AVFoundation
+import UIKit
 
-/// Animated SpriteKit-based zoom slider with notches and smooth interactions
-struct AnimatedZoomSlider: UIViewRepresentable {
-    @Binding var zoomLevel: Double // 10m to 40,000,000m
+struct AnimatedZoomSlider: View {
+    @Binding var zoomLevel: Double
     let onZoomChange: (Double) -> Void
-    
-    func makeUIView(context: Context) -> SKView {
-        let view = SKView()
-        view.backgroundColor = .clear
-        view.isMultipleTouchEnabled = false
-        view.allowsTransparency = true
-        
-        let scene = ZoomSliderScene(size: CGSize(width: 60, height: 400))
-        scene.scaleMode = .fill
-        scene.backgroundColor = .clear
-        scene.anchorPoint = CGPoint(x: 0, y: 0)
-        scene.zoomLevel = zoomLevel
-        scene.onZoomChange = onZoomChange
-        scene.coordinator = context.coordinator
-        
-        view.presentScene(scene)
-        context.coordinator.scene = scene
-        
-        return view
-    }
-    
-    func updateUIView(_ uiView: SKView, context: Context) {
-        if let scene = context.coordinator.scene {
-            scene.updateZoomLevel(zoomLevel, animated: false)
-        }
-    }
-    
-    func makeCoordinator() -> Coordinator {
-        Coordinator()
-    }
-    
-    class Coordinator {
-        weak var scene: ZoomSliderScene?
-    }
-}
 
-// MARK: - SpriteKit Scene
+    @ObservedObject private var skinStore = CubeSkinStore.shared
+    @State private var isDragging = false
+    @State private var lastHapticStep = -1
 
-class ZoomSliderScene: SKScene {
-    var zoomLevel: Double = 100 {  // Start at 100m (close zoom - near top of slider)
-        didSet {
-            // Only update if scene is properly initialized
-            if knobNode != nil {
-                updateZoomLevel(zoomLevel, animated: true)
+    private let minZoom: Double = 10
+    private let maxZoom: Double = 40_000_000
+    private let feedback = UIImpactFeedbackGenerator(style: .light)
+
+    var body: some View {
+        GeometryReader { proxy in
+            let size = proxy.size
+            let skin = skinStore.current
+            let metrics = ZoomSliderMetrics(size: size)
+            let normalized = normalizedZoom(zoomLevel)
+            let knobY = metrics.trackTop + CGFloat(normalized) * metrics.trackHeight
+
+            ZStack {
+                ThemedSkinPlate(
+                    skin: skin,
+                    tab: .map,
+                    cornerRadius: metrics.cornerRadius(for: skin),
+                    isPressed: isDragging,
+                    borderWidth: skin == .ice ? 2.8 : 2,
+                    glowRadius: metrics.glowRadius(for: skin)
+                )
+                .frame(width: metrics.plateWidth(for: skin), height: metrics.plateHeight)
+
+                VStack(spacing: 0) {
+                    sliderIcon(systemName: "plus", skin: skin)
+                        .frame(height: metrics.iconBand)
+
+                    Spacer(minLength: 0)
+
+                    sliderIcon(systemName: "minus", skin: skin)
+                        .frame(height: metrics.iconBand)
+                }
+                .frame(width: metrics.plateWidth(for: skin), height: metrics.plateHeight)
+                .allowsHitTesting(false)
+
+                sliderTrack(skin: skin, metrics: metrics)
+                    .frame(width: metrics.trackVisualWidth, height: metrics.trackHeight)
+                    .position(x: size.width / 2, y: metrics.trackCenterY)
+                    .allowsHitTesting(false)
+
+                zoomKnob(skin: skin, isDragging: isDragging)
+                    .frame(width: metrics.knobSize(for: skin), height: metrics.knobSize(for: skin))
+                    .position(x: size.width / 2, y: knobY)
+                    .animation(.spring(response: 0.22, dampingFraction: 0.72), value: zoomLevel)
+                    .animation(.spring(response: 0.18, dampingFraction: 0.64), value: isDragging)
             }
+            .frame(width: size.width, height: size.height)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        if !isDragging {
+                            isDragging = true
+                            feedback.prepare()
+                        }
+                        updateZoom(fromY: value.location.y, metrics: metrics)
+                    }
+                    .onEnded { _ in
+                        isDragging = false
+                        lastHapticStep = -1
+                    }
+            )
         }
     }
-    var onZoomChange: ((Double) -> Void)?
-    weak var coordinator: AnimatedZoomSlider.Coordinator?
-    
-    private var trackNode: SKShapeNode!
-    private var knobNode: SKShapeNode!
-    private var notchNodes: [SKShapeNode] = []
-    private var labelNodes: [SKLabelNode] = []
-    private var isDragging = false
-    private var dragStartY: CGFloat = 0
-    private var dragStartZoom: Double = 0
-    
-    // Haptic feedback
-    private var impactFeedback = UIImpactFeedbackGenerator(style: .medium)
-    private var lastNotchIndex: Int = -1
-    
-    // Audio feedback
-    private var audioPlayer: AVAudioPlayer?
-    
-    // Zoom range
-    private let minZoom: Double = 10 // 10m (very close - bottom of slider with new inversion)
-    private let maxZoom: Double = 40_000_000 // 40,000km (very far - top of slider with new inversion)
-    
-    // Visual constants
-    private let trackWidth: CGFloat = 8
-    private let trackHeight: CGFloat = 320
-    private let knobRadius: CGFloat = 18
-    private let knobWidth: CGFloat = 44
-    private let knobHeight: CGFloat = 28
-    private let notchCount = 10
-    
-    override func didMove(to view: SKView) {
-        super.didMove(to: view)
-        setupSlider()
-        setupAudio()
-    }
-    
-    private func setupAudio() {
-        // Load the pop sound (system sound or custom)
-        // Using a system sound for now - you can replace with custom audio file
-        guard let soundURL = Bundle.main.url(forResource: "pop", withExtension: "mp3") ?? 
-                             Bundle.main.url(forResource: "pop", withExtension: "wav") else {
-            print("⚠️ [ZoomSlider] Pop sound file not found, using haptic only")
-            return
-        }
-        
-        do {
-            audioPlayer = try AVAudioPlayer(contentsOf: soundURL)
-            audioPlayer?.prepareToPlay()
-            audioPlayer?.volume = 0.3 // Subtle volume
-        } catch {
-            print("⚠️ [ZoomSlider] Could not load audio: \(error.localizedDescription)")
+
+    private func updateZoom(fromY y: CGFloat, metrics: ZoomSliderMetrics) {
+        let clampedY = min(max(y, metrics.trackTop), metrics.trackTop + metrics.trackHeight)
+        let normalized = Double((clampedY - metrics.trackTop) / metrics.trackHeight)
+        let newZoom = zoomValue(for: normalized)
+        zoomLevel = newZoom
+        onZoomChange(newZoom)
+
+        let step = Int((1 - normalized) * 8)
+        if step != lastHapticStep {
+            lastHapticStep = step
+            feedback.impactOccurred(intensity: 0.45)
         }
     }
-    
-    private func playPopSound() {
-        audioPlayer?.currentTime = 0
-        audioPlayer?.play()
-    }
-    
-    private func setupSlider() {
-        // With anchor point at (0,0), center of scene is at (width/2, height/2)
-        let centerX = size.width / 2
-        let centerY = size.height / 2
-        
-        print("🔧 [ZoomSlider] setupSlider - centerX: \(centerX), centerY: \(centerY), initialZoom: \(zoomLevel)m")
-        
-        // Track - minimal vertical line
-        let trackPath = UIBezierPath(roundedRect: CGRect(x: -2, y: -trackHeight/2, width: 4, height: trackHeight), cornerRadius: 2)
-        trackNode = SKShapeNode(path: trackPath.cgPath)
-        trackNode.fillColor = UIColor(white: 0.3, alpha: 0.4)
-        trackNode.strokeColor = .clear
-        trackNode.position = CGPoint(x: centerX, y: centerY)
-        trackNode.zPosition = 50
-        addChild(trackNode)
-        
-        // Knob - simple cube-like design matching CubeTabView aesthetic
-        let knobPath = UIBezierPath(roundedRect: CGRect(x: -knobWidth/2, y: -knobHeight/2, width: knobWidth, height: knobHeight), cornerRadius: 4)
-        knobNode = SKShapeNode(path: knobPath.cgPath)
-        
-        knobNode.fillColor = UIColor.white
-        knobNode.strokeColor = UIColor.white.withAlphaComponent(0.9)
-        knobNode.lineWidth = 1
-        knobNode.position = CGPoint(x: centerX, y: centerY)
-        knobNode.zPosition = 100
-        
-        addChild(knobNode)
-        
-        print("🔧 [ZoomSlider] setupSlider complete - knob created at \(knobNode.position)")
-        
-        // Initial position
-        updateZoomLevel(zoomLevel, animated: false)
-        
-        print("🔧 [ZoomSlider] setupSlider - after updateZoomLevel, knob position: \(knobNode.position)")
-    }
-    
-    private func zoomValueForProgress(_ progress: Double) -> Double {
-        // Exponential mapping from progress to zoom value
-        let minLog = log10(minZoom)
-        let maxLog = log10(maxZoom)
-        let logValue = minLog + progress * (maxLog - minLog)
-        return pow(10.0, logValue)
-    }
-    
-    private func progressForZoomValue(_ zoom: Double) -> Double {
-        // Inverse exponential mapping - INVERTED for intuitive behavior
-        // 0 progress (close/zoomed in) = BOTTOM of slider
-        // 1 progress (far/zoomed out) = TOP of slider
+
+    private func normalizedZoom(_ zoom: Double) -> Double {
         let minLog = log10(minZoom)
         let maxLog = log10(maxZoom)
         let currentLog = log10(zoom.clamped(to: minZoom...maxZoom))
-        let normalProgress = (currentLog - minLog) / (maxLog - minLog)
-        return 1.0 - normalProgress // Invert the progress
+        return ((currentLog - minLog) / (maxLog - minLog)).clamped(to: 0...1)
     }
-    
-    private func formatZoomLabel(_ zoom: Double) -> String {
-        if zoom >= 1_000_000 {
-            return String(format: "%.0fkm", zoom / 1000)
-        } else if zoom >= 1000 {
-            return String(format: "%.1fkm", zoom / 1000)
-        } else {
-            return String(format: "%.0fm", zoom)
+
+    private func zoomValue(for normalized: Double) -> Double {
+        let minLog = log10(minZoom)
+        let maxLog = log10(maxZoom)
+        return pow(10, minLog + normalized.clamped(to: 0...1) * (maxLog - minLog))
+    }
+
+    private func sliderIcon(systemName: String, skin: CubeSkin) -> some View {
+        return Image(systemName: systemName)
+            .font(.system(size: iconSize(for: skin), weight: .black, design: .rounded))
+            .foregroundStyle(iconStyle(for: skin))
+            .shadow(color: glowColor(for: skin), radius: skin == .camo ? 1 : 6)
+            .shadow(color: Color.black.opacity(skin == .toy ? 0.16 : 0.52), radius: 2, x: 0, y: 2)
+            .padding(.top, systemName == "plus" ? 6 : 0)
+            .padding(.bottom, systemName == "minus" ? 6 : 0)
+            .accessibilityHidden(true)
+    }
+
+    private func sliderTrack(skin: CubeSkin, metrics: ZoomSliderMetrics) -> some View {
+        let theme = skin.appTheme
+        return ZStack {
+            RoundedRectangle(cornerRadius: metrics.trackVisualWidth / 2, style: .continuous)
+                .fill(trackFill(for: skin))
+                .frame(width: skin == .camo ? 3 : 5)
+                .shadow(color: glowColor(for: skin), radius: skin == .camo ? 0 : 4)
+
+            VStack(spacing: metrics.notchSpacing) {
+                ForEach(0..<8, id: \.self) { index in
+                    Circle()
+                        .fill(index.isMultiple(of: 3) ? theme.primaryText : theme.secondaryText)
+                        .frame(width: index.isMultiple(of: 3) ? 5 : 3, height: index.isMultiple(of: 3) ? 5 : 3)
+                        .shadow(color: glowColor(for: skin), radius: skin == .camo ? 0 : 3)
+                }
+            }
         }
     }
-    
-    func updateZoomLevel(_ zoom: Double, animated: Bool) {
-        guard let knob = knobNode else {
-            print("⚠️ [ZoomSlider] updateZoomLevel called but knob not ready, zoom: \(zoom)m")
-            return
+
+    private func zoomKnob(skin: CubeSkin, isDragging: Bool) -> some View {
+        let theme = skin.appTheme
+        return ZStack {
+            if skin == .sparklePink || skin == .rainbow {
+                Diamond()
+                    .fill(
+                        LinearGradient(
+                            colors: [theme.accent2, theme.accent, Color.white.opacity(0.92)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .shadow(color: theme.accent, radius: isDragging ? 14 : 9)
+            } else if skin == .camo {
+                ZStack {
+                    Circle()
+                        .stroke(theme.primaryText.opacity(0.82), lineWidth: 2)
+                    Circle()
+                        .fill(theme.surfaceStrong.opacity(0.82))
+                        .padding(7)
+                    Image(systemName: "scope")
+                        .font(.system(size: 18, weight: .black))
+                        .foregroundColor(theme.primaryText)
+                }
+            } else {
+                Circle()
+                    .fill(
+                        RadialGradient(
+                            colors: [
+                                Color.white.opacity(skin == .ice ? 0.96 : 0.72),
+                                theme.accent.opacity(0.92),
+                                theme.backgroundDeep.opacity(0.88)
+                            ],
+                            center: .topLeading,
+                            startRadius: 1,
+                            endRadius: 24
+                        )
+                    )
+                    .overlay(Circle().stroke(theme.primaryText.opacity(skin == .ice ? 0.92 : 0.55), lineWidth: 2))
+                    .shadow(color: glowColor(for: skin), radius: isDragging ? 16 : 10)
+            }
         }
-        
-        let centerY = size.height / 2
-        let progress = progressForZoomValue(zoom)
-        // With inverted progress: 0 = bottom (zoomed in), 1 = top (zoomed out)
-        let targetY = -trackHeight/2 + CGFloat(progress) * trackHeight
-        let finalY = centerY + targetY
-        
-        print("🔧 [ZoomSlider] updateZoomLevel: zoom=\(Int(zoom))m, progress=\(String(format: "%.3f", progress)), finalY=\(finalY)")
-        
-        if animated && !isDragging {
-            let moveAction = SKAction.moveTo(y: finalY, duration: 0.3)
-            moveAction.timingMode = .easeInEaseOut
-            knob.run(moveAction)
-        } else {
-            knob.position.y = finalY
-        }
-        
-        // Check if we're near a zone for haptic feedback
-        if isDragging {
-            checkForNotchHaptics(targetY: targetY, knob: knob)
+        .scaleEffect(isDragging ? 1.22 : 1)
+    }
+
+    private func iconSize(for skin: CubeSkin) -> CGFloat {
+        switch skin {
+        case .camo, .gold, .chocolate: return 20
+        default: return 23
         }
     }
-    
-    /// Check if knob crossed a notch and trigger haptic feedback
-    private func checkForNotchHaptics(targetY: CGFloat, knob: SKShapeNode) {
-        // Simplified - trigger feedback every 50 points of movement
-        let currentZone = Int(targetY / 50)
-        
-        if currentZone != lastNotchIndex {
-            lastNotchIndex = currentZone
-            
-            // Trigger haptic feedback
-            impactFeedback.impactOccurred(intensity: 0.5)
-            
-            // Play pop sound
-            playPopSound()
-            
-            // Subtle scale animation on knob
-            let scaleUp = SKAction.scale(to: 1.1, duration: 0.1)
-            let scaleDown = SKAction.scale(to: 1.0, duration: 0.1)
-            knob.run(SKAction.sequence([scaleUp, scaleDown]))
+
+    private func iconStyle(for skin: CubeSkin) -> some ShapeStyle {
+        switch skin {
+        case .rainbow:
+            return AnyShapeStyle(
+                LinearGradient(colors: [.yellow, .green, .cyan, .pink], startPoint: .topLeading, endPoint: .bottomTrailing)
+            )
+        case .toy:
+            return AnyShapeStyle(
+                LinearGradient(colors: [Color.red, Color.yellow, Color.blue], startPoint: .topLeading, endPoint: .bottomTrailing)
+            )
+        default:
+            return AnyShapeStyle(skin.appTheme.primaryText)
         }
     }
-    
-    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard let touch = touches.first else { return }
-        let location = touch.location(in: self)
-        
-        guard let knob = knobNode else { return }
-        
-        // Check if touch is on knob
-        if knob.contains(location) {
-            isDragging = true
-            dragStartY = location.y
-            dragStartZoom = zoomLevel
-            lastNotchIndex = -1
-            
-            impactFeedback.prepare()
-            
-            // Scale up animation
-            let scaleAction = SKAction.scale(to: 1.2, duration: 0.2)
-            scaleAction.timingMode = .easeOut
-            knob.run(scaleAction)
+
+    private func trackFill(for skin: CubeSkin) -> some ShapeStyle {
+        let theme = skin.appTheme
+        switch skin {
+        case .rainbow:
+            return AnyShapeStyle(
+                LinearGradient(colors: [.yellow, .green, .cyan, .pink], startPoint: .top, endPoint: .bottom)
+            )
+        case .sparklePink:
+            return AnyShapeStyle(
+                LinearGradient(colors: [theme.accent2, theme.accent, Color.white.opacity(0.72)], startPoint: .top, endPoint: .bottom)
+            )
+        case .ice:
+            return AnyShapeStyle(Color.white.opacity(0.78))
+        default:
+            return AnyShapeStyle(theme.primaryText.opacity(skin == .camo ? 0.68 : 0.78))
         }
     }
-    
-    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard isDragging, let touch = touches.first else { return }
-        let location = touch.location(in: self)
-        
-        let deltaY = dragStartY - location.y
-        let progress = Double(deltaY) / Double(trackHeight)
-        
-        // Calculate new zoom exponentially
-        let currentProgress = progressForZoomValue(dragStartZoom)
-        let newProgress = (currentProgress + progress).clamped(to: 0...1)
-        let newZoom = zoomValueForProgress(newProgress)
-        
-        // Update - with safety check
-        guard !newZoom.isNaN && !newZoom.isInfinite else { return }
-        
-        // Update zoom level without triggering didSet to avoid potential issues
-        updateZoomLevel(newZoom, animated: false)
-        onZoomChange?(newZoom)
-    }
-    
-    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
-        if isDragging {
-            isDragging = false
-            lastNotchIndex = -1
-            
-            // Scale back animation
-            let scaleAction = SKAction.scale(to: 1.0, duration: 0.2)
-            scaleAction.timingMode = .easeInEaseOut
-            knobNode?.run(scaleAction)
+
+    private func glowColor(for skin: CubeSkin) -> Color {
+        switch skin {
+        case .ice: return Color.white.opacity(0.82)
+        case .sparklePink, .rainbow, .rubber: return skin.appTheme.accent.opacity(0.86)
+        default: return skin.appTheme.shadow
         }
-    }
-    
-    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
-        touchesEnded(touches, with: event)
     }
 }
 
-// Helper extension
+private struct ZoomSliderMetrics {
+    let size: CGSize
+
+    var plateHeight: CGFloat { max(220, min(size.height, 360)) }
+    var iconBand: CGFloat { min(62, plateHeight * 0.19) }
+    var trackTop: CGFloat { (size.height - plateHeight) / 2 + iconBand + 12 }
+    var trackHeight: CGFloat { max(80, plateHeight - iconBand * 2 - 24) }
+    var trackCenterY: CGFloat { trackTop + trackHeight / 2 }
+    var trackVisualWidth: CGFloat { 22 }
+    var notchSpacing: CGFloat { max(12, (trackHeight - 34) / 7) }
+
+    func plateWidth(for skin: CubeSkin) -> CGFloat {
+        switch skin {
+        case .camo, .gold, .chocolate: return min(size.width, 54)
+        default: return min(size.width, 62)
+        }
+    }
+
+    func knobSize(for skin: CubeSkin) -> CGFloat {
+        switch skin {
+        case .sparklePink, .rainbow: return 28
+        case .camo: return 30
+        case .ice: return 32
+        default: return 27
+        }
+    }
+
+    func cornerRadius(for skin: CubeSkin) -> CGFloat {
+        switch skin {
+        case .camo, .gold, .chocolate: return 13
+        case .ice: return 22
+        default: return 24
+        }
+    }
+
+    func glowRadius(for skin: CubeSkin) -> CGFloat {
+        switch skin {
+        case .ice: return 20
+        case .sparklePink, .rainbow: return 18
+        case .camo: return 7
+        default: return 11
+        }
+    }
+}
+
+private struct Diamond: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.midX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
+        path.addLine(to: CGPoint(x: rect.midX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.midY))
+        path.closeSubpath()
+        return path
+    }
+}
+
 private extension Double {
     func clamped(to range: ClosedRange<Double>) -> Double {
-        return min(max(self, range.lowerBound), range.upperBound)
+        min(max(self, range.lowerBound), range.upperBound)
     }
 }

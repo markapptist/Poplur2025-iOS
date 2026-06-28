@@ -37,37 +37,126 @@ struct FeedChannelStepper3D: View {
     let pressToken: Int
     let onUp: () -> Void
     let onDown: () -> Void
+    @ObservedObject private var skinStore = CubeSkinStore.shared
 
     var body: some View {
-        VStack(spacing: -2) {
+        VStack(spacing: 12) {
             FeedChannelButtonHitTarget(accessibilityLabel: "Channel up", action: onUp) {
-                FeedChannelButtonSceneView(
+                ThemedFeedChannelButton(
                     kind: .up,
+                    skin: skinStore.current,
                     isPressed: activeButton == .up,
                     pressToken: pressToken
                 )
-                .frame(width: 82, height: 74)
+                .frame(width: 76, height: 76)
             }
 
-            FeedChannelButtonSceneView(
+            ThemedFeedChannelButton(
                 kind: .ch,
+                skin: skinStore.current,
                 isPressed: activeButton != nil,
                 pressToken: pressToken
             )
-            .frame(width: 82, height: 56)
+            .frame(width: 70, height: 50)
             .allowsHitTesting(false)
             .accessibilityHidden(true)
 
             FeedChannelButtonHitTarget(accessibilityLabel: "Channel down", action: onDown) {
-                FeedChannelButtonSceneView(
+                ThemedFeedChannelButton(
                     kind: .down,
+                    skin: skinStore.current,
                     isPressed: activeButton == .down,
                     pressToken: pressToken
                 )
-                .frame(width: 82, height: 78)
+                .frame(width: 76, height: 76)
             }
         }
-        .frame(width: 86, height: 208)
+        .frame(width: 86, height: 226)
+    }
+}
+
+private struct ThemedFeedChannelButton: View {
+    let kind: FeedChannelButtonKind
+    let skin: CubeSkin
+    let isPressed: Bool
+    let pressToken: Int
+
+    private var theme: CubeSkinAppTheme { skin.appTheme }
+    private var isMiddle: Bool { kind == .ch }
+    private var cornerRadius: CGFloat {
+        switch skin {
+        case .camo, .gold, .chocolate: return isMiddle ? 12 : 14
+        case .toy: return isMiddle ? 14 : 20
+        default: return isMiddle ? 16 : 18
+        }
+    }
+
+    var body: some View {
+        ZStack {
+            ThemedSkinPlate(
+                skin: skin,
+                tab: .feed,
+                cornerRadius: cornerRadius,
+                isPressed: isPressed,
+                borderWidth: skin == .ice ? 2.6 : 2,
+                glowRadius: glowRadius
+            )
+
+            icon
+                .foregroundStyle(iconStyle)
+                .shadow(color: glowColor, radius: skin == .camo ? 1 : 7)
+                .shadow(color: Color.black.opacity(skin == .toy ? 0.16 : 0.55), radius: 2, x: 0, y: 2)
+        }
+        .animation(.spring(response: 0.18, dampingFraction: 0.58), value: pressToken)
+        .animation(.spring(response: 0.20, dampingFraction: 0.62), value: isPressed)
+    }
+
+    @ViewBuilder
+    private var icon: some View {
+        switch kind {
+        case .up:
+            Image(systemName: "chevron.up")
+                .font(.system(size: 30, weight: .black, design: .rounded))
+        case .ch:
+            Text("CH")
+                .font(.system(size: 22, weight: .black, design: .rounded))
+                .minimumScaleFactor(0.72)
+        case .down:
+            Image(systemName: "chevron.down")
+                .font(.system(size: 31, weight: .black, design: .rounded))
+        }
+    }
+
+    private var iconStyle: some ShapeStyle {
+        switch skin {
+        case .rainbow:
+            return AnyShapeStyle(
+                LinearGradient(colors: [.yellow, .green, .cyan, .pink], startPoint: .topLeading, endPoint: .bottomTrailing)
+            )
+        case .toy where kind == .up:
+            return AnyShapeStyle(Color(red: 0.02, green: 0.23, blue: 0.72))
+        case .toy where kind == .down:
+            return AnyShapeStyle(Color(red: 0.92, green: 0.10, blue: 0.10))
+        default:
+            return AnyShapeStyle(theme.primaryText)
+        }
+    }
+
+    private var glowColor: Color {
+        switch skin {
+        case .ice: return Color.white.opacity(0.78)
+        case .sparklePink, .rainbow, .rubber: return theme.accent.opacity(0.86)
+        default: return theme.shadow
+        }
+    }
+
+    private var glowRadius: CGFloat {
+        switch skin {
+        case .ice: return 16
+        case .sparklePink, .rainbow: return 18
+        case .camo: return 5
+        default: return 10
+        }
     }
 }
 

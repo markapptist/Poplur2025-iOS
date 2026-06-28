@@ -68,9 +68,55 @@ private extension ProfileNotificationItem.Kind {
     }
 }
 
+private struct HeyPoplurProfileTutorialView: View {
+    let accent: Color
+    let onDismiss: () -> Void
+
+    var body: some View {
+        VStack {
+            Spacer()
+            VStack(spacing: 12) {
+                Text("Say \"Hey Poplur\"")
+                    .font(.system(size: 25, weight: .black, design: .rounded))
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(.center)
+
+                Text("The edges light up in your theme color. Then tell Poplur what to do.")
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.82))
+                    .multilineTextAlignment(.center)
+
+                Button(action: onDismiss) {
+                    Text("Got it")
+                        .font(.system(size: 15, weight: .black, design: .rounded))
+                        .foregroundStyle(.black)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 10)
+                        .background(accent, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 2)
+            }
+            .padding(.horizontal, 22)
+            .padding(.vertical, 18)
+            .frame(maxWidth: 330)
+            .background(Color.black.opacity(0.78), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(accent.opacity(0.9), lineWidth: 1.5)
+            )
+            .shadow(color: accent.opacity(0.62), radius: 22)
+            .padding(.horizontal, 24)
+            .padding(.bottom, 146)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
 struct ProfileView: View {
     @Environment(\.layoutPreviewMode) private var layoutPreviewMode
     @EnvironmentObject private var auth: AuthViewModel
+    @ObservedObject private var cubeSkinStore = CubeSkinStore.shared
     @GestureState private var isInteractingWithCube: Bool = false
     @State private var isScrollDisabled = false
     
@@ -78,6 +124,10 @@ struct ProfileView: View {
     @Environment(\.routedUserID) private var routedUserID
     
     // Track if we're viewing own profile or another user's
+    private var myPostsTotalRadiusKM: Double {
+        Double(myPosts.reduce(0) { $0 + $1.radius }) / 1000.0
+    }
+
     private var isOwnProfile: Bool {
         let targetUserID = effectiveUserID
         if let currentUID = Auth.auth().currentUser?.uid {
@@ -105,6 +155,9 @@ struct ProfileView: View {
     @State private var displayUsername: String? = nil
     @State private var userProfile: UserProfile?
 
+    @AppStorage("poplur_profileAvatarIs3D") private var profileAvatarIs3D = false
+    @AppStorage("poplur.profile.heyPoplurTutorialSeen.v1") private var hasSeenHeyPoplurProfileTutorial = false
+    @State private var showHeyPoplurProfileTutorial = false
     @State private var myPosts: [Post] = []
     @State private var loadedImages: [String: UIImage] = [:]
     @State private var isLoading = false
@@ -319,15 +372,33 @@ struct ProfileView: View {
         var id: String { rawValue }
     }
     @State private var mode: DisplayMode = .media
+    @State private var radiusSortOrder: PoplurAIProfileSortOrder?
+
+    private var displayedPosts: [Post] {
+        switch radiusSortOrder {
+        case .mostRadius:
+            return myPosts.sorted { $0.radius > $1.radius }
+        case .leastRadius:
+            return myPosts.sorted { $0.radius < $1.radius }
+        case nil:
+            return myPosts
+        }
+    }
 
     private let gridCols = [
-        GridItem(.flexible(), spacing: 12),
-        GridItem(.flexible(), spacing: 12),
-        GridItem(.flexible(), spacing: 12)
+        GridItem(.flexible(minimum: 86, maximum: 108), spacing: 10),
+        GridItem(.flexible(minimum: 86, maximum: 108), spacing: 10),
+        GridItem(.flexible(minimum: 86, maximum: 108), spacing: 10)
     ]
 
     private let tileCorner: CGFloat = 18
-    private let tileSpacing: CGFloat = 12
+    private let tileSpacing: CGFloat = 10
+    private let profileGridMaxWidth: CGFloat = 348
+    private let profileGridHorizontalPadding: CGFloat = 28
+
+    private var skinTheme: CubeSkinAppTheme {
+        cubeSkinStore.current.appTheme
+    }
 
     let userID: String?
     
@@ -397,749 +468,876 @@ struct ProfileView: View {
     }
 
     @ViewBuilder
-    var body: some View {
-        ZStack {
-            Color.white.ignoresSafeArea()
+    private var profileImagePickerSheet: some View {
+        ImagePickerView(
+            selectedImage: profileImageSelectionBinding,
+            selectedVideoURL: .constant(nil)
+        )
+    }
 
-            VStack(spacing: 0) {
-                    VStack(spacing: 10) {
-                        avatarRow
-                        usernameRow
-                        modeSwitcher
-                    }
-                    .padding(.top, isOwnProfile ? 8 : 0)
-                    .padding(.bottom, 0)
+    private var profileImageSelectionBinding: Binding<UIImage?> {
+        Binding(
+            get: { profileImage },
+            set: { handleSelectedProfileImage($0) }
+        )
+    }
 
-                    // Scrollable content with readers for "scroll to top"
-                    ScrollViewReader { proxy in
-                        Group {
-                            if isLoading || !hasLoadedOnce {
-                                VStack(spacing: 12) {
-                                    ProgressView()
-                                        .controlSize(.regular)
-                                    Text("Loading posts")
-                                        .font(.system(size: 14, weight: .semibold))
-                                        .foregroundColor(.secondary)
-                                }
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                    .id("top")
-                            } else if myPosts.isEmpty {
-                                VStack(spacing: 8) {
-                                    Image(systemName: "square.stack.3d.up.slash")
-                                        .font(.system(size: 36, weight: .semibold))
-                                        .foregroundColor(.secondary)
-                                    Text("No posts yet.")
-                                        .foregroundColor(.secondary)
-                                }
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                .id("top")
-                            } else {
-                                switch mode {
-                                case .media:
-                                    ScrollView {
-                                        VStack(spacing: 0) {
-                                            Color.clear.frame(height: 0).id("top")
-                                            LazyVGrid(columns: gridCols, spacing: tileSpacing) {
-                                                ForEach(myPosts) { post in
-                                                    ProfileGridTile(post: post, preloadedImage: loadedImages[post.id])
-                                                        .onTapGesture {
-                                                            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                                                                expandedPost = post
-                                                                // Notify radius change for global radius bar sync
-                                                                NotificationCenter.default.post(name: Notification.Name("currentPostRadiusDidChange"), object: nil, userInfo: ["radius": Double(post.radius)])
-                                                            }
-                                                        }
-                                                        .onLongPressGesture(minimumDuration: 0.5) {
-                                                            // Long press to show post location on map with user annotation
-                                                            let coordinate = CLLocationCoordinate2D(latitude: post.latitude, longitude: post.longitude)
-                                                            let latitude = coordinate.latitude
-                                                            let longitude = coordinate.longitude
-                                                            let postRadius = post.radius
-                                                            print("📍 [ProfileView Grid] Long press - showing post location: \(latitude), \(longitude)")
-                                                            print("   Post radius: \(postRadius)m")
-                                                            
-                                                            // Haptic feedback
-                                                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                                                            
-                                                            // Get profile image URL
-                                                            let profileURL: String? = post.posterURL ?? userProfile?.profilePictureURL?.absoluteString
-                                                            
-                                                            print("📍 [ProfileView Grid] Setting pending post location in MapStateManager")
-                                                            
-                                                            // Store in shared state manager - this persists even when MapView isn't loaded
-                                                            MapStateManager.shared.setPendingPostLocation(
-                                                                coordinate,
-                                                                userID: post.userID,
-                                                                username: displayUsername,
-                                                                profileImageURL: profileURL,
-                                                                radius: Double(post.radius)
-                                                            )
-                                                            
-                                                            // Also post notification for already-loaded MapView instances
-                                                            var userInfo: [String: Any] = [
-                                                                "coordinate": coordinate,
-                                                                "userID": post.userID,
-                                                                "radius": Double(post.radius)
-                                                            ]
-                                                            
-                                                            if let username = displayUsername {
-                                                                userInfo["username"] = username
-                                                            }
-                                                            
-                                                            if let profileURL = profileURL {
-                                                                userInfo["profileImageURL"] = profileURL
-                                                            }
-                                                            
-                                                            NotificationCenter.default.post(
-                                                                name: Notification.Name("ShowLocationOnMap"),
-                                                                object: nil,
-                                                                userInfo: userInfo
-                                                            )
-                                                            
-                                                            // Wait a moment for map to process location before switching tabs
-                                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                                                                // Then switch to map tab
-                                                                NotificationCenter.default.post(
-                                                                    name: Notification.Name("SwitchToMapTab"),
-                                                                    object: nil
-                                                                )
-                                                            }
-                                                        }
-                                                }
-                                                Color.clear.frame(height: 1).onAppear {
-                                                    loadMoreIfNeeded(currentItem: myPosts.last)
-                                                }
-                                            }
-                                            if isLoadingMore {
-                                                ProgressView().padding(.vertical, 12)
-                                            }
-                                        }
-                                        .padding(.horizontal, 16)
-                                        .padding(.top, 8)
-                                        .padding(.bottom, 16)
-                                    }
-                                    .scrollDisabled(isScrollDisabled)
-                                    .refreshable {
-                                        await loadMyPosts()
-                                    }
-                                case .messages:
-                                    ScrollView {
-                                        VStack(spacing: 0) {
-                                            Color.clear.frame(height: 0).id("top")
-                                            VStack(spacing: 18) {
-                                                // Messages view - placeholder for now
-                                                VStack(spacing: 12) {
-                                                    Image(systemName: "message.fill")
-                                                        .font(.system(size: 48, weight: .semibold))
-                                                        .foregroundColor(.secondary)
-                                                    Text("Messages")
-                                                        .font(.headline)
-                                                        .foregroundColor(.primary)
-                                                    Text("Your uploaded messages will appear here")
-                                                        .font(.subheadline)
-                                                        .foregroundColor(.secondary)
-                                                        .multilineTextAlignment(.center)
-                                                }
-                                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                                .padding(.top, 60)
-                                            }
-                                        }
-                                        .padding(.horizontal, 16)
-                                        .padding(.top, 8)
-                                        .padding(.bottom, 16)
-                                    }
-                                    .scrollDisabled(isScrollDisabled)
-                                    .refreshable {
-                                        await loadMyPosts()
-                                    }
-                                }
-                            }
-                        }
-                        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ResetTabToTop"))) { _ in
-                            withAnimation(.easeInOut(duration: 0.25)) {
-                                proxy.scrollTo("top", anchor: .top)
-                            }
-                        }
+    private func handleSelectedProfileImage(_ newImage: UIImage?) {
+        guard let image = newImage else { return }
+        profileImage = image
+        if let url = try? saveProfileImage(image) {
+            profileImageURL = url
+            saveFaceForRecognition(image: image)
+        }
+        NotificationCenter.default.post(name: Notification.Name("ProfilePhotoUpdated"), object: image)
+    }
+
+    private func handleHeadScannerResult(_ result: Swift.Result<HSOutput, HSError>) {
+        switch result {
+        case .success(let output):
+            if let image = output.previewImage {
+                handleSelectedProfileImage(image)
+            }
+            lastHeadModelURL = output.usdzURL
+            if output.usdzURL != nil {
+                navigateToViewer = true
+            }
+        case .failure:
+            break
+        }
+    }
+
+    private var profileMainStack: some View {
+        VStack(spacing: 0) {
+            profileHeader
+            profileScrollableContent
+        }
+    }
+
+    private var profileHeader: some View {
+        VStack(spacing: 10) {
+            avatarRow
+            usernameRow
+            modeSwitcher
+        }
+        .padding(.top, isOwnProfile ? 8 : 0)
+        .padding(.bottom, 0)
+    }
+
+    private var profileScrollableContent: some View {
+        ScrollViewReader { proxy in
+            profileScrollStateContent
+                .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ResetTabToTop"))) { _ in
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        proxy.scrollTo("top", anchor: .top)
                     }
                 }
+        }
+    }
+
+    @ViewBuilder
+    private var profileScrollStateContent: some View {
+        if isLoading || !hasLoadedOnce {
+            loadingPostsView
+        } else if myPosts.isEmpty {
+            emptyPostsView
+        } else {
+            profileLoadedContent
+        }
+    }
+
+    private var loadingPostsView: some View {
+        VStack(spacing: 12) {
+            ProgressView()
+                .controlSize(.regular)
+            Text("Loading posts")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(skinTheme.secondaryText)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .id("top")
+    }
+
+    private var emptyPostsView: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "square.stack.3d.up.slash")
+                .font(.system(size: 36, weight: .semibold))
+                .foregroundColor(skinTheme.secondaryText)
+            Text("No posts yet.")
+                .foregroundColor(skinTheme.secondaryText)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .id("top")
+    }
+
+    @ViewBuilder
+    private var profileLoadedContent: some View {
+        switch mode {
+        case .media:
+            mediaPostsScroll
+        case .messages:
+            messagesScroll
+        }
+    }
+
+    private var mediaPostsScroll: some View {
+        ScrollView {
+            VStack(spacing: 0) {
+                Color.clear.frame(height: 0).id("top")
+                LazyVGrid(columns: gridCols, spacing: tileSpacing) {
+                    ForEach(displayedPosts) { post in
+                        ProfileGridTile(post: post, preloadedImage: loadedImages[post.id], skin: cubeSkinStore.current)
+                            .onTapGesture {
+                                expandPost(post)
+                            }
+                            .onLongPressGesture(minimumDuration: 0.5) {
+                                handlePostLongPress(post)
+                            }
+                    }
+                    Color.clear.frame(height: 1).onAppear {
+                        loadMoreIfNeeded(currentItem: displayedPosts.last)
+                    }
+                }
+                .frame(maxWidth: profileGridMaxWidth)
+                if isLoadingMore {
+                    ProgressView().padding(.vertical, 12)
+                }
+            }
+            .padding(.horizontal, profileGridHorizontalPadding)
+            .padding(.top, 8)
+            .padding(.bottom, 260)
+        }
+        .scrollDisabled(isScrollDisabled)
+        .refreshable {
+            await loadMyPosts()
+        }
+    }
+
+    private var messagesScroll: some View {
+        ScrollView {
+            VStack(spacing: 0) {
+                Color.clear.frame(height: 0).id("top")
+                VStack(spacing: 18) {
+                    VStack(spacing: 12) {
+                        Image(systemName: "message.fill")
+                            .font(.system(size: 48, weight: .semibold))
+                            .foregroundColor(skinTheme.secondaryText)
+                        Text("Messages")
+                            .font(.headline)
+                            .foregroundColor(skinTheme.primaryText)
+                        Text("Your uploaded messages will appear here")
+                            .font(.subheadline)
+                            .foregroundColor(skinTheme.secondaryText)
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(.top, 60)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 16)
+        }
+        .scrollDisabled(isScrollDisabled)
+        .refreshable {
+            await loadMyPosts()
+        }
+    }
+
+    @ViewBuilder
+    private var expandedPostOverlay: some View {
+        if let post = expandedPost {
+            ZStack {
+                Color.black.opacity(0.6)
+                    .ignoresSafeArea()
+                    .transition(.opacity)
+
+                FeedFullscreenPage(
+                    post: feedPost(from: post),
+                    displayName: "",
+                    onUserTapped: { _ in }
+                )
+                .transition(.scale.combined(with: .opacity))
+                .onAppear {
+                    handleExpandedPostAppear(post)
+                }
+                .onDisappear {
+                    NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
+                }
+                .overlay(alignment: .topLeading) {
+                    expandedPostDeleteButton
+                }
+                .overlay(alignment: .bottomLeading) {
+                    expandedPostRadiusBadge(post)
+                }
+            }
+            .zIndex(10)
+        }
+    }
+
+    @ViewBuilder
+    private var expandedPostDeleteButton: some View {
+        if isOwnProfile {
+            Button(role: .destructive) {
+                Task {
+                    await deletePost(expandedPost)
+                    withAnimation(.easeOut(duration: 0.25)) { expandedPost = nil }
+                }
+            } label: {
+                Label("Delete", systemImage: "trash.fill")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(10)
+                    .background(
+                        Capsule().fill(Color.red.opacity(0.85))
+                    )
+                    .padding(12)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func expandedPostRadiusBadge(_ post: Post) -> some View {
+        Text("\(max(1, Int(post.radius) / 1000)) KM")
+            .font(.system(size: 16, weight: .heavy, design: .rounded))
+            .foregroundColor(.white)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                Capsule().fill(Color.black.opacity(0.55))
+            )
+            .padding(16)
+    }
+
+    @ViewBuilder
+    private var profileTransientOverlays: some View {
+        if cubeMenuWheel.isOnScreen && isOwnProfile {
+            CubeMenuWheelOverlay(controller: cubeMenuWheel)
+                .transition(.opacity)
+                .zIndex(20)
+        }
+
+        if showPopularPhone {
+            PopularPhone(user: FakeUser(id: UUID(), name: "Poplur Phone"))
+                .transition(.opacity)
+                .zIndex(30)
+        }
+
+        if editing {
+            EditProfileView(user: editableUserProfileBinding) {
+                editing = false
+            }
+            .transition(.opacity)
+            .zIndex(40)
+        }
+
+        profilePhotoOptionsOverlay
+
+        if showHeyPoplurProfileTutorial {
+            HeyPoplurProfileTutorialView(
+                accent: cubeSkinStore.current.appTheme.accent,
+                onDismiss: dismissHeyPoplurProfileTutorial
+            )
+            .transition(.scale(scale: 0.96).combined(with: .opacity))
+            .zIndex(60)
+        }
+    }
+
+    @ViewBuilder
+    private var profilePhotoOptionsOverlay: some View {
+        if showProfilePhotoOptions {
+            VStack(spacing: 12) {
+                Button("Scan Face (AR)") {
+                    showProfilePhotoOptions = false
+                    navigateToScanner = true
+                }
+                .buttonStyle(.borderedProminent)
+
+                Button("Take Photo") {
+                    showProfilePhotoOptions = false
+                    showImagePicker = true
+                }
+                .buttonStyle(.bordered)
+
+                if profileImage != nil || profileImageURL != nil {
+                    Button("Delete Photo", role: .destructive) {
+                        showProfilePhotoOptions = false
+                        deleteProfilePhoto()
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+            .padding(18)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .padding(.horizontal, 28)
+            .transition(.opacity)
+            .zIndex(45)
+        }
+    }
+
+    @ViewBuilder
+    private var profileRouteOverlays: some View {
+        if showSettings {
+            AppSettingsView()
+                .transition(.opacity)
+                .zIndex(50)
+        }
+
+        profileStatsOverlay
+
+        if navigateToMessages {
+            MessagesRootView()
+                .transition(.opacity)
+                .zIndex(51)
+        }
+
+        if showNotifications {
+            ProfileNotificationsView(
+                notifications: profileNotifications,
+                onMarkRead: {
+                    hasUncheckedNotifications = false
+                    notificationCenter.markAllRead()
+                }
+            )
+            .transition(.opacity)
+            .zIndex(52)
+        }
+
+        if showRadiusStore {
+            RadiusStoreView(
+                purchasedRadiusMeters: $purchasedRadiusMeters,
+                userID: effectiveUserID,
+                purchaseVM: radiusPurchaseVM
+            )
+            .transition(.opacity)
+            .zIndex(53)
+        }
+
+        if navigateToScanner {
+            HeadScannerView(onComplete: handleHeadScannerResult)
+                .transition(.opacity)
+                .zIndex(54)
+        }
+
+        if navigateToViewer {
+            profileViewerOverlay
+        }
+    }
+
+    @ViewBuilder
+    private var profileViewerOverlay: some View {
+        if let url = lastHeadModelURL {
+            USDZViewerView(usdzURL: url)
+                .transition(.opacity)
+                .zIndex(55)
+        } else {
+            Text("No model available")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color.black)
+                .foregroundColor(.white)
+                .transition(.opacity)
+                .zIndex(55)
+        }
+    }
+
+    private func feedPost(from post: Post) -> FeedPost {
+        FeedPost(
+            id: post.id,
+            latitude: post.latitude,
+            longitude: post.longitude,
+            mediaURL: post.mediaURL,
+            radius: Double(post.radius),
+            viewCount: post.viewCount,
+            userID: post.userID,
+            cityName: nil,
+            countryName: nil,
+            countryFlag: nil
+        )
+    }
+
+    private func expandPost(_ post: Post) {
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+            expandedPost = post
+            NotificationCenter.default.post(
+                name: Notification.Name("currentPostRadiusDidChange"),
+                object: nil,
+                userInfo: ["radius": Double(post.radius)]
+            )
+        }
+    }
+
+    private func handleExpandedPostAppear(_ post: Post) {
+        NotificationCenter.default.post(
+            name: Notification.Name("currentPostRadiusDidChange"),
+            object: nil,
+            userInfo: ["radius": Double(post.radius)]
+        )
+        NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
+    }
+
+    private func handlePostLongPress(_ post: Post) {
+        let coordinate = CLLocationCoordinate2D(latitude: post.latitude, longitude: post.longitude)
+        let latitude = coordinate.latitude
+        let longitude = coordinate.longitude
+        let postRadius = post.radius
+        print("📍 [ProfileView Grid] Long press - showing post location: \(latitude), \(longitude)")
+        print("   Post radius: \(postRadius)m")
+
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+
+        let profileURL: String? = post.posterURL ?? userProfile?.profilePictureURL?.absoluteString
+
+        print("📍 [ProfileView Grid] Setting pending post location in MapStateManager")
+        MapStateManager.shared.setPendingPostLocation(
+            coordinate,
+            userID: post.userID,
+            username: displayUsername,
+            profileImageURL: profileURL,
+            radius: Double(post.radius)
+        )
+
+        var userInfo: [String: Any] = [
+            "coordinate": coordinate,
+            "userID": post.userID,
+            "radius": Double(post.radius)
+        ]
+
+        if let username = displayUsername {
+            userInfo["username"] = username
+        }
+
+        if let profileURL = profileURL {
+            userInfo["profileImageURL"] = profileURL
+        }
+
+        NotificationCenter.default.post(
+            name: Notification.Name("ShowLocationOnMap"),
+            object: nil,
+            userInfo: userInfo
+        )
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            NotificationCenter.default.post(
+                name: Notification.Name("SwitchToMapTab"),
+                object: nil
+            )
+        }
+    }
+
+    var body: some View {
+        profileScene
+    }
+
+    private var profileRootScene: some View {
+        ZStack {
+            CubeSkinThemedBackground(skin: cubeSkinStore.current)
+
+            profileMainStack
                 .zIndex(1)
 
-                // Removed local IsometricRadiusBar overlay here
-
-                // REMOVED: Global gesture layer - cube gestures now handled by the cube itself in TabBarControllerHost
-                if let post = expandedPost {
-                    ZStack {
-                        Color.black.opacity(0.6)
-                            .ignoresSafeArea()
-                            .transition(.opacity)
-
-                        FeedFullscreenPage(
-                            post: FeedPost(
-                                id: post.id,
-                                latitude: post.latitude,
-                                longitude: post.longitude,
-                                mediaURL: post.mediaURL,
-                                radius: Double(post.radius),
-                                viewCount: post.viewCount,
-                                userID: post.userID,
-                                cityName: nil,
-                                countryName: nil,
-                                countryFlag: nil
-                            ),
-                            displayName: "",
-                            onUserTapped: { _ in }
-                        )
-                        .transition(.scale.combined(with: .opacity))
-                        .onAppear {
-                            // Notify radius change for global radius bar sync on fullscreen appearance
-                            NotificationCenter.default.post(name: Notification.Name("currentPostRadiusDidChange"), object: nil, userInfo: ["radius": Double(post.radius)])
-                            NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
-                        }
-                        .onDisappear {
-                            NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
-                        }
-                        .overlay(alignment: .topLeading) {
-                            if isOwnProfile {
-                                Button(role: .destructive) {
-                                    Task {
-                                        await deletePost(expandedPost)
-                                        withAnimation(.easeOut(duration: 0.25)) { expandedPost = nil }
-                                    }
-                                } label: {
-                                    Label("Delete", systemImage: "trash.fill")
-                                        .font(.system(size: 16, weight: .bold))
-                                        .foregroundStyle(.white)
-                                        .padding(10)
-                                        .background(
-                                            Capsule().fill(Color.red.opacity(0.85))
-                                        )
-                                        .padding(12)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                        .overlay(alignment: .bottomLeading) {
-                            Text("\(max(1, Int(post.radius) / 1000)) KM")
-                                .font(.system(size: 16, weight: .heavy, design: .rounded))
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .background(
-                                    Capsule().fill(Color.black.opacity(0.55))
-                                )
-                                .padding(16)
-                        }
-                    }
-                    .zIndex(10)
-                }
-
-                if cubeMenuWheel.isOnScreen && isOwnProfile {
-                    CubeMenuWheelOverlay(controller: cubeMenuWheel)
-                    .transition(.opacity)
-                    .zIndex(20)
-                }
-
-                if showPopularPhone {
-                    PopularPhone(user: FakeUser(id: UUID(), name: "Poplur Phone"))
-                        .transition(.opacity)
-                        .zIndex(30)
-                }
-
-                if editing {
-                    EditProfileView(user: editableUserProfileBinding) {
-                        editing = false
-                    }
-                    .transition(.opacity)
-                    .zIndex(40)
-                }
-
-                if showProfilePhotoOptions {
-                    VStack(spacing: 12) {
-                        Button("Scan Face (AR)") {
-                            showProfilePhotoOptions = false
-                            navigateToScanner = true
-                        }
-                        .buttonStyle(.borderedProminent)
-
-                        Button("Take Photo") {
-                            showProfilePhotoOptions = false
-                            showImagePicker = true
-                        }
-                        .buttonStyle(.bordered)
-
-                        if profileImage != nil || profileImageURL != nil {
-                            Button("Delete Photo", role: .destructive) {
-                                showProfilePhotoOptions = false
-                                deleteProfilePhoto()
-                            }
-                            .buttonStyle(.bordered)
-                        }
-                    }
-                    .padding(18)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    .padding(.horizontal, 28)
-                    .transition(.opacity)
-                    .zIndex(45)
-                }
-
-                if showSettings {
-                    AppSettingsView()
-                        .transition(.opacity)
-                        .zIndex(50)
-                }
-
-                profileStatsOverlay
-
-                if navigateToMessages {
-                    MessagesRootView()
-                        .transition(.opacity)
-                        .zIndex(51)
-                }
-
-                if showNotifications {
-                    ProfileNotificationsView(
-                        notifications: profileNotifications,
-                        onMarkRead: {
-                            hasUncheckedNotifications = false
-                            notificationCenter.markAllRead()
-                        }
-                    )
-                    .transition(.opacity)
-                    .zIndex(52)
-                }
-
-                if showRadiusStore {
-                    RadiusStoreView(
-                        purchasedRadiusMeters: $purchasedRadiusMeters,
-                        userID: effectiveUserID,
-                        purchaseVM: radiusPurchaseVM
-                    )
-                    .transition(.opacity)
-                    .zIndex(53)
-                }
-
-                if navigateToScanner {
-                    HeadScannerView { result in
-                        switch result {
-                        case .success(let output):
-                            // Save snapshot image for ML face recognition
-                            if let image = output.previewImage {
-                                self.profileImage = image
-                                if let url = try? saveProfileImage(image) {
-                                    self.profileImageURL = url
-                                    // Save for face recognition ML model
-                                    saveFaceForRecognition(image: image)
-                                }
-                                NotificationCenter.default.post(name: Notification.Name("ProfilePhotoUpdated"), object: image)
-                            }
-                            // Save 3D model URL if available
-                            self.lastHeadModelURL = output.usdzURL
-                            if output.usdzURL != nil {
-                                self.navigateToViewer = true
-                            }
-                        case .failure:
-                            break
-                        }
-                    }
-                    .transition(.opacity)
-                    .zIndex(54)
-                }
-
-                if navigateToViewer {
-                    if let url = lastHeadModelURL {
-                        USDZViewerView(usdzURL: url)
-                            .transition(.opacity)
-                            .zIndex(55)
-                    } else {
-                        Text("No model available")
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .background(Color.black)
-                            .foregroundColor(.white)
-                            .transition(.opacity)
-                            .zIndex(55)
-                    }
-                }
-            }
-
-            .sheet(isPresented: $showImagePicker) {
-                ImagePickerView(
-                    selectedImage: Binding(
-                        get: { self.profileImage },
-                        set: { newImage in
-                            if let image = newImage {
-                                self.profileImage = image
-                                if let url = try? saveProfileImage(image) {
-                                    self.profileImageURL = url
-                                    // Save for face recognition ML model
-                                    saveFaceForRecognition(image: image)
-                                }
-                                NotificationCenter.default.post(name: Notification.Name("ProfilePhotoUpdated"), object: image)
-                            }
-                        }
-                    ),
-                    selectedVideoURL: .constant(nil)
-                )
-            }
-
-            .task {
-                if !isRunningInPreviews {
-                    print("📊 [ProfileView] Initial .task running for userID: \(userID ?? "nil")")
-                    _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound])
-                    await loadMyPosts()
-                    await MainActor.run {
-                        self.averageRadius = Double(self.averagePostRadius())
-                        self.hasLoadedOnce = true
-                        
-                        // Animate radius bar to show total accumulated radius after loading
-                        if self.averageRadius > 0 {
-                            print("📊 [ProfileView] Posts loaded, animating radius bar to total: \(self.averageRadius)m")
-                            animateRadius(to:self.averageRadius, duration: 1.2)
-                        } else {
-                            print("📊 [ProfileView] No posts loaded, radius stays at 0")
-                        }
-                        self.refreshDailyNotificationsFromCurrentPosts()
-                    }
-                    
-                    // Only load profile image for own profile
-                    if isOwnProfile {
-                        await loadPersistedProfileImageIfNeeded()
-                    }
-                } else {
-                    await MainActor.run {
-                        self.applyPreviewProfileData()
-                    }
-                }
-            }
-            .onAppear {
-                print("👀 [ProfileView] onAppear isOwnProfile=\(isOwnProfile) effectiveUserID=\(effectiveUserID ?? "nil")")
-                NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
-                
-                // Immediately set radius to 0 when profile appears (before posts load)
-                print("📊 [ProfileView] onAppear - setting radius to 0")
-                animateRadius(to:0, duration: 0.3)
-                
-                // ALWAYS reload posts when appearing to ensure we show the correct user's posts
-                print("📊 [ProfileView] onAppear - reloading posts for userID: \(effectiveUserID ?? "nil")")
-                Task {
-                    await loadMyPosts()
-                    
-                    // Update radius bar after posts load
-                    await MainActor.run {
-                        self.averageRadius = Double(self.averagePostRadius())
-                        if self.averageRadius > 0 {
-                            print("📊 [ProfileView] onAppear - posts loaded, animating radius bar to: \(self.averageRadius)m")
-                            animateRadius(to:self.averageRadius, duration: 1.2)
-                        } else {
-                            print("📊 [ProfileView] onAppear - no posts, keeping radius at 0")
-                            // Ensure radius stays at 0 if no posts
-                            animateRadius(to:0, duration: 0.3)
-                        }
-                        self.refreshDailyNotificationsFromCurrentPosts()
-                    }
-                }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ProfileRemovePost"))) { notif in
-                if let id = notif.object as? String {
-                    myPosts.removeAll { $0.id == id }
-                    self.averageRadius = Double(self.averagePostRadius())
-                }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("OpenUserDetailForUser"))) { notif in
-                guard let userInfo = notif.userInfo, let uid = userInfo["userID"] as? String else { return }
-                // If our routedUserID environment isn't handling this, reload locally for the requested user
-                if uid != effectiveUserID {
-                    print("👤 [ProfileView] OpenUserDetailForUser received for uid=\(uid). Reloading profile locally.")
-                    // Clear and reload for the specified user
-                    displayUsername = nil
-                    userProfile = nil
-                    profileImage = nil
-                    profileImageURL = nil
-                    myPosts = []
-                    loadedImages = [:]
-                    hasLoadedOnce = false
-                    averageRadius = 0
-                    animateRadius(to:0, duration: 0.3)
-                    Task {
-                        // Temporarily override by using the parameter initializer path
-                        // We can't change routedUserID here, so load posts for uid directly
-                        await loadPostsForSpecificUser(uid)
-                    }
-                }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("LastTappedUserChanged"))) { notif in
-                guard let info = notif.userInfo,
-                      let uid = info["userID"] as? String,
-                      let radius = info["radius"] as? Double else { return }
-                if uid == effectiveUserID {
-                    print("📏 [ProfileView] Updating radius bar for current user to \(radius)m from feed context")
-                    animateRadius(to:radius, duration: 0.6)
-                }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ProfileShowUserContext"))) { notif in
-                guard let info = notif.userInfo,
-                      let uid = info["userID"] as? String else { return }
-                let radius = info["radius"] as? Double
-                let currentPostID = info["currentPostID"] as? String
-
-                print("👤 [ProfileView] ProfileShowUserContext for uid=\(uid) radius=\(radius.map{String($0)} ?? "nil") currentPostID=\(currentPostID ?? "nil")")
-
-                // If this context refers to a different user, reload for that user immediately
-                if uid != effectiveUserID {
-                    displayUsername = nil
-                    userProfile = nil
-                    profileImage = nil
-                    profileImageURL = nil
-                    myPosts = []
-                    loadedImages = [:]
-                    hasLoadedOnce = false
-                    averageRadius = 0
-                    animateRadius(to:0, duration: 0.3)
-                    Task { await loadPostsForSpecificUser(uid) }
-                }
-
-                // Apply incoming radius to the global bar if provided and matches the viewed user
-                if let r = radius, uid == effectiveUserID {
-                    animateRadius(to:r, duration: 0.6)
-                }
-
-                // If a current post was specified, try to bring it into view after posts are loaded
-                if let pid = currentPostID {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                        if let match = myPosts.first(where: { $0.id == pid }) {
-                            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                                expandedPost = match
-                                NotificationCenter.default.post(name: Notification.Name("currentPostRadiusDidChange"), object: nil, userInfo: ["radius": Double(match.radius)])
-                            }
-                        }
-                    }
-                }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("RefreshProfileAfterUpload"))) { _ in
-                print("🔄 [ProfileView] RefreshProfileAfterUpload received - reloading posts")
-                Task {
-                    await loadMyPosts()
-                    // After reload, scroll to top and open the newest post if available
-                    await MainActor.run {
-                        if let newest = myPosts.first {
-                            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                                expandedPost = newest
-                                NotificationCenter.default.post(name: Notification.Name("currentPostRadiusDidChange"), object: nil, userInfo: ["radius": Double(newest.radius)])
-                            }
-                        }
-                    }
-                }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("PostCreated"))) { notif in
-                guard let info = notif.userInfo,
-                      let id = info["id"] as? String,
-                      let uid = info["userID"] as? String,
-                      let lat = info["latitude"] as? Double,
-                      let lon = info["longitude"] as? Double,
-                      let mediaURL = info["mediaURL"] as? String,
-                      let rawRadiusDouble = info["radius"] as? Double ?? (info["radius"] as? Int).map(Double.init) else {
-                    print("⚠️ [ProfileView] PostCreated missing fields; ignoring")
-                    return
-                }
-                let radius = rawRadiusDouble
-                let viewCount = (info["viewCount"] as? Int) ?? 0
-                // Only insert if the post belongs to the user currently displayed
-                guard uid == effectiveUserID else { return }
-                let newPost = Post(
-                    id: id,
-                    latitude: lat,
-                    longitude: lon,
-                    mediaURL: mediaURL,
-                    radius: Int(radius),
-                    viewCount: viewCount,
-                    userID: uid,
-                    posterURL: nil
-                )
-                // Avoid duplicates
-                if myPosts.contains(where: { $0.id == id }) { return }
-                // Prepend for recency
-                myPosts.insert(newPost, at: 0)
-                // Persist cache
-                savePostsToCache(myPosts, for: uid)
-                // Prefetch image
-                Task.detached { await prefetchImages(for: [newPost]) }
-                // Update radius bar to reflect new total
-                averageRadius = Double(averagePostRadius())
-                animateRadius(to:averageRadius, duration: 0.8)
-                refreshDailyNotificationsFromCurrentPosts()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .cubeHoldBegan)) { _ in
-                print("🎯 [ProfileView] Received cubeHoldBegan - isOwnProfile: \(isOwnProfile)")
-                if !isRunningInPreviews {
-                    isHoldingCube = true
-
-                    if isOwnProfile {
-                        print("✅ [ProfileView] Showing cube menu wheel")
-                        let backItem = CubeSubmenuItem(
-                            id: "back",
-                            title: "Back",
-                            systemImage: "arrow.backward",
-                            tint: .white
-                        ) {
-                            closeProfileSubroutes()
-                        }
-                        if showPopularPhone {
-                            cubeMenuWheel.beginHold(items: [backItem])
-                        } else if isShowingMainTabChildRoute {
-                            cubeMenuWheel.beginHold(items: [backItem] + cubeSubmenuItems)
-                        } else {
-                            cubeMenuWheel.beginHold(items: cubeSubmenuItems)
-                        }
-                        postProfileCubeIconOverride(cubeMenuWheel.selectedItem)
-                    } else {
-                        print("⚠️ [ProfileView] Not showing cube menu wheel - not own profile")
-                    }
-                }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .cubeHoldEnded)) { _ in
-                if !isRunningInPreviews {
-                    isHoldingCube = false
-                    if isOwnProfile {
-                        postProfileCubeIconOverride(cubeMenuWheel.selectedItem)
-                        cubeMenuWheel.endHold(activateSelected: true)
-                    }
-                }
-            }
-            .task(id: isHoldingCube) {
-                if isRunningInPreviews { return }
-                // If holding, increase the bar height factor over time; otherwise, ensure default per current tab
-                if isHoldingCube {
-                    // Start from current value; rise at ~200pt/sec on a 220pt bar => ~0.9 factor per second
-                    let start = barHeightFactor
-                    var current = start
-                    let incrementPerTick: CGFloat = 0.03 // ~30 FPS * 0.03 ~= 0.9/sec
-                    while isHoldingCube && current < 1.0 {
-                        try? await Task.sleep(nanoseconds: 33_000_000)
-                        current = min(1.0, current + incrementPerTick)
-                        await MainActor.run { barHeightFactor = current }
-                    }
-                } else {
-                    // When not holding, keep current value (do not reset)
-                    // No action; could reset here if desired.
-                }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("RecordTabBecameActive"))) { _ in
-                // When record tab becomes active, collapse the bar
-                barHeightFactor = 0.0
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .CubeGlobalTap)) { _ in
-                print("🎯 [ProfileView] Received CubeGlobalTap - isOwnProfile: \(isOwnProfile)")
-                // Only respond if we're viewing our own profile
-                guard isOwnProfile else { 
-                    print("⚠️ [ProfileView] Ignoring CubeGlobalTap - not own profile")
-                    return 
-                }
-                if cubeMenuWheel.isOnScreen {
-                    print("✅ [ProfileView] Closing cube menu wheel")
-                    postProfileCubeIconOverride(nil)
-                    cubeMenuWheel.endHold(activateSelected: false)
-                    return
-                }
-                if expandedPost != nil {
-                    expandedPost = nil
-                    return
-                }
-                if editing || showProfilePhotoOptions || showPopularPhone || isShowingMainTabChildRoute {
-                    closeProfileSubroutes()
-                    return
-                }
-                print("✅ [ProfileView] Opening messages")
-                openProfileSubmenuRoute(.mail)
-            }
-            .onDisappear {
-                // Reset radius bar when leaving profile view
-                print("📊 [ProfileView] onDisappear - notifying to restore feed radius")
-                cubeMenuWheel.endHold(activateSelected: false)
-                headCycler.stop()
-                postProfileCubeIconOverride(nil)
-                NotificationCenter.default.post(name: Notification.Name("ProfileViewDismissed"), object: nil)
-                NotificationCenter.default.post(name: .MainTabChildRouteVisibilityChanged, object: false)
-            }
-            .onChange(of: cubeMenuWheel.selectedIndex) { _, _ in
-                if cubeMenuWheel.isVisible {
-                    postProfileCubeIconOverride(cubeMenuWheel.selectedItem)
-                }
-            }
-            .onChange(of: showSettings) { _, _ in
-                postMainTabChildRouteVisibility()
-                syncProfileCubeIconToActiveRoute()
-            }
-            .onChange(of: showStats) { _, _ in
-                postMainTabChildRouteVisibility()
-                syncProfileCubeIconToActiveRoute()
-            }
-            .onChange(of: navigateToMessages) { _, _ in
-                postMainTabChildRouteVisibility()
-                syncProfileCubeIconToActiveRoute()
-            }
-            .onChange(of: showNotifications) { _, _ in
-                postMainTabChildRouteVisibility()
-                syncProfileCubeIconToActiveRoute()
-            }
-            .onChange(of: showRadiusStore) { _, _ in
-                postMainTabChildRouteVisibility()
-                syncProfileCubeIconToActiveRoute()
-            }
-            .onChange(of: showPopularPhone) { _, _ in
-                syncProfileCubeIconToActiveRoute()
-            }
-            .onChange(of: navigateToScanner) { _, _ in
-                postMainTabChildRouteVisibility()
-                syncProfileCubeIconToActiveRoute()
-            }
-            .onChange(of: navigateToViewer) { _, _ in
-                postMainTabChildRouteVisibility()
-            }
-            .onChange(of: routedUserID) { _, newUserID in
-                print("🔄 [ProfileView] routedUserID changed to: \(newUserID ?? "nil")")
-                // Clear all state and reload everything when viewing a different user
-                displayUsername = nil
-                userProfile = nil
-                profileImage = nil
-                profileImageURL = nil
-                myPosts = []
-                loadedImages = [:]
-                hasLoadedOnce = false
-                averageRadius = 0  // Reset average radius to 0 when switching users
-                
-                // Reset radius bar to 0 when switching users
-                animateRadius(to:0, duration: 0.3)
-                
-                Task {
-                    // Reload posts for the new user
-                    await loadMyPosts()
-                    
-                    // Fetch username for the new user
-                    if let uid = effectiveUserID {
-                        displayUsername = await UsernameCache.shared.username(for: uid)
-                    }
-                    
-                    // Only load profile image for own profile
-                    if isOwnProfile {
-                        await loadPersistedProfileImageIfNeeded()
-                    }
-                    
-                    // Update radius bar with new user's total radius
-                    await MainActor.run {
-                        self.averageRadius = Double(self.averagePostRadius())
-                        if self.averageRadius > 0 {
-                            print("📊 [ProfileView] User switched, animating radius bar to: \(self.averageRadius)m")
-                            animateRadius(to:self.averageRadius, duration: 1.2)
-                        } else {
-                            print("📊 [ProfileView] User switched, no posts - keeping radius at 0")
-                            // Ensure radius stays at 0 if no posts
-                            animateRadius(to:0, duration: 0.3)
-                        }
-                    }
-                }
-            }
-            .toolbar(.hidden, for: .navigationBar)
-            .id(viewID) // Force recreation when viewing different user
+            expandedPostOverlay
+            profileTransientOverlays
+            profileRouteOverlays
         }
+    }
+
+    private var profileSheetScene: AnyView {
+        AnyView(
+            profileRootScene
+                .sheet(isPresented: $showImagePicker) {
+                    profileImagePickerSheet
+                }
+        )
+    }
+
+    private var profileLifecycleScene: AnyView {
+        AnyView(
+            profileSheetScene
+                .task { await runInitialProfileTask() }
+                .onAppear(perform: handleProfileAppear)
+                .task(id: isHoldingCube) { await updateCubeHoldProgress() }
+                .onDisappear(perform: handleProfileDisappear)
+        )
+    }
+
+    private var profileNotificationScene: AnyView {
+        AnyView(
+            profileLifecycleScene
+                .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ProfileRemovePost")), perform: handleProfileRemovePost)
+                .onReceive(NotificationCenter.default.publisher(for: Notification.Name("OpenUserDetailForUser")), perform: handleOpenUserDetailForUser)
+                .onReceive(NotificationCenter.default.publisher(for: .OpenSettingsRequested), perform: handleOpenSettingsRequested)
+                .onReceive(NotificationCenter.default.publisher(for: .OpenDMsRequested), perform: handleOpenDMsRequested)
+                .onReceive(NotificationCenter.default.publisher(for: .PoplurAIShowAnalytics), perform: handlePoplurAIShowAnalytics)
+                .onReceive(NotificationCenter.default.publisher(for: .PoplurAIProfileSortRequested), perform: handlePoplurAIProfileSortRequested)
+                .onReceive(NotificationCenter.default.publisher(for: Notification.Name("LastTappedUserChanged")), perform: handleLastTappedUserChanged)
+        )
+    }
+
+    private var profilePostNotificationScene: AnyView {
+        AnyView(
+            profileNotificationScene
+                .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ProfileShowUserContext")), perform: handleProfileShowUserContext)
+                .onReceive(NotificationCenter.default.publisher(for: Notification.Name("RefreshProfileAfterUpload")), perform: handleRefreshProfileAfterUpload)
+                .onReceive(NotificationCenter.default.publisher(for: Notification.Name("PostCreated")), perform: handlePostCreated)
+                .onReceive(NotificationCenter.default.publisher(for: .cubeHoldBegan), perform: handleCubeHoldBegan)
+                .onReceive(NotificationCenter.default.publisher(for: .cubeHoldEnded), perform: handleCubeHoldEnded)
+                .onReceive(NotificationCenter.default.publisher(for: Notification.Name("RecordTabBecameActive")), perform: handleRecordTabBecameActive)
+                .onReceive(NotificationCenter.default.publisher(for: .CubeGlobalTap), perform: handleCubeGlobalTap)
+        )
+    }
+
+    private var profileScene: AnyView {
+        AnyView(
+            profilePostNotificationScene
+                .onChange(of: cubeMenuWheel.selectedIndex) { _, _ in handleCubeSelectedIndexChanged() }
+                .onChange(of: showSettings) { _, _ in handleProfileChildRouteChanged() }
+                .onChange(of: showStats) { _, _ in handleProfileChildRouteChanged() }
+                .onChange(of: navigateToMessages) { _, _ in handleProfileChildRouteChanged() }
+                .onChange(of: showNotifications) { _, _ in handleProfileChildRouteChanged() }
+                .onChange(of: showRadiusStore) { _, _ in handleProfileChildRouteChanged() }
+                .onChange(of: showPopularPhone) { _, _ in syncProfileCubeIconToActiveRoute() }
+                .onChange(of: navigateToScanner) { _, _ in handleProfileChildRouteChanged() }
+                .onChange(of: navigateToViewer) { _, _ in postMainTabChildRouteVisibility() }
+                .onChange(of: routedUserID) { _, newUserID in handleRoutedUserIDChanged(newUserID) }
+                .toolbar(.hidden, for: .navigationBar)
+                .id(viewID)
+        )
+    }
+
+    private func runInitialProfileTask() async {
+        if !isRunningInPreviews {
+            print("📊 [ProfileView] Initial .task running for userID: \(userID ?? "nil")")
+            _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound])
+            await loadMyPosts()
+            await MainActor.run {
+                self.averageRadius = Double(self.averagePostRadius())
+                self.hasLoadedOnce = true
+
+                if self.averageRadius > 0 {
+                    print("📊 [ProfileView] Posts loaded, animating radius bar to total: \(self.averageRadius)m")
+                    animateRadius(to: self.averageRadius, duration: 1.2)
+                } else {
+                    print("📊 [ProfileView] No posts loaded, radius stays at 0")
+                }
+                self.refreshDailyNotificationsFromCurrentPosts()
+            }
+
+            if isOwnProfile {
+                await loadPersistedProfileImageIfNeeded()
+            }
+        } else {
+            await MainActor.run {
+                self.applyPreviewProfileData()
+            }
+        }
+    }
+
+    private func handleProfileAppear() {
+        print("👀 [ProfileView] onAppear isOwnProfile=\(isOwnProfile) effectiveUserID=\(effectiveUserID ?? "nil")")
+        NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
+        postMainTabChildRouteVisibility()
+        showHeyPoplurProfileTutorialIfNeeded()
+
+        print("📊 [ProfileView] onAppear - setting radius to 0")
+        animateRadius(to: 0, duration: 0.3)
+
+        print("📊 [ProfileView] onAppear - reloading posts for userID: \(effectiveUserID ?? "nil")")
+        Task {
+            await loadMyPosts()
+
+            await MainActor.run {
+                self.averageRadius = Double(self.averagePostRadius())
+                if self.averageRadius > 0 {
+                    print("📊 [ProfileView] onAppear - posts loaded, animating radius bar to: \(self.averageRadius)m")
+                    animateRadius(to: self.averageRadius, duration: 1.2)
+                } else {
+                    print("📊 [ProfileView] onAppear - no posts, keeping radius at 0")
+                    animateRadius(to: 0, duration: 0.3)
+                }
+                self.refreshDailyNotificationsFromCurrentPosts()
+            }
+        }
+    }
+
+    private func showHeyPoplurProfileTutorialIfNeeded() {
+        guard !hasSeenHeyPoplurProfileTutorial else { return }
+        hasSeenHeyPoplurProfileTutorial = true
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+            showHeyPoplurProfileTutorial = true
+        }
+        NotificationCenter.default.post(name: .PoplurAIShowWakeTutorial, object: nil)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 7.0) {
+            dismissHeyPoplurProfileTutorial()
+        }
+    }
+
+    private func dismissHeyPoplurProfileTutorial() {
+        withAnimation(.easeOut(duration: 0.2)) {
+            showHeyPoplurProfileTutorial = false
+        }
+    }
+
+    private func handleProfileRemovePost(_ notification: Notification) {
+        if let id = notification.object as? String {
+            myPosts.removeAll { $0.id == id }
+            averageRadius = Double(averagePostRadius())
+        }
+    }
+
+    private func resetDisplayedProfileState() {
+        displayUsername = nil
+        userProfile = nil
+        profileImage = nil
+        profileImageURL = nil
+        myPosts = []
+        loadedImages = [:]
+        hasLoadedOnce = false
+        averageRadius = 0
+        animateRadius(to: 0, duration: 0.3)
+    }
+
+    private func handleOpenUserDetailForUser(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let uid = userInfo["userID"] as? String else { return }
+
+        if uid != effectiveUserID {
+            print("👤 [ProfileView] OpenUserDetailForUser received for uid=\(uid). Reloading profile locally.")
+            resetDisplayedProfileState()
+            Task {
+                await loadPostsForSpecificUser(uid)
+            }
+        }
+    }
+
+    private func handleOpenSettingsRequested(_ notification: Notification) {
+        guard isOwnProfile else { return }
+        openProfileSubmenuRoute(.settings)
+    }
+
+    private func handleOpenDMsRequested(_ notification: Notification) {
+        guard isOwnProfile else { return }
+        openProfileSubmenuRoute(.mail)
+    }
+
+    private func handlePoplurAIShowAnalytics(_ notification: Notification) {
+        openProfileSubmenuRoute(.stats)
+    }
+
+    private func handlePoplurAIProfileSortRequested(_ notification: Notification) {
+        guard isOwnProfile else { return }
+        let raw = notification.userInfo?["order"] as? String
+        radiusSortOrder = raw.flatMap(PoplurAIProfileSortOrder.init(rawValue:)) ?? .mostRadius
+        mode = .media
+        closeProfileSubroutes()
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+    }
+
+    private func handleLastTappedUserChanged(_ notification: Notification) {
+        guard let info = notification.userInfo,
+              let uid = info["userID"] as? String,
+              let radius = info["radius"] as? Double else { return }
+        if uid == effectiveUserID {
+            print("📏 [ProfileView] Updating radius bar for current user to \(radius)m from feed context")
+            animateRadius(to: radius, duration: 0.6)
+        }
+    }
+
+    private func handleProfileShowUserContext(_ notification: Notification) {
+        guard let info = notification.userInfo,
+              let uid = info["userID"] as? String else { return }
+        let radius = info["radius"] as? Double
+        let currentPostID = info["currentPostID"] as? String
+
+        print("👤 [ProfileView] ProfileShowUserContext for uid=\(uid) radius=\(radius.map { String($0) } ?? "nil") currentPostID=\(currentPostID ?? "nil")")
+
+        if uid != effectiveUserID {
+            resetDisplayedProfileState()
+            Task { await loadPostsForSpecificUser(uid) }
+        }
+
+        if let radius, uid == effectiveUserID {
+            animateRadius(to: radius, duration: 0.6)
+        }
+
+        if let postID = currentPostID {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                if let match = myPosts.first(where: { $0.id == postID }) {
+                    expandPost(match)
+                }
+            }
+        }
+    }
+
+    private func handleRefreshProfileAfterUpload(_ notification: Notification) {
+        print("🔄 [ProfileView] RefreshProfileAfterUpload received - reloading posts")
+        Task {
+            await loadMyPosts()
+            await MainActor.run {
+                if let newest = myPosts.first {
+                    expandPost(newest)
+                }
+            }
+        }
+    }
+
+    private func handlePostCreated(_ notification: Notification) {
+        guard let info = notification.userInfo,
+              let id = info["id"] as? String,
+              let uid = info["userID"] as? String,
+              let lat = info["latitude"] as? Double,
+              let lon = info["longitude"] as? Double,
+              let mediaURL = info["mediaURL"] as? String,
+              let rawRadiusDouble = info["radius"] as? Double ?? (info["radius"] as? Int).map(Double.init) else {
+            print("⚠️ [ProfileView] PostCreated missing fields; ignoring")
+            return
+        }
+        let viewCount = (info["viewCount"] as? Int) ?? 0
+        guard uid == effectiveUserID else { return }
+
+        let newPost = Post(
+            id: id,
+            latitude: lat,
+            longitude: lon,
+            mediaURL: mediaURL,
+            radius: Int(rawRadiusDouble),
+            viewCount: viewCount,
+            userID: uid,
+            posterURL: nil
+        )
+        if myPosts.contains(where: { $0.id == id }) { return }
+        myPosts.insert(newPost, at: 0)
+        savePostsToCache(myPosts, for: uid)
+        Task.detached { await prefetchImages(for: [newPost]) }
+        averageRadius = Double(averagePostRadius())
+        animateRadius(to: averageRadius, duration: 0.8)
+        refreshDailyNotificationsFromCurrentPosts()
+    }
+
+    private func handleCubeHoldBegan(_ notification: Notification) {
+        print("🎯 [ProfileView] Received cubeHoldBegan - isOwnProfile: \(isOwnProfile)")
+        guard !isRunningInPreviews else { return }
+        isHoldingCube = true
+
+        if isOwnProfile {
+            print("✅ [ProfileView] Showing cube menu wheel")
+            let backItem = CubeSubmenuItem(
+                id: "back",
+                title: "Back",
+                systemImage: "arrow.backward",
+                tint: .white
+            ) {
+                closeProfileSubroutes()
+            }
+            if showPopularPhone {
+                cubeMenuWheel.beginHold(items: [backItem])
+            } else if isShowingMainTabChildRoute {
+                cubeMenuWheel.beginHold(items: [backItem] + cubeSubmenuItems)
+            } else {
+                cubeMenuWheel.beginHold(items: cubeSubmenuItems)
+            }
+            postProfileCubeIconOverride(cubeMenuWheel.selectedItem)
+        } else {
+            print("⚠️ [ProfileView] Not showing cube menu wheel - not own profile")
+        }
+    }
+
+    private func handleCubeHoldEnded(_ notification: Notification) {
+        guard !isRunningInPreviews else { return }
+        isHoldingCube = false
+        if isOwnProfile {
+            postProfileCubeIconOverride(cubeMenuWheel.selectedItem)
+            cubeMenuWheel.endHold(activateSelected: true)
+        }
+    }
+
+    private func updateCubeHoldProgress() async {
+        if isRunningInPreviews { return }
+        guard isHoldingCube else { return }
+
+        var current = barHeightFactor
+        let incrementPerTick: CGFloat = 0.03
+        while isHoldingCube && current < 1.0 {
+            try? await Task.sleep(nanoseconds: 33_000_000)
+            current = min(1.0, current + incrementPerTick)
+            await MainActor.run { barHeightFactor = current }
+        }
+    }
+
+    private func handleRecordTabBecameActive(_ notification: Notification) {
+        barHeightFactor = 0.0
+    }
+
+    private func handleCubeGlobalTap(_ notification: Notification) {
+        print("🎯 [ProfileView] Received CubeGlobalTap - isOwnProfile: \(isOwnProfile)")
+        guard isOwnProfile else {
+            print("⚠️ [ProfileView] Ignoring CubeGlobalTap - not own profile")
+            return
+        }
+        if cubeMenuWheel.isOnScreen {
+            print("✅ [ProfileView] Closing cube menu wheel")
+            postProfileCubeIconOverride(nil)
+            cubeMenuWheel.endHold(activateSelected: false)
+            return
+        }
+        if expandedPost != nil {
+            expandedPost = nil
+            return
+        }
+        if editing || showProfilePhotoOptions || showPopularPhone || isShowingMainTabChildRoute {
+            closeProfileSubroutes()
+            return
+        }
+        print("✅ [ProfileView] Opening messages")
+        openProfileSubmenuRoute(.mail)
+    }
+
+    private func handleProfileDisappear() {
+        print("📊 [ProfileView] onDisappear - notifying to restore feed radius")
+        cubeMenuWheel.endHold(activateSelected: false)
+        headCycler.stop()
+        postProfileCubeIconOverride(nil)
+        NotificationCenter.default.post(name: Notification.Name("ProfileViewDismissed"), object: nil)
+        NotificationCenter.default.post(name: .MainTabChildRouteVisibilityChanged, object: false)
+    }
+
+    private func handleCubeSelectedIndexChanged() {
+        if cubeMenuWheel.isVisible {
+            postProfileCubeIconOverride(cubeMenuWheel.selectedItem)
+        }
+    }
+
+    private func handleProfileChildRouteChanged() {
+        postMainTabChildRouteVisibility()
+        syncProfileCubeIconToActiveRoute()
+    }
+
+    private func handleRoutedUserIDChanged(_ newUserID: String?) {
+        print("🔄 [ProfileView] routedUserID changed to: \(newUserID ?? "nil")")
+        resetDisplayedProfileState()
+
+        Task {
+            await loadMyPosts()
+
+            if let uid = effectiveUserID {
+                displayUsername = await UsernameCache.shared.username(for: uid)
+            }
+
+            if isOwnProfile {
+                await loadPersistedProfileImageIfNeeded()
+            }
+
+            await MainActor.run {
+                self.averageRadius = Double(self.averagePostRadius())
+                if self.averageRadius > 0 {
+                    print("📊 [ProfileView] User switched, animating radius bar to: \(self.averageRadius)m")
+                    animateRadius(to: self.averageRadius, duration: 1.2)
+                } else {
+                    print("📊 [ProfileView] User switched, no posts - keeping radius at 0")
+                    animateRadius(to: 0, duration: 0.3)
+                }
+            }
+        }
+    }
 
     private var avatarRow: some View {
         Group {
@@ -1161,9 +1359,21 @@ struct ProfileView: View {
         let size: CGFloat = showing3D ? 180 : 96
 
         return ZStack {
-            // 2D photo — fades out when 3D is active
-            photoAvatar
-                .opacity(showing3D ? 0 : 1)
+            if isOwnProfile && !showing3D {
+                // Animated speaking avatar (SpriteKit 2D or SceneKit 3D, set in Settings)
+                ProfileAvatarSpeakerView(
+                    profileImage: profileImage,
+                    profileImageURL: profileImageURL ?? userProfile?.profilePictureURL,
+                    totalRadiusKM: myPostsTotalRadiusKM,
+                    postCount: myPosts.count,
+                    size: size
+                )
+                .clipShape(Circle())
+            } else {
+                // 2D photo — fades out when 3D is active
+                photoAvatar
+                    .opacity(showing3D ? 0 : 1)
+            }
 
             // 3D head — fades in when 3D is active
             if let url = headCycler.modelURL {
@@ -1183,7 +1393,18 @@ struct ProfileView: View {
         }
         .frame(width: size, height: size)
         .clipShape(Circle())
-        .shadow(color: Color.black.opacity(0.08), radius: 6, x: 0, y: 4)
+        .overlay(
+            Circle()
+                .stroke(
+                    LinearGradient(
+                        colors: [skinTheme.accent, skinTheme.accent2.opacity(0.78)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 2
+                )
+        )
+        .shadow(color: skinTheme.shadow, radius: 10, x: 0, y: 6)
         .animation(.spring(response: 0.55, dampingFraction: 0.72), value: showing3D)
         .zIndex(showing3D ? 10 : 0)
         .overlay(alignment: .bottomTrailing) {
@@ -1195,7 +1416,7 @@ struct ProfileView: View {
                         .font(.system(size: 14, weight: .bold))
                         .foregroundColor(.white)
                         .padding(6)
-                        .background(Circle().fill(Color.black.opacity(0.6)))
+                        .background(Circle().fill(skinTheme.badgeFill))
                 }
                 .buttonStyle(.plain)
                 .padding(4)
@@ -1219,26 +1440,26 @@ struct ProfileView: View {
                 AsyncImage(url: url) { phase in
                     switch phase {
                     case .empty:
-                        Circle().fill(Color.gray.opacity(0.2))
-                            .overlay(ProgressView().tint(.gray))
+                        Circle().fill(skinTheme.surfaceStrong)
+                            .overlay(ProgressView().tint(skinTheme.accent))
                     case .success(let img):
                         img.resizable().scaledToFill()
                     case .failure:
-                        Circle().fill(Color.gray.opacity(0.2))
-                            .overlay(Image(systemName: "person.fill").foregroundColor(.white))
+                        Circle().fill(skinTheme.surfaceStrong)
+                            .overlay(Image(systemName: "person.fill").foregroundColor(skinTheme.primaryText))
                     @unknown default:
-                        Circle().fill(Color.gray.opacity(0.2))
+                        Circle().fill(skinTheme.surfaceStrong)
                     }
                 }
             } else if isOwnProfile, let email = auth.currentUser?.email,
                       let initials = initialsFrom(email: email) {
                 Circle()
-                    .fill(Color.gray.opacity(0.2))
+                    .fill(skinTheme.surfaceStrong)
                     .overlay(Text(initials).font(.system(size: 24, weight: .bold)))
             } else {
                 Circle()
-                    .fill(Color.gray.opacity(0.2))
-                    .overlay(Image(systemName: "person.fill").foregroundColor(.white))
+                    .fill(skinTheme.surfaceStrong)
+                    .overlay(Image(systemName: "person.fill").foregroundColor(skinTheme.primaryText))
             }
         }
     }
@@ -1246,7 +1467,7 @@ struct ProfileView: View {
     private var usernameRow: some View {
         Text(displayUsername ?? (isOwnProfile ? (auth.currentUser?.email?.components(separatedBy: "@").first?.uppercased() ?? "USERNAME") : usernameForDemoUser()))
             .font(.system(size: 22, weight: .heavy, design: .rounded))
-            .foregroundColor(.black.opacity(0.95))
+            .foregroundColor(skinTheme.primaryText)
             .padding(.top, 4)
             .task(id: effectiveUserID) {
                 // Fetch username for the profile being viewed (re-runs when effectiveUserID changes)
@@ -1303,13 +1524,13 @@ struct ProfileView: View {
             Button(action: action) {
                 Text(title)
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(.black.opacity(0.85))
+                    .foregroundColor(isSelected ? skinTheme.primaryText : skinTheme.secondaryText)
                     .padding(8)
             }
             .buttonStyle(.plain)
 
             Capsule()
-                .fill(isSelected ? Color.indigo : Color.clear)
+                .fill(isSelected ? skinTheme.accent : Color.clear)
                 .frame(width: 48, height: 3)
         }
     }
@@ -2623,7 +2844,9 @@ private struct RadiusStoreView: View {
 private struct ProfileGridTile: View {
     let post: Post
     let preloadedImage: UIImage?
+    let skin: CubeSkin
     private let corner: CGFloat = 18
+    private var theme: CubeSkinAppTheme { skin.appTheme }
 
     var body: some View {
         ZStack {
@@ -2631,40 +2854,54 @@ private struct ProfileGridTile: View {
                 Image(uiImage: preloadedImage)
                     .resizable()
                     .scaledToFill()
-            } else {
-                RoundedRectangle(cornerRadius: corner, style: .continuous)
-                    .fill(
+                    .overlay(
                         LinearGradient(
                             colors: [
-                                Color.black.opacity(0.16),
-                                Color.black.opacity(0.30)
+                                Color.clear,
+                                theme.backgroundDeep.opacity(theme.prefersLightContent ? 0.18 : 0.08)
                             ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
+                            startPoint: .top,
+                            endPoint: .bottom
                         )
                     )
+            } else {
+                CubeSkinTileBackground(skin: skin, tab: .profile, cornerRadius: corner)
                     .overlay {
                         VStack(spacing: 8) {
                             Image(systemName: post.mediaURL.lowercased().contains(".mp4") ? "play.fill" : "photo")
                                 .font(.system(size: 22, weight: .bold))
                             ProgressView()
                                 .controlSize(.small)
+                                .tint(theme.accent)
                         }
-                        .foregroundStyle(.white.opacity(0.78))
+                        .foregroundStyle(theme.primaryText.opacity(0.78))
                     }
             }
         }
-        .frame(height: 120)
+        .aspectRatio(1, contentMode: .fit)
         .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: corner, style: .continuous)
+                .stroke(
+                    LinearGradient(
+                        colors: [theme.border, theme.accent.opacity(0.72), theme.accent2.opacity(0.46)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 1.8
+                )
+        )
+        .shadow(color: theme.shadow, radius: 8, x: 0, y: 5)
         .overlay(alignment: .bottomLeading) {
             Text("\(max(1, post.radius / 1000)) KM")
                 .font(.system(size: 12, weight: .heavy, design: .rounded))
-                .foregroundColor(.white)
+                .foregroundColor(theme.badgeText)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
                 .background(
-                    Capsule().fill(Color.black.opacity(0.55))
+                    Capsule().fill(theme.badgeFill)
                 )
+                .overlay(Capsule().stroke(theme.border.opacity(0.55), lineWidth: 1))
                 .padding(8)
         }
     }

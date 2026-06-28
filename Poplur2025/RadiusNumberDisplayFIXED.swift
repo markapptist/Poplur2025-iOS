@@ -17,33 +17,17 @@ extension VerticalAlignment {
 
 struct RadiusNumberDisplay: View {
     @Binding var radiusMeters: Double
-    
-    @State private var useKilometers: Bool = false
-    @State private var animationTimer: Timer? = nil
-    
-    // Earth's radius constants
-    private var earthRadiusMiles: Double { 3959 }
+
     private var earthRadiusKilometers: Double { 6371 }
-    
-    // Post radius in current unit
-    private var postRadiusMiles: Double { radiusMeters / 1609.34 }
-    private var postRadiusKilometers: Double { radiusMeters / 1000.0 }
-    
-    // Current values based on unit
-    private var currentPostRadius: Double { 
-        useKilometers ? postRadiusKilometers : postRadiusMiles 
+
+    private var currentRadiusMeters: Double {
+        max(0, radiusMeters)
     }
-    private var currentEarthRadius: Double { 
-        useKilometers ? earthRadiusKilometers : earthRadiusMiles 
-    }
-    private var currentUnit: String { 
-        useKilometers ? "km" : "mi" 
-    }
-    
+
     // Rank calculation based on percentage of Earth's radius
     private var rankPercentage: Double {
-        guard currentEarthRadius > 0 else { return 0 }
-        return currentPostRadius / currentEarthRadius
+        guard earthRadiusKilometers > 0 else { return 0 }
+        return currentRadiusMeters / (earthRadiusKilometers * 1000)
     }
     
     private var rank: RadiusRank {
@@ -58,19 +42,22 @@ struct RadiusNumberDisplay: View {
         }
     }
     
-    // Format numerator based on magnitude
-    private var formattedNumerator: String {
-        if currentPostRadius < 0.1 { 
-            return "0" 
-        } else if currentPostRadius < 10.0 { 
-            return String(format: "%.1f", currentPostRadius) 
-        } else { 
-            return String(format: "%.0f", currentPostRadius) 
+    private var formattedCurrentRadius: String {
+        if currentRadiusMeters >= 10_000 {
+            return String(format: "%.0f", currentRadiusMeters / 1000)
+        } else if currentRadiusMeters >= 1000 {
+            return String(format: "%.1f", currentRadiusMeters / 1000)
+        } else {
+            return String(format: "%.0f", currentRadiusMeters)
         }
+    }
+
+    private var currentUnit: String {
+        currentRadiusMeters >= 1000 ? "km" : "m"
     }
     
     var body: some View {
-        VStack(alignment: .trailing, spacing: 4) {
+        VStack(alignment: .trailing, spacing: 5) {
             // Label with rank badge
             HStack(spacing: 6) {
                 Text("RADIUS")
@@ -85,12 +72,10 @@ struct RadiusNumberDisplay: View {
                     .foregroundStyle(rank.color)
                     .shadow(color: rank.color.opacity(0.5), radius: 4, x: 0, y: 0)
             }
-            
-            // Fraction display: Numerator / Denominator unit
-            VStack(alignment: .trailing, spacing: 2) {
-                // Numerator (post radius) - colored by rank
-                Text(formattedNumerator)
-                    .font(.system(size: 40, weight: .bold))
+
+            HStack(alignment: .lastTextBaseline, spacing: 5) {
+                Text(formattedCurrentRadius)
+                    .font(.system(size: 46, weight: .bold))
                     .foregroundStyle(rank.color)
                     .minimumScaleFactor(0.4)
                     .lineLimit(1)
@@ -98,64 +83,25 @@ struct RadiusNumberDisplay: View {
                     .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
                     .monospacedDigit()
                     .poplurMetalNumberShader(intensity: 1.05)
-                    .contentTransition(.numericText(value: currentPostRadius))
-                
-                // Fraction bar - matches width of denominator
-                Rectangle()
-                    .fill(rank.color)
-                    .frame(width: 90, height: 2)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-                    .shadow(color: rank.color.opacity(0.5), radius: 2, x: 0, y: 0)
-                    .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 1)
-                    .alignmentGuide(.counterSeparator) { dimensions in
-                        dimensions[VerticalAlignment.center]
-                    }
-                
-                // Denominator (Earth's radius - constant)
-                Text(String(format: "%.0f", currentEarthRadius))
-                    .font(.system(size: 28, weight: .bold))
+                    .contentTransition(.numericText(value: currentRadiusMeters))
+
+                Text(currentUnit)
+                    .font(.system(size: 16, weight: .heavy))
                     .foregroundStyle(.white.opacity(0.9))
-                    .minimumScaleFactor(0.4)
-                    .lineLimit(1)
                     .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
-                    .monospacedDigit()
-                    .poplurMetalNumberShader(intensity: 0.72)
-                    .contentTransition(.numericText(value: currentEarthRadius))
+                    .transition(.scale.combined(with: .opacity))
+                    .id(currentUnit)
             }
-            
-            // Unit - animated
-            Text(currentUnit)
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(rank.color.opacity(0.9))
-                .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
-                .transition(.scale.combined(with: .opacity))
-                .id(currentUnit) // Force recreation on unit change
+            .frame(maxWidth: .infinity, alignment: .trailing)
+            .alignmentGuide(.counterSeparator) { dimensions in
+                dimensions[VerticalAlignment.center]
+            }
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
         .animation(.spring(response: 0.5, dampingFraction: 0.75), value: radiusMeters)
-        .animation(.spring(response: 0.4, dampingFraction: 0.7), value: useKilometers)
         .animation(.spring(response: 0.4, dampingFraction: 0.7), value: rank)
-        .onAppear {
-            startUnitAnimation()
-        }
-        .onDisappear {
-            stopUnitAnimation()
-        }
-    }
-    
-    private func startUnitAnimation() {
-        // Toggle between km and mi every 5 seconds
-        animationTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { _ in
-            withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) {
-                useKilometers.toggle()
-            }
-        }
-    }
-    
-    private func stopUnitAnimation() {
-        animationTimer?.invalidate()
-        animationTimer = nil
+        .accessibilityLabel("Current radius \(formattedCurrentRadius) \(currentUnit)")
     }
 }
 

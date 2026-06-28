@@ -13,7 +13,10 @@ class HomeFeedLaunchCoverScene: SKScene {
     private var isConfigured = false
     private var phaseIndex = 0
     private var lastUpdateTime: TimeInterval = 0
-    private var rainAccumulator: TimeInterval = 0
+    private var particleAccumulator: TimeInterval = 0
+    private var particleModeElapsed: TimeInterval = 0
+    private var particleModeOrder: [LoadingParticleMode] = LoadingParticleMode.allCases.shuffled()
+    private var particleModeIndex = 0
     private var showLoadingDetails = true
     private var loadingBarWidth: CGFloat = 220
     private let loadingBarHeight: CGFloat = 4
@@ -33,7 +36,34 @@ class HomeFeedLaunchCoverScene: SKScene {
         "analyzing nearby activity",
     ] as [String]).shuffled()
 
-    private let rainPalette: [UIColor] = [
+    private enum LoadingParticleMode: CaseIterable {
+        case confetti
+        case bubbles
+        case smoke
+        case rain
+        case snow
+        case sparkle
+
+        var spawnInterval: TimeInterval {
+            switch self {
+            case .confetti: return 0.09
+            case .bubbles: return 0.07
+            case .smoke: return 0.11
+            case .rain: return 0.025
+            case .snow: return 0.055
+            case .sparkle: return 0.08
+            }
+        }
+
+        var dwellDuration: TimeInterval { 2.4 }
+    }
+
+    private var currentParticleMode: LoadingParticleMode {
+        guard !particleModeOrder.isEmpty else { return .confetti }
+        return particleModeOrder[particleModeIndex % particleModeOrder.count]
+    }
+
+    private let particlePalette: [UIColor] = [
         .systemPink, .systemOrange, .systemYellow,
         .systemGreen, .systemBlue, .systemPurple,
     ]
@@ -247,21 +277,49 @@ class HomeFeedLaunchCoverScene: SKScene {
         emitBurst(at: logo.position)
     }
 
-    // MARK: - Continuous confetti rain
+    // MARK: - Rotating particle effects
 
     override func update(_ currentTime: TimeInterval) {
         guard isConfigured, size.width > 1, size.height > 1 else { return }
         let dt = lastUpdateTime > 0 ? min(currentTime - lastUpdateTime, 0.05) : 0
         lastUpdateTime = currentTime
-        rainAccumulator += dt
-        if rainAccumulator >= 0.09 {
-            rainAccumulator -= 0.09
-            spawnRainPiece()
+
+        particleModeElapsed += dt
+        if particleModeElapsed >= currentParticleMode.dwellDuration {
+            advanceParticleMode()
+        }
+
+        let mode = currentParticleMode
+        particleAccumulator += dt
+        while particleAccumulator >= mode.spawnInterval {
+            particleAccumulator -= mode.spawnInterval
+            spawnParticle(mode)
         }
     }
 
-    private func spawnRainPiece() {
-        let color = rainPalette[Int.random(in: 0..<rainPalette.count)]
+    private func advanceParticleMode() {
+        particleModeElapsed = 0
+        particleAccumulator = 0
+        guard !particleModeOrder.isEmpty else { return }
+        particleModeIndex = (particleModeIndex + 1) % particleModeOrder.count
+        if particleModeIndex == 0 {
+            particleModeOrder.shuffle()
+        }
+    }
+
+    private func spawnParticle(_ mode: LoadingParticleMode) {
+        switch mode {
+        case .confetti: spawnConfettiPiece()
+        case .bubbles: spawnBubblePiece()
+        case .smoke: spawnSmokePiece()
+        case .rain: spawnRainDrop()
+        case .snow: spawnSnowflake()
+        case .sparkle: spawnSparkle()
+        }
+    }
+
+    private func spawnConfettiPiece() {
+        let color = particlePalette[Int.random(in: 0..<particlePalette.count)]
         let x = CGFloat.random(in: 0...size.width)
         let w = CGFloat.random(in: 5...13)
         let h = CGFloat.random(in: 4...9)
@@ -293,11 +351,127 @@ class HomeFeedLaunchCoverScene: SKScene {
         ]))
     }
 
+    private func spawnBubblePiece() {
+        let radius = CGFloat.random(in: 4...16)
+        let bubble = SKShapeNode(circleOfRadius: radius)
+        bubble.fillColor = UIColor.white.withAlphaComponent(0.05)
+        bubble.strokeColor = UIColor.systemBlue.withAlphaComponent(CGFloat.random(in: 0.30...0.58))
+        bubble.lineWidth = CGFloat.random(in: 1.0...2.2)
+        bubble.position = CGPoint(x: CGFloat.random(in: 0...size.width), y: -radius - 8)
+        bubble.zPosition = CGFloat.random(in: 2...6)
+        addChild(bubble)
+
+        let dur = Double.random(in: 2.6...4.8)
+        let drift = CGFloat.random(in: -52...52)
+        bubble.run(.group([
+            .move(by: CGVector(dx: drift, dy: size.height + radius * 4), duration: dur),
+            .scale(to: CGFloat.random(in: 1.15...1.75), duration: dur),
+            .sequence([.wait(forDuration: dur * 0.68), .fadeOut(withDuration: dur * 0.32), .removeFromParent()])
+        ]))
+    }
+
+    private func spawnSmokePiece() {
+        let radius = CGFloat.random(in: 18...44)
+        let smoke = SKShapeNode(circleOfRadius: radius)
+        smoke.fillColor = UIColor(white: CGFloat.random(in: 0.42...0.70), alpha: CGFloat.random(in: 0.08...0.18))
+        smoke.strokeColor = .clear
+        smoke.position = CGPoint(x: CGFloat.random(in: 0...size.width), y: -radius)
+        smoke.zPosition = CGFloat.random(in: 1...3)
+        smoke.setScale(CGFloat.random(in: 0.35...0.72))
+        addChild(smoke)
+
+        let dur = Double.random(in: 3.2...5.4)
+        let drift = CGFloat.random(in: -70...70)
+        smoke.run(.group([
+            .move(by: CGVector(dx: drift, dy: size.height * CGFloat.random(in: 0.42...0.68)), duration: dur),
+            .scale(to: CGFloat.random(in: 1.45...2.45), duration: dur),
+            .sequence([.wait(forDuration: dur * 0.30), .fadeOut(withDuration: dur * 0.70), .removeFromParent()])
+        ]))
+    }
+
+    private func spawnRainDrop() {
+        let drop = SKShapeNode(rectOf: CGSize(width: CGFloat.random(in: 1.5...2.6), height: CGFloat.random(in: 18...34)), cornerRadius: 1)
+        drop.fillColor = UIColor.systemBlue.withAlphaComponent(CGFloat.random(in: 0.36...0.62))
+        drop.strokeColor = .clear
+        let x = CGFloat.random(in: -20...(size.width + 20))
+        drop.position = CGPoint(x: x, y: size.height + 24)
+        drop.zPosition = CGFloat.random(in: 2...6)
+        drop.zRotation = CGFloat.random(in: -0.18...0.18)
+        addChild(drop)
+
+        let dur = Double.random(in: 0.75...1.25)
+        let drift = CGFloat.random(in: -20...20)
+        drop.run(.sequence([
+            .group([
+                .move(to: CGPoint(x: x + drift, y: -40), duration: dur),
+                .fadeOut(withDuration: dur)
+            ]),
+            .removeFromParent()
+        ]))
+    }
+
+    private func spawnSnowflake() {
+        let radius = CGFloat.random(in: 2.0...5.5)
+        let snow = SKShapeNode(circleOfRadius: radius)
+        snow.fillColor = UIColor.white.withAlphaComponent(CGFloat.random(in: 0.62...0.92))
+        snow.strokeColor = .clear
+        let x = CGFloat.random(in: 0...size.width)
+        snow.position = CGPoint(x: x, y: size.height + 12)
+        snow.zPosition = CGFloat.random(in: 3...7)
+        addChild(snow)
+
+        let dur = Double.random(in: 3.0...6.0)
+        let drift = CGFloat.random(in: -74...74)
+        let sway = SKAction.sequence([
+            .moveBy(x: CGFloat.random(in: -18...18), y: 0, duration: dur * 0.25),
+            .moveBy(x: CGFloat.random(in: -18...18), y: 0, duration: dur * 0.25),
+            .moveBy(x: CGFloat.random(in: -18...18), y: 0, duration: dur * 0.25),
+            .moveBy(x: CGFloat.random(in: -18...18), y: 0, duration: dur * 0.25)
+        ])
+        snow.run(.group([
+            .move(to: CGPoint(x: x + drift, y: -20), duration: dur),
+            sway,
+            .sequence([.wait(forDuration: dur * 0.82), .fadeOut(withDuration: dur * 0.18), .removeFromParent()])
+        ]))
+    }
+
+    private func spawnSparkle() {
+        let s = CGFloat.random(in: 4...11)
+        let sparkle = SKShapeNode(rectOf: CGSize(width: s, height: s), cornerRadius: 1)
+        sparkle.fillColor = particlePalette.randomElement()?.withAlphaComponent(CGFloat.random(in: 0.58...0.90)) ?? UIColor.systemYellow
+        sparkle.strokeColor = .clear
+        sparkle.position = CGPoint(x: CGFloat.random(in: 0...size.width), y: CGFloat.random(in: 0...size.height))
+        sparkle.zPosition = CGFloat.random(in: 5...9)
+        sparkle.zRotation = .pi / 4
+        sparkle.setScale(0.15)
+        addChild(sparkle)
+
+        let dur = Double.random(in: 0.75...1.35)
+        sparkle.run(.sequence([
+            .group([.fadeIn(withDuration: dur * 0.18), .scale(to: CGFloat.random(in: 0.9...1.4), duration: dur * 0.30)]),
+            .group([.rotate(byAngle: CGFloat.random(in: -2.8...2.8), duration: dur * 0.52), .fadeOut(withDuration: dur * 0.52)]),
+            .removeFromParent()
+        ]))
+    }
+
     // MARK: - Confetti burst on pop
 
     private func emitBurst(at center: CGPoint) {
-        for i in 0..<28 {
-            spawnBurstPiece(at: center, color: rainPalette[i % rainPalette.count], index: i)
+        switch currentParticleMode {
+        case .confetti:
+            for i in 0..<28 {
+                spawnBurstPiece(at: center, color: particlePalette[i % particlePalette.count], index: i)
+            }
+        case .bubbles:
+            for i in 0..<18 { spawnBubbleBurstPiece(at: center, index: i) }
+        case .smoke:
+            for i in 0..<12 { spawnSmokeBurstPiece(at: center, index: i) }
+        case .rain:
+            for i in 0..<22 { spawnRainBurstPiece(at: center, index: i) }
+        case .snow:
+            for i in 0..<26 { spawnSnowBurstPiece(at: center, index: i) }
+        case .sparkle:
+            for i in 0..<34 { spawnSparkleBurstPiece(at: center, index: i) }
         }
     }
 
@@ -336,6 +510,115 @@ class HomeFeedLaunchCoverScene: SKScene {
             .sequence([burst, fall, .removeFromParent()]),
             spin,
             .sequence([fadeDelay, fadeOut])
+        ]))
+    }
+
+    private func spawnBubbleBurstPiece(at center: CGPoint, index: Int) {
+        let radius = CGFloat.random(in: 5...18)
+        let bubble = SKShapeNode(circleOfRadius: radius)
+        bubble.fillColor = UIColor.white.withAlphaComponent(0.05)
+        bubble.strokeColor = UIColor.systemBlue.withAlphaComponent(0.48)
+        bubble.lineWidth = 1.6
+        bubble.position = center
+        bubble.zPosition = 8
+        addChild(bubble)
+
+        let angle = CGFloat(index) / 18.0 * 2 * .pi + CGFloat.random(in: -0.18...0.18)
+        let distance = CGFloat.random(in: 110...260)
+        let dur = Double.random(in: 0.85...1.45)
+        bubble.run(.sequence([
+            .group([
+                .move(by: CGVector(dx: cos(angle) * distance, dy: sin(angle) * distance + 90), duration: dur),
+                .scale(to: CGFloat.random(in: 1.3...1.9), duration: dur),
+                .fadeOut(withDuration: dur)
+            ]),
+            .removeFromParent()
+        ]))
+    }
+
+    private func spawnSmokeBurstPiece(at center: CGPoint, index: Int) {
+        let radius = CGFloat.random(in: 18...46)
+        let smoke = SKShapeNode(circleOfRadius: radius)
+        smoke.fillColor = UIColor(white: CGFloat.random(in: 0.45...0.68), alpha: CGFloat.random(in: 0.10...0.20))
+        smoke.strokeColor = .clear
+        smoke.position = center
+        smoke.zPosition = 7
+        smoke.setScale(0.25)
+        addChild(smoke)
+
+        let angle = CGFloat(index) / 12.0 * 2 * .pi
+        let dur = Double.random(in: 1.2...2.0)
+        smoke.run(.sequence([
+            .group([
+                .move(by: CGVector(dx: cos(angle) * CGFloat.random(in: 30...130), dy: abs(sin(angle)) * 90 + CGFloat.random(in: 80...180)), duration: dur),
+                .scale(to: CGFloat.random(in: 1.4...2.4), duration: dur),
+                .fadeOut(withDuration: dur)
+            ]),
+            .removeFromParent()
+        ]))
+    }
+
+    private func spawnRainBurstPiece(at center: CGPoint, index: Int) {
+        let drop = SKShapeNode(rectOf: CGSize(width: 2, height: CGFloat.random(in: 16...32)), cornerRadius: 1)
+        drop.fillColor = UIColor.systemBlue.withAlphaComponent(0.58)
+        drop.strokeColor = .clear
+        drop.position = center
+        drop.zPosition = 8
+        addChild(drop)
+
+        let angle = CGFloat(index) / 22.0 * 2 * .pi
+        let distance = CGFloat.random(in: 120...310)
+        let dur = Double.random(in: 0.45...0.80)
+        drop.zRotation = angle - .pi / 2
+        drop.run(.sequence([
+            .group([
+                .move(by: CGVector(dx: cos(angle) * distance, dy: sin(angle) * distance - 60), duration: dur),
+                .fadeOut(withDuration: dur)
+            ]),
+            .removeFromParent()
+        ]))
+    }
+
+    private func spawnSnowBurstPiece(at center: CGPoint, index: Int) {
+        let snow = SKShapeNode(circleOfRadius: CGFloat.random(in: 2.5...6.0))
+        snow.fillColor = UIColor.white.withAlphaComponent(0.88)
+        snow.strokeColor = .clear
+        snow.position = center
+        snow.zPosition = 8
+        addChild(snow)
+
+        let angle = CGFloat(index) / 26.0 * 2 * .pi
+        let distance = CGFloat.random(in: 80...230)
+        let dur = Double.random(in: 1.1...1.9)
+        snow.run(.sequence([
+            .group([
+                .move(by: CGVector(dx: cos(angle) * distance, dy: sin(angle) * distance - 120), duration: dur),
+                .fadeOut(withDuration: dur)
+            ]),
+            .removeFromParent()
+        ]))
+    }
+
+    private func spawnSparkleBurstPiece(at center: CGPoint, index: Int) {
+        let s = CGFloat.random(in: 5...12)
+        let sparkle = SKShapeNode(rectOf: CGSize(width: s, height: s), cornerRadius: 1)
+        sparkle.fillColor = particlePalette[index % particlePalette.count].withAlphaComponent(0.88)
+        sparkle.strokeColor = .clear
+        sparkle.position = center
+        sparkle.zPosition = 9
+        sparkle.zRotation = .pi / 4
+        addChild(sparkle)
+
+        let angle = CGFloat(index) / 34.0 * 2 * .pi
+        let distance = CGFloat.random(in: 120...280)
+        let dur = Double.random(in: 0.65...1.15)
+        sparkle.run(.sequence([
+            .group([
+                .move(by: CGVector(dx: cos(angle) * distance, dy: sin(angle) * distance), duration: dur),
+                .rotate(byAngle: CGFloat.random(in: -5...5), duration: dur),
+                .fadeOut(withDuration: dur)
+            ]),
+            .removeFromParent()
         ]))
     }
 

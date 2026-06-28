@@ -132,10 +132,10 @@ struct CameraKitView: View {
                 .allowsHitTesting(!isRecording)
             }
 
-            VStack {
-                Spacer()
-            }
-            .padding(.top, 16)
+            // User recognition overlay — top of screen
+            UserRecognitionOverlay(recognitionManager: userRecognition)
+                .zIndex(8)
+                .allowsHitTesting(true)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .ignoresSafeArea()
@@ -183,10 +183,18 @@ struct CameraKitView: View {
                 lastVideoThumbnail = await generateVideoThumbnail(from: url)
             }
         }
-        .onChange(of: userRecognition.recognizedUser?.profile.username) { oldUsername, newUsername in
+        .onChange(of: userRecognition.recognizedUser?.profile.username) { _, newUsername in
             if let user = userRecognition.recognizedUser {
                 print("👤 [UserRecognition] Recognized user: @\(user.profile.username) (confidence: \(Int(user.confidence*100))%)")
+                Task { @MainActor in CameraAIAnnouncer.shared.announceRecognizedUser(user) }
+            } else {
+                Task { @MainActor in CameraAIAnnouncer.shared.clearLastUser() }
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("MLObjectsDetected"))) { note in
+            guard let objects = note.userInfo?["objects"] as? [DetectedObject],
+                  let primary = objects.first?.identifier else { return }
+            Task { @MainActor in CameraAIAnnouncer.shared.announceMLLabel(primary) }
         }
     }
     

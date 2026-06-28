@@ -18,7 +18,11 @@ private enum CubeFaceImageCache {
         return img
     }
     static func clearSkinCache() {
-        cache = cache.filter { !$0.key.hasPrefix("face_bg_skin_") }
+        cache = cache.filter {
+            !$0.key.hasPrefix("face_bg_skin_") &&
+            !$0.key.hasPrefix("face_emission_neon_") &&
+            !$0.key.hasPrefix("face_cubemap_v2_")
+        }
     }
 }
 
@@ -144,27 +148,27 @@ struct CubeFaceExporter {
             UIColor(white: 0.95, alpha: 1).setFill()
             UIBezierPath(roundedRect: rect.insetBy(dx: 27, dy: 27), cornerRadius: 82).fill()
             
-            // Icon
+            // Icon — vertically centered: icon(307) + gap(68) + title(137) = 512 → top = (1024−512)/2 = 256
             let symbolName = tab.systemImage
             let pointSize: CGFloat = 273
             let iconWidth: CGFloat = 307
             let iconHeight: CGFloat = 307
-            let iconY: CGFloat = 239
+            let iconY: CGFloat = 256
             let config = UIImage.SymbolConfiguration(pointSize: pointSize, weight: .bold)
-            
+
             let imgRect = CGRect(x: (size.width - iconWidth) / 2, y: iconY, width: iconWidth, height: iconHeight)
-            
+
             // Soft glow behind icon
             let glowConfig = UIImage.SymbolConfiguration(pointSize: pointSize + 34, weight: .bold)
             let glowImage = UIImage(systemName: symbolName, withConfiguration: glowConfig) ?? UIImage()
             let glowRect = imgRect.insetBy(dx: -20, dy: -20)
             UIColor.white.withAlphaComponent(0.25).setFill()
             glowImage.withTintColor(.white, renderingMode: .alwaysOriginal).draw(in: glowRect, blendMode: .normal, alpha: 0.25)
-            
+
             let image = UIImage(systemName: symbolName, withConfiguration: config) ?? UIImage()
             image.withTintColor(.white, renderingMode: .alwaysOriginal).draw(in: imgRect)
-            
-            // Title
+
+            // Title — top = iconY + iconHeight + gap = 256 + 307 + 68 = 631
             let paragraph = NSMutableParagraphStyle()
             paragraph.alignment = .center
             let attrs: [NSAttributedString.Key: Any] = [
@@ -173,7 +177,7 @@ struct CubeFaceExporter {
                 .paragraphStyle: paragraph
             ]
             let title = tab.title as NSString
-            let titleRect = CGRect(x: 0, y: 614, width: size.width, height: 137)
+            let titleRect = CGRect(x: 0, y: 631, width: size.width, height: 137)
             // Outline
             let outlineAttrs: [NSAttributedString.Key: Any] = [
                 .font: UIFont.systemFont(ofSize: 82, weight: .heavy),
@@ -198,24 +202,24 @@ struct CubeFaceExporter {
             let pointSize: CGFloat = 273
             let iconWidth: CGFloat = 307
             let iconHeight: CGFloat = 307
-            let iconY: CGFloat = 239
+            let iconY: CGFloat = 256
             let config = UIImage.SymbolConfiguration(pointSize: pointSize, weight: .bold)
             let imgRect = CGRect(x: (size.width - iconWidth) / 2, y: iconY, width: iconWidth, height: iconHeight)
-            
+
             // Glow
             let glowConfig = UIImage.SymbolConfiguration(pointSize: pointSize + 34, weight: .bold)
             let glowImage = UIImage(systemName: symbolName, withConfiguration: glowConfig) ?? UIImage()
             let glowRect = imgRect.insetBy(dx: -20, dy: -20)
             glowImage.withTintColor(.white, renderingMode: .alwaysOriginal).draw(in: glowRect, blendMode: .normal, alpha: 0.55)
-            
+
             let image = UIImage(systemName: symbolName, withConfiguration: config) ?? UIImage()
             image.withTintColor(.white, renderingMode: .alwaysOriginal).draw(in: imgRect)
-            
+
             // Title
             let paragraph = NSMutableParagraphStyle()
             paragraph.alignment = .center
             let title = tab.title as NSString
-            let titleRect = CGRect(x: 0, y: 614, width: size.width, height: 137)
+            let titleRect = CGRect(x: 0, y: 631, width: size.width, height: 137)
             let boldAttrs: [NSAttributedString.Key: Any] = [
                 .font: UIFont.systemFont(ofSize: 89, weight: .black),
                 .foregroundColor: UIColor.white,
@@ -483,6 +487,8 @@ private struct CubeSceneView: UIViewRepresentable {
 
         // Gestures: pan for left/right (more sensitive), swipe up for action
         let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePan(_:)))
+        pan.minimumNumberOfTouches = 1
+        pan.maximumNumberOfTouches = 1  // single-touch only — prevents multi-finger twists from reaching the gesture
         let swipeUp = UISwipeGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleSwipe(_:)))
         swipeUp.direction = .up
         let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap(_:)))
@@ -573,7 +579,12 @@ private struct CubeSceneView: UIViewRepresentable {
            let box = cube.geometry as? SCNBox {
             context.coordinator.lastAppliedSkin = currentSkin
             CubeFaceImageCache.clearSkinCache()
-            let newMats = makeMaterials(baseColor: baseColor)
+            var newMats = makeMaterials(baseColor: baseColor)
+            let elementCount = box.elementCount
+            if elementCount > newMats.count {
+                let edgeMat = makeChamferEdgeMaterial()
+                while newMats.count < elementCount { newMats.append(edgeMat) }
+            }
             box.materials = newMats
             context.coordinator.cubeMaterials = newMats
             context.coordinator.applyCurrentProfileIconOverride()
@@ -760,7 +771,7 @@ private struct CubeSceneView: UIViewRepresentable {
         // node.castsShadow = true
         scene.rootNode.addChildNode(node)
 
-        node.eulerAngles = SCNVector3(0.0, initialYaw(for: selectedTab), 0.0)
+        node.simdOrientation = simd_quatf(angle: initialYaw(for: selectedTab), axis: SIMD3<Float>(0, 1, 0))
 
         // Attach or update glow particle system for previews (only if enableGlow true)
         if enableGlow && !isRunningInPreviews {
@@ -774,7 +785,15 @@ private struct CubeSceneView: UIViewRepresentable {
             node.runAction(spin, forKey: "previewSpin")
         }
 
-        let mats = makeMaterials(baseColor: baseColor)
+        var mats = makeMaterials(baseColor: baseColor)
+        // SCNBox with chamferRadius generates 26 geometry elements (6 faces + 12 edges + 8 corners).
+        // Any element beyond the materials array cycles, but chamfer UVs sample black tile corners.
+        // Fill all extra slots with a solid edge material so no chamfer ever shows black.
+        let elementCount = box.elementCount
+        if elementCount > mats.count {
+            let edgeMat = makeChamferEdgeMaterial()
+            while mats.count < elementCount { mats.append(edgeMat) }
+        }
         box.materials = mats
         // Cache materials for in-place mutation during updates
         // Not here because coordinator is unavailable - handled in makeUIView
@@ -784,29 +803,116 @@ private struct CubeSceneView: UIViewRepresentable {
 
     private func uiColor(_ c: Color) -> UIColor { UIColor(c) }
 
+    // Slices one tile from a 4×3 cube-net image and scales the content to fill the full face.
+    // AI-generated cross layouts have black padding around the content within each tile; this
+    // detects the non-black bounding box and stretches it edge-to-edge so no black bleeds onto the cube.
+    // faceIndex matches SCNBox material order: 0=front(Map) 1=right(Camera) 2=back(Feed) 3=left(Profile) 4=top 5=bottom
+    private func sliceCubemapTile(from image: UIImage, faceIndex: Int) -> UIImage {
+        guard let cg = image.cgImage else { return image }
+        let tileW = cg.width / 4
+        let tileH = cg.height / 3
+        // (col, row) for each material index in the cross layout
+        let colRow: [(Int, Int)] = [(2,1), (3,1), (0,1), (1,1), (1,0), (1,2)]
+        guard faceIndex < colRow.count else { return image }
+        let (col, row) = colRow[faceIndex]
+        let cropRect = CGRect(x: col * tileW, y: row * tileH, width: tileW, height: tileH)
+        guard let tile = cg.cropping(to: cropRect) else { return image }
+
+        // Find the tight bounding box of non-black content pixels in the tile.
+        let contentRect = tileContentBounds(cgImage: tile, threshold: 20)
+        let size = CGSize(width: tileW, height: tileH)
+        let skin = CubeSkinStore.shared.current
+
+        let renderer = UIGraphicsImageRenderer(size: size)
+        return renderer.image { _ in
+            // Use the skin's theme color as background so chamfer edge pixels blend.
+            skin.themeUIColor.setFill()
+            UIBezierPath(rect: CGRect(origin: .zero, size: size)).fill()
+            // Crop to content area then stretch to fill the full tile — removes black padding.
+            if let contentTile = tile.cropping(to: contentRect) {
+                UIImage(cgImage: contentTile, scale: image.scale, orientation: image.imageOrientation)
+                    .draw(in: CGRect(origin: .zero, size: size))
+            } else {
+                UIImage(cgImage: tile, scale: image.scale, orientation: image.imageOrientation)
+                    .draw(in: CGRect(origin: .zero, size: size))
+            }
+        }
+    }
+
+    // Returns the tightest CGRect containing all pixels brighter than `threshold` in any channel.
+    // If the whole image is dark, returns the full image rect.
+    private func tileContentBounds(cgImage: CGImage, threshold: Int) -> CGRect {
+        let w = cgImage.width
+        let h = cgImage.height
+        guard let dataProvider = cgImage.dataProvider,
+              let cfData = dataProvider.data,
+              let bytes = CFDataGetBytePtr(cfData) else {
+            return CGRect(x: 0, y: 0, width: w, height: h)
+        }
+        let bpp = cgImage.bitsPerPixel / 8  // bytes per pixel (usually 4: RGBA or BGRA)
+        let bpr = cgImage.bytesPerRow
+        guard bpp >= 3 else { return CGRect(x: 0, y: 0, width: w, height: h) }
+        var minX = w, minY = h, maxX = 0, maxY = 0
+        for y in 0..<h {
+            for x in 0..<w {
+                let o = y * bpr + x * bpp
+                // First three bytes are R,G,B (RGBA) or B,G,R (BGRA) — order doesn't matter for threshold.
+                let c0 = Int(bytes[o]), c1 = Int(bytes[o + 1]), c2 = Int(bytes[o + 2])
+                if c0 > threshold || c1 > threshold || c2 > threshold {
+                    if x < minX { minX = x }; if x > maxX { maxX = x }
+                    if y < minY { minY = y }; if y > maxY { maxY = y }
+                }
+            }
+        }
+        if minX > maxX || minY > maxY { return CGRect(x: 0, y: 0, width: w, height: h) }
+        return CGRect(x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1)
+    }
+
     private func makeMaterials(baseColor: Color) -> [SCNMaterial] {
         // SCNBox material order (Apple docs): 0=front(+Z) 1=right(+X) 2=back(-Z) 3=left(-X) 4=top(+Y) 5=bottom(-Y)
         // yaw=0°   → front (+Z) = index 0 = Map
         // yaw=-90° → right (+X) = index 1 = Camera
         // yaw=-180°→ back  (-Z) = index 2 = Feed
         // yaw=-270°→ left  (-X) = index 3 = Profile
-        let faceSpecs: [(String, String)] = [
-            ("Map",      "map.fill"),         // 0: +Z front  — map tab
-            ("Camera",   "camera.fill"),      // 1: +X right  — record tab
-            ("Feed",     "tv.fill"),          // 2: -Z back   — feed tab
-            ("Profile",  "person.fill"),      // 3: -X left   — profile tab
-            ("",         "fork.knife"),       // 4: +Y top    — decorative
-            ("",         "p.circle.fill"),    // 5: -Y bottom — P logo peek
+        let faceSpecs: [(String, String, AppTab)] = [
+            ("Map",      "map.fill",       .map),      // 0: +Z front
+            ("Camera",   "camera.fill",    .record),   // 1: +X right
+            ("Feed",     "tv.fill",        .feed),     // 2: -Z back
+            ("Profile",  "person.fill",    .profile),  // 3: -X left
+            ("",         "fork.knife",     .settings), // 4: +Y top
+            ("",         "p.circle.fill",  .settings), // 5: -Y bottom
         ]
 
-        return faceSpecs.map { (title, icon) in
+        let skin = CubeSkinStore.shared.current
+        // Load the cube-net asset for this skin — icons are pre-rendered inside the image
+        let cubemapImage = UIImage(named: skin.cubemapAssetName)
+
+        return faceSpecs.enumerated().map { (faceIndex, spec) in
+            let (title, icon, tab) = spec
             let mat = SCNMaterial()
-            mat.diffuse.contents = faceBackgroundOnly(for: .feed, baseColor: baseColor)
+
+            if let cubeImg = cubemapImage {
+                // Slice the correct face tile — icons already baked into the texture
+                let tileKey = "face_cubemap_v2_\(skin.rawValue)_\(faceIndex)"
+                mat.diffuse.contents = CubeFaceImageCache.image(for: tileKey) {
+                    sliceCubemapTile(from: cubeImg, faceIndex: faceIndex)
+                }
+                mat.emission.intensity = 0  // icons are in the diffuse, not emission
+                mat.emission.contents = nil
+            } else {
+                // Fallback: programmatic texture + emission overlay
+                mat.diffuse.contents = faceBackgroundOnly(for: tab, baseColor: baseColor)
+                mat.emission.intensity = 0.88
+                mat.emission.contents = faceEmissionMask(title: title, systemImage: icon,
+                                                          borderColor: skin.borderAccentColor,
+                                                          iconColor: skin.iconFillColor)
+            }
+
             mat.diffuse.intensity = 1.0
+            mat.diffuse.wrapS = .clamp
+            mat.diffuse.wrapT = .clamp
             mat.multiply.contents = UIColor.white
             mat.multiply.intensity = 1.0
-            mat.emission.intensity = 0.88
-            mat.emission.contents = faceEmissionMask(title: title, systemImage: icon)
             if useNormalMap && !isRunningInPreviews, let normal = UIImage(named: "CubeNormalMap") {
                 mat.normal.contents = normal
                 mat.normal.intensity = 0.6
@@ -818,6 +924,19 @@ private struct CubeSceneView: UIViewRepresentable {
             mat.locksAmbientWithDiffuse = false
             return mat
         }
+    }
+
+    private func makeChamferEdgeMaterial() -> SCNMaterial {
+        let mat = SCNMaterial()
+        // Use the skin's theme color for chamfer edges so they blend with the face textures
+        mat.diffuse.contents = CubeSkinStore.shared.current.themeUIColor
+        mat.diffuse.intensity = 1.0
+        mat.lightingModel = lightingModel
+        mat.metalness.contents = 0.0
+        mat.roughness.contents = 1.0
+        mat.isDoubleSided = true
+        mat.locksAmbientWithDiffuse = false
+        return mat
     }
 
     private func faceImage(for tab: AppTab) -> UIImage {
@@ -876,17 +995,23 @@ private struct CubeSceneView: UIViewRepresentable {
     }
 
     private func faceEmissionMask(for tab: AppTab) -> UIImage {
+        let skin = CubeSkinStore.shared.current
+        let bc = skin.borderAccentColor
+        let ic = skin.iconFillColor
         switch tab {
-        case .feed:    return faceEmissionMask(title: "Feed",     systemImage: "tv.fill")
-        case .map:     return faceEmissionMask(title: "Map",      systemImage: "map.fill")
-        case .record:  return faceEmissionMask(title: "Camera",   systemImage: "camera.fill")
-        case .profile: return faceEmissionMask(title: "Profile",  systemImage: "person.fill")
-        case .settings:return faceEmissionMask(title: "Settings", systemImage: "gearshape.fill")
+        case .feed:    return faceEmissionMask(title: "Feed",     systemImage: "tv.fill",        borderColor: bc, iconColor: ic)
+        case .map:     return faceEmissionMask(title: "Map",      systemImage: "map.fill",       borderColor: bc, iconColor: ic)
+        case .record:  return faceEmissionMask(title: "Camera",   systemImage: "camera.fill",    borderColor: bc, iconColor: ic)
+        case .profile: return faceEmissionMask(title: "Profile",  systemImage: "person.fill",    borderColor: bc, iconColor: ic)
+        case .settings:return faceEmissionMask(title: "Settings", systemImage: "gearshape.fill", borderColor: bc, iconColor: ic)
         }
     }
 
-    private func faceEmissionMask(title: String, systemImage: String) -> UIImage {
-        let key = "face_emission_neon_\(title)_\(systemImage)"
+    private func faceEmissionMask(title: String, systemImage: String,
+                                  borderColor: UIColor = UIColor(red: 0.55, green: 0.30, blue: 1.0, alpha: 1.0),
+                                  iconColor: UIColor = .white) -> UIImage {
+        let skin = CubeSkinStore.shared.current
+        let key = "face_emission_neon_\(skin.rawValue)_\(title)_\(systemImage)"
         return CubeFaceImageCache.image(for: key) {
             let size = CGSize(width: 300, height: 300)
             let renderer = UIGraphicsImageRenderer(size: size)
@@ -894,13 +1019,12 @@ private struct CubeSceneView: UIViewRepresentable {
                 UIColor.clear.setFill()
                 ctx.fill(CGRect(origin: .zero, size: size))
 
-                // Purple neon border glow — drawn from outer edge inward
+                // Skin-matched neon border glow — drawn from outer edge inward
                 let borderRect = CGRect(origin: .zero, size: size)
-                let purple = UIColor(red: 0.55, green: 0.30, blue: 1.0, alpha: 1.0)
                 for i in 1...18 {
                     let lineWidth = CGFloat(19 - i) * 1.3
                     let alpha = CGFloat(i) / 18.0 * 0.62
-                    purple.withAlphaComponent(alpha).setStroke()
+                    borderColor.withAlphaComponent(alpha).setStroke()
                     let inset = lineWidth / 2.0 + 2.0
                     let path = UIBezierPath(
                         roundedRect: borderRect.insetBy(dx: inset, dy: inset),
@@ -909,8 +1033,10 @@ private struct CubeSceneView: UIViewRepresentable {
                     path.lineWidth = lineWidth
                     path.stroke()
                 }
-                // Crisp bright inner border line
-                UIColor(red: 0.76, green: 0.55, blue: 1.0, alpha: 0.92).setStroke()
+                // Crisp bright inner border — lighter version of borderColor
+                var bh: CGFloat = 0, bs: CGFloat = 0, bb: CGFloat = 0, ba: CGFloat = 0
+                borderColor.getHue(&bh, saturation: &bs, brightness: &bb, alpha: &ba)
+                UIColor(hue: bh, saturation: max(0, bs - 0.18), brightness: min(1, bb + 0.22), alpha: 0.92).setStroke()
                 let crispPath = UIBezierPath(roundedRect: borderRect.insetBy(dx: 5, dy: 5), cornerRadius: 20)
                 crispPath.lineWidth = 2.5
                 crispPath.stroke()
@@ -918,41 +1044,50 @@ private struct CubeSceneView: UIViewRepresentable {
                 // Icon
                 let isPhoneIcon = title == "Phone" || systemImage.contains("phone")
                 let pointSize: CGFloat = isPhoneIcon ? 118 : 80
-                let iconWidth: CGFloat = isPhoneIcon ? 132 : 90
-                let iconHeight: CGFloat = isPhoneIcon ? 132 : 90
+                let maxW: CGFloat = isPhoneIcon ? 132 : 90
+                let maxH: CGFloat = isPhoneIcon ? 132 : 90
                 let iconY: CGFloat = isPhoneIcon ? 48 : 68
                 let config = UIImage.SymbolConfiguration(pointSize: pointSize, weight: .bold)
-                let imgRect = CGRect(x: (size.width - iconWidth) / 2, y: iconY, width: iconWidth, height: iconHeight)
+                let image = UIImage(systemName: systemImage, withConfiguration: config) ?? UIImage()
+                let imgScale = image.size.width > 0 && image.size.height > 0
+                    ? min(maxW / image.size.width, maxH / image.size.height) : 1
+                let drawW = image.size.width * imgScale
+                let drawH = image.size.height * imgScale
+                let imgRect = CGRect(
+                    x: (size.width - drawW) / 2,
+                    y: iconY + (maxH - drawH) / 2,
+                    width: drawW,
+                    height: drawH
+                )
 
-                // Multi-pass glow behind icon (white, decreasing size/alpha outward→in)
+                // Multi-pass glow behind icon
                 for i in stride(from: 5, through: 1, by: -1) {
                     let glowSize = pointSize + CGFloat(i) * 7
                     let glowConfig = UIImage.SymbolConfiguration(pointSize: glowSize, weight: .bold)
                     let glowImg = UIImage(systemName: systemImage, withConfiguration: glowConfig) ?? UIImage()
                     let expand = CGFloat(i) * 3.5
-                    glowImg.withTintColor(.white, renderingMode: .alwaysOriginal)
+                    glowImg.withTintColor(iconColor, renderingMode: .alwaysOriginal)
                         .draw(in: imgRect.insetBy(dx: -expand, dy: -expand), blendMode: .normal, alpha: 0.07 * CGFloat(6 - i))
                 }
 
-                let image = UIImage(systemName: systemImage, withConfiguration: config) ?? UIImage()
-                image.withTintColor(.white, renderingMode: .alwaysOriginal).draw(in: imgRect)
+                image.withTintColor(iconColor, renderingMode: .alwaysOriginal).draw(in: imgRect)
 
                 guard !title.isEmpty else { return }
 
-                // Label text (white, double-drawn for neon thickness)
+                // Label text — skin accent color, double-drawn for thickness
                 let paragraph = NSMutableParagraphStyle()
                 paragraph.alignment = .center
                 let titleNS = title as NSString
                 let titleRect = CGRect(x: 0, y: 180, width: size.width, height: 40)
                 let glowAttrs: [NSAttributedString.Key: Any] = [
                     .font: UIFont.systemFont(ofSize: 27, weight: .black),
-                    .foregroundColor: UIColor.white.withAlphaComponent(0.38),
+                    .foregroundColor: iconColor.withAlphaComponent(0.38),
                     .paragraphStyle: paragraph
                 ]
                 titleNS.draw(in: titleRect.insetBy(dx: -1, dy: -1), withAttributes: glowAttrs)
                 let mainAttrs: [NSAttributedString.Key: Any] = [
                     .font: UIFont.systemFont(ofSize: 26, weight: .black),
-                    .foregroundColor: UIColor.white,
+                    .foregroundColor: iconColor,
                     .paragraphStyle: paragraph
                 ]
                 titleNS.draw(in: titleRect, withAttributes: mainAttrs)
@@ -962,49 +1097,13 @@ private struct CubeSceneView: UIViewRepresentable {
 
     private func faceBackgroundOnly(for tab: AppTab, baseColor: Color) -> UIImage {
         let skin = CubeSkinStore.shared.current
-        let cacheKey = "face_bg_skin_\(skin.rawValue)"
+        let tabSuffix = (skin == .rubber) ? "_\(tab.title)" : ""
+        let cacheKey = "face_bg_skin_\(skin.rawValue)\(tabSuffix)"
         if let skinImage = UIImage(named: skin.diffuseAssetName) {
             return CubeFaceImageCache.image(for: cacheKey) { skinImage }
         }
-        // No asset — generate a gradient tile from the skin's theme color
         return CubeFaceImageCache.image(for: cacheKey) {
-            makeSkinTexture(skin)
-        }
-    }
-
-    private func makeSkinTexture(_ skin: CubeSkin) -> UIImage {
-        let size = CGSize(width: 300, height: 300)
-        let renderer = UIGraphicsImageRenderer(size: size)
-        return renderer.image { ctx in
-            let cgCtx = ctx.cgContext
-            let base = skin.themeUIColor
-            var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
-            base.getHue(&h, saturation: &s, brightness: &b, alpha: &a)
-            let light = UIColor(hue: h, saturation: max(0, s - 0.15), brightness: min(1, b + 0.30), alpha: 1)
-            let dark  = UIColor(hue: h, saturation: min(1, s + 0.10), brightness: max(0, b - 0.35), alpha: 1)
-            let gradient = CGGradient(
-                colorsSpace: CGColorSpaceCreateDeviceRGB(),
-                colors: [light.cgColor, base.cgColor, dark.cgColor] as CFArray,
-                locations: [0.0, 0.5, 1.0]
-            )!
-            let rect = CGRect(origin: .zero, size: size)
-            // Rounded tile
-            UIBezierPath(roundedRect: rect.insetBy(dx: 6, dy: 6), cornerRadius: 22).addClip()
-            cgCtx.drawLinearGradient(gradient,
-                                     start: CGPoint(x: 0, y: 0),
-                                     end: CGPoint(x: size.width, y: size.height),
-                                     options: [])
-            // Subtle gloss highlight in top-left quadrant
-            let glossGrad = CGGradient(
-                colorsSpace: CGColorSpaceCreateDeviceRGB(),
-                colors: [UIColor.white.withAlphaComponent(0.18).cgColor,
-                         UIColor.white.withAlphaComponent(0.0).cgColor] as CFArray,
-                locations: [0.0, 1.0]
-            )!
-            cgCtx.drawRadialGradient(glossGrad,
-                                     startCenter: CGPoint(x: 80, y: 80), startRadius: 0,
-                                     endCenter: CGPoint(x: 80, y: 80), endRadius: 160,
-                                     options: [])
+            skin.makeTexture(tab: tab)
         }
     }
 
@@ -1074,6 +1173,9 @@ private struct CubeSceneView: UIViewRepresentable {
 
         private var motionObserver: NSObjectProtocol?
         private var liveRotation: SCNVector3 = SCNVector3Zero
+        private var liveRollYaw: Float = 0
+        private var lastTiltSnapTime: CFTimeInterval = 0
+        private var lastSetYaw: Float = 0
 
         private var holdObservers: [NSObjectProtocol] = []
         private var profileIconOverrideObserver: NSObjectProtocol?
@@ -1399,8 +1501,9 @@ private struct CubeSceneView: UIViewRepresentable {
                 if peekActive { cube.removeAction(forKey: "peekPLogo"); peekPitch = 0; peekActive = false }
                 applyCombinedRotation(to: cube)
 
-                // Clear liveRotation to avoid fighting motion tilt during pan
+                // Clear motion lean while panning
                 self.liveRotation = SCNVector3Zero
+                self.liveRollYaw = 0
 
             case .ended, .cancelled, .failed:
                 // Snap to nearest face based on currentYaw
@@ -1421,8 +1524,9 @@ private struct CubeSceneView: UIViewRepresentable {
                     NotificationCenter.default.post(name: Notification.Name("RecordTabBecameActive"), object: nil)
                 }
 
-                // Reset live tilt and reapply combined rotation in animate completion
+                // Reset motion lean after snap
                 self.liveRotation = SCNVector3Zero
+                self.liveRollYaw = 0
 
             default:
                 break
@@ -1492,16 +1596,43 @@ private struct CubeSceneView: UIViewRepresentable {
                 }
             }
 
+            // Use customAction with explicit quaternion construction so Z is mathematically
+            // impossible (we never touch the Z axis). simdOrientation bypasses eulerAngles
+            // entirely to avoid any conversion round-trip that could introduce roll.
             if bouncy {
                 let overshoot: CGFloat = 0.12
-                let target1 = SCNAction.rotateTo(x: 0, y: cgYaw + overshoot, z: 0, duration: 0.18 * parent.rotationSpeedMultiplier, usesShortestUnitArc: true)
-                target1.timingMode = .easeInEaseOut
-                let target2 = SCNAction.rotateTo(x: 0, y: cgYaw, z: 0, duration: 0.22 * parent.rotationSpeedMultiplier, usesShortestUnitArc: true)
-                target2.timingMode = .easeInEaseOut
-                cube.runAction(SCNAction.sequence([target1, target2]), completionHandler: completionBlock)
+                let dur1 = 0.18 * parent.rotationSpeedMultiplier
+                let dur2 = 0.22 * parent.rotationSpeedMultiplier
+                let startY = CGFloat(lastSetYaw)
+                let midY = cgYaw + overshoot
+                let action1 = SCNAction.customAction(duration: dur1) { [weak self] node, elapsed in
+                    guard let self else { return }
+                    let t = min(1.0, elapsed / CGFloat(dur1))
+                    let e = t * t * (3 - 2 * t)
+                    let y = Float(startY + (midY - startY) * e)
+                    self.lastSetYaw = y
+                    node.simdOrientation = simd_quatf(angle: y, axis: SIMD3<Float>(0, 1, 0))
+                }
+                let action2 = SCNAction.customAction(duration: dur2) { [weak self] node, elapsed in
+                    guard let self else { return }
+                    let t = min(1.0, elapsed / CGFloat(dur2))
+                    let e = t * t * (3 - 2 * t)
+                    let y = Float(midY + (cgYaw - midY) * e)
+                    self.lastSetYaw = y
+                    node.simdOrientation = simd_quatf(angle: y, axis: SIMD3<Float>(0, 1, 0))
+                }
+                cube.runAction(SCNAction.sequence([action1, action2]), completionHandler: completionBlock)
             } else {
-                let action = SCNAction.rotateTo(x: 0, y: cgYaw, z: 0, duration: 0.28 * parent.rotationSpeedMultiplier, usesShortestUnitArc: true)
-                action.timingMode = .easeInEaseOut
+                let dur = 0.28 * parent.rotationSpeedMultiplier
+                let startY = CGFloat(lastSetYaw)
+                let action = SCNAction.customAction(duration: dur) { [weak self] node, elapsed in
+                    guard let self else { return }
+                    let t = min(1.0, elapsed / CGFloat(dur))
+                    let e = t * t * (3 - 2 * t)
+                    let y = Float(startY + (cgYaw - startY) * e)
+                    self.lastSetYaw = y
+                    node.simdOrientation = simd_quatf(angle: y, axis: SIMD3<Float>(0, 1, 0))
+                }
                 cube.runAction(action, completionHandler: completionBlock)
             }
         }
@@ -1509,8 +1640,9 @@ private struct CubeSceneView: UIViewRepresentable {
         private func rotateCube(_ node: SCNNode, to index: Int, animated: Bool = true, bouncy: Bool = false) {
             let baseAngle = Float(index) * (-Float.pi / 2)
             if !animated {
-                node.eulerAngles.y = baseAngle
                 currentYaw = baseAngle
+                lastSetYaw = baseAngle
+                node.simdOrientation = simd_quatf(angle: baseAngle, axis: SIMD3<Float>(0, 1, 0))
                 return
             }
             currentYaw = baseAngle
@@ -1519,17 +1651,54 @@ private struct CubeSceneView: UIViewRepresentable {
 
         func startObservingMotion() {
             stopObservingMotion()
+            if SettingsStore.shared.tiltControlEnabled {
+                CubeMotionPoster.shared.start()
+            }
             motionObserver = NotificationCenter.default.addObserver(forName: Notification.Name("CubeMotionUpdate"), object: nil, queue: .main) { [weak self] notif in
                 guard let self,
                       let scnView = self.view,
                       let cube = scnView.scene?.rootNode.childNode(withName: "cube", recursively: true) else { return }
 
-                // Skip motion updates while user is interacting (panning)
-                if self.isInteracting { return }
+                if self.isInteracting {
+                    self.liveRollYaw = 0
+                    return
+                }
 
-                // Ignore device pitch/roll; keep faces square
-                self.liveRotation = SCNVector3Zero
+                guard SettingsStore.shared.tiltControlEnabled,
+                      let roll = notif.userInfo?["roll"] as? Double else {
+                    if self.liveRollYaw != 0 {
+                        self.liveRollYaw = 0
+                        self.applyCombinedRotation(to: cube)
+                    }
+                    return
+                }
+
+                // Subtle cube lean: follows device tilt, max ~12° at 45° tilt
+                self.liveRollYaw = Float(-roll) * 0.27
                 self.applyCombinedRotation(to: cube)
+
+                // Tab snap when tilt exceeds ~34° with 1.5 s cooldown
+                let snapThreshold: Double = 0.60
+                let now = CACurrentMediaTime()
+                guard abs(roll) > snapThreshold, now - self.lastTiltSnapTime > 1.5 else { return }
+
+                self.lastTiltSnapTime = now
+                // Negative roll = tilt left = previous tab; positive = tilt right = next tab
+                let direction = roll < 0 ? -1 : 1
+                let tabs = [AppTab.map, .record, .feed, .profile]
+                let newIndex = (self.currentIndex + direction + tabs.count) % tabs.count
+                self.rotateCube(cube, to: newIndex, animated: true, bouncy: true)
+                self.currentIndex = newIndex
+                self.parent.selectedTab = tabs[newIndex]
+                self.haptic.impactOccurred(intensity: 0.9)
+
+                let newTab = tabs[newIndex]
+                if newTab != .feed {
+                    NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
+                }
+                if newTab == .record {
+                    NotificationCenter.default.post(name: Notification.Name("RecordTabBecameActive"), object: nil)
+                }
             }
         }
 
@@ -1538,6 +1707,8 @@ private struct CubeSceneView: UIViewRepresentable {
                 NotificationCenter.default.removeObserver(token)
                 motionObserver = nil
             }
+            liveRollYaw = 0
+            CubeMotionPoster.shared.stop()
         }
 
         private func startObservingHold() {
@@ -1664,37 +1835,13 @@ private struct CubeSceneView: UIViewRepresentable {
         }
 
         private func startPeriodicPLogoTimer() {
+            // Peek animation disabled — cube must not rotate on X/Z axis
             peekTimer?.invalidate()
-            peekTimer = Timer.scheduledTimer(withTimeInterval: 25, repeats: true) { [weak self] _ in
-                DispatchQueue.main.async { self?.triggerPLogoPeek() }
-            }
+            peekTimer = nil
         }
 
         private func triggerPLogoPeek() {
-            guard !isInteracting, !isBlinking, !peekActive else { return }
-            guard let scnView = view,
-                  let cube = scnView.scene?.rootNode.childNode(withName: "cube", recursively: true) else { return }
-            peekActive = true
-            let tiltDur = 0.45, holdDur = 2.0, returnDur = 0.45
-            let totalDur = tiltDur + holdDur + returnDur
-            let action = SCNAction.customAction(duration: totalDur) { [weak self] _, elapsed in
-                guard let self else { return }
-                let t = Float(elapsed)
-                let target = -Float.pi / 2  // -90° shows the -Y (P logo) bottom face
-                if t < Float(tiltDur) {
-                    self.peekPitch = target * (t / Float(tiltDur))
-                } else if t < Float(tiltDur + holdDur) {
-                    self.peekPitch = target
-                } else {
-                    let rt = t - Float(tiltDur + holdDur)
-                    self.peekPitch = target * max(0, 1 - rt / Float(returnDur))
-                }
-                self.applyCombinedRotation(to: cube)
-            }
-            cube.runAction(action, forKey: "peekPLogo") { [weak self] in
-                self?.peekPitch = 0
-                self?.peekActive = false
-            }
+            // Disabled — X-axis tilt is not permitted
         }
 
         private func refreshMaterialsForSkinChange() {
@@ -1702,7 +1849,12 @@ private struct CubeSceneView: UIViewRepresentable {
                   let cube = scnView.scene?.rootNode.childNode(withName: "cube", recursively: true),
                   let box = cube.geometry as? SCNBox else { return }
             CubeFaceImageCache.clearSkinCache()
-            let mats = parent.makeMaterials(baseColor: parent.baseColor)
+            var mats = parent.makeMaterials(baseColor: parent.baseColor)
+            let elementCount = box.elementCount
+            if elementCount > mats.count {
+                let edgeMat = parent.makeChamferEdgeMaterial()
+                while mats.count < elementCount { mats.append(edgeMat) }
+            }
             box.materials = mats
             cubeMaterials = mats
             applyCurrentProfileIconOverride()
@@ -1711,7 +1863,10 @@ private struct CubeSceneView: UIViewRepresentable {
         }
 
         private func applyCombinedRotation(to node: SCNNode) {
-            node.eulerAngles = SCNVector3(peekPitch, currentYaw, 0)
+            lastSetYaw = currentYaw
+            // Cube only rotates on Y — no X/Z tilt permitted
+            let qY = simd_quatf(angle: currentYaw + liveRollYaw, axis: SIMD3<Float>(0, 1, 0))
+            node.simdOrientation = qY
         }
 
         func applyPreviewHover(_ enabled: Bool) {

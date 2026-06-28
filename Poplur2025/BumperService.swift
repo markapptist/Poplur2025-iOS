@@ -93,6 +93,12 @@ final class BumperService: ObservableObject {
         if post.isLiveStream       { context += "\nThis is a LIVE broadcast." }
         if post.viewCount > 100    { context += "\nTrending: \(post.viewCount) views." }
         if let h = post.adHeadline { context += "\nVideo headline: \(h)" }
+        if post.radius > 0 {
+            let rKm = post.radius >= 1000
+                ? String(format: "%.0f km", post.radius / 1000)
+                : String(format: "%.0f m", post.radius)
+            context += "\nRadius reach: \(rKm)"
+        }
 
         let langLine: String
         switch language {
@@ -105,7 +111,7 @@ final class BumperService: ObservableObject {
         You are a charismatic TV host for Poplur, a social video app. \
         Using the details below, write ONE natural spoken sentence (12–22 words) that a host \
         would say live on air to introduce the next video. \
-        Reference the channel and location naturally — don't just list them. \
+        Reference the channel, location, and radius reach naturally — don't just list them. \
         Be warm, specific, and engaging. Vary your phrasing. \
         \(langLine) \
         Return ONLY the spoken sentence — no quotes, no labels, no extra text.

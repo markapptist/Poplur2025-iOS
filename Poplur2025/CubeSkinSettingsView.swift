@@ -60,14 +60,8 @@ struct CubeSkinSettingsView: View {
 private struct SkinThumbnailView: View {
     let skin: CubeSkin
     var body: some View {
-        if let img = UIImage(named: skin.diffuseAssetName) {
-            Image(uiImage: img).resizable().scaledToFill()
-        } else {
-            ZStack {
-                Color(white: 0.2)
-                Text("Missing\nAsset").font(.caption2).multilineTextAlignment(.center).foregroundStyle(.secondary)
-            }
-        }
+        let img = UIImage(named: skin.diffuseAssetName) ?? skin.makeTexture()
+        Image(uiImage: img).resizable().scaledToFill()
     }
 }
 
@@ -93,21 +87,7 @@ private struct CubeSkinPreviewSceneView: UIViewRepresentable {
     }
 
     private func skinImage(for skin: CubeSkin) -> UIImage {
-        if let img = UIImage(named: skin.diffuseAssetName) { return img }
-        let size = CGSize(width: 300, height: 300)
-        let base = skin.themeUIColor
-        var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
-        base.getHue(&h, saturation: &s, brightness: &b, alpha: &a)
-        let light = UIColor(hue: h, saturation: max(0, s - 0.15), brightness: min(1, b + 0.30), alpha: 1)
-        let dark  = UIColor(hue: h, saturation: min(1, s + 0.10), brightness: max(0, b - 0.35), alpha: 1)
-        return UIGraphicsImageRenderer(size: size).image { ctx in
-            let gradient = CGGradient(
-                colorsSpace: CGColorSpaceCreateDeviceRGB(),
-                colors: [light.cgColor, base.cgColor, dark.cgColor] as CFArray,
-                locations: [0.0, 0.5, 1.0])!
-            ctx.cgContext.drawLinearGradient(gradient,
-                start: .zero, end: CGPoint(x: size.width, y: size.height), options: [])
-        }
+        UIImage(named: skin.diffuseAssetName) ?? skin.makeTexture()
     }
 
     private func makeScene() -> SCNScene {

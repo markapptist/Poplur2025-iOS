@@ -18,19 +18,23 @@ struct RecordingCountdownView: View {
     @Binding var likesCount: Int
     @Binding var selectedTab: AppTab
     @Binding var radiusTrend: HomeView.RadiusTrend
-    
+    /// When set on camera tab, shows detected user's post count instead of countdown
+    var detectedUserPostCount: Int? = nil
+
     @State private var pulseAnimation: Bool = false
     @State private var arrowAnimation: Bool = false
-    
-    // Animation state for toggling between TRENDING/arrow and LIKES/number
     @State private var showLikesMode: Bool = false
-    
+
     private var shouldShowRecording: Bool {
         isRecording && selectedTab == .record
     }
-    
+
     private var shouldShowPostCount: Bool {
         !isRecording && [AppTab.map, .feed, .profile].contains(selectedTab)
+    }
+
+    private var shouldShowDetectedUser: Bool {
+        selectedTab == .record && !isRecording && detectedUserPostCount != nil
     }
 
     private var postCountAccentColor: Color {
@@ -45,16 +49,17 @@ struct RecordingCountdownView: View {
     var body: some View {
         Group {
             if shouldShowRecording {
-                // Recording countdown mode - video timer (10s → 0s)
                 recordingCountdownBadge
                     .allowsHitTesting(false)
+            } else if shouldShowDetectedUser, let count = detectedUserPostCount {
+                detectedUserBadge(postCount: count)
+                    .allowsHitTesting(false)
             } else if shouldShowPostCount {
-                // Post count mode - align baseline with radius display
                 postCountBadge
                     .allowsHitTesting(false)
             }
         }
-        .opacity((shouldShowRecording || shouldShowPostCount) ? 1.0 : 0.0)
+        .opacity((shouldShowRecording || shouldShowPostCount || shouldShowDetectedUser) ? 1.0 : 0.0)
         .animation(.easeInOut(duration: 0.3), value: shouldShowRecording)
         .animation(.easeInOut(duration: 0.3), value: shouldShowPostCount)
         .onAppear {
@@ -136,8 +141,54 @@ struct RecordingCountdownView: View {
         .padding(.vertical, 16)
     }
     
+    // MARK: - Detected User Badge (camera tab, face recognized)
+
+    @ViewBuilder
+    private func detectedUserBadge(postCount count: Int) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("DETECTED")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Color.green.opacity(0.8))
+                .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
+                .kerning(1.2)
+
+            VStack(alignment: .center, spacing: 2) {
+                Image(systemName: "person.fill.checkmark")
+                    .font(.system(size: 36, weight: .bold))
+                    .foregroundStyle(Color.green)
+                    .scaleEffect(pulseAnimation ? 1.05 : 0.95)
+                    .animation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true), value: pulseAnimation)
+                    .shadow(color: Color.green.opacity(0.4), radius: 6, x: 0, y: 2)
+
+                Rectangle()
+                    .fill(Color.green)
+                    .frame(width: 90, height: 2)
+                    .shadow(color: Color.green.opacity(0.5), radius: 2, x: 0, y: 0)
+
+                Text("\(count)")
+                    .font(.system(size: 28, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.9))
+                    .monospacedDigit()
+                    .minimumScaleFactor(0.4)
+                    .lineLimit(1)
+                    .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
+                    .poplurMetalNumberShader(intensity: 0.72)
+            }
+            .frame(width: 90, alignment: .center)
+
+            Text(count == 1 ? "post" : "posts")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(.white.opacity(0.7))
+                .minimumScaleFactor(0.5)
+                .lineLimit(1)
+                .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 16)
+    }
+
     // MARK: - Post Count Badge
-    
+
     @ViewBuilder
     private var postCountBadge: some View {
         VStack(alignment: .leading, spacing: 4) {

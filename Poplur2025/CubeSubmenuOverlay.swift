@@ -93,36 +93,32 @@ struct CubeMenuWheelOverlay: View {
     var body: some View {
         GeometryReader { proxy in
             ZStack {
-                ZStack {
-                    menuPanel(in: proxy.size, layout: settings.holdMenuLayoutPreference)
+                ForEach(Array(controller.items.enumerated()), id: \.element.id) { index, item in
+                    let slot = slotIndex(for: index)
+                    let selected = index == controller.selectedIndex
 
-                    ForEach(Array(controller.items.enumerated()), id: \.element.id) { index, item in
-                        let slot = slotIndex(for: index)
-                        let selected = index == controller.selectedIndex
-
-                        CubeMenuWheelItem(
-                            item: item,
-                            selected: selected,
-                            layout: settings.holdMenuLayoutPreference,
-                            selectionImpulse: selected && selectionImpulse
-                        )
-                            .position(position(forSlot: slot, in: proxy.size, layout: settings.holdMenuLayoutPreference))
-                            .scaleEffect(controller.isVisible ? 1 : 0.3)
-                            .modifier(
-                                HoldMenuTransitionMotion(
-                                    slot: slot,
-                                    centerSlot: centerSlot,
-                                    layout: settings.holdMenuLayoutPreference,
-                                    style: settings.transitionStylePreference,
-                                    selectionImpulse: selected && selectionImpulse
-                                )
+                    CubeMenuWheelItem(
+                        item: item,
+                        selected: selected,
+                        layout: settings.holdMenuLayoutPreference,
+                        selectionImpulse: selected && selectionImpulse
+                    )
+                        .position(position(forSlot: slot, in: proxy.size, layout: settings.holdMenuLayoutPreference))
+                        .scaleEffect(controller.isVisible ? 1 : 0.3)
+                        .modifier(
+                            HoldMenuTransitionMotion(
+                                slot: slot,
+                                centerSlot: centerSlot,
+                                layout: settings.holdMenuLayoutPreference,
+                                style: settings.transitionStylePreference,
+                                selectionImpulse: selected && selectionImpulse
                             )
-                            .opacity(controller.isVisible ? opacity(forSlot: slot) : 0)
-                            .zIndex(selected ? 3 : Double(3 - abs(slot - centerSlot)))
-                            .animation(selectionSpring, value: controller.selectedIndex)
-                            .animation(selectionSpring, value: selectionImpulse)
-                            .animation(entranceSpring, value: controller.isVisible)
-                    }
+                        )
+                        .opacity(controller.isVisible ? opacity(forSlot: slot) : 0)
+                        .zIndex(selected ? 3 : Double(3 - abs(slot - centerSlot)))
+                        .animation(selectionSpring, value: controller.selectedIndex)
+                        .animation(selectionSpring, value: selectionImpulse)
+                        .animation(entranceSpring, value: controller.isVisible)
                 }
             }
             .allowsHitTesting(false)
@@ -186,56 +182,6 @@ struct CubeMenuWheelOverlay: View {
             withAnimation(settleSpring) {
                 selectionImpulse = false
             }
-        }
-    }
-
-    @ViewBuilder
-    private func menuPanel(in size: CGSize, layout: HoldMenuLayoutPreference) -> some View {
-        let panelSize = panelSize(in: size, layout: layout)
-        let center = panelCenter(in: size, layout: layout)
-
-        RoundedRectangle(cornerRadius: layout == .horizontal ? 34 : 28, style: .continuous)
-            .fill(
-                LinearGradient(
-                    colors: [
-                        Color.black.opacity(0.74),
-                        Color(red: 0.07, green: 0.04, blue: 0.16).opacity(0.88),
-                        Color.black.opacity(0.78)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: layout == .horizontal ? 34 : 28, style: .continuous)
-                    .stroke(
-                        LinearGradient(
-                            colors: [
-                                Color(red: 0.32, green: 0.24, blue: 1.0).opacity(0.6),
-                                Color(red: 1.0, green: 0.1, blue: 0.95).opacity(0.74),
-                                Color(red: 0.52, green: 0.35, blue: 1.0).opacity(0.58)
-                            ],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        ),
-                        lineWidth: 1.5
-                    )
-            )
-            .shadow(color: Color(red: 0.62, green: 0.14, blue: 1.0).opacity(0.3), radius: 24, x: 0, y: 0)
-            .frame(width: panelSize.width, height: panelSize.height)
-            .position(center)
-            .scaleEffect(controller.isVisible ? 1 : 0.8)
-            .opacity(controller.isVisible ? 1 : 0)
-            .animation(.spring(response: 0.34, dampingFraction: 0.74), value: layout)
-            .animation(.spring(response: 0.34, dampingFraction: 0.74), value: controller.isVisible)
-    }
-
-    private func panelSize(in size: CGSize, layout: HoldMenuLayoutPreference) -> CGSize {
-        switch layout {
-        case .horizontal:
-            return CGSize(width: min(size.width - 28, 560), height: 146)
-        case .vertical:
-            return CGSize(width: 176, height: min(size.height - 120, 620))
         }
     }
 
@@ -341,12 +287,29 @@ private struct CubeMenuWheelItem: View {
     let layout: HoldMenuLayoutPreference
     let selectionImpulse: Bool
 
+    @ObservedObject private var skinStore = CubeSkinStore.shared
+
+    private var skin: CubeSkin { skinStore.current }
+
+    private var accent: Color {
+        selected ? Color(uiColor: skin.borderAccentColor) : item.tint
+    }
+
+    private var iconColor: Color {
+        switch skin {
+        case .rubber, .toy:
+            return item.tint
+        default:
+            return Color(uiColor: skin.iconFillColor)
+        }
+    }
+
     private var tileSize: CGSize {
         switch layout {
         case .horizontal:
-            return selected ? CGSize(width: 118, height: 118) : CGSize(width: 88, height: 88)
+            return selected ? CGSize(width: 132, height: 132) : CGSize(width: 98, height: 98)
         case .vertical:
-            return selected ? CGSize(width: 152, height: 116) : CGSize(width: 112, height: 96)
+            return selected ? CGSize(width: 166, height: 128) : CGSize(width: 124, height: 104)
         }
     }
 
@@ -354,56 +317,106 @@ private struct CubeMenuWheelItem: View {
         VStack(spacing: selected ? 8 : 5) {
             Image(systemName: item.systemImage)
                 .font(.system(size: selected ? 38 : 28, weight: .semibold))
-                .foregroundStyle(.white)
-                .shadow(color: selected ? Color(red: 1.0, green: 0.45, blue: 1.0).opacity(0.95) : Color(red: 0.72, green: 0.5, blue: 1.0).opacity(0.72), radius: selected ? 9 : 5)
+                .foregroundStyle(iconColor)
+                .shadow(color: accent.opacity(selected ? 0.95 : 0.72), radius: selected ? 9 : 5)
 
             Text(item.title)
                 .font(.system(size: selected ? 17 : 13, weight: .heavy, design: .rounded))
-                .foregroundColor(.white)
+                .foregroundColor(iconColor)
                 .lineLimit(1)
                 .minimumScaleFactor(0.62)
-                .shadow(color: Color(red: 0.76, green: 0.46, blue: 1.0).opacity(0.85), radius: 5)
+                .shadow(color: accent.opacity(0.85), radius: 5)
         }
         .padding(selected ? 12 : 9)
         .frame(width: tileSize.width, height: tileSize.height)
         .scaleEffect(x: selectionImpulse ? 1.08 : 1, y: selectionImpulse ? 0.94 : 1, anchor: .center)
         .background {
-            RoundedRectangle(cornerRadius: selected ? 24 : 18, style: .continuous)
-                .fill(
-                    RadialGradient(
-                        colors: [
-                            Color(red: 0.22, green: 0.03, blue: 0.34).opacity(selected ? 0.96 : 0.78),
-                            Color(red: 0.02, green: 0.02, blue: 0.06).opacity(0.98)
-                        ],
-                        center: .topLeading,
-                        startRadius: 4,
-                        endRadius: selected ? 120 : 86
-                    )
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: selected ? 24 : 18, style: .continuous)
-                        .stroke(
-                            LinearGradient(
-                                colors: [
-                                    Color(red: 0.44, green: 0.32, blue: 1.0),
-                                    Color(red: 1.0, green: 0.12, blue: 0.95),
-                                    Color(red: 0.74, green: 0.46, blue: 1.0)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: selected ? 3.5 : 2.0
-                        )
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: selected ? 18 : 13, style: .continuous)
-                        .stroke(Color.white.opacity(selected ? 0.26 : 0.18), lineWidth: 1)
-                        .padding(6)
-                )
-                .shadow(color: Color(red: 0.74, green: 0.18, blue: 1.0).opacity(selected ? 0.7 : 0.36), radius: selected ? 22 : 12, x: 0, y: 0)
-                .shadow(color: Color(red: 0.16, green: 0.16, blue: 1.0).opacity(selected ? 0.36 : 0.24), radius: selected ? 16 : 9, x: 0, y: 0)
-                .shadow(color: .black.opacity(0.22), radius: 16, x: 0, y: 12)
+            HoldMenuDesignedTile(
+                skin: skin,
+                textureTab: textureTab,
+                accent: accent,
+                selected: selected,
+                cornerRadius: selected ? 24 : 18
+            )
         }
         .accessibilityLabel(item.title)
+    }
+
+    private var textureTab: AppTab {
+        let key = "\(item.id) \(item.title)".lowercased()
+        if key.contains("feed") || key.contains("like") || key.contains("comment") || key.contains("news") || key.contains("tv") || key.contains("caption") {
+            return .feed
+        }
+        if key.contains("profile") || key.contains("mail") || key.contains("settings") || key.contains("stats") || key.contains("notification") || key.contains("phone") || key.contains("store") || key.contains("back") {
+            return .settings
+        }
+        if key.contains("map") || key.contains("search") || key.contains("location") || key.contains("tour") {
+            return .map
+        }
+        if key.contains("camera") || key.contains("photo") || key.contains("video") || key.contains("live") || key.contains("post") || key.contains("ar") {
+            return .record
+        }
+        return .profile
+    }
+}
+
+private struct HoldMenuDesignedTile: View {
+    let skin: CubeSkin
+    let textureTab: AppTab
+    let accent: Color
+    let selected: Bool
+    let cornerRadius: CGFloat
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+
+        Image(uiImage: skin.makeTexture(tab: textureTab))
+            .resizable()
+            .scaledToFill()
+            .clipShape(shape)
+            .overlay {
+                shape
+                    .fill(tileSheen)
+                    .blendMode(.screen)
+                    .opacity(selected ? 0.34 : 0.22)
+            }
+            .overlay {
+                shape
+                    .stroke(borderGradient, lineWidth: selected ? 3.5 : 2)
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: max(cornerRadius - 6, 8), style: .continuous)
+                    .stroke(Color.white.opacity(selected ? 0.32 : 0.18), lineWidth: 1)
+                    .padding(6)
+            }
+            .shadow(color: accent.opacity(selected ? 0.78 : 0.38), radius: selected ? 24 : 13, x: 0, y: 0)
+            .shadow(color: accent.opacity(selected ? 0.32 : 0.16), radius: selected ? 16 : 8, x: 0, y: 0)
+            .shadow(color: Color.black.opacity(selected ? 0.24 : 0.14), radius: selected ? 14 : 9, x: 0, y: 8)
+    }
+
+    private var tileSheen: LinearGradient {
+        LinearGradient(
+            colors: [
+                Color.white.opacity(0.55),
+                Color.white.opacity(0.08),
+                accent.opacity(0.16),
+                Color.clear
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+
+    private var borderGradient: LinearGradient {
+        LinearGradient(
+            colors: [
+                Color.white.opacity(selected ? 0.52 : 0.28),
+                accent.opacity(selected ? 1.0 : 0.78),
+                Color.white.opacity(selected ? 0.38 : 0.18),
+                accent.opacity(selected ? 0.92 : 0.62)
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
     }
 }

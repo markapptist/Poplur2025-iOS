@@ -6,7 +6,9 @@ struct SettingsView: View {
     private let brandPink = Color(red: 255.0/255.0, green: 255.0/255.0, blue: 255.0/255.0)
     
     @EnvironmentObject var quota: DailyQuotaViewModel
+    @EnvironmentObject var skinManager: PoplurCubeSkinManager
     @StateObject private var purchaseVM = PurchaseViewModel()
+    @State private var selectedSkin: PoplurCubeSkinStyle = .neon
 
     var body: some View {
         GeometryReader { geo in
@@ -83,6 +85,29 @@ struct SettingsView: View {
                             RoundedRectangle(cornerRadius: 16, style: .continuous)
                                 .fill(Color.gray.opacity(0.08))
                         )
+                        
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Cube Skin")
+                                .font(.system(size: 18, weight: .heavy, design: .rounded))
+                                .foregroundColor(.black.opacity(0.9))
+
+                            Picker("Skin", selection: $selectedSkin) {
+                                ForEach(PoplurCubeSkinStyle.allCases, id: \.self) { style in
+                                    Text(style.rawValue.capitalized).tag(style)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+
+                            // Apply immediately on change
+                            .onChange(of: selectedSkin) { _, newStyle in
+                                skinManager.setStyle(newStyle)
+                            }
+                        }
+                        .padding()
+                        .background(
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .fill(Color.gray.opacity(0.08))
+                        )
 
                         // Demo rows (swap for real toggles/links)
                         settingsRowLeft("Private Account") {
@@ -115,6 +140,7 @@ struct SettingsView: View {
                     }
                     .padding(.horizontal, 24) // internal padding only
                     .frame(maxWidth: .infinity, alignment: .topLeading)
+                    .onAppear { selectedSkin = skinManager.current.style }
                 }
                 .scrollIndicators(.hidden)
                 .scrollContentBackground(.hidden)
@@ -189,4 +215,3 @@ private extension Path {
         return p
     }
 }
-

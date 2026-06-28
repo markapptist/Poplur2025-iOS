@@ -8,6 +8,7 @@ import SwiftUI
 /// Overlay that displays recognized user information in the camera view
 struct UserRecognitionOverlay: View {
     @ObservedObject var recognitionManager: UserRecognitionManager
+    var onProfileTap: ((String) -> Void)? = nil
     
     var body: some View {
         VStack {
@@ -66,9 +67,8 @@ struct UserRecognitionOverlay: View {
                         .foregroundColor(.blue)
                 }
                 
-                // Confidence and radius
+                // Confidence, radius, post count
                 HStack(spacing: 8) {
-                    // Confidence indicator
                     HStack(spacing: 4) {
                         Image(systemName: "face.smiling")
                             .font(.system(size: 12))
@@ -76,13 +76,9 @@ struct UserRecognitionOverlay: View {
                             .font(.system(size: 12, weight: .medium))
                     }
                     .foregroundColor(.green)
-                    
-                    // Separator
-                    Circle()
-                        .fill(Color.white.opacity(0.5))
-                        .frame(width: 3, height: 3)
-                    
-                    // Radius
+
+                    Circle().fill(Color.white.opacity(0.5)).frame(width: 3, height: 3)
+
                     HStack(spacing: 4) {
                         Image(systemName: "location.circle.fill")
                             .font(.system(size: 12))
@@ -90,8 +86,37 @@ struct UserRecognitionOverlay: View {
                             .font(.system(size: 12, weight: .medium))
                     }
                     .foregroundColor(.orange)
+
+                    Circle().fill(Color.white.opacity(0.5)).frame(width: 3, height: 3)
+
+                    HStack(spacing: 4) {
+                        Image(systemName: "photo.stack.fill")
+                            .font(.system(size: 12))
+                        Text("\(user.postCount) posts")
+                            .font(.system(size: 12, weight: .medium))
+                    }
+                    .foregroundColor(.cyan)
                 }
             }
+
+            // View Profile button
+            Button {
+                onProfileTap?(user.profile.id)
+                NotificationCenter.default.post(name: .ShowUserProfile, object: user.profile.id)
+            } label: {
+                HStack(spacing: 4) {
+                    Text("View Profile")
+                        .font(.system(size: 13, weight: .semibold))
+                    Image(systemName: "arrow.right")
+                        .font(.system(size: 11, weight: .semibold))
+                }
+                .foregroundColor(.white)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(Capsule().fill(Color.green.opacity(0.7)))
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 4)
             
             Spacer()
         }
@@ -171,7 +196,8 @@ struct UserRecognitionOverlay_Previews: PreviewProvider {
                         ),
                         detectedAt: Date(),
                         confidence: 0.95,
-                        radiusMeters: 5000
+                        radiusMeters: 5000,
+                        postCount: 42
                     )
                     return manager
                 }()

@@ -75,7 +75,11 @@ private final class _LaunchCoverView: UIView {
 
     // MARK: Sublayers / subviews
     private let emitter       = CAEmitterLayer()
-    private let logoImageView = UIImageView(image: UIImage(named: "logo"))
+    private let logoImageView: UIImageView = {
+        let skin = CubeSkinStore.shared.current
+        let image = UIImage(named: skin.logoAssetName) ?? UIImage(named: "logo")
+        return UIImageView(image: image)
+    }()
     private let trackLayer    = CALayer()
     private let fillLayer     = CALayer()
     private let phaseLabel    = UILabel()
@@ -126,16 +130,10 @@ private final class _LaunchCoverView: UIView {
     private var popTimer:   Timer?
     private var started = false
 
-    // MARK: Palette
+    // MARK: Palette — matches WelcomeView confetti
     private static let palette: [UIColor] = [
-        UIColor(red: 0.98, green: 0.24, blue: 0.24, alpha: 1),
-        UIColor(red: 1.00, green: 0.58, blue: 0.00, alpha: 1),
-        UIColor(red: 1.00, green: 0.88, blue: 0.00, alpha: 1),
-        UIColor(red: 0.18, green: 0.80, blue: 0.24, alpha: 1),
-        UIColor(red: 0.20, green: 0.52, blue: 0.98, alpha: 1),
-        UIColor(red: 0.76, green: 0.18, blue: 0.90, alpha: 1),
-        UIColor(red: 0.98, green: 0.28, blue: 0.65, alpha: 1),
-        UIColor(red: 0.00, green: 0.78, blue: 0.80, alpha: 1),
+        .systemPink, .systemOrange, .systemYellow,
+        .systemGreen, .systemBlue, .systemPurple,
     ]
 
     override init(frame: CGRect) {
@@ -189,8 +187,8 @@ private final class _LaunchCoverView: UIView {
         let barLeft = cx - loadingBarWidth / 2
 
         emitter.frame           = bounds
-        emitter.emitterPosition = CGPoint(x: cx, y: -12)
-        emitter.emitterSize     = CGSize(width: bounds.width + 60, height: 2)
+        emitter.emitterPosition = CGPoint(x: cx, y: -40)
+        emitter.emitterSize     = CGSize(width: bounds.width + 400, height: bounds.height * 2)
 
         logoImageView.frame = CGRect(x: cx - logoSz/2, y: cy - logoSz/2, width: logoSz, height: logoSz)
         trackLayer.frame    = CGRect(x: barLeft, y: barY, width: loadingBarWidth, height: loadingBarHeight)
@@ -214,31 +212,32 @@ private final class _LaunchCoverView: UIView {
     private func makeConfettiCells() -> [CAEmitterCell] {
         Self.palette.enumerated().map { i, color in
             let cell = CAEmitterCell()
-            cell.birthRate         = 1.8
-            cell.lifetime          = 4.0
-            cell.lifetimeRange     = 1.0
-            cell.velocity          = 150
-            cell.velocityRange     = 60
+            cell.birthRate         = 70
+            cell.lifetime          = 7.5
+            cell.lifetimeRange     = 1.5
+            cell.velocity          = 120
+            cell.velocityRange     = 80
             cell.emissionLongitude = .pi      // straight down
-            cell.emissionRange     = .pi / 7
-            cell.spin              = 4
-            cell.spinRange         = 8
-            cell.yAcceleration     = 18       // gentle gravity effect
-            cell.alphaSpeed        = -0.22
-            cell.contents          = confettiCGImage(color: color, circle: i % 6 == 0)
+            cell.emissionRange     = .pi / 6
+            cell.spin              = 3.0
+            cell.spinRange         = .pi
+            cell.scale             = 1.0
+            cell.scaleRange        = 0.5
+            cell.scaleSpeed        = -0.06
+            cell.alphaRange        = 0.1
+            cell.alphaSpeed        = -0.05
+            cell.xAcceleration     = 25
+            cell.yAcceleration     = 200
+            cell.contents          = confettiCGImage(color: color)
             return cell
         }
     }
 
-    private func confettiCGImage(color: UIColor, circle: Bool) -> CGImage? {
-        let w: CGFloat = circle ? 8 : 12, h: CGFloat = circle ? 8 : 7
-        return UIGraphicsImageRenderer(size: CGSize(width: w, height: h)).image { _ in
+    private func confettiCGImage(color: UIColor) -> CGImage? {
+        let size = CGSize(width: 8, height: 15)
+        return UIGraphicsImageRenderer(size: size).image { ctx in
             color.setFill()
-            if circle {
-                UIBezierPath(ovalIn: CGRect(x: 0, y: 0, width: w, height: h)).fill()
-            } else {
-                UIBezierPath(roundedRect: CGRect(x: 0, y: 0, width: w, height: h), cornerRadius: 2).fill()
-            }
+            ctx.fill(CGRect(origin: .zero, size: size))
         }.cgImage
     }
 
@@ -536,6 +535,7 @@ struct HomeView: View {
     @EnvironmentObject private var auth: AuthViewModel
     @Environment(\.scenePhase) private var scenePhase
     @ObservedObject private var settings = SettingsStore.shared
+    @ObservedObject private var cubeSkinStore = CubeSkinStore.shared
 
     @Environment(\.homeViewIsPreviewRuntime) private var isPreviewRuntime
     @Environment(\.previewSelectedTab) private var previewSelectedTab
@@ -545,6 +545,9 @@ struct HomeView: View {
 
     // Routed user ID when tapping on a username in Feed
     @State private var routedUserID: String? = nil
+
+    // Post count of user detected by camera face recognition (nil when nobody detected)
+    @State private var cameraDetectedPostCount: Int? = nil
 
     // Location only when needed
     @StateObject private var locationProvider = LocationProvider()
@@ -582,6 +585,7 @@ struct HomeView: View {
     @State private var isRecordHolding: Bool = false
     @StateObject private var feedCubeMenuWheel = CubeMenuWheelController()
     @StateObject private var cameraCubeMenuWheel = CubeMenuWheelController()
+    @StateObject private var poplurAI = PoplurAIAssistantController()
     @State private var showFeedCommentComposer = false
     @State private var showLiveLocationPicker = false
 
@@ -821,6 +825,7 @@ struct HomeView: View {
 
                     // Setup user recognition callback
                     cameraController.mlDetectionManager?.onFrameProcessed = { [weak recognitionManager = support.recognitionManager] pixelBuffer, objects in
+                        CameraAIAnnouncer.shared.announceMLObjects(objects)
                         recognitionManager?.processDetectedObjects(objects, from: pixelBuffer)
                     }
 
@@ -839,6 +844,7 @@ struct HomeView: View {
             cameraControllerHolder.controller?.disableMLDetection()
             cameraControllerHolder.controller?.userRecognitionManager = nil
             userRecognitionManager?.clearRecognition()
+            CameraAIAnnouncer.shared.resetSession()
             // Reset filters and flag when leaving camera tab
             showARFilters = false
             arFilterManager?.activeFilter = .none
@@ -1287,6 +1293,97 @@ struct HomeView: View {
         selectedTab = newTab
     }
 
+    @MainActor
+    private func handlePoplurAICommand(_ command: PoplurAICommand?) {
+        guard let command else { return }
+        resetChromeSleepTimer()
+
+        switch command {
+        case .openTab(let tab):
+            selectedTab = tab
+        case .openPage(let page):
+            openPoplurAIPage(page)
+        case .goToChannel(let query):
+            selectedTab = .feed
+            NotificationCenter.default.post(
+                name: .PoplurAIGoToFeedChannel,
+                object: nil,
+                userInfo: ["query": query]
+            )
+        case .postToLocation(let location):
+            selectedTab = .map
+            NotificationCenter.default.post(
+                name: .PoplurAIStartMapPost,
+                object: nil,
+                userInfo: ["location": location ?? ""]
+            )
+        case .camera(let mode):
+            selectedTab = .record
+            ensureCameraRunningIfNeeded()
+            switch mode {
+            case .open:
+                break
+            case .photo:
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 450_000_000)
+                    triggerCameraPhotoFromCubeMenu()
+                }
+            case .video:
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 450_000_000)
+                    triggerCameraVideoFromCubeMenu()
+                }
+            }
+        case .setTourActive(let active):
+            selectedTab = .map
+            NotificationCenter.default.post(
+                name: .PoplurAISetTourActive,
+                object: nil,
+                userInfo: ["active": active]
+            )
+        case .logout:
+            auth.signOut()
+        case .sortPosts(let order):
+            selectedTab = .profile
+            NotificationCenter.default.post(
+                name: .PoplurAIProfileSortRequested,
+                object: nil,
+                userInfo: ["order": order.rawValue]
+            )
+        case .showAnalytics:
+            selectedTab = .profile
+            NotificationCenter.default.post(name: .PoplurAIShowAnalytics, object: nil)
+        case .unknown:
+            break
+        }
+    }
+
+    @MainActor
+    private func openPoplurAIPage(_ page: String) {
+        let normalized = page.lowercased()
+        if normalized.contains("tv guide") {
+            selectedTab = .feed
+            NotificationCenter.default.post(name: .FeedOpenTVGuide, object: nil)
+        } else if normalized.contains("message") || normalized.contains("mail") || normalized.contains("dm") {
+            selectedTab = .profile
+            NotificationCenter.default.post(name: .OpenDMsRequested, object: nil)
+        } else if normalized.contains("setting") {
+            selectedTab = .profile
+            NotificationCenter.default.post(name: .OpenSettingsRequested, object: nil)
+        } else if normalized.contains("stat") || normalized.contains("analytic") {
+            selectedTab = .profile
+            NotificationCenter.default.post(name: .PoplurAIShowAnalytics, object: nil)
+        } else if normalized.contains("map") {
+            selectedTab = .map
+        } else if normalized.contains("camera") || normalized.contains("record") {
+            selectedTab = .record
+        } else if normalized.contains("profile") {
+            selectedTab = .profile
+        } else {
+            selectedTab = .feed
+        }
+    }
+
     @ViewBuilder
     private var feedTabContent: some View {
         FeedView(homeChromeInactive: selectedTab == .feed && isChromeAsleep)
@@ -1659,7 +1756,8 @@ struct HomeView: View {
                             postCount: $userPostCount,
                             likesCount: $currentPostLikesCount,
                             selectedTab: $selectedTab,
-                            radiusTrend: $radiusTrend
+                            radiusTrend: $radiusTrend,
+                            detectedUserPostCount: cameraDetectedPostCount
                         )
                         .frame(width: 150, alignment: .leading)
 
@@ -1776,6 +1874,12 @@ struct HomeView: View {
                 .zIndex(1000)
                 .allowsHitTesting(true)
             }
+
+            PoplurAIAssistantOverlay(
+                controller: poplurAI,
+                accent: cubeSkinStore.current.appTheme.accent
+            )
+            .zIndex(9500)
 
         }
     }
@@ -1899,6 +2003,10 @@ struct HomeView: View {
                     routedUserID = uid
                 }
             }
+            .onReceive(NotificationCenter.default.publisher(for: .PoplurAIShowWakeTutorial)) { _ in
+                poplurAI.start()
+                poplurAI.showWakeTutorialPulse()
+            }
             .onReceive(NotificationCenter.default.publisher(for: .MapSuggestedRadius)) { note in
                 if let value = note.userInfo?["radius"] as? Double {
                     let clampedValue = min(value, 3_323_000.0)
@@ -1984,6 +2092,9 @@ struct HomeView: View {
                 }
             }
             .onAppear {
+                if !PreviewEnvHomeView.isPreview {
+                    poplurAI.start()
+                }
                 CallSessionManager.shared.startListeningForIncomingCalls()
                 runLaunchSequenceIfNeeded()
                 if selectedTab != .feed {
@@ -2115,6 +2226,9 @@ struct HomeView: View {
             .onChange(of: scenePhase) { _, phase in
                 switch phase {
                 case .active:
+                    if !PreviewEnvHomeView.isPreview {
+                        poplurAI.start()
+                    }
                     if selectedTab == .record {
                         ensureCameraRunningIfNeeded()
                     }
@@ -2122,10 +2236,12 @@ struct HomeView: View {
                         NotificationCenter.default.post(name: .ResumeFeedAudio, object: nil)
                     }
                 case .background:
+                    poplurAI.stop()
                     cameraControllerHolder.stopIfLoaded()
                     NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
                     NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
                 case .inactive:
+                    poplurAI.stop()
                     NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
                     NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
                 @unknown default:
@@ -2146,9 +2262,13 @@ struct HomeView: View {
                 }
             }
             .onChange(of: selectedTab) { _, newTab in
+                if newTab != .record { cameraDetectedPostCount = nil }
                 if newTab != .profile && routedUserID != nil {
                     routedUserID = nil
                 }
+            }
+            .onChange(of: poplurAI.commandToken) { _, _ in
+                handlePoplurAICommand(poplurAI.lastCommand)
             }
 
         // Step 2: apply notification receivers and remaining tasks
@@ -2161,6 +2281,11 @@ struct HomeView: View {
                     isometricBarModel.radius = min(value, 3_323_000.0)
                 }
             }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("CachedUserRadius"))) { note in
+                if let value = note.userInfo?["radius"] as? Double {
+                    isometricBarModel.radius = min(max(value, 0), 3_323_000.0)
+                }
+            }
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("UserRecognizedInCamera"))) { note in
                 if let radiusMeters = note.userInfo?["radius"] as? Double {
                     NotificationCenter.default.post(
@@ -2169,6 +2294,7 @@ struct HomeView: View {
                         userInfo: ["radius": radiusMeters]
                     )
                 }
+                cameraDetectedPostCount = note.userInfo?["postCount"] as? Int
             }
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("InlinePreviewDismissRequested"))) { _ in
                 isometricBarModel.radius = 0

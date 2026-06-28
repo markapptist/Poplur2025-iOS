@@ -154,28 +154,13 @@ class UserRecognitionManager: ObservableObject {
     }
     
     /// Process detected objects to find users
-    func processDetectedObjects(_ objects: [DetectedObject], from pixelBuffer: CVPixelBuffer?) {
+    func processDetectedObjects(_ _: [DetectedObject], from pixelBuffer: CVPixelBuffer?) {
         guard Date().timeIntervalSince(lastRecognitionTime) > recognitionCooldown else {
             return
         }
-        
-        // Check if any object is a person
-        let hasPerson = objects.contains { object in
-            let identifier = object.identifier.lowercased()
-            return identifier.contains("person") || 
-                   identifier.contains("face") ||
-                   identifier.contains("human")
-        }
-        
-        guard hasPerson else {
-            // No person detected, clear recognized user
-            if recognizedUser != nil {
-                recognizedUser = nil
-            }
-            return
-        }
-        
-        // If we have a pixel buffer, try face detection
+
+        // Vision image classification often labels face scenes by surrounding context.
+        // Run face detection from the frame itself instead of trusting a "person" label.
         if let buffer = pixelBuffer {
             detectFaces(in: buffer)
         }
@@ -211,6 +196,7 @@ class UserRecognitionManager: ObservableObject {
         guard !faces.isEmpty else {
             recognizedUser = nil
             recognizedFaceBounds = nil
+            CameraAIAnnouncer.shared.clearLastUser()
             return
         }
         
@@ -238,6 +224,7 @@ class UserRecognitionManager: ObservableObject {
         } else {
             recognizedUser = nil
             recognizedFaceBounds = nil
+            CameraAIAnnouncer.shared.clearLastUser()
         }
     }
     
@@ -278,16 +265,22 @@ class UserRecognitionManager: ObservableObject {
         }
         
         do {
-            // Fetch current user's profile
             if let cachedProfile = cachedUserProfiles[currentUserID] {
-                // Fetch radius from Firestore
                 let userDoc = try await db.collection("users").document(currentUserID).getDocument()
+                var profile = cachedProfile
+                if profile.displayName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
+                    let storedDisplayName = (userDoc.data()?["displayName"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let authDisplayName = Auth.auth().currentUser?.displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
+                    profile.displayName = storedDisplayName?.isEmpty == false ? storedDisplayName : (authDisplayName?.isEmpty == false ? authDisplayName : nil)
+                    cachedUserProfiles[currentUserID] = profile
+                }
                 let radiusMeters = userDoc.data()?["radius"] as? Double ?? 5000.0
-                updateRecognizedUser(cachedProfile, radius: radiusMeters, confidence: confidence)
+                let postCount = userDoc.data()?["postCount"] as? Int ?? 0
+                updateRecognizedUser(profile, radius: radiusMeters, postCount: postCount, confidence: confidence)
             } else {
                 let result = try await fetchUserProfile(userID: currentUserID)
                 cachedUserProfiles[currentUserID] = result.profile
-                updateRecognizedUser(result.profile, radius: result.radius, confidence: confidence)
+                updateRecognizedUser(result.profile, radius: result.radius, postCount: result.postCount, confidence: confidence)
             }
         } catch {
             print("❌ Error fetching current user profile: \(error.localizedDescription)")
@@ -296,47 +289,56 @@ class UserRecognitionManager: ObservableObject {
     
     
     /// Fetch user profile from Firestore
-    private func fetchUserProfile(userID: String) async throws -> (profile: UserProfile, radius: Double) {
+    private func fetchUserProfile(userID: String) async throws -> (profile: UserProfile, radius: Double, postCount: Int) {
         let userDoc = try await db.collection("users").document(userID).getDocument()
-        
+
         guard let data = userDoc.data() else {
             throw NSError(domain: "UserRecognition", code: 404, userInfo: [NSLocalizedDescriptionKey: "User not found"])
         }
-        
+
         let username = data["username"] as? String ?? "Unknown"
         let email = data["email"] as? String ?? ""
+        let storedDisplayName = (data["displayName"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let authDisplayName = Auth.auth().currentUser?.displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let displayName = storedDisplayName?.isEmpty == false ? storedDisplayName : (authDisplayName?.isEmpty == false ? authDisplayName : nil)
         let radiusMeters = data["radius"] as? Double ?? 5000.0
+        let postCount = data["postCount"] as? Int ?? 0
         let profileImageURLString = data["profileImageURL"] as? String
         let profilePictureURL = profileImageURLString.flatMap { URL(string: $0) }
-        
+
         let profile = UserProfile(
             id: userID,
             username: username,
             email: email,
+            displayName: displayName,
             profilePictureURL: profilePictureURL
         )
-        
-        return (profile, radiusMeters)
+
+        return (profile, radiusMeters, postCount)
     }
     
-    private func updateRecognizedUser(_ profile: UserProfile, radius: Double, confidence: Float = 0.85) {
-        recognizedUser = RecognizedUser(
+    private func updateRecognizedUser(_ profile: UserProfile, radius: Double, postCount: Int = 0, confidence: Float = 0.85) {
+        let user = RecognizedUser(
             profile: profile,
             detectedAt: Date(),
             confidence: confidence,
-            radiusMeters: radius
+            radiusMeters: radius,
+            postCount: postCount
         )
-        
-        print("👤 Recognized user: @\(profile.username) with \(Int(radius))m radius (confidence: \(Int(confidence * 100))%)")
-        
-        // Post notification for other parts of app
+        recognizedUser = user
+
+        print("👤 Recognized user name: \(user.nameForSpeech), username: @\(profile.username), radius: \(Int(radius))m, posts: \(postCount), confidence: \(Int(confidence * 100))%")
+        CameraAIAnnouncer.shared.announceRecognizedUser(user)
+
         NotificationCenter.default.post(
             name: NSNotification.Name("UserRecognizedInCamera"),
             object: nil,
             userInfo: [
                 "userID": profile.id,
                 "username": profile.username,
+                "displayName": user.nameForSpeech,
                 "radius": radius,
+                "postCount": postCount,
                 "confidence": confidence
             ]
         )
@@ -354,6 +356,7 @@ class UserRecognitionManager: ObservableObject {
         if recognizedUser != nil {
             recognizedUser = nil
             recognizedFaceBounds = nil
+            CameraAIAnnouncer.shared.clearLastUser()
             print("👤 User recognition cleared")
         }
     }
@@ -366,7 +369,8 @@ struct RecognizedUser: Identifiable {
     let profile: UserProfile
     let detectedAt: Date
     let confidence: Float
-    let radiusMeters: Double // Store radius separately since it's not in the main UserProfile
+    let radiusMeters: Double
+    let postCount: Int
     
     var id: String { profile.id }
     
@@ -392,6 +396,14 @@ struct RecognizedUser: Identifiable {
                 return "\(Int(feet)) ft"
             }
         }
+    }
+
+    var nameForSpeech: String {
+        guard let displayName = profile.displayName?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !displayName.isEmpty else {
+            return profile.username
+        }
+        return displayName
     }
 }
 

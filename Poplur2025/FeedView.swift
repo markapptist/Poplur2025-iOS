@@ -338,6 +338,10 @@ struct FeedView: View {
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
             NotificationCenter.default.post(name: .FeedTVGuideBecameVisible, object: nil)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .PoplurAIGoToFeedChannel)) { notification in
+            guard let query = notification.userInfo?["query"] as? String else { return }
+            openPoplurAIChannel(query: query)
+        }
         .onReceive(NotificationCenter.default.publisher(for: .FeedOpenNews)) { _ in
             guard !posts.isEmpty else { return }
             openNewsTimelineWithoutSpin()
@@ -919,7 +923,7 @@ struct FeedView: View {
                             )
                         }
                     }
-                    .frame(width: 86, height: 208)
+                    .frame(width: 86, height: 226)
                     .shadow(color: .black.opacity(0.45), radius: 12, x: 0, y: 6)
                     .position(
                         x: proxy.safeAreaInsets.leading + 28 + 43,
@@ -1149,6 +1153,36 @@ struct FeedView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         }
+        playOneShotPop()
+    }
+
+    private func openPoplurAIChannel(query: String) {
+        let normalized = query
+            .lowercased()
+            .replacingOccurrences(of: "modeling", with: "modelling")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard let targetIndex = channels.firstIndex(where: { channel in
+            let channelName = channel.name.lowercased()
+            return channel.id == normalized
+                || channelName == normalized
+                || "\(channel.number)" == normalized
+                || normalized.contains(channel.id)
+                || normalized.contains(channelName)
+                || normalized.contains("\(channel.number)")
+        }) else { return }
+
+        noteFeedInteraction()
+        showCommentCredits = false
+        flashTransition(targetChannelIndex: targetIndex)
+        selectedChannelIndex = targetIndex
+        currentIndex = 0
+
+        Task { @MainActor in
+            await reloadForChannel()
+        }
+
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         playOneShotPop()
     }
 

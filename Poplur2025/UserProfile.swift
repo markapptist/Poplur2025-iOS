@@ -6,13 +6,15 @@ struct UserProfile: Identifiable, Hashable, Codable {
     var id: String
     var username: String
     var email: String
+    var displayName: String?
     // Stored as a string in Firestore; decoded to URL here for AsyncImage
     var profilePictureURL: URL?
 
-    init(id: String, username: String, email: String, profilePictureURL: URL? = nil) {
+    init(id: String, username: String, email: String, displayName: String? = nil, profilePictureURL: URL? = nil) {
         self.id = id
         self.username = username
         self.email = email
+        self.displayName = displayName
         self.profilePictureURL = profilePictureURL
     }
 
@@ -26,6 +28,7 @@ struct UserProfile: Identifiable, Hashable, Codable {
         self.id = document.documentID
         self.username = username
         self.email = email
+        self.displayName = (data["displayName"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
         if let urlString = data["profilePictureURL"] as? String,
            let url = URL(string: urlString) {
             self.profilePictureURL = url
@@ -40,6 +43,9 @@ struct UserProfile: Identifiable, Hashable, Codable {
             "username": username,
             "email": email
         ]
+        if let displayName {
+            dict["displayName"] = displayName
+        }
         if let url = profilePictureURL {
             dict["profilePictureURL"] = url.absoluteString
         }

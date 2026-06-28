@@ -50,11 +50,14 @@ extension Notification.Name {
     static let FeedCommentSubmitted = Notification.Name("FeedCommentSubmitted")
     static let FeedAdvanceOnMediaFailure = Notification.Name("FeedAdvanceOnMediaFailure")
     static let FeedAdvanceToNextPost = Notification.Name("FeedAdvanceToNextPost")
+    static let PoplurAIGoToFeedChannel = Notification.Name("PoplurAIGoToFeedChannel")
     
     // Map and location
     static let CenterMapOnUserLocation = Notification.Name("CenterMapOnUserLocation")
     static let SharedRadiusDidChange = Notification.Name("SharedRadiusDidChange")
     static let MapSuggestedRadius = Notification.Name("MapSuggestedRadius")
+    static let PoplurAIStartMapPost = Notification.Name("PoplurAIStartMapPost")
+    static let PoplurAISetTourActive = Notification.Name("PoplurAISetTourActive")
     
     // Settings and UI
     static let OpenSettingsRequested = Notification.Name("OpenSettingsRequested")
@@ -63,6 +66,9 @@ extension Notification.Name {
     
     // User stats
     static let UserPostCountDidChange = Notification.Name("UserPostCountDidChange")
+    static let PoplurAIProfileSortRequested = Notification.Name("PoplurAIProfileSortRequested")
+    static let PoplurAIShowAnalytics = Notification.Name("PoplurAIShowAnalytics")
+    static let PoplurAIShowWakeTutorial = Notification.Name("PoplurAIShowWakeTutorial")
     
     // Camera roll
     static let CameraRollImageSelected = Notification.Name("CameraRollImageSelected")

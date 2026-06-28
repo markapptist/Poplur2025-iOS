@@ -4,5 +4,9 @@
 <dict>
 	<key>GADApplicationIdentifier</key>
 	<string>ca-app-pub-2086359936541081~4441297400</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Poplur uses the microphone to listen for Hey Poplur voice commands.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Poplur uses speech recognition so Poplur AI can understand your voice commands.</string>
 </dict>
 </plist>
