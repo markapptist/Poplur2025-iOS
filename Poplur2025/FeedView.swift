@@ -96,6 +96,8 @@ struct FeedView: View {
     @ObservedObject private var bumper = BumperService.shared
     @State private var activeBumperPayload: BumperPayload? = nil
     @State private var presentedBumperPostIDs: Set<String> = []
+    @State private var lastBumperPresentedAt: Date = .distantPast
+    private let minimumBumperSpacing: TimeInterval = 45
 
     // Country paging (horizontal swipe)
     @State private var selectedCountryIndex: Int = 0
@@ -359,13 +361,11 @@ struct FeedView: View {
             addCommentToCurrentPost(text)
         }
         .background(feedNotificationReceivers)
-        // AI host bumper overlay — shown before each post when ready
-        .fullScreenCover(item: Binding(
-            get: { activeBumperPayload },
-            set: { if $0 == nil { activeBumperPayload = nil } }
-        )) { payload in
-            FeedBumperView(payload: payload) {
-                activeBumperPayload = nil
+        .background {
+            if let payload = activeBumperPayload {
+                FeedBumperView(payload: payload) {
+                    activeBumperPayload = nil
+                }
             }
         }
     }
@@ -446,6 +446,7 @@ struct FeedView: View {
                 feedEntryLogoTask = nil
                 showFeedEntryLogo = false
                 tvGuideActivePlayer = nil
+                FeedAudioManager.shared.activePlayer?.pause()
                 NotificationCenter.default.post(name: .MainTabChildRouteVisibilityChanged, object: false)
             }
     }
@@ -501,8 +502,12 @@ struct FeedView: View {
 
     private func presentBumper(for post: FeedPost) {
         guard !showTimelineView, !showTVGuide else { return }
+        guard activeBumperPayload == nil else { return }
         guard !presentedBumperPostIDs.contains(post.id) else { return }
+        let now = Date()
+        guard now.timeIntervalSince(lastBumperPresentedAt) >= minimumBumperSpacing else { return }
         presentedBumperPostIDs.insert(post.id)
+        lastBumperPresentedAt = now
 
         let channel = channels[safe: selectedChannelIndex]
         let payload = bumper.activate(
@@ -514,10 +519,11 @@ struct FeedView: View {
     }
 
     private func prefetchUpcomingBumpers(from index: Int) {
+        guard bumper.isConfigured, activeBumperPayload == nil else { return }
         let channel = channels[safe: selectedChannelIndex]
         let channelName = channel?.name ?? "General"
         let channelID = channel?.id ?? ""
-        for offset in 1...2 {
+        for offset in 1...1 {
             if let next = posts[safe: index + offset] {
                 bumper.prefetch(next, channelName: channelName, channelID: channelID)
             }
@@ -962,6 +968,7 @@ struct FeedView: View {
             ZStack {
                 if showHeart {
                     Image(systemName: "heart.fill")
+                        .poplurIconShader()
                         .font(.system(size: 120, weight: .bold))
                         .foregroundStyle(.red)
                         .shadow(color: .black.opacity(0.3), radius: 6, x: 0, y: 3)
@@ -2164,10 +2171,12 @@ struct ChannelAssetIcon: View {
             Image(assetName)
                 .resizable()
                 .scaledToFit()
+                .poplurIconShader(intensity: 0.66)
                 .frame(width: size, height: size)
         } else {
             Text(fallbackEmoji)
                 .font(.system(size: fallbackFontSize))
+                .poplurTextShader(intensity: 0.62)
         }
     }
 }
@@ -2266,14 +2275,17 @@ private struct FeedTVGuideView: View {
                     Text("CH \(pip.number)")
                         .font(.system(size: 16, weight: .black, design: .monospaced))
                         .foregroundStyle(guideGreen)
+                        .poplurTextShader(intensity: 0.86)
                 }
                 Text(pip.category.uppercased())
                     .font(.system(size: 11, weight: .black, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.62))
+                    .poplurTextShader(intensity: 0.58)
                     .kerning(0.8)
                 Text(pip.program)
                     .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(.white.opacity(0.42))
+                    .poplurTextShader(intensity: 0.48)
                     .lineLimit(1)
             }
 
@@ -2282,6 +2294,7 @@ private struct FeedTVGuideView: View {
             Text("LIVE")
                 .font(.system(size: 10, weight: .black, design: .monospaced))
                 .foregroundStyle(.black)
+                .poplurTextShader(intensity: 0.58)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 5)
                 .background(guideGreen, in: Capsule())
@@ -2334,9 +2347,11 @@ private struct FeedTVGuideView: View {
                         Text("\(channel.number)")
                             .font(.system(size: 18, weight: .black, design: .monospaced))
                             .foregroundStyle(guideGreen)
+                            .poplurTextShader(intensity: 0.8)
                         Text(channel.category.uppercased())
                             .font(.system(size: 12, weight: .black))
                             .foregroundStyle(.white.opacity(channel.id == currentChannelID ? 1 : 0.62))
+                            .poplurTextShader(intensity: channel.id == currentChannelID ? 0.78 : 0.56)
                             .lineLimit(1)
                     }
                     .padding(.horizontal, 14)
@@ -2360,6 +2375,7 @@ private struct FeedTVGuideView: View {
                     }
                 } label: {
                     Image(systemName: "line.3.horizontal")
+                        .poplurIconShader()
                         .font(.system(size: 20, weight: .black))
                         .foregroundStyle(.white)
                         .frame(width: 44, height: 44)
@@ -2371,9 +2387,11 @@ private struct FeedTVGuideView: View {
                 Text("TV GUIDE")
                     .font(.system(size: isTablet ? 34 : 28, weight: .black, design: .monospaced))
                     .foregroundStyle(guideGreen)
+                    .poplurTextShader(intensity: 0.92)
                 Text("LIVE CHANNELS")
                     .font(.system(size: 12, weight: .heavy, design: .monospaced))
                     .foregroundStyle(guideGreen.opacity(0.72))
+                    .poplurTextShader(intensity: 0.7)
                     .kerning(1.2)
             }
 
@@ -2381,6 +2399,7 @@ private struct FeedTVGuideView: View {
 
             Button(action: onDismiss) {
                 Image(systemName: "xmark")
+                    .poplurIconShader()
                     .font(.system(size: 20, weight: .black))
                     .foregroundStyle(.white)
                     .frame(width: 52, height: 52)
@@ -2406,6 +2425,7 @@ private struct FeedTVGuideView: View {
         }
         .font(.system(size: 12, weight: .black, design: .monospaced))
         .foregroundStyle(Color.white.opacity(0.58))
+        .poplurTextShader(intensity: 0.54)
         .padding(.horizontal, 20)
         .padding(.vertical, 12)
         .background(Color.white.opacity(0.07))
@@ -2450,6 +2470,7 @@ private struct TVGuideMarquee: View {
                 Text(text)
                     .font(font)
                     .foregroundStyle(color)
+                    .poplurTextShader(intensity: 0.7)
                     .fixedSize()
                     .offset(x: offset)
             }
@@ -2497,6 +2518,7 @@ private struct FeedTVGuideRow: View {
                 Text("\(channel.number)")
                     .font(.system(size: 22, weight: .black, design: .monospaced))
                     .foregroundStyle(isSelected ? guideGreen : .white)
+                    .poplurTextShader(intensity: isSelected ? 0.86 : 0.68)
                     .monospacedDigit()
             }
             .frame(width: 80, alignment: .leading)
@@ -2505,6 +2527,7 @@ private struct FeedTVGuideRow: View {
             Text(channel.category.uppercased())
                 .font(.system(size: 12, weight: .black, design: .monospaced))
                 .foregroundStyle(isSelected ? guideGreen : Color.white.opacity(0.72))
+                .poplurTextShader(intensity: isSelected ? 0.8 : 0.58)
                 .lineLimit(1)
                 .frame(width: 90, alignment: .leading)
 
@@ -2519,6 +2542,7 @@ private struct FeedTVGuideRow: View {
             Text("LIVE")
                 .font(.system(size: 9, weight: .black, design: .monospaced))
                 .foregroundStyle(.black)
+                .poplurTextShader(intensity: 0.52)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 3)
                 .background(guideGreen, in: Capsule())
@@ -2576,16 +2600,19 @@ private struct GuidePipVideoPane: View {
                     Text("CH \(channel.number)")
                         .font(.system(size: 13, weight: .black, design: .monospaced))
                         .foregroundStyle(guideGreen)
+                        .poplurTextShader(intensity: 0.8)
                 }
 
                 Text(currentPostName.isEmpty ? channel.username : currentPostName)
                     .font(.system(size: 12, weight: .black))
                     .foregroundStyle(.white)
+                    .poplurTextShader(intensity: 0.68)
                     .lineLimit(1)
 
                 Text("LIVE")
                     .font(.system(size: 9, weight: .black, design: .monospaced))
                     .foregroundStyle(.black)
+                    .poplurTextShader(intensity: 0.52)
                     .padding(.horizontal, 5)
                     .padding(.vertical, 2)
                     .background(guideGreen, in: Capsule())
@@ -2770,11 +2797,13 @@ private struct FeedCommentCreditsOverlay: View {
                     Text("Comments")
                         .font(.system(size: 22, weight: .black, design: .rounded))
                         .foregroundStyle(.white)
+                        .poplurTextShader(intensity: 0.9)
                         .shadow(color: .black.opacity(0.7), radius: 8, x: 0, y: 4)
 
                     Text(displayName)
                         .font(.system(size: 13, weight: .heavy, design: .rounded))
                         .foregroundStyle(.white.opacity(0.76))
+                        .poplurTextShader(intensity: 0.68)
                         .textCase(.uppercase)
 
                     ForEach(comments) { comment in
@@ -2782,12 +2811,14 @@ private struct FeedCommentCreditsOverlay: View {
                             Text(comment.username)
                                 .font(.system(size: 15, weight: .black, design: .rounded))
                                 .foregroundStyle(.cyan)
+                                .poplurTextShader(intensity: 0.8)
                                 .shadow(color: .black.opacity(0.75), radius: 5, x: 0, y: 2)
 
                             Text(comment.text)
                                 .font(.system(size: 20, weight: .bold, design: .rounded))
                                 .multilineTextAlignment(.center)
                                 .foregroundStyle(.white)
+                                .poplurTextShader(intensity: 0.78)
                                 .fixedSize(horizontal: false, vertical: true)
                                 .shadow(color: .black.opacity(0.78), radius: 7, x: 0, y: 3)
                         }

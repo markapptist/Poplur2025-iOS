@@ -126,7 +126,7 @@ struct Poplur2025App: App {
                 }
             }
             .toolbar(.hidden, for: .navigationBar)
-            .poplurTextShaderScope(intensity: 0.72)
+            .poplurGlobalShaderScope(textIntensity: 0.72, iconIntensity: 0.72)
             .onAppear {
                 let appearance = UITabBarAppearance()
                 appearance.configureWithTransparentBackground()

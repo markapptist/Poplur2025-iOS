@@ -67,6 +67,7 @@ struct ARFilterSelectorHorizontal: View {
                     }
                 } label: {
                     Image(systemName: "xmark")
+                        .poplurIconShader()
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundColor(.white.opacity(0.7))
                         .frame(width: 28, height: 28)
@@ -146,6 +147,7 @@ private struct FilterButtonSnapchat: View {
                     
                     // Icon with glow effect when selected
                     Image(systemName: filter.icon)
+                        .poplurIconShader()
                         .font(.system(size: 26, weight: isSelected ? .semibold : .medium))
                         .foregroundColor(.white)
                         .shadow(color: isSelected ? .white.opacity(0.5) : .clear, radius: 8)
@@ -189,6 +191,7 @@ struct ARFilterSelector: View {
                     }
                 } label: {
                     Image(systemName: "xmark.circle.fill")
+                        .poplurIconShader()
                         .font(.system(size: 24))
                         .foregroundColor(.white.opacity(0.8))
                 }
@@ -256,6 +259,7 @@ private struct FilterButton: View {
                         .frame(width: 60, height: 60)
                     
                     Image(systemName: filter.icon)
+                        .poplurIconShader()
                         .font(.system(size: 24, weight: .medium))
                         .foregroundColor(.white)
                 }

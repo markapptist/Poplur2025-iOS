@@ -114,6 +114,7 @@ private struct DMSearchField: View {
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: "magnifyingglass")
+                .poplurIconShader()
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(Color(red: 0.58, green: 0.58, blue: 0.62))
 
@@ -160,6 +161,7 @@ private struct DMTopBar: View {
 
                 Button(action: onEdit) {
                     Image(systemName: "square.and.pencil")
+                        .poplurIconShader()
                         .font(.system(size: 22, weight: .semibold))
                         .foregroundStyle(.white)
                         .frame(width: 44, height: 44)
@@ -230,6 +232,7 @@ private struct DMThreadRow: View {
                     onVideoCall(videoCallUser)
                 } label: {
                     Image(systemName: "video.fill")
+                        .poplurIconShader()
                         .font(.system(size: 18, weight: .semibold))
                         .foregroundStyle(Color(red: 0.82, green: 0.82, blue: 0.86))
                         .frame(width: 36, height: 36)
@@ -365,6 +368,7 @@ struct DMThreadView: View {
         HStack(spacing: 10) {
             Button(action: {}) {
                 Image(systemName: "plus")
+                    .poplurIconShader()
                     .font(.system(size: 22, weight: .black))
                     .foregroundStyle(Color(red: 0.72, green: 0.72, blue: 0.78))
                     .frame(width: 46, height: 46)
@@ -384,6 +388,7 @@ struct DMThreadView: View {
 
             Button(action: send) {
                 Image(systemName: "paperplane.fill")
+                    .poplurIconShader()
                     .font(.system(size: 22, weight: .bold))
                     .foregroundStyle(.white)
                     .frame(width: 52, height: 52)
@@ -459,6 +464,7 @@ private struct DMMessageBubble: View {
                         .foregroundStyle(.white.opacity(0.62))
                     if isMe {
                         Image(systemName: "checkmark")
+                            .poplurIconShader()
                             .font(.system(size: 10, weight: .black))
                             .foregroundStyle(.white.opacity(0.72))
                     }
@@ -492,6 +498,7 @@ private struct DMCircleIconButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: systemName)
+                .poplurIconShader()
                 .font(.system(size: iconSize, weight: .black))
                 .foregroundStyle(.white)
                 .frame(width: size, height: size)
@@ -579,6 +586,7 @@ private struct NewThreadPickerView: View {
                             }
                             Spacer()
                             Image(systemName: selected.contains(user.id) ? "checkmark.circle.fill" : "circle")
+                                .poplurIconShader()
                                 .foregroundColor(selected.contains(user.id) ? Color.accentColor : Color.secondary)
                         }
                     }

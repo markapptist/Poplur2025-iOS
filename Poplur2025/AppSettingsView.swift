@@ -464,6 +464,7 @@ struct AppSettingsView: View {
                     .foregroundColor(theme.primaryText)
                 Spacer(minLength: 12)
                 Image(systemName: "arrow.right")
+                    .poplurIconShader()
                     .font(.system(size: 18, weight: .bold))
                     .foregroundColor(theme.accent)
             }
@@ -667,6 +668,7 @@ private struct CubeSkinPickerTile: View {
                     .scaledToFill()
                 if isSelected {
                     Image(systemName: "checkmark")
+                        .poplurIconShader()
                         .font(.system(size: 18, weight: .black))
                         .foregroundColor(theme.badgeText)
                         .padding(8)

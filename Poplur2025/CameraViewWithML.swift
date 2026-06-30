@@ -121,6 +121,10 @@ struct CameraViewWithML: View {
                 }
             }
         }
+        .onDisappear {
+            controller.disableMLDetection()
+            detectedObjects = []
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("MLObjectsDetected"))) { notification in
             guard let objects = notification.userInfo?["objects"] as? [DetectedObject] else { return }
             detectedObjects = objects
@@ -249,6 +253,7 @@ struct CameraViewWithMLExample: View {
                         isMLEnabled.toggle()
                     }) {
                         Image(systemName: isMLEnabled ? "eye.fill" : "eye.slash.fill")
+                            .poplurIconShader()
                             .font(.system(size: 24))
                             .foregroundColor(.white)
                             .frame(width: 50, height: 50)
@@ -260,6 +265,7 @@ struct CameraViewWithMLExample: View {
                         showSettings.toggle()
                     }) {
                         Image(systemName: "gear")
+                            .poplurIconShader()
                             .font(.system(size: 24))
                             .foregroundColor(.white)
                             .frame(width: 50, height: 50)

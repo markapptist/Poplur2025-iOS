@@ -127,6 +127,7 @@ private struct StoreSiteNavigation: View {
             Button(action: showCart) {
                 ZStack(alignment: .topTrailing) {
                     Image(systemName: "bag")
+                        .poplurIconShader()
                         .font(.system(size: 18, weight: .semibold))
                         .frame(width: 34, height: 34)
 

@@ -17,6 +17,7 @@ struct AudioSetupView: View {
                         Button(action: generateAllTones) {
                             HStack {
                                 Image(systemName: "waveform.circle.fill")
+                                    .poplurIconShader()
                                     .foregroundColor(.blue)
                                 Text("Generate All DTMF Tones")
                                     .fontWeight(.medium)

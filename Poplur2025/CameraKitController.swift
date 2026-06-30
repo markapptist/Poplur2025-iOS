@@ -98,6 +98,27 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
         await startPreview()
     }
 
+    /// Suspends the capture stream without tearing down session config.
+    /// Call on tab-hide; pair with resumeCapture() on tab-show.
+    func suspendCapture() {
+        sessionQueue.async { [weak self] in
+            guard let self, self.captureSession.isRunning else { return }
+            self.captureSession.stopRunning()
+        }
+        mlDetectionManager?.isEnabled = false
+    }
+
+    /// Resumes the capture stream after suspendCapture().
+    /// Does nothing if the session was never configured.
+    func resumeCapture() {
+        guard isReady else { return }
+        sessionQueue.async { [weak self] in
+            guard let self, !self.captureSession.isRunning else { return }
+            self.captureSession.startRunning()
+        }
+        mlDetectionManager?.isEnabled = isMLDetectionEnabled
+    }
+
     @MainActor
     func stop() {
         isReady = false
@@ -565,9 +586,9 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
             return
         }
         if status == .unknown {
-            // Try flushing unknown state and wait for next frame
+            // `.unknown` is also the initial state. Flush stale contents, then allow
+            // this first ready frame to initialize the layer instead of staying blank.
             displayLayer.flushAndRemoveImage()
-            return
         }
 
         // Respect backpressure; drop frame if not ready
@@ -627,7 +648,7 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
                 }
                 // Recover display layer if it has failed or is unknown
                 let status = displayLayer.status
-                if status == .failed || status == .unknown {
+                if status == .failed {
                     displayLayer.flushAndRemoveImage()
                 }
                 self.safelyEnqueueSampleBuffer(sampleBuffer, to: displayLayer)
@@ -666,7 +687,7 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
                 
                 // Recover display layer if it has failed or is unknown
                 let status = displayLayer.status
-                if status == .failed || status == .unknown {
+                if status == .failed {
                     displayLayer.flushAndRemoveImage()
                 }
                 

@@ -79,15 +79,15 @@ struct CubeHoldMenuOverlay: View {
                 ZStack {
                     bg.fill(skin.wheelBackground)
                     if selected {
+                        bg.fill(skin.primaryGlow.opacity(min(skin.wheelGlowOpacity, 0.18)))
                         bg.stroke(skin.wheelBorder, lineWidth: 2)
-                        bg.fill(skin.primaryGlow.opacity(skin.wheelGlowOpacity))
-                            .blur(radius: (skin.style == PoplurCubeSkinStyle.neon || skin.style == PoplurCubeSkinStyle.glass || skin.style == PoplurCubeSkinStyle.ice) ? 10 : 4)
+                        bg.stroke(skin.primaryGlow.opacity(0.28), lineWidth: 4)
                     }
                 }
             )
         }
         .buttonStyle(.plain)
-        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: selected)
+        .animation(.easeOut(duration: 0.16), value: selected)
     }
 }
 

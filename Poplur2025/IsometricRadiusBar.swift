@@ -1068,6 +1068,7 @@ private struct RadiusBarOnlyPreview: View {
                                     }) {
                                         VStack(spacing: 2) {
                                             Image(systemName: "photo")
+                                                .poplurIconShader()
                                             Text("\(Int(feedSimValue)) m")
                                                 .monospacedDigit()
                                                 .font(.caption2)

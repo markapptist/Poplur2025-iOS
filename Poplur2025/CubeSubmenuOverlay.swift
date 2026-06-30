@@ -1,5 +1,6 @@
 import SwiftUI
 import AudioToolbox
+import UIKit
 
 struct CubeSubmenuItem: Identifiable {
     let id: String
@@ -15,10 +16,13 @@ final class CubeMenuWheelController: ObservableObject {
     @Published private(set) var selectedIndex = 0
     @Published private(set) var isVisible = false
     @Published private(set) var isClosing = false
-    @Published private(set) var tickCount = 0
 
-    private var tickTimer: Timer?
-    private let tickInterval: TimeInterval = 0.62
+    private var scrubRemainder: CGFloat = 0
+    private let horizontalScrubStep: CGFloat = 34
+    private let verticalScrubStep: CGFloat = 38
+    private let maxStepsPerScrubUpdate = 4
+    private let selectionFeedback = UISelectionFeedbackGenerator()
+    private var lastClickTime: TimeInterval = 0
 
     var isOnScreen: Bool {
         isVisible || isClosing
@@ -31,28 +35,18 @@ final class CubeMenuWheelController: ObservableObject {
 
     func beginHold(items: [CubeSubmenuItem]) {
         guard !items.isEmpty else { return }
-        tickTimer?.invalidate()
         self.items = items
         selectedIndex = 0
-        tickCount = 0
+        scrubRemainder = 0
         isClosing = false
+        selectionFeedback.prepare()
 
         withAnimation(.spring(response: 0.34, dampingFraction: 0.74)) {
             isVisible = true
         }
-
-        playPop()
-        tickTimer = Timer.scheduledTimer(withTimeInterval: tickInterval, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.advanceSelection()
-            }
-        }
     }
 
     func endHold(activateSelected: Bool) {
-        tickTimer?.invalidate()
-        tickTimer = nil
-
         let action = activateSelected ? selectedItem?.action : nil
 
         withAnimation(.easeInOut(duration: 0.2)) {
@@ -68,77 +62,116 @@ final class CubeMenuWheelController: ObservableObject {
         }
     }
 
-    private func advanceSelection() {
-        guard isVisible, !items.isEmpty else { return }
-        selectedIndex = (selectedIndex + 1) % items.count
-        tickCount += 1
-        playPop()
+    func scrub(with notification: Notification) {
+        let deltaX = Self.cgFloat(from: notification.userInfo?["deltaX"])
+        let deltaY = Self.cgFloat(from: notification.userInfo?["deltaY"])
+        scrub(deltaX: deltaX, deltaY: deltaY)
+    }
+
+    func scrub(deltaX: CGFloat, deltaY: CGFloat) {
+        guard isVisible, items.count > 1 else { return }
+        let layout = SettingsStore.shared.holdMenuLayoutPreference
+        let primaryDelta = layout == .horizontal ? deltaX : deltaY
+        guard abs(primaryDelta) > 0.25 else { return }
+
+        let stepDistance = layout == .horizontal ? horizontalScrubStep : verticalScrubStep
+        scrubRemainder += primaryDelta
+
+        var steps = 0
+        while scrubRemainder <= -stepDistance, steps < maxStepsPerScrubUpdate {
+            scrubRemainder += stepDistance
+            moveSelection(by: 1)
+            steps += 1
+        }
+        while scrubRemainder >= stepDistance, steps < maxStepsPerScrubUpdate {
+            scrubRemainder -= stepDistance
+            moveSelection(by: -1)
+            steps += 1
+        }
+        if steps == maxStepsPerScrubUpdate, abs(scrubRemainder) > stepDistance {
+            scrubRemainder = stepDistance * (scrubRemainder < 0 ? -1 : 1)
+        }
+    }
+
+    private func moveSelection(by offset: Int) {
+        guard isVisible, !items.isEmpty, offset != 0 else { return }
+        let count = items.count
+        withAnimation(CubeMenuWheelOverlay.selectionSpring) {
+            selectedIndex = (selectedIndex + offset + count) % count
+        }
+        playWheelClick()
     }
 
     private func finishClosing() {
         isClosing = false
     }
 
-    private func playPop() {
+    private func playWheelClick() {
+        let now = Date().timeIntervalSinceReferenceDate
+        guard now - lastClickTime >= 0.028 else { return }
+        lastClickTime = now
         AudioServicesPlaySystemSound(1104)
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        selectionFeedback.selectionChanged()
+        selectionFeedback.prepare()
+    }
+
+    private static func cgFloat(from value: Any?) -> CGFloat {
+        if let value = value as? CGFloat { return value }
+        if let value = value as? Double { return CGFloat(value) }
+        if let value = value as? Float { return CGFloat(value) }
+        if let value = value as? NSNumber { return CGFloat(truncating: value) }
+        return 0
     }
 }
 
 struct CubeMenuWheelOverlay: View {
     @ObservedObject var controller: CubeMenuWheelController
-    @ObservedObject private var settings = SettingsStore.shared
-    @State private var selectionImpulse = false
+    @ObservedObject private var skinStore = CubeSkinStore.shared
+
+    private let layout = SettingsStore.shared.holdMenuLayoutPreference
+    private let transitionStyle = SettingsStore.shared.transitionStylePreference
 
     var body: some View {
         GeometryReader { proxy in
             ZStack {
+                let skin = skinStore.current
                 ForEach(Array(controller.items.enumerated()), id: \.element.id) { index, item in
                     let slot = slotIndex(for: index)
                     let selected = index == controller.selectedIndex
 
                     CubeMenuWheelItem(
                         item: item,
+                        skin: skin,
                         selected: selected,
-                        layout: settings.holdMenuLayoutPreference,
-                        selectionImpulse: selected && selectionImpulse
+                        layout: layout
                     )
-                        .position(position(forSlot: slot, in: proxy.size, layout: settings.holdMenuLayoutPreference))
+                        .equatable()
+                        .position(position(forSlot: slot, in: proxy.size, layout: layout))
                         .scaleEffect(controller.isVisible ? 1 : 0.3)
                         .modifier(
                             HoldMenuTransitionMotion(
                                 slot: slot,
                                 centerSlot: centerSlot,
-                                layout: settings.holdMenuLayoutPreference,
-                                style: settings.transitionStylePreference,
-                                selectionImpulse: selected && selectionImpulse
+                                layout: layout,
+                                style: transitionStyle
                             )
                         )
                         .opacity(controller.isVisible ? opacity(forSlot: slot) : 0)
                         .zIndex(selected ? 3 : Double(3 - abs(slot - centerSlot)))
-                        .animation(selectionSpring, value: controller.selectedIndex)
-                        .animation(selectionSpring, value: selectionImpulse)
-                        .animation(entranceSpring, value: controller.isVisible)
                 }
             }
+            .animation(Self.selectionSpring, value: controller.selectedIndex)
+            .animation(entranceSpring, value: controller.isVisible)
             .allowsHitTesting(false)
         }
         .ignoresSafeArea()
-        .onChange(of: controller.tickCount) { _, _ in
-            triggerSelectionImpulse()
-        }
-        .onChange(of: controller.isVisible) { _, isVisible in
-            if isVisible {
-                triggerSelectionImpulse()
-            }
-        }
     }
 
     private var entranceSpring: Animation {
         .interpolatingSpring(mass: 0.82, stiffness: 190, damping: 16, initialVelocity: 2.2)
     }
 
-    private var selectionSpring: Animation {
+    fileprivate static var selectionSpring: Animation {
         .interpolatingSpring(mass: 0.72, stiffness: 230, damping: 13, initialVelocity: 6.0)
     }
 
@@ -172,19 +205,6 @@ struct CubeMenuWheelOverlay: View {
         }
     }
 
-    private func triggerSelectionImpulse() {
-        guard controller.isVisible else { return }
-        let settleSpring = selectionSpring
-        withAnimation(.interpolatingSpring(mass: 0.6, stiffness: 280, damping: 11, initialVelocity: 8)) {
-            selectionImpulse = true
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.09) {
-            withAnimation(settleSpring) {
-                selectionImpulse = false
-            }
-        }
-    }
-
     private func panelCenter(in size: CGSize, layout: HoldMenuLayoutPreference) -> CGPoint {
         switch layout {
         case .horizontal:
@@ -200,7 +220,6 @@ private struct HoldMenuTransitionMotion: ViewModifier {
     let centerSlot: Int
     let layout: HoldMenuLayoutPreference
     let style: TransitionStylePreference
-    let selectionImpulse: Bool
 
     @ViewBuilder
     func body(content: Content) -> some View {
@@ -228,38 +247,36 @@ private struct HoldMenuTransitionMotion: ViewModifier {
 
     private var twoDOffset: CGSize {
         let distance = abs(relativeSlot)
-        let impulse: CGFloat = selectionImpulse && relativeSlot == 0 ? -9 : 0
         let lag = CGFloat(relativeSlot) * CGFloat(distance) * 1.4
 
         switch layout {
         case .horizontal:
-            return CGSize(width: 0, height: impulse + lag)
+            return CGSize(width: 0, height: lag)
         case .vertical:
-            return CGSize(width: -impulse + lag, height: 0)
+            return CGSize(width: lag, height: 0)
         }
     }
 
     private var twoDRotation: Double {
-        guard relativeSlot != 0 else { return selectionImpulse ? -1.2 : 0 }
+        guard relativeSlot != 0 else { return 0 }
         let direction = Double(relativeSlot.signum())
         let magnitude = min(Double(abs(relativeSlot)) * 4.5, 9)
         return layout == .horizontal ? direction * magnitude : -direction * magnitude
     }
 
     private var threeDOffset: CGSize {
-        let impulse: CGFloat = selectionImpulse && relativeSlot == 0 ? -12 : 0
         let depthLag = CGFloat(relativeSlot) * CGFloat(abs(relativeSlot)) * 2.0
 
         switch layout {
         case .horizontal:
-            return CGSize(width: 0, height: impulse + depthLag)
+            return CGSize(width: 0, height: depthLag)
         case .vertical:
-            return CGSize(width: -depthLag, height: impulse)
+            return CGSize(width: -depthLag, height: 0)
         }
     }
 
     private var threeDRotation: Double {
-        guard relativeSlot != 0 else { return selectionImpulse ? -5 : 0 }
+        guard relativeSlot != 0 else { return 0 }
         let direction = Double(relativeSlot.signum())
         let magnitude = min(Double(abs(relativeSlot)) * 13, 26)
         return layout == .horizontal ? -direction * magnitude : direction * magnitude
@@ -276,20 +293,24 @@ private struct HoldMenuTransitionMotion: ViewModifier {
 
     private var threeDDepthScale: CGFloat {
         let distance = min(CGFloat(abs(relativeSlot)), 2)
-        let base = max(0.88, 1 - distance * 0.055)
-        return selectionImpulse && relativeSlot == 0 ? base * 1.04 : base
+        return max(0.88, 1 - distance * 0.055)
     }
 }
 
-private struct CubeMenuWheelItem: View {
+private struct CubeMenuWheelItem: View, Equatable {
     let item: CubeSubmenuItem
+    let skin: CubeSkin
     let selected: Bool
     let layout: HoldMenuLayoutPreference
-    let selectionImpulse: Bool
 
-    @ObservedObject private var skinStore = CubeSkinStore.shared
-
-    private var skin: CubeSkin { skinStore.current }
+    static func == (lhs: CubeMenuWheelItem, rhs: CubeMenuWheelItem) -> Bool {
+        lhs.item.id == rhs.item.id
+        && lhs.item.title == rhs.item.title
+        && lhs.item.systemImage == rhs.item.systemImage
+        && lhs.skin == rhs.skin
+        && lhs.selected == rhs.selected
+        && lhs.layout == rhs.layout
+    }
 
     private var accent: Color {
         selected ? Color(uiColor: skin.borderAccentColor) : item.tint
@@ -316,18 +337,17 @@ private struct CubeMenuWheelItem: View {
     var body: some View {
         VStack(spacing: selected ? 8 : 5) {
             menuIcon
-                .shadow(color: accent.opacity(selected ? 0.95 : 0.72), radius: selected ? 9 : 5)
+                .shadow(color: accent.opacity(selected ? 0.45 : 0.24), radius: selected ? 5 : 2)
 
             Text(item.title)
                 .font(.system(size: selected ? 17 : 13, weight: .heavy, design: .rounded))
                 .foregroundColor(iconColor)
                 .lineLimit(1)
                 .minimumScaleFactor(0.62)
-                .shadow(color: accent.opacity(0.85), radius: 5)
+                .shadow(color: accent.opacity(selected ? 0.36 : 0.18), radius: selected ? 3 : 1)
         }
         .padding(selected ? 12 : 9)
         .frame(width: tileSize.width, height: tileSize.height)
-        .scaleEffect(x: selectionImpulse ? 1.08 : 1, y: selectionImpulse ? 0.94 : 1, anchor: .center)
         .background {
             HoldMenuDesignedTile(
                 skin: skin,
@@ -409,9 +429,8 @@ private struct HoldMenuDesignedTile: View {
                     .stroke(Color.white.opacity(selected ? 0.32 : 0.18), lineWidth: 1)
                     .padding(6)
             }
-            .shadow(color: accent.opacity(selected ? 0.78 : 0.38), radius: selected ? 24 : 13, x: 0, y: 0)
-            .shadow(color: accent.opacity(selected ? 0.32 : 0.16), radius: selected ? 16 : 8, x: 0, y: 0)
-            .shadow(color: Color.black.opacity(selected ? 0.24 : 0.14), radius: selected ? 14 : 9, x: 0, y: 8)
+            .shadow(color: accent.opacity(selected ? 0.42 : 0.18), radius: selected ? 10 : 5, x: 0, y: 0)
+            .shadow(color: Color.black.opacity(selected ? 0.20 : 0.10), radius: selected ? 8 : 4, x: 0, y: 5)
     }
 
     private var tileSheen: LinearGradient {

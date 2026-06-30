@@ -13,6 +13,7 @@ final class ProfileHeadCycler: ObservableObject {
     @Published private(set) var is3DActive: Bool = false
     @Published private(set) var isGenerating: Bool = false
 
+    private let supportedRuntimeExtensions: Set<String> = ["usdz", "scn", "dae"]
     private var cycleTimer: Timer?
     private var generationTask: Task<Void, Never>?
 
@@ -29,18 +30,22 @@ final class ProfileHeadCycler: ObservableObject {
 
         generationTask = Task {
             // Prefer locally-scanned USDZ
-            if let local = localModelURL, FileManager.default.fileExists(atPath: local.path) {
+            if let local = localModelURL,
+               self.isSupportedRuntimeModel(local),
+               FileManager.default.fileExists(atPath: local.path) {
                 self.modelURL = local
                 self.startCycling()
                 return
             }
 
             // Check disk cache
-            if let cached = self.cachedURL(for: userID),
-               FileManager.default.fileExists(atPath: cached.path) {
-                self.modelURL = cached
-                self.startCycling()
-                return
+            for cached in self.cachedURLs(for: userID) {
+                if self.isSupportedRuntimeModel(cached),
+                   FileManager.default.fileExists(atPath: cached.path) {
+                    self.modelURL = cached
+                    self.startCycling()
+                    return
+                }
             }
 
             // Generate via Replicate (requires API key + public image URL)
@@ -48,10 +53,15 @@ final class ProfileHeadCycler: ObservableObject {
             guard !Task.isCancelled else { return }
 
             self.isGenerating = true
+            defer { self.isGenerating = false }
             do {
                 let meshURL = try await self.callReplicate(imageURL: imageURL)
                 guard !Task.isCancelled else { return }
                 let ext = meshURL.pathExtension.isEmpty ? "glb" : meshURL.pathExtension
+                guard self.supportedRuntimeExtensions.contains(ext.lowercased()) else {
+                    print("[ProfileHeadCycler] Generated \(ext.uppercased()) head is not an iOS runtime format. Use USDZ, SCN, or DAE.")
+                    return
+                }
                 let dest = self.cachedURL(for: userID, ext: ext)!
                 let (tmp, _) = try await URLSession.shared.download(from: meshURL)
                 guard !Task.isCancelled else { return }
@@ -64,7 +74,6 @@ final class ProfileHeadCycler: ObservableObject {
                     print("[ProfileHeadCycler] generation error: \(error.localizedDescription)")
                 }
             }
-            self.isGenerating = false
         }
     }
 
@@ -91,10 +100,18 @@ final class ProfileHeadCycler: ObservableObject {
 
     // MARK: - Cache
 
-    private func cachedURL(for userID: String, ext: String = "glb") -> URL? {
+    private func cachedURL(for userID: String, ext: String) -> URL? {
         FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)
             .first?
             .appendingPathComponent("poplur_head_\(userID).\(ext)")
+    }
+
+    private func cachedURLs(for userID: String) -> [URL] {
+        supportedRuntimeExtensions.compactMap { cachedURL(for: userID, ext: $0) }
+    }
+
+    private func isSupportedRuntimeModel(_ url: URL) -> Bool {
+        supportedRuntimeExtensions.contains(url.pathExtension.lowercased())
     }
 
     // MARK: - Replicate API (lucataco/instant-mesh)

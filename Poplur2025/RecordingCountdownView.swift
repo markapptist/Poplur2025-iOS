@@ -23,7 +23,6 @@ struct RecordingCountdownView: View {
 
     @State private var pulseAnimation: Bool = false
     @State private var arrowAnimation: Bool = false
-    @State private var showLikesMode: Bool = false
 
     private var shouldShowRecording: Bool {
         isRecording && selectedTab == .record
@@ -38,7 +37,6 @@ struct RecordingCountdownView: View {
     }
 
     private var postCountAccentColor: Color {
-        if showLikesMode { return .red }
         switch radiusTrend {
         case .up: return .green
         case .down: return .red
@@ -65,8 +63,6 @@ struct RecordingCountdownView: View {
         .onAppear {
             pulseAnimation = true
             arrowAnimation = true
-            // Start animation timer for likes/trending toggle
-            startLikesAnimation()
         }
         .onChange(of: radiusTrend) { _, newTrend in
             // Restart animation when trend changes
@@ -82,7 +78,7 @@ struct RecordingCountdownView: View {
     
     @ViewBuilder
     private var recordingCountdownBadge: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 6) {
                 Text("RECORDING")
                     .font(.system(size: 12, weight: .semibold))
@@ -102,8 +98,12 @@ struct RecordingCountdownView: View {
                         value: pulseAnimation
                     )
             }
+            .frame(height: CounterSeparatorMetrics.labelHeight, alignment: .center)
 
-            VStack(alignment: .center, spacing: 2) {
+            Color.clear
+                .frame(height: CounterSeparatorMetrics.labelToNumeratorSpacing)
+
+            VStack(alignment: .center, spacing: 0) {
                 Text(secondsRemaining > 0 ? "\(secondsRemaining)" : "0")
                     .font(.system(size: 40, weight: .bold))
                     .foregroundStyle(.red)
@@ -114,15 +114,22 @@ struct RecordingCountdownView: View {
                     .shadow(color: .red.opacity(0.3), radius: 6, x: 0, y: 2)
                     .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
                     .contentTransition(.numericText(value: Double(max(secondsRemaining, 0))))
+                    .frame(width: CounterSeparatorMetrics.separatorWidth, height: CounterSeparatorMetrics.numeratorHeight, alignment: .bottom)
+
+                Color.clear
+                    .frame(height: CounterSeparatorMetrics.numeratorToSeparatorSpacing)
 
                 Rectangle()
                     .fill(.red)
-                    .frame(width: 90, height: 2)
+                    .frame(width: CounterSeparatorMetrics.separatorWidth, height: CounterSeparatorMetrics.separatorHeight)
                     .shadow(color: .red.opacity(0.5), radius: 2, x: 0, y: 0)
                     .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 1)
                     .alignmentGuide(.counterSeparator) { dimensions in
                         dimensions[VerticalAlignment.center]
                     }
+
+                Color.clear
+                    .frame(height: CounterSeparatorMetrics.separatorToDenominatorSpacing)
 
                 Text("seconds")
                     .font(.system(size: 28, weight: .bold))
@@ -131,42 +138,63 @@ struct RecordingCountdownView: View {
                     .lineLimit(1)
                     .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
                     .poplurMetalNumberShader(intensity: 0.72)
+                    .frame(width: CounterSeparatorMetrics.separatorWidth, height: CounterSeparatorMetrics.denominatorHeight, alignment: .top)
             }
-            .frame(width: 90, alignment: .center)
+            .frame(width: CounterSeparatorMetrics.separatorWidth, alignment: .center)
 
             Text("unit")
                 .font(.system(size: 14, weight: .medium))
                 .poplurTextShader(intensity: 0.45)
                 .hidden()
+                .frame(height: CounterSeparatorMetrics.footerHeight, alignment: .top)
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 16)
+        .padding(.horizontal, CounterSeparatorMetrics.horizontalPadding)
+        .padding(.vertical, CounterSeparatorMetrics.verticalPadding)
+        .frame(height: CounterSeparatorMetrics.counterHeight, alignment: .top)
+        .alignmentGuide(.counterSeparator) { _ in
+            CounterSeparatorMetrics.separatorCenterFromTop
+        }
     }
     
     // MARK: - Detected User Badge (camera tab, face recognized)
 
     @ViewBuilder
     private func detectedUserBadge(postCount count: Int) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 0) {
             Text("DETECTED")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(Color.green.opacity(0.8))
                 .poplurTextShader(intensity: 0.8)
                 .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
                 .kerning(1.2)
+                .frame(height: CounterSeparatorMetrics.labelHeight, alignment: .center)
 
-            VStack(alignment: .center, spacing: 2) {
+            Color.clear
+                .frame(height: CounterSeparatorMetrics.labelToNumeratorSpacing)
+
+            VStack(alignment: .center, spacing: 0) {
                 Image(systemName: "person.fill.checkmark")
+                    .poplurIconShader()
                     .font(.system(size: 36, weight: .bold))
                     .foregroundStyle(Color.green)
                     .scaleEffect(pulseAnimation ? 1.05 : 0.95)
                     .animation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true), value: pulseAnimation)
                     .shadow(color: Color.green.opacity(0.4), radius: 6, x: 0, y: 2)
+                    .frame(width: CounterSeparatorMetrics.separatorWidth, height: CounterSeparatorMetrics.numeratorHeight, alignment: .bottom)
+
+                Color.clear
+                    .frame(height: CounterSeparatorMetrics.numeratorToSeparatorSpacing)
 
                 Rectangle()
                     .fill(Color.green)
-                    .frame(width: 90, height: 2)
+                    .frame(width: CounterSeparatorMetrics.separatorWidth, height: CounterSeparatorMetrics.separatorHeight)
                     .shadow(color: Color.green.opacity(0.5), radius: 2, x: 0, y: 0)
+                    .alignmentGuide(.counterSeparator) { dimensions in
+                        dimensions[VerticalAlignment.center]
+                    }
+
+                Color.clear
+                    .frame(height: CounterSeparatorMetrics.separatorToDenominatorSpacing)
 
                 Text("\(count)")
                     .font(.system(size: 28, weight: .bold))
@@ -176,8 +204,9 @@ struct RecordingCountdownView: View {
                     .lineLimit(1)
                     .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
                     .poplurMetalNumberShader(intensity: 0.72)
+                    .frame(width: CounterSeparatorMetrics.separatorWidth, height: CounterSeparatorMetrics.denominatorHeight, alignment: .top)
             }
-            .frame(width: 90, alignment: .center)
+            .frame(width: CounterSeparatorMetrics.separatorWidth, alignment: .center)
 
             Text(count == 1 ? "post" : "posts")
                 .font(.system(size: 14, weight: .medium))
@@ -186,39 +215,37 @@ struct RecordingCountdownView: View {
                 .minimumScaleFactor(0.5)
                 .lineLimit(1)
                 .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
+                .frame(height: CounterSeparatorMetrics.footerHeight, alignment: .top)
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 16)
+        .padding(.horizontal, CounterSeparatorMetrics.horizontalPadding)
+        .padding(.vertical, CounterSeparatorMetrics.verticalPadding)
+        .frame(height: CounterSeparatorMetrics.counterHeight, alignment: .top)
+        .alignmentGuide(.counterSeparator) { _ in
+            CounterSeparatorMetrics.separatorCenterFromTop
+        }
     }
 
     // MARK: - Post Count Badge
 
     @ViewBuilder
     private var postCountBadge: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(showLikesMode ? "LIKES" : "TRENDING")
+        VStack(alignment: .leading, spacing: 0) {
+            Text("TRENDING")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.6))
                 .poplurTextShader(intensity: 0.72)
                 .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
                 .kerning(1.2)
-                .transition(.opacity.combined(with: .scale(scale: 0.8)))
+                .frame(height: CounterSeparatorMetrics.labelHeight, alignment: .center)
+
+            Color.clear
+                .frame(height: CounterSeparatorMetrics.labelToNumeratorSpacing)
             
-            VStack(alignment: .center, spacing: 2) {
+            VStack(alignment: .center, spacing: 0) {
                 Group {
-                    if showLikesMode {
-                        Text("\(likesCount)")
-                            .font(.system(size: 40, weight: .bold))
-                            .foregroundStyle(.red)
-                            .monospacedDigit()
-                            .minimumScaleFactor(0.4)
-                            .lineLimit(1)
-                            .poplurMetalNumberShader(intensity: 1.05)
-                            .shadow(color: .red.opacity(0.3), radius: 6, x: 0, y: 2)
-                            .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
-                            .transition(.opacity.combined(with: .scale(scale: 0.8)))
-                    } else if radiusTrend != .neutral {
+                    if radiusTrend != .neutral {
                         Image(systemName: radiusTrend == .up ? "arrow.up" : "arrow.down")
+                            .poplurIconShader()
                             .font(.system(size: 40, weight: .bold))
                             .foregroundStyle(radiusTrend == .up ? Color.green : Color.red)
                             .scaleEffect(arrowAnimation ? 1.0 : 0.85)
@@ -231,22 +258,28 @@ struct RecordingCountdownView: View {
                             .poplurMetalNumberShader(intensity: 1.05)
                             .shadow(color: (radiusTrend == .up ? Color.green : Color.red).opacity(0.3), radius: 6, x: 0, y: 2)
                             .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
-                            .transition(.opacity.combined(with: .scale(scale: 0.8)))
                     } else {
                         Text("")
                             .font(.system(size: 40, weight: .bold))
                             .poplurTextShader(intensity: 0.45)
                     }
                 }
+                .frame(width: CounterSeparatorMetrics.separatorWidth, height: CounterSeparatorMetrics.numeratorHeight, alignment: .bottom)
+
+                Color.clear
+                    .frame(height: CounterSeparatorMetrics.numeratorToSeparatorSpacing)
 
                 Rectangle()
                     .fill(postCountAccentColor)
-                    .frame(width: 90, height: 2)
+                    .frame(width: CounterSeparatorMetrics.separatorWidth, height: CounterSeparatorMetrics.separatorHeight)
                     .shadow(color: postCountAccentColor.opacity(0.5), radius: 2, x: 0, y: 0)
                     .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 1)
                     .alignmentGuide(.counterSeparator) { dimensions in
                         dimensions[VerticalAlignment.center]
                     }
+
+                Color.clear
+                    .frame(height: CounterSeparatorMetrics.separatorToDenominatorSpacing)
 
                 Text("\(postCount)")
                     .font(.system(size: 28, weight: .bold))
@@ -256,8 +289,9 @@ struct RecordingCountdownView: View {
                     .lineLimit(1)
                     .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
                     .poplurMetalNumberShader(intensity: 0.72)
+                    .frame(width: CounterSeparatorMetrics.separatorWidth, height: CounterSeparatorMetrics.denominatorHeight, alignment: .top)
             }
-            .frame(width: 90, alignment: .center)
+            .frame(width: CounterSeparatorMetrics.separatorWidth, alignment: .center)
             
             Text(postCount == 1 ? "post" : "posts")
                 .font(.system(size: 14, weight: .medium))
@@ -266,19 +300,13 @@ struct RecordingCountdownView: View {
                 .minimumScaleFactor(0.5)
                 .lineLimit(1)
                 .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
+                .frame(height: CounterSeparatorMetrics.footerHeight, alignment: .top)
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 16)
-        .animation(.spring(response: 0.5, dampingFraction: 0.7), value: showLikesMode)
-    }
-
-    // MARK: - Likes Animation
-    
-    private func startLikesAnimation() {
-        // Toggle without withAnimation wrapper — the postCountBadge VStack owns the spring
-        // so it never leaks into secondsRemaining updates and causes countdown jitter.
-        Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { _ in
-            showLikesMode.toggle()
+        .padding(.horizontal, CounterSeparatorMetrics.horizontalPadding)
+        .padding(.vertical, CounterSeparatorMetrics.verticalPadding)
+        .frame(height: CounterSeparatorMetrics.counterHeight, alignment: .top)
+        .alignmentGuide(.counterSeparator) { _ in
+            CounterSeparatorMetrics.separatorCenterFromTop
         }
     }
 }

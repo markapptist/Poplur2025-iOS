@@ -249,6 +249,7 @@ struct LoginView: View {
                         VStack(alignment: .leading, spacing: 6) {
                             HStack(spacing: 12) {
                                 Image(systemName: "at.circle")
+                                    .poplurIconShader()
                                     .font(.system(size: 20, weight: .semibold))
                                     .foregroundColor(.white.opacity(0.95))
                                 TextField("E-Mail", text: $email)
@@ -269,6 +270,7 @@ struct LoginView: View {
                         VStack(alignment: .leading, spacing: 6) {
                             HStack(alignment: .firstTextBaseline, spacing: 12) {
                                 Image(systemName: "lock")
+                                    .poplurIconShader()
                                     .font(.system(size: 18, weight: .semibold))
                                     .foregroundColor(.white.opacity(0.95))
 

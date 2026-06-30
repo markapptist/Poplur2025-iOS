@@ -35,6 +35,7 @@ struct DMCallCoordinatorView: View {
                     Spacer()
                     Button(action: endCall) {
                         Image(systemName: "phone.down.fill")
+                            .poplurIconShader()
                             .font(.system(size: 28, weight: .semibold))
                             .foregroundStyle(.white)
                             .frame(width: 72, height: 72)

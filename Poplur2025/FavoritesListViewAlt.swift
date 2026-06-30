@@ -33,6 +33,7 @@ struct FavoritesListViewAlt: View {
                 } else if let errorMessage = errorMessage {
                     VStack(spacing: 12) {
                         Image(systemName: "exclamationmark.triangle")
+                            .poplurIconShader()
                             .font(.largeTitle)
                             .foregroundStyle(.orange)
                         Text(errorMessage)
@@ -78,6 +79,7 @@ struct FavoritesListViewAlt: View {
                                     Button(action: { onSelect(fav.coordinate) }) {
                                         HStack {
                                             Image(systemName: "mappin.and.ellipse")
+                                                .poplurIconShader()
                                             VStack(alignment: .leading) {
                                                 Text(fav.name)
                                                 if let rank = fav.rank { Text("Rank: \(rank)").font(.caption).foregroundStyle(.secondary) }

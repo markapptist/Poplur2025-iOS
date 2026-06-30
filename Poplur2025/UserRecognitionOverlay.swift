@@ -64,6 +64,7 @@ struct UserRecognitionOverlay: View {
                     
                     // Verified checkmark
                     Image(systemName: "checkmark.seal.fill")
+                        .poplurIconShader()
                         .font(.system(size: 14))
                         .foregroundColor(.blue)
                 }
@@ -72,6 +73,7 @@ struct UserRecognitionOverlay: View {
                 HStack(spacing: 8) {
                     HStack(spacing: 4) {
                         Image(systemName: "face.smiling")
+                            .poplurIconShader()
                             .font(.system(size: 12))
                         Text("\(Int(user.confidence * 100))%")
                             .font(.system(size: 12, weight: .medium))
@@ -83,6 +85,7 @@ struct UserRecognitionOverlay: View {
 
                     HStack(spacing: 4) {
                         Image(systemName: "location.circle.fill")
+                            .poplurIconShader()
                             .font(.system(size: 12))
                         Text(user.formattedRadius)
                             .font(.system(size: 12, weight: .medium))
@@ -94,6 +97,7 @@ struct UserRecognitionOverlay: View {
 
                     HStack(spacing: 4) {
                         Image(systemName: "photo.stack.fill")
+                            .poplurIconShader()
                             .font(.system(size: 12))
                         Text("\(user.postCount) posts")
                             .font(.system(size: 12, weight: .medium))
@@ -113,6 +117,7 @@ struct UserRecognitionOverlay: View {
                         .font(.system(size: 13, weight: .semibold))
                         .poplurTextShader(intensity: 0.8)
                     Image(systemName: "arrow.right")
+                        .poplurIconShader()
                         .font(.system(size: 11, weight: .semibold))
                 }
                 .foregroundColor(.white)
@@ -153,6 +158,7 @@ struct UserRecognitionOverlay: View {
                 .frame(width: 40, height: 40)
             
             Image(systemName: "person.fill")
+                .poplurIconShader()
                 .font(.system(size: 20))
                 .foregroundColor(.white)
         }

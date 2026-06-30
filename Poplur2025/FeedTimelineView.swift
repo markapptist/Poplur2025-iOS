@@ -65,11 +65,13 @@ struct FeedTimelineView: View {
                         Spacer()
                         VStack(spacing: 8) {
                             Image(systemName: "checkmark.circle.fill")
+                                .poplurIconShader()
                                 .font(.system(size: 24))
                                 .foregroundColor(.gray.opacity(0.5))
                             Text("You're all caught up!")
                                 .font(.system(size: 14, weight: .medium))
                                 .foregroundColor(.gray)
+                                .poplurTextShader(intensity: 0.46)
                         }
                         .padding(.vertical, 32)
                         Spacer()
@@ -143,6 +145,7 @@ struct FeedStylePostView: View {
                             .frame(width: 36, height: 36)
                             .overlay(
                                 Image(systemName: "person.fill")
+                                    .poplurIconShader()
                                     .font(.system(size: 16))
                                     .foregroundColor(.gray)
                             )
@@ -153,9 +156,11 @@ struct FeedStylePostView: View {
                         Text(displayName)
                             .font(.system(size: 15, weight: .semibold))
                             .foregroundColor(.black)
+                            .poplurTextShader(intensity: 0.52)
                         
                         // Verified badge
                         Image(systemName: "checkmark.seal.fill")
+                            .poplurIconShader()
                             .font(.system(size: 12))
                             .foregroundColor(.blue)
                     }
@@ -165,10 +170,12 @@ struct FeedStylePostView: View {
                         Text("\(city), \(country)")
                             .font(.system(size: 13))
                             .foregroundColor(.black.opacity(0.6))
+                            .poplurTextShader(intensity: 0.44)
                     } else {
                         Text(String(format: "%.2f, %.2f", post.latitude, post.longitude))
                             .font(.system(size: 11, design: .monospaced))
                             .foregroundColor(.black.opacity(0.5))
+                            .poplurTextShader(intensity: 0.42)
                     }
                 }
                 
@@ -179,6 +186,7 @@ struct FeedStylePostView: View {
                     // More options
                 } label: {
                     Image(systemName: "ellipsis")
+                        .poplurIconShader()
                         .font(.system(size: 18))
                         .foregroundColor(.black)
                 }
@@ -219,6 +227,7 @@ struct FeedStylePostView: View {
                                 Color.black
                                     .overlay(
                                         Image(systemName: "photo")
+                                            .poplurIconShader()
                                             .font(.system(size: 40))
                                             .foregroundColor(.white.opacity(0.85))
                                     )
@@ -243,6 +252,7 @@ struct FeedStylePostView: View {
                     // Like action
                 } label: {
                     Image(systemName: "heart")
+                        .poplurIconShader()
                         .font(.system(size: 26, weight: .regular))
                         .foregroundColor(.black)
                 }
@@ -252,6 +262,7 @@ struct FeedStylePostView: View {
                     // Comment action
                 } label: {
                     Image(systemName: "message")
+                        .poplurIconShader()
                         .font(.system(size: 26, weight: .regular))
                         .foregroundColor(.black)
                 }
@@ -261,6 +272,7 @@ struct FeedStylePostView: View {
                     // Share action
                 } label: {
                     Image(systemName: "paperplane")
+                        .poplurIconShader()
                         .font(.system(size: 26, weight: .regular))
                         .foregroundColor(.black)
                 }
@@ -272,6 +284,7 @@ struct FeedStylePostView: View {
                     // Bookmark action
                 } label: {
                     Image(systemName: "bookmark")
+                        .poplurIconShader()
                         .font(.system(size: 26, weight: .regular))
                         .foregroundColor(.black)
                 }
@@ -283,12 +296,14 @@ struct FeedStylePostView: View {
             HStack {
                 HStack(spacing: 4) {
                     Image(systemName: "circle.fill")
+                        .poplurIconShader()
                         .font(.system(size: 8))
                         .foregroundColor(.blue)
                     
                     Text(formatRadiusCount(post.radius))
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundColor(.black)
+                        .poplurTextShader(intensity: 0.5)
                 }
                 Spacer()
             }
@@ -300,14 +315,18 @@ struct FeedStylePostView: View {
                 Text(displayName)
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(.black)
+                    .poplurTextShader(intensity: 0.5)
                 
-                Text("Which is your favorite? ")
-                    .font(.system(size: 14))
-                    .foregroundColor(.black)
-                +
-                Text("more")
-                    .font(.system(size: 14))
-                    .foregroundColor(.gray)
+                (
+                    Text("Which is your favorite? ")
+                        .font(.system(size: 14))
+                        .foregroundColor(.black)
+                    +
+                    Text("more")
+                        .font(.system(size: 14))
+                        .foregroundColor(.gray)
+                )
+                .poplurTextShader(intensity: 0.42)
                 
                 Spacer()
             }
@@ -319,6 +338,7 @@ struct FeedStylePostView: View {
                 Text("View all 255 comments")
                     .font(.system(size: 14))
                     .foregroundColor(.gray)
+                    .poplurTextShader(intensity: 0.42)
                 Spacer()
             }
             .padding(.horizontal, 16)
@@ -329,6 +349,7 @@ struct FeedStylePostView: View {
                 Text("7 hours ago")
                     .font(.system(size: 12))
                     .foregroundColor(.gray)
+                    .poplurTextShader(intensity: 0.38)
                 Spacer()
             }
             .padding(.horizontal, 16)

@@ -192,6 +192,7 @@ import SwiftUI
  // Add toggle button in phone UI
  Button(action: { callMode = .video }) {
      Image(systemName: callMode == .audio ? "video" : "video.fill")
+         .poplurIconShader()
  }
  ```
  
@@ -204,10 +205,12 @@ import SwiftUI
  HStack(spacing: 40) {
      Button(action: { isMuted.toggle() }) {
          Image(systemName: isMuted ? "mic.slash.fill" : "mic.fill")
+             .poplurIconShader()
      }
      
      Button(action: { isSpeakerOn.toggle() }) {
          Image(systemName: isSpeakerOn ? "speaker.wave.3.fill" : "speaker.fill")
+             .poplurIconShader()
      }
  }
  ```
@@ -327,6 +330,7 @@ struct CallHistoryView: View {
             List(callHistory.calls) { call in
                 HStack {
                     Image(systemName: call.type.icon)
+                        .poplurIconShader()
                         .foregroundColor(call.type.color)
                         .frame(width: 30)
                     

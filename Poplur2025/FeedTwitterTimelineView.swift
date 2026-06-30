@@ -133,6 +133,7 @@ private struct HighlightedText: View {
 
     var body: some View {
         Text(attributedString)
+            .poplurTextShader(intensity: 0.58)
     }
 
     private var attributedString: AttributedString {
@@ -417,6 +418,7 @@ private struct NewspaperGeneratedVisual: View {
                     Text(visualLabel)
                         .font(.system(size: 10, weight: .black, design: .monospaced))
                         .foregroundStyle(style == .dominance ? .white : .black)
+                        .poplurTextShader(intensity: 0.56)
                         .padding(.horizontal, 9)
                         .padding(.vertical, 4)
                         .background(accent)
@@ -425,17 +427,20 @@ private struct NewspaperGeneratedVisual: View {
                     Text("\(flag) \(city)")
                         .font(.system(size: 11, weight: .semibold, design: .monospaced))
                         .foregroundStyle(.white.opacity(0.72))
+                        .poplurTextShader(intensity: 0.54)
                 }
 
                 if style == .dominance, let username {
                     Text("@\(username) territory lock")
                         .font(.system(size: 16, weight: .black, design: .rounded))
                         .foregroundStyle(.white)
+                        .poplurTextShader(intensity: 0.68)
                         .lineLimit(1)
                 } else {
                     Text(headline)
                         .font(.system(size: 14, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
+                        .poplurTextShader(intensity: 0.62)
                         .lineLimit(2)
                 }
             }
@@ -656,20 +661,25 @@ private struct NewspaperArticleCard: View {
     private var masthead: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline) {
-                Text("POPLUR")
-                    .font(.system(size: 42, weight: .black, design: .serif))
-                    .foregroundStyle(.white)
-                + Text(" DAILY")
-                    .font(.system(size: 42, weight: .ultraLight, design: .serif))
-                    .foregroundStyle(Color(red: 1.0, green: 0.85, blue: 0.10))
+                (
+                    Text("POPLUR")
+                        .font(.system(size: 42, weight: .black, design: .serif))
+                        .foregroundStyle(.white)
+                    + Text(" DAILY")
+                        .font(.system(size: 42, weight: .ultraLight, design: .serif))
+                        .foregroundStyle(Color(red: 1.0, green: 0.85, blue: 0.10))
+                )
+                .poplurTextShader(intensity: 0.76)
                 Spacer()
                 VStack(alignment: .trailing, spacing: 2) {
                     Text(date)
                         .font(.system(size: 12, weight: .medium, design: .monospaced))
                         .foregroundStyle(.white.opacity(0.45))
+                        .poplurTextShader(intensity: 0.46)
                     Text(edition)
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(.white.opacity(0.28))
+                        .poplurTextShader(intensity: 0.38)
                 }
             }
             .padding(.horizontal, 26)
@@ -770,6 +780,7 @@ private struct NewspaperArticleCard: View {
                 Text("@\(a.username)")
                     .font(.system(size: 28, weight: .black))
                     .foregroundStyle(Color(red: 1.0, green: 0.85, blue: 0.10))
+                    .poplurTextShader(intensity: 0.82)
                     .lineLimit(1)
             }
             .padding(.horizontal, 26)
@@ -810,6 +821,7 @@ private struct NewspaperArticleCard: View {
             Text("@\(a.username)")
                 .font(.system(size: 22, weight: .bold))
                 .foregroundStyle(.white.opacity(0.75))
+                .poplurTextShader(intensity: 0.72)
                 .padding(.horizontal, 26)
                 .padding(.top, 14)
 
@@ -852,6 +864,7 @@ private struct NewspaperArticleCard: View {
             Text(label)
                 .font(.system(size: 10, weight: .bold, design: .monospaced))
                 .foregroundStyle(labelColor)
+                .poplurTextShader(intensity: 0.52)
                 .padding(.horizontal, 10).padding(.vertical, 4)
                 .background(chipColor)
                 .clipShape(Capsule())
@@ -859,12 +872,14 @@ private struct NewspaperArticleCard: View {
             Text("\(flag) \(city)")
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(.white.opacity(0.55))
+                .poplurTextShader(intensity: 0.48)
 
             Spacer()
 
             Text(timeAgo)
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(.white.opacity(0.38))
+                .poplurTextShader(intensity: 0.38)
         }
         .padding(.horizontal, 26)
         .padding(.top, 22)
@@ -923,11 +938,13 @@ private struct NewspaperArticleCard: View {
     private func statItem(icon: String, value: String) -> some View {
         HStack(spacing: 5) {
             Image(systemName: icon)
+                .poplurIconShader()
                 .font(.system(size: 12))
                 .foregroundStyle(.white.opacity(0.45))
             Text(value)
                 .font(.system(size: 13, weight: .medium, design: .monospaced))
                 .foregroundStyle(.white.opacity(0.45))
+                .poplurTextShader(intensity: 0.42)
                 .lineLimit(1)
         }
     }
@@ -938,6 +955,7 @@ private struct NewspaperArticleCard: View {
             Text("Hold to view on map  •  Swipe for next story  •  Reading aloud")
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(.white.opacity(0.28))
+                .poplurTextShader(intensity: 0.34)
         }
         .padding(.horizontal, 26)
         .padding(.bottom, 30)

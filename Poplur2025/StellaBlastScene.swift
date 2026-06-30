@@ -63,7 +63,16 @@ final class StellaBlastScene: SKScene, SKPhysicsContactDelegate {
         playerNode = cfg.character.makeSpriteNode(scale: 0.85)
         playerNode.position = CGPoint(x: playerX, y: size.height * 0.12)
         playerNode.zPosition = 5
+
+        let pb = SKPhysicsBody(circleOfRadius: 22)
+        pb.isDynamic = false          // player is moved manually, not by physics
+        pb.categoryBitMask    = catPlayer
+        pb.contactTestBitMask = catEnemy | catPowerUp
+        pb.collisionBitMask   = 0
+        playerNode.physicsBody = pb
+
         addChild(playerNode)
+
         // Engine glow
         let glow = SKShapeNode(ellipseIn: CGRect(x: -16, y: -28, width: 32, height: 18))
         glow.fillColor = cfg.accentUIColor.withAlphaComponent(0.6); glow.strokeColor = .clear

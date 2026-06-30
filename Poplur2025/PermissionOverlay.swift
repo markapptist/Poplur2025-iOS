@@ -7,6 +7,7 @@ struct PermissionOverlay: View {
     var body: some View {
         VStack(spacing: 16) {
             Image(systemName: "camera.fill")
+                .poplurIconShader()
                 .font(.system(size: 40, weight: .bold))
                 .foregroundColor(.white)
 

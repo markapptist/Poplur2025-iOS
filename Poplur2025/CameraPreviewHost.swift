@@ -119,6 +119,7 @@ private struct RecordTabPreview: View {
                 .overlay {
                     VStack(spacing: 14) {
                         Image(systemName: "camera.viewfinder")
+                            .poplurIconShader()
                             .font(.system(size: 54, weight: .semibold))
                         Text("Record Preview")
                             .font(.system(size: 26, weight: .heavy, design: .rounded))

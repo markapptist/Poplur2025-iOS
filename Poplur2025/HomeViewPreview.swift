@@ -25,6 +25,7 @@ private struct RecordPreviewSkeletonForHome: View {
             Color.black.ignoresSafeArea()
             VStack(spacing: 14) {
                 Image(systemName: "camera.viewfinder")
+                    .poplurIconShader()
                     .font(.system(size: 54, weight: .semibold))
                 Text("Record")
                     .font(.system(size: 30, weight: .heavy, design: .rounded))

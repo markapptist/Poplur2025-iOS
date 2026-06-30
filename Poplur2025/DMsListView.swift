@@ -68,6 +68,7 @@ struct ChatThreadListView: View {
                             }
                         }) {
                             Image(systemName: "video.fill")
+                                .poplurIconShader()
                                 .font(.system(size: 18))
                                 .foregroundColor(.white)
                                 .frame(width: 40, height: 40)
@@ -103,6 +104,7 @@ struct ChatThreadListView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Button(action: { startNewConversation() }) {
                     Image(systemName: "plus")
+                        .poplurIconShader()
                 }
             }
         }
@@ -224,6 +226,7 @@ struct DMDetailView: View {
                     }
                 } label: {
                     Image(systemName: "video.fill")
+                        .poplurIconShader()
                         .font(.system(size: 18, weight: .semibold))
                         .foregroundColor(.white)
                         .frame(width: 42, height: 42)

@@ -40,17 +40,37 @@ final class PoplurAIAssistantController: ObservableObject {
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
     private var wakeTask: Task<Void, Never>?
+    private var restartTask: Task<Void, Never>?
     private var isEnabled = false
     private var permissionRequested = false
     private var lastHandledText = ""
+    private var lastHandledAt = Date.distantPast
+    private var lastTranscriptUpdateAt = Date.distantPast
+    private let transcriptUpdateThrottle: TimeInterval = 0.25
+    private var suppressRecognitionCallbacksUntil = Date.distantPast
+    private var lastRecognitionRestartAt = Date.distantPast
+    private var recognitionStartedAt = Date.distantPast
+    private var listeningSuppressedUntil = Date.distantPast
+    private var wakeWatchdogTask: Task<Void, Never>?
+    private var audioSessionObserverTokens: [NSObjectProtocol] = []
 
     var isAvailable: Bool {
         speechRecognizer?.isAvailable == true
     }
 
+    private func setStatus(_ text: String) {
+        if statusText != text { statusText = text }
+    }
+
     func start() {
-        guard !isEnabled else { return }
+        guard !isEnabled else {
+            startWakeWatchdog()
+            beginListeningIfAuthorized()
+            return
+        }
         isEnabled = true
+        installAudioSessionObservers()
+        startWakeWatchdog()
         requestPermissionsIfNeeded()
     }
 
@@ -58,29 +78,28 @@ final class PoplurAIAssistantController: ObservableObject {
         isEnabled = false
         wakeTask?.cancel()
         wakeTask = nil
-        recognitionTask?.cancel()
-        recognitionTask = nil
-        recognitionRequest?.endAudio()
-        recognitionRequest = nil
-        if audioEngine.isRunning {
-            audioEngine.stop()
-            audioEngine.inputNode.removeTap(onBus: 0)
-        }
+        restartTask?.cancel()
+        restartTask = nil
+        wakeWatchdogTask?.cancel()
+        wakeWatchdogTask = nil
+        removeAudioSessionObservers()
+        stopRecognitionSession(cancelTask: true, finishRequest: false)
+        lastHandledText = ""
         isIlluminated = false
         isListeningForCommand = false
-        statusText = "Say Hey Poplur"
+        setStatus("Say Hey Poplur")
     }
 
     func showWakeTutorialPulse() {
         wakeTask?.cancel()
         isIlluminated = true
         isListeningForCommand = false
-        statusText = "Say Hey Poplur"
+        setStatus("Say Hey Poplur")
         wakeTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 5_500_000_000)
             self.isIlluminated = false
             self.isListeningForCommand = false
-            self.statusText = "Say Hey Poplur"
+            self.setStatus("Say Hey Poplur")
         }
     }
 
@@ -98,7 +117,7 @@ final class PoplurAIAssistantController: ObservableObject {
                     if speechStatus == .authorized, micGranted {
                         self.beginListeningIfAuthorized()
                     } else {
-                        self.statusText = "Enable microphone and speech access"
+                        self.setStatus("Enable microphone and speech access")
                     }
                 }
             }
@@ -107,12 +126,17 @@ final class PoplurAIAssistantController: ObservableObject {
 
     private func beginListeningIfAuthorized() {
         guard isEnabled else { return }
+        guard speechRecognizer?.isAvailable == true else {
+            setStatus("Speech recognition is unavailable")
+            scheduleRecognitionRestart(delay: 1_500_000_000)
+            return
+        }
         guard SFSpeechRecognizer.authorizationStatus() == .authorized else {
-            statusText = "Speech access is off"
+            setStatus("Speech access is off")
             return
         }
         guard AVAudioSession.sharedInstance().recordPermission == .granted else {
-            statusText = "Microphone access is off"
+            setStatus("Microphone access is off")
             return
         }
         restartRecognition()
@@ -120,76 +144,177 @@ final class PoplurAIAssistantController: ObservableObject {
 
     private func restartRecognition() {
         guard isEnabled else { return }
+        restartTask?.cancel()
+        restartTask = nil
 
-        recognitionTask?.cancel()
-        recognitionTask = nil
-        recognitionRequest?.endAudio()
-        recognitionRequest = nil
-
-        if audioEngine.isRunning {
-            audioEngine.stop()
-            audioEngine.inputNode.removeTap(onBus: 0)
-        }
+        stopRecognitionSession(cancelTask: true, finishRequest: false)
 
         do {
             let audioSession = AVAudioSession.sharedInstance()
-            try audioSession.setCategory(.playAndRecord, mode: .measurement, options: [.duckOthers, .defaultToSpeaker])
+            try audioSession.setCategory(.playAndRecord, mode: .measurement, options: [.mixWithOthers, .defaultToSpeaker, .allowBluetoothHFP])
             try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
 
             let request = SFSpeechAudioBufferRecognitionRequest()
             request.shouldReportPartialResults = true
+            request.contextualStrings = [
+                "Hey Poplur",
+                "Poplur",
+                "Ok Poplur",
+                "Yo Poplur",
+                "take a photo",
+                "open camera",
+                "start tour",
+                "go to channel",
+                "show analytics"
+            ]
             recognitionRequest = request
 
             let inputNode = audioEngine.inputNode
-            let format = inputNode.outputFormat(forBus: 0)
-            inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak request] buffer, _ in
+            guard let format = validInputFormat(for: inputNode, session: audioSession) else {
+                setStatus("Microphone is warming up")
+                scheduleRecognitionRestart(delay: 2_000_000_000)
+                return
+            }
+            inputNode.removeTap(onBus: 0)
+            inputNode.installTap(onBus: 0, bufferSize: 2048, format: format) { [weak request] buffer, _ in
                 request?.append(buffer)
             }
 
             audioEngine.prepare()
             try audioEngine.start()
+            recognitionStartedAt = Date()
+            listeningSuppressedUntil = .distantPast
 
             recognitionTask = speechRecognizer?.recognitionTask(with: request) { [weak self] result, error in
                 Task { @MainActor in
                     guard let self else { return }
                     if let text = result?.bestTranscription.formattedString {
-                        self.handleRecognized(text)
+                        let now = Date()
+                        if result?.isFinal == true || now.timeIntervalSince(self.lastTranscriptUpdateAt) >= self.transcriptUpdateThrottle {
+                            self.lastTranscriptUpdateAt = now
+                            self.handleRecognized(text)
+                        }
                     }
+                    guard Date() >= self.suppressRecognitionCallbacksUntil else { return }
                     if error != nil || result?.isFinal == true {
-                        self.scheduleRecognitionRestart()
+                        self.scheduleRecognitionRestart(delay: 2_000_000_000)
                     }
                 }
             }
-            statusText = "Say Hey Poplur"
+            setStatus("Say Hey Poplur")
         } catch {
-            statusText = "Poplur AI could not start listening"
+            setStatus("Poplur AI could not start listening")
+            scheduleRecognitionRestart(delay: 1_000_000_000)
         }
     }
 
-    private func scheduleRecognitionRestart() {
+    private func validInputFormat(for inputNode: AVAudioInputNode, session: AVAudioSession) -> AVAudioFormat? {
+        let format = inputNode.outputFormat(forBus: 0)
+        guard session.sampleRate.isFinite,
+              session.sampleRate > 0,
+              session.inputNumberOfChannels > 0,
+              format.sampleRate.isFinite,
+              format.sampleRate > 0,
+              format.channelCount > 0 else {
+            return nil
+        }
+        return format
+    }
+
+    private func scheduleRecognitionRestart(delay: UInt64 = 300_000_000) {
         guard isEnabled else { return }
-        recognitionTask?.cancel()
+        restartTask?.cancel()
+        let now = Date()
+        let secondsSinceLastRestart = now.timeIntervalSince(lastRecognitionRestartAt)
+        let minimumDelay: UInt64 = 2_500_000_000
+        let throttledDelay: UInt64
+        if secondsSinceLastRestart < 1.5 {
+            throttledDelay = max(delay, UInt64((1.5 - secondsSinceLastRestart) * 1_000_000_000))
+        } else {
+            throttledDelay = max(delay, minimumDelay)
+        }
+        suppressRecognitionCallbacksUntil = now.addingTimeInterval(0.6)
+        stopRecognitionSession(cancelTask: true, finishRequest: false)
+
+        restartTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: throttledDelay)
+            guard !Task.isCancelled else { return }
+            if Date() < self.listeningSuppressedUntil {
+                let remaining = self.listeningSuppressedUntil.timeIntervalSinceNow
+                if remaining > 0 {
+                    try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
+                }
+                guard !Task.isCancelled else { return }
+            }
+            self.lastRecognitionRestartAt = Date()
+            self.restartRecognition()
+        }
+    }
+
+    private func startWakeWatchdog() {
+        guard wakeWatchdogTask == nil else { return }
+        wakeWatchdogTask = Task { @MainActor in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 18_000_000_000)
+                guard self.isEnabled, Date() >= self.listeningSuppressedUntil else { continue }
+                guard SFSpeechRecognizer.authorizationStatus() == .authorized,
+                      AVAudioSession.sharedInstance().recordPermission == .granted else { continue }
+
+                let recognitionAge = Date().timeIntervalSince(self.recognitionStartedAt)
+                if !self.audioEngine.isRunning || self.recognitionTask == nil || recognitionAge > 60 {
+                    self.restartRecognition()
+                }
+            }
+        }
+    }
+
+    private func installAudioSessionObservers() {
+        guard audioSessionObserverTokens.isEmpty else { return }
+        let center = NotificationCenter.default
+        audioSessionObserverTokens = [
+            center.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in
+                    self?.scheduleRecognitionRestart(delay: 900_000_000)
+                }
+            },
+            center.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in
+                    self?.scheduleRecognitionRestart(delay: 700_000_000)
+                }
+            }
+        ]
+    }
+
+    private func removeAudioSessionObservers() {
+        let center = NotificationCenter.default
+        audioSessionObserverTokens.forEach { center.removeObserver($0) }
+        audioSessionObserverTokens.removeAll()
+    }
+
+    private func stopRecognitionSession(cancelTask: Bool, finishRequest: Bool) {
+        if cancelTask {
+            recognitionTask?.cancel()
+        }
         recognitionTask = nil
-        recognitionRequest?.endAudio()
+        if finishRequest {
+            recognitionRequest?.endAudio()
+        }
         recognitionRequest = nil
         if audioEngine.isRunning {
             audioEngine.stop()
-            audioEngine.inputNode.removeTap(onBus: 0)
         }
-
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 300_000_000)
-            self.restartRecognition()
-        }
+        audioEngine.inputNode.removeTap(onBus: 0)
     }
 
     private func handleRecognized(_ text: String) {
         transcript = text
         let normalized = Self.normalize(text)
-        guard normalized != lastHandledText else { return }
+        guard !normalized.isEmpty else { return }
+        let now = Date()
+        guard normalized != lastHandledText || now.timeIntervalSince(lastHandledAt) > 0.8 else { return }
 
         if let wakeRange = Self.wakePhraseRange(in: normalized) {
-            lastHandledText = normalized
+            markHandled(normalized, at: now)
             let commandText = normalized[wakeRange.upperBound...]
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             activateWake()
@@ -200,21 +325,27 @@ final class PoplurAIAssistantController: ObservableObject {
         }
 
         if isListeningForCommand, !normalized.isEmpty {
-            lastHandledText = normalized
+            markHandled(normalized, at: now)
             emitCommand(Self.parse(normalized))
         }
+    }
+
+    private func markHandled(_ text: String, at date: Date) {
+        lastHandledText = text
+        lastHandledAt = date
     }
 
     private func activateWake() {
         wakeTask?.cancel()
         isIlluminated = true
         isListeningForCommand = true
-        statusText = "Listening"
+        setStatus("Listening")
         wakeTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 6_000_000_000)
             self.isListeningForCommand = false
             self.isIlluminated = false
-            self.statusText = "Say Hey Poplur"
+            self.lastHandledText = ""
+            self.setStatus("Say Hey Poplur")
         }
     }
 
@@ -222,19 +353,20 @@ final class PoplurAIAssistantController: ObservableObject {
         wakeTask?.cancel()
         claudeTask?.cancel()
         if case .unknown(let text) = command {
-            Task { await self.askClaude(text) }
+            Task { @MainActor in await self.askClaude(text) }
             return
         }
         lastCommand = command
         commandToken += 1
         isIlluminated = true
         isListeningForCommand = false
-        statusText = Self.feedback(for: command)
+        setStatus(Self.feedback(for: command))
         speak(Self.feedback(for: command))
         wakeTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 3_000_000_000)
             self.isIlluminated = false
-            self.statusText = "Say Hey Poplur"
+            self.lastHandledText = ""
+            self.setStatus("Say Hey Poplur")
         }
     }
 
@@ -249,13 +381,13 @@ final class PoplurAIAssistantController: ObservableObject {
         await MainActor.run {
             isConversing = true
             isIlluminated = true
-            statusText = "Thinking…"
+            setStatus("Thinking…")
             aiResponse = ""
         }
         let response = await fetchClaudeResponse(question)
         await MainActor.run {
             aiResponse = response
-            statusText = response
+            setStatus(response)
             isConversing = false
         }
         speak(response)
@@ -263,19 +395,15 @@ final class PoplurAIAssistantController: ObservableObject {
         await MainActor.run {
             isIlluminated = false
             aiResponse = ""
-            statusText = "Say Hey Poplur"
+            lastHandledText = ""
+            setStatus("Say Hey Poplur")
         }
     }
 
     private func fetchClaudeResponse(_ question: String) async -> String {
-        let apiKey: String
-        if let stored = UserDefaults.standard.string(forKey: "poplur_claude_key"), !stored.isEmpty {
-            apiKey = stored
-        } else {
-            apiKey = Secrets.claudeAPIKey
+        guard let apiKey = UserDefaults.standard.string(forKey: "poplur_claude_key"), !apiKey.isEmpty else {
+            return "I'm here! Set your Poplur API key in settings to enable full conversation."
         }
-        guard !apiKey.isEmpty else { return "I'm here! Set your Poplur API key in settings to enable full conversation." }
-
         guard let url = URL(string: "https://api.anthropic.com/v1/messages") else { return "Something went wrong." }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
@@ -302,6 +430,8 @@ final class PoplurAIAssistantController: ObservableObject {
     }
 
     private func speak(_ text: String) {
+        let shouldResumeListening = isEnabled
+        stopRecognitionSession(cancelTask: true, finishRequest: false)
         speechSynth.stopSpeaking(at: .immediate)
         let utterance = AVSpeechUtterance(string: text)
         utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
@@ -309,10 +439,15 @@ final class PoplurAIAssistantController: ObservableObject {
         utterance.pitchMultiplier = 1.05
         utterance.volume = 0.92
         do {
-            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio, options: [.duckOthers, .mixWithOthers])
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio, options: [.mixWithOthers])
             try AVAudioSession.sharedInstance().setActive(true)
         } catch {}
         speechSynth.speak(utterance)
+        if shouldResumeListening {
+            let estimatedDuration = max(1.8, min(6.0, Double(text.count) * 0.055))
+            listeningSuppressedUntil = Date().addingTimeInterval(estimatedDuration + 0.6)
+            scheduleRecognitionRestart(delay: UInt64(estimatedDuration * 1_000_000_000))
+        }
     }
 
     static func parse(_ commandText: String) -> PoplurAICommand {
@@ -373,18 +508,86 @@ final class PoplurAIAssistantController: ObservableObject {
     }
 
     private static func normalize(_ text: String) -> String {
-        text.lowercased()
-            .replacingOccurrences(of: "pop blur", with: "poplur")
-            .replacingOccurrences(of: "pop lure", with: "poplur")
-            .replacingOccurrences(of: "popler", with: "poplur")
-            .replacingOccurrences(of: "popular", with: "poplur")
-            .replacingOccurrences(of: "poplar", with: "poplur")
+        var normalized = text
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            .lowercased()
+
+        normalized = normalized
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+
+        let replacements = [
+            ("pop blur", "poplur"),
+            ("pop blurr", "poplur"),
+            ("pop lure", "poplur"),
+            ("pop lur", "poplur"),
+            ("pop lour", "poplur"),
+            ("popler", "poplur"),
+            ("poppler", "poplur"),
+            ("popular", "poplur"),
+            ("poplar", "poplur")
+        ]
+
+        for (from, to) in replacements {
+            normalized = normalized.replacingOccurrences(of: from, with: to)
+        }
+
+        return normalized
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
     }
 
     private static func wakePhraseRange(in text: String) -> Range<String.Index>? {
-        ["hey populr", "hey poplur", "okay poplur", "ok poplur"].compactMap { phrase in
+        if let exact = [
+            "hey populr",
+            "hey poplur",
+            "hay poplur",
+            "hi poplur",
+            "okay poplur",
+            "ok poplur",
+            "yo poplur"
+        ].compactMap({ phrase in
             text.range(of: phrase)
-        }.first
+        }).first {
+            return exact
+        }
+
+        let tokens = text.split(separator: " ")
+        guard !tokens.isEmpty else { return nil }
+
+        func isWakeLead(_ token: Substring) -> Bool {
+            ["hey", "hay", "hi", "okay", "ok", "yo"].contains(String(token))
+        }
+
+        func isPoplurToken(_ token: Substring) -> Bool {
+            [
+                "poplur",
+                "populr",
+                "popular",
+                "poplar",
+                "popler",
+                "poppler",
+                "poplure",
+                "poplurr"
+            ].contains(String(token))
+        }
+
+        for index in tokens.indices {
+            if isPoplurToken(tokens[index]), index == tokens.startIndex {
+                return tokens[index].startIndex..<tokens[index].endIndex
+            }
+
+            let nextIndex = tokens.index(after: index)
+            if nextIndex < tokens.endIndex,
+               isWakeLead(tokens[index]),
+               isPoplurToken(tokens[nextIndex]) {
+                return tokens[index].startIndex..<tokens[nextIndex].endIndex
+            }
+        }
+
+        return nil
     }
 
     private static func extractChannel(from text: String) -> String? {
@@ -460,7 +663,6 @@ struct PoplurAIAssistantOverlay: View {
                                     RoundedRectangle(cornerRadius: 3)
                                         .fill(accent)
                                         .frame(width: 4, height: 8 + 18 * abs(sin(wavePhase + CGFloat(i) * 0.7)))
-                                        .animation(.easeInOut(duration: 0.4).repeatForever().delay(Double(i) * 0.08), value: wavePhase)
                                 }
                             }
                             .padding(.bottom, 8)

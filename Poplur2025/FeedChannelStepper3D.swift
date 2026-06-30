@@ -116,13 +116,16 @@ private struct ThemedFeedChannelButton: View {
         switch kind {
         case .up:
             Image(systemName: "chevron.up")
+                .poplurIconShader()
                 .font(.system(size: 30, weight: .black, design: .rounded))
         case .ch:
             Text("CH")
                 .font(.system(size: 22, weight: .black, design: .rounded))
+                .poplurTextShader(intensity: 0.78)
                 .minimumScaleFactor(0.72)
         case .down:
             Image(systemName: "chevron.down")
+                .poplurIconShader()
                 .font(.system(size: 31, weight: .black, design: .rounded))
         }
     }

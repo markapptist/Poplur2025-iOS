@@ -7,6 +7,38 @@ import AVFoundation
 import AudioToolbox
 import WebKit
 
+@MainActor
+final class TaskDebouncer: ObservableObject {
+    private let delayNanoseconds: UInt64
+    private var task: Task<Void, Never>?
+
+    init(delayNanoseconds: UInt64) {
+        self.delayNanoseconds = delayNanoseconds
+    }
+
+    func schedule(_ action: @escaping @MainActor () -> Void) {
+        task?.cancel()
+        task = Task { [delayNanoseconds] in
+            do {
+                try await Task.sleep(nanoseconds: delayNanoseconds)
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+            action()
+        }
+    }
+
+    func cancel() {
+        task?.cancel()
+        task = nil
+    }
+
+    deinit {
+        task?.cancel()
+    }
+}
+
 // MARK: - Required Dependencies
 /*
  This file requires the following project files to compile:
@@ -51,8 +83,10 @@ struct WeatherParticleOverlay: UIViewRepresentable {
         view.backgroundColor = .clear
         view.allowsTransparency = true
         view.ignoresSiblingOrder = true
+        view.preferredFramesPerSecond = 20
+        view.shouldCullNonVisibleNodes = true
         
-        let scene = SKScene()
+        let scene = SKScene(size: UIScreen.main.bounds.size)
         scene.backgroundColor = .clear
         scene.scaleMode = .resizeFill
         
@@ -65,40 +99,103 @@ struct WeatherParticleOverlay: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: SKView, context: Context) {
+        context.coordinator.resizeSceneIfNeeded(to: uiView.bounds.size)
         context.coordinator.configureScene(for: weatherState)
+    }
+
+    static func dismantleUIView(_ uiView: SKView, coordinator: Coordinator) {
+        coordinator.teardown()
+        uiView.presentScene(nil)
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     final class Coordinator {
+        private struct ParticleConfig: Equatable {
+            let kind: WeatherVisualizationState.Kind
+            let intensityBucket: Int
+            let lightningBucket: Int
+
+            init(_ state: WeatherVisualizationState) {
+                kind = state.kind
+                intensityBucket = Int((max(0, min(1, state.intensity)) * 12).rounded())
+                lightningBucket = Int((max(0, min(1, state.lightningFrequency)) * 10).rounded())
+            }
+
+            var intensity: Double { Double(intensityBucket) / 12.0 }
+            var lightningFrequency: Double { Double(lightningBucket) / 10.0 }
+        }
+
         weak var skView: SKView?
         weak var skScene: SKScene?
         private var currentEmitter: SKEmitterNode?
         private var lightningNode: SKSpriteNode?
         private var lightningTimer: Timer?
+        private var currentConfig: ParticleConfig?
+        private var raindropTexture: SKTexture?
+        private var sunMoteTexture: SKTexture?
+        private var cloudTexture: SKTexture?
+        private var snowflakeTexture: SKTexture?
 
         func configureScene(for state: WeatherVisualizationState) {
             guard let scene = skScene else { return }
+            let config = ParticleConfig(state)
+            guard currentConfig != config else {
+                updateEmitterLayout(in: scene)
+                return
+            }
+            currentConfig = config
             
-            // Remove previous effects
+            teardownEffects()
+
+            switch config.kind {
+            case .rain:
+                addRain(to: scene, intensity: config.intensity)
+            case .thunderstorms:
+                addRain(to: scene, intensity: config.intensity)
+                addLightning(to: scene, frequency: config.lightningFrequency)
+            case .cloudy:
+                addCloudHaze(to: scene, density: config.intensity)
+            case .snow:
+                addSnow(to: scene, intensity: config.intensity)
+            }
+        }
+
+        func resizeSceneIfNeeded(to size: CGSize) {
+            guard size.width > 0, size.height > 0, let scene = skScene else { return }
+            guard abs(scene.size.width - size.width) > 0.5 || abs(scene.size.height - size.height) > 0.5 else { return }
+            scene.size = size
+            updateEmitterLayout(in: scene)
+        }
+
+        func teardown() {
+            teardownEffects()
+            currentConfig = nil
+        }
+
+        private func teardownEffects() {
             currentEmitter?.removeFromParent()
             currentEmitter = nil
             lightningNode?.removeFromParent()
             lightningNode = nil
             lightningTimer?.invalidate()
             lightningTimer = nil
+        }
 
-            switch state.kind {
-            case .rain:
-                addRain(to: scene, intensity: state.intensity)
-            case .thunderstorms:
-                addRain(to: scene, intensity: state.intensity)
-                addLightning(to: scene, frequency: state.lightningFrequency)
+        private func updateEmitterLayout(in scene: SKScene) {
+            guard let currentEmitter else { return }
+            switch currentConfig?.kind {
             case .cloudy:
-                addCloudHaze(to: scene, density: state.intensity)
-            case .snow:
-                addSnow(to: scene, intensity: state.intensity)
+                currentEmitter.position = CGPoint(x: scene.frame.midX, y: scene.frame.maxY)
+                currentEmitter.particlePositionRange = CGVector(dx: scene.frame.width, dy: 0)
+            case .rain, .thunderstorms, .snow:
+                currentEmitter.position = CGPoint(x: scene.frame.midX, y: scene.frame.maxY)
+                currentEmitter.particlePositionRange = CGVector(dx: scene.frame.width, dy: 0)
+            case .none:
+                break
             }
+            lightningNode?.size = scene.size
+            lightningNode?.position = CGPoint(x: scene.frame.midX, y: scene.frame.midY)
         }
 
         private func addRain(to scene: SKScene, intensity: Double) {
@@ -109,8 +206,8 @@ struct WeatherParticleOverlay: UIViewRepresentable {
             emitter.particlePositionRange = CGVector(dx: scene.frame.width, dy: 0)
             
             // Rain appearance
-            emitter.particleTexture = SKTexture(image: createRaindropImage())
-            emitter.particleBirthRate = CGFloat(300 * max(0.1, intensity))
+            emitter.particleTexture = cachedRaindropTexture()
+            emitter.particleBirthRate = CGFloat(70 * max(0.08, intensity))
             emitter.particleLifetime = 2.0
             emitter.particleLifetimeRange = 0.5
             
@@ -166,7 +263,7 @@ struct WeatherParticleOverlay: UIViewRepresentable {
             emitter.particlePositionRange = CGVector(dx: scene.frame.width, dy: scene.frame.height)
             
             // Sunny particles
-            emitter.particleTexture = SKTexture(image: createSunMoteImage())
+            emitter.particleTexture = cachedSunMoteTexture()
             emitter.particleBirthRate = CGFloat(30 * max(0.1, intensity))
             emitter.particleLifetime = 4.0
             emitter.particleLifetimeRange = 2.0
@@ -196,8 +293,8 @@ struct WeatherParticleOverlay: UIViewRepresentable {
             emitter.particlePositionRange = CGVector(dx: scene.frame.width, dy: 0)
             
             // Cloud particles
-            emitter.particleTexture = SKTexture(image: createCloudImage())
-            emitter.particleBirthRate = CGFloat(15 * max(0.1, density))
+            emitter.particleTexture = cachedCloudTexture()
+            emitter.particleBirthRate = CGFloat(8 * max(0.1, density))
             emitter.particleLifetime = 8.0
             emitter.particleLifetimeRange = 2.0
             
@@ -226,8 +323,8 @@ struct WeatherParticleOverlay: UIViewRepresentable {
             emitter.particlePositionRange = CGVector(dx: scene.frame.width, dy: 0)
             
             // Snow appearance
-            emitter.particleTexture = SKTexture(image: createSnowflakeImage())
-            emitter.particleBirthRate = CGFloat(150 * max(0.1, intensity))
+            emitter.particleTexture = cachedSnowflakeTexture()
+            emitter.particleBirthRate = CGFloat(48 * max(0.08, intensity))
             emitter.particleLifetime = 10.0
             emitter.particleLifetimeRange = 3.0
             
@@ -261,6 +358,34 @@ struct WeatherParticleOverlay: UIViewRepresentable {
         }
         
         // MARK: - Particle Textures
+
+        private func cachedRaindropTexture() -> SKTexture {
+            if let raindropTexture { return raindropTexture }
+            let texture = SKTexture(image: createRaindropImage())
+            raindropTexture = texture
+            return texture
+        }
+
+        private func cachedSunMoteTexture() -> SKTexture {
+            if let sunMoteTexture { return sunMoteTexture }
+            let texture = SKTexture(image: createSunMoteImage())
+            sunMoteTexture = texture
+            return texture
+        }
+
+        private func cachedCloudTexture() -> SKTexture {
+            if let cloudTexture { return cloudTexture }
+            let texture = SKTexture(image: createCloudImage())
+            cloudTexture = texture
+            return texture
+        }
+
+        private func cachedSnowflakeTexture() -> SKTexture {
+            if let snowflakeTexture { return snowflakeTexture }
+            let texture = SKTexture(image: createSnowflakeImage())
+            snowflakeTexture = texture
+            return texture
+        }
         
         private func createRaindropImage() -> UIImage {
             let size = CGSize(width: 4, height: 20)
@@ -848,6 +973,7 @@ private struct ThemedMapActionPin: View {
             .frame(width: size, height: size)
             .overlay {
                 Image(systemName: systemName)
+                    .poplurIconShader()
                     .font(.system(size: size * 0.48, weight: .black, design: .rounded))
                     .symbolRenderingMode(.hierarchical)
                     .foregroundStyle(iconForeground)
@@ -1026,7 +1152,8 @@ final class PoplurMapRadioHost: NSObject, ObservableObject, AVSpeechSynthesizerD
 
     private func configureVoiceSession() throws {
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playback, mode: .spokenAudio, options: [.mixWithOthers])
+        // Keep the same mixed playback mode as rain ambience; the map handles ducking itself.
+        try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
         try session.setActive(true, options: [])
     }
 
@@ -1820,6 +1947,7 @@ private final class RainAmbientAudioService: ObservableObject {
     private var player: AVAudioPlayer?
     private var targetVolume: Float = 0
     private var isDuckedForVoice = false
+    private var lastAppliedVolume: Float = -1
 
     func update(for weatherState: WeatherVisualizationState) {
         switch weatherState.kind {
@@ -1834,7 +1962,7 @@ private final class RainAmbientAudioService: ObservableObject {
         targetVolume = volume
         let mixedVolume = outputVolume(for: volume)
         if let player, player.isPlaying {
-            player.setVolume(mixedVolume, fadeDuration: PoplurAudioMix.rainFadeDuration)
+            applyVolume(mixedVolume, to: player, fadeDuration: PoplurAudioMix.rainFadeDuration)
             return
         }
         do {
@@ -1847,7 +1975,8 @@ private final class RainAmbientAudioService: ObservableObject {
             if !player.play() {
                 print("[RainAmbientAudio] AVAudioPlayer refused to start")
             }
-            player.setVolume(mixedVolume, fadeDuration: PoplurAudioMix.rainFadeDuration)
+            lastAppliedVolume = -1
+            applyVolume(mixedVolume, to: player, fadeDuration: PoplurAudioMix.rainFadeDuration)
             self.player = player
         } catch {
             print("[RainAmbientAudio] Failed to start rain audio: \(error)")
@@ -1855,9 +1984,12 @@ private final class RainAmbientAudioService: ObservableObject {
     }
 
     func setVoiceDucked(_ ducked: Bool) {
+        guard isDuckedForVoice != ducked else { return }
         isDuckedForVoice = ducked
-        player?.setVolume(
+        guard let player else { return }
+        applyVolume(
             outputVolume(for: targetVolume),
+            to: player,
             fadeDuration: ducked ? PoplurAudioMix.rainVoiceDuckDuration : PoplurAudioMix.rainFadeDuration
         )
     }
@@ -1874,9 +2006,16 @@ private final class RainAmbientAudioService: ObservableObject {
 
     func stop() {
         targetVolume = 0
+        lastAppliedVolume = -1
         let stoppingPlayer = player
         stoppingPlayer?.fadeOutAndStop(duration: 0.65)
         player = nil
+    }
+
+    private func applyVolume(_ volume: Float, to player: AVAudioPlayer, fadeDuration: TimeInterval) {
+        guard abs(lastAppliedVolume - volume) > 0.01 else { return }
+        lastAppliedVolume = volume
+        player.setVolume(volume, fadeDuration: fadeDuration)
     }
 
     private func configureAudioSession() throws {
@@ -2412,7 +2551,7 @@ private struct TrendPopMarker: View {
     @State private var startDate = Date()
 
     var body: some View {
-        TimelineView(.animation) { timeline in
+        TimelineView(.periodic(from: startDate, by: 1.0 / 20.0)) { timeline in
             let elapsed = max(0, timeline.date.timeIntervalSince(startDate) - object.delay)
             let popPhase = min(max(elapsed / 0.42, 0), 1)
             let seedOffset = Double(object.seed * 157)
@@ -2535,6 +2674,7 @@ private struct MapTourPreviewWithControls: View {
                     // Hamburger menu button
                     Button(action: { showPlacesList.toggle() }) {
                         Image(systemName: "line.3.horizontal")
+                            .poplurIconShader()
                             .font(.system(size: 18, weight: .semibold))
                             .foregroundStyle(.primary)
                             .padding(12)
@@ -2546,6 +2686,7 @@ private struct MapTourPreviewWithControls: View {
                     // Address search button
                     Button(action: { showAddressSearch.toggle() }) {
                         Image(systemName: "magnifyingglass")
+                            .poplurIconShader()
                             .font(.system(size: 18, weight: .semibold))
                             .foregroundStyle(.primary)
                             .padding(12)
@@ -2789,6 +2930,7 @@ private struct PlacesListView: View {
                         }
                         Spacer()
                         Image(systemName: "chevron.right")
+                            .poplurIconShader()
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -2811,6 +2953,7 @@ private struct CubeMenuBackButton: View {
             dismiss()
         } label: {
             Image(systemName: "chevron.left")
+                .poplurIconShader()
                 .font(.system(size: 17, weight: .bold))
                 .foregroundStyle(.primary)
                 .frame(width: 36, height: 36)
@@ -2846,6 +2989,7 @@ private struct MapRadioSearchChecklistView: View {
                 Spacer()
                 Button(action: onClose) {
                     Image(systemName: "chevron.left")
+                        .poplurIconShader()
                         .font(.system(size: 15, weight: .black))
                         .foregroundStyle(.primary)
                         .frame(width: 34, height: 34)
@@ -2863,6 +3007,7 @@ private struct MapRadioSearchChecklistView: View {
 
                 Button(action: performSearch) {
                     Image(systemName: "magnifyingglass")
+                        .poplurIconShader()
                         .font(.system(size: 17, weight: .black))
                         .frame(width: 38, height: 38)
                 }
@@ -2886,6 +3031,7 @@ private struct MapRadioSearchChecklistView: View {
                             } label: {
                                 HStack(spacing: 10) {
                                     Image(systemName: "mappin.circle.fill")
+                                        .poplurIconShader()
                                         .foregroundStyle(cubeSkinStore.current.mapMarkerColor(role: .selected))
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(item.name ?? "Unknown place")
@@ -2922,9 +3068,11 @@ private struct MapRadioSearchChecklistView: View {
                     } label: {
                         HStack(spacing: 8) {
                             Image(systemName: selectedTopics.contains(topic) ? "checkmark.square.fill" : "square")
+                                .poplurIconShader()
                                 .font(.system(size: 16, weight: .black))
                                 .foregroundStyle(selectedTopics.contains(topic) ? topic.trendCategory.tint : .secondary)
                             Image(systemName: topic.symbolName)
+                                .poplurIconShader()
                                 .font(.system(size: 13, weight: .bold))
                                 .foregroundStyle(topic.trendCategory.tint)
                             Text(topic.title)
@@ -3014,6 +3162,7 @@ private struct AddressSearchView: View {
                 if results.isEmpty && !query.isEmpty && !isSearching {
                     VStack(spacing: 12) {
                         Image(systemName: "magnifyingglass")
+                            .poplurIconShader()
                             .font(.largeTitle)
                             .foregroundStyle(.secondary)
                         Text("No results found")
@@ -3024,6 +3173,7 @@ private struct AddressSearchView: View {
                 } else if results.isEmpty {
                     VStack(spacing: 12) {
                         Image(systemName: "map")
+                            .poplurIconShader()
                             .font(.largeTitle)
                             .foregroundStyle(.secondary)
                         Text("Search for any address or place")
@@ -3497,6 +3647,7 @@ private struct RotatingEarthGlobePreview: View {
                         Spacer()
                         Button(action: { showGlobeInfo.toggle() }) {
                             Image(systemName: "xmark.circle.fill").font(.title2).foregroundStyle(.secondary)
+                                .poplurIconShader()
                         }
                     }
                     .padding()
@@ -3529,6 +3680,7 @@ private struct CubeHoldSearchOverlay_UNUSED: View {
             // Search field
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
+                    .poplurIconShader()
                     .foregroundStyle(.secondary)
                     .font(.system(size: 14))
                 
@@ -3559,6 +3711,7 @@ private struct CubeHoldSearchOverlay_UNUSED: View {
                         results = []
                     }) {
                         Image(systemName: "xmark.circle.fill")
+                            .poplurIconShader()
                             .foregroundStyle(.secondary)
                             .font(.system(size: 14))
                     }
@@ -3591,6 +3744,7 @@ private struct CubeHoldSearchOverlay_UNUSED: View {
                                     }
                                     Spacer()
                                     Image(systemName: "arrow.up.right")
+                                        .poplurIconShader()
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
@@ -3632,6 +3786,7 @@ private struct CubeHoldSearchOverlay_UNUSED: View {
                                     }
                                     Spacer()
                                     Image(systemName: "arrow.up.right")
+                                        .poplurIconShader()
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
@@ -3652,6 +3807,7 @@ private struct CubeHoldSearchOverlay_UNUSED: View {
                     Spacer()
                     VStack(spacing: 8) {
                         Image(systemName: "magnifyingglass")
+                            .poplurIconShader()
                             .font(.title2)
                             .foregroundStyle(.secondary)
                         Text("No results found")
@@ -3711,12 +3867,13 @@ struct MapViewProduction: View {
 
     @AppStorage("poplur_use2DMap") private var use2DMap: Bool = false
     private var activePitch: CGFloat { use2DMap ? 0 : fixedPitchAlt }
+    private let focusedLocationDistance: CLLocationDistance = 120
 
-    @State private var fixedDistanceAlt: CLLocationDistance = 700 // Start at optimal viewing distance (700m)
+    @State private var fixedDistanceAlt: CLLocationDistance = 120
     @State private var camera: MapCameraPosition = .camera(
         MapCamera(
             centerCoordinate: CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194), // SF default, will update to user location
-            distance: 700,  // Start at 700m (optimal viewing distance)
+            distance: 120,
             heading: 0,
             pitch: 60
         )
@@ -3727,6 +3884,7 @@ struct MapViewProduction: View {
     @State private var showPlacesList: Bool = false
     @State private var showAddressSearch: Bool = false
     @StateObject private var mapCubeMenuWheel = CubeMenuWheelController()
+    @StateObject private var regionChangeDebouncer = TaskDebouncer(delayNanoseconds: 350_000_000)
     @State private var searchQuery: String = ""
     @State private var searchResults: [MKMapItem] = []
     @State private var isSearching: Bool = false
@@ -3755,12 +3913,14 @@ struct MapViewProduction: View {
     @State private var showTourNowPlayingText: Bool = true
     @State private var currentLocationMusicStopID: String? = nil
     @State private var locationContextTask: Task<Void, Never>? = nil
+    @State private var tourLoopTask: Task<Void, Never>? = nil
+    @State private var tourSubtitleTask: Task<Void, Never>? = nil
     @State private var liveUserCoordinate: CLLocationCoordinate2D? = nil
     @State private var lastUserCenterRequestAt: Date = .distantPast
     @State private var lastContextRefreshLocation: CLLocation? = nil
     @State private var isCameraTransitionInProgress: Bool = false
 
-    private let mapZoomSliderHeight: CGFloat = 200
+    private let mapZoomSliderHeight: CGFloat = 176
     private let mapLeftOverlayPadding: CGFloat = 28
     
     @State private var longPressLocation: CGPoint? = nil  // Track long press location
@@ -3789,13 +3949,13 @@ struct MapViewProduction: View {
     @State private var shownPostCountryFlag: String? = nil
     
     // Zoom slider state
-    @State private var zoomLevel: Double = 700 // Initial distance in meters (700 = optimal viewing distance)
+    @State private var zoomLevel: Double = 120
     
     // Confetti system for trending pins
     @StateObject private var trendingTracker = PinTrendingTracker()
     @State private var showConfetti: Bool = true // Toggle confetti on/off
     @State private var cubeHoldStartY: CGFloat? = nil // Track cube hold drag start position
-    @State private var initialZoomLevel: Double = 700 // Store zoom level when cube hold starts
+    @State private var initialZoomLevel: Double = 120
     @State private var showIndoorMap: Bool = false
     @State private var indoorVenues: [MappedinVenue] = []
     @State private var selectedVenueSlug: String? = nil
@@ -3834,6 +3994,18 @@ struct MapViewProduction: View {
     }
     
     // MARK: - Helper Methods
+
+    private var mapTextShader: LinearGradient {
+        LinearGradient(
+            colors: [
+                Color(red: 0.54, green: 1.0, blue: 0.86),
+                Color(red: 0.97, green: 1.0, blue: 0.55),
+                Color(red: 0.36, green: 0.92, blue: 1.0)
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
     
     private func lockCamera(_ pos: MapCameraPosition) -> MapCameraPosition {
         return pos.camera.map {
@@ -3854,12 +4026,14 @@ struct MapViewProduction: View {
             camera = .camera(
                 MapCamera(
                     centerCoordinate: coordinate,
-                    distance: fixedDistanceAlt,
+                    distance: focusedLocationDistance,
                     heading: heading,
                     pitch: activePitch
                 )
             )
         }
+        fixedDistanceAlt = focusedLocationDistance
+        zoomLevel = focusedLocationDistance
     }
     
     /// Navigate to a location using tour-style transitions (zoom out, move, zoom in)
@@ -3889,7 +4063,7 @@ struct MapViewProduction: View {
         }
         
         let currentCoord = camera.camera?.centerCoordinate ?? coordinate
-        let targetDistance = fixedDistanceAlt
+        let targetDistance = focusedLocationDistance
         print("   Current camera: \(currentCoord.latitude), \(currentCoord.longitude)")
         print("   Zoom out distance: \(tourZoomOutDistance)m")
         isCameraTransitionInProgress = true
@@ -3983,12 +4157,14 @@ struct MapViewProduction: View {
             camera = .camera(
                 MapCamera(
                     centerCoordinate: coordinate,
-                    distance: fixedDistanceAlt,
+                    distance: focusedLocationDistance,
                     heading: heading,
                     pitch: activePitch
                 )
             )
         }
+        fixedDistanceAlt = focusedLocationDistance
+        zoomLevel = focusedLocationDistance
     }
     
     private func filteredPosts() -> [MapAnnotationPost] {
@@ -4076,8 +4252,19 @@ struct MapViewProduction: View {
             musicPlayer.stop()
         }
     }
+
+    private var isPostPlacementFlowActive: Bool {
+        isPostPlacementMode || (flowManager.currentFlow?.isCameraFirst ?? false)
+    }
     
     private func startTour() {
+        guard mapState.isMapTabActive, !isPostPlacementFlowActive else {
+            print("🗺️ [MapView] Tour start ignored - map is not in regular browsing mode")
+            if isPostPlacementFlowActive {
+                mapState.enterPostLocationSelectionMode()
+            }
+            return
+        }
         currentTourIndex = Int.random(in: 0..<PoplurTourStops.count)
         mapState.startTour()
     }
@@ -4090,6 +4277,7 @@ struct MapViewProduction: View {
     private func beginPoplurAIMapPost(location: String?) {
         mapState.stopTour()
         clearTourEffects()
+        mapState.enterPostLocationSelectionMode()
         mapCubeMenuWheel.endHold(activateSelected: false)
         isPostPlacementMode = false
         isPoplurAIPostMode = true
@@ -4153,12 +4341,14 @@ struct MapViewProduction: View {
             camera = .camera(
                 MapCamera(
                     centerCoordinate: userCoordinate,
-                    distance: fixedDistanceAlt,
+                    distance: focusedLocationDistance,
                     heading: camera.camera?.heading ?? 0,
                     pitch: activePitch
                 )
             )
         }
+        fixedDistanceAlt = focusedLocationDistance
+        zoomLevel = focusedLocationDistance
 
         refreshLocalContext(for: CLLocation(latitude: userCoordinate.latitude, longitude: userCoordinate.longitude))
     }
@@ -4254,7 +4444,7 @@ struct MapViewProduction: View {
             coordinate: coordinate,
             bearing: camera.camera?.heading ?? 0,
             radiusMeters: radiusMeters,
-            distance: max(850, fixedDistanceAlt),
+            distance: focusedLocationDistance,
             description: "Current location"
         )
         guard currentLocationMusicStopID != stop.id else { return }
@@ -4450,6 +4640,28 @@ struct MapViewProduction: View {
             }
         }
     }
+
+    @MainActor
+    private func startTourBackgroundTasks() {
+        if tourLoopTask == nil {
+            tourLoopTask = Task {
+                await runTourLoop()
+            }
+        }
+        if tourSubtitleTask == nil {
+            tourSubtitleTask = Task {
+                await runTourSubtitleLoop()
+            }
+        }
+    }
+
+    @MainActor
+    private func stopTourBackgroundTasks() {
+        tourLoopTask?.cancel()
+        tourLoopTask = nil
+        tourSubtitleTask?.cancel()
+        tourSubtitleTask = nil
+    }
     
     private func runExtendedTourStop(_ stop: PoplurTourStop) async {
         guard mapState.isInTourMode else { return }
@@ -4518,13 +4730,13 @@ struct MapViewProduction: View {
                 camera = .camera(
                     MapCamera(
                         centerCoordinate: focus.coordinate,
-                        distance: focus.distance,
+                        distance: focusedLocationDistance,
                         heading: focus.bearing,
                         pitch: activePitch
                     )
                 )
-                fixedDistanceAlt = focus.distance
-                zoomLevel = focus.distance
+                fixedDistanceAlt = focusedLocationDistance
+                zoomLevel = focusedLocationDistance
                 radiusMeters = focus.radiusMeters
             }
 
@@ -4566,18 +4778,27 @@ struct MapViewProduction: View {
             set: { newValue in
                 // Allow free camera movement - user can pan/zoom anywhere
                 camera = newValue
-
-                // Only sync zoom when it changes meaningfully (>1%). Panning
-                // doesn't change distance so this stays silent during drags.
-                if !isCameraTransitionInProgress,
-                   let distance = newValue.camera?.distance,
-                   abs(distance - fixedDistanceAlt) > fixedDistanceAlt * 0.01 {
-                    zoomLevel = distance
-                    fixedDistanceAlt = distance
-                }
+                scheduleRegionChangeHandling(newValue)
                 
             }
         )
+    }
+
+    private func scheduleRegionChangeHandling(_ newValue: MapCameraPosition) {
+        regionChangeDebouncer.schedule {
+            handleRegionChange(newValue)
+        }
+    }
+
+    private func handleRegionChange(_ newValue: MapCameraPosition) {
+        // Only sync zoom when it changes meaningfully (>1%). Panning
+        // doesn't change distance so this stays silent during drags.
+        if !isCameraTransitionInProgress,
+           let distance = newValue.camera?.distance,
+           abs(distance - fixedDistanceAlt) > fixedDistanceAlt * 0.01 {
+            zoomLevel = distance
+            fixedDistanceAlt = distance
+        }
     }
     
     private var dragGesture: some Gesture {
@@ -4907,13 +5128,16 @@ struct MapViewProduction: View {
                     
                     Text(titleText)
                         .font(.headline)
-                        .foregroundStyle(LinearGradient(colors: [.white, .white.opacity(0.9)], startPoint: .leading, endPoint: .trailing))
-                        .shadow(color: .black.opacity(0.55), radius: 4, x: 0, y: 1)
+                        .foregroundStyle(mapTextShader)
+                        .shadow(color: .cyan.opacity(0.55), radius: 5, x: 0, y: 0)
+                        .shadow(color: .black.opacity(0.65), radius: 4, x: 0, y: 1)
                     Text(recommendationText)
                         .font(.subheadline)
-                        .foregroundStyle(LinearGradient(colors: [.white.opacity(0.92), .white.opacity(0.78)], startPoint: .leading, endPoint: .trailing))
-                        .lineLimit(2)
-                        .shadow(color: .black.opacity(0.55), radius: 4, x: 0, y: 1)
+                        .foregroundStyle(mapTextShader)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .shadow(color: .cyan.opacity(0.45), radius: 5, x: 0, y: 0)
+                        .shadow(color: .black.opacity(0.65), radius: 4, x: 0, y: 1)
                         .id(recommendationText)
                         .transition(.asymmetric(
                             insertion: .move(edge: .bottom).combined(with: .opacity),
@@ -4938,6 +5162,7 @@ struct MapViewProduction: View {
                         }
                     }) {
                         Image(systemName: "xmark.circle.fill")
+                            .poplurIconShader()
                             .font(.title2)
                             .foregroundStyle(.white)
                             .shadow(color: .black.opacity(0.5), radius: 3, x: 0, y: 2)
@@ -4945,6 +5170,7 @@ struct MapViewProduction: View {
                 }
             }
             .padding(.horizontal)
+            .frame(maxWidth: .infinity, alignment: .leading)
             
             Spacer()
             
@@ -5001,11 +5227,13 @@ struct MapViewProduction: View {
                     HStack {
                         if let flow = flowManager.currentFlow, flow.isCameraFirst {
                             Image(systemName: "checkmark.circle.fill")
+                                .poplurIconShader()
                                 .font(.system(size: 16, weight: .semibold))
                             Text("Confirm Location")
                                 .font(.system(size: 16, weight: .bold, design: .rounded))
                         } else {
                             Image(systemName: "camera.fill")
+                                .poplurIconShader()
                                 .font(.system(size: 16, weight: .semibold))
                             Text("Post Here")
                                 .font(.system(size: 16, weight: .bold, design: .rounded))
@@ -5029,6 +5257,7 @@ struct MapViewProduction: View {
                 }) {
                     HStack {
                         Image(systemName: "mappin.and.ellipse")
+                            .poplurIconShader()
                             .font(.system(size: 16, weight: .semibold))
                         Text("Post Here")
                             .font(.system(size: 16, weight: .bold, design: .rounded))
@@ -5058,8 +5287,8 @@ struct MapViewProduction: View {
                     AnimatedZoomSlider(zoomLevel: $zoomLevel) { newZoom in
                         updateMapZoom(to: newZoom)
                     }
-                    .frame(width: 44, height: mapZoomSliderHeight)
-                    .shadow(color: .black.opacity(0.3), radius: 6, x: 0, y: 2)
+                    .frame(width: 34, height: mapZoomSliderHeight)
+                    .shadow(color: .black.opacity(0.22), radius: 4, x: 0, y: 2)
 
                     Spacer()
                 }
@@ -5110,48 +5339,24 @@ struct MapViewProduction: View {
     }
 
     @ViewBuilder
-    private var mapSearchButtonOverlay: some View {
-        GeometryReader { proxy in
-            VStack {
-                Spacer()
-                HStack {
-                    Spacer()
-                    Button {
-                        showAddressSearch = true
-                    } label: {
-                        Image(systemName: "magnifyingglass")
-                            .font(.system(size: 22, weight: .heavy))
-                            .foregroundStyle(.white)
-                            .frame(width: 54, height: 54)
-                            .contentShape(Circle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Search locations")
-                    .frame(width: 112, alignment: .center)
-                }
-                .padding(.trailing, proxy.safeAreaInsets.trailing + 12)
-                .padding(.bottom, proxy.safeAreaInsets.bottom + 152)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-        }
-        .zIndex(1002)
-    }
-
-    @ViewBuilder
     private var weatherBadge: some View {
         VStack(spacing: 4) {
             weatherIcon(for: weatherState.kind)
+                .poplurIconShader()
                 .font(.system(size: 32))
-                .foregroundStyle(.white)
+                .foregroundStyle(mapTextShader)
+                .shadow(color: .cyan.opacity(0.55), radius: 6, x: 0, y: 0)
 
             Text(weatherName(for: weatherState.kind))
                 .font(.caption)
                 .fontWeight(.semibold)
-                .foregroundStyle(.white)
+                .foregroundStyle(mapTextShader)
+                .shadow(color: .cyan.opacity(0.45), radius: 5, x: 0, y: 0)
 
             Text("\(weatherState.temperatureFahrenheit)°")
                 .font(.system(size: 20, weight: .heavy, design: .rounded))
-                .foregroundStyle(.white)
+                .foregroundStyle(mapTextShader)
+                .shadow(color: .cyan.opacity(0.45), radius: 5, x: 0, y: 0)
         }
     }
     
@@ -5276,8 +5481,6 @@ struct MapViewProduction: View {
 
             weatherBadgeOverlay
 
-            mapSearchButtonOverlay
-
             Button {
                 selectedVenueSlug = indoorVenues.first?.slug ?? MappedinVenueSearch.demoSlug
                 showIndoorMap = true
@@ -5339,8 +5542,8 @@ struct MapViewProduction: View {
                 Text(aiRecommendation)
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
                     .multilineTextAlignment(.center)
-                    .foregroundStyle(.white.opacity(0.72))
-                    .lineLimit(2)
+                    .foregroundStyle(mapTextShader)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .foregroundStyle(.white)
             .padding(.horizontal, 24)
@@ -5378,7 +5581,8 @@ struct MapViewProduction: View {
                     .font(.headline)
                 Text(aiRecommendation)
                     .font(.subheadline)
-                    .lineLimit(2)
+                    .foregroundStyle(mapTextShader)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .foregroundStyle(.white)
             .padding(.horizontal, 14)
@@ -5390,8 +5594,8 @@ struct MapViewProduction: View {
             AnimatedZoomSlider(zoomLevel: $zoomLevel) { newZoom in
                 zoomLevel = newZoom
             }
-            .frame(width: 60, height: 400)
-            .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 2)
+            .frame(width: 34, height: 176)
+            .shadow(color: .black.opacity(0.22), radius: 4, x: 0, y: 2)
             .positioned(tab: .map, control: .secondaryAction)
 
             Button {} label: {
@@ -5443,8 +5647,12 @@ struct MapViewProduction: View {
             .onAppear {
                 guard !layoutPreviewMode else { return }
                 handleOnAppear()
+                startTourBackgroundTasks()
             }
             .onDisappear {
+                stopTourBackgroundTasks()
+                resetMapCubeFaceOverride()
+                regionChangeDebouncer.cancel()
                 mapLaunchTask?.cancel()
                 mapLaunchTask = nil
                 if !mapState.hasRunFirstLaunchSequence {
@@ -5517,13 +5725,17 @@ struct MapViewProduction: View {
                 mapState.stopTour()
                 showAddressSearch = false
                 mapCubeMenuWheel.beginHold(items: mapCubeMenuItems)
+                postMapCubeFaceOverride(item: mapCubeMenuWheel.selectedItem)
             }
-            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("CameraCubeHoldMoved"))) { _ in
+            .onReceive(NotificationCenter.default.publisher(for: .cubeHoldMoved)) { notification in
                 guard !layoutPreviewMode else { return }
+                mapCubeMenuWheel.scrub(with: notification)
+                postMapCubeFaceOverride(item: mapCubeMenuWheel.selectedItem)
             }
             .onReceive(NotificationCenter.default.publisher(for: .cameraCubeHoldEnded)) { _ in
                 guard !layoutPreviewMode else { return }
                 mapCubeMenuWheel.endHold(activateSelected: true)
+                resetMapCubeFaceOverride()
             }
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("SwitchToMapTab"))) { _ in
                 guard !layoutPreviewMode else { return }
@@ -5627,12 +5839,14 @@ struct MapViewProduction: View {
                             camera = .camera(
                                 MapCamera(
                                     centerCoordinate: pendingCoordinate,
-                                    distance: fixedDistanceAlt,
+                                    distance: focusedLocationDistance,
                                     heading: 0,
                                     pitch: activePitch
                                 )
                             )
                         }
+                        fixedDistanceAlt = focusedLocationDistance
+                        zoomLevel = focusedLocationDistance
                         
                         print("🎬 [MapView] Starting tour-style transition")
                         
@@ -5855,12 +6069,14 @@ struct MapViewProduction: View {
                         camera = .camera(
                             MapCamera(
                                 centerCoordinate: coordinate,
-                                distance: fixedDistanceAlt,
+                                distance: focusedLocationDistance,
                                 heading: 0,
                                 pitch: activePitch
                             )
                         )
                     }
+                    fixedDistanceAlt = focusedLocationDistance
+                    zoomLevel = focusedLocationDistance
 
                     print("📸 [MapView] Camera snapped to target coordinate")
 
@@ -5908,6 +6124,20 @@ struct MapViewProduction: View {
                 
                 // Start Camera -> Map flow
                 flowManager.startCameraToMapFlow(image: image, videoURL: videoURL)
+                mapLaunchTask?.cancel()
+                mapLaunchTask = nil
+                isInitialMapLaunchPreparing = false
+                isInitialMapLaunchActive = false
+                isCameraTransitionInProgress = false
+                mapState.stopTour()
+                clearTourEffects()
+                mapState.enterPostLocationSelectionMode()
+                isPostPlacementMode = true
+                pendingPostImage = image
+                pendingPostVideoURL = videoURL
+                postPlacementCoordinate = nil
+                clickedCoordinate = nil
+                showPostPrompt = false
                 
                 // Show UI prompts
                 currentCity = "Select Post Location"
@@ -5948,14 +6178,6 @@ struct MapViewProduction: View {
                     currentCity = "Edit Post"
                     aiRecommendation = "Choose a filter, trim if needed, then pick a channel"
                 }
-            }
-            .task {
-                guard !layoutPreviewMode else { return }
-                await runTourLoop()
-            }
-            .task {
-                guard !layoutPreviewMode else { return }
-                await runTourSubtitleLoop()
             }
             .onChange(of: mapRadioHost.isLive) { _, isLive in
                 guard !layoutPreviewMode else { return }
@@ -6073,24 +6295,58 @@ struct MapViewProduction: View {
     private var mapCubeMenuItems: [CubeSubmenuItem] {
         [
             CubeSubmenuItem(id: "search", title: "Search", systemImage: "magnifyingglass", tint: .white) {
+                postMapCubeFaceOverride(title: "Search", systemImage: "magnifyingglass")
                 showAddressSearch = true
             },
             CubeSubmenuItem(id: "location", title: "Location", systemImage: "location.fill", tint: .white) {
+                postMapCubeFaceOverride(title: "Location", systemImage: "location.fill")
                 centerOnUserLocation()
             },
             CubeSubmenuItem(id: "post", title: "Post Here", systemImage: "camera.fill", tint: .white) {
+                postMapCubeFaceOverride(title: "Post Here", systemImage: "camera.fill")
                 isPostPlacementMode = true
             },
             CubeSubmenuItem(id: "view-mode", title: use2DMap ? "3D Map" : "2D Map", systemImage: use2DMap ? "cube.fill" : "square.on.square.fill", tint: .blue) {
+                postMapCubeFaceOverride(title: use2DMap ? "3D Map" : "2D Map", systemImage: use2DMap ? "cube.fill" : "square.on.square.fill")
                 use2DMap.toggle()
             },
             CubeSubmenuItem(id: "tour", title: mapState.isInTourMode ? "Stop Tour" : "Start Tour", systemImage: "map.fill", tint: .white) {
+                postMapCubeFaceOverride(title: mapState.isInTourMode ? "Stop Tour" : "Start Tour", systemImage: "map.fill")
                 if mapState.isInTourMode { stopTour() } else { startTour() }
             },
             CubeSubmenuItem(id: "message", title: "Add Message", systemImage: "message.fill", tint: .white) {
+                postMapCubeFaceOverride(title: "Message", systemImage: "message.fill")
                 showAddMessage = true
             }
         ]
+    }
+
+    private func postMapCubeFaceOverride(item: CubeSubmenuItem?) {
+        guard let item else {
+            resetMapCubeFaceOverride()
+            return
+        }
+        postMapCubeFaceOverride(title: item.id == "message" ? "Message" : item.title, systemImage: item.systemImage)
+    }
+
+    private func postMapCubeFaceOverride(title: String, systemImage: String) {
+        NotificationCenter.default.post(
+            name: .CubeFaceOverrideChanged,
+            object: nil,
+            userInfo: [
+                "face": "map",
+                "title": title,
+                "systemImage": systemImage
+            ]
+        )
+    }
+
+    private func resetMapCubeFaceOverride() {
+        NotificationCenter.default.post(
+            name: .CubeFaceOverrideChanged,
+            object: nil,
+            userInfo: ["face": "map"]
+        )
     }
 
     // MARK: - Message Composer
@@ -6198,8 +6454,8 @@ struct MapViewProduction: View {
             rainAmbientAudio.setVoiceDucked(false)
         }
 
-        fixedDistanceAlt = 700
-        zoomLevel = 700
+        fixedDistanceAlt = focusedLocationDistance
+        zoomLevel = focusedLocationDistance
         radiusMeters = 5_000
         showConfetti = false
         isCameraTransitionInProgress = true
@@ -6230,7 +6486,7 @@ struct MapViewProduction: View {
         withAnimation(.easeInOut(duration: 2.2)) {
             camera = .camera(MapCamera(
                 centerCoordinate: coordinate,
-                distance: fixedDistanceAlt,
+                distance: focusedLocationDistance,
                 heading: 0,
                 pitch: activePitch
             ))
@@ -6268,7 +6524,7 @@ struct MapViewProduction: View {
             coordinate: coordinate,
             bearing: 0,
             radiusMeters: radiusMeters,
-            distance: max(850, fixedDistanceAlt),
+            distance: focusedLocationDistance,
             description: "Current location"
         )
         currentLocationMusicStopID = stop.id
@@ -6281,6 +6537,8 @@ struct MapViewProduction: View {
     // MARK: - Event Handlers
 
     private func handleOnAppear() {
+        mapState.setMapTabActive(true)
+
         if mapState.hasRunFirstLaunchSequence {
             rainAmbientAudio.update(for: weatherState)
         }
@@ -6318,11 +6576,13 @@ struct MapViewProduction: View {
             withAnimation(.none) {
                 camera = .camera(MapCamera(
                     centerCoordinate: pendingCoordinate,
-                    distance: fixedDistanceAlt,
+                    distance: focusedLocationDistance,
                     heading: 0,
                     pitch: activePitch
                 ))
             }
+            fixedDistanceAlt = focusedLocationDistance
+            zoomLevel = focusedLocationDistance
             navigateWithTourTransition(to: pendingCoordinate, cityName: "Post Location")
             mapState.clearPendingPostLocation()
             return
@@ -6335,6 +6595,22 @@ struct MapViewProduction: View {
         if case .showingPostLocation = mapState.mode {
             print("⛔️ [MapView] handleOnAppear ignored - showing post location")
             return
+        }
+
+        if isPostPlacementFlowActive {
+            mapLaunchTask?.cancel()
+            mapLaunchTask = nil
+            isInitialMapLaunchPreparing = false
+            isInitialMapLaunchActive = false
+            isCameraTransitionInProgress = false
+            clearTourEffects()
+            mapState.enterPostLocationSelectionMode()
+            locationManager.request()
+            currentCity = "Select Post Location"
+            aiRecommendation = "Tap where you want to post your capture"
+            return
+        } else if case .selectingPostLocation = mapState.mode {
+            mapState.cancelCurrentOperation()
         }
 
         locationManager.request()
@@ -6441,10 +6717,12 @@ struct MapViewProduction: View {
 
         camera = .camera(MapCamera(
             centerCoordinate: newLocation.coordinate,
-            distance: fixedDistanceAlt,
+            distance: focusedLocationDistance,
             heading: 0,
             pitch: activePitch
         ))
+        fixedDistanceAlt = focusedLocationDistance
+        zoomLevel = focusedLocationDistance
 
         if mapState.hasRunFirstLaunchSequence {
             lastContextRefreshLocation = newLocation
@@ -6589,6 +6867,7 @@ private struct MapTabLayoutPreview: View {
                     Spacer()
                     Button {} label: {
                         Image(systemName: "location.fill")
+                            .poplurIconShader()
                             .font(.system(size: 20, weight: .bold))
                             .foregroundStyle(.white)
                             .frame(width: 44, height: 44)
@@ -6603,11 +6882,13 @@ private struct MapTabLayoutPreview: View {
                 HStack {
                     Button {} label: {
                         Image(systemName: "minus")
+                            .poplurIconShader()
                             .frame(width: 44, height: 44)
                     }
                     Spacer()
                     Button {} label: {
                         Image(systemName: "plus")
+                            .poplurIconShader()
                             .frame(width: 44, height: 44)
                     }
                 }
@@ -6648,6 +6929,7 @@ private struct IndoorMapContainer: View {
             } else {
                 VStack(spacing: 16) {
                     Image(systemName: "building.2.slash")
+                        .poplurIconShader()
                         .font(.system(size: 52))
                         .foregroundStyle(.secondary)
                     Text("No indoor map available\nfor this location")
@@ -6704,6 +6986,7 @@ private struct MappedinVenue3DButton: View {
     var body: some View {
         VStack(spacing: 2) {
             Image(systemName: "building.2.fill")
+                .poplurIconShader()
                 .font(.system(size: 13, weight: .bold))
             Text("3D")
                 .font(.system(size: 12, weight: .heavy, design: .rounded))

@@ -36,6 +36,7 @@ struct SimpleFeedView: View {
             Color.orange.opacity(0.3)
             VStack(spacing: 12) {
                 Image(systemName: "photo.on.rectangle.angled")
+                    .poplurIconShader()
                     .font(.system(size: 60))
                     .foregroundStyle(.orange)
                 Text("Feed View")
@@ -56,6 +57,7 @@ struct SimpleMapView: View {
             Color.green.opacity(0.2)
             VStack(spacing: 12) {
                 Image(systemName: "map")
+                    .poplurIconShader()
                     .font(.system(size: 60))
                     .foregroundStyle(.green)
                 Text("Map View")
@@ -76,6 +78,7 @@ struct SimpleProfileView: View {
             Color.purple.opacity(0.3)
             VStack(spacing: 12) {
                 Image(systemName: "person.circle.fill")
+                    .poplurIconShader()
                     .font(.system(size: 60))
                     .foregroundStyle(.purple)
                 Text("Profile View")
@@ -96,6 +99,7 @@ struct SimpleCameraView: View {
             Color.indigo.opacity(0.2)
             VStack(spacing: 12) {
                 Image(systemName: "camera.fill")
+                    .poplurIconShader()
                     .font(.system(size: 60))
                     .foregroundStyle(.indigo)
                 Text("Camera View")

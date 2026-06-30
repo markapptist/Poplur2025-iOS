@@ -416,6 +416,8 @@ private struct FloatingCube: View {
 }
 
 private struct CubeSceneView: UIViewRepresentable {
+    private static let cubeTargetExtent: Float = 1.3
+
     @Binding var selectedTab: AppTab
     @Binding var rotationIndex: Int
     @Binding var previewHover: Bool
@@ -457,11 +459,8 @@ private struct CubeSceneView: UIViewRepresentable {
             v.rendersContinuously = self.selectedTab == .record || self.selectedTab == .map
             // Removed: v.antialiasingMode = .multisampling4X
 
-            if let cube = v.scene?.rootNode.childNode(withName: "cube", recursively: true), let box = cube.geometry as? SCNBox {
-                context.coordinator.cubeMaterials = box.materials
-                context.coordinator.applyCurrentProfileIconOverride()
-                context.coordinator.setInitialYaw(for: self.selectedTab)
-            }
+            context.coordinator.bindGeneratedCubeMaterials(from: v.scene)
+            context.coordinator.setInitialYaw(for: self.selectedTab)
             // Defer normal map and glow attachment one more pass in previews
             if isRunningInPreviews {
                 DispatchQueue.main.async {
@@ -495,6 +494,7 @@ private struct CubeSceneView: UIViewRepresentable {
 
         let longPress = UILongPressGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleLongPress(_:)))
         longPress.minimumPressDuration = 0.5 // 0.5 seconds for timeline/general interactions (recording countdown handles the 2s delay)
+        longPress.allowableMovement = 24
 
         // Set delegates
         pan.delegate = context.coordinator
@@ -557,38 +557,32 @@ private struct CubeSceneView: UIViewRepresentable {
         // Keep tab state in sync
         context.coordinator.syncToSelectedTab(selectedTab)
 
-        // Drive profile face icon when on the settings tab
-        let onSettings = (selectedTab == .settings)
-        if onSettings != context.coordinator.wasOnSettingsTab {
-            context.coordinator.wasOnSettingsTab = onSettings
-            if onSettings {
-                NotificationCenter.default.post(name: .CubeProfileIconOverrideChanged, object: nil,
-                    userInfo: ["title": "Settings", "systemImage": "gearshape.fill"])
-            } else {
-                NotificationCenter.default.post(name: .CubeProfileIconOverrideChanged, object: nil)
-            }
-        }
+        context.coordinator.setSettingsFaceActive(selectedTab == .settings)
 
         if selectedTab == .record {
             context.coordinator.resumeForCameraTab()
         }
 
-        // Rebuild materials when the cube skin changes
-        if currentSkin != context.coordinator.lastAppliedSkin,
-           let cube = uiView.scene?.rootNode.childNode(withName: "cube", recursively: true),
-           let box = cube.geometry as? SCNBox {
+        // Rebuild the scene when model-backed skins change, and update generated materials for fallback skins.
+        if currentSkin != context.coordinator.lastAppliedSkin {
             context.coordinator.lastAppliedSkin = currentSkin
             CubeFaceImageCache.clearSkinCache()
-            var newMats = makeMaterials(baseColor: baseColor)
-            let elementCount = box.elementCount
-            if elementCount > newMats.count {
-                let edgeMat = makeChamferEdgeMaterial()
-                while newMats.count < elementCount { newMats.append(edgeMat) }
+            if currentSkin.runtimeModelAssetName != nil {
+                uiView.scene = makeScene()
+                context.coordinator.bindGeneratedCubeMaterials(from: uiView.scene)
+                context.coordinator.setInitialYaw(for: selectedTab)
+            } else if let cube = uiView.scene?.rootNode.childNode(withName: "cube", recursively: true),
+                      let box = cube.geometry as? SCNBox {
+                var newMats = makeMaterials(baseColor: baseColor)
+                let elementCount = box.elementCount
+                if elementCount > newMats.count {
+                    let edgeMat = makeChamferEdgeMaterial()
+                    while newMats.count < elementCount { newMats.append(edgeMat) }
+                }
+                box.materials = newMats
+                context.coordinator.cubeMaterials = newMats
+                context.coordinator.applyAllDynamicFaces()
             }
-            box.materials = newMats
-            context.coordinator.cubeMaterials = newMats
-            context.coordinator.applyCurrentProfileIconOverride()
-            context.coordinator.applyFeedFaceIcon()
         }
 
         // Keep multiply white (neon style — emission carries all color)
@@ -762,10 +756,19 @@ private struct CubeSceneView: UIViewRepresentable {
             scene.rootNode.addChildNode(omniNode)
         }
 
-        // Lean cube geometry with small chamfer (lower tessellation)
-        let box = SCNBox(width: 1.3, height: 1.3, length: 1.3, chamferRadius: 0.25)
-        box.chamferSegmentCount = 8
-        let node = SCNNode(geometry: box)
+        let generatedBox: SCNBox?
+        let node: SCNNode
+        if let runtimeModelNode = makeRuntimeCubeModelNode() {
+            generatedBox = nil
+            node = runtimeModelNode
+        } else {
+            // Lean fallback cube geometry with small chamfer (lower tessellation).
+            let boxSize = CGFloat(Self.cubeTargetExtent)
+            let box = SCNBox(width: boxSize, height: boxSize, length: boxSize, chamferRadius: boxSize * 0.192)
+            box.chamferSegmentCount = 8
+            generatedBox = box
+            node = SCNNode(geometry: box)
+        }
         node.name = "cube"
         // Removed shadow casting on cube
         // node.castsShadow = true
@@ -785,20 +788,149 @@ private struct CubeSceneView: UIViewRepresentable {
             node.runAction(spin, forKey: "previewSpin")
         }
 
-        var mats = makeMaterials(baseColor: baseColor)
-        // SCNBox with chamferRadius generates 26 geometry elements (6 faces + 12 edges + 8 corners).
-        // Any element beyond the materials array cycles, but chamfer UVs sample black tile corners.
-        // Fill all extra slots with a solid edge material so no chamfer ever shows black.
-        let elementCount = box.elementCount
-        if elementCount > mats.count {
-            let edgeMat = makeChamferEdgeMaterial()
-            while mats.count < elementCount { mats.append(edgeMat) }
+        if let box = generatedBox {
+            var mats = makeMaterials(baseColor: baseColor)
+            // SCNBox with chamferRadius generates 26 geometry elements (6 faces + 12 edges + 8 corners).
+            // Any element beyond the materials array cycles, but chamfer UVs sample black tile corners.
+            // Fill all extra slots with a solid edge material so no chamfer ever shows black.
+            let elementCount = box.elementCount
+            if elementCount > mats.count {
+                let edgeMat = makeChamferEdgeMaterial()
+                while mats.count < elementCount { mats.append(edgeMat) }
+            }
+            box.materials = mats
         }
-        box.materials = mats
         // Cache materials for in-place mutation during updates
         // Not here because coordinator is unavailable - handled in makeUIView
 
         return scene
+    }
+
+    private func makeRuntimeCubeModelNode() -> SCNNode? {
+        guard let assetName = currentSkin.runtimeModelAssetName,
+              let url = Bundle.main.url(forResource: assetName, withExtension: "usdz", subdirectory: "CubeModels")
+                    ?? Bundle.main.url(forResource: assetName, withExtension: "usdz")
+                    ?? Bundle.main.url(forResource: assetName, withExtension: "dae", subdirectory: "CubeModels")
+                    ?? Bundle.main.url(forResource: assetName, withExtension: "dae"),
+              let loadedScene = try? SCNScene(url: url, options: nil) else {
+            return nil
+        }
+
+        let container = SCNNode()
+        let modelContent = SCNNode()
+        for child in loadedScene.rootNode.childNodes {
+            child.removeFromParentNode()
+            modelContent.addChildNode(child)
+        }
+        guard !modelContent.childNodes.isEmpty else { return nil }
+
+        normalizeRuntimeCubeModel(modelContent)
+        prepareRuntimeCubeMaterials(modelContent, assetName: assetName, skin: currentSkin)
+        container.addChildNode(modelContent)
+        return container
+    }
+
+    private func normalizeRuntimeCubeModel(_ node: SCNNode) {
+        guard let bounds = runtimeBounds(for: node) else { return }
+        let minBounds = bounds.min
+        let maxBounds = bounds.max
+
+        let width = maxBounds.x - minBounds.x
+        let height = maxBounds.y - minBounds.y
+        let depth = maxBounds.z - minBounds.z
+        let maxExtent = max(width, max(height, depth))
+        guard maxExtent > 0 else { return }
+
+        let center = SCNVector3(
+            (minBounds.x + maxBounds.x) / 2,
+            (minBounds.y + maxBounds.y) / 2,
+            (minBounds.z + maxBounds.z) / 2
+        )
+        let scale = Self.cubeTargetExtent / maxExtent
+        node.pivot = SCNMatrix4MakeTranslation(center.x, center.y, center.z)
+        node.scale = SCNVector3(scale, scale, scale)
+    }
+
+    private func runtimeBounds(for root: SCNNode) -> (min: SCNVector3, max: SCNVector3)? {
+        var minBounds = SCNVector3(Float.greatestFiniteMagnitude, Float.greatestFiniteMagnitude, Float.greatestFiniteMagnitude)
+        var maxBounds = SCNVector3(-Float.greatestFiniteMagnitude, -Float.greatestFiniteMagnitude, -Float.greatestFiniteMagnitude)
+        var foundGeometry = false
+
+        root.enumerateChildNodes { child, _ in
+            guard child.geometry != nil else { return }
+            foundGeometry = true
+            let bounds = child.boundingBox
+            let corners = [
+                SCNVector3(bounds.min.x, bounds.min.y, bounds.min.z),
+                SCNVector3(bounds.min.x, bounds.min.y, bounds.max.z),
+                SCNVector3(bounds.min.x, bounds.max.y, bounds.min.z),
+                SCNVector3(bounds.min.x, bounds.max.y, bounds.max.z),
+                SCNVector3(bounds.max.x, bounds.min.y, bounds.min.z),
+                SCNVector3(bounds.max.x, bounds.min.y, bounds.max.z),
+                SCNVector3(bounds.max.x, bounds.max.y, bounds.min.z),
+                SCNVector3(bounds.max.x, bounds.max.y, bounds.max.z)
+            ]
+            for corner in corners {
+                let point = child.convertPosition(corner, to: root)
+                minBounds.x = min(minBounds.x, point.x)
+                minBounds.y = min(minBounds.y, point.y)
+                minBounds.z = min(minBounds.z, point.z)
+                maxBounds.x = max(maxBounds.x, point.x)
+                maxBounds.y = max(maxBounds.y, point.y)
+                maxBounds.z = max(maxBounds.z, point.z)
+            }
+        }
+
+        return foundGeometry ? (minBounds, maxBounds) : nil
+    }
+
+    private func prepareRuntimeCubeMaterials(_ node: SCNNode, assetName: String, skin: CubeSkin) {
+        let diffuseTexture = runtimeCubeTexture(assetName: assetName, suffix: "0003")
+        let normalTexture = runtimeCubeTexture(assetName: assetName, suffix: "0001")
+
+        node.enumerateChildNodes { child, _ in
+            child.geometry?.materials.forEach { material in
+                material.lightingModel = .physicallyBased
+                material.isDoubleSided = true
+                material.diffuse.contents = diffuseTexture ?? material.diffuse.contents
+                material.diffuse.intensity = 1.0
+                material.emission.contents = nil
+                material.emission.intensity = 0.0
+                material.normal.contents = useNormalMap ? normalTexture : nil
+                material.normal.intensity = useNormalMap ? 0.55 : 0.0
+                if skin == .gold {
+                    material.metalness.contents = 1.0
+                    material.roughness.contents = 0.28
+                    material.specular.contents = UIColor(white: 1.0, alpha: 1.0)
+                    material.specular.intensity = 0.95
+                } else {
+                    material.metalness.contents = 0.35
+                    material.roughness.contents = 0.38
+                    material.specular.contents = UIColor(white: 0.9, alpha: 1.0)
+                    material.specular.intensity = 0.55
+                }
+            }
+        }
+    }
+
+    private func runtimeCubeTexture(assetName: String, suffix: String) -> UIImage? {
+        let resourceName = "\(assetName)_texture_\(suffix)"
+        for extensionName in ["png", "jpg"] {
+            if let image = UIImage(named: "\(resourceName).\(extensionName)") {
+                return image
+            }
+        }
+        if let image = UIImage(named: resourceName) {
+            return image
+        }
+        for extensionName in ["png", "jpg"] {
+            let url = Bundle.main.url(forResource: resourceName, withExtension: extensionName, subdirectory: "CubeModels")
+                ?? Bundle.main.url(forResource: resourceName, withExtension: extensionName)
+            if let url, let image = UIImage(contentsOfFile: url.path) {
+                return image
+            }
+        }
+        return nil
     }
 
     private func uiColor(_ c: Color) -> UIColor { UIColor(c) }
@@ -884,29 +1016,18 @@ private struct CubeSceneView: UIViewRepresentable {
         ]
 
         let skin = CubeSkinStore.shared.current
-        // Load the cube-net asset for this skin — icons are pre-rendered inside the image
-        let cubemapImage = UIImage(named: skin.cubemapAssetName)
 
-        return faceSpecs.enumerated().map { (faceIndex, spec) in
+        return faceSpecs.map { spec in
             let (title, icon, tab) = spec
             let mat = SCNMaterial()
 
-            if let cubeImg = cubemapImage {
-                // Slice the correct face tile — icons already baked into the texture
-                let tileKey = "face_cubemap_v2_\(skin.rawValue)_\(faceIndex)"
-                mat.diffuse.contents = CubeFaceImageCache.image(for: tileKey) {
-                    sliceCubemapTile(from: cubeImg, faceIndex: faceIndex)
-                }
-                mat.emission.intensity = 0  // icons are in the diffuse, not emission
-                mat.emission.contents = nil
-            } else {
-                // Fallback: programmatic texture + emission overlay
-                mat.diffuse.contents = faceBackgroundOnly(for: tab, baseColor: baseColor)
-                mat.emission.intensity = 0.88
-                mat.emission.contents = faceEmissionMask(title: title, systemImage: icon,
-                                                          borderColor: skin.borderAccentColor,
-                                                          iconColor: skin.iconFillColor)
-            }
+            // Use the skin only as the face material. Icons and labels are rendered
+            // dynamically so new skins never show stale baked cube artwork.
+            mat.diffuse.contents = faceBackgroundOnly(for: tab, baseColor: baseColor)
+            mat.emission.intensity = 0.88
+            mat.emission.contents = faceEmissionMask(title: title, systemImage: icon,
+                                                     borderColor: skin.borderAccentColor,
+                                                     iconColor: skin.iconFillColor)
 
             mat.diffuse.intensity = 1.0
             mat.diffuse.wrapS = .clamp
@@ -1170,6 +1291,7 @@ private struct CubeSceneView: UIViewRepresentable {
         private var panAccumulated: CGFloat = 0
         private let panThreshold: CGFloat = 10 // lower threshold for sensitivity
         private let haptic = UIImpactFeedbackGenerator(style: .light)
+        private var cubeHoldLastLocation: CGPoint?
 
         private var motionObserver: NSObjectProtocol?
         private var liveRotation: SCNVector3 = SCNVector3Zero
@@ -1179,7 +1301,9 @@ private struct CubeSceneView: UIViewRepresentable {
 
         private var holdObservers: [NSObjectProtocol] = []
         private var profileIconOverrideObserver: NSObjectProtocol?
+        private var faceOverrideObserver: NSObjectProtocol?
         private var profileIconOverride: (title: String, systemImage: String)?
+        private var faceOverrides: [Int: (title: String, systemImage: String)] = [:]
         private var tvGuideObservers: [NSObjectProtocol] = []
         private var isTVGuideOpen: Bool = false
         private var isBlinking: Bool = false
@@ -1234,6 +1358,36 @@ private struct CubeSceneView: UIViewRepresentable {
             let rawIndex = Int(round(yaw / (-Float.pi / 2)))
             let modIndex = ((rawIndex % tabs.count) + tabs.count) % tabs.count
             return modIndex
+        }
+
+        private func canonicalYaw(for index: Int) -> Float {
+            Float(index) * (-Float.pi / 2)
+        }
+
+        private func nearestEquivalentYaw(for index: Int, from yaw: Float) -> Float {
+            let baseYaw = canonicalYaw(for: index)
+            let turn = Float.pi * 2
+            return baseYaw + round((yaw - baseYaw) / turn) * turn
+        }
+
+        private func continuousYaw(to targetIndex: Int) -> Float {
+            let target = max(0, min(tabs.count - 1, targetIndex))
+            let current = currentIndex
+            let forwardSteps = (target - current + tabs.count) % tabs.count
+            let backwardSteps = (current - target + tabs.count) % tabs.count
+            let signedSteps: Int
+            if forwardSteps == 0 {
+                signedSteps = 0
+            } else if forwardSteps <= backwardSteps {
+                signedSteps = forwardSteps
+            } else {
+                signedSteps = -backwardSteps
+            }
+
+            let currentFaceYaw = canonicalYaw(for: current)
+            let turn = Float.pi * 2
+            let currentRevolution = round((currentYaw - currentFaceYaw) / turn) * turn
+            return currentFaceYaw + currentRevolution - (Float(signedSteps) * Float.pi / 2)
         }
 
         private var rotationSpeedMultiplier: Double { parent.rotationSpeedMultiplier }
@@ -1312,7 +1466,21 @@ private struct CubeSceneView: UIViewRepresentable {
                 self.applyCurrentProfileIconOverride()
             }
 
-            // TV Guide open/close → swap feed face icon (material[5] = -Z back = feed at yaw=-180°)
+            faceOverrideObserver = NotificationCenter.default.addObserver(forName: .CubeFaceOverrideChanged, object: nil, queue: .main) { [weak self] notification in
+                guard let self = self,
+                      let face = notification.userInfo?["face"] as? String,
+                      let index = Self.faceMaterialIndex(for: face) else { return }
+                let title = notification.userInfo?["title"] as? String
+                let systemImage = notification.userInfo?["systemImage"] as? String
+                if let title, let systemImage {
+                    self.faceOverrides[index] = (title, systemImage)
+                } else {
+                    self.faceOverrides.removeValue(forKey: index)
+                }
+                self.applyDynamicFace(at: index)
+            }
+
+            // TV Guide open/close → swap feed face icon (material[2] = -Z back = feed at yaw=-180°)
             let tvOpenToken = NotificationCenter.default.addObserver(forName: .FeedTVGuideBecameVisible, object: nil, queue: .main) { [weak self] _ in
                 guard let self else { return }
                 self.isTVGuideOpen = true
@@ -1355,6 +1523,10 @@ private struct CubeSceneView: UIViewRepresentable {
                 NotificationCenter.default.removeObserver(token)
                 profileIconOverrideObserver = nil
             }
+            if let token = faceOverrideObserver {
+                NotificationCenter.default.removeObserver(token)
+                faceOverrideObserver = nil
+            }
             if let token = resignActiveToken {
                 NotificationCenter.default.removeObserver(token)
                 resignActiveToken = nil
@@ -1366,33 +1538,84 @@ private struct CubeSceneView: UIViewRepresentable {
             stopAccelerometerSimulation()
         }
 
+        func bindGeneratedCubeMaterials(from scene: SCNScene?) {
+            guard let cube = scene?.rootNode.childNode(withName: "cube", recursively: true),
+                  let box = cube.geometry as? SCNBox else {
+                cubeMaterials = []
+                return
+            }
+            cubeMaterials = box.materials
+            applyAllDynamicFaces()
+        }
+
+        func setSettingsFaceActive(_ active: Bool) {
+            guard active != wasOnSettingsTab else { return }
+            wasOnSettingsTab = active
+            if active {
+                profileIconOverride = ("Settings", "gearshape.fill")
+            } else {
+                profileIconOverride = nil
+            }
+            applyCurrentProfileIconOverride()
+        }
+
         func applyCurrentProfileIconOverride() {
-            // Profile face is material index 3 (-X left face, visible at yaw=-270°)
-            let profileMaterialIndex = 3
-            guard cubeMaterials.indices.contains(profileMaterialIndex) else { return }
-            let title = profileIconOverride?.title ?? "Profile"
-            let icon  = profileIconOverride?.systemImage ?? "person.fill"
-            cubeMaterials[profileMaterialIndex].emission.contents = parent.faceEmissionMask(
-                title: title,
-                systemImage: icon
-            )
+            applyDynamicFace(at: 3)
         }
 
         func applyFeedFaceIcon() {
-            // Feed face is material index 2 (-Z back face, visible at yaw=-180°)
-            let feedMaterialIndex = 2
-            guard cubeMaterials.indices.contains(feedMaterialIndex) else { return }
-            if isTVGuideOpen {
-                cubeMaterials[feedMaterialIndex].emission.contents = parent.faceEmissionMask(
-                    title: "TV Guide",
-                    systemImage: "list.and.film"
-                )
-            } else {
-                cubeMaterials[feedMaterialIndex].emission.contents = parent.faceEmissionMask(
-                    title: "Feed",
-                    systemImage: "tv.fill"
-                )
+            applyDynamicFace(at: 2)
+        }
+
+        func applyAllDynamicFaces() {
+            for index in 0...3 {
+                applyDynamicFace(at: index)
             }
+        }
+
+        private static func faceMaterialIndex(for face: String) -> Int? {
+            switch face.lowercased() {
+            case "map": return 0
+            case "camera", "record": return 1
+            case "feed": return 2
+            case "profile", "settings": return 3
+            default: return nil
+            }
+        }
+
+        private func defaultFaceSpec(for index: Int) -> (title: String, systemImage: String)? {
+            switch index {
+            case 0: return ("Map", "map.fill")
+            case 1: return ("Camera", "camera.fill")
+            case 2: return ("Feed", "tv.fill")
+            case 3: return ("Profile", "person.fill")
+            default: return nil
+            }
+        }
+
+        private func effectiveFaceSpec(for index: Int) -> (title: String, systemImage: String)? {
+            if let override = faceOverrides[index] {
+                return override
+            }
+            if index == 2, isTVGuideOpen {
+                return ("TV Guide", "list.and.film")
+            }
+            if index == 3, let profileIconOverride {
+                return profileIconOverride
+            }
+            return defaultFaceSpec(for: index)
+        }
+
+        private func applyDynamicFace(at index: Int) {
+            guard cubeMaterials.indices.contains(index),
+                  let spec = effectiveFaceSpec(for: index) else { return }
+            let skin = CubeSkinStore.shared.current
+            cubeMaterials[index].emission.contents = parent.faceEmissionMask(
+                title: spec.title,
+                systemImage: spec.systemImage,
+                borderColor: skin.borderAccentColor,
+                iconColor: skin.iconFillColor
+            )
         }
 
         func setInitialYaw(for tab: AppTab) {
@@ -1431,8 +1654,10 @@ private struct CubeSceneView: UIViewRepresentable {
         }
 
         @objc func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
+            let currentLocation = gesture.location(in: gesture.view)
             switch gesture.state {
             case .began:
+                cubeHoldLastLocation = currentLocation
                 print("[CubeTabView] Long press began -> .cubeHoldBegan + .cameraCubeHoldBegan")
                 // Post general cube hold notification for all tabs
                 NotificationCenter.default.post(name: .cubeHoldBegan, object: nil)
@@ -1443,7 +1668,20 @@ private struct CubeSceneView: UIViewRepresentable {
                     print("[CubeTabView] Long press on profile -> posting CubeLongPressed")
                     NotificationCenter.default.post(name: Notification.Name("CubeLongPressed"), object: nil)
                 }
+            case .changed:
+                guard let lastLocation = cubeHoldLastLocation else {
+                    cubeHoldLastLocation = currentLocation
+                    return
+                }
+                let userInfo: [String: CGFloat] = [
+                    "deltaX": currentLocation.x - lastLocation.x,
+                    "deltaY": currentLocation.y - lastLocation.y
+                ]
+                cubeHoldLastLocation = currentLocation
+                NotificationCenter.default.post(name: .cubeHoldMoved, object: nil, userInfo: userInfo)
+                NotificationCenter.default.post(name: Notification.Name("CameraCubeHoldMoved"), object: nil, userInfo: userInfo)
             case .ended, .cancelled, .failed:
+                cubeHoldLastLocation = nil
                 print("[CubeTabView] Long press ended -> .cubeHoldEnded + .cameraCubeHoldEnded")
                 // Post general cube hold ended notification
                 NotificationCenter.default.post(name: .cubeHoldEnded, object: nil)
@@ -1508,7 +1746,7 @@ private struct CubeSceneView: UIViewRepresentable {
             case .ended, .cancelled, .failed:
                 // Snap to nearest face based on currentYaw
                 let targetIndex = snappedIndex(from: currentYaw)
-                let targetYaw = Float(targetIndex) * (-Float.pi / 2)
+                let targetYaw = nearestEquivalentYaw(for: targetIndex, from: currentYaw)
 
                 currentIndex = targetIndex
                 currentYaw = targetYaw
@@ -1538,8 +1776,9 @@ private struct CubeSceneView: UIViewRepresentable {
             let resolvedTab: AppTab = (tab == .settings) ? .profile : tab
             guard let scnView = view, let _ = scnView.scene?.rootNode.childNode(withName: "cube", recursively: true) else { return }
             if let idx = tabs.firstIndex(of: resolvedTab), idx != currentIndex {
+                let targetYaw = continuousYaw(to: idx)
                 currentIndex = idx
-                currentYaw = Float(idx) * (-Float.pi / 2)
+                currentYaw = targetYaw
                 animateToYaw(currentYaw)
 
                 if resolvedTab != .feed {
@@ -1638,13 +1877,15 @@ private struct CubeSceneView: UIViewRepresentable {
         }
 
         private func rotateCube(_ node: SCNNode, to index: Int, animated: Bool = true, bouncy: Bool = false) {
-            let baseAngle = Float(index) * (-Float.pi / 2)
+            let baseAngle = animated ? continuousYaw(to: index) : canonicalYaw(for: index)
             if !animated {
+                currentIndex = index
                 currentYaw = baseAngle
                 lastSetYaw = baseAngle
                 node.simdOrientation = simd_quatf(angle: baseAngle, axis: SIMD3<Float>(0, 1, 0))
                 return
             }
+            currentIndex = index
             currentYaw = baseAngle
             animateToYaw(currentYaw, bouncy: bouncy)
         }
@@ -1857,8 +2098,7 @@ private struct CubeSceneView: UIViewRepresentable {
             }
             box.materials = mats
             cubeMaterials = mats
-            applyCurrentProfileIconOverride()
-            applyFeedFaceIcon()
+            applyAllDynamicFaces()
             scnView.isPlaying = true
         }
 

@@ -43,6 +43,7 @@ struct SettingsView: View {
 
                             HStack(spacing: 12) {
                                 Image(systemName: "plus.circle.fill")
+                                    .poplurIconShader()
                                     .foregroundColor(.indigo)
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text("Boost your daily limit")
@@ -179,6 +180,7 @@ struct SettingsView: View {
                 .foregroundColor(.black)
             Spacer()
             Image(systemName: "arrow.right")
+                .poplurIconShader()
                 .font(.system(size: 18, weight: .bold))
                 .foregroundColor(.gray)
         }

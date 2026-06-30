@@ -339,147 +339,8 @@ private final class _LaunchCoverView: UIView {
     }
 }
 
-private extension Notification.Name {
-    static let feedHardwareVolumeChanged = Notification.Name("FeedHardwareVolumeChanged")
-}
-
-@MainActor
-private final class DeviceVolumeObserver: ObservableObject {
-    @Published private(set) var level: Float
-    @Published private(set) var isShowing: Bool = false
-
-    private let session = AVAudioSession.sharedInstance()
-    private var observation: NSKeyValueObservation?
-    private var volumeNotificationObserver: NSObjectProtocol?
-    private var refreshTimer: AnyCancellable?
-    private var hideTask: Task<Void, Never>?
-    private var volumePopPlayer: AVAudioPlayer?
-    private var lastVolumePopTime: TimeInterval = 0
-    private var isSuppressed = false
-
-    init() {
-        level = session.outputVolume
-
-        if !PreviewEnvHomeView.isPreview {
-            // Defer audio session activation to avoid blocking the first render.
-            // KVO observation and notification delivery work without an active session;
-            // only playback (pop sound) requires it, which won't be needed immediately.
-            Task { @MainActor in
-                try? AVAudioSession.sharedInstance().setCategory(.ambient, options: [.mixWithOthers])
-                try? AVAudioSession.sharedInstance().setActive(true)
-            }
-            observation = session.observe(\.outputVolume, options: [.old, .new]) { [weak self] session, change in
-                let nextLevel = change.newValue ?? session.outputVolume
-                Task { @MainActor in
-                    self?.handleVolumeChange(nextLevel, forceShow: true)
-                }
-            }
-            volumeNotificationObserver = NotificationCenter.default.addObserver(
-                forName: NSNotification.Name("AVSystemController_SystemVolumeDidChangeNotification"),
-                object: nil,
-                queue: .main
-            ) { [weak self] notification in
-                self?.handleSystemVolumeNotification(notification)
-            }
-            refreshTimer = Timer.publish(every: 0.25, on: .main, in: .common)
-                .autoconnect()
-                .sink { [weak self] _ in
-                    guard let self else { return }
-                    self.handleVolumeChange(self.session.outputVolume)
-                }
-        }
-    }
-
-    deinit {
-        observation?.invalidate()
-        if let volumeNotificationObserver {
-            NotificationCenter.default.removeObserver(volumeNotificationObserver)
-        }
-        refreshTimer?.cancel()
-        hideTask?.cancel()
-        volumePopPlayer?.stop()
-    }
-
-    func showForHardwareVolumePress(level newLevel: Float? = nil) {
-        if isSuppressed {
-            setSuppressed(false)
-        }
-        handleVolumeChange(newLevel ?? session.outputVolume, forceShow: true)
-    }
-
-    func setSuppressed(_ suppressed: Bool) {
-        isSuppressed = suppressed
-        if suppressed {
-            hideTask?.cancel()
-            isShowing = false
-        }
-    }
-
-    private nonisolated func handleSystemVolumeNotification(_ notification: Notification) {
-        let notifiedLevel = notification.userInfo?["AVSystemController_AudioVolumeNotificationParameter"] as? Float
-        let reason = notification.userInfo?["AVSystemController_AudioVolumeChangeReasonNotificationParameter"] as? String
-        let nextLevel = notifiedLevel ?? AVAudioSession.sharedInstance().outputVolume
-
-        Task { @MainActor in
-            NotificationCenter.default.post(name: .feedHardwareVolumeChanged, object: nil, userInfo: [
-                "level": nextLevel,
-                "reason": reason ?? "unknown"
-            ])
-            self.handleVolumeChange(nextLevel, forceShow: reason == nil || reason == "ExplicitVolumeChange")
-        }
-    }
-
-    private func handleVolumeChange(_ newLevel: Float, forceShow: Bool = false) {
-        let clampedLevel = max(0, min(1, newLevel))
-        let changed = abs(clampedLevel - level) > 0.005
-        level = clampedLevel
-        guard !isSuppressed else { return }
-        if changed || forceShow {
-            playVolumePop()
-            showTemporarily()
-        }
-    }
-
-    private func playVolumePop() {
-        let now = Date().timeIntervalSinceReferenceDate
-        guard now - lastVolumePopTime > 0.08 else { return }
-        lastVolumePopTime = now
-
-        guard let url = Bundle.main.url(forResource: "pop", withExtension: "mp3") ?? Bundle.main.url(forResource: "pop", withExtension: "wav") else {
-            AudioServicesPlaySystemSound(1104)
-            return
-        }
-
-        do {
-            try? session.setActive(true)
-            if volumePopPlayer == nil {
-                let player = try AVAudioPlayer(contentsOf: url)
-                player.numberOfLoops = 0
-                player.volume = 0.9
-                player.prepareToPlay()
-                volumePopPlayer = player
-            }
-            volumePopPlayer?.currentTime = 0
-            volumePopPlayer?.play()
-        } catch {
-            print("[VolumePop] Failed to play pop sound: \(error)")
-            AudioServicesPlaySystemSound(1104)
-        }
-    }
-
-    private func showTemporarily() {
-        hideTask?.cancel()
-        withAnimation(.easeOut(duration: 0.12)) {
-            isShowing = true
-        }
-        hideTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 1_100_000_000)
-            withAnimation(.easeIn(duration: 0.18)) {
-                isShowing = false
-            }
-        }
-    }
-}
+// DeviceVolumeObserver, PoplurVolumeBars, and Notification.Name.feedHardwareVolumeChanged
+// are defined in VolumeOverlaySystem.swift (module-level, shared with fullScreenCover targets).
 
 private struct HomeViewIsPreviewRuntimeKey: EnvironmentKey {
     static let defaultValue: Bool = false
@@ -943,6 +804,12 @@ struct HomeView: View {
         // - Navigation controls (places list, address search)
         // - Optimized camera with 60° pitch at 700m distance
         MapViewProduction()
+            .onAppear {
+                MapStateManager.shared.setMapTabActive(true)
+            }
+            .onDisappear {
+                MapStateManager.shared.setMapTabActive(false)
+            }
             .task {
                 if selectedTab == .map, !didTriggerMapInitialLoad {
                     deferUntilAfterLaunch {
@@ -1262,7 +1129,10 @@ struct HomeView: View {
                 title: "Games",
                 systemImage: "gamecontroller.fill",
                 tint: .purple,
-                action: { showGames = true }
+                action: {
+                    postCubeFaceOverride(face: "camera", title: "Games", systemImage: "gamecontroller.fill")
+                    showGames = true
+                }
             )
         ]
     }
@@ -1284,6 +1154,7 @@ struct HomeView: View {
                 systemImage: "bubble.left.and.bubble.right.fill",
                 tint: .cyan,
                 action: {
+                    postCubeFaceOverride(face: "feed", title: "Comment", systemImage: "bubble.left.and.bubble.right.fill")
                     NotificationCenter.default.post(name: .FeedOpenCommentComposer, object: nil)
                 }
             ),
@@ -1302,6 +1173,7 @@ struct HomeView: View {
                 systemImage: "newspaper.fill",
                 tint: .red,
                 action: {
+                    postCubeFaceOverride(face: "feed", title: "News", systemImage: "newspaper.fill")
                     NotificationCenter.default.post(name: .FeedOpenNews, object: nil)
                 }
             ),
@@ -1327,9 +1199,38 @@ struct HomeView: View {
         ]
     }
 
+    private func postCubeFaceOverride(face: String, item: CubeSubmenuItem?) {
+        guard let item else {
+            resetCubeFaceOverride(face)
+            return
+        }
+        postCubeFaceOverride(face: face, title: item.title, systemImage: item.systemImage)
+    }
+
+    private func postCubeFaceOverride(face: String, title: String, systemImage: String) {
+        NotificationCenter.default.post(
+            name: .CubeFaceOverrideChanged,
+            object: nil,
+            userInfo: [
+                "face": face,
+                "title": title,
+                "systemImage": systemImage
+            ]
+        )
+    }
+
+    private func resetCubeFaceOverride(_ face: String) {
+        NotificationCenter.default.post(
+            name: .CubeFaceOverrideChanged,
+            object: nil,
+            userInfo: ["face": face]
+        )
+    }
+
     @MainActor
     private func openFeedCommentComposer() {
         guard selectedTab == .feed else { return }
+        postCubeFaceOverride(face: "feed", title: "Comment", systemImage: "bubble.left.and.bubble.right.fill")
         chromeSleepTask?.cancel()
         chromeSleepTask = nil
         isMainTabChildRouteVisible = true
@@ -1344,6 +1245,7 @@ struct HomeView: View {
         withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
             showFeedCommentComposer = false
         }
+        resetCubeFaceOverride("feed")
         isMainTabChildRouteVisible = false
         resetChromeSleepTimer()
     }
@@ -1405,6 +1307,7 @@ struct HomeView: View {
     @MainActor
     private func openLiveLocationPicker() {
         locationProvider.request()
+        postCubeFaceOverride(face: "camera", title: "Live", systemImage: "dot.radiowaves.left.and.right")
         isMainTabChildRouteVisible = true
         withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
             showLiveLocationPicker = true
@@ -1416,6 +1319,7 @@ struct HomeView: View {
         withAnimation(.spring(response: 0.28, dampingFraction: 0.84)) {
             showLiveLocationPicker = false
         }
+        resetCubeFaceOverride("camera")
         isMainTabChildRouteVisible = false
     }
 
@@ -1461,6 +1365,7 @@ struct HomeView: View {
     @MainActor
     private func openARFiltersFromCubeMenu() {
         guard selectedTab == .record else { return }
+        postCubeFaceOverride(face: "camera", title: "AR", systemImage: "sparkles")
         _ = cameraControllerHolder.resolve()
         _ = ensureRecordSupportManagers()
         ensureCameraRunningIfNeeded()
@@ -1716,6 +1621,43 @@ struct HomeView: View {
         }
     }
 
+    private func applyInactiveTabResourcePolicy(activeTab: AppTab) {
+        MapStateManager.shared.setMapTabActive(activeTab == .map)
+
+        if activeTab != .map {
+            NotificationCenter.default.post(name: .StopMapAudio, object: nil)
+        }
+
+        if activeTab != .feed {
+            NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
+            NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
+            feedCubeMenuWheel.endHold(activateSelected: false)
+            resetCubeFaceOverride("feed")
+            stopChannelLogoTimer()
+
+            if showFeedCommentComposer {
+                showFeedCommentComposer = false
+                isMainTabChildRouteVisible = false
+            }
+        }
+
+        if activeTab != .record {
+            isRecordHolding = false
+            showCameraRollWindow = false
+            showARFilters = false
+            cameraCubeMenuWheel.endHold(activateSelected: false)
+            resetCubeFaceOverride("camera")
+            stopCameraDetectionObjectPop()
+            stopRecordHoldRamp(reset: false)
+            arFilterManager?.activeFilter = .none
+            userRecognitionManager?.clearRecognition()
+            CameraAIAnnouncer.shared.resetSession()
+            if !PreviewEnvHomeView.isPreview {
+                cameraControllerHolder.stopIfLoaded()
+            }
+        }
+    }
+
     // MARK: - Body split for type-checker performance
 
     private var rootStack: some View {
@@ -1734,6 +1676,7 @@ struct HomeView: View {
                 case .settings:
                     VStack(spacing: 12) {
                         Image(systemName: "gearshape.fill")
+                            .poplurIconShader()
                             .font(.largeTitle)
                             .foregroundStyle(.secondary)
                         Text("Settings are not available from here.")
@@ -1753,15 +1696,22 @@ struct HomeView: View {
                 .allowsHitTesting(false)
                 .opacity(0.01)
 
-            FeedChromeNotificationBridge(
-                isActive: selectedTab == .feed,
-                onHoldBegan: {
-                    resetChromeSleepTimer()
-                    feedCubeMenuWheel.beginHold(items: feedCubeMenuItems)
-                },
-                onHoldEnded: {
-                    resetChromeSleepTimer()
-                    feedCubeMenuWheel.endHold(activateSelected: true)
+                FeedChromeNotificationBridge(
+                    isActive: selectedTab == .feed,
+                    onHoldBegan: {
+                        resetChromeSleepTimer()
+                        feedCubeMenuWheel.beginHold(items: feedCubeMenuItems)
+                        postCubeFaceOverride(face: "feed", item: feedCubeMenuWheel.selectedItem)
+                    },
+                    onHoldMoved: { notification in
+                        resetChromeSleepTimer()
+                        feedCubeMenuWheel.scrub(with: notification)
+                        postCubeFaceOverride(face: "feed", item: feedCubeMenuWheel.selectedItem)
+                    },
+                    onHoldEnded: {
+                        resetChromeSleepTimer()
+                        feedCubeMenuWheel.endHold(activateSelected: true)
+                        resetCubeFaceOverride("feed")
                 },
                 onInteraction: resetChromeSleepTimer
             )
@@ -1772,6 +1722,7 @@ struct HomeView: View {
                 VStack {
                     HStack(spacing: 12) {
                         Image(systemName: uploadStatusIcon)
+                            .poplurIconShader()
                             .font(.title2)
                             .foregroundStyle(uploadStatusColor)
                             .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
@@ -1841,13 +1792,15 @@ struct HomeView: View {
                 .zIndex(7250)
             }
 
-            CubeMenuWheelOverlay(controller: cameraCubeMenuWheel)
-                .opacity(selectedTab == .record ? 1 : 0)
-                .zIndex(6100)
+            if selectedTab == .record {
+                CubeMenuWheelOverlay(controller: cameraCubeMenuWheel)
+                    .zIndex(6100)
+            }
 
-            CubeMenuWheelOverlay(controller: feedCubeMenuWheel)
-                .opacity(selectedTab == .feed ? 1 : 0)
-                .zIndex(6101)
+            if selectedTab == .feed {
+                CubeMenuWheelOverlay(controller: feedCubeMenuWheel)
+                    .zIndex(6101)
+            }
 
             if let info = incomingCallInfo {
                 IncomingCallView(
@@ -2119,8 +2072,11 @@ struct HomeView: View {
             .zIndex(9500)
 
         }
-        .fullScreenCover(isPresented: $showGames) {
+        .fullScreenCover(isPresented: $showGames, onDismiss: {
+            resetCubeFaceOverride("camera")
+        }) {
             PoplurGameLaunchView()
+                .environmentObject(deviceVolumeObserver)
         }
     }
 
@@ -2347,6 +2303,7 @@ struct HomeView: View {
                     didSetInitialCubeYaw = true
                     cubeYawDegrees = yawForTab(.feed)
                 }
+                applyInactiveTabResourcePolicy(activeTab: selectedTab)
                 Task { @MainActor in
                     try? await Task.sleep(nanoseconds: 120_000_000)
                     await Task.yield()
@@ -2358,6 +2315,8 @@ struct HomeView: View {
                 }
             }
             .onChange(of: selectedTab) { _, newTab in
+                applyInactiveTabResourcePolicy(activeTab: newTab)
+
                 if !didSetInitialCubeYaw {
                     didSetInitialCubeYaw = true
                     cubeYawDegrees = yawForTab(selectedTab)
@@ -2579,11 +2538,18 @@ struct HomeView: View {
                 isRecordHolding = true
                 ensureCameraRunningIfNeeded()
                 cameraCubeMenuWheel.beginHold(items: cameraCubeMenuItems)
+                postCubeFaceOverride(face: "camera", item: cameraCubeMenuWheel.selectedItem)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .cubeHoldMoved)) { notification in
+                guard selectedTab == .record else { return }
+                cameraCubeMenuWheel.scrub(with: notification)
+                postCubeFaceOverride(face: "camera", item: cameraCubeMenuWheel.selectedItem)
             }
             .onReceive(NotificationCenter.default.publisher(for: .cameraCubeHoldEnded)) { _ in
                 guard selectedTab == .record else { return }
                 isRecordHolding = false
                 cameraCubeMenuWheel.endHold(activateSelected: true)
+                resetCubeFaceOverride("camera")
                 if !isRecording {
                     stopRecordHoldRamp(reset: true)
                 }
@@ -2688,6 +2654,7 @@ private struct FeedCommentComposerOverlay: View {
         return VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 12) {
                 Image(systemName: "bubble.left.and.sparkles.fill")
+                    .poplurIconShader()
                     .font(.system(size: 20, weight: .black))
                     .foregroundStyle(.cyan)
 
@@ -2700,6 +2667,7 @@ private struct FeedCommentComposerOverlay: View {
 
                 Button(action: onDismiss) {
                     Image(systemName: "xmark")
+                        .poplurIconShader()
                         .font(.system(size: 15, weight: .black))
                         .foregroundStyle(.white)
                         .frame(width: 34, height: 34)
@@ -2765,6 +2733,7 @@ private struct FeedCommentComposerOverlay: View {
             HStack(spacing: 12) {
                 Button(action: onDismiss) {
                     Image(systemName: "arrow.down.right.and.arrow.up.left")
+                        .poplurIconShader()
                         .font(.system(size: 17, weight: .heavy))
                         .foregroundStyle(.white.opacity(0.84))
                         .frame(width: 46, height: 46)
@@ -2779,6 +2748,7 @@ private struct FeedCommentComposerOverlay: View {
                     onSubmit(draft)
                 } label: {
                     Image(systemName: "paperplane.fill")
+                        .poplurIconShader()
                         .font(.system(size: 18, weight: .black))
                         .foregroundStyle(canSubmit ? .black : .white.opacity(0.42))
                         .frame(width: 52, height: 46)
@@ -2848,6 +2818,7 @@ private struct LiveLocationPickerOverlay: View {
                                 .fill(Color.red.opacity(0.22))
                                 .frame(width: 42, height: 42)
                             Image(systemName: "dot.radiowaves.left.and.right")
+                                .poplurIconShader()
                                 .font(.system(size: 18, weight: .black))
                                 .foregroundStyle(.red)
                         }
@@ -2867,6 +2838,7 @@ private struct LiveLocationPickerOverlay: View {
 
                         Button(action: onDismiss) {
                             Image(systemName: "xmark")
+                                .poplurIconShader()
                                 .font(.system(size: 15, weight: .black))
                                 .foregroundStyle(.white)
                                 .frame(width: 36, height: 36)
@@ -2883,6 +2855,7 @@ private struct LiveLocationPickerOverlay: View {
                             } label: {
                                 HStack(spacing: 12) {
                                     Image(systemName: "location.fill")
+                                        .poplurIconShader()
                                         .font(.system(size: 16, weight: .black))
                                         .foregroundStyle(Color(red: 0.36, green: 1.0, blue: 0.42))
                                         .frame(width: 34, height: 34)
@@ -2903,6 +2876,7 @@ private struct LiveLocationPickerOverlay: View {
                                     Spacer()
 
                                     Image(systemName: "arrow.up.forward")
+                                        .poplurIconShader()
                                         .font(.system(size: 14, weight: .black))
                                         .foregroundStyle(.white.opacity(0.72))
                                 }
@@ -3023,6 +2997,7 @@ final class BarCubePreviewTuning: ObservableObject {
 private struct FeedChromeNotificationBridge: View {
     let isActive: Bool
     let onHoldBegan: () -> Void
+    let onHoldMoved: (Notification) -> Void
     let onHoldEnded: () -> Void
     let onInteraction: () -> Void
 
@@ -3032,6 +3007,10 @@ private struct FeedChromeNotificationBridge: View {
             .onReceive(NotificationCenter.default.publisher(for: .cubeHoldBegan)) { _ in
                 guard isActive else { return }
                 onHoldBegan()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .cubeHoldMoved)) { notification in
+                guard isActive else { return }
+                onHoldMoved(notification)
             }
             .onReceive(NotificationCenter.default.publisher(for: .cubeHoldEnded)) { _ in
                 guard isActive else { return }
@@ -3399,6 +3378,7 @@ private struct CameraIconControlButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: systemName)
+                .poplurIconShader()
                 .font(.system(size: 18, weight: .bold))
                 .foregroundStyle(isActive ? Color.yellow : Color.white)
                 .frame(width: 44, height: 44)
@@ -3642,6 +3622,7 @@ private struct LiveMLDetectionOverlay: View {
                     if detectedObjects.count > 1 {
                         HStack(spacing: 8) {
                             Image(systemName: "plus.circle.fill")
+                                .poplurIconShader()
                                 .font(.caption)
                                 .foregroundStyle(.white.opacity(0.7))
 
@@ -3748,29 +3729,6 @@ private struct LiveMLDetectionOverlay: View {
     }
 }
 
-private struct PoplurVolumeBars: View {
-    let volumeLevel: Float
-
-    private let barCount = 18
-    private let meterGreen = Color(red: 0.23, green: 1.0, blue: 0.18)
-
-    var body: some View {
-        let activeLevel = Int(ceil(Double(max(0, min(1, volumeLevel))) * Double(barCount)))
-
-        VStack(spacing: 6.4) {
-            ForEach((0..<barCount).reversed(), id: \.self) { index in
-                let active = index < activeLevel
-                RoundedRectangle(cornerRadius: 2, style: .continuous)
-                    .fill(meterGreen.opacity(active ? 1.0 : 0.18))
-                    .shadow(color: meterGreen.opacity(active ? 0.55 : 0), radius: 3, x: 0, y: 0)
-                    .frame(width: 32, height: 8)
-            }
-        }
-        .frame(width: 64, height: 320)
-        .drawingGroup()
-    }
-}
-
 // MARK: - Recognized User Card
 
 /// Card showing recognized user with their radius
@@ -3791,6 +3749,7 @@ private struct RecognizedUserCard: View {
                     .frame(width: 44, height: 44)
                     .overlay(
                         Image(systemName: "person.fill")
+                            .poplurIconShader()
                             .font(.system(size: 20))
                             .foregroundStyle(.white)
                     )
@@ -3823,6 +3782,7 @@ private struct RecognizedUserCard: View {
             // Radius display
             HStack(spacing: 12) {
                 Image(systemName: "circle.dashed")
+                    .poplurIconShader()
                     .font(.title2)
                     .foregroundStyle(.white.opacity(0.9))
 
@@ -3842,6 +3802,7 @@ private struct RecognizedUserCard: View {
 
                 // Trend indicator (optional)
                 Image(systemName: "arrow.up.right")
+                    .poplurIconShader()
                     .font(.caption)
                     .foregroundStyle(.green)
                     .padding(8)

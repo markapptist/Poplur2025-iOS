@@ -9,6 +9,7 @@ import AVFoundation
 import AVKit
 import CoreLocation
 import FirebaseFirestore
+import ImageIO
 import UIKit
 
 // MARK: - Fullscreen Feed Page View
@@ -129,6 +130,7 @@ struct FeedFullscreenPageView: View {
         @State private var itemFailed: Bool = false
         @State private var isReadyToDisplay: Bool = false
         @State private var creditsVisible: Bool = false
+        @State private var lastReportedPlaybackSecond: Double = -1
 
         private func setupPlayer() {
             guard player == nil else { return }
@@ -198,13 +200,17 @@ struct FeedFullscreenPageView: View {
             FeedAudioManager.shared.register(p)
             p.play()
             timeObserver = p.addPeriodicTimeObserver(
-                forInterval: CMTime(seconds: 0.1, preferredTimescale: 600),
+                forInterval: CMTime(seconds: 0.25, preferredTimescale: 600),
                 queue: .main
             ) { time in
                 if time.seconds.isFinite {
-                    self.onPlaybackTimeChanged(time.seconds)
+                    let wholeSecond = floor(max(time.seconds, 0))
+                    if wholeSecond != self.lastReportedPlaybackSecond {
+                        self.lastReportedPlaybackSecond = wholeSecond
+                        self.onPlaybackTimeChanged(time.seconds)
+                    }
                 }
-                if time.seconds > 0.05 || p.timeControlStatus == .playing {
+                if !self.isReadyToDisplay, time.seconds > 0.05 || p.timeControlStatus == .playing {
                     self.isReadyToDisplay = true
                     self.playbackStuck = false
                     self.onReadyToDisplay()
@@ -313,6 +319,7 @@ struct FeedFullscreenPageView: View {
             }
             playbackStuck = false
             isReadyToDisplay = false
+            lastReportedPlaybackSecond = -1
             if let obs = timeObserver, let p = player {
                 p.removeTimeObserver(obs)
             }
@@ -367,8 +374,6 @@ struct FeedFullscreenPageView: View {
             }
             uiView.player = player
             uiView.playerLayer.videoGravity = .resizeAspectFill
-            uiView.setNeedsLayout()
-            uiView.layoutIfNeeded()
         }
     }
 
@@ -381,10 +386,16 @@ struct FeedFullscreenPageView: View {
             }
         }
         private var readyPollWorkItem: DispatchWorkItem?
+        private var lastReadyForDisplay: Bool?
 
         var player: AVPlayer? {
             get { playerLayer.player }
             set {
+                guard playerLayer.player !== newValue else {
+                    notifyReadyForDisplay()
+                    return
+                }
+                lastReadyForDisplay = nil
                 playerLayer.player = newValue
                 notifyReadyForDisplay()
                 startReadyPolling()
@@ -418,16 +429,19 @@ struct FeedFullscreenPageView: View {
                 guard let self else { return }
                 self.notifyReadyForDisplay()
 
-                if !self.playerLayer.isReadyForDisplay && attempt < 240 {
+                if !self.playerLayer.isReadyForDisplay && attempt < 80 {
                     self.startReadyPolling(attempt: attempt + 1)
                 }
             }
             readyPollWorkItem = workItem
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: workItem)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: workItem)
         }
 
         private func notifyReadyForDisplay() {
-            onReadyForDisplayChanged?(playerLayer.isReadyForDisplay)
+            let isReady = playerLayer.isReadyForDisplay
+            guard lastReadyForDisplay != isReady else { return }
+            lastReadyForDisplay = isReady
+            onReadyForDisplayChanged?(isReady)
         }
     }
 
@@ -717,6 +731,7 @@ struct FeedFullscreenPageView: View {
         ZStack {
             Color.black
             Image(systemName: isVideo ? "play.slash.fill" : "photo")
+                .poplurIconShader()
                 .font(.system(size: 42, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.55))
         }
@@ -765,6 +780,7 @@ struct FeedFullscreenPageView: View {
         }
         .font(.system(size: 11, weight: .semibold, design: .monospaced))
         .foregroundColor(.white)
+        .poplurTextShader(intensity: 0.54)
         .padding(8)
         .background(Color.black.opacity(0.55), in: Capsule())
         .padding(.top, 8)
@@ -780,6 +796,7 @@ struct FeedFullscreenPageView: View {
         Text(post.mediaURL)
             .font(.system(size: 11, weight: .regular, design: .monospaced))
             .foregroundColor(.white.opacity(0.95))
+            .poplurTextShader(intensity: 0.58)
             .lineLimit(1)
             .truncationMode(.middle)
             .padding(.horizontal, 10)
@@ -810,6 +827,7 @@ struct FeedFullscreenPageView: View {
             .font(.system(size: min(size.width * 0.045, 19), weight: .bold, design: .rounded))
             .multilineTextAlignment(.center)
             .foregroundStyle(.white)
+            .poplurTextShader(intensity: 0.76)
             .lineLimit(3)
             .fixedSize(horizontal: false, vertical: true)
             .shadow(color: .black.opacity(0.85), radius: 4, x: 0, y: 2)
@@ -820,6 +838,7 @@ struct FeedFullscreenPageView: View {
             ))
             .font(.system(size: 10, weight: .black, design: .monospaced))
             .foregroundStyle(.white.opacity(0.72))
+            .poplurTextShader(intensity: 0.58)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -844,10 +863,13 @@ struct FeedFullscreenPageView: View {
                 if let flag = post.countryFlag {
                     Text(flag)
                         .font(.system(size: 32))
+                        .poplurTextShader(intensity: 0.58)
                 }
                 if post.isPoplurAd {
                     Text("AD")
                         .font(.system(size: 22, weight: .black, design: .rounded))
+                        .foregroundStyle(.white)
+                        .poplurTextShader(intensity: 0.86)
                 } else {
                     ChannelAssetIcon(assetName: channelIconAssetName, fallbackEmoji: channelEmoji, size: 38, fallbackFontSize: 32)
                 }
@@ -860,6 +882,7 @@ struct FeedFullscreenPageView: View {
                         Text(post.isPoplurAd ? "Poplur Ad" : (displayName.isEmpty ? "User" : displayName))
                             .font(.system(size: 20, weight: .bold, design: .default))
                             .foregroundColor(.white)
+                            .poplurTextShader(intensity: 0.8)
                     }
                     .buttonStyle(.plain)
                     .opacity(displayAsChannel ? 0 : 1)
@@ -868,6 +891,7 @@ struct FeedFullscreenPageView: View {
                     Text("CH \(channelNumber)")
                         .font(.system(size: 22, weight: .black, design: .monospaced))
                         .foregroundColor(Color(red: 0.31, green: 1.0, blue: 0.25))
+                        .poplurTextShader(intensity: 0.9)
                         .opacity(displayAsChannel ? 1 : 0)
                         .offset(y: displayAsChannel ? 0 : 10)
                 }
@@ -877,12 +901,14 @@ struct FeedFullscreenPageView: View {
                     Text(post.isPoplurAd ? (post.adCreativeKind?.uppercased() ?? "AI CREATIVE") : String(format: "%.4f, %.4f", post.latitude, post.longitude))
                         .font(.system(size: 16, weight: .regular, design: .default))
                         .foregroundColor(.white.opacity(0.9))
+                        .poplurTextShader(intensity: 0.62)
                         .opacity(displayAsChannel ? 0 : 1)
                         .offset(y: displayAsChannel ? -8 : 0)
 
                     Text(channelCategory.uppercased())
                         .font(.system(size: 16, weight: .heavy, design: .monospaced))
                         .foregroundColor(Color(red: 0.31, green: 1.0, blue: 0.25))
+                        .poplurTextShader(intensity: 0.78)
                         .opacity(displayAsChannel ? 1 : 0)
                         .offset(y: displayAsChannel ? 0 : 8)
                 }
@@ -903,11 +929,13 @@ struct FeedFullscreenPageView: View {
             Text("POPLUR AD")
                 .font(.system(size: 12, weight: .black, design: .rounded))
                 .foregroundStyle(.white.opacity(0.78))
+                .poplurTextShader(intensity: 0.68)
                 .tracking(0)
 
             Text(post.adHeadline ?? "See what is happening nearby")
                 .font(.system(size: 36, weight: .black, design: .rounded))
                 .foregroundStyle(.white)
+                .poplurTextShader(intensity: 0.88)
                 .lineLimit(2)
                 .minimumScaleFactor(0.82)
 
@@ -915,12 +943,14 @@ struct FeedFullscreenPageView: View {
                 Text(body)
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.88))
+                    .poplurTextShader(intensity: 0.64)
                     .lineLimit(3)
             }
 
             Text(post.adCallToAction ?? "Open Poplur")
                 .font(.system(size: 14, weight: .black, design: .rounded))
                 .foregroundStyle(.black)
+                .poplurTextShader(intensity: 0.72)
                 .padding(.horizontal, 17)
                 .padding(.vertical, 9)
                 .background(Color.white, in: Capsule())
@@ -966,6 +996,7 @@ private struct FullBleedRemoteImage: View {
                     .transition(.opacity)
             case .failed:
                 Image(systemName: "photo")
+                    .poplurIconShader()
                     .font(.system(size: 42, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.55))
             }
@@ -990,7 +1021,8 @@ private struct FullBleedRemoteImage: View {
             }
 
             guard !Task.isCancelled else { return }
-            guard let image = UIImage(data: data) else {
+            let screenScale = await MainActor.run { UIScreen.main.scale }
+            guard let image = Self.downsampledImage(from: data, targetSize: size, scale: screenScale) ?? UIImage(data: data) else {
                 throw URLError(.cannotDecodeContentData)
             }
 
@@ -1019,6 +1051,30 @@ private struct FullBleedRemoteImage: View {
                 onReady()
             }
         }
+    }
+
+    private static func downsampledImage(from data: Data, targetSize: CGSize, scale: CGFloat) -> UIImage? {
+        let maxPixelSize = max(targetSize.width, targetSize.height) * scale * 1.15
+        guard maxPixelSize.isFinite, maxPixelSize > 1 else { return UIImage(data: data) }
+
+        let options: [CFString: Any] = [
+            kCGImageSourceShouldCache: false
+        ]
+        guard let source = CGImageSourceCreateWithData(data as CFData, options as CFDictionary) else {
+            return nil
+        }
+
+        let downsampleOptions: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: Int(maxPixelSize)
+        ]
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, downsampleOptions as CFDictionary) else {
+            return nil
+        }
+
+        return UIImage(cgImage: cgImage, scale: scale, orientation: .up)
     }
 }
 

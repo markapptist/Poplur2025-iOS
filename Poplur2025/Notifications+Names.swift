@@ -23,6 +23,7 @@ extension Notification.Name {
     static let CubeGlobalDragEnded = Notification.Name("CubeGlobalDragEnded")
     static let CubeGlobalTap = Notification.Name("CubeGlobalTap")
     static let cubeHoldBegan = Notification.Name("cubeHoldBegan")
+    static let cubeHoldMoved = Notification.Name("cubeHoldMoved")
     static let cubeHoldEnded = Notification.Name("cubeHoldEnded")
     static let cameraCubeHoldBegan = Notification.Name("cameraCubeHoldBegan")
     static let cameraCubeHoldEnded = Notification.Name("cameraCubeHoldEnded")
@@ -31,6 +32,7 @@ extension Notification.Name {
     static let CubeStartFlashing = Notification.Name("CubeStartFlashing")
     static let CubeStopFlashing = Notification.Name("CubeStopFlashing")
     static let CubeProfileIconOverrideChanged = Notification.Name("CubeProfileIconOverrideChanged")
+    static let CubeFaceOverrideChanged = Notification.Name("CubeFaceOverrideChanged")
     static let CenterMapOnUser = Notification.Name("CenterMapOnUser")
     
     // Feed and audio

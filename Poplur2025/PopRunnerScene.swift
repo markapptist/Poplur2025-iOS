@@ -3,6 +3,7 @@ import UIKit
 
 // MARK: - Pop Runner (Side Scroller)
 
+@MainActor
 final class PopRunnerScene: SKScene, SKPhysicsContactDelegate {
 
     // MARK: Config
@@ -111,24 +112,37 @@ final class PopRunnerScene: SKScene, SKPhysicsContactDelegate {
 
     // MARK: Player
     private func setupPlayer() {
-        playerNode = cfg.character.makeSpriteNode(scale: 1.0)
-        playerNode.position = CGPoint(x: size.width * 0.22, y: size.height * 0.14 + 60)
-        playerNode.zPosition = 5
+        // Create a placeholder node so physics and actions can be attached after async sprite creation
+        let container = SKNode()
+        container.position = CGPoint(x: size.width * 0.22, y: size.height * 0.14 + 60)
+        container.zPosition = 5
+        self.playerNode = container
+        addChild(container)
 
-        let pb = SKPhysicsBody(rectangleOf: CGSize(width: 36, height: 60), center: CGPoint(x: 0, y: 10))
-        pb.categoryBitMask = catPlayer
-        pb.contactTestBitMask = catGround | catObstacle | catCoin
-        pb.collisionBitMask = catGround | catObstacle
-        pb.allowsRotation = false; pb.restitution = 0; pb.friction = 0.2
-        playerNode.physicsBody = pb
-        addChild(playerNode)
+        // Defer sprite creation to an async context if the factory is async
+        Task { [weak self] in
+            guard let self else { return }
+            // If makeSpriteNode is synchronous, this will still work; if it's async, we can `await` it.
+            let sprite = await self.cfg.character.makeSpriteNode(scale: 1.0)
+            sprite.position = .zero
+            container.addChild(sprite)
 
-        // Run cycle: bob up and down
-        let bob = SKAction.sequence([
-            SKAction.moveBy(x: 0, y: 4, duration: 0.22),
-            SKAction.moveBy(x: 0, y: -4, duration: 0.22)
-        ])
-        playerNode.run(SKAction.repeatForever(bob))
+            // Set up physics body on the container so collisions work regardless of sprite loading
+            let pb = SKPhysicsBody(rectangleOf: CGSize(width: 36, height: 60), center: CGPoint(x: 0, y: 10))
+            pb.categoryBitMask = self.catPlayer
+            pb.contactTestBitMask = self.catGround | self.catObstacle | self.catCoin
+            pb.collisionBitMask = self.catGround | self.catObstacle
+            pb.allowsRotation = false; pb.restitution = 0; pb.friction = 0.2
+            container.physicsBody = pb
+            self.playerBody = pb
+
+            // Run cycle: bob up and down
+            let bob = SKAction.sequence([
+                SKAction.moveBy(x: 0, y: 4, duration: 0.22),
+                SKAction.moveBy(x: 0, y: -4, duration: 0.22)
+            ])
+            container.run(SKAction.repeatForever(bob), completion: {})
+        }
     }
 
     // MARK: HUD

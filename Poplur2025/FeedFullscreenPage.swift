@@ -255,6 +255,7 @@ struct FeedFullscreenPage: View {
                         .frame(width: 36, height: 36)
                         .overlay(
                             Image(systemName: post.isPoplurAd ? "megaphone.fill" : "person.fill")
+                                .poplurIconShader()
                                 .foregroundStyle(.white)
                         )
                 }
@@ -280,6 +281,7 @@ struct FeedFullscreenPage: View {
         ZStack {
             Color.black
             Image(systemName: directVideoURL != nil ? "play.slash.fill" : "photo")
+                .poplurIconShader()
                 .font(.system(size: 42, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.55))
         }
@@ -309,6 +311,7 @@ struct FeedFullscreenPage: View {
             Text(post.adCallToAction ?? "Open Poplur")
                 .font(.system(size: 14, weight: .black, design: .rounded))
                 .foregroundStyle(.black)
+                .poplurMetalNumberShader(intensity: 0.7)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 9)
                 .background(Color.white, in: Capsule())

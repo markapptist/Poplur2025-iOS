@@ -145,6 +145,7 @@ struct MusicSearchSheet: View {
     private var searchField: some View {
         HStack(spacing: 10) {
             Image(systemName: "magnifyingglass")
+                .poplurIconShader()
                 .foregroundStyle(.white.opacity(0.55))
             TextField("Search songs, artists, sounds", text: $query)
                 .textInputAutocapitalization(.never)
@@ -155,6 +156,7 @@ struct MusicSearchSheet: View {
                     query = ""
                 } label: {
                     Image(systemName: "xmark.circle.fill")
+                        .poplurIconShader()
                         .foregroundStyle(.white.opacity(0.45))
                 }
                 .buttonStyle(.plain)
@@ -200,6 +202,7 @@ struct MusicSearchSheet: View {
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: "folder.badge.plus")
+                    .poplurIconShader()
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Use local audio/video file")
                         .font(.system(size: 13, weight: .black, design: .rounded))
@@ -209,6 +212,7 @@ struct MusicSearchSheet: View {
                 }
                 Spacer()
                 Image(systemName: "chevron.right")
+                    .poplurIconShader()
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(.white.opacity(0.45))
             }
@@ -256,6 +260,7 @@ private struct MusicSearchTrackRow: View {
                     .frame(width: 52, height: 52)
                     .overlay(
                         Image(systemName: "music.note")
+                            .poplurIconShader()
                             .font(.system(size: 20, weight: .black))
                             .foregroundStyle(.black.opacity(track.provider == .tidal ? 0.75 : 0.95))
                     )
@@ -281,6 +286,7 @@ private struct MusicSearchTrackRow: View {
                         .font(.system(size: 11, weight: .bold, design: .monospaced))
                         .foregroundStyle(.white.opacity(0.55))
                     Image(systemName: isSelected ? "checkmark.circle.fill" : "plus.circle")
+                        .poplurIconShader()
                         .font(.system(size: 20, weight: .bold))
                         .foregroundStyle(isSelected ? Color(red: 0.3, green: 1.0, blue: 0.45) : .white.opacity(0.45))
                 }

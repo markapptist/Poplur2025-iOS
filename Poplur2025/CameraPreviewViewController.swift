@@ -7,6 +7,8 @@ final class CameraPreviewViewController: UIViewController {
     var displayLayer: AVSampleBufferDisplayLayer?
     private var previewLayer: AVCaptureVideoPreviewLayer?
     private var singleTapRecognizer: UITapGestureRecognizer?
+    private var isARFilterTrayVisible = false
+    private var activeARFilterRawValue = "None"
 
     /// Expose the AR display layer for external configuration (e.g., CameraKitController)
     public func getARDisplayLayer() -> AVSampleBufferDisplayLayer? {
@@ -163,12 +165,21 @@ final class CameraPreviewViewController: UIViewController {
 
     @objc private func handleARFiltersStateChanged(_ notification: Notification) {
         let isShown = notification.userInfo?["isShown"] as? Bool ?? false
-        setFilteredPreviewVisible(isShown)
+        isARFilterTrayVisible = isShown
+        if !isShown {
+            activeARFilterRawValue = "None"
+        }
+        updateFilteredPreviewVisibility()
     }
 
     @objc private func handleARFilterChanged(_ notification: Notification) {
-        let rawValue = (notification.userInfo?["filter"] as? String) ?? "None"
-        setFilteredPreviewVisible(rawValue.caseInsensitiveCompare("None") != .orderedSame)
+        activeARFilterRawValue = (notification.userInfo?["filter"] as? String) ?? "None"
+        updateFilteredPreviewVisibility()
+    }
+
+    private func updateFilteredPreviewVisibility() {
+        let hasActiveFilter = activeARFilterRawValue.caseInsensitiveCompare("None") != .orderedSame
+        setFilteredPreviewVisible(isARFilterTrayVisible && hasActiveFilter)
     }
 
     private func setFilteredPreviewVisible(_ visible: Bool) {
@@ -281,7 +292,7 @@ final class CameraPreviewViewController: UIViewController {
     private func recoverDisplayLayerIfNeeded() {
         guard let dl = displayLayer else { return }
         let status = dl.status
-        if status == .failed || status == .unknown {
+        if status == .failed {
             print("⚠️ [CameraPreviewVC] Display layer status \(status.rawValue) — flushing to recover")
             dl.flushAndRemoveImage()
         }

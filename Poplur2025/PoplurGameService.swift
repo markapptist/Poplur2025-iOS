@@ -10,7 +10,7 @@ final class PoplurGameService {
     private let systemPrompt = """
     You generate game session configs for Poplur, a mobile game app. Return ONLY valid JSON — no markdown, no code fences.
 
-    Available game keys: pop_runner, stella_blast, zyla_quest, rex_hoops
+    Available game keys: stella_blast
     Available character ids: pop, zyla, blip, rex, stella, glitch
 
     Return exactly this JSON shape:
@@ -29,7 +29,8 @@ final class PoplurGameService {
       "specialMechanic": "<one short phrase>"
     }
 
-    Be creative and varied. Pick different games/characters each call. Colors should match the theme.
+    Generate a polished arcade-shooter session that feels closer to a real console game than a toy mini-game.
+    Use stella_blast, choose cinematic space/neon colors, and make the mechanics sound skill-based.
     """
 
     func generateConfig() async -> PoplurGameConfig {

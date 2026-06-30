@@ -5,6 +5,7 @@ import SpriteKit
 
 struct PoplurGameLaunchView: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var volumeObserver: DeviceVolumeObserver
     @State private var phase: LoadPhase = .loading
     @State private var config: PoplurGameConfig?
     @State private var spinAngle: Double = 0
@@ -26,12 +27,42 @@ struct PoplurGameLaunchView: View {
                 }
             case .playing:
                 if let cfg = config {
-                    GameSceneContainer(config: cfg, onExit: { dismiss() })
+                    GameSceneContainer(config: cfg)
                         .ignoresSafeArea()
                 }
             }
+
+            // Exit button lives here, outside GameSceneContainer, so SwiftUI gets the tap
+            // before SpriteKit's touchesBegan sees it.
+            if phase == .playing {
+                VStack {
+                    HStack {
+                        Spacer()
+                        Button {
+                            dismiss()
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 34, weight: .bold))
+                                .foregroundStyle(.white)
+                                .shadow(color: .black.opacity(0.55), radius: 4, x: 0, y: 2)
+                                .frame(width: 56, height: 56)
+                        }
+                        .padding(.trailing, 18)
+                        .padding(.top, 60)
+                        .contentShape(Rectangle())
+                    }
+                    Spacer()
+                }
+                .allowsHitTesting(true)
+                .zIndex(1001)
+            }
         }
+        .volumeBarsOverlay()
         .task { await loadConfig() }
+        .onDisappear {
+            config = nil
+            phase = .loading
+        }
     }
 
     // MARK: Loading screen
@@ -138,6 +169,7 @@ struct PoplurGameLaunchView: View {
                 } label: {
                     HStack {
                         Image(systemName: "gamecontroller.fill")
+                            .poplurIconShader()
                         Text("Play Now")
                             .font(.system(size: 18, weight: .black, design: .rounded))
                     }
@@ -177,6 +209,7 @@ struct PoplurGameLaunchView: View {
     private func infoRow(icon: String, label: String, value: String) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: icon)
+                .poplurIconShader()
                 .font(.system(size: 13))
                 .foregroundStyle(.white.opacity(0.5))
                 .frame(width: 18)
@@ -213,40 +246,26 @@ struct PoplurGameLaunchView: View {
 
 private struct GameSceneContainer: View {
     let config: PoplurGameConfig
-    let onExit: () -> Void
 
     @State private var scene: SKScene?
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         GeometryReader { geo in
             ZStack {
                 Color.black.ignoresSafeArea()
-
                 if let scene {
                     SpriteView(scene: scene)
                         .ignoresSafeArea()
                 }
-
-                // Exit button (SwiftUI, always on top)
-                VStack {
-                    HStack {
-                        Spacer()
-                        Button(action: onExit) {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 32, weight: .bold))
-                                .foregroundStyle(.white.opacity(0.75))
-                                .shadow(radius: 4)
-                        }
-                        .padding(.trailing, 16)
-                        .padding(.top, geo.safeAreaInsets.top + 8)
-                    }
-                    Spacer()
-                }
-                .zIndex(1000)
             }
             .onAppear {
                 guard scene == nil else { return }
-                let size = geo.size
+                // Include safe-area insets so scene coordinates match what SpriteView renders
+                let size = CGSize(
+                    width: geo.size.width + geo.safeAreaInsets.leading + geo.safeAreaInsets.trailing,
+                    height: geo.size.height + geo.safeAreaInsets.top + geo.safeAreaInsets.bottom
+                )
                 let s: SKScene
                 switch config.game {
                 case .sideScroller:    s = PopRunnerScene(config: config, size: size)
@@ -255,6 +274,9 @@ private struct GameSceneContainer: View {
                 case .sports:          s = RexHoopsScene(config: config, size: size)
                 }
                 scene = s
+            }
+            .onChange(of: scenePhase) { _, phase in
+                scene?.isPaused = (phase != .active)
             }
         }
     }

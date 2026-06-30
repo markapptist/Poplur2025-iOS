@@ -81,29 +81,14 @@ struct CameraKitView: View {
             }
 
             // Last capture thumbnail (video)
-            if let url = lastVideoURL {
+            if lastVideoURL != nil {
                 VStack {
                     HStack {
                         ZStack {
-                            Group {
-                                if let thumb = lastVideoThumbnail {
-                                    Image(uiImage: thumb)
-                                        .resizable()
-                                        .scaledToFill()
-                                } else {
-                                    Rectangle().fill(Color.black.opacity(0.4))
-                                }
-                            }
+                            lastVideoThumbnailContent
                             .frame(width: 64, height: 64)
                             .clipped()
-                            .overlay(
-                                Image(systemName: "video.fill")
-                                    .resizable()
-                                    .scaledToFit()
-                                    .frame(width: 18, height: 18)
-                                    .foregroundStyle(.white)
-                                    .shadow(radius: 1)
-                            )
+                            .overlay(lastVideoBadge)
                             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                             .overlay(
                                 RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -141,16 +126,16 @@ struct CameraKitView: View {
         .ignoresSafeArea()
         .onAppear {
             isVisible = true
-            // Prewarm and ensure preview is ready when the tab first appears
             Task { @MainActor in
-                // Connect user recognition to controller
                 controller.userRecognitionManager = userRecognition
-                
-                await controller.prewarm()
-                await controller.startPreview()
-                controller.preparePreviewIfNeeded()
-                
-                // Start user recognition
+                if controller.isReady {
+                    // Session already configured — just resume the stream
+                    controller.resumeCapture()
+                } else {
+                    await controller.prewarm()
+                    await controller.startPreview()
+                    controller.preparePreviewIfNeeded()
+                }
                 await userRecognition.startRecognitionSession()
                 print("👤 [UserRecognition] Session started")
             }
@@ -159,6 +144,7 @@ struct CameraKitView: View {
             isVisible = false
             userRecognition.clearRecognition()
             controller.userRecognitionManager = nil
+            controller.suspendCapture()
         }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ScreenFlashOn"))) { _ in
             withAnimation(.easeIn(duration: 0.1)) {
@@ -196,6 +182,28 @@ struct CameraKitView: View {
                   let primary = objects.first?.identifier else { return }
             Task { @MainActor in CameraAIAnnouncer.shared.announceMLLabel(primary) }
         }
+    }
+
+    @ViewBuilder
+    private var lastVideoThumbnailContent: some View {
+        if let thumb = lastVideoThumbnail {
+            Image(uiImage: thumb)
+                .resizable()
+                .scaledToFill()
+        } else {
+            Rectangle().fill(Color.black.opacity(0.4))
+        }
+    }
+
+    private var lastVideoBadge: some View {
+        Image(systemName: "video.fill")
+            .resizable()
+            .scaledToFit()
+            .symbolRenderingMode(.monochrome)
+            .foregroundStyle(Color.white)
+            .poplurIconShader()
+            .frame(width: 18, height: 18)
+            .shadow(radius: 1)
     }
     
     // Attempt to call a flip/toggle method if the controller implements it.

@@ -103,6 +103,7 @@ struct CommentSectionView: View {
                     
                     Button(action: onDismiss) {
                         Image(systemName: "xmark.circle.fill")
+                            .poplurIconShader()
                             .font(.title2)
                             .foregroundStyle(.white.opacity(0.6))
                     }
@@ -116,6 +117,7 @@ struct CommentSectionView: View {
                 if comments.isEmpty {
                     VStack(spacing: 16) {
                         Image(systemName: "bubble.left.and.bubble.right")
+                            .poplurIconShader()
                             .font(.system(size: 48))
                             .foregroundStyle(.white.opacity(0.3))
                         
@@ -175,6 +177,7 @@ struct CommentSectionView: View {
                         }
                     }) {
                         Image(systemName: "paperplane.fill")
+                            .poplurIconShader()
                             .font(.title3)
                             .foregroundStyle(newCommentText.isEmpty ? .white.opacity(0.3) : .blue)
                     }
@@ -317,6 +320,7 @@ private struct CommentRowView: View {
                 Button(action: onLike) {
                     HStack(spacing: 4) {
                         Image(systemName: comment.isLikedByCurrentUser ? "heart.fill" : "heart")
+                            .poplurIconShader()
                             .font(.subheadline)
                             .foregroundStyle(comment.isLikedByCurrentUser ? .red : .white.opacity(0.6))
                         

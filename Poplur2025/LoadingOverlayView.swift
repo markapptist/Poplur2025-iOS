@@ -76,6 +76,7 @@ struct RadiusTrendIndicator: View {
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: trend.symbol)
+                .poplurIconShader()
                 .font(.system(size: 16, weight: .bold))
                 .foregroundColor(trend.color)
             

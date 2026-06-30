@@ -98,6 +98,8 @@ final class MapStateManager: ObservableObject {
             handleModeChange(from: oldValue, to: mode)
         }
     }
+
+    @Published private(set) var isMapTabActive: Bool = false
     
     var lastInteractionTime: Date = Date()
     private var idleTimerTask: Task<Void, Never>?
@@ -155,6 +157,24 @@ final class MapStateManager: ObservableObject {
         guard timeSinceLastNote > 0.3 || idleTimerTask == nil else { return }
         restartIdleTimer()
     }
+
+    /// Keep automatic map-tour behavior scoped to the actual Map tab.
+    func setMapTabActive(_ isActive: Bool) {
+        guard isMapTabActive != isActive else { return }
+        isMapTabActive = isActive
+        print("🗺️ [MapState] Map tab active: \(isActive)")
+
+        if isActive {
+            lastInteractionTime = Date()
+            restartIdleTimer()
+        } else {
+            cancelIdleTimer()
+            if case .autoTour = mode {
+                print("🗺️ [MapState] Leaving map tab - stopping tour")
+                mode = .browsing
+            }
+        }
+    }
     
     /// Enter coordinate selection mode (Map → Camera flow)
     func selectCoordinate(_ coordinate: CLLocationCoordinate2D) {
@@ -211,6 +231,11 @@ final class MapStateManager: ObservableObject {
     
     /// Start auto-tour mode
     func startTour() {
+        guard isMapTabActive else {
+            print("🗺️ [MapState] Cannot start tour - map tab is not active")
+            return
+        }
+
         guard mode.allowsTourToStart else {
             print("🗺️ [MapState] Cannot start tour - current mode doesn't allow it: \(mode)")
             return
@@ -246,6 +271,7 @@ final class MapStateManager: ObservableObject {
     
     /// Check if enough time has passed to start tour
     func checkIdleTimeout() {
+        guard isMapTabActive else { return }
         guard mode.allowsTourToStart else { return }
         
         let idleTime = Date().timeIntervalSince(lastInteractionTime)
@@ -280,6 +306,7 @@ final class MapStateManager: ObservableObject {
     private func restartIdleTimer() {
         cancelIdleTimer()
         
+        guard isMapTabActive else { return }
         guard mode.allowsTourToStart else { return }
         
         idleTimerTask = Task { @MainActor in

@@ -82,7 +82,13 @@ enum FaceAdGenerationService {
     }
 
     private static func startPrediction(_ req: URLRequest) async throws -> String {
-        let (data, _) = try await URLSession.shared.data(for: req)
+        let (data, response) = try await URLSession.shared.data(for: req)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            if let body = String(data: data, encoding: .utf8) {
+                print("[FaceAdGenerationService] start failed: \(body)")
+            }
+            throw FaceAdError.networkFailed
+        }
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let id = json["id"] as? String
         else { throw FaceAdError.invalidResponse }
@@ -99,14 +105,27 @@ enum FaceAdGenerationService {
         for _ in 0..<90 {
             try await Task.sleep(nanoseconds: 3_000_000_000)
             try Task.checkCancellation()
-            let (data, _) = try await URLSession.shared.data(for: req)
+            let (data, response) = try await URLSession.shared.data(for: req)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                if let body = String(data: data, encoding: .utf8) {
+                    print("[FaceAdGenerationService] poll failed: \(body)")
+                }
+                throw FaceAdError.networkFailed
+            }
             guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
             switch json["status"] as? String {
             case "succeeded":
                 if let arr = json["output"] as? [String], let s = arr.first, let u = URL(string: s) { return u }
                 if let s = json["output"] as? String, let u = URL(string: s) { return u }
+                if let out = json["output"] as? [String: Any] {
+                    let s = out["video"] as? String ?? out["image"] as? String ?? out["url"] as? String
+                    if let s, let u = URL(string: s) { return u }
+                }
                 throw FaceAdError.invalidResponse
             case "failed", "canceled":
+                if let error = json["error"] {
+                    print("[FaceAdGenerationService] generation failed: \(error)")
+                }
                 throw FaceAdError.generationFailed
             default: continue
             }

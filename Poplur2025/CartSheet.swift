@@ -38,6 +38,7 @@ struct CartSheet: View {
                         }
                         Button(action: { cart.removeItem(item) }) {
                             Image(systemName: "trash")
+                                .poplurIconShader()
                                 .foregroundColor(.red)
                         }
                         .buttonStyle(BorderlessButtonStyle())

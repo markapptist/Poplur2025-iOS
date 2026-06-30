@@ -112,6 +112,7 @@ struct InAppVideoCallView: View {
                         RoundedRectangle(cornerRadius: 16, style: .continuous)
                             .fill(Color(red: 0.12, green: 0.12, blue: 0.16))
                         Image(systemName: "video.slash.fill")
+                            .poplurIconShader()
                             .font(.system(size: 22))
                             .foregroundStyle(.white.opacity(0.4))
                     }
@@ -189,6 +190,7 @@ struct InAppVideoCallView: View {
                         } label: {
                             VStack(spacing: 4) {
                                 Image(systemName: filter.icon)
+                                    .poplurIconShader()
                                     .font(.system(size: 18, weight: .semibold))
                                     .frame(width: 46, height: 46)
                                     .background(
@@ -502,6 +504,7 @@ private struct VideoCallButton: View {
         Button(action: action) {
             VStack(spacing: 8) {
                 Image(systemName: icon)
+                    .poplurIconShader()
                     .font(.system(size: size == 72 ? 28 : 22, weight: .semibold))
                     .foregroundStyle(.white)
                     .frame(width: size, height: size)

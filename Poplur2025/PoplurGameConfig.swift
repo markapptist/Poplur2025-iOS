@@ -36,11 +36,11 @@ struct PoplurGameConfig: Codable {
     var accentUIColor: UIColor { UIColor(hex: accentColor) ?? UIColor(red: 0.91, green: 0.27, blue: 0.38, alpha: 1) }
 
     static let fallback = PoplurGameConfig(
-        game: .sideScroller, character: .pop,
-        gameName: "Pop's City Run", theme: "Neon City",
-        skyColor: "#1A1A2E", groundColor: "#16213E", accentColor: "#E94560",
+        game: .arcadeShooter, character: .stella,
+        gameName: "Stella Starfall", theme: "Space",
+        skyColor: "#050713", groundColor: "#111B3D", accentColor: "#00F5FF",
         difficulty: "medium", speed: 260,
-        powerUps: ["star", "shield"], enemyType: "robo_blob", specialMechanic: "double_jump"
+        powerUps: ["triple shot", "shield"], enemyType: "neon drones", specialMechanic: "drag-to-fly auto fire"
     )
 }
 

@@ -128,6 +128,10 @@ struct ProfileView: View {
         Double(myPosts.reduce(0) { $0 + $1.radius }) / 1000.0
     }
 
+    private var profileTotalRadiusMeters: Int {
+        myPosts.reduce(0) { $0 + $1.radius }
+    }
+
     private var isOwnProfile: Bool {
         let targetUserID = effectiveUserID
         if let currentUID = Auth.auth().currentUser?.uid {
@@ -385,17 +389,9 @@ struct ProfileView: View {
         }
     }
 
-    private let gridCols = [
-        GridItem(.flexible(minimum: 60, maximum: 82), spacing: 5),
-        GridItem(.flexible(minimum: 60, maximum: 82), spacing: 5),
-        GridItem(.flexible(minimum: 60, maximum: 82), spacing: 5),
-        GridItem(.flexible(minimum: 60, maximum: 82), spacing: 5)
-    ]
-
-    private let tileCorner: CGFloat = 12
-    private let tileSpacing: CGFloat = 5
-    private let profileGridMaxWidth: CGFloat = 380
-    private let profileGridHorizontalPadding: CGFloat = 12
+    private let tileSpacing: CGFloat = 10
+    private let profileGridMaxWidth: CGFloat = 520
+    private let profileGridHorizontalPadding: CGFloat = 18
 
     private var skinTheme: CubeSkinAppTheme {
         cubeSkinStore.current.appTheme
@@ -553,7 +549,8 @@ struct ProfileView: View {
                 .controlSize(.regular)
             Text("Loading posts")
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(skinTheme.secondaryText)
+                .foregroundColor(.black.opacity(0.58))
+                .poplurTextShader(intensity: 0.58)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .id("top")
@@ -562,10 +559,12 @@ struct ProfileView: View {
     private var emptyPostsView: some View {
         VStack(spacing: 8) {
             Image(systemName: "square.stack.3d.up.slash")
+                .poplurIconShader()
                 .font(.system(size: 36, weight: .semibold))
-                .foregroundColor(skinTheme.secondaryText)
+                .foregroundColor(.black.opacity(0.55))
             Text("No posts yet.")
-                .foregroundColor(skinTheme.secondaryText)
+                .foregroundColor(.black.opacity(0.58))
+                .poplurTextShader(intensity: 0.58)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .id("top")
@@ -582,35 +581,55 @@ struct ProfileView: View {
     }
 
     private var mediaPostsScroll: some View {
-        ScrollView {
-            VStack(spacing: 0) {
-                Color.clear.frame(height: 0).id("top")
-                LazyVGrid(columns: gridCols, spacing: tileSpacing) {
-                    ForEach(displayedPosts) { post in
-                        ProfileGridTile(post: post, preloadedImage: loadedImages[post.id], skin: cubeSkinStore.current)
-                            .onTapGesture {
-                                expandPost(post)
-                            }
-                            .onLongPressGesture(minimumDuration: 0.5) {
-                                handlePostLongPress(post)
-                            }
+        GeometryReader { proxy in
+            let availableWidth = max(1, proxy.size.width - profileGridHorizontalPadding * 2)
+            let gridWidth = min(availableWidth, profileGridMaxWidth)
+            let tileSize = max(1, floor((gridWidth - tileSpacing * 2) / 3))
+            let resolvedGridWidth = tileSize * 3 + tileSpacing * 2
+            let columns = Array(
+                repeating: GridItem(.fixed(tileSize), spacing: tileSpacing),
+                count: 3
+            )
+
+            ScrollView {
+                VStack(spacing: 0) {
+                    Color.clear.frame(height: 0).id("top")
+                    LazyVGrid(columns: columns, spacing: tileSpacing) {
+                        ForEach(displayedPosts) { post in
+                            profileGridTileView(post: post, tileSize: tileSize)
+                        }
+                        Color.clear.frame(height: 1).onAppear {
+                            loadMoreIfNeeded(currentItem: displayedPosts.last)
+                        }
                     }
-                    Color.clear.frame(height: 1).onAppear {
-                        loadMoreIfNeeded(currentItem: displayedPosts.last)
+                    .frame(width: resolvedGridWidth)
+                    .frame(maxWidth: .infinity)
+                    if isLoadingMore {
+                        ProgressView().padding(.vertical, 12)
                     }
                 }
-                .frame(maxWidth: profileGridMaxWidth)
-                if isLoadingMore {
-                    ProgressView().padding(.vertical, 12)
-                }
+                .padding(.horizontal, profileGridHorizontalPadding)
+                .padding(.top, 8)
+                .padding(.bottom, 260)
             }
-            .padding(.horizontal, profileGridHorizontalPadding)
-            .padding(.top, 8)
-            .padding(.bottom, 260)
+            .scrollDisabled(isScrollDisabled)
+            .refreshable {
+                await loadMyPosts()
+            }
         }
-        .scrollDisabled(isScrollDisabled)
-        .refreshable {
-            await loadMyPosts()
+    }
+
+    private func profileGridTileView(post: Post, tileSize: CGFloat) -> some View {
+        ProfileGridTile(
+            post: post,
+            preloadedImage: loadedImages[post.id]
+        )
+        .frame(width: tileSize, height: tileSize)
+        .onTapGesture {
+            expandPost(post)
+        }
+        .onLongPressGesture(minimumDuration: 0.5) {
+            handlePostLongPress(post)
         }
     }
 
@@ -621,14 +640,17 @@ struct ProfileView: View {
                 VStack(spacing: 18) {
                     VStack(spacing: 12) {
                         Image(systemName: "message.fill")
+                            .poplurIconShader()
                             .font(.system(size: 48, weight: .semibold))
                             .foregroundColor(skinTheme.secondaryText)
                         Text("Messages")
                             .font(.headline)
-                            .foregroundColor(skinTheme.primaryText)
+                            .foregroundColor(.black)
+                            .poplurTextShader(intensity: 0.78)
                         Text("Your uploaded messages will appear here")
                             .font(.subheadline)
-                            .foregroundColor(skinTheme.secondaryText)
+                            .foregroundColor(.black.opacity(0.58))
+                            .poplurTextShader(intensity: 0.52)
                             .multilineTextAlignment(.center)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -931,7 +953,8 @@ struct ProfileView: View {
 
     private var profileRootScene: some View {
         ZStack {
-            CubeSkinThemedBackground(skin: cubeSkinStore.current)
+            Color.white
+                .ignoresSafeArea()
 
             profileMainStack
                 .zIndex(1)
@@ -981,6 +1004,7 @@ struct ProfileView: View {
                 .onReceive(NotificationCenter.default.publisher(for: Notification.Name("RefreshProfileAfterUpload")), perform: handleRefreshProfileAfterUpload)
                 .onReceive(NotificationCenter.default.publisher(for: Notification.Name("PostCreated")), perform: handlePostCreated)
                 .onReceive(NotificationCenter.default.publisher(for: .cubeHoldBegan), perform: handleCubeHoldBegan)
+                .onReceive(NotificationCenter.default.publisher(for: .cubeHoldMoved), perform: handleCubeHoldMoved)
                 .onReceive(NotificationCenter.default.publisher(for: .cubeHoldEnded), perform: handleCubeHoldEnded)
                 .onReceive(NotificationCenter.default.publisher(for: Notification.Name("RecordTabBecameActive")), perform: handleRecordTabBecameActive)
                 .onReceive(NotificationCenter.default.publisher(for: .CubeGlobalTap), perform: handleCubeGlobalTap)
@@ -1251,6 +1275,13 @@ struct ProfileView: View {
         }
     }
 
+    private func handleCubeHoldMoved(_ notification: Notification) {
+        guard !isRunningInPreviews else { return }
+        guard isOwnProfile, isHoldingCube else { return }
+        cubeMenuWheel.scrub(with: notification)
+        postProfileCubeIconOverride(cubeMenuWheel.selectedItem)
+    }
+
     private func updateCubeHoldProgress() async {
         if isRunningInPreviews { return }
         guard isHoldingCube else { return }
@@ -1356,46 +1387,27 @@ struct ProfileView: View {
     }
     
     private var avatarContent: some View {
-        let showing3D = headCycler.is3DActive && headCycler.modelURL != nil
-        let size: CGFloat = showing3D ? 180 : 96
+        let size: CGFloat = profileAvatarIs3D ? 180 : 96
 
         return ZStack {
-            if isOwnProfile && !showing3D {
-                // Animated speaking avatar (SpriteKit 2D or SceneKit 3D, set in Settings)
+            if isOwnProfile {
+                // Animated speaking avatar. In 3D mode this is always the bundled Mark head.
                 ProfileAvatarSpeakerView(
                     profileImage: profileImage,
                     profileImageURL: profileImageURL ?? userProfile?.profilePictureURL,
                     totalRadiusKM: myPostsTotalRadiusKM,
                     postCount: myPosts.count,
-                    size: size
+                    size: size,
+                    skin: cubeSkinStore.current
                 )
-                .clipShape(Circle())
             } else {
-                // 2D photo — fades out when 3D is active
                 photoAvatar
-                    .opacity(showing3D ? 0 : 1)
-            }
-
-            // 3D head — fades in when 3D is active
-            if let url = headCycler.modelURL {
-                HeadPreviewView(modelURL: url)
-                    .opacity(showing3D ? 1 : 0)
-            }
-
-            // Subtle "generating" pulse ring while Replicate is working
-            if headCycler.isGenerating {
-                Circle()
-                    .strokeBorder(
-                        AngularGradient(colors: [.cyan, .purple, .cyan], center: .center),
-                        lineWidth: 2.5
-                    )
-                    .opacity(0.75)
+                    .clipShape(Circle())
             }
         }
         .frame(width: size, height: size)
-        .clipShape(Circle())
         .overlay(
-            Circle()
+            RoundedRectangle(cornerRadius: isOwnProfile ? 24 : size / 2, style: .continuous)
                 .stroke(
                     LinearGradient(
                         colors: [skinTheme.accent, skinTheme.accent2.opacity(0.78)],
@@ -1406,14 +1418,14 @@ struct ProfileView: View {
                 )
         )
         .shadow(color: skinTheme.shadow, radius: 10, x: 0, y: 6)
-        .animation(.spring(response: 0.55, dampingFraction: 0.72), value: showing3D)
-        .zIndex(showing3D ? 10 : 0)
+        .animation(.spring(response: 0.55, dampingFraction: 0.72), value: profileAvatarIs3D)
         .overlay(alignment: .bottomTrailing) {
-            if lastHeadModelURL != nil && isOwnProfile && !showing3D {
+            if lastHeadModelURL != nil && isOwnProfile {
                 Button {
                     navigateToViewer = true
                 } label: {
                     Image(systemName: "eye.fill")
+                        .poplurIconShader()
                         .font(.system(size: 14, weight: .bold))
                         .foregroundColor(.white)
                         .padding(6)
@@ -1447,7 +1459,11 @@ struct ProfileView: View {
                         img.resizable().scaledToFill()
                     case .failure:
                         Circle().fill(skinTheme.surfaceStrong)
-                            .overlay(Image(systemName: "person.fill").foregroundColor(skinTheme.primaryText))
+                            .overlay(
+                                Image(systemName: "person.fill")
+                                    .poplurIconShader()
+                                    .foregroundColor(skinTheme.primaryText)
+                            )
                     @unknown default:
                         Circle().fill(skinTheme.surfaceStrong)
                     }
@@ -1460,7 +1476,11 @@ struct ProfileView: View {
             } else {
                 Circle()
                     .fill(skinTheme.surfaceStrong)
-                    .overlay(Image(systemName: "person.fill").foregroundColor(skinTheme.primaryText))
+                    .overlay(
+                        Image(systemName: "person.fill")
+                            .poplurIconShader()
+                            .foregroundColor(skinTheme.primaryText)
+                    )
             }
         }
     }
@@ -1468,7 +1488,8 @@ struct ProfileView: View {
     private var usernameRow: some View {
         Text(displayUsername ?? (isOwnProfile ? (auth.currentUser?.email?.components(separatedBy: "@").first?.uppercased() ?? "USERNAME") : usernameForDemoUser()))
             .font(.system(size: 22, weight: .heavy, design: .rounded))
-            .foregroundColor(skinTheme.primaryText)
+            .foregroundColor(.black)
+            .poplurTextShader(intensity: 0.9)
             .padding(.top, 4)
             .task(id: effectiveUserID) {
                 // Fetch username for the profile being viewed (re-runs when effectiveUserID changes)
@@ -1476,18 +1497,77 @@ struct ProfileView: View {
                     displayUsername = await UsernameCache.shared.username(for: uid)
                 }
             }
-            .onChange(of: userProfile) { _, profile in
-                guard let profile else { return }
-                let uid = effectiveUserID ?? Auth.auth().currentUser?.uid ?? "unknown"
+            .onChange(of: userProfile) { _, _ in
                 headCycler.stop()
-                Task {
-                    await headCycler.start(
-                        profileImageURL: profile.profilePictureURL,
-                        localModelURL: isOwnProfile ? lastHeadModelURL : nil,
-                        userID: uid
-                    )
-                }
             }
+    }
+
+    private var profileStatsSummaryRow: some View {
+        HStack(spacing: 10) {
+            profileStatChip(
+                title: "Radius",
+                value: formattedProfileRadius(profileTotalRadiusMeters),
+                systemImage: "dot.radiowaves.left.and.right"
+            )
+            profileStatChip(
+                title: "Posts",
+                value: "\(myPosts.count)",
+                systemImage: "square.grid.3x3.fill"
+            )
+        }
+        .padding(.horizontal, 22)
+        .frame(maxWidth: 380)
+    }
+
+    private func profileStatChip(title: String, value: String, systemImage: String) -> some View {
+        HStack(spacing: 7) {
+            Image(systemName: systemImage)
+                .poplurIconShader()
+                .font(.system(size: 12, weight: .black))
+                .foregroundColor(skinTheme.accent)
+                .frame(width: 16)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title.uppercased())
+                    .font(.system(size: 9, weight: .black, design: .rounded))
+                    .foregroundColor(skinTheme.secondaryText)
+                    .poplurTextShader(intensity: 0.48)
+                Text(value)
+                    .font(.system(size: 15, weight: .black, design: .rounded))
+                    .foregroundColor(skinTheme.primaryText)
+                    .poplurTextShader(intensity: 0.68)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.68)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, minHeight: 46)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(skinTheme.surface.opacity(0.72))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(skinTheme.accent.opacity(0.36), lineWidth: 1)
+        )
+    }
+
+    private func formattedProfileRadius(_ meters: Int) -> String {
+        guard meters > 0 else { return "0 KM" }
+        if meters >= 1_000_000 {
+            let km = Double(meters) / 1000.0
+            return String(format: "%.1fK KM", km / 1000.0)
+        }
+        if meters >= 1000 {
+            let km = Double(meters) / 1000.0
+            if meters % 1000 == 0 {
+                return "\(Int(km)) KM"
+            }
+            return String(format: "%.1f KM", km)
+        }
+        return "\(meters) M"
     }
     
     // Helper to generate readable username for demo users
@@ -1525,7 +1605,8 @@ struct ProfileView: View {
             Button(action: action) {
                 Text(title)
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(isSelected ? skinTheme.primaryText : skinTheme.secondaryText)
+                    .foregroundColor(isSelected ? .black : .black.opacity(0.72))
+                    .poplurTextShader(intensity: isSelected ? 0.86 : 0.58)
                     .padding(8)
             }
             .buttonStyle(.plain)
@@ -2253,6 +2334,7 @@ private struct ProfileNotificationsView: View {
                                 .frame(width: 48, height: 48)
                                 .overlay {
                                     Image(systemName: item.kind.iconName)
+                                        .poplurIconShader()
                                         .font(.system(size: 20, weight: .bold))
                                         .foregroundColor(item.kind.color)
                                 }
@@ -2511,6 +2593,7 @@ private struct RadiusStoreView: View {
             Spacer(minLength: 8)
 
             Image(systemName: "bag")
+                .poplurIconShader()
                 .font(.system(size: 18, weight: .semibold))
                 .foregroundColor(.black.opacity(0.76))
                 .frame(width: 34, height: 34)
@@ -2551,6 +2634,7 @@ private struct RadiusStoreView: View {
                 Spacer()
 
                 Image(systemName: "bag.fill")
+                    .poplurIconShader()
                     .font(.system(size: 18, weight: .heavy))
                     .foregroundStyle(.white)
                     .frame(width: 38, height: 38)
@@ -2619,6 +2703,7 @@ private struct RadiusStoreView: View {
                                     .overlay {
                                         if selectedCardID == card.id {
                                             Image(systemName: "checkmark")
+                                                .poplurIconShader()
                                                 .font(.system(size: 13, weight: .heavy))
                                                 .foregroundColor(.white)
                                         }
@@ -2663,6 +2748,7 @@ private struct RadiusStoreView: View {
                         .foregroundColor(.black)
                     Spacer()
                     Image(systemName: selectedCardID == card.id ? "checkmark.circle.fill" : "plus.circle.fill")
+                        .poplurIconShader()
                         .font(.system(size: 18, weight: .heavy))
                         .foregroundColor(selectedCardID == card.id ? card.accent : .black.opacity(0.72))
                 }
@@ -2717,6 +2803,7 @@ private struct RadiusStoreView: View {
             } label: {
                 HStack {
                     Image(systemName: "creditcard.fill")
+                        .poplurIconShader()
                     Text("Buy \(selectedCard.name)")
                 }
                 .font(.system(size: 16, weight: .heavy, design: .rounded))
@@ -2747,6 +2834,7 @@ private struct RadiusStoreView: View {
                     .foregroundColor(.black)
                 Spacer()
                 Image(systemName: "dot.radiowaves.left.and.right")
+                    .poplurIconShader()
                     .font(.system(size: 17, weight: .heavy))
                     .foregroundColor(.green)
             }
@@ -2776,6 +2864,7 @@ private struct RadiusStoreView: View {
                             .frame(width: 48, height: 48)
                             .overlay {
                                 Image(systemName: "dollarsign")
+                                    .poplurIconShader()
                                     .font(.system(size: 21, weight: .heavy))
                                     .foregroundColor(.green)
                             }
@@ -2841,70 +2930,70 @@ private struct RadiusStoreView: View {
     }
 }
 
-// Grid and list tiles unchanged…
+// Grid and list tiles
 private struct ProfileGridTile: View {
     let post: Post
     let preloadedImage: UIImage?
-    let skin: CubeSkin
-    private let corner: CGFloat = 12
-    private var theme: CubeSkinAppTheme { skin.appTheme }
+    private let corner: CGFloat = 24
+    private var isVideo: Bool {
+        let lower = post.mediaURL.lowercased()
+        return lower.contains(".mp4")
+            || lower.contains(".mov")
+            || lower.contains(".m4v")
+            || lower.contains(".m3u8")
+            || lower.contains("video")
+    }
 
     var body: some View {
-        ZStack {
-            if let preloadedImage {
-                Image(uiImage: preloadedImage)
-                    .resizable()
-                    .scaledToFill()
-                    .overlay(
-                        LinearGradient(
-                            colors: [
-                                Color.clear,
-                                theme.backgroundDeep.opacity(theme.prefersLightContent ? 0.18 : 0.08)
-                            ],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
-            } else {
-                CubeSkinTileBackground(skin: skin, tab: .profile, cornerRadius: corner)
-                    .overlay {
+        GeometryReader { proxy in
+            ZStack {
+                if let preloadedImage, !isVideo {
+                    Image(uiImage: preloadedImage)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: proxy.size.width, height: proxy.size.height)
+                } else {
+                    ZStack {
+                        Color.gray.opacity(0.26)
                         VStack(spacing: 8) {
-                            Image(systemName: post.mediaURL.lowercased().contains(".mp4") ? "play.fill" : "photo")
-                                .font(.system(size: 22, weight: .bold))
-                            ProgressView()
-                                .controlSize(.small)
-                                .tint(theme.accent)
+                            Image(systemName: isVideo ? "play.fill" : "photo")
+                                .font(.system(size: isVideo ? 36 : 22, weight: .bold))
+                                .foregroundStyle(Color.white.opacity(0.84))
+                            if !isVideo {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
                         }
-                        .foregroundStyle(theme.primaryText.opacity(0.78))
                     }
+                }
+
+                LinearGradient(
+                    colors: [
+                        .clear,
+                        Color.black.opacity(0.16)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            }
+            .frame(width: proxy.size.width, height: proxy.size.height)
+            .clipped()
+            .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
+            .overlay(alignment: .bottomLeading) {
+                Text("\(max(1, post.radius / 1000)) KM")
+                    .font(.system(size: 12, weight: .heavy, design: .rounded))
+                    .foregroundColor(.white)
+                    .poplurTextShader(intensity: 0.62)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(
+                        Capsule().fill(Color.black.opacity(0.58))
+                    )
+                    .padding(8)
             }
         }
         .aspectRatio(1, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: corner, style: .continuous)
-                .stroke(
-                    LinearGradient(
-                        colors: [theme.border, theme.accent.opacity(0.72), theme.accent2.opacity(0.46)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 1.8
-                )
-        )
-        .shadow(color: theme.shadow, radius: 8, x: 0, y: 5)
-        .overlay(alignment: .bottomLeading) {
-            Text("\(max(1, post.radius / 1000)) KM")
-                .font(.system(size: 12, weight: .heavy, design: .rounded))
-                .foregroundColor(theme.badgeText)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(
-                    Capsule().fill(theme.badgeFill)
-                )
-                .overlay(Capsule().stroke(theme.border.opacity(0.55), lineWidth: 1))
-                .padding(8)
-        }
     }
 }
 

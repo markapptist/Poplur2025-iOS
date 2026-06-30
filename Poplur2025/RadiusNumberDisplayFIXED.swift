@@ -15,6 +15,39 @@ extension VerticalAlignment {
     static let counterSeparator = VerticalAlignment(CounterSeparatorAlignment.self)
 }
 
+enum CounterSeparatorMetrics {
+    static let labelHeight: CGFloat = 16
+    static let labelToNumeratorSpacing: CGFloat = 4
+    static let numeratorHeight: CGFloat = 48
+    static let numeratorToSeparatorSpacing: CGFloat = 2
+    static let separatorWidth: CGFloat = 90
+    static let separatorHeight: CGFloat = 2
+    static let separatorToDenominatorSpacing: CGFloat = 2
+    static let denominatorHeight: CGFloat = 34
+    static let footerHeight: CGFloat = 18
+    static let horizontalPadding: CGFloat = 20
+    static let verticalPadding: CGFloat = 16
+
+    static let separatorCenterFromTop: CGFloat =
+        verticalPadding
+        + labelHeight
+        + labelToNumeratorSpacing
+        + numeratorHeight
+        + numeratorToSeparatorSpacing
+        + separatorHeight / 2
+
+    static let counterHeight: CGFloat =
+        verticalPadding * 2
+        + labelHeight
+        + labelToNumeratorSpacing
+        + numeratorHeight
+        + numeratorToSeparatorSpacing
+        + separatorHeight
+        + separatorToDenominatorSpacing
+        + denominatorHeight
+        + footerHeight
+}
+
 struct RadiusNumberDisplay: View {
     @Binding var radiusMeters: Double
 
@@ -55,9 +88,17 @@ struct RadiusNumberDisplay: View {
     private var currentUnit: String {
         currentRadiusMeters >= 1000 ? "km" : "m"
     }
+
+    private var formattedDenominatorRadius: String {
+        NumberFormatter.localizedString(from: NSNumber(value: Int(earthRadiusKilometers)), number: .decimal)
+    }
+
+    private var denominatorUnit: String {
+        "km"
+    }
     
     var body: some View {
-        VStack(alignment: .trailing, spacing: 5) {
+        VStack(alignment: .trailing, spacing: 0) {
             // Label with rank badge
             HStack(spacing: 6) {
                 Text("RADIUS")
@@ -69,10 +110,15 @@ struct RadiusNumberDisplay: View {
                 
                 // Rank badge
                 Image(systemName: rank.iconName)
+                    .poplurIconShader()
                     .font(.system(size: 14, weight: .bold))
                     .foregroundStyle(rank.color)
                     .shadow(color: rank.color.opacity(0.5), radius: 4, x: 0, y: 0)
             }
+            .frame(height: CounterSeparatorMetrics.labelHeight, alignment: .center)
+
+            Color.clear
+                .frame(height: CounterSeparatorMetrics.labelToNumeratorSpacing)
 
             HStack(alignment: .lastTextBaseline, spacing: 5) {
                 Text(formattedCurrentRadius)
@@ -94,13 +140,50 @@ struct RadiusNumberDisplay: View {
                     .transition(.scale.combined(with: .opacity))
                     .id(currentUnit)
             }
-            .frame(maxWidth: .infinity, alignment: .trailing)
-            .alignmentGuide(.counterSeparator) { dimensions in
-                dimensions[VerticalAlignment.center]
+            .frame(maxWidth: .infinity, minHeight: CounterSeparatorMetrics.numeratorHeight, maxHeight: CounterSeparatorMetrics.numeratorHeight, alignment: .bottomTrailing)
+
+            Color.clear
+                .frame(height: CounterSeparatorMetrics.numeratorToSeparatorSpacing)
+
+            Rectangle()
+                .fill(rank.color)
+                .frame(width: CounterSeparatorMetrics.separatorWidth, height: CounterSeparatorMetrics.separatorHeight)
+                .shadow(color: rank.color.opacity(0.5), radius: 2, x: 0, y: 0)
+                .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 1)
+                .alignmentGuide(.counterSeparator) { dimensions in
+                    dimensions[VerticalAlignment.center]
+                }
+
+            Color.clear
+                .frame(height: CounterSeparatorMetrics.separatorToDenominatorSpacing)
+
+            HStack(alignment: .lastTextBaseline, spacing: 4) {
+                Text(formattedDenominatorRadius)
+                    .font(.system(size: 28, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.9))
+                    .monospacedDigit()
+                    .minimumScaleFactor(0.4)
+                    .lineLimit(1)
+                    .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
+                    .poplurMetalNumberShader(intensity: 0.72)
+
+                Text(denominatorUnit)
+                    .font(.system(size: 13, weight: .heavy))
+                    .foregroundStyle(.white.opacity(0.78))
+                    .poplurTextShader(intensity: 0.68)
+                    .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
             }
+            .frame(maxWidth: .infinity, minHeight: CounterSeparatorMetrics.denominatorHeight, maxHeight: CounterSeparatorMetrics.denominatorHeight, alignment: .topTrailing)
+
+            Color.clear
+                .frame(height: CounterSeparatorMetrics.footerHeight)
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 16)
+        .padding(.horizontal, CounterSeparatorMetrics.horizontalPadding)
+        .padding(.vertical, CounterSeparatorMetrics.verticalPadding)
+        .frame(height: CounterSeparatorMetrics.counterHeight, alignment: .top)
+        .alignmentGuide(.counterSeparator) { _ in
+            CounterSeparatorMetrics.separatorCenterFromTop
+        }
         .animation(.spring(response: 0.5, dampingFraction: 0.75), value: radiusMeters)
         .animation(.spring(response: 0.4, dampingFraction: 0.7), value: rank)
         .accessibilityLabel("Current radius \(formattedCurrentRadius) \(currentUnit)")

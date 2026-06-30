@@ -91,6 +91,27 @@ public enum CubeSkin: String, CaseIterable, Identifiable, Codable {
         }
     }
 
+    public var runtimeModelAssetName: String? {
+        switch self {
+        case .standard, .rubber:
+            return "dark_rubber_neon_icon_cube"
+        case .rainbow:
+            return "rainbow_neon_icon_cube"
+        case .gold:
+            return "gold_metallic_icon_cube"
+        case .toy:
+            return "circus_carnival_icon_cube"
+        case .chocolate:
+            return "dark_chocolate_icon_cube"
+        case .ice:
+            return "frozen_ice_icon_cube"
+        case .sparklePink:
+            return "purple_sparkle_icon_cube"
+        case .camo:
+            return "military_camo_icon_cube"
+        }
+    }
+
     /// Primary theme color used for code-generated cube face textures.
     public var themeUIColor: UIColor {
         switch self {
@@ -158,14 +179,23 @@ public enum CubeSkin: String, CaseIterable, Identifiable, Codable {
 
 // MARK: - Programmatic texture generation
 
+private enum CubeSkinTextureCache {
+    static let shared = NSCache<NSString, UIImage>()
+}
+
 extension CubeSkin {
     /// Returns a 300×300 programmatic background texture for this skin.
     /// Only `.rubber` varies per face — all other skins ignore `tab`.
     func makeTexture(tab: AppTab = .map) -> UIImage {
+        let cacheKey = "\(rawValue)-\(String(describing: tab))" as NSString
+        if let cached = CubeSkinTextureCache.shared.object(forKey: cacheKey) {
+            return cached
+        }
+
         let size = CGSize(width: 300, height: 300)
         let rect = CGRect(origin: .zero, size: size)
         let corner: CGFloat = 28
-        return UIGraphicsImageRenderer(size: size).image { ctx in
+        let image = UIGraphicsImageRenderer(size: size).image { ctx in
             let g = ctx.cgContext
             switch self {
 
@@ -386,6 +416,8 @@ extension CubeSkin {
                 }
             }
         }
+        CubeSkinTextureCache.shared.setObject(image, forKey: cacheKey)
+        return image
     }
 }
 
@@ -398,14 +430,19 @@ public extension Notification.Name {
 public final class CubeSkinStore: ObservableObject {
     public static let shared = CubeSkinStore()
     private let defaultsKey = "CubeSkin.rawValue"
+    private let goldModelRolloutKey = "CubeSkin.goldMetallicModelRolloutApplied"
 
     @Published public private(set) var current: CubeSkin
 
     private init() {
-        if let raw = UserDefaults.standard.string(forKey: defaultsKey), let skin = CubeSkin(rawValue: raw) {
+        if !UserDefaults.standard.bool(forKey: goldModelRolloutKey) {
+            current = .gold
+            UserDefaults.standard.set(CubeSkin.gold.rawValue, forKey: defaultsKey)
+            UserDefaults.standard.set(true, forKey: goldModelRolloutKey)
+        } else if let raw = UserDefaults.standard.string(forKey: defaultsKey), let skin = CubeSkin(rawValue: raw) {
             current = skin
         } else {
-            current = .standard
+            current = .gold
         }
         syncAppIcon()
     }
@@ -621,26 +658,228 @@ struct CubeSkinThemedBackground: View {
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
+            CubeSkinBackdropMotif(skin: skin)
+                .opacity(skin == .toy ? 0.92 : 1)
             Image(uiImage: skin.makeTexture(tab: .profile))
                 .resizable()
                 .scaledToFill()
-                .opacity(theme.textureOpacity)
-                .saturation(skin == .toy ? 0.72 : 1.12)
-                .contrast(skin == .toy ? 0.88 : 1.12)
-            if skin == .rainbow {
+                .opacity(theme.textureOpacity * (skin == .toy ? 0.34 : 0.58))
+                .saturation(skin == .toy ? 0.45 : 1.18)
+                .contrast(skin == .toy ? 0.82 : 1.10)
+            CubeSkinEdgeGlow(skin: skin)
+        }
+        .ignoresSafeArea()
+    }
+}
+
+private struct CubeSkinEdgeGlow: View {
+    let skin: CubeSkin
+
+    var body: some View {
+        let theme = skin.appTheme
+        RoundedRectangle(cornerRadius: 42, style: .continuous)
+            .strokeBorder(
                 LinearGradient(
                     colors: [
-                        Color.red.opacity(0.26),
-                        Color.green.opacity(0.18),
-                        Color.blue.opacity(0.22),
-                        Color.pink.opacity(0.26)
+                        theme.accent.opacity(skin == .toy ? 0.72 : 0.86),
+                        theme.accent2.opacity(skin == .toy ? 0.62 : 0.74),
+                        theme.accent.opacity(skin == .rainbow ? 0.92 : 0.56)
                     ],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
-                )
+                ),
+                lineWidth: skin == .toy ? 2 : 1.5
+            )
+            .padding(skin == .toy ? 8 : 10)
+            .shadow(color: theme.shadow, radius: skin == .toy ? 4 : 12)
+            .allowsHitTesting(false)
+    }
+}
+
+private struct CubeSkinBackdropMotif: View {
+    let skin: CubeSkin
+
+    var body: some View {
+        Canvas { context, size in
+            switch skin {
+            case .toy:
+                drawToyBackdrop(in: &context, size: size)
+            case .chocolate:
+                drawChocolateBackdrop(in: &context, size: size)
+            case .camo:
+                drawCamoBackdrop(in: &context, size: size)
+            case .ice:
+                drawIceBackdrop(in: &context, size: size)
+            case .sparklePink:
+                drawSparkleBackdrop(in: &context, size: size, base: .pink)
+            case .rainbow:
+                drawRainbowBackdrop(in: &context, size: size)
+            case .gold:
+                drawGoldBackdrop(in: &context, size: size)
+            case .standard, .rubber:
+                drawRubberBackdrop(in: &context, size: size)
             }
         }
-        .ignoresSafeArea()
+        .allowsHitTesting(false)
+    }
+
+    private func drawRubberBackdrop(in context: inout GraphicsContext, size: CGSize) {
+        let accent = Color(red: 0.72, green: 0.18, blue: 1.00)
+        for row in stride(from: CGFloat(24), through: size.height + 32, by: 42) {
+            for col in stride(from: CGFloat(20), through: size.width + 32, by: 46) {
+                let seed = Int(row * 13 + col * 7)
+                let radius = CGFloat(3 + (seed % 13))
+                let x = col + CGFloat((seed % 17) - 8)
+                let y = row + CGFloat((seed % 19) - 9)
+                let rect = CGRect(x: x - radius, y: y - radius, width: radius * 2, height: radius * 2)
+                context.fill(Path(ellipseIn: rect), with: .color(.black.opacity(0.34)))
+                context.stroke(Path(ellipseIn: rect.offsetBy(dx: -1, dy: -1)), with: .color(.white.opacity(0.05)), lineWidth: 1)
+            }
+        }
+        for i in 0..<5 {
+            var path = Path()
+            let x = size.width * CGFloat(0.18 + Double(i) * 0.17)
+            path.move(to: CGPoint(x: x, y: size.height * -0.06))
+            path.addLine(to: CGPoint(x: x + 95, y: size.height * 0.98))
+            context.stroke(path, with: .color(accent.opacity(0.12)), lineWidth: 18)
+        }
+    }
+
+    private func drawRainbowBackdrop(in context: inout GraphicsContext, size: CGSize) {
+        let colors: [Color] = [.red, .orange, .yellow, .green, .cyan, .blue, .purple, .pink]
+        for (index, color) in colors.enumerated() {
+            let rect = CGRect(
+                x: -size.width * 0.25 + CGFloat(index) * size.width / 7,
+                y: -size.height * 0.12,
+                width: size.width * 0.48,
+                height: size.height * 1.22
+            )
+            context.fill(Path(ellipseIn: rect), with: .color(color.opacity(0.18)))
+        }
+        for i in 0..<36 {
+            let x = CGFloat((i * 73) % 997) / 997 * size.width
+            let y = CGFloat((i * 151) % 997) / 997 * size.height
+            context.fill(Path(ellipseIn: CGRect(x: x, y: y, width: 2.2, height: 2.2)), with: .color(.white.opacity(0.32)))
+        }
+    }
+
+    private enum SparkleBase { case pink, ice }
+
+    private func drawSparkleBackdrop(in context: inout GraphicsContext, size: CGSize, base: SparkleBase) {
+        let color = base == .pink ? Color(red: 1.0, green: 0.12, blue: 0.72) : Color(red: 0.55, green: 0.88, blue: 1.0)
+        for i in 0..<150 {
+            let x = CGFloat((i * 89) % 1021) / 1021 * size.width
+            let y = CGFloat((i * 193) % 1021) / 1021 * size.height
+            let radius = CGFloat(0.8 + Double((i * 11) % 5) * 0.42)
+            context.fill(Path(ellipseIn: CGRect(x: x, y: y, width: radius, height: radius)), with: .color(color.opacity(0.35)))
+        }
+        for i in 0..<18 {
+            let x = CGFloat((i * 157) % 953) / 953 * size.width
+            let y = CGFloat((i * 211) % 953) / 953 * size.height
+            var star = Path()
+            star.move(to: CGPoint(x: x - 5, y: y))
+            star.addLine(to: CGPoint(x: x + 5, y: y))
+            star.move(to: CGPoint(x: x, y: y - 5))
+            star.addLine(to: CGPoint(x: x, y: y + 5))
+            context.stroke(star, with: .color(color.opacity(0.44)), lineWidth: 1.1)
+        }
+    }
+
+    private func drawToyBackdrop(in context: inout GraphicsContext, size: CGSize) {
+        let cream = Color(red: 1.0, green: 0.96, blue: 0.86)
+        context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(cream.opacity(0.72)))
+        let red = Color(red: 0.88, green: 0.08, blue: 0.08)
+        let blue = Color(red: 0.02, green: 0.24, blue: 0.72)
+        let gold = Color(red: 1.0, green: 0.72, blue: 0.04)
+        for corner in 0..<4 {
+            let isRight = corner == 1 || corner == 2
+            let isBottom = corner >= 2
+            let origin = CGPoint(x: isRight ? size.width - 72 : 0, y: isBottom ? size.height - 72 : 0)
+            let rect = CGRect(origin: origin, size: CGSize(width: 72, height: 72))
+            context.fill(Path(roundedRect: rect, cornerRadius: 24), with: .color((corner % 2 == 0 ? red : blue).opacity(0.72)))
+            context.stroke(Path(roundedRect: rect.insetBy(dx: 7, dy: 7), cornerRadius: 17), with: .color(gold.opacity(0.84)), lineWidth: 2)
+        }
+        for i in 0..<20 {
+            let x = CGFloat((i * 109) % 997) / 997 * size.width
+            let y = CGFloat((i * 167) % 997) / 997 * size.height
+            var star = Path()
+            star.move(to: CGPoint(x: x, y: y - 6))
+            star.addLine(to: CGPoint(x: x + 2, y: y - 2))
+            star.addLine(to: CGPoint(x: x + 6, y: y))
+            star.addLine(to: CGPoint(x: x + 2, y: y + 2))
+            star.addLine(to: CGPoint(x: x, y: y + 6))
+            star.addLine(to: CGPoint(x: x - 2, y: y + 2))
+            star.addLine(to: CGPoint(x: x - 6, y: y))
+            star.addLine(to: CGPoint(x: x - 2, y: y - 2))
+            star.closeSubpath()
+            context.fill(star, with: .color(gold.opacity(0.42)))
+        }
+    }
+
+    private func drawChocolateBackdrop(in context: inout GraphicsContext, size: CGSize) {
+        let dark = Color(red: 0.12, green: 0.045, blue: 0.01)
+        let milk = Color(red: 0.42, green: 0.18, blue: 0.055)
+        var drip = Path()
+        drip.move(to: .zero)
+        drip.addLine(to: CGPoint(x: size.width, y: 0))
+        drip.addLine(to: CGPoint(x: size.width, y: 56))
+        for x in stride(from: size.width, through: CGFloat(0), by: -70) {
+            drip.addCurve(
+                to: CGPoint(x: max(0, x - 70), y: 56),
+                control1: CGPoint(x: x - 18, y: 116),
+                control2: CGPoint(x: x - 48, y: 12)
+            )
+        }
+        drip.closeSubpath()
+        context.fill(drip, with: .linearGradient(Gradient(colors: [milk.opacity(0.92), dark.opacity(0.80)]), startPoint: .zero, endPoint: CGPoint(x: 0, y: 132)))
+        for row in stride(from: CGFloat(190), through: size.height, by: 120) {
+            for col in stride(from: CGFloat(30), through: size.width, by: 118) {
+                let rect = CGRect(x: col, y: row, width: 90, height: 70)
+                context.stroke(Path(roundedRect: rect, cornerRadius: 16), with: .color(Color.white.opacity(0.08)), lineWidth: 1.5)
+                context.fill(Path(roundedRect: rect, cornerRadius: 16), with: .color(Color.black.opacity(0.08)))
+            }
+        }
+    }
+
+    private func drawCamoBackdrop(in context: inout GraphicsContext, size: CGSize) {
+        let palette: [Color] = [
+            Color(red: 0.05, green: 0.08, blue: 0.04),
+            Color(red: 0.15, green: 0.18, blue: 0.09),
+            Color(red: 0.25, green: 0.24, blue: 0.12),
+            Color(red: 0.09, green: 0.13, blue: 0.06)
+        ]
+        for i in 0..<95 {
+            let x = CGFloat((i * 67) % 991) / 991 * size.width
+            let y = CGFloat((i * 137) % 991) / 991 * size.height
+            let w = CGFloat(42 + (i * 17) % 92)
+            let h = CGFloat(24 + (i * 23) % 68)
+            context.fill(Path(ellipseIn: CGRect(x: x - w / 2, y: y - h / 2, width: w, height: h)), with: .color(palette[i % palette.count].opacity(0.64)))
+        }
+    }
+
+    private func drawGoldBackdrop(in context: inout GraphicsContext, size: CGSize) {
+        for i in 0..<24 {
+            let y = CGFloat(i) * size.height / 24
+            var path = Path()
+            path.move(to: CGPoint(x: -30, y: y))
+            path.addLine(to: CGPoint(x: size.width + 30, y: y + size.height * 0.18))
+            context.stroke(path, with: .color(Color.white.opacity(i % 3 == 0 ? 0.09 : 0.035)), lineWidth: 2)
+        }
+    }
+
+    private func drawIceBackdrop(in context: inout GraphicsContext, size: CGSize) {
+        drawSparkleBackdrop(in: &context, size: size, base: .ice)
+        let ice = Color(red: 0.68, green: 0.92, blue: 1.0)
+        for i in 0..<34 {
+            let sx = CGFloat((i * 83) % 997) / 997 * size.width
+            let sy = CGFloat((i * 197) % 997) / 997 * size.height
+            var crack = Path()
+            crack.move(to: CGPoint(x: sx, y: sy))
+            crack.addLine(to: CGPoint(x: sx + CGFloat((i % 7) - 3) * 18, y: sy + CGFloat(28 + (i * 9) % 76)))
+            crack.addLine(to: CGPoint(x: sx + CGFloat((i % 5) - 2) * 25, y: sy + CGFloat(58 + (i * 11) % 110)))
+            context.stroke(crack, with: .color(ice.opacity(0.22)), lineWidth: CGFloat(0.8 + Double(i % 3) * 0.4))
+        }
+        context.stroke(Path(roundedRect: CGRect(origin: .zero, size: size).insetBy(dx: 6, dy: 6), cornerRadius: 32), with: .color(ice.opacity(0.54)), lineWidth: 5)
     }
 }
 

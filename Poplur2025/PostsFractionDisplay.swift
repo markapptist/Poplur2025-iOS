@@ -11,33 +11,45 @@ struct PostsFractionDisplay: View {
     enum ChangeDirection { case up, down, none }
 
     var body: some View {
-        VStack(alignment: .center, spacing: 6) {
+        VStack(alignment: .center, spacing: 0) {
             // Numerator: change arrow (centered above the line)
             Group {
                 switch changeDirection {
                 case .up:
                     Image(systemName: "arrow.up")
+                        .poplurIconShader()
                         .font(.system(size: 28, weight: .bold))
                         .foregroundStyle(.green)
                         .shadow(color: .black.opacity(0.6), radius: 4, x: 0, y: 2)
                 case .down:
                     Image(systemName: "arrow.down")
+                        .poplurIconShader()
                         .font(.system(size: 28, weight: .bold))
                         .foregroundStyle(.red)
                         .shadow(color: .black.opacity(0.6), radius: 4, x: 0, y: 2)
                 case .none:
                     Image(systemName: "arrow.up")
+                        .poplurIconShader()
                         .font(.system(size: 28, weight: .bold))
                         .opacity(0)
                 }
             }
-            .frame(width: 90) // Match the line width so arrow is centered
+            .frame(width: CounterSeparatorMetrics.separatorWidth, height: CounterSeparatorMetrics.numeratorHeight, alignment: .bottom)
+
+            Color.clear
+                .frame(height: CounterSeparatorMetrics.numeratorToSeparatorSpacing)
 
             // Bar (aligned parallel to radius display line)
             Rectangle()
                 .fill(.white)
-                .frame(width: 90, height: 2)
+                .frame(width: CounterSeparatorMetrics.separatorWidth, height: CounterSeparatorMetrics.separatorHeight)
                 .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 1)
+                .alignmentGuide(.counterSeparator) { dimensions in
+                    dimensions[VerticalAlignment.center]
+                }
+
+            Color.clear
+                .frame(height: CounterSeparatorMetrics.separatorToDenominatorSpacing)
 
             // Denominator: posts count (centered below the line)
             Text("\(postsCount) posts")
@@ -45,7 +57,12 @@ struct PostsFractionDisplay: View {
                 .foregroundStyle(.white.opacity(0.9))
                 .poplurTextShader(intensity: 0.72)
                 .shadow(color: .black.opacity(0.6), radius: 4, x: 0, y: 2)
-                .frame(width: 90) // Match the line width so text is centered
+                .frame(width: CounterSeparatorMetrics.separatorWidth, height: CounterSeparatorMetrics.denominatorHeight, alignment: .top)
+        }
+        .alignmentGuide(.counterSeparator) { _ in
+            CounterSeparatorMetrics.numeratorHeight
+            + CounterSeparatorMetrics.numeratorToSeparatorSpacing
+            + CounterSeparatorMetrics.separatorHeight / 2
         }
     }
 }

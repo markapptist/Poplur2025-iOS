@@ -143,6 +143,7 @@ internal struct TrendObjectGlyph: View {
             .aspectRatio(contentMode: .fit)
             .frame(width: size, height: size)
             .foregroundColor(category.tint)
+            .poplurIconShader()
             .shadow(color: category.darkTint.opacity(0.6), radius: 2, x: 1, y: 1)
     }
 }

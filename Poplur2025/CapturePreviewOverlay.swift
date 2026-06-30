@@ -77,6 +77,7 @@ struct CapturePreviewOverlay: View {
                             .scaleEffect(pulseScale)
                     }
                     Image(systemName: "dot.radiowaves.left.and.right")
+                        .poplurIconShader()
                         .font(.system(size: 22, weight: .bold))
                         .foregroundStyle(.white)
                 }
@@ -89,6 +90,7 @@ struct CapturePreviewOverlay: View {
                 Text("SCANNING BROADCAST")
                     .font(.system(size: 10, weight: .black, design: .rounded))
                     .foregroundStyle(.white.opacity(0.88))
+                    .poplurTextShader(intensity: 0.82)
                     .tracking(2.8)
             }
         }
@@ -110,11 +112,13 @@ struct CapturePreviewOverlay: View {
                 Button { close() } label: {
                     VStack(spacing: 8) {
                         Image(systemName: "xmark.circle.fill")
+                            .poplurIconShader()
                             .font(.system(size: 44))
                             .foregroundStyle(.white.opacity(0.7))
                         Text("Retake")
                             .font(.system(size: 14, weight: .medium))
                             .foregroundStyle(.white.opacity(0.7))
+                            .poplurTextShader(intensity: 0.62)
                     }
                 }
                 Spacer()
@@ -135,22 +139,26 @@ struct CapturePreviewOverlay: View {
             Button { close() } label: {
                 VStack(spacing: 8) {
                     Image(systemName: "xmark.circle.fill")
+                        .poplurIconShader()
                         .font(.system(size: 44, weight: .regular))
                         .foregroundStyle(.white)
                     Text("Retake")
                         .font(.system(size: 14, weight: .medium))
                         .foregroundStyle(.white)
+                        .poplurTextShader(intensity: 0.72)
                 }
             }
             Spacer()
             Button { continueFromPreview() } label: {
                 VStack(spacing: 8) {
                     Image(systemName: "checkmark.circle.fill")
+                        .poplurIconShader()
                         .font(.system(size: 40, weight: .bold))
                         .foregroundStyle(Color(red: 1, green: 0.22, blue: 0.22))
                     Text("Keep")
                         .font(.system(size: 14, weight: .bold))
                         .foregroundStyle(.white)
+                        .poplurTextShader(intensity: 0.86)
                 }
             }
         }
@@ -168,14 +176,17 @@ struct CapturePreviewOverlay: View {
                     Text(meta.broadcastName)
                         .font(.system(size: 12, weight: .black, design: .rounded))
                         .foregroundStyle(.white)
+                        .poplurTextShader(intensity: 0.82)
                         .tracking(0.8)
                     Text(meta.adConcept)
                         .font(.system(size: 10, weight: .semibold, design: .rounded))
                         .foregroundStyle(.white.opacity(0.70))
+                        .poplurTextShader(intensity: 0.62)
                         .lineLimit(1)
                 }
                 Spacer()
                 Image(systemName: "checkmark.seal.fill")
+                    .poplurIconShader()
                     .foregroundStyle(.green)
                     .font(.system(size: 18))
             }
@@ -190,11 +201,13 @@ struct CapturePreviewOverlay: View {
                 Button { close() } label: {
                     VStack(spacing: 8) {
                         Image(systemName: "xmark.circle.fill")
+                            .poplurIconShader()
                             .font(.system(size: 40))
                             .foregroundStyle(.white.opacity(0.8))
                         Text("Retake")
                             .font(.system(size: 13, weight: .medium))
                             .foregroundStyle(.white.opacity(0.8))
+                            .poplurTextShader(intensity: 0.64)
                     }
                 }
                 .disabled(isPosting)
@@ -210,12 +223,14 @@ struct CapturePreviewOverlay: View {
                                 .frame(width: 40, height: 40)
                         } else {
                             Image(systemName: "dot.radiowaves.right")
+                                .poplurIconShader()
                                 .font(.system(size: 34, weight: .bold))
                                 .foregroundStyle(Color(red: 1, green: 0.22, blue: 0.22))
                         }
                         Text(isPosting ? "Broadcasting..." : "Broadcast Now")
                             .font(.system(size: 13, weight: .bold))
                             .foregroundStyle(.white)
+                            .poplurTextShader(intensity: 0.76)
                     }
                 }
                 .disabled(isPosting)
@@ -230,11 +245,13 @@ struct CapturePreviewOverlay: View {
             Button { close() } label: {
                 VStack(spacing: 8) {
                     Image(systemName: "xmark.circle.fill")
+                        .poplurIconShader()
                         .font(.system(size: 44, weight: .regular))
                         .foregroundStyle(.white)
                     Text("Retake")
                         .font(.system(size: 14, weight: .medium))
                         .foregroundStyle(.white)
+                        .poplurTextShader(intensity: 0.72)
                 }
             }
             Spacer()
@@ -247,12 +264,14 @@ struct CapturePreviewOverlay: View {
                             .frame(width: 44, height: 44)
                     } else {
                         Image(systemName: "checkmark.circle.fill")
+                            .poplurIconShader()
                             .font(.system(size: 44, weight: .regular))
                             .foregroundStyle(.green)
                     }
                     Text(isPosting ? "Posting..." : "Post Anyway")
                         .font(.system(size: 14, weight: .medium))
                         .foregroundStyle(.white)
+                        .poplurTextShader(intensity: 0.76)
                 }
             }
             .disabled(isPosting)
@@ -466,6 +485,7 @@ struct PostCaptureComposerOverlay: View {
     @State private var generatedMeta: TVStyleMetadata? = nil
     @State private var isGenerating = false
     @State private var generationError: String? = nil
+    @State private var generationStatusText = "Creating your Poplur TV ad..."
     @State private var adPulseScale: CGFloat = 1.0
     @State private var selectedMusicURL: URL? = nil
     @State private var selectedMusicTrack: MusicSearchTrack? = nil
@@ -473,6 +493,7 @@ struct PostCaptureComposerOverlay: View {
     @State private var showMusicSearch = false
     @State private var adVideoTrimSeconds: Double = 10
     @State private var adVideoMaxSeconds: Double = 10
+    @FocusState private var isAdPromptFocused: Bool
 
     private var isVideo: Bool { videoURL != nil }
     private var isGeneratedChannelStep: Bool {
@@ -546,6 +567,17 @@ struct PostCaptureComposerOverlay: View {
         }
         .onAppear(perform: configureVideoDuration)
         .toolbar(.hidden, for: .navigationBar)
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                if case .adPrompt = step {
+                    Spacer()
+                    Button("Done") {
+                        isAdPromptFocused = false
+                    }
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                }
+            }
+        }
         .navigationBarBackButtonHidden(true)
         .sheet(isPresented: $showMusicPicker) {
             MusicDocumentPicker { url in
@@ -640,6 +672,7 @@ struct PostCaptureComposerOverlay: View {
                 }
             } label: {
                 Image(systemName: headerIsBack ? "chevron.left" : "xmark")
+                    .poplurIconShader()
                     .font(.system(size: 17, weight: .bold))
                     .foregroundStyle(.white)
                     .frame(width: 42, height: 42)
@@ -650,9 +683,11 @@ struct PostCaptureComposerOverlay: View {
                 Text(headerStepTitle)
                     .font(.system(size: 18, weight: .black, design: .rounded))
                     .foregroundStyle(.white)
+                    .poplurTextShader(intensity: 0.9)
                 Text("\(String(format: "%.4f", coordinate.latitude)), \(String(format: "%.4f", coordinate.longitude))")
                     .font(.system(size: 11, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white.opacity(0.72))
+                    .poplurTextShader(intensity: 0.58)
             }
 
             Spacer()
@@ -688,6 +723,7 @@ struct PostCaptureComposerOverlay: View {
                                         Circle()
                                             .stroke(.white, lineWidth: 3)
                                         Image(systemName: "checkmark")
+                                            .poplurIconShader()
                                             .font(.system(size: 15, weight: .black))
                                             .foregroundStyle(.white)
                                     }
@@ -697,6 +733,7 @@ struct PostCaptureComposerOverlay: View {
                                 Text(filter.displayName)
                                     .font(.system(size: 11, weight: .bold, design: .rounded))
                                     .foregroundStyle(.white.opacity(selectedFilter == filter ? 1 : 0.72))
+                                    .poplurTextShader(intensity: selectedFilter == filter ? 0.82 : 0.58)
                             }
                             .frame(width: 66)
                         }
@@ -712,10 +749,12 @@ struct PostCaptureComposerOverlay: View {
                         Text("Trim")
                             .font(.system(size: 13, weight: .black, design: .rounded))
                             .foregroundStyle(.white)
+                            .poplurTextShader(intensity: 0.76)
                         Spacer()
                         Text("\(Int(videoTrimSeconds.rounded()))s")
                             .font(.system(size: 13, weight: .bold, design: .rounded))
                             .foregroundStyle(.white.opacity(0.78))
+                            .poplurTextShader(intensity: 0.68)
                     }
                     Slider(value: $videoTrimSeconds, in: 1...max(maxVideoTrimSeconds, 1), step: 1)
                         .tint(Color(red: 1, green: 0.22, blue: 0.22))
@@ -730,8 +769,10 @@ struct PostCaptureComposerOverlay: View {
             } label: {
                 HStack(spacing: 9) {
                     Image(systemName: "arrow.right.circle.fill")
+                        .poplurIconShader()
                     Text("Continue")
                         .font(.system(size: 16, weight: .black, design: .rounded))
+                        .poplurTextShader(intensity: 0.78)
                 }
                 .foregroundStyle(.black)
                 .frame(maxWidth: .infinity)
@@ -751,11 +792,14 @@ struct PostCaptureComposerOverlay: View {
             Button { showMusicSearch = true } label: {
                 HStack(spacing: 9) {
                     Image(systemName: selectedMusicURL == nil && selectedMusicTrack == nil ? "music.note" : "music.note.list")
+                        .poplurIconShader()
                         .font(.system(size: 15, weight: .bold))
                     Text(musicButtonTitle)
                         .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .poplurTextShader(intensity: 0.68)
                     Spacer()
                     Image(systemName: "plus.circle.fill")
+                        .poplurIconShader()
                         .font(.system(size: 14, weight: .bold))
                 }
                 .foregroundStyle(selectedMusicURL == nil && selectedMusicTrack == nil ? .white.opacity(0.78) : Color(red: 0.3, green: 1, blue: 0.5))
@@ -778,9 +822,11 @@ struct PostCaptureComposerOverlay: View {
                 Text("Post original or add Poplur AI?")
                     .font(.system(size: 18, weight: .black, design: .rounded))
                     .foregroundStyle(.white)
+                    .poplurTextShader(intensity: 0.9)
                 Text("Your edits are ready. Choose the version you want to send to a channel.")
                     .font(.system(size: 12, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white.opacity(0.62))
+                    .poplurTextShader(intensity: 0.58)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -796,8 +842,10 @@ struct PostCaptureComposerOverlay: View {
             } label: {
                 HStack(spacing: 9) {
                     Image(systemName: "paperplane.fill")
+                        .poplurIconShader()
                     Text("Post Original")
                         .font(.system(size: 16, weight: .black, design: .rounded))
+                        .poplurTextShader(intensity: 0.78)
                 }
                 .foregroundStyle(.black)
                 .frame(maxWidth: .infinity)
@@ -817,8 +865,10 @@ struct PostCaptureComposerOverlay: View {
             } label: {
                 HStack(spacing: 9) {
                     Image(systemName: "sparkles")
+                        .poplurIconShader()
                     Text("Add Poplur AI")
                         .font(.system(size: 16, weight: .black, design: .rounded))
+                        .poplurTextShader(intensity: 0.9)
                 }
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity)
@@ -851,14 +901,17 @@ struct PostCaptureComposerOverlay: View {
                                     Text("CH \(channel.number)  \(channel.title)")
                                         .font(.system(size: 14, weight: .black, design: .rounded))
                                         .foregroundStyle(.white)
+                                        .poplurTextShader(intensity: 0.82)
                                     Text(channel.subtitle)
                                         .font(.system(size: 11, weight: .semibold, design: .rounded))
                                         .foregroundStyle(.white.opacity(0.62))
+                                        .poplurTextShader(intensity: 0.56)
                                         .lineLimit(1)
                                 }
                                 Spacer()
                                 if selectedChannel == channel {
                                     Image(systemName: "checkmark.seal.fill")
+                                        .poplurIconShader()
                                         .foregroundStyle(Color(red: 0.30, green: 1, blue: 0.34))
                                 }
                             }
@@ -890,9 +943,11 @@ struct PostCaptureComposerOverlay: View {
                             .frame(width: 18, height: 18)
                     } else {
                         Image(systemName: "dot.radiowaves.right")
+                            .poplurIconShader()
                     }
                     Text(isPosting ? "Posting..." : "Post to Channel")
                         .font(.system(size: 16, weight: .black, design: .rounded))
+                        .poplurTextShader(intensity: 0.82)
                 }
                 .foregroundStyle(usePoplurAI ? .white : .black)
                 .frame(maxWidth: .infinity)
@@ -913,6 +968,7 @@ struct PostCaptureComposerOverlay: View {
         let shouldMove = usePoplurAI && recommendation != nil && recommendation != selectedChannel
         return HStack(spacing: 10) {
             Image(systemName: shouldMove ? "exclamationmark.triangle.fill" : "checkmark.shield.fill")
+                .poplurIconShader()
                 .font(.system(size: 15, weight: .bold))
                 .foregroundStyle(shouldMove ? Color.yellow : Color(red: 0.30, green: 1, blue: 0.34))
             Text(shouldMove
@@ -920,6 +976,7 @@ struct PostCaptureComposerOverlay: View {
                  : "AI will verify this content and move it to the right channel if needed.")
                 .font(.system(size: 11, weight: .semibold, design: .rounded))
                 .foregroundStyle(.white.opacity(0.72))
+                .poplurTextShader(intensity: 0.58)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
         }
@@ -944,6 +1001,7 @@ struct PostCaptureComposerOverlay: View {
                             .scaleEffect(adPulseScale)
                     }
                     Image(systemName: isGenerating ? "sparkles" : "dot.radiowaves.right")
+                        .poplurIconShader()
                         .font(.system(size: 22, weight: .bold))
                         .foregroundStyle(isGenerating ? .yellow : .white)
                 }
@@ -953,18 +1011,20 @@ struct PostCaptureComposerOverlay: View {
                     }
                 }
 
-                Text(isGenerating ? "Creating your Poplur TV ad…" : statusText)
+                Text(isGenerating ? generationStatusText : statusText)
                     .font(.system(size: 16, weight: .black, design: .rounded))
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.white)
+                    .poplurTextShader(intensity: 0.88)
                     .padding(.horizontal, 28)
 
                 Text(isGenerating
-                     ? "AI is generating custom Poplur TV content from your capture and prompt."
-                     : "Your ad will be added to your profile.")
+                     ? "AI is trying every available Poplur generation route until it gets a result."
+                    : "Your ad will be added to your profile.")
                     .font(.system(size: 12, weight: .semibold, design: .rounded))
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.white.opacity(0.68))
+                    .poplurTextShader(intensity: 0.58)
                     .padding(.horizontal, 28)
             }
         }
@@ -978,9 +1038,11 @@ struct PostCaptureComposerOverlay: View {
                 Text("Tell Poplur AI what to make")
                     .font(.system(size: 18, weight: .black, design: .rounded))
                     .foregroundStyle(.white)
+                    .poplurTextShader(intensity: 0.9)
                 Text("Use one prompt. Photos generate photos, and videos generate videos.")
                     .font(.system(size: 11, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white.opacity(0.60))
+                    .poplurTextShader(intensity: 0.58)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.horizontal, 18)
@@ -992,6 +1054,7 @@ struct PostCaptureComposerOverlay: View {
                     Text("A cinematic Poplur TV ad about...")
                         .font(.system(size: 15, weight: .semibold, design: .rounded))
                         .foregroundStyle(.white.opacity(0.34))
+                        .poplurTextShader(intensity: 0.42)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 18)
                 }
@@ -999,6 +1062,7 @@ struct PostCaptureComposerOverlay: View {
                     .font(.system(size: 15, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white)
                     .tint(.white)
+                    .focused($isAdPromptFocused)
                     .scrollContentBackground(.hidden)
                     .background(Color.clear)
                     .frame(minHeight: 132, maxHeight: 172)
@@ -1016,14 +1080,20 @@ struct PostCaptureComposerOverlay: View {
                 Text(err)
                     .font(.system(size: 12, weight: .semibold, design: .rounded))
                     .foregroundStyle(Color(red: 1, green: 0.35, blue: 0.35))
+                    .poplurTextShader(intensity: 0.72)
                     .padding(.horizontal, 18)
             }
 
-            Button { generateAd() } label: {
+            Button {
+                isAdPromptFocused = false
+                generateAd()
+            } label: {
                 HStack(spacing: 9) {
                     Image(systemName: "sparkles")
+                        .poplurIconShader()
                     Text("Generate Poplur AI")
                         .font(.system(size: 16, weight: .black, design: .rounded))
+                        .poplurTextShader(intensity: 0.78)
                 }
                 .foregroundStyle(.black)
                 .frame(maxWidth: .infinity)
@@ -1074,69 +1144,143 @@ struct PostCaptureComposerOverlay: View {
     // MARK: - Ad generation
 
     private func generateAd() {
+        guard !isGenerating else { return }
         generationError = nil
+        generationStatusText = "Starting Poplur AI..."
         isGenerating = true
 
         Task {
+            guard image != nil || videoURL != nil else {
+                await finishGenerationFailure("No media was found. Retake and try again.")
+                return
+            }
+
+            await updateGenerationStatus("Analyzing your capture...")
+            let meta = await analyzeTVMetadata(image: image, videoURL: videoURL)
+            let prompt = buildAdPrompt(meta: meta)
+            let faceImage: UIImage? = image ?? (videoURL.flatMap { firstFrame(of: $0) })
+
+            if isVideo {
+                await generateVideoAd(meta: meta, prompt: prompt, faceImage: faceImage)
+            } else {
+                await generateImageAd(meta: meta, prompt: prompt, faceImage: faceImage)
+            }
+        }
+    }
+
+    private func generateVideoAd(meta: TVStyleMetadata, prompt: String, faceImage: UIImage?) async {
+        if let faceImage {
             do {
-                guard image != nil || videoURL != nil else {
-                    throw AdGenerationError.noMedia
+                let videoURL = try await generationAttempt("Animating your capture with Poplur AI") {
+                    try await FaceAdGenerationService.generateVideo(faceImage: faceImage, prompt: prompt)
                 }
-
-                let meta = await analyzeTVMetadata(image: image, videoURL: videoURL)
-                let prompt = buildAdPrompt(meta: meta)
-
-                // Resolve the best face reference: captured photo first, then first frame of video
-                let faceImage: UIImage? = image ?? (videoURL.flatMap { firstFrame(of: $0) })
-
-                if isVideo {
-                    let adVideoURL: URL
-                    if let face = faceImage {
-                        adVideoURL = try await FaceAdGenerationService.generateVideo(faceImage: face, prompt: prompt)
-                    } else {
-                        adVideoURL = try await VideoAdGenerationService.generate(prompt: prompt)
-                    }
-                    await MainActor.run {
-                        generatedMeta = meta
-                        generatedAdVideoURL = adVideoURL
-                        generatedAdImage = nil
-                        isGenerating = false
-                        withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) {
-                            step = .adVideoPreview(adVideoURL)
-                        }
-                    }
-                } else {
-                    let adImage: UIImage
-                    if let face = faceImage {
-                        adImage = try await FaceAdGenerationService.generateImage(faceImage: face, prompt: prompt)
-                    } else {
-                        adImage = try await AdGenerationService.generate(prompt: prompt)
-                    }
-                    await MainActor.run {
-                        generatedMeta = meta
-                        generatedAdImage = adImage
-                        generatedAdVideoURL = nil
-                        isGenerating = false
-                        withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) {
-                            step = .adPreview(adImage)
-                        }
-                    }
-                }
-            } catch AdGenerationError.noAPIKey {
-                await MainActor.run {
-                    isGenerating = false
-                    generationError = "Video AI needs a Replicate key in Settings to generate a video."
-                }
+                await showGeneratedVideo(videoURL, meta: meta)
+                return
             } catch {
-                print("🎬 [AdGeneration] Failed: \(error)")
-                await MainActor.run {
-                    isGenerating = false
-                    generationError = isVideo
-                        ? "Video generation failed — check the AI video key and try again."
-                        : "Image generation failed — check your internet connection and try again."
+                logGenerationFailure("face video", error)
+            }
+        }
+
+        do {
+            let videoURL = try await generationAttempt("Building a fresh Poplur AI video") {
+                try await VideoAdGenerationService.generate(prompt: prompt)
+            }
+            await showGeneratedVideo(videoURL, meta: meta)
+            return
+        } catch {
+            logGenerationFailure("text video", error)
+        }
+
+        await updateGenerationStatus("Video AI is busy. Creating a Poplur poster ad...")
+        await generateImageAd(meta: meta, prompt: prompt, faceImage: faceImage)
+    }
+
+    private func generateImageAd(meta: TVStyleMetadata, prompt: String, faceImage: UIImage?) async {
+        if let faceImage {
+            do {
+                let image = try await generationAttempt("Creating your face-aware Poplur AI ad") {
+                    try await FaceAdGenerationService.generateImage(faceImage: faceImage, prompt: prompt)
+                }
+                await showGeneratedImage(image, meta: meta)
+                return
+            } catch {
+                logGenerationFailure("face image", error)
+            }
+        }
+
+        do {
+            let image = try await generationAttempt("Creating a fresh Poplur AI ad", attempts: 3) {
+                try await AdGenerationService.generate(prompt: prompt)
+            }
+            await showGeneratedImage(image, meta: meta)
+        } catch {
+            logGenerationFailure("image fallback", error)
+            await finishGenerationFailure("Poplur AI could not finish this one. Check connection and tap Generate again.")
+        }
+    }
+
+    private func generationAttempt<T>(
+        _ status: String,
+        attempts: Int = 2,
+        operation: @escaping () async throws -> T
+    ) async throws -> T {
+        var lastError: Error?
+        for attempt in 1...attempts {
+            let suffix = attempts > 1 ? " (\(attempt)/\(attempts))" : ""
+            await updateGenerationStatus(status + suffix)
+            do {
+                return try await operation()
+            } catch {
+                lastError = error
+                logGenerationFailure("\(status) attempt \(attempt)", error)
+                if attempt < attempts {
+                    try? await Task.sleep(nanoseconds: 900_000_000)
                 }
             }
         }
+        throw lastError ?? AdGenerationError.generationFailed
+    }
+
+    private func showGeneratedImage(_ image: UIImage, meta: TVStyleMetadata) async {
+        await MainActor.run {
+            generatedMeta = meta
+            generatedAdImage = image
+            generatedAdVideoURL = nil
+            isGenerating = false
+            generationStatusText = "Creating your Poplur TV ad..."
+            withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) {
+                step = .adPreview(image)
+            }
+        }
+    }
+
+    private func showGeneratedVideo(_ url: URL, meta: TVStyleMetadata) async {
+        await MainActor.run {
+            generatedMeta = meta
+            generatedAdVideoURL = url
+            generatedAdImage = nil
+            isGenerating = false
+            generationStatusText = "Creating your Poplur TV ad..."
+            withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) {
+                step = .adVideoPreview(url)
+            }
+        }
+    }
+
+    private func updateGenerationStatus(_ text: String) async {
+        await MainActor.run { generationStatusText = text }
+    }
+
+    private func finishGenerationFailure(_ message: String) async {
+        await MainActor.run {
+            generationError = message
+            isGenerating = false
+            generationStatusText = "Creating your Poplur TV ad..."
+        }
+    }
+
+    private func logGenerationFailure(_ route: String, _ error: Error) {
+        print("[PoplurAI] \(route) failed: \(error.localizedDescription)")
     }
 
     private func firstFrame(of url: URL) -> UIImage? {
@@ -1310,6 +1454,7 @@ struct PostCaptureComposerOverlay: View {
                                     Text(filter.displayName)
                                         .font(.system(size: 10, weight: .semibold, design: .rounded))
                                         .foregroundStyle(selectedFilter == filter ? .white : .white.opacity(0.55))
+                                        .poplurTextShader(intensity: selectedFilter == filter ? 0.78 : 0.5)
                                 }
                             }
                             .buttonStyle(.plain)
@@ -1326,12 +1471,14 @@ struct PostCaptureComposerOverlay: View {
                         Text("Trim")
                             .font(.system(size: 11, weight: .black, design: .rounded))
                             .foregroundStyle(.white.opacity(0.55))
+                            .poplurTextShader(intensity: 0.58)
                             .tracking(1)
                             .textCase(.uppercase)
                         Spacer()
                         Text("\(Int(adVideoTrimSeconds))s")
                             .font(.system(size: 13, weight: .bold, design: .rounded))
                             .foregroundStyle(.white)
+                            .poplurTextShader(intensity: 0.74)
                     }
                     Slider(value: $adVideoTrimSeconds, in: 1...adVideoMaxSeconds, step: 1)
                         .tint(.white)
@@ -1343,9 +1490,11 @@ struct PostCaptureComposerOverlay: View {
             Button { showMusicSearch = true } label: {
                 HStack(spacing: 8) {
                     Image(systemName: selectedMusicURL == nil && selectedMusicTrack == nil ? "music.note" : "music.note.list")
+                        .poplurIconShader()
                         .font(.system(size: 15, weight: .bold))
                     Text(musicButtonTitle)
                         .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .poplurTextShader(intensity: 0.68)
                 }
                 .foregroundStyle(selectedMusicURL == nil && selectedMusicTrack == nil ? .white.opacity(0.75) : Color(red: 0.3, green: 1, blue: 0.5))
                 .frame(maxWidth: .infinity)
@@ -1362,6 +1511,7 @@ struct PostCaptureComposerOverlay: View {
                         .frame(width: 34, height: 34)
                         .overlay(
                             Image(systemName: "music.note")
+                                .poplurIconShader()
                                 .font(.system(size: 14, weight: .black))
                                 .foregroundStyle(.black.opacity(0.82))
                         )
@@ -1369,10 +1519,12 @@ struct PostCaptureComposerOverlay: View {
                         Text(selectedMusicTrack.title)
                             .font(.system(size: 12, weight: .black, design: .rounded))
                             .foregroundStyle(.white)
+                            .poplurTextShader(intensity: 0.76)
                             .lineLimit(1)
                         Text("\(selectedMusicTrack.artist) • \(selectedMusicTrack.provider.rawValue)")
                             .font(.system(size: 10, weight: .semibold, design: .rounded))
                             .foregroundStyle(.white.opacity(0.65))
+                            .poplurTextShader(intensity: 0.54)
                             .lineLimit(1)
                     }
                     Spacer()
@@ -1380,6 +1532,7 @@ struct PostCaptureComposerOverlay: View {
                         self.selectedMusicTrack = nil
                     } label: {
                         Image(systemName: "xmark.circle.fill")
+                            .poplurIconShader()
                             .font(.system(size: 18, weight: .bold))
                             .foregroundStyle(.white.opacity(0.48))
                     }
@@ -1399,14 +1552,17 @@ struct PostCaptureComposerOverlay: View {
                         Text(meta.broadcastName)
                             .font(.system(size: 12, weight: .black, design: .rounded))
                             .foregroundStyle(.white)
+                            .poplurTextShader(intensity: 0.78)
                             .tracking(0.8)
                         Text(meta.adConcept)
                             .font(.system(size: 10, weight: .semibold, design: .rounded))
                             .foregroundStyle(.white.opacity(0.70))
+                            .poplurTextShader(intensity: 0.56)
                             .lineLimit(1)
                     }
                     Spacer()
                     Image(systemName: "sparkles")
+                        .poplurIconShader()
                         .foregroundStyle(.yellow)
                         .font(.system(size: 16))
                 }
@@ -1420,11 +1576,13 @@ struct PostCaptureComposerOverlay: View {
                 Button(action: onRedo) {
                     VStack(spacing: 8) {
                         Image(systemName: "arrow.counterclockwise.circle.fill")
+                            .poplurIconShader()
                             .font(.system(size: 40))
                             .foregroundStyle(.white.opacity(0.8))
                         Text("Redo")
                             .font(.system(size: 13, weight: .medium))
                             .foregroundStyle(.white.opacity(0.8))
+                            .poplurTextShader(intensity: 0.64)
                     }
                 }
                 .disabled(isPosting)
@@ -1440,12 +1598,14 @@ struct PostCaptureComposerOverlay: View {
                                 .frame(width: 40, height: 40)
                         } else {
                             Image(systemName: primaryIcon)
+                                .poplurIconShader()
                                 .font(.system(size: 34, weight: .bold))
                                 .foregroundStyle(Color(red: 1, green: 0.22, blue: 0.22))
                         }
                         Text(isPosting ? "Broadcasting…" : primaryTitle)
                             .font(.system(size: 13, weight: .bold))
                             .foregroundStyle(.white)
+                            .poplurTextShader(intensity: 0.76)
                     }
                 }
                 .disabled(isPosting)
@@ -1469,6 +1629,7 @@ struct PostCaptureComposerOverlay: View {
                 .frame(width: 34, height: 34)
                 .overlay(
                     Image(systemName: "music.note")
+                        .poplurIconShader()
                         .font(.system(size: 14, weight: .black))
                         .foregroundStyle(.black.opacity(0.82))
                 )
@@ -1476,10 +1637,12 @@ struct PostCaptureComposerOverlay: View {
                 Text(track.title)
                     .font(.system(size: 12, weight: .black, design: .rounded))
                     .foregroundStyle(.white)
+                    .poplurTextShader(intensity: 0.76)
                     .lineLimit(1)
                 Text("\(track.artist) • \(track.provider.rawValue)")
                     .font(.system(size: 10, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white.opacity(0.65))
+                    .poplurTextShader(intensity: 0.54)
                     .lineLimit(1)
             }
             Spacer()
@@ -1487,6 +1650,7 @@ struct PostCaptureComposerOverlay: View {
                 selectedMusicTrack = nil
             } label: {
                 Image(systemName: "xmark.circle.fill")
+                    .poplurIconShader()
                     .font(.system(size: 18, weight: .bold))
                     .foregroundStyle(.white.opacity(0.48))
             }
@@ -1806,8 +1970,17 @@ private extension UIImage {
 
 // MARK: - Ad generation service
 
-private enum AdGenerationError: Error {
+private enum AdGenerationError: LocalizedError {
     case noMedia, generationFailed, downloadFailed, noAPIKey
+
+    var errorDescription: String? {
+        switch self {
+        case .noMedia: return "No media was found."
+        case .generationFailed: return "AI generation failed."
+        case .downloadFailed: return "Could not download generated media."
+        case .noAPIKey: return "Replicate API key missing."
+        }
+    }
 }
 
 // MARK: - Music picker
@@ -1841,16 +2014,23 @@ private struct MusicDocumentPicker: UIViewControllerRepresentable {
 private enum AdGenerationService {
     /// Generates an ad image via Pollinations.ai (free, no API key required).
     static func generate(prompt: String) async throws -> UIImage {
-        guard let encoded = prompt.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+        var allowed = CharacterSet.urlPathAllowed
+        allowed.remove(charactersIn: "?#%/")
+        guard let encoded = prompt.addingPercentEncoding(withAllowedCharacters: allowed),
               let url = URL(string: "https://image.pollinations.ai/prompt/\(encoded)?width=1080&height=1920&model=flux&nologo=true&enhance=false&seed=\(Int.random(in: 0...99999))")
         else { throw AdGenerationError.generationFailed }
 
         var req = URLRequest(url: url, timeoutInterval: 90)
         req.setValue("Poplur/1.0", forHTTPHeaderField: "User-Agent")
         let (data, response) = try await URLSession.shared.data(for: req)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200,
-              let image = UIImage(data: data)
-        else { throw AdGenerationError.downloadFailed }
+        guard let http = response as? HTTPURLResponse else { throw AdGenerationError.downloadFailed }
+        guard http.statusCode == 200 else {
+            if let body = String(data: data, encoding: .utf8) {
+                print("[AdGenerationService] image failed \(http.statusCode): \(body)")
+            }
+            throw AdGenerationError.downloadFailed
+        }
+        guard let image = UIImage(data: data) else { throw AdGenerationError.downloadFailed }
         return image
     }
 }
@@ -1859,7 +2039,8 @@ private enum VideoAdGenerationService {
     /// Generates an ad video via Replicate (wan-ai/wan2.1-t2v-480p).
     /// Returns a remote URL pointing to the generated MP4.
     static func generate(prompt: String) async throws -> URL {
-        let apiKey = UserDefaults.standard.string(forKey: "poplur_replicate_key") ?? ""
+        let storedKey = UserDefaults.standard.string(forKey: "poplur_replicate_key") ?? ""
+        let apiKey = storedKey.isEmpty ? Secrets.replicateAPIKey : storedKey
         guard !apiKey.isEmpty else { throw AdGenerationError.noAPIKey }
 
         guard let endpoint = URL(string: "https://api.replicate.com/v1/models/wan-ai/wan2.1-t2v-480p/predictions")
@@ -1873,7 +2054,13 @@ private enum VideoAdGenerationService {
             "input": ["prompt": prompt, "num_frames": 81, "size": "480*832"] as [String: Any]
         ])
 
-        let (data, _) = try await URLSession.shared.data(for: req)
+        let (data, response) = try await URLSession.shared.data(for: req)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            if let body = String(data: data, encoding: .utf8) {
+                print("[VideoAdGenerationService] start failed: \(body)")
+            }
+            throw AdGenerationError.generationFailed
+        }
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let id = json["id"] as? String
         else { throw AdGenerationError.generationFailed }
@@ -1891,14 +2078,27 @@ private enum VideoAdGenerationService {
         for _ in 0..<90 {                          // max ~4.5 min
             try await Task.sleep(nanoseconds: 3_000_000_000)
             try Task.checkCancellation()
-            let (data, _) = try await URLSession.shared.data(for: req)
+            let (data, response) = try await URLSession.shared.data(for: req)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                if let body = String(data: data, encoding: .utf8) {
+                    print("[VideoAdGenerationService] poll failed: \(body)")
+                }
+                throw AdGenerationError.generationFailed
+            }
             guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
             switch json["status"] as? String {
             case "succeeded":
                 if let arr = json["output"] as? [String], let s = arr.first, let u = URL(string: s) { return u }
                 if let s = json["output"] as? String, let u = URL(string: s) { return u }
+                if let out = json["output"] as? [String: Any] {
+                    let s = out["video"] as? String ?? out["url"] as? String
+                    if let s, let u = URL(string: s) { return u }
+                }
                 throw AdGenerationError.downloadFailed
             case "failed", "canceled":
+                if let error = json["error"] {
+                    print("[VideoAdGenerationService] generation failed: \(error)")
+                }
                 throw AdGenerationError.generationFailed
             default: continue
             }

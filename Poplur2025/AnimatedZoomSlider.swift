@@ -157,18 +157,7 @@ struct AnimatedZoomSlider: View {
                 }
             } else {
                 Circle()
-                    .fill(
-                        RadialGradient(
-                            colors: [
-                                Color.white.opacity(skin == .ice ? 0.96 : 0.72),
-                                theme.accent.opacity(0.92),
-                                theme.backgroundDeep.opacity(0.88)
-                            ],
-                            center: .topLeading,
-                            startRadius: 1,
-                            endRadius: 24
-                        )
-                    )
+                    .fill(theme.accent)
                     .overlay(Circle().stroke(theme.primaryText.opacity(skin == .ice ? 0.92 : 0.55), lineWidth: 2))
                     .shadow(color: glowColor(for: skin), radius: isDragging ? 16 : 10)
             }

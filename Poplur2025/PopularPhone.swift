@@ -91,6 +91,7 @@ struct PopularPhone: View {
 
     private func swipeArrow(systemName: String) -> some View {
         Image(systemName: systemName)
+            .poplurIconShader()
             .font(.system(size: 34, weight: .black))
             .foregroundStyle(Color.white.opacity(0.38))
             .shadow(color: .black.opacity(0.55), radius: 8, x: 0, y: 2)

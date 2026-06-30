@@ -72,6 +72,7 @@ struct UserProfileAnnotation: View {
                             .frame(width: 40, height: 40)
                             .overlay(
                                 Image(systemName: "person.fill")
+                                    .poplurIconShader()
                                     .foregroundColor(.white)
                                     .font(.system(size: 20))
                             )
@@ -88,6 +89,7 @@ struct UserProfileAnnotation: View {
                     .frame(width: 40, height: 40)
                     .overlay(
                         Image(systemName: "person.fill")
+                            .poplurIconShader()
                             .foregroundColor(.white)
                             .font(.system(size: 20))
                     )
@@ -438,6 +440,7 @@ struct MapView: View {
                 HStack {
                     Button(action: { showSearch.toggle() }) {
                         Image(systemName: "magnifyingglass")
+                            .poplurIconShader()
                             .font(.system(size: 18, weight: .semibold))
                             .foregroundStyle(.primary)
                             .padding(10)
@@ -454,6 +457,7 @@ struct MapView: View {
                             aiMessage = nil
                         }) {
                             Image(systemName: "xmark")
+                                .poplurIconShader()
                                 .font(.system(size: 18, weight: .semibold))
                                 .foregroundStyle(.primary)
                                 .padding(10)
@@ -463,6 +467,7 @@ struct MapView: View {
                     
                     Button(action: { showFavorites.toggle() }) {
                         Image(systemName: "line.3.horizontal")
+                            .poplurIconShader()
                             .font(.system(size: 18, weight: .semibold))
                             .foregroundStyle(.primary)
                             .padding(10)
@@ -507,6 +512,7 @@ struct MapView: View {
                                 } label: {
                                     HStack(spacing: 8) {
                                         Image(systemName: "camera.fill")
+                                            .poplurIconShader()
                                         Text("Post Here")
                                             .font(.system(size: 16, weight: .bold, design: .rounded))
                                     }
@@ -537,6 +543,7 @@ struct MapView: View {
                                 } label: {
                                     HStack(spacing: 8) {
                                         Image(systemName: "checkmark.circle.fill")
+                                            .poplurIconShader()
                                         Text("Confirm Location")
                                             .font(.system(size: 16, weight: .bold, design: .rounded))
                                     }
@@ -566,6 +573,7 @@ struct MapView: View {
                             } label: {
                                 HStack(spacing: 8) {
                                     Image(systemName: "camera.fill")
+                                        .poplurIconShader()
                                     Text("Post Here")
                                         .font(.system(size: 16, weight: .bold, design: .rounded))
                                 }

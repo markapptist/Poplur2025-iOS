@@ -34,6 +34,7 @@ struct CameraRollButton: View {
                         .frame(width: 60, height: 60)
                     
                     Image(systemName: "photo.on.rectangle.angled")
+                        .poplurIconShader()
                         .font(.system(size: 24, weight: .medium))
                         .foregroundStyle(.white.opacity(0.9))
                 }
@@ -170,6 +171,7 @@ struct CameraRollWindowOverlay: View {
 
             Button(action: onDismiss) {
                 Image(systemName: "xmark")
+                    .poplurIconShader()
                     .font(.system(size: 13, weight: .bold))
                     .foregroundStyle(.white)
                     .frame(width: 30, height: 30)

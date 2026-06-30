@@ -81,15 +81,6 @@ class ARFilterManager: NSObject, ObservableObject {
         }
     }
     
-    // MARK: - Initialization
-    
-    override init() {
-        super.init()
-        Task { @MainActor in
-            self.activeFilter = .beautyFilter
-        }
-    }
-    
     // MARK: - Public Methods
     
     /// Setup AR session with face tracking
@@ -301,13 +292,19 @@ class ARFilterManager: NSObject, ObservableObject {
     
     /// Create a pixel buffer from CIImage
     private func createPixelBuffer(from ciImage: CIImage) -> CVPixelBuffer? {
-        let width = Int(ciImage.extent.width)
-        let height = Int(ciImage.extent.height)
+        let extent = ciImage.extent.integral
+        guard extent.width > 0, extent.height > 0 else {
+            return nil
+        }
+
+        let width = Int(extent.width)
+        let height = Int(extent.height)
         
         var pixelBuffer: CVPixelBuffer?
         let attributes = [
             kCVPixelBufferCGImageCompatibilityKey: kCFBooleanTrue!,
             kCVPixelBufferCGBitmapContextCompatibilityKey: kCFBooleanTrue!,
+            kCVPixelBufferIOSurfacePropertiesKey: [:],
             kCVPixelBufferWidthKey: width,
             kCVPixelBufferHeightKey: height,
             kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_32BGRA
@@ -325,8 +322,17 @@ class ARFilterManager: NSObject, ObservableObject {
         guard status == kCVReturnSuccess, let buffer = pixelBuffer else {
             return nil
         }
-        
-        ciContext.render(ciImage, to: buffer)
+
+        let normalizedImage = ciImage.transformed(
+            by: CGAffineTransform(translationX: -extent.origin.x, y: -extent.origin.y)
+        )
+        let renderBounds = CGRect(origin: .zero, size: CGSize(width: width, height: height))
+        ciContext.render(
+            normalizedImage,
+            to: buffer,
+            bounds: renderBounds,
+            colorSpace: CGColorSpaceCreateDeviceRGB()
+        )
         return buffer
     }
     

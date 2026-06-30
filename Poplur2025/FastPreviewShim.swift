@@ -76,6 +76,7 @@ struct FastPreviewHarness: View {
                 Color.green.opacity(0.2)
                 VStack {
                     Image(systemName: "map.fill")
+                        .poplurIconShader()
                         .font(.system(size: 60))
                         .foregroundStyle(.green)
                     Text("Map View")
@@ -96,6 +97,7 @@ struct FastPreviewHarness: View {
                 
                 VStack {
                     Image(systemName: "camera.fill")
+                        .poplurIconShader()
                         .font(.system(size: 60))
                         .foregroundStyle(.blue)
                     Text("Camera Preview")
@@ -129,6 +131,7 @@ struct FastPreviewHarness: View {
                             Spacer()
                             
                             Image(systemName: "chevron.right")
+                                .poplurIconShader()
                                 .foregroundStyle(.tertiary)
                         }
                         .padding()
@@ -149,6 +152,7 @@ struct FastPreviewHarness: View {
                         .frame(width: 100, height: 100)
                         .overlay(
                             Image(systemName: "person.fill")
+                                .poplurIconShader()
                                 .font(.system(size: 40))
                                 .foregroundStyle(.purple)
                         )

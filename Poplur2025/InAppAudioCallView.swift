@@ -144,6 +144,7 @@ private struct AudioCallButton: View {
         Button(action: action) {
             VStack(spacing: 10) {
                 Image(systemName: icon)
+                    .poplurIconShader()
                     .font(.system(size: size == 72 ? 28 : 22, weight: .semibold))
                     .foregroundStyle(active ? Color.black : Color.white)
                     .frame(width: size, height: size)

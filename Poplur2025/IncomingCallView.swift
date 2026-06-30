@@ -67,6 +67,7 @@ private struct CallActionButton: View {
         Button(action: action) {
             VStack(spacing: 10) {
                 Image(systemName: icon)
+                    .poplurIconShader()
                     .font(.system(size: 26, weight: .semibold))
                     .foregroundColor(.white)
                     .frame(width: 70, height: 70)

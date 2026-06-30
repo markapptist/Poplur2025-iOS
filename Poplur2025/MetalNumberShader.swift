@@ -1,5 +1,10 @@
 import SwiftUI
 
+private enum PoplurShaderPerformance {
+    static let frameInterval: TimeInterval = 1.0 / 12.0
+    static let browserFrameInterval: TimeInterval = 1.0 / 15.0
+}
+
 @available(iOS 17.0, macOS 14.0, tvOS 17.0, watchOS 10.0, *)
 private struct PoplurShaderTextRenderer: TextRenderer {
     var time: Double
@@ -38,7 +43,7 @@ struct PoplurTextShaderScope: ViewModifier {
     @ViewBuilder
     func body(content: Content) -> some View {
         if #available(iOS 17.0, macOS 14.0, tvOS 17.0, watchOS 10.0, *) {
-            TimelineView(.periodic(from: epoch, by: 1.0 / 30.0)) { timeline in
+            TimelineView(.periodic(from: epoch, by: PoplurShaderPerformance.frameInterval)) { timeline in
                 let time = reduceMotion ? 0 : timeline.date.timeIntervalSince(epoch)
 
                 content
@@ -55,8 +60,69 @@ struct PoplurTextShaderScope: ViewModifier {
     }
 }
 
+private struct PoplurShaderTimeKey: EnvironmentKey {
+    static let defaultValue: Float? = nil
+}
+
+private struct PoplurShaderIconIntensityKey: EnvironmentKey {
+    static let defaultValue: Float = 0.72
+}
+
+private extension EnvironmentValues {
+    var poplurShaderTime: Float? {
+        get { self[PoplurShaderTimeKey.self] }
+        set { self[PoplurShaderTimeKey.self] = newValue }
+    }
+
+    var poplurShaderIconIntensity: Float {
+        get { self[PoplurShaderIconIntensityKey.self] }
+        set { self[PoplurShaderIconIntensityKey.self] = newValue }
+    }
+}
+
+private struct PoplurShaderLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 6) {
+            configuration.icon
+                .poplurIconShader()
+            configuration.title
+        }
+    }
+}
+
+struct PoplurGlobalShaderScope: ViewModifier {
+    var textIntensity: Float = 0.75
+    var iconIntensity: Float = 0.72
+
+    @State private var epoch = Date()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 17.0, macOS 14.0, tvOS 17.0, watchOS 10.0, *) {
+            TimelineView(.periodic(from: epoch, by: PoplurShaderPerformance.frameInterval)) { timeline in
+                let time = reduceMotion ? 0 : Float(timeline.date.timeIntervalSince(epoch))
+
+                content
+                    .environment(\.poplurShaderTime, time)
+                    .environment(\.poplurShaderIconIntensity, iconIntensity)
+                    .textRenderer(
+                        PoplurShaderTextRenderer(
+                            time: Double(time),
+                            intensity: Double(textIntensity)
+                        )
+                    )
+                    .labelStyle(PoplurShaderLabelStyle())
+            }
+        } else {
+            content
+        }
+    }
+}
+
 struct MetalNumberShader: ViewModifier {
     var intensity: Float = 1.0
+    var animated: Bool = false
 
     // Stable epoch so time increases monotonically regardless of view rebuilds
     @State private var epoch = Date()
@@ -65,50 +131,113 @@ struct MetalNumberShader: ViewModifier {
     @ViewBuilder
     func body(content: Content) -> some View {
         if #available(iOS 17.0, *) {
-            // .periodic drives its own 60 fps clock — never stalls under camera/recording load
-            TimelineView(.periodic(from: epoch, by: 1.0 / 60.0)) { timeline in
-                let time = reduceMotion ? 0 : Float(timeline.date.timeIntervalSince(epoch))
-
-                content
-                    .colorEffect(
-                        ShaderLibrary.poplurNumberGlow(
-                            .float(time),
-                            .float(intensity)
-                        )
-                    )
-                    .shadow(color: Color(red: 1.0, green: 0.55, blue: 0.12).opacity(Double(0.28 * intensity)), radius: 8, x: 0, y: 0)
-                    .shadow(color: Color(red: 0.18, green: 0.78, blue: 1.0).opacity(Double(0.18 * intensity)), radius: 12, x: 0, y: 0)
+            if animated && !reduceMotion {
+                TimelineView(.periodic(from: epoch, by: PoplurShaderPerformance.frameInterval)) { timeline in
+                    let time = Float(timeline.date.timeIntervalSince(epoch))
+                    shadered(content, time: time)
+                }
+            } else {
+                shadered(content, time: 0)
             }
+        } else {
+            content
+        }
+    }
+
+    @ViewBuilder
+    private func shadered(_ content: Content, time: Float) -> some View {
+        if #available(iOS 17.0, *) {
+            content
+                .colorEffect(
+                    ShaderLibrary.poplurNumberGlow(
+                        .float(time),
+                        .float(intensity)
+                    )
+                )
+                .shadow(color: Color(red: 1.0, green: 0.55, blue: 0.12).opacity(Double(0.28 * intensity)), radius: 8, x: 0, y: 0)
+                .shadow(color: Color(red: 0.18, green: 0.78, blue: 1.0).opacity(Double(0.18 * intensity)), radius: 12, x: 0, y: 0)
         } else {
             content
         }
     }
 }
 
+struct PoplurIconShader: ViewModifier {
+    var intensity: Float? = nil
+    var animated: Bool = false
+
+    @State private var epoch = Date()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.poplurShaderTime) private var sharedTime
+    @Environment(\.poplurShaderIconIntensity) private var inheritedIntensity
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 17.0, *) {
+            if let sharedTime {
+                shadered(content, time: reduceMotion ? 0 : sharedTime)
+            } else if animated && !reduceMotion {
+                TimelineView(.periodic(from: epoch, by: PoplurShaderPerformance.frameInterval)) { timeline in
+                    let time = reduceMotion ? 0 : Float(timeline.date.timeIntervalSince(epoch))
+                    shadered(content, time: time)
+                }
+            } else {
+                shadered(content, time: 0)
+            }
+        } else {
+            content
+        }
+    }
+
+    @ViewBuilder
+    private func shadered(_ content: Content, time: Float) -> some View {
+        let resolvedIntensity = intensity ?? inheritedIntensity
+
+        content
+            .colorEffect(
+                ShaderLibrary.poplurNumberGlow(
+                    .float(time),
+                    .float(resolvedIntensity)
+                )
+            )
+            .shadow(color: Color(red: 0.18, green: 0.78, blue: 1.0).opacity(Double(0.12 * resolvedIntensity)), radius: 4, x: 0, y: 0)
+            .shadow(color: Color(red: 1.0, green: 0.55, blue: 0.12).opacity(Double(0.08 * resolvedIntensity)), radius: 6, x: 0, y: 0)
+    }
+}
+
 extension View {
+    func poplurGlobalShaderScope(textIntensity: Float = 0.75, iconIntensity: Float = 0.72) -> some View {
+        modifier(PoplurGlobalShaderScope(textIntensity: textIntensity, iconIntensity: iconIntensity))
+    }
+
     func poplurTextShaderScope(intensity: Float = 0.75) -> some View {
         modifier(PoplurTextShaderScope(intensity: intensity))
     }
 
-    func poplurMetalNumberShader(intensity: Float = 1.0) -> some View {
-        modifier(MetalNumberShader(intensity: intensity))
+    func poplurMetalNumberShader(intensity: Float = 1.0, animated: Bool = false) -> some View {
+        modifier(MetalNumberShader(intensity: intensity, animated: animated))
     }
 
-    func poplurTextShader(intensity: Float = 1.0) -> some View {
-        poplurMetalNumberShader(intensity: intensity)
+    func poplurTextShader(intensity: Float = 1.0, animated: Bool = false) -> some View {
+        poplurMetalNumberShader(intensity: intensity, animated: animated)
+    }
+
+    func poplurIconShader(intensity: Float? = nil, animated: Bool = false) -> some View {
+        modifier(PoplurIconShader(intensity: intensity, animated: animated))
     }
 }
 
 struct BrowserMetalGlassShader: ViewModifier {
     var intensity: Float = 1.0
 
+    @State private var epoch = Date()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @ViewBuilder
     func body(content: Content) -> some View {
         if #available(iOS 17.0, *) {
-            TimelineView(.animation) { timeline in
-                let time = reduceMotion ? 0 : Float(timeline.date.timeIntervalSinceReferenceDate)
+            TimelineView(.periodic(from: epoch, by: PoplurShaderPerformance.browserFrameInterval)) { timeline in
+                let time = reduceMotion ? 0 : Float(timeline.date.timeIntervalSince(epoch))
 
                 content
                     .colorEffect(
