@@ -69,14 +69,17 @@ final class DeviceVolumeObserver: ObservableObject {
 
         Task { @MainActor in
             let clampedLevel = max(0, min(1, nextLevel))
-            self.level = clampedLevel
-            guard isExplicitVolumeChange else { return }
+            let changed = abs(clampedLevel - self.level) > self.volumeChangeEpsilon
+            guard isExplicitVolumeChange, changed else {
+                self.level = clampedLevel
+                return
+            }
             NotificationCenter.default.post(name: .feedHardwareVolumeChanged, object: nil, userInfo: [
                 "level": clampedLevel,
                 "reason": reason ?? "unknown",
                 "isExplicit": true
             ])
-            self.handleVolumeChange(clampedLevel, forceShow: isExplicitVolumeChange)
+            self.handleVolumeChange(clampedLevel)
         }
     }
 

@@ -82,8 +82,7 @@ class DialTonePlayer {
     private func configureAudioSessionIfNeeded() {
         #if os(iOS)
         // .playback ignores the ringer/silent switch so dial tones are always audible.
-        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.mixWithOthers])
-        try? AVAudioSession.sharedInstance().setActive(true)
+        PoplurEQSync.shared.configureAudioSession(for: .mixedPlayback)
         #endif
     }
 
@@ -825,8 +824,7 @@ class PhoneScene: SKScene, ObservableObject {
 
     private func configureBootupAudioSessionIfNeeded() {
         #if os(iOS)
-        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.mixWithOthers])
-        try? AVAudioSession.sharedInstance().setActive(true)
+        PoplurEQSync.shared.configureAudioSession(for: .mixedPlayback)
         #endif
     }
 

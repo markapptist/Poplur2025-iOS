@@ -156,28 +156,27 @@ struct FullscreenVideoView: View {
     private func updatePlayback() {
         if shouldPlay {
             if !isMuted {
+                PoplurEQSync.shared.begin(.standaloneVideo)
                 activatePlaybackAudioSession()
+            } else {
+                PoplurEQSync.shared.end(.standaloneVideo)
             }
             player.play()
         } else {
             player.pause()
+            PoplurEQSync.shared.end(.standaloneVideo)
         }
     }
 
     private func activatePlaybackAudioSession() {
-        do {
-            let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback, mode: .moviePlayback, options: [])
-            try session.setActive(true, options: [])
-        } catch {
-            print("[AudioSession] Failed to activate playback session: \(error.localizedDescription)")
-        }
+        PoplurEQSync.shared.configureAudioSession(for: .feedPlayback)
     }
 
     private func teardown() {
         print("[Video] teardown() called for url: \(url)")
         removeBoundaryObserver()
         player.pause()
+        PoplurEQSync.shared.end(.standaloneVideo)
         player.removeAllItems()
         looper = nil
         if let it = item {

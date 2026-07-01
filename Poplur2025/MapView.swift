@@ -1153,10 +1153,8 @@ final class PoplurMapRadioHost: NSObject, ObservableObject, AVSpeechSynthesizerD
     }
 
     private func configureVoiceSession() throws {
-        let session = AVAudioSession.sharedInstance()
         // Keep the same mixed playback mode as rain ambience; the map handles ducking itself.
-        try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
-        try session.setActive(true, options: [])
+        PoplurEQSync.shared.configureAudioSession(for: .mixedPlayback)
     }
 
     private func finishSpeech() {
@@ -2044,9 +2042,7 @@ private final class RainAmbientAudioService: ObservableObject {
     }
 
     private func configureAudioSession() throws {
-        let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
-        try session.setActive(true, options: [])
+        PoplurEQSync.shared.configureAudioSession(for: .mixedPlayback)
     }
 
     private func rainLoopURL() throws -> URL {
@@ -2363,13 +2359,7 @@ private final class CityTourMusicPlayerService: ObservableObject {
     }
 
     private func configureCallFriendlyAudioSession() {
-        let session = AVAudioSession.sharedInstance()
-        do {
-            try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
-            try session.setActive(true, options: [])
-        } catch {
-            print("[MapTourAudio] Call-friendly audio session setup failed: \(error)")
-        }
+        PoplurEQSync.shared.configureAudioSession(for: .mixedPlayback)
     }
 
     private func handleAudioSessionInterruption(_ notification: Notification) {

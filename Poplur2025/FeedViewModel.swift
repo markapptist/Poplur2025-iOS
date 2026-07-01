@@ -65,25 +65,12 @@ final class FeedViewModel: ObservableObject {
 // MARK: - Audio helpers
 extension FeedViewModel {
     func activateAmbientAudioSessionIfNeeded() {
-        let session = AVAudioSession.sharedInstance()
-        do {
-            try session.setCategory(.ambient, mode: .default, options: [.mixWithOthers])
-            if session.isOtherAudioPlaying == false {
-                try session.setActive(true, options: [])
-            }
-        } catch {
-            print("[Audio] activateAmbientAudioSessionIfNeeded failed: \(error)")
-        }
+        PoplurEQSync.shared.configureAudioSession(for: .ambientPlayback)
     }
 
     func deactivateAudioSessionIfPossible() {
-        let session = AVAudioSession.sharedInstance()
-        do {
-            if popPlayer?.isPlaying != true {
-                try session.setActive(false, options: [.notifyOthersOnDeactivation])
-            }
-        } catch {
-            print("[Audio] deactivateAudioSessionIfPossible failed: \(error)")
+        if popPlayer?.isPlaying != true {
+            PoplurEQSync.shared.deactivateAudioSessionIfIdle()
         }
     }
 
@@ -100,7 +87,6 @@ extension FeedViewModel {
             player.prepareToPlay()
             player.play()
             popPlayer = player
-            try? AVAudioSession.sharedInstance().setActive(true)
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
                 self?.popPlayer?.stop()
                 self?.popPlayer = nil

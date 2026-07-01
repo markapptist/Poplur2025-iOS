@@ -22,10 +22,7 @@ struct FeedBumperView: View {
 
     private func setupPlayer() {
         PoplurEQSync.shared.begin(.feedBumper)
-        do {
-            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
-            try AVAudioSession.sharedInstance().setActive(true)
-        } catch { }
+        PoplurEQSync.shared.configureAudioSession(for: .voicePrompt)
 
         if let audioData = payload.audioData,
            let p = try? AVAudioPlayer(data: audioData) {

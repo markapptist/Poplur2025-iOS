@@ -85,10 +85,7 @@ struct ProfileAvatarSpeakerView: View {
         let delegate = ProfileSpeechDelegate { isSpeaking = false }
         speechDelegate = delegate
         synth.delegate = delegate
-        do {
-            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
-            try AVAudioSession.sharedInstance().setActive(true)
-        } catch {}
+        PoplurEQSync.shared.configureAudioSession(for: .voicePrompt)
         synth.speak(utterance)
     }
 

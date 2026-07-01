@@ -83,8 +83,7 @@ class HomeFeedLaunchCoverScene: SKScene {
         view.isPaused = false
         view.preferredFramesPerSecond = 60
         view.shouldCullNonVisibleNodes = false
-        try? AVAudioSession.sharedInstance().setCategory(.ambient, options: .mixWithOthers)
-        try? AVAudioSession.sharedInstance().setActive(true)
+        PoplurEQSync.shared.configureAudioSession(for: .ambientPlayback)
         configureSceneIfNeeded()
     }
 

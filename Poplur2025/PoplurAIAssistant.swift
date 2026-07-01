@@ -53,6 +53,8 @@ final class PoplurAIAssistantController: ObservableObject {
     private var listeningSuppressedUntil = Date.distantPast
     private var wakeWatchdogTask: Task<Void, Never>?
     private var audioSessionObserverTokens: [NSObjectProtocol] = []
+    private var eqSyncObserverToken: NSObjectProtocol?
+    private var isPausedForAppAudio = false
 
     var isAvailable: Bool {
         speechRecognizer?.isAvailable == true
@@ -65,11 +67,13 @@ final class PoplurAIAssistantController: ObservableObject {
     func start() {
         guard !isEnabled else {
             startWakeWatchdog()
+            installEQSyncObserver()
             beginListeningIfAuthorized()
             return
         }
         isEnabled = true
         installAudioSessionObservers()
+        installEQSyncObserver()
         startWakeWatchdog()
         requestPermissionsIfNeeded()
     }
@@ -83,8 +87,10 @@ final class PoplurAIAssistantController: ObservableObject {
         wakeWatchdogTask?.cancel()
         wakeWatchdogTask = nil
         removeAudioSessionObservers()
+        removeEQSyncObserver()
         stopRecognitionSession(cancelTask: true, finishRequest: false)
         lastHandledText = ""
+        isPausedForAppAudio = false
         isIlluminated = false
         isListeningForCommand = false
         setStatus("Say Hey Poplur")
@@ -126,6 +132,10 @@ final class PoplurAIAssistantController: ObservableObject {
 
     private func beginListeningIfAuthorized() {
         guard isEnabled else { return }
+        guard !shouldPauseForAppAudio else {
+            pauseRecognitionForAppAudio()
+            return
+        }
         guard speechRecognizer?.isAvailable == true else {
             setStatus("Speech recognition is unavailable")
             scheduleRecognitionRestart(delay: 1_500_000_000)
@@ -144,15 +154,19 @@ final class PoplurAIAssistantController: ObservableObject {
 
     private func restartRecognition() {
         guard isEnabled else { return }
+        guard !shouldPauseForAppAudio else {
+            pauseRecognitionForAppAudio()
+            return
+        }
         restartTask?.cancel()
         restartTask = nil
+        isPausedForAppAudio = false
 
         stopRecognitionSession(cancelTask: true, finishRequest: false)
 
         do {
             let audioSession = AVAudioSession.sharedInstance()
-            try audioSession.setCategory(.playAndRecord, mode: .measurement, options: [.mixWithOthers, .defaultToSpeaker, .allowBluetoothHFP])
-            try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
+            PoplurEQSync.shared.configureAudioSession(for: .wakeRecognition)
 
             let request = SFSpeechAudioBufferRecognitionRequest()
             request.shouldReportPartialResults = true
@@ -223,6 +237,10 @@ final class PoplurAIAssistantController: ObservableObject {
 
     private func scheduleRecognitionRestart(delay: UInt64 = 300_000_000) {
         guard isEnabled else { return }
+        guard !shouldPauseForAppAudio else {
+            pauseRecognitionForAppAudio()
+            return
+        }
         restartTask?.cancel()
         let now = Date()
         let secondsSinceLastRestart = now.timeIntervalSince(lastRecognitionRestartAt)
@@ -246,6 +264,10 @@ final class PoplurAIAssistantController: ObservableObject {
                 }
                 guard !Task.isCancelled else { return }
             }
+            guard !self.shouldPauseForAppAudio else {
+                self.pauseRecognitionForAppAudio()
+                return
+            }
             self.lastRecognitionRestartAt = Date()
             self.restartRecognition()
         }
@@ -257,6 +279,10 @@ final class PoplurAIAssistantController: ObservableObject {
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 18_000_000_000)
                 guard self.isEnabled, Date() >= self.listeningSuppressedUntil else { continue }
+                guard !self.shouldPauseForAppAudio else {
+                    self.pauseRecognitionForAppAudio()
+                    continue
+                }
                 guard SFSpeechRecognizer.authorizationStatus() == .authorized,
                       AVAudioSession.sharedInstance().recordPermission == .granted else { continue }
 
@@ -291,6 +317,51 @@ final class PoplurAIAssistantController: ObservableObject {
         audioSessionObserverTokens.removeAll()
     }
 
+    private var shouldPauseForAppAudio: Bool {
+        PoplurEQSync.shared.isAppAudioActive || AVAudioSession.sharedInstance().isOtherAudioPlaying
+    }
+
+    private func installEQSyncObserver() {
+        guard eqSyncObserverToken == nil else { return }
+        eqSyncObserverToken = NotificationCenter.default.addObserver(
+            forName: .poplurEQSyncChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.handleAppAudioStateChanged()
+            }
+        }
+    }
+
+    private func removeEQSyncObserver() {
+        if let eqSyncObserverToken {
+            NotificationCenter.default.removeObserver(eqSyncObserverToken)
+            self.eqSyncObserverToken = nil
+        }
+    }
+
+    private func handleAppAudioStateChanged() {
+        guard isEnabled else { return }
+        if shouldPauseForAppAudio {
+            pauseRecognitionForAppAudio()
+        } else if isPausedForAppAudio {
+            isPausedForAppAudio = false
+            beginListeningIfAuthorized()
+        }
+    }
+
+    private func pauseRecognitionForAppAudio() {
+        restartTask?.cancel()
+        restartTask = nil
+        stopRecognitionSession(cancelTask: true, finishRequest: false)
+        restorePlaybackAudioSession()
+        isPausedForAppAudio = true
+        isListeningForCommand = false
+        isIlluminated = false
+        setStatus("Say Hey Poplur")
+    }
+
     private func stopRecognitionSession(cancelTask: Bool, finishRequest: Bool) {
         if cancelTask {
             recognitionTask?.cancel()
@@ -304,6 +375,10 @@ final class PoplurAIAssistantController: ObservableObject {
             audioEngine.stop()
         }
         audioEngine.inputNode.removeTap(onBus: 0)
+    }
+
+    private func restorePlaybackAudioSession() {
+        PoplurEQSync.shared.restorePlaybackSessionAfterRecognition()
     }
 
     private func handleRecognized(_ text: String) {
@@ -438,10 +513,7 @@ final class PoplurAIAssistantController: ObservableObject {
         utterance.rate = 0.52
         utterance.pitchMultiplier = 1.05
         utterance.volume = 0.92
-        do {
-            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio, options: [.mixWithOthers])
-            try AVAudioSession.sharedInstance().setActive(true)
-        } catch {}
+        PoplurEQSync.shared.configureAudioSession(for: .voicePrompt)
         speechSynth.speak(utterance)
         if shouldResumeListening {
             let estimatedDuration = max(1.8, min(6.0, Double(text.count) * 0.055))

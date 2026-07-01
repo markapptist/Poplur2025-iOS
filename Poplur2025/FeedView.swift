@@ -1532,14 +1532,7 @@ struct FeedView: View {
     
     private func playOneShotPop() {
         guard PoplurEQSync.shared.shouldPlayTransientSound(minimumInterval: 0.14) else { return }
-        do {
-            let session = AVAudioSession.sharedInstance()
-            // Use ambient to avoid errors and allow mixing
-            try session.setCategory(.ambient, mode: .default, options: [.mixWithOthers])
-            try session.setActive(true)
-        } catch {
-            print("[PopSound] Audio session config failed: \(error)")
-        }
+        PoplurEQSync.shared.configureAudioSession(for: .ambientPlayback)
         guard let url = Bundle.main.url(forResource: "pop", withExtension: "mp3")
             ?? Bundle.main.url(forResource: "pop", withExtension: "caf")
             ?? Bundle.main.url(forResource: "pop", withExtension: "wav") else {

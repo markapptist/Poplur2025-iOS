@@ -349,13 +349,8 @@ struct CubeTabView: View {
             print("[CubeTabView] Appeared (forced 3D)")
             #if DEBUG
             if !isRunningInPreviews {
-                do {
-                    try AVAudioSession.sharedInstance().setCategory(.ambient, options: [.mixWithOthers])
-                    try AVAudioSession.sharedInstance().setActive(true)
-                    print("[CubeTabView] AVAudioSession activated")
-                } catch {
-                    print("[CubeTabView] AVAudioSession activation failed: \(error)")
-                }
+                PoplurEQSync.shared.configureAudioSession(for: .ambientPlayback)
+                print("[CubeTabView] AVAudioSession activated")
             } else {
                 print("[CubeTabView] Skipping AVAudioSession setup in previews")
             }
@@ -2517,12 +2512,7 @@ private struct CubeOnlyPreview: View {
     
     private func playPopDirect() {
         lastDirectPopError = nil
-        do {
-            try AVAudioSession.sharedInstance().setCategory(.ambient, options: [.mixWithOthers])
-            try AVAudioSession.sharedInstance().setActive(true)
-        } catch {
-            print("[CubeOnlyPreview] AVAudioSession activation failed: \(error)")
-        }
+        PoplurEQSync.shared.configureAudioSession(for: .ambientPlayback)
         let candidates: [(String, String?)] = [("pop", "mp3"), ("pop", "caf"), ("pop", "wav")]
         var loaded: URL? = nil
         for (name, ext) in candidates {

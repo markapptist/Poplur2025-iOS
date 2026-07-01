@@ -379,11 +379,7 @@ private final class TVStaticSoundPlayer: ObservableObject {
         stop()
         guard PoplurEQSync.shared.shouldPlayTransientSound(minimumInterval: 0.30) else { return }
         PoplurEQSync.shared.begin(.transientFX)
-        do {
-            let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.ambient, mode: .default, options: [.mixWithOthers])
-            try session.setActive(true)
-        } catch {}
+        PoplurEQSync.shared.configureAudioSession(for: .ambientPlayback)
         do {
             let data = Self.makeStaticWAV(duration: duration)
             let player = try AVAudioPlayer(data: data)

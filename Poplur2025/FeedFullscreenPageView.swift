@@ -137,13 +137,7 @@ struct FeedFullscreenPageView: View {
             
             // Configure audio session for playback with mixing disabled so audio is audible
             DispatchQueue.main.async {
-                let session = AVAudioSession.sharedInstance()
-                do {
-                    try session.setCategory(.playback, mode: .moviePlayback, options: [])
-                    try session.setActive(true, options: [])
-                } catch {
-                    print("[Video] Audio session setup failed (main): \(error)")
-                }
+                PoplurEQSync.shared.configureAudioSession(for: .feedPlayback)
             }
 
             let assetOptions: [String: Any] = [
