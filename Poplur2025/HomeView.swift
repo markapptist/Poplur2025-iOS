@@ -12,6 +12,14 @@ private enum PreviewEnvHomeView {
         let env = ProcessInfo.processInfo.environment
         return env["XCODE_RUNNING_FOR_PREVIEWS"] == "1" || env["XCODE_RUNNING_FOR_PLAYGROUNDS"] == "1"
     }
+
+    static var isVerificationLaunch: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("-PoplurVerificationTab")
+        #else
+        false
+        #endif
+    }
 }
 
 // Preview tab enum for environment
@@ -421,6 +429,10 @@ struct HomeView: View {
 
     // Start on feed tab instead of record tab
     @State private var selectedTab: AppTab = .feed
+
+    init(initialTab: AppTab = .feed) {
+        _selectedTab = State(initialValue: initialTab)
+    }
 
     // Routed user ID when tapping on a username in Feed
     @State private var routedUserID: String? = nil
@@ -2288,7 +2300,7 @@ struct HomeView: View {
                 }
             }
             .onAppear {
-                if !PreviewEnvHomeView.isPreview {
+                if !PreviewEnvHomeView.isPreview && !PreviewEnvHomeView.isVerificationLaunch {
                     poplurAI.start()
                 }
                 CallSessionManager.shared.startListeningForIncomingCalls()
@@ -2410,8 +2422,9 @@ struct HomeView: View {
                 triggerCameraDetectionObjectPop(objects)
             }
             .onReceive(NotificationCenter.default.publisher(for: .feedHardwareVolumeChanged)) { notification in
-	                if isFeedLaunchLoading {
-	                    feedLaunchSuppressionTask?.cancel()
+                guard notification.userInfo?["isExplicit"] as? Bool == true else { return }
+                if isFeedLaunchLoading {
+                    feedLaunchSuppressionTask?.cancel()
                     feedLaunchSuppressionTask = nil
                     isFeedLaunchLoading = false
                     deviceVolumeObserver.setSuppressed(false)
@@ -2431,7 +2444,7 @@ struct HomeView: View {
             .onChange(of: scenePhase) { _, phase in
                 switch phase {
                 case .active:
-                    if !PreviewEnvHomeView.isPreview {
+                    if !PreviewEnvHomeView.isPreview && !PreviewEnvHomeView.isVerificationLaunch {
                         poplurAI.start()
                     }
                     if selectedTab == .record {

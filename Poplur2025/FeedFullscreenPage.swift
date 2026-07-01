@@ -428,6 +428,7 @@ private struct FeedInlineVideoPlayer: View {
             .onAppear {
                 let nextPlayer = AVPlayer(url: url)
                 player = nextPlayer
+                FeedAudioManager.shared.register(nextPlayer)
                 endObserver = NotificationCenter.default.addObserver(
                     forName: .AVPlayerItemDidPlayToEndTime,
                     object: nextPlayer.currentItem,
@@ -435,14 +436,17 @@ private struct FeedInlineVideoPlayer: View {
                 ) { _ in
                     NotificationCenter.default.post(name: .FeedAdvanceToNextPost, object: nil)
                 }
-                nextPlayer.play()
+                FeedAudioManager.shared.playExclusively(nextPlayer)
             }
             .onDisappear {
                 if let endObserver {
                     NotificationCenter.default.removeObserver(endObserver)
                     self.endObserver = nil
                 }
-                player?.pause()
+                if let player {
+                    FeedAudioManager.shared.unregister(player)
+                    player.pause()
+                }
                 player = nil
             }
     }

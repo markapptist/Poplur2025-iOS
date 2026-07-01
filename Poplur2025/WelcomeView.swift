@@ -14,6 +14,7 @@ private final class WelcomeScene: SKScene {
     // Coordinator to communicate with SwiftUI
     final class Coordinator: ObservableObject {
         @Published var didTapSignIn = false
+        @Published var didTapSignUp = false
     }
 
     let coordinator: Coordinator
@@ -48,6 +49,8 @@ private final class WelcomeScene: SKScene {
     // Node names
     private let buttonShadowName = "buttonShadow"
     private let signinNodeName = "signin"
+    private let signupNodeName = "signup"
+    private let signupShadowName = "signupShadow"
 
     // Layout constants (SpriteKit points)
     private let floorY: CGFloat = 24
@@ -317,6 +320,26 @@ private final class WelcomeScene: SKScene {
             shadowSprite.run(fade, withKey: "buttonShadowFade")
         }
 
+        if let signupNode = childNode(withName: signupNodeName) {
+            signupNode.removeAllActions()
+            signupNode.alpha = 0.0
+            let sequence = SKAction.sequence([
+                fade,
+                SKAction.run { [weak self, weak signupNode] in
+                    if let node = signupNode {
+                        self?.startFloating(node: node, amplitude: 6, period: 2.5, phaseOffset: 0.25)
+                    }
+                }
+            ])
+            signupNode.run(sequence, withKey: "signupButtonFade")
+        }
+
+        if let signupShadow = childNode(withName: signupShadowName) {
+            signupShadow.removeAllActions()
+            signupShadow.alpha = 0.0
+            signupShadow.run(fade, withKey: "signupShadowFade")
+        }
+
         // After button fade finishes: play pop sound, then spawn confetti
         let playPopThenConfetti = SKAction.sequence([
             .wait(forDuration: duration),
@@ -365,7 +388,7 @@ private final class WelcomeScene: SKScene {
         }
     }
 
-    // Handle taps on the sign-in button to trigger navigation
+    // Handle taps on the welcome buttons to trigger navigation
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let touch = touches.first else { return }
         let location = touch.location(in: self)
@@ -381,6 +404,18 @@ private final class WelcomeScene: SKScene {
 
             // Notify SwiftUI to navigate
             coordinator.didTapSignIn = true
+            return
+        }
+
+        if let signupNode = childNode(withName: signupNodeName),
+           signupNode.contains(location) {
+            let pulseDown = SKAction.scale(to: 0.96, duration: 0.06)
+            let pulseUp = SKAction.scale(to: 1.0, duration: 0.08)
+            pulseDown.timingMode = .easeOut
+            pulseUp.timingMode = .easeInEaseOut
+            signupNode.run(.sequence([pulseDown, pulseUp]))
+
+            coordinator.didTapSignUp = true
         }
     }
 
@@ -637,6 +672,38 @@ private final class WelcomeScene: SKScene {
         shadowSprite.alpha = 0.0 // start hidden together with button
         shadowSprite.zPosition = 20.5
         addChild(shadowSprite)
+
+        let signupSize = CGSize(width: 220, height: 52)
+        let signupShadow = SKShapeNode(rectOf: signupSize, cornerRadius: signupSize.height / 2)
+        signupShadow.name = signupShadowName
+        signupShadow.fillColor = UIColor.black.withAlphaComponent(0.18)
+        signupShadow.strokeColor = .clear
+        signupShadow.alpha = 0.0
+        signupShadow.zPosition = 20.4
+        addChild(signupShadow)
+
+        let signupNode = SKNode()
+        signupNode.name = signupNodeName
+        signupNode.zPosition = 21
+        signupNode.alpha = 0.0
+
+        let capsule = SKShapeNode(rectOf: signupSize, cornerRadius: signupSize.height / 2)
+        capsule.fillColor = .white
+        capsule.strokeColor = UIColor.black.withAlphaComponent(0.08)
+        capsule.lineWidth = 1.5
+        capsule.zPosition = 0
+        signupNode.addChild(capsule)
+
+        let label = SKLabelNode(text: "Sign Up")
+        label.fontName = "AvenirNext-Heavy"
+        label.fontSize = 22
+        label.fontColor = .black
+        label.verticalAlignmentMode = .center
+        label.horizontalAlignmentMode = .center
+        label.zPosition = 1
+        signupNode.addChild(label)
+
+        addChild(signupNode)
     }
 
     private func layoutAll() {
@@ -649,6 +716,13 @@ private final class WelcomeScene: SKScene {
         }
         if let shadowSprite = childNode(withName: buttonShadowName) as? SKSpriteNode {
             shadowSprite.position = CGPoint(x: target.x, y: target.y - 6)
+        }
+        let signupTarget = CGPoint(x: target.x, y: target.y - 76)
+        if let signupNode = childNode(withName: signupNodeName) {
+            signupNode.position = signupTarget
+        }
+        if let signupShadow = childNode(withName: signupShadowName) {
+            signupShadow.position = CGPoint(x: signupTarget.x, y: signupTarget.y - 6)
         }
     }
 
@@ -727,6 +801,7 @@ struct WelcomeView: View {
     @State private var scene: WelcomeScene?
 
     @State private var navigateToLogin = false
+    @State private var navigateToSignup = false
 
     private func ensureScene(size: CGSize) -> WelcomeScene {
         if let s = scene { return s }
@@ -763,11 +838,30 @@ struct WelcomeView: View {
                         s.resize(to: newSize)
                     }
                 }
+
+                VStack {
+                    Spacer()
+                    AuthCubeView(
+                        title: "Welcome",
+                        systemImage: "sparkles",
+                        accent: .green,
+                        spinToken: 0,
+                        isInteractive: false
+                    )
+                    .padding(.bottom, 58)
+                }
+                .allowsHitTesting(false)
             }
             .onReceive(coordinator.$didTapSignIn) { tapped in
                 if tapped {
                     navigateToLogin = true
                     coordinator.didTapSignIn = false
+                }
+            }
+            .onReceive(coordinator.$didTapSignUp) { tapped in
+                if tapped {
+                    navigateToSignup = true
+                    coordinator.didTapSignUp = false
                 }
             }
             .onAppear {
@@ -779,6 +873,7 @@ struct WelcomeView: View {
                 if authed {
                     // Proactively tear down the SpriteKit scene before the root swaps to HomeView.
                     navigateToLogin = false
+                    navigateToSignup = false
                     teardownScene()
                 }
             }
@@ -789,6 +884,11 @@ struct WelcomeView: View {
             .navigationBarHidden(true)
             .navigationDestination(isPresented: $navigateToLogin) {
                 LoginView()
+                    .toolbar(.hidden, for: .navigationBar)
+                    .navigationBarBackButtonHidden(true)
+            }
+            .navigationDestination(isPresented: $navigateToSignup) {
+                SignUpView()
                     .toolbar(.hidden, for: .navigationBar)
                     .navigationBarBackButtonHidden(true)
             }

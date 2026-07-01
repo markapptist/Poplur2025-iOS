@@ -21,7 +21,7 @@ struct AppSettingsView: View {
     @AppStorage("poplur_phoneXLMode") private var phoneXLMode: Bool = true
     @AppStorage("poplur_tvGuideFlipAnimation") private var tvGuideFlipAnimation: Bool = true
     @AppStorage("poplur_feedChannelButtonsSpriteKit2D") private var feedChannelButtonsSpriteKit2D: Bool = false
-    @AppStorage("poplur_profileAvatarIs3D") private var profileAvatarIs3D: Bool = false
+    @AppStorage("poplur_profileAvatarIs3D") private var profileAvatarIs3D: Bool = true
 
     @State private var posts: [Post] = []
     @State private var isLoadingStats = true
@@ -428,13 +428,26 @@ struct AppSettingsView: View {
                 .font(.system(size: 18, weight: .heavy, design: .rounded))
                 .foregroundColor(theme.primaryText)
 
-            Picker("Profile Head", selection: $profileAvatarIs3D) {
-                Text("2D").tag(false)
-                Text("3D").tag(true)
+            HStack(spacing: 10) {
+                Image(systemName: "person.crop.circle.badge.checkmark")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(theme.accent)
+                Text("3D Mark Head")
+                    .font(.system(size: 15, weight: .heavy, design: .rounded))
+                    .foregroundColor(theme.primaryText)
+                Spacer()
+                Text("Active")
+                    .font(.system(size: 12, weight: .black, design: .rounded))
+                    .foregroundColor(theme.accent)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(theme.surfaceStrong, in: Capsule())
             }
-            .pickerStyle(.segmented)
+            .onAppear {
+                profileAvatarIs3D = true
+            }
 
-            Text("Choose whether your profile uses the 2D speaking head or the 3D head.")
+            Text("Your profile uses the bundled 3D Mark head.")
                 .font(.system(size: 12, weight: .semibold, design: .rounded))
                 .foregroundColor(theme.secondaryText)
         }

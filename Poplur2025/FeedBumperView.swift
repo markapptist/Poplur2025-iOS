@@ -21,6 +21,7 @@ struct FeedBumperView: View {
     }
 
     private func setupPlayer() {
+        PoplurEQSync.shared.begin(.feedBumper)
         do {
             try AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
             try AVAudioSession.sharedInstance().setActive(true)
@@ -64,6 +65,7 @@ struct FeedBumperView: View {
         player = nil
         speechSynthesizer?.stopSpeaking(at: .immediate)
         speechSynthesizer = nil
+        PoplurEQSync.shared.end(.feedBumper)
     }
 
     private func finish() {

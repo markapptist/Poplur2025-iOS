@@ -377,6 +377,8 @@ private final class TVStaticSoundPlayer: ObservableObject {
 
     func play(duration: TimeInterval) {
         stop()
+        guard PoplurEQSync.shared.shouldPlayTransientSound(minimumInterval: 0.30) else { return }
+        PoplurEQSync.shared.begin(.transientFX)
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.ambient, mode: .default, options: [.mixWithOthers])
@@ -386,14 +388,16 @@ private final class TVStaticSoundPlayer: ObservableObject {
             let data = Self.makeStaticWAV(duration: duration)
             let player = try AVAudioPlayer(data: data)
             player.numberOfLoops = 0
-            player.volume = 0.18
+            player.volume = 0.14
             player.prepareToPlay()
             player.play()
             self.player = player
             let item = DispatchWorkItem { [weak self] in self?.stop() }
             stopWorkItem = item
             DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: item)
-        } catch {}
+        } catch {
+            PoplurEQSync.shared.end(.transientFX)
+        }
     }
 
     func stop() {
@@ -401,6 +405,7 @@ private final class TVStaticSoundPlayer: ObservableObject {
         stopWorkItem = nil
         player?.stop()
         player = nil
+        PoplurEQSync.shared.end(.transientFX)
     }
 
     private static func makeStaticWAV(duration: TimeInterval) -> Data {

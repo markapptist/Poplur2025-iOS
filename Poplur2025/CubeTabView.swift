@@ -416,8 +416,6 @@ private struct FloatingCube: View {
 }
 
 private struct CubeSceneView: UIViewRepresentable {
-    private static let cubeTargetExtent: Float = 1.3
-
     @Binding var selectedTab: AppTab
     @Binding var rotationIndex: Int
     @Binding var previewHover: Bool
@@ -763,8 +761,7 @@ private struct CubeSceneView: UIViewRepresentable {
             node = runtimeModelNode
         } else {
             // Lean fallback cube geometry with small chamfer (lower tessellation).
-            let boxSize = CGFloat(Self.cubeTargetExtent)
-            let box = SCNBox(width: boxSize, height: boxSize, length: boxSize, chamferRadius: boxSize * 0.192)
+            let box = SCNBox(width: 1.3, height: 1.3, length: 1.3, chamferRadius: 0.25)
             box.chamferSegmentCount = 8
             generatedBox = box
             node = SCNNode(geometry: box)
@@ -846,7 +843,7 @@ private struct CubeSceneView: UIViewRepresentable {
             (minBounds.y + maxBounds.y) / 2,
             (minBounds.z + maxBounds.z) / 2
         )
-        let scale = Self.cubeTargetExtent / maxExtent
+        let scale = Float(1.3) / maxExtent
         node.pivot = SCNMatrix4MakeTranslation(center.x, center.y, center.z)
         node.scale = SCNVector3(scale, scale, scale)
     }
@@ -915,22 +912,13 @@ private struct CubeSceneView: UIViewRepresentable {
 
     private func runtimeCubeTexture(assetName: String, suffix: String) -> UIImage? {
         let resourceName = "\(assetName)_texture_\(suffix)"
-        for extensionName in ["png", "jpg"] {
-            if let image = UIImage(named: "\(resourceName).\(extensionName)") {
-                return image
-            }
-        }
-        if let image = UIImage(named: resourceName) {
+        if let image = UIImage(named: "\(resourceName).jpg") ?? UIImage(named: resourceName) {
             return image
         }
-        for extensionName in ["png", "jpg"] {
-            let url = Bundle.main.url(forResource: resourceName, withExtension: extensionName, subdirectory: "CubeModels")
-                ?? Bundle.main.url(forResource: resourceName, withExtension: extensionName)
-            if let url, let image = UIImage(contentsOfFile: url.path) {
-                return image
-            }
-        }
-        return nil
+        let url = Bundle.main.url(forResource: resourceName, withExtension: "jpg", subdirectory: "CubeModels")
+            ?? Bundle.main.url(forResource: resourceName, withExtension: "jpg")
+        guard let url else { return nil }
+        return UIImage(contentsOfFile: url.path)
     }
 
     private func uiColor(_ c: Color) -> UIColor { UIColor(c) }
@@ -1392,6 +1380,22 @@ private struct CubeSceneView: UIViewRepresentable {
 
         private var rotationSpeedMultiplier: Double { parent.rotationSpeedMultiplier }
 
+        private var selectedTabNeedsContinuousRenderer: Bool {
+            parent.selectedTab == .record || parent.selectedTab == .map
+        }
+
+        private func setRendererHot(_ hot: Bool) {
+            guard let scnView = view else { return }
+            scnView.isPlaying = true
+            scnView.rendersContinuously = hot || selectedTabNeedsContinuousRenderer
+        }
+
+        private func restoreRendererMode() {
+            guard let scnView = view else { return }
+            scnView.rendersContinuously = selectedTabNeedsContinuousRenderer
+            scnView.setNeedsDisplay()
+        }
+
         // Safe AVAudioPlayer — used in place of SCNAction.playAudio/SCNAudioPlayer which
         // crash when AVAudioEngine is interrupted (app background) or scene tears down (tab switch).
         private lazy var popAVPlayer: AVAudioPlayer? = {
@@ -1500,7 +1504,7 @@ private struct CubeSceneView: UIViewRepresentable {
                 self?.view?.rendersContinuously = false
             }
             NotificationCenter.default.addObserver(forName: Notification.Name("RecordingStopped"), object: nil, queue: .main) { [weak self] _ in
-                self?.view?.rendersContinuously = true
+                self?.restoreRendererMode()
             }
             // ML object detection → one-shot pop when camera finds something new
             NotificationCenter.default.addObserver(forName: Notification.Name("MLCubePopTrigger"), object: nil, queue: .main) { [weak self] _ in
@@ -1715,6 +1719,7 @@ private struct CubeSceneView: UIViewRepresentable {
 
             switch gesture.state {
             case .began:
+                setRendererHot(true)
                 isInteracting = true
                 if isRunningInPreviews,
                    let scnView = view,
@@ -1809,6 +1814,7 @@ private struct CubeSceneView: UIViewRepresentable {
 
         private func animateToYaw(_ yaw: Float, bouncy: Bool = false) {
             guard let scnView = view, let cube = scnView.scene?.rootNode.childNode(withName: "cube", recursively: true) else { return }
+            setRendererHot(true)
 
             // Suspend spin and remove existing spin if any
             self.suspendSpin = true
@@ -1828,6 +1834,7 @@ private struct CubeSceneView: UIViewRepresentable {
                 self.applyCombinedRotation(to: cube)
                 self.isInteracting = false
                 self.suspendSpin = false
+                self.restoreRendererMode()
                 if isRunningInPreviews && self.parent.enablePreviewSpin {
                     let spin = SCNAction.repeatForever(SCNAction.rotateBy(x: 0, y: CGFloat.pi * 2, z: 0, duration: 8.0))
                     spin.timingMode = .linear
@@ -2002,6 +2009,7 @@ private struct CubeSceneView: UIViewRepresentable {
 
         private func playPopSafely() {
             guard let player = popAVPlayer else { return }
+            guard PoplurEQSync.shared.shouldPlayTransientSound(minimumInterval: 0.16) else { return }
             if player.isPlaying { player.stop() }
             player.currentTime = 0
             player.play()
@@ -2123,6 +2131,7 @@ private struct CubeSceneView: UIViewRepresentable {
 
         func triggerPreviewPop() {
             guard let scnView = view, let cube = scnView.scene?.rootNode.childNode(withName: "cube", recursively: true) else { return }
+            setRendererHot(true)
             
             let shouldPlaySound = parent.previewPopSoundEnabled
             
@@ -2131,7 +2140,8 @@ private struct CubeSceneView: UIViewRepresentable {
             up.timingMode = .easeInEaseOut
             let down = SCNAction.scale(to: 1.0, duration: 0.40)
             down.timingMode = .easeInEaseOut
-            cube.runAction(SCNAction.sequence([up, down]), forKey: "previewPop")
+            let restore = SCNAction.run { [weak self] _ in self?.restoreRendererMode() }
+            cube.runAction(SCNAction.sequence([up, down, restore]), forKey: "previewPop")
             
             if shouldPlaySound {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
@@ -2143,6 +2153,7 @@ private struct CubeSceneView: UIViewRepresentable {
         enum YawDirection { case left, right }
         func applyYaw(steps: Int, direction: YawDirection) {
             guard steps != 0, let scnView = view, let cube = scnView.scene?.rootNode.childNode(withName: "cube", recursively: true) else { return }
+            setRendererHot(true)
             // Pause any continuous spin during manual yaw so the action isn't overridden
             let wasSpinning = cube.action(forKey: "previewSpin") != nil
             if wasSpinning { cube.removeAction(forKey: "previewSpin") }
@@ -2167,6 +2178,7 @@ private struct CubeSceneView: UIViewRepresentable {
                     spin.timingMode = .linear
                     cube.runAction(spin, forKey: "previewSpin")
                 }
+                self.restoreRendererMode()
             }
         }
 

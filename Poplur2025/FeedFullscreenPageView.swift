@@ -325,8 +325,11 @@ struct FeedFullscreenPageView: View {
             }
             timeObserver = nil
             itemObservation = nil
-            player?.pause()
-            player?.replaceCurrentItem(with: nil)
+            if let player {
+                FeedAudioManager.shared.unregister(player)
+                player.pause()
+                player.replaceCurrentItem(with: nil)
+            }
             player = nil
         }
 

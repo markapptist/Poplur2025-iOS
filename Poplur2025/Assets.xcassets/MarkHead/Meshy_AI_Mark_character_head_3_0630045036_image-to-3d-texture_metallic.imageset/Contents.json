@@ -1,0 +1,21 @@
+{
+  "images" : [
+    {
+      "filename" : "Meshy_AI_Mark_character_head_3_0630045036_image-to-3d-texture_metallic.png",
+      "idiom" : "universal",
+      "scale" : "1x"
+    },
+    {
+      "idiom" : "universal",
+      "scale" : "2x"
+    },
+    {
+      "idiom" : "universal",
+      "scale" : "3x"
+    }
+  ],
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  }
+}

@@ -1,7 +1,6 @@
 import SwiftUI
 import AVFoundation
-import Combine
-import AudioToolbox
+import UIKit
 
 // MARK: - Notification name (shared between DeviceVolumeObserver and HomeView)
 
@@ -17,29 +16,22 @@ final class DeviceVolumeObserver: ObservableObject {
     @Published private(set) var isShowing: Bool = false
 
     private let session = AVAudioSession.sharedInstance()
-    private var observation: NSKeyValueObservation?
     private var volumeNotificationObserver: NSObjectProtocol?
-    private var refreshTimer: AnyCancellable?
     private var hideTask: Task<Void, Never>?
-    private var volumePopPlayer: AVAudioPlayer?
     private var lastVolumePopTime: TimeInterval = 0
+    private var lastShownLevel: Float = 0
+    private var lastShowTime: TimeInterval = 0
     private var isSuppressed = false
+
+    private let volumeChangeEpsilon: Float = 0.005
+    private let duplicateDisplayInterval: TimeInterval = 1.35
 
     init() {
         level = AVAudioSession.sharedInstance().outputVolume
+        lastShownLevel = level
 
         guard ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] != "1" else { return }
 
-        Task { @MainActor in
-            try? AVAudioSession.sharedInstance().setCategory(.ambient, options: [.mixWithOthers])
-            try? AVAudioSession.sharedInstance().setActive(true)
-        }
-        observation = session.observe(\.outputVolume, options: [.old, .new]) { [weak self] session, change in
-            let nextLevel = change.newValue ?? session.outputVolume
-            Task { @MainActor in
-                self?.handleVolumeChange(nextLevel, forceShow: true)
-            }
-        }
         volumeNotificationObserver = NotificationCenter.default.addObserver(
             forName: NSNotification.Name("AVSystemController_SystemVolumeDidChangeNotification"),
             object: nil,
@@ -47,22 +39,13 @@ final class DeviceVolumeObserver: ObservableObject {
         ) { [weak self] notification in
             self?.handleSystemVolumeNotification(notification)
         }
-        refreshTimer = Timer.publish(every: 0.25, on: .main, in: .common)
-            .autoconnect()
-            .sink { [weak self] _ in
-                guard let self else { return }
-                self.handleVolumeChange(self.session.outputVolume)
-            }
     }
 
     deinit {
-        observation?.invalidate()
         if let volumeNotificationObserver {
             NotificationCenter.default.removeObserver(volumeNotificationObserver)
         }
-        refreshTimer?.cancel()
         hideTask?.cancel()
-        volumePopPlayer?.stop()
     }
 
     func showForHardwareVolumePress(level newLevel: Float? = nil) {
@@ -82,57 +65,53 @@ final class DeviceVolumeObserver: ObservableObject {
         let notifiedLevel = notification.userInfo?["AVSystemController_AudioVolumeNotificationParameter"] as? Float
         let reason = notification.userInfo?["AVSystemController_AudioVolumeChangeReasonNotificationParameter"] as? String
         let nextLevel = notifiedLevel ?? AVAudioSession.sharedInstance().outputVolume
+        let isExplicitVolumeChange = reason == "ExplicitVolumeChange"
 
         Task { @MainActor in
+            let clampedLevel = max(0, min(1, nextLevel))
+            self.level = clampedLevel
+            guard isExplicitVolumeChange else { return }
             NotificationCenter.default.post(name: .feedHardwareVolumeChanged, object: nil, userInfo: [
-                "level": nextLevel,
-                "reason": reason ?? "unknown"
+                "level": clampedLevel,
+                "reason": reason ?? "unknown",
+                "isExplicit": true
             ])
-            self.handleVolumeChange(nextLevel, forceShow: reason == nil || reason == "ExplicitVolumeChange")
+            self.handleVolumeChange(clampedLevel, forceShow: isExplicitVolumeChange)
         }
     }
 
     private func handleVolumeChange(_ newLevel: Float, forceShow: Bool = false) {
         let clampedLevel = max(0, min(1, newLevel))
-        let changed = abs(clampedLevel - level) > 0.005
+        let changed = abs(clampedLevel - level) > volumeChangeEpsilon
         level = clampedLevel
         guard !isSuppressed else { return }
-        if changed || forceShow {
-            playVolumePop()
-            showTemporarily()
-        }
+        guard changed || forceShow else { return }
+
+        let now = Date().timeIntervalSinceReferenceDate
+        let duplicateForcedEvent = forceShow
+            && !changed
+            && abs(clampedLevel - lastShownLevel) <= volumeChangeEpsilon
+            && now - lastShowTime < duplicateDisplayInterval
+        guard !duplicateForcedEvent else { return }
+
+        lastShownLevel = clampedLevel
+        lastShowTime = now
+        playVolumePop()
+        showTemporarily()
     }
 
     private func playVolumePop() {
         let now = Date().timeIntervalSinceReferenceDate
         guard now - lastVolumePopTime > 0.08 else { return }
         lastVolumePopTime = now
-
-        guard let url = Bundle.main.url(forResource: "pop", withExtension: "mp3")
-                ?? Bundle.main.url(forResource: "pop", withExtension: "wav") else {
-            AudioServicesPlaySystemSound(1104)
-            return
-        }
-
-        do {
-            try? session.setActive(true)
-            if volumePopPlayer == nil {
-                let player = try AVAudioPlayer(contentsOf: url)
-                player.numberOfLoops = 0
-                player.volume = 0.9
-                player.prepareToPlay()
-                volumePopPlayer = player
-            }
-            volumePopPlayer?.currentTime = 0
-            volumePopPlayer?.play()
-        } catch {
-            AudioServicesPlaySystemSound(1104)
-        }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred(intensity: 0.45)
     }
 
     private func showTemporarily() {
         hideTask?.cancel()
-        withAnimation(.easeOut(duration: 0.12)) { isShowing = true }
+        if !isShowing {
+            withAnimation(.easeOut(duration: 0.12)) { isShowing = true }
+        }
         hideTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 1_100_000_000)
             withAnimation(.easeIn(duration: 0.18)) { isShowing = false }

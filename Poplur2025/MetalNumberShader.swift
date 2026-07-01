@@ -36,6 +36,7 @@ private struct PoplurShaderTextRenderer: TextRenderer {
 
 struct PoplurTextShaderScope: ViewModifier {
     var intensity: Float = 0.75
+    var animated: Bool = false
 
     @State private var epoch = Date()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -43,13 +44,23 @@ struct PoplurTextShaderScope: ViewModifier {
     @ViewBuilder
     func body(content: Content) -> some View {
         if #available(iOS 17.0, macOS 14.0, tvOS 17.0, watchOS 10.0, *) {
-            TimelineView(.periodic(from: epoch, by: PoplurShaderPerformance.frameInterval)) { timeline in
-                let time = reduceMotion ? 0 : timeline.date.timeIntervalSince(epoch)
+            if animated && !reduceMotion {
+                TimelineView(.periodic(from: epoch, by: PoplurShaderPerformance.frameInterval)) { timeline in
+                    let time = timeline.date.timeIntervalSince(epoch)
 
+                    content
+                        .textRenderer(
+                            PoplurShaderTextRenderer(
+                                time: time,
+                                intensity: Double(intensity)
+                            )
+                        )
+                }
+            } else {
                 content
                     .textRenderer(
                         PoplurShaderTextRenderer(
-                            time: time,
+                            time: 0,
                             intensity: Double(intensity)
                         )
                     )
@@ -93,6 +104,7 @@ private struct PoplurShaderLabelStyle: LabelStyle {
 struct PoplurGlobalShaderScope: ViewModifier {
     var textIntensity: Float = 0.75
     var iconIntensity: Float = 0.72
+    var animated: Bool = false
 
     @State private var epoch = Date()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -100,15 +112,28 @@ struct PoplurGlobalShaderScope: ViewModifier {
     @ViewBuilder
     func body(content: Content) -> some View {
         if #available(iOS 17.0, macOS 14.0, tvOS 17.0, watchOS 10.0, *) {
-            TimelineView(.periodic(from: epoch, by: PoplurShaderPerformance.frameInterval)) { timeline in
-                let time = reduceMotion ? 0 : Float(timeline.date.timeIntervalSince(epoch))
+            if animated && !reduceMotion {
+                TimelineView(.periodic(from: epoch, by: PoplurShaderPerformance.frameInterval)) { timeline in
+                    let time = Float(timeline.date.timeIntervalSince(epoch))
 
+                    content
+                        .environment(\.poplurShaderTime, time)
+                        .environment(\.poplurShaderIconIntensity, iconIntensity)
+                        .textRenderer(
+                            PoplurShaderTextRenderer(
+                                time: Double(time),
+                                intensity: Double(textIntensity)
+                            )
+                        )
+                        .labelStyle(PoplurShaderLabelStyle())
+                }
+            } else {
                 content
-                    .environment(\.poplurShaderTime, time)
+                    .environment(\.poplurShaderTime, 0)
                     .environment(\.poplurShaderIconIntensity, iconIntensity)
                     .textRenderer(
                         PoplurShaderTextRenderer(
-                            time: Double(time),
+                            time: 0,
                             intensity: Double(textIntensity)
                         )
                     )
@@ -206,12 +231,12 @@ struct PoplurIconShader: ViewModifier {
 }
 
 extension View {
-    func poplurGlobalShaderScope(textIntensity: Float = 0.75, iconIntensity: Float = 0.72) -> some View {
-        modifier(PoplurGlobalShaderScope(textIntensity: textIntensity, iconIntensity: iconIntensity))
+    func poplurGlobalShaderScope(textIntensity: Float = 0.75, iconIntensity: Float = 0.72, animated: Bool = false) -> some View {
+        modifier(PoplurGlobalShaderScope(textIntensity: textIntensity, iconIntensity: iconIntensity, animated: animated))
     }
 
-    func poplurTextShaderScope(intensity: Float = 0.75) -> some View {
-        modifier(PoplurTextShaderScope(intensity: intensity))
+    func poplurTextShaderScope(intensity: Float = 0.75, animated: Bool = false) -> some View {
+        modifier(PoplurTextShaderScope(intensity: intensity, animated: animated))
     }
 
     func poplurMetalNumberShader(intensity: Float = 1.0, animated: Bool = false) -> some View {

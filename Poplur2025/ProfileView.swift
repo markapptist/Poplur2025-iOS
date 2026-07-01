@@ -159,7 +159,8 @@ struct ProfileView: View {
     @State private var displayUsername: String? = nil
     @State private var userProfile: UserProfile?
 
-    @AppStorage("poplur_profileAvatarIs3D") private var profileAvatarIs3D = false
+    @AppStorage("poplur_profileAvatarIs3D") private var profileAvatarIs3D = true
+    @AppStorage("poplur_profileAvatarModeInitialized.v1") private var profileAvatarModeInitialized = false
     @AppStorage("poplur.profile.heyPoplurTutorialSeen.v1") private var hasSeenHeyPoplurProfileTutorial = false
     @State private var showHeyPoplurProfileTutorial = false
     @State private var myPosts: [Post] = []
@@ -357,13 +358,17 @@ struct ProfileView: View {
                     setUsername: { _ in }, // Will be handled in the setter
                     getEmail: { profile.email },
                     setEmail: { _ in }, // Will be handled in the setter
-                    getProfilePictureURL: { profile.profilePictureURL }
+                    getProfilePictureURL: { profile.profilePictureURL },
+                    getAccountType: { profile.accountType },
+                    getBusinessProfile: { profile.businessProfile },
+                    setBusinessProfile: { _ in } // Will be handled in the setter
                 )
             },
             set: { newValue in
                 if let newValue = newValue, var profile = userProfile {
                     profile.username = newValue.username
                     profile.email = newValue.email
+                    profile.businessProfile = newValue.businessProfile
                     userProfile = profile
                 }
             }
@@ -515,6 +520,7 @@ struct ProfileView: View {
         VStack(spacing: 10) {
             avatarRow
             usernameRow
+            businessIdentityRow
             modeSwitcher
         }
         .padding(.top, isOwnProfile ? 8 : 0)
@@ -1033,6 +1039,9 @@ struct ProfileView: View {
         if !isRunningInPreviews {
             print("📊 [ProfileView] Initial .task running for userID: \(userID ?? "nil")")
             _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound])
+            if let uid = effectiveUserID {
+                await loadUserProfile(for: uid)
+            }
             await loadMyPosts()
             await MainActor.run {
                 self.averageRadius = Double(self.averagePostRadius())
@@ -1059,6 +1068,7 @@ struct ProfileView: View {
 
     private func handleProfileAppear() {
         print("👀 [ProfileView] onAppear isOwnProfile=\(isOwnProfile) effectiveUserID=\(effectiveUserID ?? "nil")")
+        initializeProfileHeadModeIfNeeded()
         NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
         postMainTabChildRouteVisibility()
         showHeyPoplurProfileTutorialIfNeeded()
@@ -1081,6 +1091,16 @@ struct ProfileView: View {
                 }
                 self.refreshDailyNotificationsFromCurrentPosts()
             }
+        }
+    }
+
+    private func initializeProfileHeadModeIfNeeded() {
+        guard isOwnProfile else { return }
+        if !profileAvatarIs3D {
+            profileAvatarIs3D = true
+        }
+        if !profileAvatarModeInitialized {
+            profileAvatarModeInitialized = true
         }
     }
 
@@ -1348,6 +1368,10 @@ struct ProfileView: View {
         resetDisplayedProfileState()
 
         Task {
+            if let uid = effectiveUserID {
+                await loadUserProfile(for: uid)
+            }
+
             await loadMyPosts()
 
             if let uid = effectiveUserID {
@@ -1387,7 +1411,7 @@ struct ProfileView: View {
     }
     
     private var avatarContent: some View {
-        let size: CGFloat = profileAvatarIs3D ? 180 : 96
+        let size: CGFloat = isOwnProfile ? 180 : 96
 
         return ZStack {
             if isOwnProfile {
@@ -1418,7 +1442,7 @@ struct ProfileView: View {
                 )
         )
         .shadow(color: skinTheme.shadow, radius: 10, x: 0, y: 6)
-        .animation(.spring(response: 0.55, dampingFraction: 0.72), value: profileAvatarIs3D)
+        .animation(.spring(response: 0.55, dampingFraction: 0.72), value: isOwnProfile)
         .overlay(alignment: .bottomTrailing) {
             if lastHeadModelURL != nil && isOwnProfile {
                 Button {
@@ -1486,7 +1510,7 @@ struct ProfileView: View {
     }
 
     private var usernameRow: some View {
-        Text(displayUsername ?? (isOwnProfile ? (auth.currentUser?.email?.components(separatedBy: "@").first?.uppercased() ?? "USERNAME") : usernameForDemoUser()))
+        Text(profileTitleText)
             .font(.system(size: 22, weight: .heavy, design: .rounded))
             .foregroundColor(.black)
             .poplurTextShader(intensity: 0.9)
@@ -1500,6 +1524,43 @@ struct ProfileView: View {
             .onChange(of: userProfile) { _, _ in
                 headCycler.stop()
             }
+    }
+
+    private var profileTitleText: String {
+        if let userProfile, userProfile.isBusinessAccount {
+            return userProfile.profileDisplayName.uppercased()
+        }
+        return displayUsername ?? (isOwnProfile ? (auth.currentUser?.email?.components(separatedBy: "@").first?.uppercased() ?? "USERNAME") : usernameForDemoUser())
+    }
+
+    @ViewBuilder
+    private var businessIdentityRow: some View {
+        if let businessProfile = userProfile?.businessProfile, userProfile?.isBusinessAccount == true {
+            VStack(spacing: 6) {
+                HStack(spacing: 7) {
+                    Image(systemName: businessProfile.verificationStatus == .verified ? "checkmark.seal.fill" : "building.2.crop.circle.fill")
+                        .poplurIconShader()
+                        .font(.system(size: 12, weight: .black))
+                        .foregroundStyle(businessStatusColor(businessProfile.verificationStatus))
+                    Text(businessProfile.verificationStatus == .verified ? "Verified Business" : businessProfile.verificationStatus.title)
+                        .font(.system(size: 11, weight: .black, design: .rounded))
+                        .foregroundStyle(.black)
+                }
+                .padding(.horizontal, 11)
+                .padding(.vertical, 7)
+                .background(Capsule().fill(businessStatusColor(businessProfile.verificationStatus).opacity(0.16)))
+                .overlay(Capsule().stroke(businessStatusColor(businessProfile.verificationStatus).opacity(0.48), lineWidth: 1))
+
+                if !businessProfile.category.isEmpty || !businessProfile.address.isEmpty {
+                    Text([businessProfile.category, businessProfile.address].filter { !$0.isEmpty }.joined(separator: " - "))
+                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .foregroundStyle(.black.opacity(0.56))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
+                        .padding(.horizontal, 24)
+                }
+            }
+        }
     }
 
     private var profileStatsSummaryRow: some View {
@@ -1568,6 +1629,16 @@ struct ProfileView: View {
             return String(format: "%.1f KM", km)
         }
         return "\(meters) M"
+    }
+
+    private func businessStatusColor(_ status: BusinessVerificationStatus) -> Color {
+        switch status {
+        case .notVerified: return .gray
+        case .pendingReview: return .orange
+        case .verified: return .green
+        case .rejected: return .red
+        case .needsMoreInfo: return .blue
+        }
     }
     
     // Helper to generate readable username for demo users
@@ -2115,6 +2186,25 @@ struct ProfileView: View {
                     self.profileImageURL = url
                 }
             }
+        }
+    }
+
+    private func loadUserProfile(for uid: String) async {
+        guard !uid.isEmpty else { return }
+        do {
+            let document = try await Firestore.firestore().collection("users").document(uid).getDocument()
+            guard let profile = UserProfile(document: document) else { return }
+            await MainActor.run {
+                self.userProfile = profile
+                if profile.isBusinessAccount {
+                    self.displayUsername = profile.profileDisplayName.uppercased()
+                }
+                if self.profileImageURL == nil {
+                    self.profileImageURL = profile.profilePictureURL
+                }
+            }
+        } catch {
+            print("Profile: failed to load user profile -> \(error.localizedDescription)")
         }
     }
 

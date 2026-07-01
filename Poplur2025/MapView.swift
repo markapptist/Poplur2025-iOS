@@ -1057,6 +1057,7 @@ final class PoplurMapRadioHost: NSObject, ObservableObject, AVSpeechSynthesizerD
         onSpeechFinished = onFinished
 
         isLive = true
+        PoplurEQSync.shared.begin(.mapRadio)
         let token = UUID()
         speechToken = token
 
@@ -1115,6 +1116,7 @@ final class PoplurMapRadioHost: NSObject, ObservableObject, AVSpeechSynthesizerD
         generatedVoicePlayer = nil
         synth.stopSpeaking(at: .immediate)
         isLive = false
+        PoplurEQSync.shared.end(.mapRadio)
         let completion = onSpeechFinished
         onSpeechFinished = nil
         if notifyFinished {
@@ -1163,6 +1165,7 @@ final class PoplurMapRadioHost: NSObject, ObservableObject, AVSpeechSynthesizerD
         generatedVoicePlayer?.delegate = nil
         generatedVoicePlayer = nil
         isLive = false
+        PoplurEQSync.shared.end(.mapRadio)
         let completion = onSpeechFinished
         onSpeechFinished = nil
         completion?()
@@ -1948,6 +1951,24 @@ private final class RainAmbientAudioService: ObservableObject {
     private var targetVolume: Float = 0
     private var isDuckedForVoice = false
     private var lastAppliedVolume: Float = -1
+    private var eqObserver: NSObjectProtocol?
+
+    init() {
+        eqObserver = NotificationCenter.default.addObserver(forName: .poplurEQSyncChanged, object: nil, queue: .main) { [weak self] _ in
+            guard let self, let player = self.player else { return }
+            self.applyVolume(
+                self.outputVolume(for: self.targetVolume),
+                to: player,
+                fadeDuration: PoplurAudioMix.rainVoiceDuckDuration
+            )
+        }
+    }
+
+    deinit {
+        if let eqObserver {
+            NotificationCenter.default.removeObserver(eqObserver)
+        }
+    }
 
     func update(for weatherState: WeatherVisualizationState) {
         switch weatherState.kind {
@@ -1960,6 +1981,7 @@ private final class RainAmbientAudioService: ObservableObject {
 
     func play(volume: Float) {
         targetVolume = volume
+        PoplurEQSync.shared.begin(.rainAmbient)
         let mixedVolume = outputVolume(for: volume)
         if let player, player.isPlaying {
             applyVolume(mixedVolume, to: player, fadeDuration: PoplurAudioMix.rainFadeDuration)
@@ -1979,6 +2001,7 @@ private final class RainAmbientAudioService: ObservableObject {
             applyVolume(mixedVolume, to: player, fadeDuration: PoplurAudioMix.rainFadeDuration)
             self.player = player
         } catch {
+            PoplurEQSync.shared.end(.rainAmbient)
             print("[RainAmbientAudio] Failed to start rain audio: \(error)")
         }
     }
@@ -2001,7 +2024,8 @@ private final class RainAmbientAudioService: ObservableObject {
     }
 
     private func outputVolume(for volume: Float) -> Float {
-        isDuckedForVoice ? volume * PoplurAudioMix.rainDuckMultiplier : volume
+        let voiceMultiplier: Float = isDuckedForVoice ? PoplurAudioMix.rainDuckMultiplier : 1.0
+        return volume * min(voiceMultiplier, PoplurEQSync.shared.rainVolumeMultiplier)
     }
 
     func stop() {
@@ -2010,6 +2034,7 @@ private final class RainAmbientAudioService: ObservableObject {
         let stoppingPlayer = player
         stoppingPlayer?.fadeOutAndStop(duration: 0.65)
         player = nil
+        PoplurEQSync.shared.end(.rainAmbient)
     }
 
     private func applyVolume(_ volume: Float, to player: AVAudioPlayer, fadeDuration: TimeInterval) {
@@ -2110,6 +2135,7 @@ private final class CityTourMusicPlayerService: ObservableObject {
     private var preparingStopID: String?
     private var isPreparingPlayback = false
     private var interruptionObserver: NSObjectProtocol?
+    private var eqObserver: NSObjectProtocol?
 
     var isPlaybackActive: Bool {
         if isPreparingPlayback { return true }
@@ -2129,11 +2155,20 @@ private final class CityTourMusicPlayerService: ObservableObject {
                 self?.handleAudioSessionInterruption(notification)
             }
         }
+        eqObserver = NotificationCenter.default.addObserver(forName: .poplurEQSyncChanged, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                self.fadePlayerVolume(to: self.lastPlayerVolume, duration: 0.25)
+            }
+        }
     }
 
     deinit {
         if let interruptionObserver {
             NotificationCenter.default.removeObserver(interruptionObserver)
+        }
+        if let eqObserver {
+            NotificationCenter.default.removeObserver(eqObserver)
         }
     }
 
@@ -2178,6 +2213,7 @@ private final class CityTourMusicPlayerService: ObservableObject {
         player?.pause()
         player = nil
         currentTrackTitle = nil
+        PoplurEQSync.shared.end(.cityMusic)
     }
 
     func duckForRadio() {
@@ -2216,7 +2252,7 @@ private final class CityTourMusicPlayerService: ObservableObject {
 
         let item = AVPlayerItem(url: url)
         let newPlayer = AVPlayer(playerItem: item)
-        newPlayer.volume = fadeIn ? 0 : lastPlayerVolume
+        newPlayer.volume = fadeIn ? 0 : resolvedMusicVolume(for: lastPlayerVolume)
         newPlayer.isMuted = false
         // Keep default stalling behaviour (true) so streaming URLs buffer properly
         player = newPlayer
@@ -2255,6 +2291,7 @@ private final class CityTourMusicPlayerService: ObservableObject {
             }
         }
 
+        PoplurEQSync.shared.begin(.cityMusic)
         newPlayer.play()
         playbackFallbackTask = Task { [weak self, weak item] in
             try? await Task.sleep(nanoseconds: 6_000_000_000)
@@ -2286,6 +2323,7 @@ private final class CityTourMusicPlayerService: ObservableObject {
             activeTracks = []
             activeTrackIndex = 0
             activeStopID = nil
+            PoplurEQSync.shared.end(.cityMusic)
         }
     }
 
@@ -2293,6 +2331,7 @@ private final class CityTourMusicPlayerService: ObservableObject {
         guard let player else { return }
         volumeFadeTask?.cancel()
         let startVolume = player.volume
+        let outputTargetVolume = resolvedMusicVolume(for: targetVolume)
         let steps = max(1, Int(duration * 30))
         volumeFadeTask = Task { [weak self, weak player] in
             for step in 1...steps {
@@ -2300,11 +2339,18 @@ private final class CityTourMusicPlayerService: ObservableObject {
                 let progress = Float(step) / Float(steps)
                 await MainActor.run {
                     guard let self, let player, self.player === player else { return }
-                    player.volume = startVolume + (targetVolume - startVolume) * progress
+                    player.volume = startVolume + (outputTargetVolume - startVolume) * progress
                 }
                 try? await Task.sleep(nanoseconds: UInt64((duration / Double(steps)) * 1_000_000_000))
             }
         }
+    }
+
+    private func resolvedMusicVolume(for targetVolume: Float) -> Float {
+        if targetVolume <= PoplurAudioMix.voiceDuckVolume + 0.01 {
+            return targetVolume
+        }
+        return targetVolume * PoplurEQSync.shared.cityMusicMultiplier
     }
 
     private func clearPlaybackObservers() {
@@ -4670,6 +4716,7 @@ struct MapViewProduction: View {
 
         await MainActor.run {
             clearTourEffects()
+            isCameraTransitionInProgress = true
             currentCity = "World"
             aiRecommendation = "Scanning global hotspots..."
             NotificationCenter.default.post(name: .MapSuggestedRadius, object: nil, userInfo: ["radius": 0.0])
@@ -4686,7 +4733,13 @@ struct MapViewProduction: View {
             }
         }
 
-        try? await Task.sleep(nanoseconds: 3_300_000_000)
+        try? await Task.sleep(nanoseconds: 2_950_000_000)
+        guard mapState.isInTourMode, !Task.isCancelled else {
+            await MainActor.run { isCameraTransitionInProgress = false }
+            return
+        }
+        await MainActor.run { isCameraTransitionInProgress = false }
+        try? await Task.sleep(nanoseconds: 350_000_000)
         guard mapState.isInTourMode, !Task.isCancelled else { return }
 
         let topicFocuses = await tourFocuses(for: stop, topics: topics)
@@ -4717,16 +4770,16 @@ struct MapViewProduction: View {
         )
 
         await MainActor.run {
+            let cameraTransitionDuration = index == 0 ? 4.2 : 2.4
+            isCameraTransitionInProgress = true
             activeTourStop = focusStop
             activeTourInsight = insight
             activeTourMoment = focus.liveMoment
             currentCity = index == 0 ? activeCityTitle(cityStop) : focus.title
             aiRecommendation = focus.subtitle
             showTourNowPlayingText = false
-            musicPlayer.play(for: cityStop, insight: insight)
-            mapRadioHost.speak(radioScript(for: focus, cityStop: cityStop, index: index, total: total))
 
-            withAnimation(.easeInOut(duration: index == 0 ? 4.2 : 2.4)) {
+            withAnimation(.easeInOut(duration: cameraTransitionDuration)) {
                 camera = .camera(
                     MapCamera(
                         centerCoordinate: focus.coordinate,
@@ -4747,7 +4800,20 @@ struct MapViewProduction: View {
             )
         }
 
-        try? await Task.sleep(nanoseconds: trendPopStartDelaySeconds * 1_000_000_000 + 350_000_000)
+        let cameraTransitionNanoseconds: UInt64 = (index == 0 ? 4_200_000_000 : 2_400_000_000) + 450_000_000
+        try? await Task.sleep(nanoseconds: cameraTransitionNanoseconds)
+        guard mapState.isInTourMode, !Task.isCancelled else {
+            await MainActor.run { isCameraTransitionInProgress = false }
+            return
+        }
+
+        await MainActor.run {
+            isCameraTransitionInProgress = false
+            musicPlayer.play(for: cityStop, insight: insight)
+            mapRadioHost.speak(radioScript(for: focus, cityStop: cityStop, index: index, total: total))
+        }
+
+        try? await Task.sleep(nanoseconds: trendPopStartDelaySeconds * 1_000_000_000)
         guard mapState.isInTourMode, !Task.isCancelled else { return }
 
         await MainActor.run {
@@ -5001,9 +5067,11 @@ struct MapViewProduction: View {
                 
             // Weather particle overlay (DEBUG ONLY)
             #if DEBUG
-            WeatherParticleOverlay(weatherState: $weatherState)
-                .allowsHitTesting(false) // Let touches pass through to map
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            if !isCameraTransitionInProgress {
+                WeatherParticleOverlay(weatherState: $weatherState)
+                    .allowsHitTesting(false) // Let touches pass through to map
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
             #endif
             
             // Confetti overlay for trending pins

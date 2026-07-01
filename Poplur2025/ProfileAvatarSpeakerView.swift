@@ -13,7 +13,6 @@ struct ProfileAvatarSpeakerView: View {
     let size: CGFloat
     let skin: CubeSkin
 
-    @AppStorage("poplur_profileAvatarIs3D") private var is3D = false
     @State private var isSpeaking = false
     @State private var synth = AVSpeechSynthesizer()
     @State private var speechDelegate: ProfileSpeechDelegate?
@@ -36,18 +35,8 @@ struct ProfileAvatarSpeakerView: View {
                         .frame(width: size * 0.98, height: size * 0.98)
                         .shadow(color: palette.glow, radius: size * 0.18)
                 }
-                if is3D {
-                    MarkHeadView(isSpeaking: $isSpeaking)
+                MarkHeadView(isSpeaking: $isSpeaking)
                     .frame(width: size * 1.12, height: size * 1.20)
-                } else {
-                    PixelHead2DView(
-                        profileImage: profileImage,
-                        profileImageURL: profileImageURL,
-                        isSpeaking: $isSpeaking,
-                        size: size
-                    )
-                    .frame(width: size * 1.08, height: size * 1.28)
-                }
                 if isSpeaking {
                     SpeechBubble(color: palette.accent)
                         .frame(width: size * 0.46, height: size * 0.34)

@@ -94,6 +94,38 @@ final class SceneDelegate: NSObject, UIWindowSceneDelegate {
     // No Snapchat URL handling anymore
 }
 
+#if DEBUG
+private enum PoplurVerificationLaunch {
+    static var tab: AppTab? {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let tabFlagIndex = arguments.firstIndex(of: "-PoplurVerificationTab") else { return nil }
+        let tabValueIndex = arguments.index(after: tabFlagIndex)
+        guard arguments.indices.contains(tabValueIndex) else { return nil }
+
+        switch arguments[tabValueIndex].lowercased() {
+        case "map": return .map
+        case "record": return .record
+        case "feed": return .feed
+        case "profile": return .profile
+        default: return nil
+        }
+    }
+
+    static func previewTab(for tab: AppTab) -> PreviewAppTab {
+        switch tab {
+        case .map:
+            return .map
+        case .record:
+            return .record
+        case .feed, .settings:
+            return .feed
+        case .profile:
+            return .profile
+        }
+    }
+}
+#endif
+
 @main
 struct Poplur2025App: App {
     // Attach AppDelegate to SwiftUI lifecycle
@@ -109,21 +141,19 @@ struct Poplur2025App: App {
     var body: some Scene {
         WindowGroup {
             NavigationStack {
-                if auth.isResolvingAuthState {
-                    // Hold a white screen while Firebase validates the persisted token.
-                    // Prevents flashing WelcomeView for users who are already signed in.
-                    Color.white.ignoresSafeArea()
-                } else if auth.isAuthenticated {
-                    HomeView()
-                        .environmentObject(auth)
-                        .task(id: auth.currentUser?.uid) {
-                            await PoplurNotificationCenter.shared.refreshDailyNotificationForCurrentUser()
-                            WatchRadiusSync.shared.refreshAndSendRadius()
-                        }
+                #if DEBUG
+                if let verificationTab = PoplurVerificationLaunch.tab {
+                    HomeView(initialTab: verificationTab)
+                        .environmentObject(AuthViewModel(previewAuthenticated: true))
+                        .environment(\.layoutPreviewMode, true)
+                        .environment(\.homeViewIsPreviewRuntime, true)
+                        .environment(\.previewSelectedTab, PoplurVerificationLaunch.previewTab(for: verificationTab))
                 } else {
-                    WelcomeView()
-                        .environmentObject(auth)
+                    authenticatedContent
                 }
+                #else
+                authenticatedContent
+                #endif
             }
             .toolbar(.hidden, for: .navigationBar)
             .poplurGlobalShaderScope(textIntensity: 0.72, iconIntensity: 0.72)
@@ -151,6 +181,25 @@ struct Poplur2025App: App {
                     for: .default
                 )
             }
+        }
+    }
+
+    @ViewBuilder
+    private var authenticatedContent: some View {
+        if auth.isResolvingAuthState {
+            // Hold a white screen while Firebase validates the persisted token.
+            // Prevents flashing WelcomeView for users who are already signed in.
+            Color.white.ignoresSafeArea()
+        } else if auth.isAuthenticated {
+            HomeView()
+                .environmentObject(auth)
+                .task(id: auth.currentUser?.uid) {
+                    await PoplurNotificationCenter.shared.refreshDailyNotificationForCurrentUser()
+                    WatchRadiusSync.shared.refreshAndSendRadius()
+                }
+        } else {
+            WelcomeView()
+                .environmentObject(auth)
         }
     }
 }

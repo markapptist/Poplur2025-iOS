@@ -40,6 +40,7 @@ final class CubeMenuWheelController: ObservableObject {
         scrubRemainder = 0
         isClosing = false
         selectionFeedback.prepare()
+        PoplurEQSync.shared.begin(.holdMenu)
 
         withAnimation(.spring(response: 0.34, dampingFraction: 0.74)) {
             isVisible = true
@@ -104,11 +105,13 @@ final class CubeMenuWheelController: ObservableObject {
 
     private func finishClosing() {
         isClosing = false
+        PoplurEQSync.shared.end(.holdMenu)
     }
 
     private func playWheelClick() {
+        guard PoplurEQSync.shared.shouldPlayMenuClick() else { return }
         let now = Date().timeIntervalSinceReferenceDate
-        guard now - lastClickTime >= 0.028 else { return }
+        guard now - lastClickTime >= 0.055 else { return }
         lastClickTime = now
         AudioServicesPlaySystemSound(1104)
         selectionFeedback.selectionChanged()

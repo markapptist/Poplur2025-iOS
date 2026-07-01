@@ -159,8 +159,11 @@ public struct FeedVideoView: View {
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
         endObserver = nil
 
-        player?.pause()
-        player?.replaceCurrentItem(with: nil)
+        if let player {
+            FeedAudioManager.shared.unregister(player)
+            player.pause()
+            player.replaceCurrentItem(with: nil)
+        }
         player = nil
         item = nil
         ready = false

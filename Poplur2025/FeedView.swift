@@ -91,6 +91,7 @@ struct FeedView: View {
     @State private var tvTransitionChannelNumber: Int = 101
     @State private var tvTransitionChannelCategory: String = "Food"
     @State private var tvTransitionToken: Int = 0
+    @State private var deliveryPost: FeedPost?
 
     // AI host bumper
     @ObservedObject private var bumper = BumperService.shared
@@ -367,6 +368,9 @@ struct FeedView: View {
                     activeBumperPayload = nil
                 }
             }
+        }
+        .sheet(item: $deliveryPost) { post in
+            DeliveryFlowView(post: post, displayName: displayName(for: post))
         }
     }
 
@@ -1030,6 +1034,23 @@ struct FeedView: View {
                 .ignoresSafeArea()
                 .clipped()
                 .background(Color.black)
+
+                if isDeliveryEligible(post), !showTVGuide {
+                    VStack {
+                        Spacer()
+                        HStack {
+                            Spacer()
+                            DeliverToMeButton {
+                                noteFeedInteraction()
+                                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                                deliveryPost = post
+                            }
+                            .padding(.trailing, 22)
+                            .padding(.bottom, 214)
+                        }
+                    }
+                    .zIndex(42)
+                }
             } else {
                 Color.black
             }
@@ -1113,6 +1134,15 @@ struct FeedView: View {
     private var currentPostDisplayName: String {
         guard let post = posts[safe: currentIndex] else { return "Live feed" }
         return displayName(for: post)
+    }
+
+    private func isDeliveryEligible(_ post: FeedPost) -> Bool {
+        let userID = post.userID.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !post.isPoplurAd
+            && !post.isLiveStream
+            && !userID.isEmpty
+            && !userID.hasPrefix("poplur_ad_")
+            && !userID.hasPrefix("sponsored_ad_")
     }
 
     private func toggleTimelineFlip() {
@@ -1501,6 +1531,7 @@ struct FeedView: View {
     }
     
     private func playOneShotPop() {
+        guard PoplurEQSync.shared.shouldPlayTransientSound(minimumInterval: 0.14) else { return }
         do {
             let session = AVAudioSession.sharedInstance()
             // Use ambient to avoid errors and allow mixing

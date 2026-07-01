@@ -327,10 +327,35 @@ struct LoginView: View {
                         }
                         .disabled(isLoading || email.isEmpty || password.isEmpty)
 
+                        NavigationLink {
+                            SignUpView()
+                                .toolbar(.hidden, for: .navigationBar)
+                                .navigationBarBackButtonHidden(true)
+                        } label: {
+                            Text("New here? Create an account")
+                                .font(.system(size: 14, weight: .black, design: .rounded))
+                                .foregroundColor(.white.opacity(0.94))
+                        }
+                        .buttonStyle(.plain)
+
                         Spacer()
                     }
                     .padding(.horizontal, 24)
                     .padding(.bottom, 24)
+
+                    HStack {
+                        Spacer()
+                        AuthCubeView(
+                            title: "Login",
+                            systemImage: "lock.fill",
+                            accent: .pink,
+                            spinToken: 0,
+                            isInteractive: false
+                        )
+                        .padding(.top, 26)
+                        .padding(.trailing, 26)
+                    }
+                    .allowsHitTesting(false)
                 }
                 .frame(maxWidth: 600)
                 .frame(height: 640)
@@ -401,4 +426,3 @@ struct LoginView_Previews: PreviewProvider {
         .preferredColorScheme(.light)
     }
 }
-
