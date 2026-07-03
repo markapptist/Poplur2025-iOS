@@ -9,6 +9,11 @@ private let isRunningInPreviews: Bool = {
     ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1"
 }()
 
+// GLTFSceneKit can raise an Objective-C exception while decoding some generated GLB
+// files, which Swift cannot catch. Keep the generated SceneKit cube path active until
+// these runtime cube assets are converted to a SceneKit-native format.
+private let runtimeCubeGLBLoadingEnabled = false
+
 
 private enum CubeFaceImageCache {
     private static var cache: [String: UIImage] = [:]
@@ -800,7 +805,8 @@ private struct CubeSceneView: UIViewRepresentable {
     }
 
     private func makeRuntimeCubeModelNode() -> SCNNode? {
-        guard let assetName = currentSkin.runtimeModelAssetName else { return nil }
+        guard runtimeCubeGLBLoadingEnabled,
+              let assetName = currentSkin.runtimeModelAssetName else { return nil }
 
         let loadedScene: SCNScene
         if let glbURL = runtimeCubeModelURL(named: assetName, fileExtensions: ["glb"]),
