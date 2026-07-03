@@ -3,6 +3,7 @@ import SceneKit
 import CoreMotion
 import AVFoundation
 import Photos
+import GLTFSceneKit
 
 private let isRunningInPreviews: Bool = {
     ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1"
@@ -659,8 +660,8 @@ private struct CubeSceneView: UIViewRepresentable {
 
     // MARK: - Scene
     private func initialYaw(for tab: AppTab) -> Float {
-        let tabs: [AppTab] = [.map, .record, .feed, .profile]
-        let index = tabs.firstIndex(of: tab) ?? 2
+        let tabs: [AppTab] = [.feed, .profile, .map, .record]
+        let index = tabs.firstIndex(of: tab) ?? 0
         return Float(index) * (-Float.pi / 2)
     }
 
@@ -799,12 +800,17 @@ private struct CubeSceneView: UIViewRepresentable {
     }
 
     private func makeRuntimeCubeModelNode() -> SCNNode? {
-        guard let assetName = currentSkin.runtimeModelAssetName,
-              let url = Bundle.main.url(forResource: assetName, withExtension: "usdz", subdirectory: "CubeModels")
-                    ?? Bundle.main.url(forResource: assetName, withExtension: "usdz")
-                    ?? Bundle.main.url(forResource: assetName, withExtension: "dae", subdirectory: "CubeModels")
-                    ?? Bundle.main.url(forResource: assetName, withExtension: "dae"),
-              let loadedScene = try? SCNScene(url: url, options: nil) else {
+        guard let assetName = currentSkin.runtimeModelAssetName else { return nil }
+
+        let loadedScene: SCNScene
+        if let glbURL = runtimeCubeModelURL(named: assetName, fileExtensions: ["glb"]),
+           let glbScene = loadRuntimeGLBScene(from: glbURL, assetName: assetName) {
+            loadedScene = glbScene
+        } else if let url = runtimeCubeModelURL(named: assetName, fileExtensions: ["usdz", "dae"]),
+            let daeScene = try? SCNScene(url: url, options: nil) {
+            loadedScene = daeScene
+        } else {
+            print("[CubeSceneView] Missing runtime cube model asset: \(assetName)")
             return nil
         }
 
@@ -820,6 +826,42 @@ private struct CubeSceneView: UIViewRepresentable {
         prepareRuntimeCubeMaterials(modelContent, assetName: assetName, skin: currentSkin)
         container.addChildNode(modelContent)
         return container
+    }
+
+    private func runtimeCubeModelURL(named assetName: String, fileExtensions: [String]) -> URL? {
+        for fileExtension in fileExtensions {
+            if let bundledURL = Bundle.main.url(
+                forResource: assetName,
+                withExtension: fileExtension,
+                subdirectory: "CubeModels"
+            ) ?? Bundle.main.url(forResource: assetName, withExtension: fileExtension) {
+                return bundledURL
+            }
+        }
+
+        #if DEBUG
+        let projectCubeModelsURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .appendingPathComponent("CubeModels", isDirectory: true)
+
+        for fileExtension in fileExtensions {
+            let localURL = projectCubeModelsURL.appendingPathComponent("\(assetName).\(fileExtension)")
+            if FileManager.default.fileExists(atPath: localURL.path) {
+                return localURL
+            }
+        }
+        #endif
+
+        return nil
+    }
+
+    private func loadRuntimeGLBScene(from url: URL, assetName: String) -> SCNScene? {
+        let source = GLTFSceneSource(url: url, options: nil)
+        guard let scene = source.scene() else {
+            print("[CubeSceneView] Could not decode GLB runtime cube model: \(assetName) at \(url.path)")
+            return nil
+        }
+        return scene
     }
 
     private func normalizeRuntimeCubeModel(_ node: SCNNode) {
@@ -921,7 +963,7 @@ private struct CubeSceneView: UIViewRepresentable {
     // Slices one tile from a 4×3 cube-net image and scales the content to fill the full face.
     // AI-generated cross layouts have black padding around the content within each tile; this
     // detects the non-black bounding box and stretches it edge-to-edge so no black bleeds onto the cube.
-    // faceIndex matches SCNBox material order: 0=front(Map) 1=right(Camera) 2=back(Feed) 3=left(Profile) 4=top 5=bottom
+    // faceIndex matches SCNBox material order: 0=front(Feed) 1=right(Profile) 2=back(Map) 3=left(Camera) 4=top 5=bottom
     private func sliceCubemapTile(from image: UIImage, faceIndex: Int) -> UIImage {
         guard let cg = image.cgImage else { return image }
         let tileW = cg.width / 4
@@ -990,10 +1032,10 @@ private struct CubeSceneView: UIViewRepresentable {
         // yaw=-180°→ back  (-Z) = index 2 = Feed
         // yaw=-270°→ left  (-X) = index 3 = Profile
         let faceSpecs: [(String, String, AppTab)] = [
-            ("Map",      "map.fill",       .map),      // 0: +Z front
-            ("Camera",   "camera.fill",    .record),   // 1: +X right
-            ("Feed",     "tv.fill",        .feed),     // 2: -Z back
-            ("Profile",  "person.fill",    .profile),  // 3: -X left
+            ("Feed",     "tv.fill",        .feed),     // 0: +Z front
+            ("Profile",  "person.fill",    .profile),  // 1: +X right
+            ("Map",      "map.fill",       .map),      // 2: -Z back
+            ("Camera",   "camera.fill",    .record),   // 3: -X left
             ("",         "fork.knife",     .settings), // 4: +Y top
             ("",         "p.circle.fill",  .settings), // 5: -Y bottom
         ]
@@ -1559,11 +1601,11 @@ private struct CubeSceneView: UIViewRepresentable {
         }
 
         func applyCurrentProfileIconOverride() {
-            applyDynamicFace(at: 3)
+            applyDynamicFace(at: 1)
         }
 
         func applyFeedFaceIcon() {
-            applyDynamicFace(at: 2)
+            applyDynamicFace(at: 0)
         }
 
         func applyAllDynamicFaces() {
@@ -1574,20 +1616,20 @@ private struct CubeSceneView: UIViewRepresentable {
 
         private static func faceMaterialIndex(for face: String) -> Int? {
             switch face.lowercased() {
-            case "map": return 0
-            case "camera", "record": return 1
-            case "feed": return 2
-            case "profile", "settings": return 3
+            case "feed": return 0
+            case "profile", "settings": return 1
+            case "map": return 2
+            case "camera", "record": return 3
             default: return nil
             }
         }
 
         private func defaultFaceSpec(for index: Int) -> (title: String, systemImage: String)? {
             switch index {
-            case 0: return ("Map", "map.fill")
-            case 1: return ("Camera", "camera.fill")
-            case 2: return ("Feed", "tv.fill")
-            case 3: return ("Profile", "person.fill")
+            case 0: return ("Feed",    "tv.fill")
+            case 1: return ("Profile", "person.fill")
+            case 2: return ("Map",     "map.fill")
+            case 3: return ("Camera",  "camera.fill")
             default: return nil
             }
         }
@@ -1596,10 +1638,10 @@ private struct CubeSceneView: UIViewRepresentable {
             if let override = faceOverrides[index] {
                 return override
             }
-            if index == 2, isTVGuideOpen {
+            if index == 0, isTVGuideOpen {
                 return ("TV Guide", "list.and.film")
             }
-            if index == 3, let profileIconOverride {
+            if index == 1, let profileIconOverride {
                 return profileIconOverride
             }
             return defaultFaceSpec(for: index)

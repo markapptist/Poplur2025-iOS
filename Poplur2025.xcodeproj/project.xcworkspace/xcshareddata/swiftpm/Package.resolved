@@ -1,5 +1,5 @@
 {
-  "originHash" : "248eadcccd68137222b668b8869f5eb59ea3d351b91cdd4135fcc465695dbf81",
+  "originHash" : "1cdb0a7d5eb2b68a26930997daa7a94764815a071aa0a1eb985fd60ec882fb51",
   "pins" : [
     {
       "identity" : "abseil-cpp-binary",
@@ -26,6 +26,15 @@
       "state" : {
         "revision" : "8d5b4189f1f482df8d5c58c9985ea70491ef5382",
         "version" : "12.14.0"
+      }
+    },
+    {
+      "identity" : "gltfscenekit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/magicien/GLTFSceneKit",
+      "state" : {
+        "revision" : "a9587ec5c6515ee7d036533fdd909815a9a718ef",
+        "version" : "0.4.1"
       }
     },
     {

@@ -114,6 +114,10 @@ struct TVOverlayView: View {
         case "tech":          return "💻"
         case "news":          return "📺"
         case "city":          return "🏙️"
+        case "shopping":      return "🛍️"
+        case "cartoon":       return "🎨"
+        case "kids":          return "🧸"
+        case "comedy":        return "😂"
         case "entertainment": return "🎬"
         default:              return "📡"
         }

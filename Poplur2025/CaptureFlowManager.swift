@@ -66,7 +66,10 @@ struct PostCaptureChannel: Identifiable, Hashable {
         PostCaptureChannel(id: "film", number: 107, emoji: "🎬", title: "Film", subtitle: "Movies, edits, reviews"),
         PostCaptureChannel(id: "shopping", number: 108, emoji: "🛍️", title: "Shopping", subtitle: "Finds, hauls, drops"),
         PostCaptureChannel(id: "french", number: 109, emoji: "🇫🇷", title: "French", subtitle: "French-language broadcasts"),
-        PostCaptureChannel(id: "spanish", number: 110, emoji: "🇪🇸", title: "Spanish", subtitle: "Spanish-language broadcasts")
+        PostCaptureChannel(id: "spanish", number: 110, emoji: "🇪🇸", title: "Spanish", subtitle: "Spanish-language broadcasts"),
+        PostCaptureChannel(id: "cartoon", number: 111, emoji: "🎨", title: "Cartoon", subtitle: "2D, 3D, animation clips"),
+        PostCaptureChannel(id: "kids", number: 112, emoji: "🧸", title: "Kids", subtitle: "Family-safe fun and learning"),
+        PostCaptureChannel(id: "comedy", number: 113, emoji: "😂", title: "Comedy", subtitle: "Sketches, laughs, reactions")
     ]
 }
 

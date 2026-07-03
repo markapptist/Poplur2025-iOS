@@ -121,7 +121,11 @@ struct FeedView: View {
         ("tech", 108, "Tech", "💻", "poplur_channel_108_tech"),
         ("news", 109, "News", "📰", "poplur_channel_109_news"),
         ("french", 110, "French", "🇫🇷", "poplur_channel_110_french"),
-        ("spanish", 111, "Spanish", "🇪🇸", "poplur_channel_111_spanish")
+        ("spanish", 111, "Spanish", "🇪🇸", "poplur_channel_111_spanish"),
+        ("shopping", 112, "Shopping", "🛍️", "poplur_channel_112_shopping"),
+        ("cartoon", 113, "Cartoon", "🎨", "poplur_channel_113_cartoon"),
+        ("kids", 114, "Kids", "🧸", "poplur_channel_114_kids"),
+        ("comedy", 115, "Comedy", "😂", "poplur_channel_115_comedy")
     ]
 
     private func countryIndex(for coordinate: CLLocationCoordinate2D?) -> Int {
@@ -1724,6 +1728,7 @@ struct FeedView: View {
 
     private struct PoplurAdCreative: Sendable {
         let id: String
+        let channelID: String
         let mediaURL: String
         let headline: String
         let body: String
@@ -1739,9 +1744,136 @@ struct FeedView: View {
         let driveFileID: String?
     }
 
+    nonisolated private static func googleDriveMediaURL(fileID: String) -> String {
+        "https://drive.google.com/uc?export=download&id=\(fileID)&type=video"
+    }
+
+    nonisolated private static let poplurChannelAdCreatives: [String: PoplurAdCreative] = [
+        "food": PoplurAdCreative(
+            id: "food-drive-ad",
+            channelID: "food",
+            mediaURL: googleDriveMediaURL(fileID: "1cNOqd9w6gGpeoU7oMC1xf7iuUcv0l94E"),
+            headline: "Poplur Food is serving nearby",
+            body: "Food creators, cravings, and local spots are live inside the Poplur radius.",
+            callToAction: "Watch Food",
+            creativeKind: "Food channel ad",
+            latitude: 35.6762,
+            longitude: 139.6503,
+            cityName: "Tokyo",
+            countryName: "Japan",
+            countryFlag: "🇯🇵",
+            radius: 135_000,
+            viewCount: 1_010,
+            driveFileID: "1cNOqd9w6gGpeoU7oMC1xf7iuUcv0l94E"
+        ),
+        "sports": PoplurAdCreative(
+            id: "sports-drive-ad",
+            channelID: "sports",
+            mediaURL: googleDriveMediaURL(fileID: "1FmRd8-hKDd-pkOueGXjDuDS-SpGeIL27"),
+            headline: "Sports energy is live",
+            body: "Follow the plays, fans, and stadium moments moving through Poplur.",
+            callToAction: "Watch Sports",
+            creativeKind: "Sports channel ad",
+            latitude: 40.8296,
+            longitude: -73.9262,
+            cityName: "New York",
+            countryName: "USA",
+            countryFlag: "🇺🇸",
+            radius: 160_000,
+            viewCount: 1_104,
+            driveFileID: "1FmRd8-hKDd-pkOueGXjDuDS-SpGeIL27"
+        ),
+        "shopping": PoplurAdCreative(
+            id: "shopping-drive-ad",
+            channelID: "shopping",
+            mediaURL: googleDriveMediaURL(fileID: "1nKmjGcUTQW1gn1FVkFMWVwn9ErtH7XmM"),
+            headline: "Shopping drops are nearby",
+            body: "Sales, hauls, and local shopping moments are popping up on Poplur.",
+            callToAction: "Watch Shopping",
+            creativeKind: "Shopping channel ad",
+            latitude: 43.6544,
+            longitude: -79.3807,
+            cityName: "Toronto",
+            countryName: "Canada",
+            countryFlag: "🇨🇦",
+            radius: 125_000,
+            viewCount: 980,
+            driveFileID: "1nKmjGcUTQW1gn1FVkFMWVwn9ErtH7XmM"
+        ),
+        "music": PoplurAdCreative(
+            id: "music-drive-ad",
+            channelID: "music",
+            mediaURL: googleDriveMediaURL(fileID: "1tfukw5oiNk1VtqEy4wcgToHKNzTq22kT"),
+            headline: "Music is moving through the city",
+            body: "Studios, stages, and creator sounds are broadcasting through Poplur.",
+            callToAction: "Watch Music",
+            creativeKind: "Music channel ad",
+            latitude: 34.0522,
+            longitude: -118.2437,
+            cityName: "Los Angeles",
+            countryName: "USA",
+            countryFlag: "🇺🇸",
+            radius: 150_000,
+            viewCount: 1_070,
+            driveFileID: "1tfukw5oiNk1VtqEy4wcgToHKNzTq22kT"
+        ),
+        "cartoon": PoplurAdCreative(
+            id: "cartoon-drive-ad",
+            channelID: "cartoon",
+            mediaURL: googleDriveMediaURL(fileID: "1NyDZewxeHe6R-aiziY5yBVCnwdeFTfZS"),
+            headline: "Cartoon worlds are live",
+            body: "2D and 3D Poplur stories turn the feed into a bright animated channel.",
+            callToAction: "Watch Cartoon",
+            creativeKind: "Cartoon channel ad",
+            latitude: 34.1381,
+            longitude: -118.3534,
+            cityName: "Burbank",
+            countryName: "USA",
+            countryFlag: "🇺🇸",
+            radius: 118_000,
+            viewCount: 875,
+            driveFileID: "1NyDZewxeHe6R-aiziY5yBVCnwdeFTfZS"
+        ),
+        "kids": PoplurAdCreative(
+            id: "kids-drive-ad",
+            channelID: "kids",
+            mediaURL: googleDriveMediaURL(fileID: "1rx5BE095nIuA5lyZHictzB09-VsdiAIk"),
+            headline: "Kids channel is playing",
+            body: "Friendly Poplur moments for games, cartoons, learning, and family-safe fun.",
+            callToAction: "Watch Kids",
+            creativeKind: "Kids channel ad",
+            latitude: 28.5384,
+            longitude: -81.3789,
+            cityName: "Orlando",
+            countryName: "USA",
+            countryFlag: "🇺🇸",
+            radius: 110_000,
+            viewCount: 820,
+            driveFileID: "1rx5BE095nIuA5lyZHictzB09-VsdiAIk"
+        ),
+        "comedy": PoplurAdCreative(
+            id: "comedy-drive-ad",
+            channelID: "comedy",
+            mediaURL: googleDriveMediaURL(fileID: "1Byb1h62MEdDd4xnPb6Ao-_dQXK9T02sX"),
+            headline: "Comedy is going live",
+            body: "Sketches, reactions, and funny local moments are ready on Poplur.",
+            callToAction: "Watch Comedy",
+            creativeKind: "Comedy channel ad",
+            latitude: 41.8781,
+            longitude: -87.6298,
+            cityName: "Chicago",
+            countryName: "USA",
+            countryFlag: "🇺🇸",
+            radius: 120_000,
+            viewCount: 925,
+            driveFileID: "1Byb1h62MEdDd4xnPb6Ao-_dQXK9T02sX"
+        )
+    ]
+
     nonisolated private static let poplurAdCreatives: [PoplurAdCreative] = [
         PoplurAdCreative(
             id: "nearby-reel",
+            channelID: "sponsored",
             mediaURL: "asset://poplur_ad_real_humans",
             headline: "Real people are already nearby",
             body: "Human-first Poplur ad slot for finding pop-ups, food, and people around you.",
@@ -1758,6 +1890,7 @@ struct FeedView: View {
         ),
         PoplurAdCreative(
             id: "three-d-city-tour",
+            channelID: "sponsored",
             mediaURL: "asset://poplur_ad_3d_group",
             headline: "Your city is already talking",
             body: "3D human figures bring local radius discovery into a premium city ad slot.",
@@ -1774,6 +1907,7 @@ struct FeedView: View {
         ),
         PoplurAdCreative(
             id: "radius-hero",
+            channelID: "sponsored",
             mediaURL: "asset://poplur_ad_3d_creator",
             headline: "Post it where it matters",
             body: "Dimensional creator-led ad slot for radius sharing, local discovery, and city energy.",
@@ -1810,7 +1944,10 @@ struct FeedView: View {
         return "https://picsum.photos/id/\(imageID)/1080/1920"
     }
 
-    nonisolated private static func poplurAdCreative(for index: Int, namespace: String) -> PoplurAdCreative {
+    nonisolated private static func poplurAdCreative(for index: Int, namespace: String, channel: String? = nil) -> PoplurAdCreative {
+        if let channel, let creative = poplurChannelAdCreatives[channel] {
+            return creative
+        }
         let offset = stableMediaOffset(for: namespace)
         return poplurAdCreatives[abs(index + offset) % poplurAdCreatives.count]
     }
@@ -1832,14 +1969,14 @@ struct FeedView: View {
         }
     }
 
-    nonisolated private static func balancedDemoMediaURL(for index: Int, namespace: String) -> String {
+    nonisolated private static func balancedDemoMediaURL(for index: Int, namespace: String, channel: String? = nil) -> String {
         switch demoMediaKind(for: index) {
         case .video:
             return reliableDemoVideoURLs[index % reliableDemoVideoURLs.count]
         case .image:
             return reliableDemoImageURL(for: index, namespace: namespace)
         case .ad:
-            return poplurAdCreative(for: index, namespace: namespace).mediaURL
+            return poplurAdCreative(for: index, namespace: namespace, channel: channel).mediaURL
         }
     }
 
@@ -1989,13 +2126,13 @@ struct FeedView: View {
                 ? (i % 2 == 0 ? channelLanguage : .english)
                 : .english
             let adCreative: PoplurAdCreative? = (!isLanguageChannel && demoMediaKind(for: i) == .ad)
-                ? poplurAdCreative(for: i, namespace: "\(country)_\(channel)")
+                ? poplurAdCreative(for: i, namespace: "\(country)_\(channel)", channel: channel)
                 : nil
             let feedUserID = adCreative.map { "poplur_ad_\($0.id)" } ?? demoUserID(regular: userID, for: i)
 
             let mediaURL: String = isLanguageChannel
                 ? languageDemoVideoURL(for: i, language: postSourceLanguage)
-                : balancedDemoMediaURL(for: i, namespace: "\(country)_\(channel)")
+                : balancedDemoMediaURL(for: i, namespace: "\(country)_\(channel)", channel: channel)
             
             // ✅ USE GLOBAL CITIES for coordinates - posts now come from all over the world!
             let city = globalCities[i % globalCities.count]

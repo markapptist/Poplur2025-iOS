@@ -377,7 +377,8 @@ struct CapturePreviewOverlay: View {
         case "food": return "🍔"; case "fitness": return "💪"; case "sports": return "⚽"
         case "beauty": return "💄"; case "fashion": return "👗"; case "music": return "🎵"
         case "tech": return "💻"; case "news": return "📺"; case "city": return "🏙️"
-        case "entertainment": return "🎬"; default: return "📡"
+        case "shopping": return "🛍️"; case "cartoon": return "🎨"; case "kids": return "🧸"
+        case "comedy": return "😂"; case "entertainment": return "🎬"; default: return "📡"
         }
     }
 }
@@ -1137,7 +1138,8 @@ struct PostCaptureComposerOverlay: View {
         case "food": return "🍔"; case "fitness": return "💪"; case "sports": return "⚽"
         case "beauty": return "💄"; case "fashion": return "👗"; case "music": return "🎵"
         case "tech": return "💻"; case "news": return "📺"; case "city": return "🏙️"
-        case "entertainment": return "🎬"; default: return "📡"
+        case "shopping": return "🛍️"; case "cartoon": return "🎨"; case "kids": return "🧸"
+        case "comedy": return "😂"; case "entertainment": return "🎬"; default: return "📡"
         }
     }
 
@@ -1935,6 +1937,10 @@ private extension PostCaptureChannel {
         case "sports": return "sports"
         case "style": return "fashion"
         case "film": return "entertainment"
+        case "shopping": return "shopping"
+        case "cartoon": return "entertainment"
+        case "kids": return "entertainment"
+        case "comedy": return "entertainment"
         default: return "entertainment"
         }
     }
@@ -1971,14 +1977,14 @@ private extension UIImage {
 // MARK: - Ad generation service
 
 private enum AdGenerationError: LocalizedError {
-    case noMedia, generationFailed, downloadFailed, noAPIKey
+    case noMedia, generationFailed, downloadFailed, providerMustRunOnBackend
 
     var errorDescription: String? {
         switch self {
         case .noMedia: return "No media was found."
         case .generationFailed: return "AI generation failed."
         case .downloadFailed: return "Could not download generated media."
-        case .noAPIKey: return "Replicate API key missing."
+        case .providerMustRunOnBackend: return "Poplur AI generation must run through the backend so provider keys stay server-side."
         }
     }
 }
@@ -2012,7 +2018,6 @@ private struct MusicDocumentPicker: UIViewControllerRepresentable {
 }
 
 private enum AdGenerationService {
-    /// Generates an ad image via Pollinations.ai (free, no API key required).
     static func generate(prompt: String) async throws -> UIImage {
         var allowed = CharacterSet.urlPathAllowed
         allowed.remove(charactersIn: "?#%/")
@@ -2026,7 +2031,7 @@ private enum AdGenerationService {
         guard let http = response as? HTTPURLResponse else { throw AdGenerationError.downloadFailed }
         guard http.statusCode == 200 else {
             if let body = String(data: data, encoding: .utf8) {
-                print("[AdGenerationService] image failed \(http.statusCode): \(body)")
+                print("[FreeTierAdGenerationService] image failed \(http.statusCode): \(body)")
             }
             throw AdGenerationError.downloadFailed
         }
@@ -2036,73 +2041,9 @@ private enum AdGenerationService {
 }
 
 private enum VideoAdGenerationService {
-    /// Generates an ad video via Replicate (wan-ai/wan2.1-t2v-480p).
-    /// Returns a remote URL pointing to the generated MP4.
     static func generate(prompt: String) async throws -> URL {
-        let storedKey = UserDefaults.standard.string(forKey: "poplur_replicate_key") ?? ""
-        let apiKey = storedKey.isEmpty ? Secrets.replicateAPIKey : storedKey
-        guard !apiKey.isEmpty else { throw AdGenerationError.noAPIKey }
-
-        guard let endpoint = URL(string: "https://api.replicate.com/v1/models/wan-ai/wan2.1-t2v-480p/predictions")
-        else { throw AdGenerationError.generationFailed }
-
-        var req = URLRequest(url: endpoint, timeoutInterval: 30)
-        req.httpMethod = "POST"
-        req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = try JSONSerialization.data(withJSONObject: [
-            "input": ["prompt": prompt, "num_frames": 81, "size": "480*832"] as [String: Any]
-        ])
-
-        let (data, response) = try await URLSession.shared.data(for: req)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            if let body = String(data: data, encoding: .utf8) {
-                print("[VideoAdGenerationService] start failed: \(body)")
-            }
-            throw AdGenerationError.generationFailed
-        }
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let id = json["id"] as? String
-        else { throw AdGenerationError.generationFailed }
-
-        return try await poll(id: id, apiKey: apiKey)
-    }
-
-    private static func poll(id: String, apiKey: String) async throws -> URL {
-        guard let url = URL(string: "https://api.replicate.com/v1/predictions/\(id)") else {
-            throw AdGenerationError.generationFailed
-        }
-        var req = URLRequest(url: url)
-        req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-
-        for _ in 0..<90 {                          // max ~4.5 min
-            try await Task.sleep(nanoseconds: 3_000_000_000)
-            try Task.checkCancellation()
-            let (data, response) = try await URLSession.shared.data(for: req)
-            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-                if let body = String(data: data, encoding: .utf8) {
-                    print("[VideoAdGenerationService] poll failed: \(body)")
-                }
-                throw AdGenerationError.generationFailed
-            }
-            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
-            switch json["status"] as? String {
-            case "succeeded":
-                if let arr = json["output"] as? [String], let s = arr.first, let u = URL(string: s) { return u }
-                if let s = json["output"] as? String, let u = URL(string: s) { return u }
-                if let out = json["output"] as? [String: Any] {
-                    let s = out["video"] as? String ?? out["url"] as? String
-                    if let s, let u = URL(string: s) { return u }
-                }
-                throw AdGenerationError.downloadFailed
-            case "failed", "canceled":
-                if let error = json["error"] {
-                    print("[VideoAdGenerationService] generation failed: \(error)")
-                }
-                throw AdGenerationError.generationFailed
-            default: continue
-            }
-        }
-        throw AdGenerationError.generationFailed
+        _ = prompt
+        // TODO: Queue POST /ai/generate/video through Poplur's backend and return the completed asset URL.
+        throw AdGenerationError.providerMustRunOnBackend
     }
 }

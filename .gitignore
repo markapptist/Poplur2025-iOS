@@ -6,7 +6,6 @@ build/
 
 # Large source/runtime model exports. Keep optimized runtime assets under 100 MB instead.
 CubeModelSources/
-Poplur2025/CubeModels/
 Poplur2025/MarkHead.dae
 Poplur2025/MarkHead.fbx
 
