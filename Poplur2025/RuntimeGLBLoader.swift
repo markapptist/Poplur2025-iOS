@@ -17,7 +17,7 @@ enum RuntimeGLBLoader {
                 decodedScene = source.scene()
             }
         } catch {
-            print("[RuntimeGLBLoader] GLB decode raised an exception for \(label): \(error.localizedDescription)")
+            print("[RuntimeGLBLoader] GLB decode raised an exception for \(label) at \(url.path): \(error.localizedDescription)")
             return nil
         }
 
@@ -38,7 +38,7 @@ enum RuntimeGLBLoader {
         let height = maxBounds.y - minBounds.y
         let depth = maxBounds.z - minBounds.z
         let maxExtent = max(width, max(height, depth))
-        guard maxExtent > 0 else { return }
+        guard maxExtent.isFinite, maxExtent > 0 else { return }
 
         let center = SCNVector3(
             (minBounds.x + maxBounds.x) / 2,
@@ -46,6 +46,7 @@ enum RuntimeGLBLoader {
             (minBounds.z + maxBounds.z) / 2
         )
         let scale = targetExtent / maxExtent
+        guard scale.isFinite else { return }
         node.pivot = SCNMatrix4MakeTranslation(center.x, center.y, center.z)
         node.scale = SCNVector3(scale, scale, scale)
     }
@@ -56,21 +57,33 @@ enum RuntimeGLBLoader {
         var foundGeometry = false
 
         root.enumerateChildNodes { child, _ in
-            guard child.geometry != nil else { return }
+            guard child.geometry != nil else { return } // skip nodes without geometry
             foundGeometry = true
             let bounds = child.boundingBox
+
+            var minBB = bounds.min
+            var maxBB = bounds.max
+            // Validate bounding box values; skip degenerate or non-finite boxes
+            if !(minBB.x.isFinite && minBB.y.isFinite && minBB.z.isFinite && maxBB.x.isFinite && maxBB.y.isFinite && maxBB.z.isFinite) {
+                return
+            }
+            if minBB == maxBB { // degenerate box
+                return
+            }
+
             let corners = [
-                SCNVector3(bounds.min.x, bounds.min.y, bounds.min.z),
-                SCNVector3(bounds.min.x, bounds.min.y, bounds.max.z),
-                SCNVector3(bounds.min.x, bounds.max.y, bounds.min.z),
-                SCNVector3(bounds.min.x, bounds.max.y, bounds.max.z),
-                SCNVector3(bounds.max.x, bounds.min.y, bounds.min.z),
-                SCNVector3(bounds.max.x, bounds.min.y, bounds.max.z),
-                SCNVector3(bounds.max.x, bounds.max.y, bounds.min.z),
-                SCNVector3(bounds.max.x, bounds.max.y, bounds.max.z)
+                SCNVector3(minBB.x, minBB.y, minBB.z),
+                SCNVector3(minBB.x, minBB.y, maxBB.z),
+                SCNVector3(minBB.x, maxBB.y, minBB.z),
+                SCNVector3(minBB.x, maxBB.y, maxBB.z),
+                SCNVector3(maxBB.x, minBB.y, minBB.z),
+                SCNVector3(maxBB.x, minBB.y, maxBB.z),
+                SCNVector3(maxBB.x, maxBB.y, minBB.z),
+                SCNVector3(maxBB.x, maxBB.y, maxBB.z)
             ]
             for corner in corners {
                 let point = child.convertPosition(corner, to: root)
+                guard point.x.isFinite, point.y.isFinite, point.z.isFinite else { continue }
                 minBounds.x = min(minBounds.x, point.x)
                 minBounds.y = min(minBounds.y, point.y)
                 minBounds.z = min(minBounds.z, point.z)
