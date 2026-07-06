@@ -1,0 +1,81 @@
+{
+  "asset": "MarkHead_TalkingRig.glb",
+  "main_mesh": "MarkHead_FacialBlendshapeRig",
+  "main_morph_targets": [
+    "jawOpen",
+    "mouthClose",
+    "mouthFunnel",
+    "mouthPucker",
+    "mouthLeft",
+    "mouthRight",
+    "mouthSmileLeft",
+    "mouthSmileRight",
+    "mouthFrownLeft",
+    "mouthFrownRight",
+    "mouthStretchLeft",
+    "mouthStretchRight",
+    "mouthUpperUp",
+    "mouthLowerDown",
+    "jawLeft",
+    "jawRight",
+    "viseme_AA",
+    "viseme_E",
+    "viseme_I",
+    "viseme_O",
+    "viseme_U",
+    "viseme_FV",
+    "viseme_MBP",
+    "eyeBlinkLeft",
+    "eyeBlinkRight",
+    "browInnerUp"
+  ],
+  "mouth_interior_mesh": "MouthInterior_MorphControlled",
+  "mouth_interior_morph_targets": [
+    "mouthInteriorOpen"
+  ],
+  "recommended_viseme_mapping": {
+    "silence": {},
+    "AA/AH/AE": {
+      "viseme_AA": 1.0,
+      "mouthInteriorOpen": 1.0
+    },
+    "E/EH/ER": {
+      "viseme_E": 1.0,
+      "mouthInteriorOpen": 0.35
+    },
+    "I/IH": {
+      "viseme_I": 1.0,
+      "mouthInteriorOpen": 0.35
+    },
+    "O/AO/OW": {
+      "viseme_O": 1.0,
+      "mouthInteriorOpen": 0.75
+    },
+    "U/UW": {
+      "viseme_U": 1.0,
+      "mouthInteriorOpen": 0.5
+    },
+    "F/V": {
+      "viseme_FV": 1.0,
+      "mouthInteriorOpen": 0.0
+    },
+    "M/B/P": {
+      "viseme_MBP": 1.0,
+      "mouthClose": 0.6,
+      "mouthInteriorOpen": 0.0
+    },
+    "wide/smile": {
+      "mouthSmileLeft": 0.8,
+      "mouthSmileRight": 0.8
+    },
+    "blink": {
+      "eyeBlinkLeft": 1.0,
+      "eyeBlinkRight": 1.0
+    }
+  },
+  "notes": [
+    "This is an approximate morph-target talking rig generated from a single static closed-mouth mesh.",
+    "For best results, drive the MouthInterior_MorphControlled.mouthInteriorOpen target along with open-mouth visemes.",
+    "A true production facial rig should retopologize the mouth, separate upper/lower lips, and add teeth/tongue/interior geometry."
+  ]
+}

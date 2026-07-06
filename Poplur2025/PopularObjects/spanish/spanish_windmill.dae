@@ -1,0 +1,353 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
+<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+  <asset>
+    <contributor>
+      <author>Assimp</author>
+      <authoring_tool>https://github.com/mikedh/trimesh</authoring_tool>
+    </contributor>
+    <created>2026-07-03T10:30:47</created>
+    <modified>2026-07-03T10:30:47</modified>
+    <unit name="meter" meter="1" />
+    <up_axis>Y_UP</up_axis>
+  </asset>
+  <library_images>
+  </library_images>
+  <library_effects>
+    <effect id="panel_orange_trim-fx" name="panel_orange_trim">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0.5   0.180000007   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">1   0.450980395   0   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">608.399963</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="cream-fx" name="cream">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">0.858823538   0.78039217   0.619607866   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">159.999985</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="brown_leather-fx" name="brown_leather">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">0.419607848   0.200000003   0.0784313753   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">202.5</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="material_3-fx" name="">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">1   1   1   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">0</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+  </library_effects>
+  <library_materials>
+    <material id="panel_orange_trim" name="panel_orange_trim">
+      <instance_effect url="#panel_orange_trim-fx"/>
+    </material>
+    <material id="cream" name="cream">
+      <instance_effect url="#cream-fx"/>
+    </material>
+    <material id="brown_leather" name="brown_leather">
+      <instance_effect url="#brown_leather-fx"/>
+    </material>
+    <material id="material_3" name="">
+      <instance_effect url="#material_3-fx"/>
+    </material>
+  </library_materials>
+  <library_geometries>
+    <geometry id="_11_18_Popular_Spanish_Windmill_ROOT_base_1" name="11_18_Popular_Spanish_Windmill_ROOT_base" >
+      <mesh>
+        <source id="_11_18_Popular_Spanish_Windmill_ROOT_base_1-positions" name="_11_18_Popular_Spanish_Windmill_ROOT_base_1-positions">
+          <float_array id="_11_18_Popular_Spanish_Windmill_ROOT_base_1-positions-array" count="198"> 0 0.0199999996 17.0949993 0 0.0199999996 17.4750004 -0.07413432 0.0199999996 17.1023006 0 0.0799999982 17.0949993 -0.07413432 0.0799999982 17.1023006 0 0.0799999982 17.4750004 -0.145419702 0.0199999996 17.1239262 -0.145419702 0.0799999982 17.1239262 -0.211116686 0.0199999996 17.1590424 -0.211116686 0.0799999982 17.1590424 -0.26870057 0.0199999996 17.2062988 -0.26870057 0.0799999982 17.2062988 -0.31595844 0.0199999996 17.2638836 -0.31595844 0.0799999982 17.2638836 -0.351074219 0.0199999996 17.3295803 -0.351074219 0.0799999982 17.3295803 -0.372698396 0.0199999996 17.4008656 -0.372698396 0.0799999982 17.4008656 -0.379999995 0.0199999996 17.4750004 -0.379999995 0.0799999982 17.4750004 -0.372698396 0.0199999996 17.5491352 -0.372698396 0.0799999982 17.5491352 -0.351074219 0.0199999996 17.6204205 -0.351074219 0.0799999982 17.6204205 -0.31595844 0.0199999996 17.6861172 -0.31595844 0.0799999982 17.6861172 -0.26870057 0.0199999996 17.7437 -0.26870057 0.0799999982 17.7437 -0.211116686 0.0199999996 17.7909584 -0.211116686 0.0799999982 17.7909584 -0.145419702 0.0199999996 17.8260746 -0.145419702 0.0799999982 17.8260746 -0.07413432 0.0199999996 17.8476982 -0.07413432 0.0799999982 17.8476982 -4.65365791e-17 0.0199999996 17.8549995 -4.65365791e-17 0.0799999982 17.8549995 0.07413432 0.0199999996 17.8476982 0.07413432 0.0799999982 17.8476982 0.145419702 0.0199999996 17.8260746 0.145419702 0.0799999982 17.8260746 0.211116686 0.0199999996 17.7909584 0.211116686 0.0799999982 17.7909584 0.26870057 0.0199999996 17.7437 0.26870057 0.0799999982 17.7437 0.31595844 0.0199999996 17.6861172 0.31595844 0.0799999982 17.6861172 0.351074219 0.0199999996 17.6204205 0.351074219 0.0799999982 17.6204205 0.372698396 0.0199999996 17.5491352 0.372698396 0.0799999982 17.5491352 0.379999995 0.0199999996 17.4750004 0.379999995 0.0799999982 17.4750004 0.372698396 0.0199999996 17.4008656 0.372698396 0.0799999982 17.4008656 0.351074219 0.0199999996 17.3295803 0.351074219 0.0799999982 17.3295803 0.31595844 0.0199999996 17.2638836 0.31595844 0.0799999982 17.2638836 0.26870057 0.0199999996 17.2062988 0.26870057 0.0799999982 17.2062988 0.211116686 0.0199999996 17.1590424 0.211116686 0.0799999982 17.1590424 0.145419702 0.0199999996 17.1239262 0.145419702 0.0799999982 17.1239262 0.07413432 0.0199999996 17.1023006 0.07413432 0.0799999982 17.1023006 </float_array>
+          <technique_common>
+            <accessor count="66" offset="0" source="#_11_18_Popular_Spanish_Windmill_ROOT_base_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_11_18_Popular_Spanish_Windmill_ROOT_base_1-vertices">
+          <input semantic="POSITION" source="#_11_18_Popular_Spanish_Windmill_ROOT_base_1-positions" />
+        </vertices>
+        <polylist count="128" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_11_18_Popular_Spanish_Windmill_ROOT_base_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 34 32 34 33 33 34 35 33 35 5 34 1 36 34 36 35 35 36 37 35 37 5 36 1 38 36 38 37 37 38 39 37 39 5 38 1 40 38 40 39 39 40 41 39 41 5 40 1 42 40 42 41 41 42 43 41 43 5 42 1 44 42 44 43 43 44 45 43 45 5 44 1 46 44 46 45 45 46 47 45 47 5 46 1 48 46 48 47 47 48 49 47 49 5 48 1 50 48 50 49 49 50 51 49 51 5 50 1 52 50 52 51 51 52 53 51 53 5 52 1 54 52 54 53 53 54 55 53 55 5 54 1 56 54 56 55 55 56 57 55 57 5 56 1 58 56 58 57 57 58 59 57 59 5 58 1 60 58 60 59 59 60 61 59 61 5 60 1 62 60 62 61 61 62 63 61 63 5 62 1 64 62 64 63 63 64 65 63 65 5 64 1 0 64 0 65 65 0 3 65 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_11_18_Popular_Spanish_Windmill_part_01_1" name="11_18_Popular_Spanish_Windmill_part_01" >
+      <mesh>
+        <source id="_11_18_Popular_Spanish_Windmill_part_01_1-positions" name="_11_18_Popular_Spanish_Windmill_part_01_1-positions">
+          <float_array id="_11_18_Popular_Spanish_Windmill_part_01_1-positions-array" count="24"> -0.0931764692 0.150000006 17.5681763 -0.0931764692 0.573529422 17.5681763 -0.0931764692 0.150000006 17.3818226 0.0931764692 0.150000006 17.3818226 -0.0931764692 0.573529422 17.3818226 0.0931764692 0.573529422 17.5681763 0.0931764692 0.150000006 17.5681763 0.0931764692 0.573529422 17.3818226 </float_array>
+          <technique_common>
+            <accessor count="8" offset="0" source="#_11_18_Popular_Spanish_Windmill_part_01_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_11_18_Popular_Spanish_Windmill_part_01_1-vertices">
+          <input semantic="POSITION" source="#_11_18_Popular_Spanish_Windmill_part_01_1-positions" />
+        </vertices>
+        <polylist count="12" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_11_18_Popular_Spanish_Windmill_part_01_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 3 0 2 2 1 4 4 3 2 0 5 1 6 0 3 6 5 0 1 5 4 7 3 4 4 5 7 7 6 3 5 6 7 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_11_18_Popular_Spanish_Windmill_part_02_1" name="11_18_Popular_Spanish_Windmill_part_02" >
+      <mesh>
+        <source id="_11_18_Popular_Spanish_Windmill_part_02_1-positions" name="_11_18_Popular_Spanish_Windmill_part_02_1-positions">
+          <float_array id="_11_18_Popular_Spanish_Windmill_part_02_1-positions-array" count="66"> 0 0.573529422 17.3394699 0 0.573529422 17.4750004 -0.0418808907 0.573529422 17.3461037 0 0.742941201 17.4750004 -0.0796621889 0.573529422 17.3653545 -0.109645598 0.573529422 17.3953381 -0.128896132 0.573529422 17.4331188 -0.135529414 0.573529422 17.4750004 -0.128896132 0.573529422 17.51688 -0.109645598 0.573529422 17.5546627 -0.0796621889 0.573529422 17.5846462 -0.0418808907 0.573529422 17.6038952 -1.65975659e-17 0.573529422 17.6105289 0.0418808907 0.573529422 17.6038952 0.0796621889 0.573529422 17.5846462 0.109645598 0.573529422 17.5546627 0.128896132 0.573529422 17.51688 0.135529414 0.573529422 17.4750004 0.128896132 0.573529422 17.4331188 0.109645598 0.573529422 17.3953381 0.0796621889 0.573529422 17.3653545 0.0418808907 0.573529422 17.3461037 </float_array>
+          <technique_common>
+            <accessor count="22" offset="0" source="#_11_18_Popular_Spanish_Windmill_part_02_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_11_18_Popular_Spanish_Windmill_part_02_1-vertices">
+          <input semantic="POSITION" source="#_11_18_Popular_Spanish_Windmill_part_02_1-positions" />
+        </vertices>
+        <polylist count="40" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_11_18_Popular_Spanish_Windmill_part_02_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 2 1 4 2 4 3 4 1 5 4 5 3 5 1 6 5 6 3 6 1 7 6 7 3 7 1 8 7 8 3 8 1 9 8 9 3 9 1 10 9 10 3 10 1 11 10 11 3 11 1 12 11 12 3 12 1 13 12 13 3 13 1 14 13 14 3 14 1 15 14 15 3 15 1 16 15 16 3 16 1 17 16 17 3 17 1 18 17 18 3 18 1 19 18 19 3 19 1 20 19 20 3 20 1 21 20 21 3 21 1 0 21 0 3 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_11_18_Popular_Spanish_Windmill_part_03_1" name="11_18_Popular_Spanish_Windmill_part_03" >
+      <mesh>
+        <source id="_11_18_Popular_Spanish_Windmill_part_03_1-positions" name="_11_18_Popular_Spanish_Windmill_part_03_1-positions">
+          <float_array id="_11_18_Popular_Spanish_Windmill_part_03_1-positions-array" count="198"> 0 0.615882337 17.56987 0 0.615882337 17.5851173 0 0.618856907 17.5701637 0.254117638 0.615882337 17.56987 0.254117638 0.618856907 17.5701637 0.254117638 0.615882337 17.5851173 0 0.621717155 17.5710316 0.254117638 0.621717155 17.5710316 0 0.62435317 17.5724411 0.254117638 0.62435317 17.5724411 0 0.626663625 17.574337 0.254117638 0.626663625 17.574337 0 0.628559828 17.5766468 0.254117638 0.628559828 17.5766468 0 0.629968822 17.5792828 0.254117638 0.629968822 17.5792828 0 0.630836427 17.5821438 0.254117638 0.630836427 17.5821438 0 0.631129384 17.5851173 0.254117638 0.631129384 17.5851173 0 0.630836427 17.5880928 0.254117638 0.630836427 17.5880928 0 0.629968822 17.5909519 0.254117638 0.629968822 17.5909519 0 0.628559828 17.5935879 0.254117638 0.628559828 17.5935879 0 0.626663625 17.5958996 0.254117638 0.626663625 17.5958996 0 0.62435317 17.5977955 0.254117638 0.62435317 17.5977955 0 0.621717155 17.599205 0.254117638 0.621717155 17.599205 0 0.618856907 17.600071 0.254117638 0.618856907 17.600071 0 0.615882337 17.6003647 0.254117638 0.615882337 17.6003647 0 0.612907827 17.600071 0.254117638 0.612907827 17.600071 0 0.610047579 17.599205 0.254117638 0.610047579 17.599205 0 0.607411563 17.5977955 0.254117638 0.607411563 17.5977955 0 0.605101049 17.5958996 0.254117638 0.605101049 17.5958996 0 0.603204906 17.5935879 0.254117638 0.603204906 17.5935879 0 0.601795912 17.5909519 0.254117638 0.601795912 17.5909519 0 0.600928247 17.5880928 0.254117638 0.600928247 17.5880928 0 0.60063529 17.5851173 0.254117638 0.60063529 17.5851173 0 0.600928247 17.5821438 0.254117638 0.600928247 17.5821438 0 0.601795912 17.5792828 0.254117638 0.601795912 17.5792828 0 0.603204906 17.5766468 0.254117638 0.603204906 17.5766468 0 0.605101049 17.574337 0.254117638 0.605101049 17.574337 0 0.607411563 17.5724411 0.254117638 0.607411563 17.5724411 0 0.610047579 17.5710316 0.254117638 0.610047579 17.5710316 0 0.612907827 17.5701637 0.254117638 0.612907827 17.5701637 </float_array>
+          <technique_common>
+            <accessor count="66" offset="0" source="#_11_18_Popular_Spanish_Windmill_part_03_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_11_18_Popular_Spanish_Windmill_part_03_1-vertices">
+          <input semantic="POSITION" source="#_11_18_Popular_Spanish_Windmill_part_03_1-positions" />
+        </vertices>
+        <polylist count="128" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_11_18_Popular_Spanish_Windmill_part_03_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 34 32 34 33 33 34 35 33 35 5 34 1 36 34 36 35 35 36 37 35 37 5 36 1 38 36 38 37 37 38 39 37 39 5 38 1 40 38 40 39 39 40 41 39 41 5 40 1 42 40 42 41 41 42 43 41 43 5 42 1 44 42 44 43 43 44 45 43 45 5 44 1 46 44 46 45 45 46 47 45 47 5 46 1 48 46 48 47 47 48 49 47 49 5 48 1 50 48 50 49 49 50 51 49 51 5 50 1 52 50 52 51 51 52 53 51 53 5 52 1 54 52 54 53 53 54 55 53 55 5 54 1 56 54 56 55 55 56 57 55 57 5 56 1 58 56 58 57 57 58 59 57 59 5 58 1 60 58 60 59 59 60 61 59 61 5 60 1 62 60 62 61 61 62 63 61 63 5 62 1 64 62 64 63 63 64 65 63 65 5 64 1 0 64 0 65 65 0 3 65 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_11_18_Popular_Spanish_Windmill_part_04_1" name="11_18_Popular_Spanish_Windmill_part_04" >
+      <mesh>
+        <source id="_11_18_Popular_Spanish_Windmill_part_04_1-positions" name="_11_18_Popular_Spanish_Windmill_part_04_1-positions">
+          <float_array id="_11_18_Popular_Spanish_Windmill_part_04_1-positions-array" count="198"> 7.78010929e-18 0.615882337 17.56987 7.78010929e-18 0.615882337 17.5851173 -0.0029745535 0.615882337 17.5701637 7.78010929e-18 0.870000005 17.56987 -0.0029745535 0.870000005 17.5701637 7.78010929e-18 0.870000005 17.5851173 -0.00583479693 0.615882337 17.5710316 -0.00583479693 0.870000005 17.5710316 -0.00847081188 0.615882337 17.5724411 -0.00847081188 0.870000005 17.5724411 -0.0107812984 0.615882337 17.574337 -0.0107812984 0.870000005 17.574337 -0.0126774665 0.615882337 17.5766468 -0.0126774665 0.870000005 17.5766468 -0.0140864458 0.615882337 17.5792828 -0.0140864458 0.870000005 17.5792828 -0.014954091 0.615882337 17.5821438 -0.014954091 0.870000005 17.5821438 -0.0152470591 0.615882337 17.5851173 -0.0152470591 0.870000005 17.5851173 -0.014954091 0.615882337 17.5880928 -0.014954091 0.870000005 17.5880928 -0.0140864458 0.615882337 17.5909519 -0.0140864458 0.870000005 17.5909519 -0.0126774665 0.615882337 17.5935879 -0.0126774665 0.870000005 17.5935879 -0.0107812984 0.615882337 17.5958996 -0.0107812984 0.870000005 17.5958996 -0.00847081188 0.615882337 17.5977955 -0.00847081188 0.870000005 17.5977955 -0.00583479693 0.615882337 17.599205 -0.00583479693 0.870000005 17.599205 -0.0029745535 0.615882337 17.600071 -0.0029745535 0.870000005 17.600071 5.91288306e-18 0.615882337 17.6003647 5.91288306e-18 0.870000005 17.6003647 0.0029745535 0.615882337 17.600071 0.0029745535 0.870000005 17.600071 0.00583479693 0.615882337 17.599205 0.00583479693 0.870000005 17.599205 0.00847081188 0.615882337 17.5977955 0.00847081188 0.870000005 17.5977955 0.0107812984 0.615882337 17.5958996 0.0107812984 0.870000005 17.5958996 0.0126774665 0.615882337 17.5935879 0.0126774665 0.870000005 17.5935879 0.0140864458 0.615882337 17.5909519 0.0140864458 0.870000005 17.5909519 0.014954091 0.615882337 17.5880928 0.014954091 0.870000005 17.5880928 0.0152470591 0.615882337 17.5851173 0.0152470591 0.870000005 17.5851173 0.014954091 0.615882337 17.5821438 0.014954091 0.870000005 17.5821438 0.0140864458 0.615882337 17.5792828 0.0140864458 0.870000005 17.5792828 0.0126774665 0.615882337 17.5766468 0.0126774665 0.870000005 17.5766468 0.0107812984 0.615882337 17.574337 0.0107812984 0.870000005 17.574337 0.00847081188 0.615882337 17.5724411 0.00847081188 0.870000005 17.5724411 0.00583479693 0.615882337 17.5710316 0.00583479693 0.870000005 17.5710316 0.0029745535 0.615882337 17.5701637 0.0029745535 0.870000005 17.5701637 </float_array>
+          <technique_common>
+            <accessor count="66" offset="0" source="#_11_18_Popular_Spanish_Windmill_part_04_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_11_18_Popular_Spanish_Windmill_part_04_1-vertices">
+          <input semantic="POSITION" source="#_11_18_Popular_Spanish_Windmill_part_04_1-positions" />
+        </vertices>
+        <polylist count="128" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_11_18_Popular_Spanish_Windmill_part_04_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 34 32 34 33 33 34 35 33 35 5 34 1 36 34 36 35 35 36 37 35 37 5 36 1 38 36 38 37 37 38 39 37 39 5 38 1 40 38 40 39 39 40 41 39 41 5 40 1 42 40 42 41 41 42 43 41 43 5 42 1 44 42 44 43 43 44 45 43 45 5 44 1 46 44 46 45 45 46 47 45 47 5 46 1 48 46 48 47 47 48 49 47 49 5 48 1 50 48 50 49 49 50 51 49 51 5 50 1 52 50 52 51 51 52 53 51 53 5 52 1 54 52 54 53 53 54 55 53 55 5 54 1 56 54 56 55 55 56 57 55 57 5 56 1 58 56 58 57 57 58 59 57 59 5 58 1 60 58 60 59 59 60 61 59 61 5 60 1 62 60 62 61 61 62 63 61 63 5 62 1 64 62 64 63 63 64 65 63 65 5 64 1 0 64 0 65 65 0 3 65 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_11_18_Popular_Spanish_Windmill_part_05_1" name="11_18_Popular_Spanish_Windmill_part_05" >
+      <mesh>
+        <source id="_11_18_Popular_Spanish_Windmill_part_05_1-positions" name="_11_18_Popular_Spanish_Windmill_part_05_1-positions">
+          <float_array id="_11_18_Popular_Spanish_Windmill_part_05_1-positions-array" count="198"> 0 0.615882337 17.6003647 0 0.615882337 17.5851173 0 0.618856907 17.600071 -0.254117638 0.615882337 17.6003647 -0.254117638 0.618856907 17.600071 -0.254117638 0.615882337 17.5851173 0 0.621717155 17.599205 -0.254117638 0.621717155 17.599205 0 0.62435317 17.5977955 -0.254117638 0.62435317 17.5977955 0 0.626663625 17.5958996 -0.254117638 0.626663625 17.5958996 0 0.628559828 17.5935879 -0.254117638 0.628559828 17.5935879 0 0.629968822 17.5909519 -0.254117638 0.629968822 17.5909519 0 0.630836427 17.5880928 -0.254117638 0.630836427 17.5880928 0 0.631129384 17.5851173 -0.254117638 0.631129384 17.5851173 0 0.630836427 17.5821438 -0.254117638 0.630836427 17.5821438 0 0.629968822 17.5792828 -0.254117638 0.629968822 17.5792828 0 0.628559828 17.5766468 -0.254117638 0.628559828 17.5766468 0 0.626663625 17.574337 -0.254117638 0.626663625 17.574337 0 0.62435317 17.5724411 -0.254117638 0.62435317 17.5724411 0 0.621717155 17.5710316 -0.254117638 0.621717155 17.5710316 0 0.618856907 17.5701637 -0.254117638 0.618856907 17.5701637 0 0.615882337 17.56987 -0.254117638 0.615882337 17.56987 0 0.612907827 17.5701637 -0.254117638 0.612907827 17.5701637 0 0.610047579 17.5710316 -0.254117638 0.610047579 17.5710316 0 0.607411563 17.5724411 -0.254117638 0.607411563 17.5724411 0 0.605101049 17.574337 -0.254117638 0.605101049 17.574337 0 0.603204906 17.5766468 -0.254117638 0.603204906 17.5766468 0 0.601795912 17.5792828 -0.254117638 0.601795912 17.5792828 0 0.600928247 17.5821438 -0.254117638 0.600928247 17.5821438 0 0.60063529 17.5851173 -0.254117638 0.60063529 17.5851173 0 0.600928247 17.5880928 -0.254117638 0.600928247 17.5880928 0 0.601795912 17.5909519 -0.254117638 0.601795912 17.5909519 0 0.603204906 17.5935879 -0.254117638 0.603204906 17.5935879 0 0.605101049 17.5958996 -0.254117638 0.605101049 17.5958996 0 0.607411563 17.5977955 -0.254117638 0.607411563 17.5977955 0 0.610047579 17.599205 -0.254117638 0.610047579 17.599205 0 0.612907827 17.600071 -0.254117638 0.612907827 17.600071 </float_array>
+          <technique_common>
+            <accessor count="66" offset="0" source="#_11_18_Popular_Spanish_Windmill_part_05_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_11_18_Popular_Spanish_Windmill_part_05_1-vertices">
+          <input semantic="POSITION" source="#_11_18_Popular_Spanish_Windmill_part_05_1-positions" />
+        </vertices>
+        <polylist count="128" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_11_18_Popular_Spanish_Windmill_part_05_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 34 32 34 33 33 34 35 33 35 5 34 1 36 34 36 35 35 36 37 35 37 5 36 1 38 36 38 37 37 38 39 37 39 5 38 1 40 38 40 39 39 40 41 39 41 5 40 1 42 40 42 41 41 42 43 41 43 5 42 1 44 42 44 43 43 44 45 43 45 5 44 1 46 44 46 45 45 46 47 45 47 5 46 1 48 46 48 47 47 48 49 47 49 5 48 1 50 48 50 49 49 50 51 49 51 5 50 1 52 50 52 51 51 52 53 51 53 5 52 1 54 52 54 53 53 54 55 53 55 5 54 1 56 54 56 55 55 56 57 55 57 5 56 1 58 56 58 57 57 58 59 57 59 5 58 1 60 58 60 59 59 60 61 59 61 5 60 1 62 60 62 61 61 62 63 61 63 5 62 1 64 62 64 63 63 64 65 63 65 5 64 1 0 64 0 65 65 0 3 65 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_11_18_Popular_Spanish_Windmill_part_06_1" name="11_18_Popular_Spanish_Windmill_part_06" >
+      <mesh>
+        <source id="_11_18_Popular_Spanish_Windmill_part_06_1-positions" name="_11_18_Popular_Spanish_Windmill_part_06_1-positions">
+          <float_array id="_11_18_Popular_Spanish_Windmill_part_06_1-positions-array" count="198"> 4.87239904e-18 0.615882337 17.6003647 4.87239904e-18 0.615882337 17.5851173 -0.0029745535 0.615882337 17.600071 -5.15530523e-17 0.361764699 17.6003647 -0.0029745535 0.361764699 17.600071 -5.15530523e-17 0.361764699 17.5851173 -0.00583479693 0.615882337 17.599205 -0.00583479693 0.361764699 17.599205 -0.00847081188 0.615882337 17.5977955 -0.00847081188 0.361764699 17.5977955 -0.0107812984 0.615882337 17.5958996 -0.0107812984 0.361764699 17.5958996 -0.0126774665 0.615882337 17.5935879 -0.0126774665 0.361764699 17.5935879 -0.0140864458 0.615882337 17.5909519 -0.0140864458 0.361764699 17.5909519 -0.014954091 0.615882337 17.5880928 -0.014954091 0.361764699 17.5880928 -0.0152470591 0.615882337 17.5851173 -0.0152470591 0.361764699 17.5851173 -0.014954091 0.615882337 17.5821438 -0.014954091 0.361764699 17.5821438 -0.0140864458 0.615882337 17.5792828 -0.0140864458 0.361764699 17.5792828 -0.0126774665 0.615882337 17.5766468 -0.0126774665 0.361764699 17.5766468 -0.0107812984 0.615882337 17.574337 -0.0107812984 0.361764699 17.574337 -0.00847081188 0.615882337 17.5724411 -0.00847081188 0.361764699 17.5724411 -0.00583479693 0.615882337 17.5710316 -0.00583479693 0.361764699 17.5710316 -0.0029745535 0.615882337 17.5701637 -0.0029745535 0.361764699 17.5701637 3.00517281e-18 0.615882337 17.56987 -5.34202802e-17 0.361764699 17.56987 0.0029745535 0.615882337 17.5701637 0.0029745535 0.361764699 17.5701637 0.00583479693 0.615882337 17.5710316 0.00583479693 0.361764699 17.5710316 0.00847081188 0.615882337 17.5724411 0.00847081188 0.361764699 17.5724411 0.0107812984 0.615882337 17.574337 0.0107812984 0.361764699 17.574337 0.0126774665 0.615882337 17.5766468 0.0126774665 0.361764699 17.5766468 0.0140864458 0.615882337 17.5792828 0.0140864458 0.361764699 17.5792828 0.014954091 0.615882337 17.5821438 0.014954091 0.361764699 17.5821438 0.0152470591 0.615882337 17.5851173 0.0152470591 0.361764699 17.5851173 0.014954091 0.615882337 17.5880928 0.014954091 0.361764699 17.5880928 0.0140864458 0.615882337 17.5909519 0.0140864458 0.361764699 17.5909519 0.0126774665 0.615882337 17.5935879 0.0126774665 0.361764699 17.5935879 0.0107812984 0.615882337 17.5958996 0.0107812984 0.361764699 17.5958996 0.00847081188 0.615882337 17.5977955 0.00847081188 0.361764699 17.5977955 0.00583479693 0.615882337 17.599205 0.00583479693 0.361764699 17.599205 0.0029745535 0.615882337 17.600071 0.0029745535 0.361764699 17.600071 </float_array>
+          <technique_common>
+            <accessor count="66" offset="0" source="#_11_18_Popular_Spanish_Windmill_part_06_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_11_18_Popular_Spanish_Windmill_part_06_1-vertices">
+          <input semantic="POSITION" source="#_11_18_Popular_Spanish_Windmill_part_06_1-positions" />
+        </vertices>
+        <polylist count="128" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_11_18_Popular_Spanish_Windmill_part_06_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 34 32 34 33 33 34 35 33 35 5 34 1 36 34 36 35 35 36 37 35 37 5 36 1 38 36 38 37 37 38 39 37 39 5 38 1 40 38 40 39 39 40 41 39 41 5 40 1 42 40 42 41 41 42 43 41 43 5 42 1 44 42 44 43 43 44 45 43 45 5 44 1 46 44 46 45 45 46 47 45 47 5 46 1 48 46 48 47 47 48 49 47 49 5 48 1 50 48 50 49 49 50 51 49 51 5 50 1 52 50 52 51 51 52 53 51 53 5 52 1 54 52 54 53 53 54 55 53 55 5 54 1 56 54 56 55 55 56 57 55 57 5 56 1 58 56 58 57 57 58 59 57 59 5 58 1 60 58 60 59 59 60 61 59 61 5 60 1 62 60 62 61 61 62 63 61 63 5 62 1 64 62 64 63 63 64 65 63 65 5 64 1 0 64 0 65 65 0 3 65 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+  </library_geometries>
+  <library_controllers>
+  </library_controllers>
+  <library_visual_scenes>
+    <visual_scene id="ROOT" name="ROOT">
+      <node id="_11_18_Popular_Spanish_Windmill_ROOT_base" name="11_18_Popular_Spanish_Windmill_ROOT_base" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_11_18_Popular_Spanish_Windmill_ROOT_base_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#panel_orange_trim">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_11_18_Popular_Spanish_Windmill_part_01" name="11_18_Popular_Spanish_Windmill_part_01" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_11_18_Popular_Spanish_Windmill_part_01_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#cream">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_11_18_Popular_Spanish_Windmill_part_02" name="11_18_Popular_Spanish_Windmill_part_02" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_11_18_Popular_Spanish_Windmill_part_02_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#brown_leather">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_11_18_Popular_Spanish_Windmill_part_03" name="11_18_Popular_Spanish_Windmill_part_03" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_11_18_Popular_Spanish_Windmill_part_03_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#brown_leather">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_11_18_Popular_Spanish_Windmill_part_04" name="11_18_Popular_Spanish_Windmill_part_04" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_11_18_Popular_Spanish_Windmill_part_04_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#brown_leather">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_11_18_Popular_Spanish_Windmill_part_05" name="11_18_Popular_Spanish_Windmill_part_05" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_11_18_Popular_Spanish_Windmill_part_05_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#brown_leather">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_11_18_Popular_Spanish_Windmill_part_06" name="11_18_Popular_Spanish_Windmill_part_06" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_11_18_Popular_Spanish_Windmill_part_06_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#brown_leather">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+    </visual_scene>
+  </library_visual_scenes>
+  <scene>
+    <instance_visual_scene url="#ROOT" />
+  </scene>
+</COLLADA>

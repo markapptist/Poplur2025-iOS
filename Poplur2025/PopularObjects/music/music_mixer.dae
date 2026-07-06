@@ -1,0 +1,475 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
+<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+  <asset>
+    <contributor>
+      <author>Assimp</author>
+      <authoring_tool>https://github.com/mikedh/trimesh</authoring_tool>
+    </contributor>
+    <created>2026-07-03T10:30:36</created>
+    <modified>2026-07-03T10:30:36</modified>
+    <unit name="meter" meter="1" />
+    <up_axis>Y_UP</up_axis>
+  </asset>
+  <library_images>
+  </library_images>
+  <library_effects>
+    <effect id="panel_pink_trim-fx" name="panel_pink_trim">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0.5   0.0500000007   0.200000003   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">1   0.200000003   0.600000024   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">608.399963</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="brushed_gunmetal-fx" name="brushed_gunmetal">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">0.121568628   0.129411772   0.149019614   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">462.399994</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="cyan_emissive-fx" name="cyan_emissive">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0.349999994   0.75   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">0.0196078438   0.850980401   1   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">577.599976</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="pink-fx" name="pink">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">1   0.278431386   0.619607866   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">302.5</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="material_4-fx" name="">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">1   1   1   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">0</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+  </library_effects>
+  <library_materials>
+    <material id="panel_pink_trim" name="panel_pink_trim">
+      <instance_effect url="#panel_pink_trim-fx"/>
+    </material>
+    <material id="brushed_gunmetal" name="brushed_gunmetal">
+      <instance_effect url="#brushed_gunmetal-fx"/>
+    </material>
+    <material id="cyan_emissive" name="cyan_emissive">
+      <instance_effect url="#cyan_emissive-fx"/>
+    </material>
+    <material id="pink" name="pink">
+      <instance_effect url="#pink-fx"/>
+    </material>
+    <material id="material_4" name="">
+      <instance_effect url="#material_4-fx"/>
+    </material>
+  </library_materials>
+  <library_geometries>
+    <geometry id="_07_12_Popular_Music_Mixer_ROOT_base_1" name="07_12_Popular_Music_Mixer_ROOT_base" >
+      <mesh>
+        <source id="_07_12_Popular_Music_Mixer_ROOT_base_1-positions" name="_07_12_Popular_Music_Mixer_ROOT_base_1-positions">
+          <float_array id="_07_12_Popular_Music_Mixer_ROOT_base_1-positions-array" count="198"> -8.72000027 0.0199999996 10.6949997 -8.72000027 0.0199999996 11.0749998 -8.79413414 0.0199999996 10.702302 -8.72000027 0.0799999982 10.6949997 -8.79413414 0.0799999982 10.702302 -8.72000027 0.0799999982 11.0749998 -8.86541939 0.0199999996 10.7239256 -8.86541939 0.0799999982 10.7239256 -8.93111706 0.0199999996 10.7590418 -8.93111706 0.0799999982 10.7590418 -8.98870087 0.0199999996 10.8062992 -8.98870087 0.0799999982 10.8062992 -9.03595829 0.0199999996 10.863883 -9.03595829 0.0799999982 10.863883 -9.07107449 0.0199999996 10.9295807 -9.07107449 0.0799999982 10.9295807 -9.0926981 0.0199999996 11.0008659 -9.0926981 0.0799999982 11.0008659 -9.10000038 0.0199999996 11.0749998 -9.10000038 0.0799999982 11.0749998 -9.0926981 0.0199999996 11.1491346 -9.0926981 0.0799999982 11.1491346 -9.07107449 0.0199999996 11.2204199 -9.07107449 0.0799999982 11.2204199 -9.03595829 0.0199999996 11.2861166 -9.03595829 0.0799999982 11.2861166 -8.98870087 0.0199999996 11.3437004 -8.98870087 0.0799999982 11.3437004 -8.93111706 0.0199999996 11.3909588 -8.93111706 0.0799999982 11.3909588 -8.86541939 0.0199999996 11.426074 -8.86541939 0.0799999982 11.426074 -8.79413414 0.0199999996 11.4476986 -8.79413414 0.0799999982 11.4476986 -8.72000027 0.0199999996 11.4549999 -8.72000027 0.0799999982 11.4549999 -8.64586544 0.0199999996 11.4476986 -8.64586544 0.0799999982 11.4476986 -8.57458019 0.0199999996 11.426074 -8.57458019 0.0799999982 11.426074 -8.50888348 0.0199999996 11.3909588 -8.50888348 0.0799999982 11.3909588 -8.45129967 0.0199999996 11.3437004 -8.45129967 0.0799999982 11.3437004 -8.40404129 0.0199999996 11.2861166 -8.40404129 0.0799999982 11.2861166 -8.36892605 0.0199999996 11.2204199 -8.36892605 0.0799999982 11.2204199 -8.34730148 0.0199999996 11.1491346 -8.34730148 0.0799999982 11.1491346 -8.34000015 0.0199999996 11.0749998 -8.34000015 0.0799999982 11.0749998 -8.34730148 0.0199999996 11.0008659 -8.34730148 0.0799999982 11.0008659 -8.36892605 0.0199999996 10.9295807 -8.36892605 0.0799999982 10.9295807 -8.40404129 0.0199999996 10.863883 -8.40404129 0.0799999982 10.863883 -8.45129967 0.0199999996 10.8062992 -8.45129967 0.0799999982 10.8062992 -8.50888348 0.0199999996 10.7590418 -8.50888348 0.0799999982 10.7590418 -8.57458019 0.0199999996 10.7239256 -8.57458019 0.0799999982 10.7239256 -8.64586544 0.0199999996 10.702302 -8.64586544 0.0799999982 10.702302 </float_array>
+          <technique_common>
+            <accessor count="66" offset="0" source="#_07_12_Popular_Music_Mixer_ROOT_base_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_07_12_Popular_Music_Mixer_ROOT_base_1-vertices">
+          <input semantic="POSITION" source="#_07_12_Popular_Music_Mixer_ROOT_base_1-positions" />
+        </vertices>
+        <polylist count="128" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_07_12_Popular_Music_Mixer_ROOT_base_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 34 32 34 33 33 34 35 33 35 5 34 1 36 34 36 35 35 36 37 35 37 5 36 1 38 36 38 37 37 38 39 37 39 5 38 1 40 38 40 39 39 40 41 39 41 5 40 1 42 40 42 41 41 42 43 41 43 5 42 1 44 42 44 43 43 44 45 43 45 5 44 1 46 44 46 45 45 46 47 45 47 5 46 1 48 46 48 47 47 48 49 47 49 5 48 1 50 48 50 49 49 50 51 49 51 5 50 1 52 50 52 51 51 52 53 51 53 5 52 1 54 52 54 53 53 54 55 53 55 5 54 1 56 54 56 55 55 56 57 55 57 5 56 1 58 56 58 57 57 58 59 57 59 5 58 1 60 58 60 59 59 60 61 59 61 5 60 1 62 60 62 61 61 62 63 61 63 5 62 1 64 62 64 63 63 64 65 63 65 5 64 1 0 64 0 65 65 0 3 65 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_07_12_Popular_Music_Mixer_part_01_1" name="07_12_Popular_Music_Mixer_part_01" >
+      <mesh>
+        <source id="_07_12_Popular_Music_Mixer_part_01_1-positions" name="_07_12_Popular_Music_Mixer_part_01_1-positions">
+          <float_array id="_07_12_Popular_Music_Mixer_part_01_1-positions-array" count="24"> -9.07999992 0.150000006 11.3185291 -9.07999992 0.404117644 11.3185291 -9.07999992 0.150000006 10.8314705 -8.35999966 0.150000006 10.8314705 -9.07999992 0.404117644 10.8314705 -8.35999966 0.404117644 11.3185291 -8.35999966 0.150000006 11.3185291 -8.35999966 0.404117644 10.8314705 </float_array>
+          <technique_common>
+            <accessor count="8" offset="0" source="#_07_12_Popular_Music_Mixer_part_01_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_07_12_Popular_Music_Mixer_part_01_1-vertices">
+          <input semantic="POSITION" source="#_07_12_Popular_Music_Mixer_part_01_1-positions" />
+        </vertices>
+        <polylist count="12" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_07_12_Popular_Music_Mixer_part_01_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 3 0 2 2 1 4 4 3 2 0 5 1 6 0 3 6 5 0 1 5 4 7 3 4 4 5 7 7 6 3 5 6 7 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_07_12_Popular_Music_Mixer_part_02_1" name="07_12_Popular_Music_Mixer_part_02" >
+      <mesh>
+        <source id="_07_12_Popular_Music_Mixer_part_02_1-positions" name="_07_12_Popular_Music_Mixer_part_02_1-positions">
+          <float_array id="_07_12_Popular_Music_Mixer_part_02_1-positions-array" count="102"> -8.97411728 0.425294131 10.910882 -8.97411728 0.425294131 10.9479408 -8.98829937 0.425294131 10.913703 -8.97411728 0.50999999 10.910882 -8.98829937 0.50999999 10.913703 -8.97411728 0.50999999 10.9479408 -9.00032234 0.425294131 10.9217367 -9.00032234 0.50999999 10.9217367 -9.00835514 0.425294131 10.9337597 -9.00835514 0.50999999 10.9337597 -9.01117611 0.425294131 10.9479408 -9.01117611 0.50999999 10.9479408 -9.00835514 0.425294131 10.9621229 -9.00835514 0.50999999 10.9621229 -9.00032234 0.425294131 10.9741459 -9.00032234 0.50999999 10.9741459 -8.98829937 0.425294131 10.9821787 -8.98829937 0.50999999 10.9821787 -8.97411728 0.425294131 10.9849997 -8.97411728 0.50999999 10.9849997 -8.95993614 0.425294131 10.9821787 -8.95993614 0.50999999 10.9821787 -8.94791317 0.425294131 10.9741459 -8.94791317 0.50999999 10.9741459 -8.93987942 0.425294131 10.9621229 -8.93987942 0.50999999 10.9621229 -8.93705845 0.425294131 10.9479408 -8.93705845 0.50999999 10.9479408 -8.93987942 0.425294131 10.9337597 -8.93987942 0.50999999 10.9337597 -8.94791317 0.425294131 10.9217367 -8.94791317 0.50999999 10.9217367 -8.95993614 0.425294131 10.913703 -8.95993614 0.50999999 10.913703 </float_array>
+          <technique_common>
+            <accessor count="34" offset="0" source="#_07_12_Popular_Music_Mixer_part_02_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_07_12_Popular_Music_Mixer_part_02_1-vertices">
+          <input semantic="POSITION" source="#_07_12_Popular_Music_Mixer_part_02_1-positions" />
+        </vertices>
+        <polylist count="64" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_07_12_Popular_Music_Mixer_part_02_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 0 32 0 33 33 0 3 33 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_07_12_Popular_Music_Mixer_part_03_1" name="07_12_Popular_Music_Mixer_part_03" >
+      <mesh>
+        <source id="_07_12_Popular_Music_Mixer_part_03_1-positions" name="_07_12_Popular_Music_Mixer_part_03_1-positions">
+          <float_array id="_07_12_Popular_Music_Mixer_part_03_1-positions-array" count="102"> -8.97411728 0.425294131 11.165 -8.97411728 0.425294131 11.2020588 -8.98829937 0.425294131 11.1678209 -8.97411728 0.50999999 11.165 -8.98829937 0.50999999 11.1678209 -8.97411728 0.50999999 11.2020588 -9.00032234 0.425294131 11.1758547 -9.00032234 0.50999999 11.1758547 -9.00835514 0.425294131 11.1878767 -9.00835514 0.50999999 11.1878767 -9.01117611 0.425294131 11.2020588 -9.01117611 0.50999999 11.2020588 -9.00835514 0.425294131 11.2162409 -9.00835514 0.50999999 11.2162409 -9.00032234 0.425294131 11.2282629 -9.00032234 0.50999999 11.2282629 -8.98829937 0.425294131 11.2362967 -8.98829937 0.50999999 11.2362967 -8.97411728 0.425294131 11.2391176 -8.97411728 0.50999999 11.2391176 -8.95993614 0.425294131 11.2362967 -8.95993614 0.50999999 11.2362967 -8.94791317 0.425294131 11.2282629 -8.94791317 0.50999999 11.2282629 -8.93987942 0.425294131 11.2162409 -8.93987942 0.50999999 11.2162409 -8.93705845 0.425294131 11.2020588 -8.93705845 0.50999999 11.2020588 -8.93987942 0.425294131 11.1878767 -8.93987942 0.50999999 11.1878767 -8.94791317 0.425294131 11.1758547 -8.94791317 0.50999999 11.1758547 -8.95993614 0.425294131 11.1678209 -8.95993614 0.50999999 11.1678209 </float_array>
+          <technique_common>
+            <accessor count="34" offset="0" source="#_07_12_Popular_Music_Mixer_part_03_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_07_12_Popular_Music_Mixer_part_03_1-vertices">
+          <input semantic="POSITION" source="#_07_12_Popular_Music_Mixer_part_03_1-positions" />
+        </vertices>
+        <polylist count="64" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_07_12_Popular_Music_Mixer_part_03_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 0 32 0 33 33 0 3 33 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_07_12_Popular_Music_Mixer_part_04_1" name="07_12_Popular_Music_Mixer_part_04" >
+      <mesh>
+        <source id="_07_12_Popular_Music_Mixer_part_04_1-positions" name="_07_12_Popular_Music_Mixer_part_04_1-positions">
+          <float_array id="_07_12_Popular_Music_Mixer_part_04_1-positions-array" count="102"> -8.80470562 0.425294131 10.910882 -8.80470562 0.425294131 10.9479408 -8.81888771 0.425294131 10.913703 -8.80470562 0.50999999 10.910882 -8.81888771 0.50999999 10.913703 -8.80470562 0.50999999 10.9479408 -8.83091068 0.425294131 10.9217367 -8.83091068 0.50999999 10.9217367 -8.83894348 0.425294131 10.9337597 -8.83894348 0.50999999 10.9337597 -8.84176445 0.425294131 10.9479408 -8.84176445 0.50999999 10.9479408 -8.83894348 0.425294131 10.9621229 -8.83894348 0.50999999 10.9621229 -8.83091068 0.425294131 10.9741459 -8.83091068 0.50999999 10.9741459 -8.81888771 0.425294131 10.9821787 -8.81888771 0.50999999 10.9821787 -8.80470562 0.425294131 10.9849997 -8.80470562 0.50999999 10.9849997 -8.79052448 0.425294131 10.9821787 -8.79052448 0.50999999 10.9821787 -8.77850151 0.425294131 10.9741459 -8.77850151 0.50999999 10.9741459 -8.77046776 0.425294131 10.9621229 -8.77046776 0.50999999 10.9621229 -8.76764679 0.425294131 10.9479408 -8.76764679 0.50999999 10.9479408 -8.77046776 0.425294131 10.9337597 -8.77046776 0.50999999 10.9337597 -8.77850151 0.425294131 10.9217367 -8.77850151 0.50999999 10.9217367 -8.79052448 0.425294131 10.913703 -8.79052448 0.50999999 10.913703 </float_array>
+          <technique_common>
+            <accessor count="34" offset="0" source="#_07_12_Popular_Music_Mixer_part_04_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_07_12_Popular_Music_Mixer_part_04_1-vertices">
+          <input semantic="POSITION" source="#_07_12_Popular_Music_Mixer_part_04_1-positions" />
+        </vertices>
+        <polylist count="64" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_07_12_Popular_Music_Mixer_part_04_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 0 32 0 33 33 0 3 33 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_07_12_Popular_Music_Mixer_part_05_1" name="07_12_Popular_Music_Mixer_part_05" >
+      <mesh>
+        <source id="_07_12_Popular_Music_Mixer_part_05_1-positions" name="_07_12_Popular_Music_Mixer_part_05_1-positions">
+          <float_array id="_07_12_Popular_Music_Mixer_part_05_1-positions-array" count="102"> -8.80470562 0.425294131 11.165 -8.80470562 0.425294131 11.2020588 -8.81888771 0.425294131 11.1678209 -8.80470562 0.50999999 11.165 -8.81888771 0.50999999 11.1678209 -8.80470562 0.50999999 11.2020588 -8.83091068 0.425294131 11.1758547 -8.83091068 0.50999999 11.1758547 -8.83894348 0.425294131 11.1878767 -8.83894348 0.50999999 11.1878767 -8.84176445 0.425294131 11.2020588 -8.84176445 0.50999999 11.2020588 -8.83894348 0.425294131 11.2162409 -8.83894348 0.50999999 11.2162409 -8.83091068 0.425294131 11.2282629 -8.83091068 0.50999999 11.2282629 -8.81888771 0.425294131 11.2362967 -8.81888771 0.50999999 11.2362967 -8.80470562 0.425294131 11.2391176 -8.80470562 0.50999999 11.2391176 -8.79052448 0.425294131 11.2362967 -8.79052448 0.50999999 11.2362967 -8.77850151 0.425294131 11.2282629 -8.77850151 0.50999999 11.2282629 -8.77046776 0.425294131 11.2162409 -8.77046776 0.50999999 11.2162409 -8.76764679 0.425294131 11.2020588 -8.76764679 0.50999999 11.2020588 -8.77046776 0.425294131 11.1878767 -8.77046776 0.50999999 11.1878767 -8.77850151 0.425294131 11.1758547 -8.77850151 0.50999999 11.1758547 -8.79052448 0.425294131 11.1678209 -8.79052448 0.50999999 11.1678209 </float_array>
+          <technique_common>
+            <accessor count="34" offset="0" source="#_07_12_Popular_Music_Mixer_part_05_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_07_12_Popular_Music_Mixer_part_05_1-vertices">
+          <input semantic="POSITION" source="#_07_12_Popular_Music_Mixer_part_05_1-positions" />
+        </vertices>
+        <polylist count="64" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_07_12_Popular_Music_Mixer_part_05_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 0 32 0 33 33 0 3 33 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_07_12_Popular_Music_Mixer_part_06_1" name="07_12_Popular_Music_Mixer_part_06" >
+      <mesh>
+        <source id="_07_12_Popular_Music_Mixer_part_06_1-positions" name="_07_12_Popular_Music_Mixer_part_06_1-positions">
+          <float_array id="_07_12_Popular_Music_Mixer_part_06_1-positions-array" count="102"> -8.63529396 0.425294131 10.910882 -8.63529396 0.425294131 10.9479408 -8.64947605 0.425294131 10.913703 -8.63529396 0.50999999 10.910882 -8.64947605 0.50999999 10.913703 -8.63529396 0.50999999 10.9479408 -8.66149902 0.425294131 10.9217367 -8.66149902 0.50999999 10.9217367 -8.66953182 0.425294131 10.9337597 -8.66953182 0.50999999 10.9337597 -8.67235279 0.425294131 10.9479408 -8.67235279 0.50999999 10.9479408 -8.66953182 0.425294131 10.9621229 -8.66953182 0.50999999 10.9621229 -8.66149902 0.425294131 10.9741459 -8.66149902 0.50999999 10.9741459 -8.64947605 0.425294131 10.9821787 -8.64947605 0.50999999 10.9821787 -8.63529396 0.425294131 10.9849997 -8.63529396 0.50999999 10.9849997 -8.62111187 0.425294131 10.9821787 -8.62111187 0.50999999 10.9821787 -8.60908985 0.425294131 10.9741459 -8.60908985 0.50999999 10.9741459 -8.6010561 0.425294131 10.9621229 -8.6010561 0.50999999 10.9621229 -8.59823513 0.425294131 10.9479408 -8.59823513 0.50999999 10.9479408 -8.6010561 0.425294131 10.9337597 -8.6010561 0.50999999 10.9337597 -8.60908985 0.425294131 10.9217367 -8.60908985 0.50999999 10.9217367 -8.62111187 0.425294131 10.913703 -8.62111187 0.50999999 10.913703 </float_array>
+          <technique_common>
+            <accessor count="34" offset="0" source="#_07_12_Popular_Music_Mixer_part_06_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_07_12_Popular_Music_Mixer_part_06_1-vertices">
+          <input semantic="POSITION" source="#_07_12_Popular_Music_Mixer_part_06_1-positions" />
+        </vertices>
+        <polylist count="64" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_07_12_Popular_Music_Mixer_part_06_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 0 32 0 33 33 0 3 33 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_07_12_Popular_Music_Mixer_part_07_1" name="07_12_Popular_Music_Mixer_part_07" >
+      <mesh>
+        <source id="_07_12_Popular_Music_Mixer_part_07_1-positions" name="_07_12_Popular_Music_Mixer_part_07_1-positions">
+          <float_array id="_07_12_Popular_Music_Mixer_part_07_1-positions-array" count="102"> -8.63529396 0.425294131 11.165 -8.63529396 0.425294131 11.2020588 -8.64947605 0.425294131 11.1678209 -8.63529396 0.50999999 11.165 -8.64947605 0.50999999 11.1678209 -8.63529396 0.50999999 11.2020588 -8.66149902 0.425294131 11.1758547 -8.66149902 0.50999999 11.1758547 -8.66953182 0.425294131 11.1878767 -8.66953182 0.50999999 11.1878767 -8.67235279 0.425294131 11.2020588 -8.67235279 0.50999999 11.2020588 -8.66953182 0.425294131 11.2162409 -8.66953182 0.50999999 11.2162409 -8.66149902 0.425294131 11.2282629 -8.66149902 0.50999999 11.2282629 -8.64947605 0.425294131 11.2362967 -8.64947605 0.50999999 11.2362967 -8.63529396 0.425294131 11.2391176 -8.63529396 0.50999999 11.2391176 -8.62111187 0.425294131 11.2362967 -8.62111187 0.50999999 11.2362967 -8.60908985 0.425294131 11.2282629 -8.60908985 0.50999999 11.2282629 -8.6010561 0.425294131 11.2162409 -8.6010561 0.50999999 11.2162409 -8.59823513 0.425294131 11.2020588 -8.59823513 0.50999999 11.2020588 -8.6010561 0.425294131 11.1878767 -8.6010561 0.50999999 11.1878767 -8.60908985 0.425294131 11.1758547 -8.60908985 0.50999999 11.1758547 -8.62111187 0.425294131 11.1678209 -8.62111187 0.50999999 11.1678209 </float_array>
+          <technique_common>
+            <accessor count="34" offset="0" source="#_07_12_Popular_Music_Mixer_part_07_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_07_12_Popular_Music_Mixer_part_07_1-vertices">
+          <input semantic="POSITION" source="#_07_12_Popular_Music_Mixer_part_07_1-positions" />
+        </vertices>
+        <polylist count="64" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_07_12_Popular_Music_Mixer_part_07_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 0 32 0 33 33 0 3 33 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_07_12_Popular_Music_Mixer_part_08_1" name="07_12_Popular_Music_Mixer_part_08" >
+      <mesh>
+        <source id="_07_12_Popular_Music_Mixer_part_08_1-positions" name="_07_12_Popular_Music_Mixer_part_08_1-positions">
+          <float_array id="_07_12_Popular_Music_Mixer_part_08_1-positions-array" count="102"> -8.4658823 0.425294131 10.910882 -8.4658823 0.425294131 10.9479408 -8.48006439 0.425294131 10.913703 -8.4658823 0.50999999 10.910882 -8.48006439 0.50999999 10.913703 -8.4658823 0.50999999 10.9479408 -8.49208736 0.425294131 10.9217367 -8.49208736 0.50999999 10.9217367 -8.50012016 0.425294131 10.9337597 -8.50012016 0.50999999 10.9337597 -8.50294113 0.425294131 10.9479408 -8.50294113 0.50999999 10.9479408 -8.50012016 0.425294131 10.9621229 -8.50012016 0.50999999 10.9621229 -8.49208736 0.425294131 10.9741459 -8.49208736 0.50999999 10.9741459 -8.48006439 0.425294131 10.9821787 -8.48006439 0.50999999 10.9821787 -8.4658823 0.425294131 10.9849997 -8.4658823 0.50999999 10.9849997 -8.45170021 0.425294131 10.9821787 -8.45170021 0.50999999 10.9821787 -8.43967819 0.425294131 10.9741459 -8.43967819 0.50999999 10.9741459 -8.43164444 0.425294131 10.9621229 -8.43164444 0.50999999 10.9621229 -8.42882347 0.425294131 10.9479408 -8.42882347 0.50999999 10.9479408 -8.43164444 0.425294131 10.9337597 -8.43164444 0.50999999 10.9337597 -8.43967819 0.425294131 10.9217367 -8.43967819 0.50999999 10.9217367 -8.45170021 0.425294131 10.913703 -8.45170021 0.50999999 10.913703 </float_array>
+          <technique_common>
+            <accessor count="34" offset="0" source="#_07_12_Popular_Music_Mixer_part_08_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_07_12_Popular_Music_Mixer_part_08_1-vertices">
+          <input semantic="POSITION" source="#_07_12_Popular_Music_Mixer_part_08_1-positions" />
+        </vertices>
+        <polylist count="64" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_07_12_Popular_Music_Mixer_part_08_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 0 32 0 33 33 0 3 33 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_07_12_Popular_Music_Mixer_part_09_1" name="07_12_Popular_Music_Mixer_part_09" >
+      <mesh>
+        <source id="_07_12_Popular_Music_Mixer_part_09_1-positions" name="_07_12_Popular_Music_Mixer_part_09_1-positions">
+          <float_array id="_07_12_Popular_Music_Mixer_part_09_1-positions-array" count="102"> -8.4658823 0.425294131 11.165 -8.4658823 0.425294131 11.2020588 -8.48006439 0.425294131 11.1678209 -8.4658823 0.50999999 11.165 -8.48006439 0.50999999 11.1678209 -8.4658823 0.50999999 11.2020588 -8.49208736 0.425294131 11.1758547 -8.49208736 0.50999999 11.1758547 -8.50012016 0.425294131 11.1878767 -8.50012016 0.50999999 11.1878767 -8.50294113 0.425294131 11.2020588 -8.50294113 0.50999999 11.2020588 -8.50012016 0.425294131 11.2162409 -8.50012016 0.50999999 11.2162409 -8.49208736 0.425294131 11.2282629 -8.49208736 0.50999999 11.2282629 -8.48006439 0.425294131 11.2362967 -8.48006439 0.50999999 11.2362967 -8.4658823 0.425294131 11.2391176 -8.4658823 0.50999999 11.2391176 -8.45170021 0.425294131 11.2362967 -8.45170021 0.50999999 11.2362967 -8.43967819 0.425294131 11.2282629 -8.43967819 0.50999999 11.2282629 -8.43164444 0.425294131 11.2162409 -8.43164444 0.50999999 11.2162409 -8.42882347 0.425294131 11.2020588 -8.42882347 0.50999999 11.2020588 -8.43164444 0.425294131 11.1878767 -8.43164444 0.50999999 11.1878767 -8.43967819 0.425294131 11.1758547 -8.43967819 0.50999999 11.1758547 -8.45170021 0.425294131 11.1678209 -8.45170021 0.50999999 11.1678209 </float_array>
+          <technique_common>
+            <accessor count="34" offset="0" source="#_07_12_Popular_Music_Mixer_part_09_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_07_12_Popular_Music_Mixer_part_09_1-vertices">
+          <input semantic="POSITION" source="#_07_12_Popular_Music_Mixer_part_09_1-positions" />
+        </vertices>
+        <polylist count="64" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_07_12_Popular_Music_Mixer_part_09_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 0 32 0 33 33 0 3 33 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+  </library_geometries>
+  <library_controllers>
+  </library_controllers>
+  <library_visual_scenes>
+    <visual_scene id="ROOT" name="ROOT">
+      <node id="_07_12_Popular_Music_Mixer_ROOT_base" name="07_12_Popular_Music_Mixer_ROOT_base" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_07_12_Popular_Music_Mixer_ROOT_base_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#panel_pink_trim">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_07_12_Popular_Music_Mixer_part_01" name="07_12_Popular_Music_Mixer_part_01" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_07_12_Popular_Music_Mixer_part_01_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#brushed_gunmetal">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_07_12_Popular_Music_Mixer_part_02" name="07_12_Popular_Music_Mixer_part_02" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_07_12_Popular_Music_Mixer_part_02_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#cyan_emissive">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_07_12_Popular_Music_Mixer_part_03" name="07_12_Popular_Music_Mixer_part_03" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_07_12_Popular_Music_Mixer_part_03_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#pink">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_07_12_Popular_Music_Mixer_part_04" name="07_12_Popular_Music_Mixer_part_04" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_07_12_Popular_Music_Mixer_part_04_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#cyan_emissive">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_07_12_Popular_Music_Mixer_part_05" name="07_12_Popular_Music_Mixer_part_05" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_07_12_Popular_Music_Mixer_part_05_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#pink">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_07_12_Popular_Music_Mixer_part_06" name="07_12_Popular_Music_Mixer_part_06" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_07_12_Popular_Music_Mixer_part_06_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#cyan_emissive">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_07_12_Popular_Music_Mixer_part_07" name="07_12_Popular_Music_Mixer_part_07" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_07_12_Popular_Music_Mixer_part_07_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#pink">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_07_12_Popular_Music_Mixer_part_08" name="07_12_Popular_Music_Mixer_part_08" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_07_12_Popular_Music_Mixer_part_08_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#cyan_emissive">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_07_12_Popular_Music_Mixer_part_09" name="07_12_Popular_Music_Mixer_part_09" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_07_12_Popular_Music_Mixer_part_09_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#pink">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+    </visual_scene>
+  </library_visual_scenes>
+  <scene>
+    <instance_visual_scene url="#ROOT" />
+  </scene>
+</COLLADA>

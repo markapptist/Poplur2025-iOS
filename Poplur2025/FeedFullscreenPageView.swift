@@ -124,11 +124,15 @@ struct FeedFullscreenPageView: View {
 
         @State private var timeObserver: Any? = nil
         @State private var endObserver: Any? = nil
-        
+        @State private var failObserver: Any? = nil
+        @State private var stallObserver: Any? = nil
+
         @State private var pauseObserver: Any? = nil
 
         @State private var itemFailed: Bool = false
         @State private var isReadyToDisplay: Bool = false
+        @State private var showEndTransition: Bool = false
+        @State private var didHandlePlaybackEnd: Bool = false
         @State private var creditsVisible: Bool = false
         @State private var lastReportedPlaybackSecond: Double = -1
 
@@ -186,8 +190,35 @@ struct FeedFullscreenPageView: View {
                 object: item,
                 queue: .main
             ) { _ in
+                guard !self.didHandlePlaybackEnd else { return }
+                self.didHandlePlaybackEnd = true
                 self.setCreditsVisible(false)
-                NotificationCenter.default.post(name: .FeedAdvanceToNextPost, object: nil)
+                p.pause()
+                self.showEndTransition = true
+            }
+
+            // A video that starts fine but drops mid-stream leaves item.status stuck at
+            // .readyToPlay forever, so the 8s stuck-check below (which requires status != .readyToPlay)
+            // never fires. These two observers catch that case directly.
+            failObserver = NotificationCenter.default.addObserver(
+                forName: .AVPlayerItemFailedToPlayToEndTime,
+                object: item,
+                queue: .main
+            ) { notif in
+                let err = notif.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? NSError
+                print("[Video] FailedToPlayToEnd: \(String(describing: err))")
+                self.itemFailed = true
+                self.playbackStuck = true
+                NotificationCenter.default.post(name: .FeedAdvanceOnMediaFailure, object: nil)
+            }
+
+            stallObserver = NotificationCenter.default.addObserver(
+                forName: .AVPlayerItemPlaybackStalled,
+                object: item,
+                queue: .main
+            ) { _ in
+                print("[Video] Playback stalled — attempting resume")
+                p.playImmediately(atRate: 1.0)
             }
 
             player = p
@@ -267,7 +298,17 @@ struct FeedFullscreenPageView: View {
                             }
                         }
                 }
+
+                if showEndTransition {
+                    FeedEndTransitionOverlay {
+                        showEndTransition = false
+                        NotificationCenter.default.post(name: .FeedAdvanceToNextPost, object: nil)
+                    }
+                    .transition(.opacity)
+                    .zIndex(20)
+                }
             }
+            .animation(.easeInOut(duration: 0.16), value: showEndTransition)
             .onAppear {
                 setupPlayer()
             }
@@ -311,7 +352,17 @@ struct FeedFullscreenPageView: View {
                 NotificationCenter.default.removeObserver(token)
                 endObserver = nil
             }
+            if let token = failObserver {
+                NotificationCenter.default.removeObserver(token)
+                failObserver = nil
+            }
+            if let token = stallObserver {
+                NotificationCenter.default.removeObserver(token)
+                stallObserver = nil
+            }
             playbackStuck = false
+            showEndTransition = false
+            didHandlePlaybackEnd = false
             isReadyToDisplay = false
             lastReportedPlaybackSecond = -1
             if let obs = timeObserver, let p = player {
@@ -467,6 +518,7 @@ struct FeedFullscreenPageView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color.black)
                 .contentShape(Rectangle())
+                .ignoresSafeArea()
                 .onLongPressGesture(minimumDuration: 0.5) {
                     // Long press to show post location on map with user annotation
                     let coordinate = CLLocationCoordinate2D(latitude: post.latitude, longitude: post.longitude)
@@ -572,16 +624,6 @@ struct FeedFullscreenPageView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black)
-        .task(id: post.id) {
-            // Continuously cycle username ↔ channel number like a TV ticker
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(3.5))
-                guard !Task.isCancelled else { break }
-                withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
-                    showChannelMode.toggle()
-                }
-            }
-        }
     }
 
     @ViewBuilder
@@ -657,18 +699,9 @@ struct FeedFullscreenPageView: View {
 
             mediaView
 
-            // Username overlay in top-right corner
-            topRightInfo(size: size)
-                .zIndex(10)
-
             if shouldShowCaptions {
                 aiCaptionOverlay(size: size)
                     .zIndex(12)
-            }
-
-            if post.isPoplurAd {
-                poplurAdInfo
-                    .zIndex(11)
             }
         }
     }
@@ -677,7 +710,14 @@ struct FeedFullscreenPageView: View {
         let mediaKey: String
 
         var body: some View {
-            Color.black
+            LinearGradient(
+                colors: [
+                    Color(red: 0.07, green: 0.0, blue: 0.12),
+                    Color(red: 0.84, green: 0.02, blue: 0.47).opacity(0.28)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
         }
     }
 

@@ -36,7 +36,7 @@ struct ProfileStatsView: View {
 
     var body: some View {
         ZStack {
-            Color.white.ignoresSafeArea()
+            DS.Color.background.ignoresSafeArea()
 
             ScrollView {
                 VStack(spacing: 24) {

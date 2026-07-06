@@ -414,6 +414,8 @@ private struct FeedInlineVideoPlayer: View {
     let url: URL
     @State private var player: AVPlayer?
     @State private var endObserver: Any?
+    @State private var showEndTransition = false
+    @State private var didHandlePlaybackEnd = false
 
     var body: some View {
         ZStack {
@@ -422,19 +424,32 @@ private struct FeedInlineVideoPlayer: View {
                 AspectFillInlinePlayer(player: player)
                     .transition(.opacity)
             }
+            if showEndTransition {
+                FeedEndTransitionOverlay {
+                    showEndTransition = false
+                    NotificationCenter.default.post(name: .FeedAdvanceToNextPost, object: nil)
+                }
+                .transition(.opacity)
+                .zIndex(10)
+            }
         }
         .animation(.easeIn(duration: 0.25), value: player != nil)
+        .animation(.easeInOut(duration: 0.16), value: showEndTransition)
             .clipped()
             .onAppear {
                 let nextPlayer = AVPlayer(url: url)
                 player = nextPlayer
+                didHandlePlaybackEnd = false
                 FeedAudioManager.shared.register(nextPlayer)
                 endObserver = NotificationCenter.default.addObserver(
                     forName: .AVPlayerItemDidPlayToEndTime,
                     object: nextPlayer.currentItem,
                     queue: .main
                 ) { _ in
-                    NotificationCenter.default.post(name: .FeedAdvanceToNextPost, object: nil)
+                    guard !didHandlePlaybackEnd else { return }
+                    didHandlePlaybackEnd = true
+                    nextPlayer.pause()
+                    showEndTransition = true
                 }
                 FeedAudioManager.shared.playExclusively(nextPlayer)
             }
@@ -447,8 +462,106 @@ private struct FeedInlineVideoPlayer: View {
                     FeedAudioManager.shared.unregister(player)
                     player.pause()
                 }
+                showEndTransition = false
+                didHandlePlaybackEnd = false
                 player = nil
             }
+    }
+}
+
+struct FeedEndTransitionOverlay: View {
+    var onComplete: () -> Void
+
+    @State private var player: AVPlayer?
+    @State private var endObserver: Any?
+    @State private var didComplete = false
+
+    private var transitionURL: URL? {
+        Bundle.main.url(forResource: "feed_end_transition", withExtension: "mp4", subdirectory: "FeedTransitions")
+            ?? Bundle.main.url(forResource: "feed_end_transition", withExtension: "mov", subdirectory: "FeedTransitions")
+            ?? Bundle.main.url(forResource: "feed_end_transition", withExtension: "mp4")
+            ?? Bundle.main.url(forResource: "feed_end_transition", withExtension: "mov")
+    }
+
+    var body: some View {
+        ZStack {
+            Color.black
+            if let player {
+                TransitionPlayerLayer(player: player)
+            }
+        }
+        .ignoresSafeArea()
+        .onAppear { start() }
+        .onDisappear { cleanup() }
+    }
+
+    private func start() {
+        guard player == nil else { return }
+        guard let url = transitionURL else {
+            finish()
+            return
+        }
+        let item = AVPlayerItem(url: url)
+        let nextPlayer = AVPlayer(playerItem: item)
+        nextPlayer.isMuted = false
+        nextPlayer.actionAtItemEnd = .pause
+        player = nextPlayer
+        endObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime,
+            object: item,
+            queue: .main
+        ) { _ in
+            finish()
+        }
+        nextPlayer.play()
+
+        let duration = item.asset.duration.seconds
+        let fallbackDelay = duration.isFinite && duration > 0 ? duration + 0.25 : 1.6
+        DispatchQueue.main.asyncAfter(deadline: .now() + fallbackDelay) {
+            finish()
+        }
+    }
+
+    private func finish() {
+        guard !didComplete else { return }
+        didComplete = true
+        cleanup()
+        onComplete()
+    }
+
+    private func cleanup() {
+        if let endObserver {
+            NotificationCenter.default.removeObserver(endObserver)
+            self.endObserver = nil
+        }
+        player?.pause()
+        player = nil
+    }
+}
+
+private struct TransitionPlayerLayer: UIViewRepresentable {
+    let player: AVPlayer
+
+    func makeUIView(context: Context) -> TransitionPlayerLayerView {
+        let view = TransitionPlayerLayerView()
+        view.backgroundColor = .black
+        view.playerLayer.videoGravity = .resizeAspectFill
+        view.player = player
+        return view
+    }
+
+    func updateUIView(_ uiView: TransitionPlayerLayerView, context: Context) {
+        uiView.player = player
+        uiView.playerLayer.videoGravity = .resizeAspectFill
+    }
+}
+
+private final class TransitionPlayerLayerView: UIView {
+    override class var layerClass: AnyClass { AVPlayerLayer.self }
+    var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
+    var player: AVPlayer? {
+        get { playerLayer.player }
+        set { playerLayer.player = newValue }
     }
 }
 

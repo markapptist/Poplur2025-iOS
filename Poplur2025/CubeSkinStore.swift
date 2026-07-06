@@ -91,6 +91,56 @@ public enum CubeSkin: String, CaseIterable, Identifiable, Codable {
         }
     }
 
+    public var bannerAssetName: String {
+        switch self {
+        case .standard:    return "theme_banner_default"
+        case .rainbow:     return "theme_banner_rainbow"
+        case .sparklePink: return "theme_banner_sparkle_pink"
+        case .gold:        return "theme_banner_gold"
+        case .toy:         return "theme_banner_toy"
+        case .chocolate:   return "theme_banner_chocolate"
+        case .camo:        return "theme_banner_camo"
+        case .rubber:      return "theme_banner_rubber"
+        case .ice:         return "theme_banner_ice"
+        }
+    }
+
+    public var bannerImage: UIImage? {
+        if let image = UIImage(named: bannerAssetName) {
+            return image
+        }
+        guard let url = Bundle.main.url(
+            forResource: bannerAssetName,
+            withExtension: "png",
+            subdirectory: "ThemeBanners"
+        ) else {
+            return nil
+        }
+        return UIImage(contentsOfFile: url.path)
+    }
+
+    /// Main-tab background image asset. Rubber reuses the classic/default background until a rubber-specific image is added.
+    public var backgroundAssetName: String {
+        switch self {
+        case .standard, .rubber:
+            return "theme_bg_default"
+        case .rainbow:
+            return "theme_bg_rainbow"
+        case .sparklePink:
+            return "theme_bg_sparkle_pink"
+        case .gold:
+            return "theme_bg_gold"
+        case .toy:
+            return "theme_bg_toy"
+        case .chocolate:
+            return "theme_bg_chocolate"
+        case .camo:
+            return "theme_bg_camo"
+        case .ice:
+            return "theme_bg_ice"
+        }
+    }
+
     public var runtimeModelAssetName: String? {
         switch self {
         case .standard, .rubber:
@@ -98,7 +148,8 @@ public enum CubeSkin: String, CaseIterable, Identifiable, Codable {
         case .rainbow:
             return "rainbow_neon_icon_cube"
         case .gold:
-            return "gold_metallic_icon_cube"
+            // gold_metallic_icon_cube.glb causes SIGSEGV inside Apple's SCNSceneSource — use procedural fallback
+            return nil
         case .toy:
             return "circus_carnival_icon_cube"
         case .chocolate:
@@ -146,7 +197,8 @@ public enum CubeSkin: String, CaseIterable, Identifiable, Codable {
     public var iconFillColor: UIColor {
         switch self {
         case .standard: return .white
-        case .rainbow, .sparklePink, .toy, .rubber: return .white
+        case .rainbow, .sparklePink, .rubber: return .white
+        case .toy: return UIColor(red: 0.09, green: 0.24, blue: 0.88, alpha: 1)
         case .gold:        return UIColor(red: 1.00, green: 0.95, blue: 0.60, alpha: 1)
         case .chocolate:   return UIColor(red: 0.92, green: 0.65, blue: 0.25, alpha: 1)
         case .camo:        return UIColor(red: 0.82, green: 0.84, blue: 0.56, alpha: 1)
@@ -647,25 +699,57 @@ extension CubeSkin {
     }
 }
 
+struct CubeSkinBackgroundImageLayer: View {
+    let skin: CubeSkin
+    var opacity: Double = 0.22
+    var baseColor: Color = .clear
+    var scrimColor: Color = .clear
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack {
+                baseColor
+                Image(skin.backgroundAssetName)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+                    .clipped()
+                    .opacity(opacity)
+                scrimColor
+            }
+        }
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
+    }
+}
+
 struct CubeSkinThemedBackground: View {
     let skin: CubeSkin
 
     var body: some View {
         let theme = skin.appTheme
         ZStack {
-            LinearGradient(
-                colors: [theme.background, theme.backgroundMid, theme.backgroundDeep],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
+            CubeSkinBackgroundImageLayer(
+                skin: skin,
+                opacity: theme.prefersLightContent ? 0.34 : 0.30,
+                baseColor: theme.backgroundDeep,
+                scrimColor: theme.prefersLightContent ? Color.black.opacity(0.18) : Color.white.opacity(0.06)
             )
-            CubeSkinBackdropMotif(skin: skin)
-                .opacity(skin == .toy ? 0.92 : 1)
             Image(uiImage: skin.makeTexture(tab: .profile))
                 .resizable()
                 .scaledToFill()
-                .opacity(theme.textureOpacity * (skin == .toy ? 0.34 : 0.58))
+                .opacity(theme.textureOpacity * 0.16)
                 .saturation(skin == .toy ? 0.45 : 1.18)
                 .contrast(skin == .toy ? 0.82 : 1.10)
+            LinearGradient(
+                colors: [
+                    theme.backgroundDeep.opacity(theme.prefersLightContent ? 0.14 : 0.32),
+                    Color.clear,
+                    theme.background.opacity(theme.prefersLightContent ? 0.10 : 0.22)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
             CubeSkinEdgeGlow(skin: skin)
         }
         .ignoresSafeArea()

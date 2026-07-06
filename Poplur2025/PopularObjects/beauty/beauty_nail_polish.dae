@@ -1,0 +1,221 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
+<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+  <asset>
+    <contributor>
+      <author>Assimp</author>
+      <authoring_tool>https://github.com/mikedh/trimesh</authoring_tool>
+    </contributor>
+    <created>2026-07-03T10:30:27</created>
+    <modified>2026-07-03T10:30:27</modified>
+    <unit name="meter" meter="1" />
+    <up_axis>Y_UP</up_axis>
+  </asset>
+  <library_images>
+  </library_images>
+  <library_effects>
+    <effect id="panel_pink_trim-fx" name="panel_pink_trim">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0.5   0.0500000007   0.200000003   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">1   0.200000003   0.600000024   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">608.399963</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="pink-fx" name="pink">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">1   0.278431386   0.619607866   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">302.5</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="black_soft-fx" name="black_soft">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">0.0156862754   0.0156862754   0.0196078438   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">62.5</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="material_3-fx" name="">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">1   1   1   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">0</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+  </library_effects>
+  <library_materials>
+    <material id="panel_pink_trim" name="panel_pink_trim">
+      <instance_effect url="#panel_pink_trim-fx"/>
+    </material>
+    <material id="pink" name="pink">
+      <instance_effect url="#pink-fx"/>
+    </material>
+    <material id="black_soft" name="black_soft">
+      <instance_effect url="#black_soft-fx"/>
+    </material>
+    <material id="material_3" name="">
+      <instance_effect url="#material_3-fx"/>
+    </material>
+  </library_materials>
+  <library_geometries>
+    <geometry id="_03_05_Popular_Beauty_Nail_Polish_ROOT_base_1" name="03_05_Popular_Beauty_Nail_Polish_ROOT_base" >
+      <mesh>
+        <source id="_03_05_Popular_Beauty_Nail_Polish_ROOT_base_1-positions" name="_03_05_Popular_Beauty_Nail_Polish_ROOT_base_1-positions">
+          <float_array id="_03_05_Popular_Beauty_Nail_Polish_ROOT_base_1-positions-array" count="198"> 10.04 0.0199999996 -2.10500002 10.04 0.0199999996 -1.72500002 9.96586609 0.0199999996 -2.09769845 10.04 0.0799999982 -2.10500002 9.96586609 0.0799999982 -2.09769845 10.04 0.0799999982 -1.72500002 9.89457989 0.0199999996 -2.07607412 9.89457989 0.0799999982 -2.07607412 9.82888317 0.0199999996 -2.0409584 9.82888317 0.0799999982 -2.0409584 9.77129936 0.0199999996 -1.99370062 9.77129936 0.0799999982 -1.99370062 9.72404194 0.0199999996 -1.9361167 9.72404194 0.0799999982 -1.9361167 9.68892574 0.0199999996 -1.87041974 9.68892574 0.0799999982 -1.87041974 9.66730118 0.0199999996 -1.79913437 9.66730118 0.0799999982 -1.79913437 9.65999985 0.0199999996 -1.72500002 9.65999985 0.0799999982 -1.72500002 9.66730118 0.0199999996 -1.65086567 9.66730118 0.0799999982 -1.65086567 9.68892574 0.0199999996 -1.57958031 9.68892574 0.0799999982 -1.57958031 9.72404194 0.0199999996 -1.51388335 9.72404194 0.0799999982 -1.51388335 9.77129936 0.0199999996 -1.45629942 9.77129936 0.0799999982 -1.45629942 9.82888317 0.0199999996 -1.40904152 9.82888317 0.0799999982 -1.40904152 9.89457989 0.0199999996 -1.37392581 9.89457989 0.0799999982 -1.37392581 9.96586609 0.0199999996 -1.3523016 9.96586609 0.0799999982 -1.3523016 10.04 0.0199999996 -1.34500003 10.04 0.0799999982 -1.34500003 10.1141348 0.0199999996 -1.3523016 10.1141348 0.0799999982 -1.3523016 10.18542 0.0199999996 -1.37392581 10.18542 0.0799999982 -1.37392581 10.2511168 0.0199999996 -1.40904152 10.2511168 0.0799999982 -1.40904152 10.3087006 0.0199999996 -1.45629942 10.3087006 0.0799999982 -1.45629942 10.355958 0.0199999996 -1.51388335 10.355958 0.0799999982 -1.51388335 10.3910742 0.0199999996 -1.57958031 10.3910742 0.0799999982 -1.57958031 10.4126987 0.0199999996 -1.65086567 10.4126987 0.0799999982 -1.65086567 10.4200001 0.0199999996 -1.72500002 10.4200001 0.0799999982 -1.72500002 10.4126987 0.0199999996 -1.79913437 10.4126987 0.0799999982 -1.79913437 10.3910742 0.0199999996 -1.87041974 10.3910742 0.0799999982 -1.87041974 10.355958 0.0199999996 -1.9361167 10.355958 0.0799999982 -1.9361167 10.3087006 0.0199999996 -1.99370062 10.3087006 0.0799999982 -1.99370062 10.2511168 0.0199999996 -2.0409584 10.2511168 0.0799999982 -2.0409584 10.18542 0.0199999996 -2.07607412 10.18542 0.0799999982 -2.07607412 10.1141348 0.0199999996 -2.09769845 10.1141348 0.0799999982 -2.09769845 </float_array>
+          <technique_common>
+            <accessor count="66" offset="0" source="#_03_05_Popular_Beauty_Nail_Polish_ROOT_base_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_03_05_Popular_Beauty_Nail_Polish_ROOT_base_1-vertices">
+          <input semantic="POSITION" source="#_03_05_Popular_Beauty_Nail_Polish_ROOT_base_1-positions" />
+        </vertices>
+        <polylist count="128" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_03_05_Popular_Beauty_Nail_Polish_ROOT_base_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 34 32 34 33 33 34 35 33 35 5 34 1 36 34 36 35 35 36 37 35 37 5 36 1 38 36 38 37 37 38 39 37 39 5 38 1 40 38 40 39 39 40 41 39 41 5 40 1 42 40 42 41 41 42 43 41 43 5 42 1 44 42 44 43 43 44 45 43 45 5 44 1 46 44 46 45 45 46 47 45 47 5 46 1 48 46 48 47 47 48 49 47 49 5 48 1 50 48 50 49 49 50 51 49 51 5 50 1 52 50 52 51 51 52 53 51 53 5 52 1 54 52 54 53 53 54 55 53 55 5 54 1 56 54 56 55 55 56 57 55 57 5 56 1 58 56 58 57 57 58 59 57 59 5 58 1 60 58 60 59 59 60 61 59 61 5 60 1 62 60 62 61 61 62 63 61 63 5 62 1 64 62 64 63 63 64 65 63 65 5 64 1 0 64 0 65 65 0 3 65 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_03_05_Popular_Beauty_Nail_Polish_part_01_1" name="03_05_Popular_Beauty_Nail_Polish_part_01" >
+      <mesh>
+        <source id="_03_05_Popular_Beauty_Nail_Polish_part_01_1-positions" name="_03_05_Popular_Beauty_Nail_Polish_part_01_1-positions">
+          <float_array id="_03_05_Popular_Beauty_Nail_Polish_part_01_1-positions-array" count="174"> 10.04 0.150000006 -1.87596774 10.04 0.150000006 -1.72500002 10.0064068 0.150000006 -1.87218261 10.04 0.544838727 -1.87596774 10.0064068 0.544838727 -1.87218261 10.04 0.544838727 -1.72500002 9.9744978 0.150000006 -1.86101723 9.9744978 0.544838727 -1.86101723 9.94587326 0.150000006 -1.84303129 9.94587326 0.544838727 -1.84303129 9.92196846 0.150000006 -1.81912684 9.92196846 0.544838727 -1.81912684 9.90398312 0.150000006 -1.79050243 9.90398312 0.544838727 -1.79050243 9.8928175 0.150000006 -1.75859344 9.8928175 0.544838727 -1.75859344 9.88903236 0.150000006 -1.72500002 9.88903236 0.544838727 -1.72500002 9.8928175 0.150000006 -1.69140649 9.8928175 0.544838727 -1.69140649 9.90398312 0.150000006 -1.6594975 9.90398312 0.544838727 -1.6594975 9.92196846 0.150000006 -1.6308732 9.92196846 0.544838727 -1.6308732 9.94587326 0.150000006 -1.60696864 9.94587326 0.544838727 -1.60696864 9.9744978 0.150000006 -1.58898282 9.9744978 0.544838727 -1.58898282 10.0064068 0.150000006 -1.57781732 10.0064068 0.544838727 -1.57781732 10.04 0.150000006 -1.57403231 10.04 0.544838727 -1.57403231 10.0735931 0.150000006 -1.57781732 10.0735931 0.544838727 -1.57781732 10.1055021 0.150000006 -1.58898282 10.1055021 0.544838727 -1.58898282 10.1341267 0.150000006 -1.60696864 10.1341267 0.544838727 -1.60696864 10.1580315 0.150000006 -1.6308732 10.1580315 0.544838727 -1.6308732 10.1760168 0.150000006 -1.6594975 10.1760168 0.544838727 -1.6594975 10.1871824 0.150000006 -1.69140649 10.1871824 0.544838727 -1.69140649 10.1909676 0.150000006 -1.72500002 10.1909676 0.544838727 -1.72500002 10.1871824 0.150000006 -1.75859344 10.1871824 0.544838727 -1.75859344 10.1760168 0.150000006 -1.79050243 10.1760168 0.544838727 -1.79050243 10.1580315 0.150000006 -1.81912684 10.1580315 0.544838727 -1.81912684 10.1341267 0.150000006 -1.84303129 10.1341267 0.544838727 -1.84303129 10.1055021 0.150000006 -1.86101723 10.1055021 0.544838727 -1.86101723 10.0735931 0.150000006 -1.87218261 10.0735931 0.544838727 -1.87218261 </float_array>
+          <technique_common>
+            <accessor count="58" offset="0" source="#_03_05_Popular_Beauty_Nail_Polish_part_01_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_03_05_Popular_Beauty_Nail_Polish_part_01_1-vertices">
+          <input semantic="POSITION" source="#_03_05_Popular_Beauty_Nail_Polish_part_01_1-positions" />
+        </vertices>
+        <polylist count="112" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_03_05_Popular_Beauty_Nail_Polish_part_01_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 34 32 34 33 33 34 35 33 35 5 34 1 36 34 36 35 35 36 37 35 37 5 36 1 38 36 38 37 37 38 39 37 39 5 38 1 40 38 40 39 39 40 41 39 41 5 40 1 42 40 42 41 41 42 43 41 43 5 42 1 44 42 44 43 43 44 45 43 45 5 44 1 46 44 46 45 45 46 47 45 47 5 46 1 48 46 48 47 47 48 49 47 49 5 48 1 50 48 50 49 49 50 51 49 51 5 50 1 52 50 52 51 51 52 53 51 53 5 52 1 54 52 54 53 53 54 55 53 55 5 54 1 56 54 56 55 55 56 57 55 57 5 56 1 0 56 0 57 57 0 3 57 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_03_05_Popular_Beauty_Nail_Polish_part_02_1" name="03_05_Popular_Beauty_Nail_Polish_part_02" >
+      <mesh>
+        <source id="_03_05_Popular_Beauty_Nail_Polish_part_02_1-positions" name="_03_05_Popular_Beauty_Nail_Polish_part_02_1-positions">
+          <float_array id="_03_05_Popular_Beauty_Nail_Polish_part_02_1-positions-array" count="150"> 10.04 0.544838727 -1.80629027 10.04 0.544838727 -1.72500002 10.018961 0.544838727 -1.80352044 10.04 0.870000005 -1.80629027 10.018961 0.870000005 -1.80352044 10.04 0.870000005 -1.72500002 9.99935436 0.544838727 -1.79539943 9.99935436 0.870000005 -1.79539943 9.98251915 0.544838727 -1.78248096 9.98251915 0.870000005 -1.78248096 9.96960068 0.544838727 -1.76564515 9.96960068 0.870000005 -1.76564515 9.96147919 0.544838727 -1.74603951 9.96147919 0.870000005 -1.74603951 9.95870972 0.544838727 -1.72500002 9.95870972 0.870000005 -1.72500002 9.96147919 0.544838727 -1.70396054 9.96147919 0.870000005 -1.70396054 9.96960068 0.544838727 -1.68435478 9.96960068 0.870000005 -1.68435478 9.98251915 0.544838727 -1.66751909 9.98251915 0.870000005 -1.66751909 9.99935436 0.544838727 -1.6546005 9.99935436 0.870000005 -1.6546005 10.018961 0.544838727 -1.64647961 10.018961 0.870000005 -1.64647961 10.04 0.544838727 -1.64370966 10.04 0.870000005 -1.64370966 10.0610399 0.544838727 -1.64647961 10.0610399 0.870000005 -1.64647961 10.0806456 0.544838727 -1.6546005 10.0806456 0.870000005 -1.6546005 10.0974808 0.544838727 -1.66751909 10.0974808 0.870000005 -1.66751909 10.1103992 0.544838727 -1.68435478 10.1103992 0.870000005 -1.68435478 10.1185207 0.544838727 -1.70396054 10.1185207 0.870000005 -1.70396054 10.1212902 0.544838727 -1.72500002 10.1212902 0.870000005 -1.72500002 10.1185207 0.544838727 -1.74603951 10.1185207 0.870000005 -1.74603951 10.1103992 0.544838727 -1.76564515 10.1103992 0.870000005 -1.76564515 10.0974808 0.544838727 -1.78248096 10.0974808 0.870000005 -1.78248096 10.0806456 0.544838727 -1.79539943 10.0806456 0.870000005 -1.79539943 10.0610399 0.544838727 -1.80352044 10.0610399 0.870000005 -1.80352044 </float_array>
+          <technique_common>
+            <accessor count="50" offset="0" source="#_03_05_Popular_Beauty_Nail_Polish_part_02_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_03_05_Popular_Beauty_Nail_Polish_part_02_1-vertices">
+          <input semantic="POSITION" source="#_03_05_Popular_Beauty_Nail_Polish_part_02_1-positions" />
+        </vertices>
+        <polylist count="96" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_03_05_Popular_Beauty_Nail_Polish_part_02_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 34 32 34 33 33 34 35 33 35 5 34 1 36 34 36 35 35 36 37 35 37 5 36 1 38 36 38 37 37 38 39 37 39 5 38 1 40 38 40 39 39 40 41 39 41 5 40 1 42 40 42 41 41 42 43 41 43 5 42 1 44 42 44 43 43 44 45 43 45 5 44 1 46 44 46 45 45 46 47 45 47 5 46 1 48 46 48 47 47 48 49 47 49 5 48 1 0 48 0 49 49 0 3 49 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+  </library_geometries>
+  <library_controllers>
+  </library_controllers>
+  <library_visual_scenes>
+    <visual_scene id="ROOT" name="ROOT">
+      <node id="_03_05_Popular_Beauty_Nail_Polish_ROOT_base" name="03_05_Popular_Beauty_Nail_Polish_ROOT_base" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_03_05_Popular_Beauty_Nail_Polish_ROOT_base_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#panel_pink_trim">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_03_05_Popular_Beauty_Nail_Polish_part_01" name="03_05_Popular_Beauty_Nail_Polish_part_01" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_03_05_Popular_Beauty_Nail_Polish_part_01_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#pink">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_03_05_Popular_Beauty_Nail_Polish_part_02" name="03_05_Popular_Beauty_Nail_Polish_part_02" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_03_05_Popular_Beauty_Nail_Polish_part_02_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#black_soft">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+    </visual_scene>
+  </library_visual_scenes>
+  <scene>
+    <instance_visual_scene url="#ROOT" />
+  </scene>
+</COLLADA>

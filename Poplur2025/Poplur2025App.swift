@@ -1,6 +1,7 @@
 import SwiftUI
 
 // Only import heavy frameworks in release on real device
+import FirebaseAppCheck
 import FirebaseCore
 import FirebaseFirestore
 #if canImport(GoogleMobileAds)
@@ -26,6 +27,12 @@ private enum FirebaseBootstrap {
         }
 
         guard FirebaseApp.app() == nil else { return }
+
+        #if DEBUG
+        AppCheck.setAppCheckProviderFactory(AppCheckDebugProviderFactory())
+        #else
+        AppCheck.setAppCheckProviderFactory(DeviceCheckProviderFactory())
+        #endif
 
         FirebaseApp.configure()
 
@@ -67,11 +74,6 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
             PoplurNotificationCenter.shared.configure()
             WatchRadiusSync.shared.start()
             CubeSkinStore.shared.syncAppIcon()
-        }
-
-        // Replicate API key — sourced from Secrets.swift (gitignored, never committed)
-        if UserDefaults.standard.string(forKey: "poplur_replicate_key") == nil {
-            UserDefaults.standard.set(Secrets.replicateAPIKey, forKey: "poplur_replicate_key")
         }
 
         // Claude API key for AI bumper scripts
@@ -132,12 +134,13 @@ struct Poplur2025App: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     @StateObject private var auth: AuthViewModel
+    @StateObject private var stripeCoordinator = StripeTransitionCoordinator()
 
     init() {
         FirebaseBootstrap.configureIfNeeded()
         _auth = StateObject(wrappedValue: AuthViewModel())
     }
-    
+
     var body: some Scene {
         WindowGroup {
             NavigationStack {
@@ -157,6 +160,15 @@ struct Poplur2025App: App {
             }
             .toolbar(.hidden, for: .navigationBar)
             .poplurGlobalShaderScope(textIntensity: 0.72, iconIntensity: 0.72)
+            // Global rounded font for the entire app
+            .environment(\.font, .system(size: 16, weight: .semibold, design: .rounded))
+            .environmentObject(stripeCoordinator)
+            .overlay {
+                if stripeCoordinator.isVisible {
+                    StripeTransitionOverlay(coordinator: stripeCoordinator)
+                        .ignoresSafeArea()
+                }
+            }
             .onAppear {
                 let appearance = UITabBarAppearance()
                 appearance.configureWithTransparentBackground()
@@ -186,20 +198,36 @@ struct Poplur2025App: App {
 
     @ViewBuilder
     private var authenticatedContent: some View {
-        if auth.isResolvingAuthState {
-            // Hold a white screen while Firebase validates the persisted token.
-            // Prevents flashing WelcomeView for users who are already signed in.
-            Color.white.ignoresSafeArea()
-        } else if auth.isAuthenticated {
-            HomeView()
-                .environmentObject(auth)
-                .task(id: auth.currentUser?.uid) {
-                    await PoplurNotificationCenter.shared.refreshDailyNotificationForCurrentUser()
-                    WatchRadiusSync.shared.refreshAndSendRadius()
+        ZStack {
+            if auth.isResolvingAuthState {
+                ZStack {
+                    Color.white.ignoresSafeArea()
+                    if SettingsStore.shared.use3DLoadingScreen {
+                        LoginCubeView()
+                            .frame(width: 200, height: 200)
+                    } else {
+                        Image("logo")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 200, height: 200)
+                    }
                 }
-        } else {
-            WelcomeView()
-                .environmentObject(auth)
+                .transition(.opacity)
+            } else if auth.isAuthenticated {
+                HomeView()
+                    .environmentObject(auth)
+                    .task(id: auth.currentUser?.uid) {
+                        await PoplurNotificationCenter.shared.refreshDailyNotificationForCurrentUser()
+                        WatchRadiusSync.shared.refreshAndSendRadius()
+                    }
+                    .transition(.scale(scale: 0.88, anchor: .bottom).combined(with: .opacity))
+            } else {
+                WelcomeView()
+                    .environmentObject(auth)
+                    .transition(.opacity)
+            }
         }
+        .animation(.spring(response: 0.55, dampingFraction: 0.72), value: auth.isAuthenticated)
+        .animation(.easeOut(duration: 0.3), value: auth.isResolvingAuthState)
     }
 }

@@ -1,0 +1,287 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
+<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+  <asset>
+    <contributor>
+      <author>Assimp</author>
+      <authoring_tool>https://github.com/mikedh/trimesh</authoring_tool>
+    </contributor>
+    <created>2026-07-03T10:30:42</created>
+    <modified>2026-07-03T10:30:42</modified>
+    <unit name="meter" meter="1" />
+    <up_axis>Y_UP</up_axis>
+  </asset>
+  <library_images>
+  </library_images>
+  <library_effects>
+    <effect id="panel_blue_trim-fx" name="panel_blue_trim">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0.150000006   0.5   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">0   0.478431374   1   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">608.399963</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="brown_leather-fx" name="brown_leather">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">0.419607848   0.200000003   0.0784313753   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">202.5</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="polished_silver-fx" name="polished_silver">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">0.721568644   0.741176486   0.760784328   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">608.399963</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="material_3-fx" name="">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">1   1   1   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">0</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+  </library_effects>
+  <library_materials>
+    <material id="panel_blue_trim" name="panel_blue_trim">
+      <instance_effect url="#panel_blue_trim-fx"/>
+    </material>
+    <material id="brown_leather" name="brown_leather">
+      <instance_effect url="#brown_leather-fx"/>
+    </material>
+    <material id="polished_silver" name="polished_silver">
+      <instance_effect url="#polished_silver-fx"/>
+    </material>
+    <material id="material_3" name="">
+      <instance_effect url="#material_3-fx"/>
+    </material>
+  </library_materials>
+  <library_geometries>
+    <geometry id="_09_19_Popular_News_Podium_ROOT_base_1" name="09_19_Popular_News_Podium_ROOT_base" >
+      <mesh>
+        <source id="_09_19_Popular_News_Podium_ROOT_base_1-positions" name="_09_19_Popular_News_Podium_ROOT_base_1-positions">
+          <float_array id="_09_19_Popular_News_Podium_ROOT_base_1-positions-array" count="198"> 8.72000027 0.0199999996 11.8450003 8.72000027 0.0199999996 12.2250004 8.64586544 0.0199999996 11.8523016 8.72000027 0.0799999982 11.8450003 8.64586544 0.0799999982 11.8523016 8.72000027 0.0799999982 12.2250004 8.57458019 0.0199999996 11.8739262 8.57458019 0.0799999982 11.8739262 8.50888348 0.0199999996 11.9090414 8.50888348 0.0799999982 11.9090414 8.45129967 0.0199999996 11.9562998 8.45129967 0.0799999982 11.9562998 8.40404129 0.0199999996 12.0138836 8.40404129 0.0799999982 12.0138836 8.36892605 0.0199999996 12.0795803 8.36892605 0.0799999982 12.0795803 8.34730148 0.0199999996 12.1508656 8.34730148 0.0799999982 12.1508656 8.34000015 0.0199999996 12.2250004 8.34000015 0.0799999982 12.2250004 8.34730148 0.0199999996 12.2991343 8.34730148 0.0799999982 12.2991343 8.36892605 0.0199999996 12.3704195 8.36892605 0.0799999982 12.3704195 8.40404129 0.0199999996 12.4361162 8.40404129 0.0799999982 12.4361162 8.45129967 0.0199999996 12.493701 8.45129967 0.0799999982 12.493701 8.50888348 0.0199999996 12.5409584 8.50888348 0.0799999982 12.5409584 8.57458019 0.0199999996 12.5760746 8.57458019 0.0799999982 12.5760746 8.64586544 0.0199999996 12.5976982 8.64586544 0.0799999982 12.5976982 8.72000027 0.0199999996 12.6049995 8.72000027 0.0799999982 12.6049995 8.79413414 0.0199999996 12.5976982 8.79413414 0.0799999982 12.5976982 8.86541939 0.0199999996 12.5760746 8.86541939 0.0799999982 12.5760746 8.93111706 0.0199999996 12.5409584 8.93111706 0.0799999982 12.5409584 8.98870087 0.0199999996 12.493701 8.98870087 0.0799999982 12.493701 9.03595829 0.0199999996 12.4361162 9.03595829 0.0799999982 12.4361162 9.07107449 0.0199999996 12.3704195 9.07107449 0.0799999982 12.3704195 9.0926981 0.0199999996 12.2991343 9.0926981 0.0799999982 12.2991343 9.10000038 0.0199999996 12.2250004 9.10000038 0.0799999982 12.2250004 9.0926981 0.0199999996 12.1508656 9.0926981 0.0799999982 12.1508656 9.07107449 0.0199999996 12.0795803 9.07107449 0.0799999982 12.0795803 9.03595829 0.0199999996 12.0138836 9.03595829 0.0799999982 12.0138836 8.98870087 0.0199999996 11.9562998 8.98870087 0.0799999982 11.9562998 8.93111706 0.0199999996 11.9090414 8.93111706 0.0799999982 11.9090414 8.86541939 0.0199999996 11.8739262 8.86541939 0.0799999982 11.8739262 8.79413414 0.0199999996 11.8523016 8.79413414 0.0799999982 11.8523016 </float_array>
+          <technique_common>
+            <accessor count="66" offset="0" source="#_09_19_Popular_News_Podium_ROOT_base_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_09_19_Popular_News_Podium_ROOT_base_1-vertices">
+          <input semantic="POSITION" source="#_09_19_Popular_News_Podium_ROOT_base_1-positions" />
+        </vertices>
+        <polylist count="128" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_09_19_Popular_News_Podium_ROOT_base_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 34 32 34 33 33 34 35 33 35 5 34 1 36 34 36 35 35 36 37 35 37 5 36 1 38 36 38 37 37 38 39 37 39 5 38 1 40 38 40 39 39 40 41 39 41 5 40 1 42 40 42 41 41 42 43 41 43 5 42 1 44 42 44 43 43 44 45 43 45 5 44 1 46 44 46 45 45 46 47 45 47 5 46 1 48 46 48 47 47 48 49 47 49 5 48 1 50 48 50 49 49 50 51 49 51 5 50 1 52 50 52 51 51 52 53 51 53 5 52 1 54 52 54 53 53 54 55 53 55 5 54 1 56 54 56 55 55 56 57 55 57 5 56 1 58 56 58 57 57 58 59 57 59 5 58 1 60 58 60 59 59 60 61 59 61 5 60 1 62 60 62 61 61 62 63 61 63 5 62 1 64 62 64 63 63 64 65 63 65 5 64 1 0 64 0 65 65 0 3 65 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_09_19_Popular_News_Podium_part_01_1" name="09_19_Popular_News_Podium_part_01" >
+      <mesh>
+        <source id="_09_19_Popular_News_Podium_part_01_1-positions" name="_09_19_Popular_News_Podium_part_01_1-positions">
+          <float_array id="_09_19_Popular_News_Podium_part_01_1-positions-array" count="24"> 8.5232935 0.150000006 12.345212 8.5232935 0.487211168 12.345212 8.5232935 0.150000006 12.0829372 8.91670609 0.150000006 12.0829372 8.5232935 0.487211168 12.0829372 8.91670609 0.487211168 12.345212 8.91670609 0.150000006 12.345212 8.91670609 0.487211168 12.0829372 </float_array>
+          <technique_common>
+            <accessor count="8" offset="0" source="#_09_19_Popular_News_Podium_part_01_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_09_19_Popular_News_Podium_part_01_1-vertices">
+          <input semantic="POSITION" source="#_09_19_Popular_News_Podium_part_01_1-positions" />
+        </vertices>
+        <polylist count="12" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_09_19_Popular_News_Podium_part_01_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 3 0 2 2 1 4 4 3 2 0 5 1 6 0 3 6 5 0 1 5 4 7 3 4 4 5 7 7 6 3 5 6 7 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_09_19_Popular_News_Podium_part_02_1" name="09_19_Popular_News_Podium_part_02" >
+      <mesh>
+        <source id="_09_19_Popular_News_Podium_part_02_1-positions" name="_09_19_Popular_News_Podium_part_02_1-positions">
+          <float_array id="_09_19_Popular_News_Podium_part_02_1-positions-array" count="24"> 8.45772457 0.496578127 12.373313 8.45772457 0.627715826 12.373313 8.45772457 0.496578127 12.0548363 8.98227501 0.496578127 12.0548363 8.45772457 0.627715826 12.0548363 8.98227501 0.627715826 12.373313 8.98227501 0.496578127 12.373313 8.98227501 0.627715826 12.0548363 </float_array>
+          <technique_common>
+            <accessor count="8" offset="0" source="#_09_19_Popular_News_Podium_part_02_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_09_19_Popular_News_Podium_part_02_1-vertices">
+          <input semantic="POSITION" source="#_09_19_Popular_News_Podium_part_02_1-positions" />
+        </vertices>
+        <polylist count="12" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_09_19_Popular_News_Podium_part_02_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 3 0 2 2 1 4 4 3 2 0 5 1 6 0 3 6 5 0 1 5 4 7 3 4 4 5 7 7 6 3 5 6 7 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_09_19_Popular_News_Podium_part_03_1" name="09_19_Popular_News_Podium_part_03" >
+      <mesh>
+        <source id="_09_19_Popular_News_Podium_part_03_1-positions" name="_09_19_Popular_News_Podium_part_03_1-positions">
+          <float_array id="_09_19_Popular_News_Podium_part_03_1-positions-array" count="198"> 8.65142441 0.689479947 12.3009472 8.64506435 0.693284631 12.28901 8.65353584 0.690958083 12.2999754 8.57648849 0.858085513 12.3946171 8.57859993 0.859563649 12.3936453 8.57012844 0.861890197 12.3826799 8.65532112 0.692525625 12.2985821 8.58038616 0.861131251 12.392252 8.65671349 0.694122374 12.2968216 8.58177757 0.86272794 12.3904915 8.65765667 0.695686877 12.2947607 8.58272076 0.864292502 12.3884306 8.65811729 0.697159111 12.2924786 8.58318138 0.865764678 12.3861485 8.65807533 0.698482454 12.2900629 8.58313942 0.86708802 12.3837328 8.65753365 0.699606001 12.2876072 8.58259773 0.868211567 12.3812771 8.65651321 0.70048666 12.2852058 8.5815773 0.869092226 12.3788757 8.65505219 0.701090515 12.2829504 8.58011627 0.869696081 12.3766193 8.65320778 0.701394439 12.2809277 8.57827187 0.870000005 12.3745966 8.65104961 0.70138669 12.2792149 8.5761137 0.869992256 12.3728848 8.64866257 0.701067567 12.2778797 8.57372665 0.869673133 12.3715496 8.64613628 0.700449347 12.2769718 8.57120037 0.869054914 12.3706408 8.64356899 0.699555814 12.2765265 8.56863308 0.86816138 12.3701963 8.64105988 0.698421299 12.2765608 8.56612396 0.867026865 12.3702307 8.6387043 0.697089374 12.2770739 8.56376839 0.86569494 12.3707438 8.63659286 0.695611179 12.2780447 8.56165695 0.864216805 12.3717146 8.63480663 0.694043636 12.279438 8.55987072 0.862649202 12.3731079 8.63341522 0.692446947 12.2811995 8.55847931 0.861052513 12.3748684 8.63247108 0.690882385 12.2832603 8.55753517 0.859487951 12.3769302 8.63201141 0.68941015 12.2855425 8.5570755 0.858015776 12.3792114 8.63205338 0.688086867 12.2879572 8.55711746 0.856692433 12.3816271 8.63259506 0.68696326 12.2904129 8.55765915 0.855568886 12.3840828 8.63361549 0.686082661 12.2928152 8.55867958 0.854688227 12.3864851 8.63507652 0.685478747 12.2950706 8.56014061 0.854084373 12.3887405 8.63692093 0.685174882 12.2970934 8.56198502 0.853780448 12.3907633 8.63907909 0.685182631 12.2988052 8.56414318 0.853788197 12.3924751 8.64146614 0.685501754 12.3001413 8.56653023 0.85410732 12.3938112 8.64399242 0.686119914 12.3010492 8.56905651 0.85472554 12.3947191 8.64655876 0.687013447 12.3014946 8.5716238 0.855619073 12.3951645 8.64906883 0.688148022 12.3014603 8.57413292 0.856753588 12.3951292 </float_array>
+          <technique_common>
+            <accessor count="66" offset="0" source="#_09_19_Popular_News_Podium_part_03_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_09_19_Popular_News_Podium_part_03_1-vertices">
+          <input semantic="POSITION" source="#_09_19_Popular_News_Podium_part_03_1-positions" />
+        </vertices>
+        <polylist count="128" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_09_19_Popular_News_Podium_part_03_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 34 32 34 33 33 34 35 33 35 5 34 1 36 34 36 35 35 36 37 35 37 5 36 1 38 36 38 37 37 38 39 37 39 5 38 1 40 38 40 39 39 40 41 39 41 5 40 1 42 40 42 41 41 42 43 41 43 5 42 1 44 42 44 43 43 44 45 43 45 5 44 1 46 44 46 45 45 46 47 45 47 5 46 1 48 46 48 47 47 48 49 47 49 5 48 1 50 48 50 49 49 50 51 49 51 5 50 1 52 50 52 51 51 52 53 51 53 5 52 1 54 52 54 53 53 54 55 53 55 5 54 1 56 54 56 55 55 56 57 55 57 5 56 1 58 56 58 57 57 58 59 57 59 5 58 1 60 58 60 59 59 60 61 59 61 5 60 1 62 60 62 61 61 62 63 61 63 5 62 1 64 62 64 63 63 64 65 63 65 5 64 1 0 64 0 65 65 0 3 65 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_09_19_Popular_News_Podium_part_04_1" name="09_19_Popular_News_Podium_part_04" >
+      <mesh>
+        <source id="_09_19_Popular_News_Podium_part_04_1-positions" name="_09_19_Popular_News_Podium_part_04_1-positions">
+          <float_array id="_09_19_Popular_News_Podium_part_04_1-positions-array" count="198"> 8.80129623 0.697089374 12.2770739 8.79493618 0.693284631 12.28901 8.79894066 0.698421299 12.2765608 8.87623215 0.86569494 12.3707438 8.87387657 0.867026865 12.3702307 8.86987209 0.861890197 12.3826799 8.79643059 0.699555814 12.2765265 8.8713665 0.86816138 12.3701963 8.7938633 0.700449347 12.2769718 8.86879921 0.869054914 12.3706408 8.79133797 0.701067567 12.2778797 8.86627388 0.869673133 12.3715496 8.78894997 0.70138669 12.2792149 8.86388588 0.869992256 12.3728848 8.78679276 0.701394439 12.2809277 8.86172867 0.870000005 12.3745966 8.78494835 0.701090515 12.2829504 8.85988426 0.869696081 12.3766193 8.78348732 0.70048666 12.2852058 8.85842323 0.869092226 12.3788757 8.78246593 0.699606001 12.2876072 8.85740185 0.868211567 12.3812771 8.78192425 0.698482454 12.2900629 8.85686016 0.86708802 12.3837328 8.78188324 0.697159111 12.2924786 8.85681915 0.865764678 12.3861485 8.78234291 0.695686877 12.2947607 8.85727882 0.864292502 12.3884306 8.78328705 0.694122374 12.2968216 8.85822296 0.86272794 12.3904915 8.78467846 0.692525625 12.2985821 8.85961437 0.861131251 12.392252 8.78646374 0.690958083 12.2999754 8.86139965 0.859563649 12.3936453 8.78857517 0.689479947 12.3009472 8.86351109 0.858085513 12.3946171 8.79093075 0.688148022 12.3014603 8.86586666 0.856753588 12.3951292 8.79344082 0.687013447 12.3014946 8.86837673 0.855619073 12.3951645 8.79600811 0.686119914 12.3010492 8.87094402 0.85472554 12.3947191 8.79853344 0.685501754 12.3001413 8.87346935 0.85410732 12.3938112 8.80092144 0.685182631 12.2988052 8.87585735 0.853788197 12.3924751 8.80307865 0.685174882 12.2970934 8.87801456 0.853780448 12.3907633 8.80492401 0.685478747 12.2950706 8.87985897 0.854084373 12.3887405 8.80638409 0.686082661 12.2928152 8.88132 0.854688227 12.3864851 8.80740547 0.68696326 12.2904129 8.88234138 0.855568886 12.3840828 8.80794716 0.688086867 12.2879572 8.88288307 0.856692433 12.3816271 8.80798817 0.68941015 12.2855425 8.88292408 0.858015776 12.3792114 8.8075285 0.690882385 12.2832603 8.88246441 0.859487951 12.3769302 8.80658436 0.692446947 12.2811995 8.88152027 0.861052513 12.3748684 8.80519295 0.694043636 12.279438 8.88012886 0.862649202 12.3731079 8.80340767 0.695611179 12.2780447 8.87834358 0.864216805 12.3717146 </float_array>
+          <technique_common>
+            <accessor count="66" offset="0" source="#_09_19_Popular_News_Podium_part_04_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_09_19_Popular_News_Podium_part_04_1-vertices">
+          <input semantic="POSITION" source="#_09_19_Popular_News_Podium_part_04_1-positions" />
+        </vertices>
+        <polylist count="128" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_09_19_Popular_News_Podium_part_04_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 34 32 34 33 33 34 35 33 35 5 34 1 36 34 36 35 35 36 37 35 37 5 36 1 38 36 38 37 37 38 39 37 39 5 38 1 40 38 40 39 39 40 41 39 41 5 40 1 42 40 42 41 41 42 43 41 43 5 42 1 44 42 44 43 43 44 45 43 45 5 44 1 46 44 46 45 45 46 47 45 47 5 46 1 48 46 48 47 47 48 49 47 49 5 48 1 50 48 50 49 49 50 51 49 51 5 50 1 52 50 52 51 51 52 53 51 53 5 52 1 54 52 54 53 53 54 55 53 55 5 54 1 56 54 56 55 55 56 57 55 57 5 56 1 58 56 58 57 57 58 59 57 59 5 58 1 60 58 60 59 59 60 61 59 61 5 60 1 62 60 62 61 61 62 63 61 63 5 62 1 64 62 64 63 63 64 65 63 65 5 64 1 0 64 0 65 65 0 3 65 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+  </library_geometries>
+  <library_controllers>
+  </library_controllers>
+  <library_visual_scenes>
+    <visual_scene id="ROOT" name="ROOT">
+      <node id="_09_19_Popular_News_Podium_ROOT_base" name="09_19_Popular_News_Podium_ROOT_base" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_09_19_Popular_News_Podium_ROOT_base_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#panel_blue_trim">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_09_19_Popular_News_Podium_part_01" name="09_19_Popular_News_Podium_part_01" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_09_19_Popular_News_Podium_part_01_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#brown_leather">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_09_19_Popular_News_Podium_part_02" name="09_19_Popular_News_Podium_part_02" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_09_19_Popular_News_Podium_part_02_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#brown_leather">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_09_19_Popular_News_Podium_part_03" name="09_19_Popular_News_Podium_part_03" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_09_19_Popular_News_Podium_part_03_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#polished_silver">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_09_19_Popular_News_Podium_part_04" name="09_19_Popular_News_Podium_part_04" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_09_19_Popular_News_Podium_part_04_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#polished_silver">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+    </visual_scene>
+  </library_visual_scenes>
+  <scene>
+    <instance_visual_scene url="#ROOT" />
+  </scene>
+</COLLADA>

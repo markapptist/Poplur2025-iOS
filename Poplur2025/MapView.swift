@@ -4,7 +4,6 @@ import CoreLocation
 import SceneKit
 import Foundation
 import AVFoundation
-import AudioToolbox
 import WebKit
 
 @MainActor
@@ -74,7 +73,6 @@ struct WeatherVisualizationState {
     var temperatureFahrenheit: Int
 }
 
-#if DEBUG
 struct WeatherParticleOverlay: UIViewRepresentable {
     @Binding var weatherState: WeatherVisualizationState
 
@@ -233,25 +231,37 @@ struct WeatherParticleOverlay: UIViewRepresentable {
         }
 
         private func addLightning(to scene: SKScene, frequency: Double) {
-            // Create a white flash overlay
             let flash = SKSpriteNode(color: .white, size: scene.size)
             flash.alpha = 0
             flash.position = CGPoint(x: scene.frame.midX, y: scene.frame.midY)
             flash.zPosition = 100
             scene.addChild(flash)
             lightningNode = flash
-            
-            // Calculate flash interval based on frequency
-            let interval = max(0.5, 3.0 - frequency * 2.5)
-            
-            lightningTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak flash] _ in
-                guard let flash = flash else { return }
-                
-                // Quick flash
-                let fadeIn = SKAction.fadeAlpha(to: 0.3, duration: 0.05)
-                let fadeOut = SKAction.fadeAlpha(to: 0, duration: 0.1)
-                let sequence = SKAction.sequence([fadeIn, fadeOut])
-                flash.run(sequence)
+            scheduleNextFlash(flash: flash, frequency: frequency)
+        }
+
+        private func scheduleNextFlash(flash: SKSpriteNode, frequency: Double) {
+            // Random interval: 1.2–7 seconds scaled by frequency
+            let minInterval = max(0.8, 2.5 - frequency * 1.8)
+            let maxInterval = max(minInterval + 1.0, 8.0 - frequency * 4.0)
+            let delay = Double.random(in: minInterval...maxInterval)
+
+            lightningTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self, weak flash] _ in
+                guard let flash = flash, flash.parent != nil else { return }
+                let isDouble = Double.random(in: 0...1) < 0.35
+                if isDouble {
+                    let f1In  = SKAction.fadeAlpha(to: CGFloat(Float.random(in: 0.25...0.45)), duration: 0.04)
+                    let f1Out = SKAction.fadeAlpha(to: 0, duration: 0.06)
+                    let gap   = SKAction.wait(forDuration: Double.random(in: 0.06...0.14))
+                    let f2In  = SKAction.fadeAlpha(to: CGFloat(Float.random(in: 0.35...0.6)), duration: 0.03)
+                    let f2Out = SKAction.fadeAlpha(to: 0, duration: 0.12)
+                    flash.run(SKAction.sequence([f1In, f1Out, gap, f2In, f2Out]))
+                } else {
+                    let fadeIn  = SKAction.fadeAlpha(to: CGFloat(Float.random(in: 0.28...0.52)), duration: 0.04)
+                    let fadeOut = SKAction.fadeAlpha(to: 0, duration: 0.10)
+                    flash.run(SKAction.sequence([fadeIn, fadeOut]))
+                }
+                self?.scheduleNextFlash(flash: flash, frequency: frequency)
             }
         }
 
@@ -464,7 +474,6 @@ struct WeatherParticleOverlay: UIViewRepresentable {
         }
     }
 }
-#endif // End WeatherParticleOverlay DEBUG block
 
 /*
  ═══════════════════════════════════════════════════════════════════════════════
@@ -1013,10 +1022,29 @@ private let fixedPitchAlt: CGFloat = 60 // Changed to 60 degrees for 3D perspect
 private final class PoplurHumanVoiceSpeechService {
     static let shared = PoplurHumanVoiceSpeechService()
 
-    func speechData(for script: String) async throws -> Data {
+    struct HostedSpeech {
+        let script: String
+        let audioData: Data
+    }
+
+    func speechData(
+        for script: String,
+        cityName: String,
+        stopTitle: String,
+        stationName: String?
+    ) async throws -> HostedSpeech {
         let text = script.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { throw ElevenLabsService.ElevenLabsError.badResponse }
-        return try await ElevenLabsService.shared.audioData(for: text, voice: .english)
+        if let hosted = try? await PoplurAIBackendClient().radioHostAudio(
+            script: text,
+            cityName: cityName,
+            stopTitle: stopTitle,
+            stationName: stationName
+        ) {
+            return HostedSpeech(script: hosted.script, audioData: hosted.audioData)
+        }
+        let data = try await ElevenLabsService.shared.audioData(for: text, voice: .english)
+        return HostedSpeech(script: text, audioData: data)
     }
 }
 
@@ -1045,12 +1073,23 @@ final class PoplurMapRadioHost: NSObject, ObservableObject, AVSpeechSynthesizerD
         guard prewarmTask == nil else { return }
         let genericScript = "Welcome to Poplur Radio, live and direct from your area. The music scene here is absolutely on fire. Stay with us."
         prewarmTask = Task {
-            _ = try? await PoplurHumanVoiceSpeechService.shared.speechData(for: genericScript)
+            _ = try? await PoplurHumanVoiceSpeechService.shared.speechData(
+                for: genericScript,
+                cityName: "your area",
+                stopTitle: "Local scan",
+                stationName: "Poplur Radio"
+            )
         }
         await prewarmTask?.value
     }
 
-    func speak(_ script: String, onFinished: (() -> Void)? = nil) {
+    func speak(
+        _ script: String,
+        cityName: String = "this stop",
+        stopTitle: String = "Current stop",
+        stationName: String? = nil,
+        onFinished: (() -> Void)? = nil
+    ) {
         stop(notifyFinished: false)
         synth.stopSpeaking(at: .immediate)
         currentScript = script
@@ -1063,11 +1102,17 @@ final class PoplurMapRadioHost: NSObject, ObservableObject, AVSpeechSynthesizerD
 
         generatedVoiceTask = Task { [weak self] in
             do {
-                let data = try await PoplurHumanVoiceSpeechService.shared.speechData(for: script)
+                let hosted = try await PoplurHumanVoiceSpeechService.shared.speechData(
+                    for: script,
+                    cityName: cityName,
+                    stopTitle: stopTitle,
+                    stationName: stationName
+                )
                 try Task.checkCancellation()
                 try await MainActor.run {
                     guard let self, self.speechToken == token else { return }
-                    try self.playGeneratedVoice(data, token: token)
+                    self.currentScript = hosted.script
+                    try self.playGeneratedVoice(hosted.audioData, token: token)
                 }
             } catch {
                 guard !Task.isCancelled else { return }
@@ -1105,6 +1150,10 @@ final class PoplurMapRadioHost: NSObject, ObservableObject, AVSpeechSynthesizerD
 
     func stop() {
         stop(notifyFinished: false)
+    }
+
+    func stopAndNotify() {
+        stop(notifyFinished: true)
     }
 
     private func stop(notifyFinished: Bool) {
@@ -1411,8 +1460,8 @@ private enum TrendCategory: String, CaseIterable {
     }
 }
 
-private let tourStopDwellSeconds: UInt64 = 30
-private let tourTopicDwellSeconds: UInt64 = 14
+private let tourStopDwellSeconds: UInt64 = 300
+private let tourTopicDwellSeconds: UInt64 = 300
 private let trendPopStartDelaySeconds: UInt64 = 1
 private let trendPopCountMin = 10
 private let trendPopCountRange = 6
@@ -1854,30 +1903,23 @@ private func stableTourSeed(parts: String...) -> Int {
 
 private func trendChannelObject(category: TrendCategory, seed: Int) -> (channelId: String, objectId: String) {
     let channelId: String
-    let options: [String]
 
     switch category {
     case .food:
         channelId = "food"
-        options = ["banana", "cake", "fruit"]
     case .sports:
         channelId = "sports"
-        options = ["ball", "trophy", "dumbbell"]
     case .clothes:
         channelId = "fashion"
-        options = ["dress", "shoe", "bag"]
     case .nightlife:
         channelId = "music"
-        options = ["sparkle", "spotlight", "microphone"]
     case .music:
         channelId = "music"
-        options = ["microphone", "note", "speaker"]
     case .travel:
         channelId = "news"
-        options = ["globe", "eiffel", "camera"]
     }
 
-    return (channelId, options[abs(seed) % options.count])
+    return (channelId, PopularObjectCatalog.object(for: channelId, seed: seed))
 }
 
 private func buildTrendPopObjects(stop: PoplurTourStop, insight: AiTourInsight) -> [TrendPopObject] {
@@ -1946,19 +1988,23 @@ private func makeLocalTrendInsight(for cityName: String) -> AiTourInsight {
 @MainActor
 private final class RainAmbientAudioService: ObservableObject {
     private var player: AVAudioPlayer?
+    private var thunderPlayer: AVAudioPlayer?
     private var targetVolume: Float = 0
     private var isDuckedForVoice = false
     private var lastAppliedVolume: Float = -1
+    private var lastAppliedThunderVolume: Float = -1
+    private var isThunderstorm = false
     private var eqObserver: NSObjectProtocol?
 
     init() {
         eqObserver = NotificationCenter.default.addObserver(forName: .poplurEQSyncChanged, object: nil, queue: .main) { [weak self] _ in
-            guard let self, let player = self.player else { return }
-            self.applyVolume(
-                self.outputVolume(for: self.targetVolume),
-                to: player,
-                fadeDuration: PoplurAudioMix.rainVoiceDuckDuration
-            )
+            guard let self else { return }
+            if let player = self.player {
+                self.applyVolume(self.outputVolume(for: self.targetVolume), to: player, fadeDuration: PoplurAudioMix.rainVoiceDuckDuration)
+            }
+            if let tp = self.thunderPlayer {
+                self.applyVolume(self.outputThunderVolume(), to: tp, fadeDuration: PoplurAudioMix.rainVoiceDuckDuration, last: &self.lastAppliedThunderVolume)
+            }
         }
     }
 
@@ -1969,11 +2015,18 @@ private final class RainAmbientAudioService: ObservableObject {
     }
 
     func update(for weatherState: WeatherVisualizationState) {
+        isThunderstorm = weatherState.kind == .thunderstorms
         switch weatherState.kind {
         case .rain, .thunderstorms:
             play(volume: rainVolume(for: weatherState))
+            if weatherState.kind == .thunderstorms {
+                playThunder(intensity: weatherState.intensity)
+            } else {
+                stopThunder()
+            }
         case .cloudy, .snow:
             stop()
+            stopThunder()
         }
     }
 
@@ -2004,15 +2057,51 @@ private final class RainAmbientAudioService: ObservableObject {
         }
     }
 
+    private func playThunder(intensity: Double) {
+        let vol = outputThunderVolume()
+        if let tp = thunderPlayer, tp.isPlaying {
+            applyVolume(vol, to: tp, fadeDuration: PoplurAudioMix.rainFadeDuration, last: &lastAppliedThunderVolume)
+            return
+        }
+        do {
+            let url = try thunderLoopURL()
+            let tp = try AVAudioPlayer(contentsOf: url)
+            tp.numberOfLoops = -1
+            tp.volume = 0
+            tp.prepareToPlay()
+            tp.play()
+            lastAppliedThunderVolume = -1
+            applyVolume(vol, to: tp, fadeDuration: PoplurAudioMix.rainFadeDuration, last: &lastAppliedThunderVolume)
+            thunderPlayer = tp
+        } catch {
+            print("[ThunderAudio] Failed: \(error)")
+        }
+    }
+
+    private func stopThunder() {
+        lastAppliedThunderVolume = -1
+        thunderPlayer?.fadeOutAndStop(duration: 0.8)
+        thunderPlayer = nil
+    }
+
+    private func outputThunderVolume() -> Float {
+        let base: Float = 0.14
+        let voiceMul: Float = isDuckedForVoice ? PoplurAudioMix.rainDuckMultiplier : 1.0
+        return base * min(voiceMul, PoplurEQSync.shared.rainVolumeMultiplier)
+    }
+
     func setVoiceDucked(_ ducked: Bool) {
         guard isDuckedForVoice != ducked else { return }
         isDuckedForVoice = ducked
-        guard let player else { return }
-        applyVolume(
-            outputVolume(for: targetVolume),
-            to: player,
-            fadeDuration: ducked ? PoplurAudioMix.rainVoiceDuckDuration : PoplurAudioMix.rainFadeDuration
-        )
+        if let player {
+            applyVolume(outputVolume(for: targetVolume), to: player,
+                        fadeDuration: ducked ? PoplurAudioMix.rainVoiceDuckDuration : PoplurAudioMix.rainFadeDuration)
+        }
+        if let tp = thunderPlayer {
+            applyVolume(outputThunderVolume(), to: tp,
+                        fadeDuration: ducked ? PoplurAudioMix.rainVoiceDuckDuration : PoplurAudioMix.rainFadeDuration,
+                        last: &lastAppliedThunderVolume)
+        }
     }
 
     private func rainVolume(for state: WeatherVisualizationState) -> Float {
@@ -2038,6 +2127,12 @@ private final class RainAmbientAudioService: ObservableObject {
     private func applyVolume(_ volume: Float, to player: AVAudioPlayer, fadeDuration: TimeInterval) {
         guard abs(lastAppliedVolume - volume) > 0.01 else { return }
         lastAppliedVolume = volume
+        player.setVolume(volume, fadeDuration: fadeDuration)
+    }
+
+    private func applyVolume(_ volume: Float, to player: AVAudioPlayer, fadeDuration: TimeInterval, last: inout Float) {
+        guard abs(last - volume) > 0.01 else { return }
+        last = volume
         player.setVolume(volume, fadeDuration: fadeDuration)
     }
 
@@ -2097,6 +2192,13 @@ private final class RainAmbientAudioService: ObservableObject {
         }
 
         try data.write(to: url, options: .atomic)
+        return url
+    }
+
+    private func thunderLoopURL() throws -> URL {
+        guard let url = Bundle.main.url(forResource: "thunder", withExtension: "mp3") else {
+            throw URLError(.fileDoesNotExist)
+        }
         return url
     }
 }
@@ -3902,7 +4004,25 @@ struct MapViewProduction: View {
     @ObservedObject private var cubeSkinStore = CubeSkinStore.shared
 
     @AppStorage("poplur_use2DMap") private var use2DMap: Bool = false
+    // Custom map theme disabled — was causing crashes on some devices
+    private let customMapTheme: Bool = false
     private var activePitch: CGFloat { use2DMap ? 0 : fixedPitchAlt }
+
+    private var themedMapStyle: MapStyle {
+        if use2DMap { return .standard }
+        guard customMapTheme else {
+            return .hybrid(elevation: .realistic, showsTraffic: false)
+        }
+        switch cubeSkinStore.current {
+        case .ice, .rubber:
+            return .standard(elevation: .realistic)
+        case .camo, .chocolate:
+            return .standard(elevation: .realistic)
+        case .gold, .rainbow, .sparklePink, .toy, .standard:
+            return .hybrid(elevation: .realistic, showsTraffic: false)
+        }
+    }
+
     private let focusedLocationDistance: CLLocationDistance = 120
 
     @State private var fixedDistanceAlt: CLLocationDistance = 120
@@ -3921,6 +4041,7 @@ struct MapViewProduction: View {
     @State private var showAddressSearch: Bool = false
     @StateObject private var mapCubeMenuWheel = CubeMenuWheelController()
     @StateObject private var regionChangeDebouncer = TaskDebouncer(delayNanoseconds: 350_000_000)
+    @StateObject private var streetViewViewModel = MapStreetViewViewModel()
     @State private var searchQuery: String = ""
     @State private var searchResults: [MKMapItem] = []
     @State private var isSearching: Bool = false
@@ -3931,6 +4052,12 @@ struct MapViewProduction: View {
     @State private var isInitialMapLaunchPreparing: Bool
     @State private var isInitialMapLaunchActive: Bool = false
     @State private var mapLaunchTask: Task<Void, Never>? = nil
+    @State private var navigationTransitionTask: Task<Void, Never>? = nil
+    @State private var delayedNavigationTask: Task<Void, Never>? = nil
+    @State private var returnContextTask: Task<Void, Never>? = nil
+    @State private var currentLocationMusicTask: Task<Void, Never>? = nil
+    @State private var weatherFetchTask: Task<Void, Never>? = nil
+    @State private var indoorVenueTask: Task<Void, Never>? = nil
     
     @State private var posts: [MapAnnotationPost] = []
     @State private var dominance: [CityDominance] = []
@@ -3956,8 +4083,12 @@ struct MapViewProduction: View {
     @State private var lastContextRefreshLocation: CLLocation? = nil
     @State private var isCameraTransitionInProgress: Bool = false
 
-    private let mapZoomSliderHeight: CGFloat = 176
     private let mapLeftOverlayPadding: CGFloat = 28
+
+    // Auto-probed Look Around scene — nil means street view is unavailable at this location
+    @State private var lookaroundScene: MKLookAroundScene? = nil
+    @State private var lookaroundProbeTask: Task<Void, Never>? = nil
+    @State private var isPresentingLookaround: Bool = false
     
     @State private var longPressLocation: CGPoint? = nil  // Track long press location
     @State private var selectedCoordinate: CLLocationCoordinate2D? = nil  // Track selected coordinate for long-press
@@ -3990,6 +4121,7 @@ struct MapViewProduction: View {
     // Confetti system for trending pins
     @StateObject private var trendingTracker = PinTrendingTracker()
     @State private var showConfetti: Bool = true // Toggle confetti on/off
+    private let userLocationPinID = UUID() // Stable ID for user location trending pin
     @State private var cubeHoldStartY: CGFloat? = nil // Track cube hold drag start position
     @State private var initialZoomLevel: Double = 120
     @State private var showIndoorMap: Bool = false
@@ -4031,6 +4163,34 @@ struct MapViewProduction: View {
     
     // MARK: - Helper Methods
 
+    private func cancelMapAsyncWork(includeLaunchTask: Bool = true) {
+        navigationTransitionTask?.cancel()
+        navigationTransitionTask = nil
+        delayedNavigationTask?.cancel()
+        delayedNavigationTask = nil
+        returnContextTask?.cancel()
+        returnContextTask = nil
+        currentLocationMusicTask?.cancel()
+        currentLocationMusicTask = nil
+        weatherFetchTask?.cancel()
+        weatherFetchTask = nil
+        indoorVenueTask?.cancel()
+        indoorVenueTask = nil
+        locationContextTask?.cancel()
+        locationContextTask = nil
+        if includeLaunchTask {
+            mapLaunchTask?.cancel()
+            mapLaunchTask = nil
+        }
+    }
+
+    private func scheduleWeatherFetch() {
+        weatherFetchTask?.cancel()
+        weatherFetchTask = Task { @MainActor in
+            await fetchWeatherForCurrentLocation()
+        }
+    }
+
     private var mapTextShader: LinearGradient {
         LinearGradient(
             colors: [
@@ -4057,6 +4217,11 @@ struct MapViewProduction: View {
     }
     
     private func panTo(_ coordinate: CLLocationCoordinate2D) {
+        navigationTransitionTask?.cancel()
+        navigationTransitionTask = nil
+        delayedNavigationTask?.cancel()
+        delayedNavigationTask = nil
+        isCameraTransitionInProgress = false
         let heading = camera.camera?.heading ?? 0
         withAnimation(.easeInOut(duration: 0.8)) {
             camera = .camera(
@@ -4074,6 +4239,7 @@ struct MapViewProduction: View {
     
     /// Navigate to a location using tour-style transitions (zoom out, move, zoom in)
     private func navigateWithTourTransition(to coordinate: CLLocationCoordinate2D, cityName: String = "Selected Location", postRadius: Double? = nil) {
+        navigationTransitionTask?.cancel()
         print("🎯 [navigateWithTourTransition] Starting transition")
         print("   Target: \(coordinate.latitude), \(coordinate.longitude)")
         print("   City: \(cityName)")
@@ -4118,8 +4284,9 @@ struct MapViewProduction: View {
         }
         
         // Step 2: Pan to new location while zoomed out (FASTER - 1.5s instead of 3.0s)
-        Task { @MainActor in
+        navigationTransitionTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 800_000_000)
+            guard !Task.isCancelled else { return }
             
             print("➡️ [Step 2] Panning to target location (1.5s)")
             withAnimation(.easeInOut(duration: 1.5)) {
@@ -4135,6 +4302,7 @@ struct MapViewProduction: View {
             
             // Step 3: Zoom in to new location (FASTER - 1.2s instead of 2.0s)
             try? await Task.sleep(nanoseconds: 1_500_000_000)
+            guard !Task.isCancelled else { return }
             
             print("🔎 [Step 3] Zooming in to target location (1.2s)")
             withAnimation(.easeInOut(duration: 1.2)) {
@@ -4153,6 +4321,7 @@ struct MapViewProduction: View {
             // Update radius display if post radius is provided
             if let radius = postRadius {
                 try? await Task.sleep(nanoseconds: 300_000_000) // Small delay for smooth transition
+                guard !Task.isCancelled else { return }
                 
                 print("📏 [Step 4] Updating radius display to \(Int(radius))m")
                 withAnimation(.easeInOut(duration: 0.8)) {
@@ -4168,6 +4337,7 @@ struct MapViewProduction: View {
             }
             
             isCameraTransitionInProgress = false
+            navigationTransitionTask = nil
             print("✅ [navigateWithTourTransition] Animation sequence complete")
         }
     }
@@ -4307,7 +4477,8 @@ struct MapViewProduction: View {
     
     private func stopTour() {
         mapState.stopTour()
-        clearTourEffects()
+        mapRadioHost.stopAndNotify()
+        clearTourEffects(stopAudio: false)
     }
 
     private func beginPoplurAIMapPost(location: String?) {
@@ -4360,6 +4531,11 @@ struct MapViewProduction: View {
             return
         }
         lastUserCenterRequestAt = now
+        navigationTransitionTask?.cancel()
+        navigationTransitionTask = nil
+        delayedNavigationTask?.cancel()
+        delayedNavigationTask = nil
+        isCameraTransitionInProgress = false
 
         if let currentCoordinate = camera.camera?.centerCoordinate,
            CLLocation(latitude: currentCoordinate.latitude, longitude: currentCoordinate.longitude)
@@ -4489,8 +4665,10 @@ struct MapViewProduction: View {
     }
 
     private func ensureCurrentLocationMusicAfterLaunch(delayNanoseconds: UInt64 = 1_200_000_000) {
-        Task { @MainActor in
+        currentLocationMusicTask?.cancel()
+        currentLocationMusicTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: delayNanoseconds)
+            guard !Task.isCancelled else { return }
             guard !isInitialMapLaunchActive, !musicPlayer.isPlaybackActive else { return }
             guard !mapState.isInTourMode, !(flowManager.currentFlow?.isCameraFirst ?? false), !isPostPlacementMode else { return }
             guard lockToPostUntil == nil || lockToPostUntil! <= Date() else { return }
@@ -4501,6 +4679,7 @@ struct MapViewProduction: View {
             } else {
                 locationManager.request()
             }
+            currentLocationMusicTask = nil
         }
     }
 
@@ -4670,6 +4849,11 @@ struct MapViewProduction: View {
                     withAnimation(.easeInOut(duration: 0.38)) {
                         showTourNowPlayingText.toggle()
                     }
+                } else if musicPlayer.isPlaybackActive {
+                    // Outside tour mode: cycle "Now playing" ↔ trending text while radio is on
+                    withAnimation(.easeInOut(duration: 0.38)) {
+                        showTourNowPlayingText.toggle()
+                    }
                 } else if !showTourNowPlayingText {
                     showTourNowPlayingText = true
                 }
@@ -4738,8 +4922,8 @@ struct MapViewProduction: View {
         for (index, focus) in itinerary.enumerated() {
             guard mapState.isInTourMode, !Task.isCancelled else { return }
             await runTourFocus(focus, cityStop: stop, index: index, total: itinerary.count)
-            let dwell = index == 0 ? tourTopicDwellSeconds + 4 : tourTopicDwellSeconds
-            try? await Task.sleep(nanoseconds: dwell * 1_000_000_000)
+            let dwell = max(tourStopDwellSeconds, index == 0 ? tourTopicDwellSeconds + 4 : tourTopicDwellSeconds)
+            await sleepWhileTourActive(seconds: dwell)
         }
     }
 
@@ -4800,15 +4984,51 @@ struct MapViewProduction: View {
         await MainActor.run {
             isCameraTransitionInProgress = false
             musicPlayer.play(for: cityStop, insight: insight)
-            mapRadioHost.speak(radioScript(for: focus, cityStop: cityStop, index: index, total: total))
         }
+
+        await playTourRadioSegment(focus, cityStop: cityStop, index: index, total: total)
+        guard mapState.isInTourMode, !Task.isCancelled else { return }
 
         try? await Task.sleep(nanoseconds: trendPopStartDelaySeconds * 1_000_000_000)
         guard mapState.isInTourMode, !Task.isCancelled else { return }
 
         await MainActor.run {
-            AudioServicesPlaySystemSound(1104)
+            PoplurSoundPlayer.shared.playPop()
             trendPopObjects = buildTrendPopObjects(stop: focusStop, insight: insight)
+        }
+    }
+
+    private func playTourRadioSegment(_ focus: PoplurTourFocus, cityStop: PoplurTourStop, index: Int, total: Int) async {
+        let script = radioScript(for: focus, cityStop: cityStop, index: index, total: total)
+        let stationName = await MainActor.run {
+            musicPlayer.currentTrackTitle ?? "\(cityStop.cityName) local radio"
+        }
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                Task { @MainActor in
+                    mapRadioHost.speak(
+                        script,
+                        cityName: cityStop.cityName,
+                        stopTitle: focus.title,
+                        stationName: stationName
+                    ) {
+                        continuation.resume()
+                    }
+                }
+            }
+        } onCancel: {
+            Task { @MainActor in
+                mapRadioHost.stopAndNotify()
+            }
+        }
+    }
+
+    private func sleepWhileTourActive(seconds: UInt64) async {
+        let endTime = Date().addingTimeInterval(TimeInterval(seconds))
+        while mapState.isInTourMode, !Task.isCancelled, Date() < endTime {
+            let remaining = max(0, endTime.timeIntervalSinceNow)
+            let sliceSeconds = min(remaining, 1.0)
+            try? await Task.sleep(nanoseconds: UInt64(sliceSeconds * 1_000_000_000))
         }
     }
 
@@ -4861,7 +5081,35 @@ struct MapViewProduction: View {
         DragGesture(minimumDistance: 0)
             .onChanged { _ in noteInteraction() }
     }
-    
+
+    // Pinch sensitivity multiplier — 1.0 = default MapKit feel, 2.0+ = very fast
+    private let pinchAmplification: Double = 2.2
+
+    @State private var pinchBaseDistance: Double? = nil
+
+    private var amplifiedPinchGesture: some Gesture {
+        MagnificationGesture()
+            .onChanged { scale in
+                noteInteraction()
+                guard let current = camera.camera else { return }
+                let base = pinchBaseDistance ?? current.distance
+                if pinchBaseDistance == nil { pinchBaseDistance = base }
+                // Amplify the scale change: raise to the power of the amplification factor
+                let amplified = pow(Double(scale), pinchAmplification)
+                let newDist = (base / amplified).clamped(to: 10...40_000_000)
+                camera = .camera(MapCamera(
+                    centerCoordinate: current.centerCoordinate,
+                    distance: newDist,
+                    heading: current.heading,
+                    pitch: current.pitch
+                ))
+            }
+            .onEnded { _ in
+                pinchBaseDistance = nil
+                fixedDistanceAlt = camera.camera?.distance ?? fixedDistanceAlt
+            }
+    }
+
     private var tapGesture: some Gesture {
         TapGesture()
             .onEnded {
@@ -4929,13 +5177,15 @@ struct MapViewProduction: View {
                     
                     // Show detailed pin annotation - no background, text only
                     Annotation("", coordinate: coord) {
-                        // Pin marker only - no information card
-                        ThemedMapActionPin(
-                            skin: cubeSkinStore.current,
-                            systemName: "mappin.circle.fill",
-                            role: .selected,
-                            size: 60
-                        )
+                        ZStack {
+                            PoplurRadiusPulseAnnotation(skin: cubeSkinStore.current, size: 90)
+                            ThemedMapActionPin(
+                                skin: cubeSkinStore.current,
+                                systemName: "mappin.circle.fill",
+                                role: .selected,
+                                size: 60
+                            )
+                        }
                         .id("map-post-location-\(cubeSkinStore.current.rawValue)")
                     }
                 }
@@ -5009,7 +5259,7 @@ struct MapViewProduction: View {
 #if POP_PREVIEW_LIGHT
                 .mapStyle(.standard)
 #else
-                .mapStyle(use2DMap ? .standard : .hybrid(elevation: .realistic, showsTraffic: false))
+                .mapStyle(themedMapStyle)
 #endif
                 .onTapGesture { location in
                 // Handle map tap based on current flow
@@ -5055,15 +5305,39 @@ struct MapViewProduction: View {
                     }
             )
                 
-            // Weather particle overlay (DEBUG ONLY)
-            #if DEBUG
             if !isCameraTransitionInProgress {
                 WeatherParticleOverlay(weatherState: $weatherState)
-                    .allowsHitTesting(false) // Let touches pass through to map
+                    .allowsHitTesting(false)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                PoplurThemeParticleOverlay(skin: cubeSkinStore.current)
+                    .allowsHitTesting(false)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .opacity(weatherState.kind == .rain || weatherState.kind == .thunderstorms || weatherState.kind == .snow ? 0 : 1)
             }
-            #endif
             
+            // Particle burst at the user's current location using Spark.sks / Bokeh.sks
+            GeometryReader { geoProxy in
+                let userCoord = liveUserCoordinate ?? locationManager.location?.coordinate
+                let screenPos: CGPoint? = userCoord.flatMap { coord -> CGPoint? in
+                    guard let cam = camera.camera else { return nil }
+                    let latDelta = coord.latitude - cam.centerCoordinate.latitude
+                    let lonDelta = coord.longitude - cam.centerCoordinate.longitude
+                    let pxPerDeg = geoProxy.size.width / 0.5
+                    let x = geoProxy.size.width / 2 + CGFloat(lonDelta) * pxPerDeg
+                    let y = geoProxy.size.height / 2 - CGFloat(latDelta) * pxPerDeg
+                    guard x >= -40, x <= geoProxy.size.width + 40,
+                          y >= -40, y <= geoProxy.size.height + 40 else { return nil }
+                    return CGPoint(x: x, y: y)
+                }
+                UserLocationParticleBurst(
+                    screenPosition: screenPos,
+                    tintColor: UIColor(cubeSkinStore.current.mapMarkerColor(role: .user))
+                )
+                .allowsHitTesting(false)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .zIndex(50)
+
             // Confetti overlay for trending pins
             if showConfetti {
                 GeometryReader { geometry in
@@ -5134,6 +5408,44 @@ struct MapViewProduction: View {
             }
             .allowsHitTesting(false) // Let touches pass through to map
             */
+            if customMapTheme {
+                HStack {
+                    Spacer()
+                    VStack {
+                        Spacer()
+                        PoplurMapFloatingControlStack(
+                            skin: cubeSkinStore.current,
+                            onLocation: { centerOnUserLocation() },
+                            onStreetView: {},
+                            onCompass: {
+                                if let cam = camera.camera {
+                                    withAnimation(.easeInOut) {
+                                        camera = .camera(MapCamera(
+                                            centerCoordinate: cam.centerCoordinate,
+                                            distance: cam.distance,
+                                            heading: 0,
+                                            pitch: cam.pitch
+                                        ))
+                                    }
+                                }
+                            },
+                            onZoomIn: {
+                                if let center = camera.camera?.centerCoordinate {
+                                    zoomIn(to: center)
+                                }
+                            },
+                            onZoomOut: {
+                                if let center = camera.camera?.centerCoordinate {
+                                    zoomOut(to: center)
+                                }
+                            },
+                            onThemeCycle: {}
+                        )
+                        .padding(.trailing, 16)
+                        .padding(.bottom, 220)
+                    }
+                }
+            }
         } // End ZStack
         } // End MapReader
     }
@@ -5172,6 +5484,14 @@ struct MapViewProduction: View {
                         } else if isPostPlacementMode {
                             return "Tap on the map to choose where to place your post"
                         } else if mapState.isInTourMode, activeTourInsight != nil {
+                            if showTourNowPlayingText {
+                                let trackText = musicPlayer.currentTrackTitle?
+                                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                                return "Now playing - \((trackText?.isEmpty == false) ? trackText! : "Finding local station...")"
+                            } else {
+                                return aiRecommendation
+                            }
+                        } else if musicPlayer.isPlaybackActive {
                             if showTourNowPlayingText {
                                 let trackText = musicPlayer.currentTrackTitle?
                                     .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -5337,25 +5657,51 @@ struct MapViewProduction: View {
     }
 
     @ViewBuilder
-    private var mapZoomSliderOverlay: some View {
-        GeometryReader { proxy in
-            VStack {
-                Spacer()
-                HStack {
-                    AnimatedZoomSlider(zoomLevel: $zoomLevel) { newZoom in
-                        updateMapZoom(to: newZoom)
-                    }
-                    .frame(width: 34, height: mapZoomSliderHeight)
-                    .shadow(color: .black.opacity(0.22), radius: 4, x: 0, y: 2)
-
-                    Spacer()
-                }
-                .padding(.leading, proxy.safeAreaInsets.leading + mapLeftOverlayPadding)
-                .padding(.bottom, proxy.safeAreaInsets.bottom + 120)
+    private func mapActionIcon(systemName: String, tint: Color, size: CGFloat = 52, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [.black.opacity(0.55), .black.opacity(0.82)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: size, height: size)
+                    .shadow(color: tint.opacity(0.60), radius: 10, x: 0, y: 0)
+                    .shadow(color: .black.opacity(0.55), radius: 6, x: 0, y: 4)
+                Circle()
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [.white.opacity(0.35), .clear],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1
+                    )
+                    .frame(width: size, height: size)
+                Image(systemName: systemName)
+                    .font(.system(size: size * 0.38, weight: .semibold))
+                    .foregroundStyle(tint)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
         }
-        .zIndex(1000)
+        .buttonStyle(.plain)
+    }
+
+    private func probeLookaround(at coordinate: CLLocationCoordinate2D) {
+        lookaroundProbeTask?.cancel()
+        guard #available(iOS 16.0, *) else { return }
+        lookaroundProbeTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 800_000_000) // debounce 0.8s after camera settles
+            guard !Task.isCancelled else { return }
+            let request = MKLookAroundSceneRequest(coordinate: coordinate)
+            let scene = try? await request.scene
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeInOut(duration: 0.35)) {
+                lookaroundScene = scene
+            }
+        }
     }
 
     private func updateMapZoom(to newZoom: Double) {
@@ -5446,37 +5792,48 @@ struct MapViewProduction: View {
         }
     }
     
-    /// Fetch weather for current map center
+    /// Fetch real weather from Open-Meteo for the current map center
     private func fetchWeatherForCurrentLocation() async {
         guard let centerCoord = camera.camera?.centerCoordinate else { return }
-        
-        // In production, you would call a real weather API here
-        // For now, we'll simulate based on location
-        await MainActor.run {
-            // Simple mock based on latitude/season
-            let latitude = centerCoord.latitude
-            
-            if latitude > 45 {
-                // Northern regions - snow
-                weatherState.kind = .snow
-                weatherState.intensity = 0.6
-                weatherState.temperatureFahrenheit = Int(max(18, min(42, 58 - latitude * 0.45)))
-            } else if latitude > 30 {
-                // Temperate - rain
-                weatherState.kind = .rain
-                weatherState.intensity = 0.5
-                weatherState.temperatureFahrenheit = Int(max(45, min(78, 82 - abs(latitude - 35) * 1.25)))
-            } else {
-                // Tropical - thunderstorms
-                weatherState.kind = .thunderstorms
-                weatherState.intensity = 0.7
-                weatherState.lightningFrequency = 0.4
-                weatherState.temperatureFahrenheit = Int(max(72, min(92, 90 - abs(latitude) * 0.25)))
-            }
-            
-            print("🌦 Weather updated for location: \(latitude), \(centerCoord.longitude)")
-            print("   Weather: \(weatherName(for: weatherState.kind))")
+        let lat = centerCoord.latitude
+        let lon = centerCoord.longitude
+        do {
+            let urlStr = "https://api.open-meteo.com/v1/forecast?latitude=\(lat)&longitude=\(lon)&current=temperature_2m,weather_code&temperature_unit=fahrenheit&timezone=auto"
+            guard let url = URL(string: urlStr) else { return }
+            let (data, _) = try await URLSession.shared.data(from: url)
+            guard !Task.isCancelled else { return }
+            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let current = json["current"] as? [String: Any],
+                  let code = current["weather_code"] as? Int,
+                  let temp = current["temperature_2m"] as? Double else { return }
+            let (kind, intensity, lightFreq) = weatherVisualizationForCode(code)
+            weatherState = WeatherVisualizationState(
+                kind: kind,
+                intensity: intensity,
+                lightningFrequency: lightFreq,
+                temperatureFahrenheit: Int(temp.rounded())
+            )
             rainAmbientAudio.update(for: weatherState)
+        } catch {
+            // Network unavailable — keep current state; rain audio state unchanged
+        }
+    }
+
+    private func weatherVisualizationForCode(_ code: Int) -> (WeatherVisualizationState.Kind, Double, Double) {
+        switch code {
+        case 0, 1:           return (.cloudy, 0.0, 0)   // clear — no overlay
+        case 2, 3:           return (.cloudy, 0.45, 0)  // partly/fully cloudy
+        case 45, 48:         return (.cloudy, 0.75, 0)  // fog
+        case 51, 53, 55,
+             56, 57:         return (.rain, 0.35, 0)    // drizzle
+        case 61, 63, 66,
+             80, 81:         return (.rain, 0.55, 0)    // moderate rain
+        case 65, 67, 82:     return (.rain, 0.80, 0)    // heavy rain
+        case 71, 73, 85:     return (.snow, 0.45, 0)
+        case 75, 77, 86:     return (.snow, 0.75, 0)
+        case 95:             return (.thunderstorms, 0.65, 0.5)
+        case 96, 99:         return (.thunderstorms, 0.85, 0.75)
+        default:             return (.cloudy, 0.2, 0)
         }
     }
     
@@ -5518,6 +5875,7 @@ struct MapViewProduction: View {
                     .ignoresSafeArea()
                     .contentShape(Rectangle())
                     .simultaneousGesture(dragGesture)
+                    .simultaneousGesture(amplifiedPinchGesture)
                     .opacity(shouldObscureMapForInitialLaunch ? 0.001 : 1)
                     .allowsHitTesting(!shouldObscureMapForInitialLaunch)
 
@@ -5529,32 +5887,45 @@ struct MapViewProduction: View {
             }
 
             if !shouldObscureMapForInitialLaunch {
-            // Top navigation buttons
-            navigationButtons
-            
-            // AI Recommendation Overlay
-            aiRecommendationOverlay
+                // Top navigation buttons
+                navigationButtons
 
-            mapZoomSliderOverlay
+                // AI Recommendation Overlay
+                aiRecommendationOverlay
 
-            weatherBadgeOverlay
+                weatherBadgeOverlay
 
-            Button {
-                selectedVenueSlug = indoorVenues.first?.slug ?? MappedinVenueSearch.demoSlug
-                showIndoorMap = true
-            } label: {
-                Label("View Inside", systemImage: "building.2.fill")
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(.ultraThinMaterial, in: Capsule())
-                    .foregroundStyle(.white)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-            .padding(.trailing, 20)
-            .padding(.bottom, 200)
-            .zIndex(1004)
+                // View Inside icon — only shown when Mappedin has venues nearby
+                if !indoorVenues.isEmpty {
+                    mapActionIcon(systemName: "building.2.fill", tint: .cyan) {
+                        selectedVenueSlug = indoorVenues.first?.slug ?? MappedinVenueSearch.demoSlug
+                        showIndoorMap = true
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                    .padding(.trailing, 20)
+                    .padding(.bottom, 200)
+                    .zIndex(1004)
+                    .transition(.scale.combined(with: .opacity))
+                }
+
+                // Street View (Look Around) icon — only shown when available at this location
+                if lookaroundScene != nil {
+                    mapActionIcon(systemName: "binoculars.fill", tint: .green) {
+                        isPresentingLookaround = true
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                    .padding(.trailing, 20)
+                    .padding(.bottom, indoorVenues.isEmpty ? 200 : 260)
+                    .zIndex(1005)
+                    .transition(.scale.combined(with: .opacity))
+                    .fullScreenCover(isPresented: $isPresentingLookaround) {
+                        if let scene = lookaroundScene {
+                            LookAroundContainerView(scene: scene) {
+                                isPresentingLookaround = false
+                            }
+                        }
+                    }
+                }
             }
         }
         .animation(.easeOut(duration: 0.28), value: shouldObscureMapForInitialLaunch)
@@ -5649,13 +6020,6 @@ struct MapViewProduction: View {
             .shadow(color: .black.opacity(0.35), radius: 10, x: 0, y: 5)
             .positioned(tab: .map, control: .title)
 
-            AnimatedZoomSlider(zoomLevel: $zoomLevel) { newZoom in
-                zoomLevel = newZoom
-            }
-            .frame(width: 34, height: 176)
-            .shadow(color: .black.opacity(0.22), radius: 4, x: 0, y: 2)
-            .positioned(tab: .map, control: .secondaryAction)
-
             Button {} label: {
                 Label("Post Here", systemImage: "camera.fill")
                     .font(.system(size: 16, weight: .bold, design: .rounded))
@@ -5711,8 +6075,7 @@ struct MapViewProduction: View {
                 stopTourBackgroundTasks()
                 resetMapCubeFaceOverride()
                 regionChangeDebouncer.cancel()
-                mapLaunchTask?.cancel()
-                mapLaunchTask = nil
+                cancelMapAsyncWork()
                 if !mapState.hasRunFirstLaunchSequence {
                     isInitialMapLaunchPreparing = true
                 }
@@ -5780,7 +6143,9 @@ struct MapViewProduction: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: .cameraCubeHoldBegan)) { _ in
                 guard !layoutPreviewMode else { return }
-                mapState.stopTour()
+                if mapState.isInTourMode {
+                    stopTour()
+                }
                 showAddressSearch = false
                 mapCubeMenuWheel.beginHold(items: mapCubeMenuItems)
                 postMapCubeFaceOverride(item: mapCubeMenuWheel.selectedItem)
@@ -5887,8 +6252,10 @@ struct MapViewProduction: View {
                     print("   aiRecommendation: '\(aiRecommendation)'")
                     
                     // Small delay to ensure SwiftUI processes the state changes
-                    Task { @MainActor in
+                    delayedNavigationTask?.cancel()
+                    delayedNavigationTask = Task { @MainActor in
                         try? await Task.sleep(nanoseconds: 100_000_000)
+                        guard !Task.isCancelled else { return }
                         
                         print("📸 [MapView] Now snapping camera to coordinate")
                         
@@ -5913,7 +6280,9 @@ struct MapViewProduction: View {
                         
                         // Clear pending location AFTER navigation starts
                         try? await Task.sleep(nanoseconds: 500_000_000)
+                        guard !Task.isCancelled else { return }
                         mapState.clearPendingPostLocation()
+                        delayedNavigationTask = nil
                     }
                     
                     return // Exit early - don't set shorter locks below
@@ -6115,8 +6484,10 @@ struct MapViewProduction: View {
                 // Instead, use a small delay to ensure SwiftUI has processed the state changes
                 print("⏱️ [MapView] Waiting 100ms for SwiftUI to process state changes...")
                 
-                Task { @MainActor in
+                delayedNavigationTask?.cancel()
+                delayedNavigationTask = Task { @MainActor in
                     try? await Task.sleep(nanoseconds: 100_000_000) // 100ms delay
+                    guard !Task.isCancelled else { return }
                     
                     print("🎬 [MapView] Now starting navigation animation")
                     print("   Current shownPostCoordinate: \(String(describing: shownPostCoordinate))")
@@ -6143,6 +6514,7 @@ struct MapViewProduction: View {
                     navigateWithTourTransition(to: coordinate, cityName: "Post Location", postRadius: postRadius)
                     
                     print("✅ [MapView] Navigation transition started")
+                    delayedNavigationTask = nil
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("SetCameraCoordinate"))) { notification in
@@ -6167,9 +6539,12 @@ struct MapViewProduction: View {
                 self.aiRecommendation = "📍 Navigating to post location..."
                 self.navigateWithTourTransition(to: coordinate, cityName: "Post Location")
 
-                Task { @MainActor in
+                delayedNavigationTask?.cancel()
+                delayedNavigationTask = Task { @MainActor in
                     try? await Task.sleep(nanoseconds: 7_000_000_000)
+                    guard !Task.isCancelled else { return }
                     self.aiRecommendation = "📍 This is where the post was created!"
+                    delayedNavigationTask = nil
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("OpenMapToSelectPostLocation"))) { notification in
@@ -6182,8 +6557,7 @@ struct MapViewProduction: View {
                 
                 // Start Camera -> Map flow
                 flowManager.startCameraToMapFlow(image: image, videoURL: videoURL)
-                mapLaunchTask?.cancel()
-                mapLaunchTask = nil
+                cancelMapAsyncWork()
                 isInitialMapLaunchPreparing = false
                 isInitialMapLaunchActive = false
                 isCameraTransitionInProgress = false
@@ -6252,16 +6626,20 @@ struct MapViewProduction: View {
             }
             .onChange(of: fixedDistanceAlt) { _, newDist in
                 if newDist >= 800 {
+                    indoorVenueTask?.cancel()
+                    indoorVenueTask = nil
                     indoorVenues = []
                     return
                 }
                 guard let center = camera.camera?.centerCoordinate ?? locationManager.location?.coordinate else { return }
                 let lat = center.latitude
                 let lng = center.longitude
-                Task {
-                    let venues = await MappedinVenueSearch.nearbyVenues(lat: lat, lng: lng)
-                    await MainActor.run { indoorVenues = venues }
-                }
+                // MappedIn indoor venues disabled — feature turned off to prevent crashes
+                indoorVenueTask?.cancel()
+                indoorVenueTask = nil
+                indoorVenues = []
+                // Probe Look Around availability for the new center
+                probeLookaround(at: center)
             }
     }
 
@@ -6597,6 +6975,9 @@ struct MapViewProduction: View {
     private func handleOnAppear() {
         mapState.setMapTabActive(true)
 
+        // Fetch real weather immediately every time the map becomes visible
+        scheduleWeatherFetch()
+
         if mapState.hasRunFirstLaunchSequence {
             rainAmbientAudio.update(for: weatherState)
         }
@@ -6714,22 +7095,25 @@ struct MapViewProduction: View {
                     cityName = nearest.cityName
                     countryCode = nearest.storefront
                 }
+                guard !Task.isCancelled else { return }
 
                 let insight = makeLocalTrendInsight(for: cityName)
                 await runFirstLaunchSequence(at: coordinate, cityName: cityName, insight: insight, countryCode: countryCode)
                 mapLaunchTask = nil
             }
         } else {
-            Task { await fetchWeatherForCurrentLocation() }
             // Returning to map tab: restore context and resume music without re-running the intro
-            Task { @MainActor in
+            returnContextTask?.cancel()
+            returnContextTask = Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 900_000_000)
+                guard !Task.isCancelled else { return }
                 guard !mapState.isInTourMode, !(flowManager.currentFlow?.isCameraFirst ?? false), !isPostPlacementMode else { return }
                 guard lockToPostUntil == nil || lockToPostUntil! <= Date() else { return }
                 if let location = locationManager.location {
                     liveUserCoordinate = location.coordinate
                     refreshLocalContext(for: location)
                 }
+                returnContextTask = nil
             }
             ensureCurrentLocationMusicAfterLaunch(delayNanoseconds: 2_800_000_000)
         }
@@ -6808,12 +7192,15 @@ struct MapViewProduction: View {
             if mapState.isInTourMode {
                 let stop = PoplurTourStops[currentTourIndex % PoplurTourStops.count]
                 await runExtendedTourStop(stop)
-                await MainActor.run {
-                    currentTourIndex = (currentTourIndex + 1) % PoplurTourStops.count
+                let shouldAdvance = await MainActor.run { mapState.isInTourMode }
+                if shouldAdvance {
+                    await MainActor.run {
+                        currentTourIndex = (currentTourIndex + 1) % PoplurTourStops.count
+                    }
                 }
             } else {
                 await MainActor.run {
-                    clearTourEffects()
+                    clearTourEffects(stopAudio: false)
                     isZoomedOut = false
                 }
                 // If tour is not active, wait a bit before checking again
@@ -6828,6 +7215,16 @@ struct MapViewProduction: View {
     /// Update trending pin tracking (called periodically)
     private func updateTrendingPins() async {
         await MainActor.run {
+            // Always register the user's current GPS location as an active trending pin
+            if let userCoord = liveUserCoordinate ?? locationManager.location?.coordinate {
+                trendingTracker.updatePin(
+                    id: userLocationPinID,
+                    coordinate: userCoord,
+                    radius: 400,
+                    activityCount: 20
+                )
+            }
+
             // Update all visible posts as trending pins
             for post in filteredPosts() {
                 trendingTracker.updatePin(

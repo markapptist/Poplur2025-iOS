@@ -175,6 +175,7 @@ struct ProfileView: View {
     @State private var showPopularPhone = false
     @State private var showNotifications = false
     @State private var showStats = false
+    @State private var showCreatorDashboard = false
     @State private var hasUncheckedNotifications = true
     @StateObject private var notificationCenter = PoplurNotificationCenter.shared
     @State private var showRadiusStore = false
@@ -206,10 +207,11 @@ struct ProfileView: View {
         case phone
         case store
         case stats
+        case creator
     }
 
     private var isShowingMainTabChildRoute: Bool {
-        showSettings || navigateToMessages || showNotifications || showRadiusStore || showStats || navigateToScanner || navigateToViewer
+        showSettings || navigateToMessages || showNotifications || showRadiusStore || showStats || navigateToScanner || navigateToViewer || showCreatorDashboard
     }
 
     @ViewBuilder
@@ -276,6 +278,7 @@ struct ProfileView: View {
         showPopularPhone = route == .phone
         showRadiusStore = route == .store
         showStats = route == .stats
+        showCreatorDashboard = route == .creator
 
         if route == .notifications {
             hasUncheckedNotifications = false
@@ -293,6 +296,7 @@ struct ProfileView: View {
         showStats = false
         navigateToScanner = false
         navigateToViewer = false
+        showCreatorDashboard = false
     }
 
     private var cubeSubmenuItems: [CubeSubmenuItem] {
@@ -344,6 +348,14 @@ struct ProfileView: View {
                 tint: Color(red: 0.95, green: 0.55, blue: 0.16)
             ) {
                 openProfileSubmenuRoute(.store)
+            },
+            CubeSubmenuItem(
+                id: "creator",
+                title: "Credits",
+                systemImage: "bolt.circle.fill",
+                tint: Color(red: 0.36, green: 1.0, blue: 0.42)
+            ) {
+                openProfileSubmenuRoute(.creator)
             }
         ]
     }
@@ -376,8 +388,9 @@ struct ProfileView: View {
     }
 
     enum DisplayMode: String, CaseIterable, Identifiable {
-        case media // Changed from 'list'
-        case messages // Changed from 'grid'
+        case media
+        case messages
+        case saved
         var id: String { rawValue }
     }
     @State private var mode: DisplayMode = .media
@@ -517,14 +530,107 @@ struct ProfileView: View {
     }
 
     private var profileHeader: some View {
-        VStack(spacing: 10) {
-            avatarRow
-            usernameRow
-            businessIdentityRow
+        VStack(spacing: 0) {
+            VStack(spacing: 12) {
+                avatarRow
+                usernameRow
+                businessIdentityRow
+
+            }
+            .padding(.top, 12)
+            .padding(.bottom, 12)
+
             modeSwitcher
         }
-        .padding(.top, isOwnProfile ? 8 : 0)
-        .padding(.bottom, 0)
+    }
+
+    private var profileTopAppBar: some View {
+        HStack {
+            // Small profile avatar top-left
+            Button {
+                showProfilePhotoOptions = true
+            } label: {
+                ZStack {
+                    if let img = profileImage {
+                        Image(uiImage: img)
+                            .resizable()
+                            .scaledToFill()
+                    } else {
+                        Image(systemName: "person.fill")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(DS.Color.accent)
+                    }
+                }
+                .frame(width: 34, height: 34)
+                .clipShape(Circle())
+                .overlay(Circle().stroke(DS.Color.accent, lineWidth: 1.5))
+            }
+            .buttonStyle(.plain)
+            .opacity(isOwnProfile ? 1 : 0)
+
+            Spacer()
+
+            Text("Poplur")
+                .font(.system(size: 22, weight: .black, design: .rounded))
+                .foregroundColor(DS.Color.textPrimary)
+
+            Spacer()
+
+            // Notification bell
+            Button {
+                openProfileSubmenuRoute(.notifications)
+            } label: {
+                ZStack(alignment: .topTrailing) {
+                    Image(systemName: "bell.fill")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundColor(DS.Color.textPrimary)
+                    if hasUncheckedNotifications {
+                        Circle()
+                            .fill(DS.Color.accent)
+                            .frame(width: 10, height: 10)
+                            .offset(x: 3, y: -2)
+                    }
+                }
+                .frame(width: 34, height: 34)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private var profileQuickActions: some View {
+        HStack(spacing: 12) {
+            PoplurQuickActionCard(
+                icon: "star.fill",
+                label: "My Posts",
+                iconColor: .orange,
+                iconBg: Color(red: 1.0, green: 0.94, blue: 0.88)
+            ) {
+                mode = .media
+            }
+            PoplurQuickActionCard(
+                icon: "bookmark.fill",
+                label: "Saved",
+                iconColor: Color(red: 0.95, green: 0.26, blue: 0.35),
+                iconBg: Color(red: 1.0, green: 0.90, blue: 0.92)
+            ) { }
+            PoplurQuickActionCard(
+                icon: "bubble.left.fill",
+                label: "Messages",
+                iconColor: Color(red: 0.18, green: 0.55, blue: 0.96),
+                iconBg: Color(red: 0.88, green: 0.94, blue: 1.0)
+            ) {
+                openProfileSubmenuRoute(.mail)
+            }
+            PoplurQuickActionCard(
+                icon: "gift.fill",
+                label: "Gifts",
+                iconColor: Color(red: 0.55, green: 0.28, blue: 0.92),
+                iconBg: Color(red: 0.94, green: 0.88, blue: 1.0),
+                isHighlighted: false
+            ) {
+                openProfileSubmenuRoute(.store)
+            }
+        }
     }
 
     private var profileScrollableContent: some View {
@@ -583,6 +689,8 @@ struct ProfileView: View {
             mediaPostsScroll
         case .messages:
             messagesScroll
+        case .saved:
+            savedPostsScroll
         }
     }
 
@@ -671,6 +779,37 @@ struct ProfileView: View {
         .refreshable {
             await loadMyPosts()
         }
+    }
+
+    private var savedPostsScroll: some View {
+        ScrollView {
+            VStack(spacing: 0) {
+                Color.clear.frame(height: 0).id("top")
+                VStack(spacing: 18) {
+                    VStack(spacing: 12) {
+                        Image(systemName: "bookmark.fill")
+                            .poplurIconShader()
+                            .font(.system(size: 48, weight: .semibold))
+                            .foregroundColor(skinTheme.secondaryText)
+                        Text("Saved")
+                            .font(.headline)
+                            .foregroundColor(.black)
+                            .poplurTextShader(intensity: 0.78)
+                        Text("Posts you save will appear here")
+                            .font(.subheadline)
+                            .foregroundColor(.black.opacity(0.58))
+                            .poplurTextShader(intensity: 0.52)
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(.top, 60)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 16)
+        }
+        .scrollDisabled(isScrollDisabled)
     }
 
     @ViewBuilder
@@ -851,6 +990,26 @@ struct ProfileView: View {
         if navigateToViewer {
             profileViewerOverlay
         }
+
+        if showCreatorDashboard {
+            ZStack(alignment: .topLeading) {
+                PoplurAICreateView()
+
+                Button {
+                    showCreatorDashboard = false
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 17, weight: .black))
+                        .foregroundStyle(.white)
+                        .frame(width: 44, height: 44)
+                        .background(Color.black.opacity(0.45), in: Circle())
+                }
+                .padding(.leading, 18)
+                .padding(.top, 56)
+            }
+            .transition(.opacity)
+            .zIndex(56)
+        }
     }
 
     @ViewBuilder
@@ -959,8 +1118,9 @@ struct ProfileView: View {
 
     private var profileRootScene: some View {
         ZStack {
-            Color.white
-                .ignoresSafeArea()
+            // Pink sparkle background
+            DS.Color.background.ignoresSafeArea()
+            PoplurSparkleBackground().ignoresSafeArea()
 
             profileMainStack
                 .zIndex(1)
@@ -1026,6 +1186,7 @@ struct ProfileView: View {
                 .onChange(of: navigateToMessages) { _, _ in handleProfileChildRouteChanged() }
                 .onChange(of: showNotifications) { _, _ in handleProfileChildRouteChanged() }
                 .onChange(of: showRadiusStore) { _, _ in handleProfileChildRouteChanged() }
+                .onChange(of: showCreatorDashboard) { _, _ in handleProfileChildRouteChanged() }
                 .onChange(of: showPopularPhone) { _, _ in syncProfileCubeIconToActiveRoute() }
                 .onChange(of: navigateToScanner) { _, _ in handleProfileChildRouteChanged() }
                 .onChange(of: navigateToViewer) { _, _ in postMainTabChildRouteVisibility() }
@@ -1398,12 +1559,44 @@ struct ProfileView: View {
     private var avatarRow: some View {
         Group {
             if isOwnProfile {
-                Button {
-                    showProfilePhotoOptions = true
-                } label: {
-                    avatarContent
+                ZStack {
+                    // Bell to the left of the head in 3D space
+                    HStack {
+                        Button {
+                            openProfileSubmenuRoute(.notifications)
+                        } label: {
+                            ZStack(alignment: .topTrailing) {
+                                Circle()
+                                    .fill(skinTheme.badgeFill)
+                                    .frame(width: 44, height: 44)
+                                Image(systemName: "bell.fill")
+                                    .poplurIconShader()
+                                    .font(.system(size: 20, weight: .semibold))
+                                    .foregroundColor(.white)
+                                    .frame(width: 44, height: 44)
+                                if hasUncheckedNotifications {
+                                    Circle()
+                                        .fill(Color.red)
+                                        .frame(width: 10, height: 10)
+                                        .offset(x: 2, y: -2)
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.leading, 24)
+                        .padding(.top, 20)
+                        Spacer()
+                    }
+
+                    // Avatar centered
+                    Button {
+                        showProfilePhotoOptions = true
+                    } label: {
+                        avatarContent
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity)
             } else {
                 avatarContent
             }
@@ -1660,12 +1853,15 @@ struct ProfileView: View {
     }
 
     private var modeSwitcher: some View {
-        HStack(spacing: 36) {
+        HStack(spacing: 28) {
             modeButton(title: "Media", isSelected: mode == .media) {
                 mode = .media
             }
             modeButton(title: "Messages", isSelected: mode == .messages) {
                 mode = .messages
+            }
+            modeButton(title: "Saved", isSelected: mode == .saved) {
+                mode = .saved
             }
         }
         .padding(.top, 2)
@@ -2408,7 +2604,20 @@ private struct ProfileNotificationsView: View {
     let notifications: [ProfileNotificationItem]
     let onMarkRead: () -> Void
 
+    @ObservedObject private var cubeSkinStore = CubeSkinStore.shared
+
     var body: some View {
+        ZStack {
+            DS.Color.background.ignoresSafeArea()
+
+            profileNotificationsList
+        }
+        .onAppear(perform: onMarkRead)
+        .navigationTitle("")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var profileNotificationsList: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 Text("Notifications")
@@ -2449,19 +2658,12 @@ private struct ProfileNotificationsView: View {
                         Spacer(minLength: 0)
                     }
                     .padding(16)
-                    .background(
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .fill(Color.black.opacity(0.045))
-                    )
+                    .poplurCard()
                 }
             }
             .padding(.horizontal, 20)
             .padding(.bottom, 40)
         }
-        .background(Color.white.ignoresSafeArea())
-        .onAppear(perform: onMarkRead)
-        .navigationTitle("")
-        .navigationBarTitleDisplayMode(.inline)
     }
 }
 

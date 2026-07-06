@@ -1,0 +1,231 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
+<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+  <asset>
+    <contributor>
+      <author>Assimp</author>
+      <authoring_tool>https://github.com/mikedh/trimesh</authoring_tool>
+    </contributor>
+    <created>2026-07-03T10:30:39</created>
+    <modified>2026-07-03T10:30:39</modified>
+    <unit name="meter" meter="1" />
+    <up_axis>Y_UP</up_axis>
+  </asset>
+  <library_images>
+  </library_images>
+  <library_effects>
+    <effect id="panel_green_trim-fx" name="panel_green_trim">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0.180000007   0.5   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">0.250980407   1   0   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">608.399963</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="black_soft-fx" name="black_soft">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">0.0156862754   0.0156862754   0.0196078438   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">62.5</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="material_2-fx" name="">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">1   1   1   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">0</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+  </library_effects>
+  <library_materials>
+    <material id="panel_green_trim" name="panel_green_trim">
+      <instance_effect url="#panel_green_trim-fx"/>
+    </material>
+    <material id="black_soft" name="black_soft">
+      <instance_effect url="#black_soft-fx"/>
+    </material>
+    <material id="material_2" name="">
+      <instance_effect url="#material_2-fx"/>
+    </material>
+  </library_materials>
+  <library_geometries>
+    <geometry id="_08_18_Popular_Tech_Router_ROOT_base_1" name="08_18_Popular_Tech_Router_ROOT_base" >
+      <mesh>
+        <source id="_08_18_Popular_Tech_Router_ROOT_base_1-positions" name="_08_18_Popular_Tech_Router_ROOT_base_1-positions">
+          <float_array id="_08_18_Popular_Tech_Router_ROOT_base_1-positions-array" count="198"> 0 0.0199999996 11.8450003 0 0.0199999996 12.2250004 -0.07413432 0.0199999996 11.8523016 0 0.0799999982 11.8450003 -0.07413432 0.0799999982 11.8523016 0 0.0799999982 12.2250004 -0.145419702 0.0199999996 11.8739262 -0.145419702 0.0799999982 11.8739262 -0.211116686 0.0199999996 11.9090414 -0.211116686 0.0799999982 11.9090414 -0.26870057 0.0199999996 11.9562998 -0.26870057 0.0799999982 11.9562998 -0.31595844 0.0199999996 12.0138836 -0.31595844 0.0799999982 12.0138836 -0.351074219 0.0199999996 12.0795803 -0.351074219 0.0799999982 12.0795803 -0.372698396 0.0199999996 12.1508656 -0.372698396 0.0799999982 12.1508656 -0.379999995 0.0199999996 12.2250004 -0.379999995 0.0799999982 12.2250004 -0.372698396 0.0199999996 12.2991343 -0.372698396 0.0799999982 12.2991343 -0.351074219 0.0199999996 12.3704195 -0.351074219 0.0799999982 12.3704195 -0.31595844 0.0199999996 12.4361162 -0.31595844 0.0799999982 12.4361162 -0.26870057 0.0199999996 12.493701 -0.26870057 0.0799999982 12.493701 -0.211116686 0.0199999996 12.5409584 -0.211116686 0.0799999982 12.5409584 -0.145419702 0.0199999996 12.5760746 -0.145419702 0.0799999982 12.5760746 -0.07413432 0.0199999996 12.5976982 -0.07413432 0.0799999982 12.5976982 -4.65365791e-17 0.0199999996 12.6049995 -4.65365791e-17 0.0799999982 12.6049995 0.07413432 0.0199999996 12.5976982 0.07413432 0.0799999982 12.5976982 0.145419702 0.0199999996 12.5760746 0.145419702 0.0799999982 12.5760746 0.211116686 0.0199999996 12.5409584 0.211116686 0.0799999982 12.5409584 0.26870057 0.0199999996 12.493701 0.26870057 0.0799999982 12.493701 0.31595844 0.0199999996 12.4361162 0.31595844 0.0799999982 12.4361162 0.351074219 0.0199999996 12.3704195 0.351074219 0.0799999982 12.3704195 0.372698396 0.0199999996 12.2991343 0.372698396 0.0799999982 12.2991343 0.379999995 0.0199999996 12.2250004 0.379999995 0.0799999982 12.2250004 0.372698396 0.0199999996 12.1508656 0.372698396 0.0799999982 12.1508656 0.351074219 0.0199999996 12.0795803 0.351074219 0.0799999982 12.0795803 0.31595844 0.0199999996 12.0138836 0.31595844 0.0799999982 12.0138836 0.26870057 0.0199999996 11.9562998 0.26870057 0.0799999982 11.9562998 0.211116686 0.0199999996 11.9090414 0.211116686 0.0799999982 11.9090414 0.145419702 0.0199999996 11.8739262 0.145419702 0.0799999982 11.8739262 0.07413432 0.0199999996 11.8523016 0.07413432 0.0799999982 11.8523016 </float_array>
+          <technique_common>
+            <accessor count="66" offset="0" source="#_08_18_Popular_Tech_Router_ROOT_base_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_08_18_Popular_Tech_Router_ROOT_base_1-vertices">
+          <input semantic="POSITION" source="#_08_18_Popular_Tech_Router_ROOT_base_1-positions" />
+        </vertices>
+        <polylist count="128" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_08_18_Popular_Tech_Router_ROOT_base_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 34 32 34 33 33 34 35 33 35 5 34 1 36 34 36 35 35 36 37 35 37 5 36 1 38 36 38 37 37 38 39 37 39 5 38 1 40 38 40 39 39 40 41 39 41 5 40 1 42 40 42 41 41 42 43 41 43 5 42 1 44 42 44 43 43 44 45 43 45 5 44 1 46 44 46 45 45 46 47 45 47 5 46 1 48 46 48 47 47 48 49 47 49 5 48 1 50 48 50 49 49 50 51 49 51 5 50 1 52 50 52 51 51 52 53 51 53 5 52 1 54 52 54 53 53 54 55 53 55 5 54 1 56 54 56 55 55 56 57 55 57 5 56 1 58 56 58 57 57 58 59 57 59 5 58 1 60 58 60 59 59 60 61 59 61 5 60 1 62 60 62 61 61 62 63 61 63 5 62 1 64 62 64 63 63 64 65 63 65 5 64 1 0 64 0 65 65 0 3 65 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_08_18_Popular_Tech_Router_part_01_1" name="08_18_Popular_Tech_Router_part_01" >
+      <mesh>
+        <source id="_08_18_Popular_Tech_Router_part_01_1-positions" name="_08_18_Popular_Tech_Router_part_01_1-positions">
+          <float_array id="_08_18_Popular_Tech_Router_part_01_1-positions-array" count="24"> -0.320005745 0.150000006 12.4318094 -0.320005745 0.32066974 12.4318094 -0.320005745 0.150000006 12.0691366 0.320005745 0.150000006 12.0691366 -0.320005745 0.32066974 12.0691366 0.320005745 0.32066974 12.4318094 0.320005745 0.150000006 12.4318094 0.320005745 0.32066974 12.0691366 </float_array>
+          <technique_common>
+            <accessor count="8" offset="0" source="#_08_18_Popular_Tech_Router_part_01_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_08_18_Popular_Tech_Router_part_01_1-vertices">
+          <input semantic="POSITION" source="#_08_18_Popular_Tech_Router_part_01_1-positions" />
+        </vertices>
+        <polylist count="12" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_08_18_Popular_Tech_Router_part_01_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 3 0 2 2 1 4 4 3 2 0 5 1 6 0 3 6 5 0 1 5 4 7 3 4 4 5 7 7 6 3 5 6 7 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_08_18_Popular_Tech_Router_part_02_1" name="08_18_Popular_Tech_Router_part_02" >
+      <mesh>
+        <source id="_08_18_Popular_Tech_Router_part_02_1-positions" name="_08_18_Popular_Tech_Router_part_02_1-positions">
+          <float_array id="_08_18_Popular_Tech_Router_part_02_1-positions-array" count="198"> -0.237313792 0.301407367 12.1200409 -0.234670877 0.299336016 12.1011372 -0.233653754 0.302284658 12.1200819 -0.343982369 0.749415398 12.0560398 -0.340322345 0.750292718 12.0560808 -0.341339469 0.747344077 12.0371361 -0.230032817 0.303048611 12.1193953 -0.336701393 0.751056671 12.0553942 -0.226590097 0.3036699 12.1180058 -0.333258688 0.75167793 12.0540047 -0.223457932 0.304124624 12.1159687 -0.330126524 0.752132654 12.0519676 -0.220756665 0.304395348 12.1133623 -0.327425241 0.752403378 12.0493612 -0.218590125 0.304471642 12.1102848 -0.325258702 0.752479672 12.0462837 -0.217041552 0.304350555 12.1068563 -0.323710114 0.752358615 12.0428553 -0.21617046 0.304036796 12.1032085 -0.322839051 0.752044797 12.0392075 -0.216010332 0.303542346 12.0994806 -0.322678924 0.751550376 12.0354795 -0.216567323 0.302886277 12.0958166 -0.323235899 0.750894308 12.0318155 -0.217820019 0.302093774 12.0923567 -0.32448861 0.750101805 12.0283556 -0.219720289 0.301195294 12.0892344 -0.326388866 0.749203324 12.0252333 -0.222195089 0.300225347 12.0865688 -0.32886368 0.748233378 12.0225677 -0.225149333 0.299221218 12.0844641 -0.331817925 0.747229278 12.020463 -0.228469491 0.298221529 12.0830002 -0.335138083 0.746229529 12.0189991 -0.232027963 0.297264636 12.0822325 -0.338696539 0.745272696 12.0182314 -0.235688001 0.296387374 12.0821915 -0.342356563 0.744395435 12.0181904 -0.239308938 0.295623422 12.0828791 -0.345977515 0.743631423 12.018878 -0.242751658 0.295002133 12.0842676 -0.34942022 0.743010163 12.0202665 -0.245883822 0.294547379 12.0863047 -0.352552414 0.742555439 12.0223036 -0.24858509 0.294276685 12.088912 -0.355253667 0.742284715 12.0249109 -0.250751644 0.294200391 12.0919886 -0.357420206 0.742208421 12.0279875 -0.252300203 0.294321448 12.095417 -0.358968794 0.742329478 12.0314159 -0.253171295 0.294635236 12.0990658 -0.359839886 0.742643297 12.0350647 -0.253331423 0.295129657 12.1027937 -0.360000014 0.743137717 12.0387926 -0.252774447 0.295785755 12.1064577 -0.359443009 0.743793786 12.0424566 -0.251521736 0.296578258 12.1099176 -0.358190328 0.744586289 12.0459166 -0.249621466 0.297476739 12.11304 -0.356290042 0.745484769 12.0490389 -0.247146666 0.298446685 12.1157045 -0.353815228 0.746454716 12.0517035 -0.244192421 0.299450785 12.1178093 -0.350860983 0.747458816 12.0538082 -0.240872264 0.300450504 12.1192741 -0.347540855 0.748458564 12.0552731 </float_array>
+          <technique_common>
+            <accessor count="66" offset="0" source="#_08_18_Popular_Tech_Router_part_02_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_08_18_Popular_Tech_Router_part_02_1-vertices">
+          <input semantic="POSITION" source="#_08_18_Popular_Tech_Router_part_02_1-positions" />
+        </vertices>
+        <polylist count="128" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_08_18_Popular_Tech_Router_part_02_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 34 32 34 33 33 34 35 33 35 5 34 1 36 34 36 35 35 36 37 35 37 5 36 1 38 36 38 37 37 38 39 37 39 5 38 1 40 38 40 39 39 40 41 39 41 5 40 1 42 40 42 41 41 42 43 41 43 5 42 1 44 42 44 43 43 44 45 43 45 5 44 1 46 44 46 45 45 46 47 45 47 5 46 1 48 46 48 47 47 48 49 47 49 5 48 1 50 48 50 49 49 50 51 49 51 5 50 1 52 50 52 51 51 52 53 51 53 5 52 1 54 52 54 53 53 54 55 53 55 5 54 1 56 54 56 55 55 56 57 55 57 5 56 1 58 56 58 57 57 58 59 57 59 5 58 1 60 58 60 59 59 60 61 59 61 5 60 1 62 60 62 61 61 62 63 61 63 5 62 1 64 62 64 63 63 64 65 63 65 5 64 1 0 64 0 65 65 0 3 65 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_08_18_Popular_Tech_Router_part_03_1" name="08_18_Popular_Tech_Router_part_03" >
+      <mesh>
+        <source id="_08_18_Popular_Tech_Router_part_03_1-positions" name="_08_18_Popular_Tech_Router_part_03_1-positions">
+          <float_array id="_08_18_Popular_Tech_Router_part_03_1-positions-array" count="198"> 0.232027963 0.297264636 12.0822325 0.234670877 0.299336016 12.1011372 0.228469491 0.298221529 12.0830002 0.338696539 0.745272696 12.0182314 0.335138083 0.746229529 12.0189991 0.341339469 0.747344077 12.0371361 0.225149333 0.299221218 12.0844641 0.331817925 0.747229278 12.020463 0.222195089 0.300225347 12.0865688 0.32886368 0.748233378 12.0225677 0.219720289 0.301195294 12.0892344 0.326388866 0.749203324 12.0252333 0.217820019 0.302093774 12.0923567 0.32448861 0.750101805 12.0283556 0.216567323 0.302886277 12.0958166 0.323235899 0.750894308 12.0318155 0.216010332 0.303542346 12.0994806 0.322678924 0.751550376 12.0354795 0.21617046 0.304036796 12.1032085 0.322839051 0.752044797 12.0392075 0.217041552 0.304350555 12.1068563 0.323710114 0.752358615 12.0428553 0.218590125 0.304471642 12.1102848 0.325258702 0.752479672 12.0462837 0.220756665 0.304395348 12.1133623 0.327425241 0.752403378 12.0493612 0.223457932 0.304124624 12.1159687 0.330126524 0.752132654 12.0519676 0.226590097 0.3036699 12.1180058 0.333258688 0.75167793 12.0540047 0.230032817 0.303048611 12.1193953 0.336701393 0.751056671 12.0553942 0.233653754 0.302284658 12.1200819 0.340322345 0.750292718 12.0560808 0.237313792 0.301407367 12.1200409 0.343982369 0.749415398 12.0560398 0.240872264 0.300450504 12.1192741 0.347540855 0.748458564 12.0552731 0.244192421 0.299450785 12.1178093 0.350860983 0.747458816 12.0538082 0.247146666 0.298446685 12.1157045 0.353815228 0.746454716 12.0517035 0.249621466 0.297476739 12.11304 0.356290042 0.745484769 12.0490389 0.251521736 0.296578258 12.1099176 0.358190328 0.744586289 12.0459166 0.252774447 0.295785755 12.1064577 0.359443009 0.743793786 12.0424566 0.253331423 0.295129657 12.1027937 0.360000014 0.743137717 12.0387926 0.253171295 0.294635236 12.0990658 0.359839886 0.742643297 12.0350647 0.252300203 0.294321448 12.095417 0.358968794 0.742329478 12.0314159 0.250751644 0.294200391 12.0919886 0.357420206 0.742208421 12.0279875 0.24858509 0.294276685 12.088912 0.355253667 0.742284715 12.0249109 0.245883822 0.294547379 12.0863047 0.352552414 0.742555439 12.0223036 0.242751658 0.295002133 12.0842676 0.34942022 0.743010163 12.0202665 0.239308938 0.295623422 12.0828791 0.345977515 0.743631423 12.018878 0.235688001 0.296387374 12.0821915 0.342356563 0.744395435 12.0181904 </float_array>
+          <technique_common>
+            <accessor count="66" offset="0" source="#_08_18_Popular_Tech_Router_part_03_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_08_18_Popular_Tech_Router_part_03_1-vertices">
+          <input semantic="POSITION" source="#_08_18_Popular_Tech_Router_part_03_1-positions" />
+        </vertices>
+        <polylist count="128" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_08_18_Popular_Tech_Router_part_03_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 34 32 34 33 33 34 35 33 35 5 34 1 36 34 36 35 35 36 37 35 37 5 36 1 38 36 38 37 37 38 39 37 39 5 38 1 40 38 40 39 39 40 41 39 41 5 40 1 42 40 42 41 41 42 43 41 43 5 42 1 44 42 44 43 43 44 45 43 45 5 44 1 46 44 46 45 45 46 47 45 47 5 46 1 48 46 48 47 47 48 49 47 49 5 48 1 50 48 50 49 49 50 51 49 51 5 50 1 52 50 52 51 51 52 53 51 53 5 52 1 54 52 54 53 53 54 55 53 55 5 54 1 56 54 56 55 55 56 57 55 57 5 56 1 58 56 58 57 57 58 59 57 59 5 58 1 60 58 60 59 59 60 61 59 61 5 60 1 62 60 62 61 61 62 63 61 63 5 62 1 64 62 64 63 63 64 65 63 65 5 64 1 0 64 0 65 65 0 3 65 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+  </library_geometries>
+  <library_controllers>
+  </library_controllers>
+  <library_visual_scenes>
+    <visual_scene id="ROOT" name="ROOT">
+      <node id="_08_18_Popular_Tech_Router_ROOT_base" name="08_18_Popular_Tech_Router_ROOT_base" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_08_18_Popular_Tech_Router_ROOT_base_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#panel_green_trim">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_08_18_Popular_Tech_Router_part_01" name="08_18_Popular_Tech_Router_part_01" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_08_18_Popular_Tech_Router_part_01_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#black_soft">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_08_18_Popular_Tech_Router_part_02" name="08_18_Popular_Tech_Router_part_02" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_08_18_Popular_Tech_Router_part_02_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#black_soft">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_08_18_Popular_Tech_Router_part_03" name="08_18_Popular_Tech_Router_part_03" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_08_18_Popular_Tech_Router_part_03_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#black_soft">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+    </visual_scene>
+  </library_visual_scenes>
+  <scene>
+    <instance_visual_scene url="#ROOT" />
+  </scene>
+</COLLADA>

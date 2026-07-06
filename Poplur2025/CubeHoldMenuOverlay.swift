@@ -11,8 +11,7 @@ struct CubeHoldMenuOverlay: View {
     var body: some View {
         let skin = skinManager.current
         ZStack {
-            // Dim background
-            Color.black.opacity(0.28)
+            Color.black.opacity(0.50)
                 .ignoresSafeArea()
                 .onTapGesture {
                     controller.endHold(activateSelected: false)
@@ -31,6 +30,26 @@ struct CubeHoldMenuOverlay: View {
                 )
                 .shadow(color: Color.black.opacity(0.20), radius: 18, x: 0, y: 10)
                 .padding(.horizontal, 20)
+
+            VStack(spacing: 7) {
+                Image(systemName: "chevron.up")
+                    .font(.system(size: 18, weight: .black))
+                Text("SCRUB")
+                    .font(.system(size: 10, weight: .black, design: .rounded))
+                    .rotationEffect(.degrees(-90))
+                    .fixedSize()
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 18, weight: .black))
+            }
+            .foregroundStyle(.white)
+            .padding(.vertical, 14)
+            .padding(.horizontal, 10)
+            .background(.black.opacity(0.32), in: Capsule())
+            .overlay {
+                Capsule().stroke(.white.opacity(0.22), lineWidth: 1)
+            }
+            .frame(maxWidth: .infinity, alignment: .trailing)
+            .padding(.trailing, 22)
         }
         .transition(.opacity)
     }
@@ -39,7 +58,7 @@ struct CubeHoldMenuOverlay: View {
     private func content(for skin: PoplurCubeSkin) -> some View {
         let items = controller.items
         if items.count <= 4 {
-            HStack(spacing: 12) {
+            HStack(spacing: 18) {
                 ForEach(items) { item in
                     wheelItem(item, selected: controller.selectedItem?.id == item.id, skin: skin)
                 }
@@ -47,9 +66,9 @@ struct CubeHoldMenuOverlay: View {
         } else {
             // Wrap into multiple rows for many items
             let rows = Array(items.chunked(into: 4))
-            VStack(spacing: 12) {
+            VStack(spacing: 18) {
                 ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
-                    HStack(spacing: 12) {
+                    HStack(spacing: 18) {
                         ForEach(row) { item in
                             wheelItem(item, selected: controller.selectedItem?.id == item.id, skin: skin)
                         }

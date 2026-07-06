@@ -2,12 +2,15 @@ import SwiftUI
 import FirebaseAuth
 import MapKit
 import PhotosUI
+import SceneKit
 
 struct SignUpView: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var stripeCoordinator: StripeTransitionCoordinator
     @State private var accountType: PoplurAccountType?
     @State private var signupStep: SignupStep = .accountType
     @State private var cubeSpinToken = 0
+    @State private var logoFloatOffset: CGFloat = 0
     @State private var email = ""
     @State private var password = ""
     @State private var confirmPassword = ""
@@ -81,21 +84,25 @@ struct SignUpView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
-                    header
-                    signupCube
-                    signupStepContent
-                    errorMessageView
-                    walkthroughControls
+            ZStack {
+                Color.white.ignoresSafeArea()
+                AuthConfettiBackground()
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 22) {
+                        header
+                        signupCube
+                        signupStepContent
+                        walkthroughControls
+                    }
+                    .padding(.horizontal, 22)
+                    .padding(.top, 28)
+                    .padding(.bottom, 44)
                 }
-                .padding(.horizontal, 22)
-                .padding(.top, 28)
-                .padding(.bottom, 44)
             }
-            .background(Color.white.ignoresSafeArea())
             .navigationBarTitleDisplayMode(.inline)
             .toolbar(.hidden, for: .navigationBar)
+            .errorBanner($errorMessage)
             .onTapGesture { hideKeyboard() }
             .navigationDestination(isPresented: $isSignedUp) {
                 HomeView()
@@ -107,9 +114,27 @@ struct SignUpView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
+            // Floating Poplur logo
+            HStack {
+                Spacer()
+                Image("logo")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 100, height: 100)
+                    .offset(y: logoFloatOffset)
+                    .onAppear {
+                        withAnimation(
+                            .easeInOut(duration: 1.3)
+                            .repeatForever(autoreverses: true)
+                        ) { logoFloatOffset = -8 }
+                    }
+                Spacer()
+            }
+            .padding(.bottom, 4)
+
             HStack {
                 Button {
-                    dismiss()
+                    stripeCoordinator.trigger { dismiss() }
                 } label: {
                     Image(systemName: "chevron.left")
                         .poplurIconShader()
@@ -152,14 +177,20 @@ struct SignUpView: View {
     private var signupCube: some View {
         HStack {
             Spacer()
-            AuthCubeView(
-                title: signupStep.title,
-                systemImage: signupStep.cubeIcon,
-                accent: accountType == .business ? .pink : .green,
-                spinToken: cubeSpinToken,
-                isInteractive: true,
-                action: advanceSignupStep
+            LoginCubeView(
+                onTap: {
+                    switch signupStep {
+                    case .accountType:
+                        stripeCoordinator.trigger { dismiss() }
+                    default:
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.88)) {
+                            errorMessage = nil
+                            signupStep = previousStep(before: signupStep)
+                        }
+                    }
+                }
             )
+            .frame(width: 200, height: 200)
             Spacer()
         }
         .padding(.vertical, 2)
@@ -178,16 +209,6 @@ struct SignUpView: View {
             verificationSection
         case .review:
             reviewStatusSection
-        }
-    }
-
-    @ViewBuilder
-    private var errorMessageView: some View {
-        if let errorMessage {
-            Text(errorMessage)
-                .font(.system(size: 13, weight: .bold, design: .rounded))
-                .foregroundStyle(Color.red)
-                .padding(.horizontal, 4)
         }
     }
 
@@ -213,7 +234,7 @@ struct SignUpView: View {
                 HStack(spacing: 10) {
                     if isLoading {
                         ProgressView()
-                            .tint(.black)
+                            .tint(.white)
                     } else {
                         Image(systemName: nextActionIcon)
                             .poplurIconShader()
@@ -221,12 +242,11 @@ struct SignUpView: View {
                     Text(nextActionTitle)
                 }
                 .font(.system(size: 16, weight: .black, design: .rounded))
-                .foregroundStyle(.black)
+                .foregroundStyle(.white)
                 .padding(.horizontal, 20)
                 .padding(.vertical, 13)
-                .background(Capsule().fill(Color.white))
-                .overlay(Capsule().stroke(Color.black.opacity(0.14), lineWidth: 1))
-                .shadow(color: Color.black.opacity(0.1), radius: 10, x: 0, y: 5)
+                .background(Capsule().fill(DS.Color.accent))
+                .shadow(color: DS.Color.accent.opacity(0.30), radius: 10, x: 0, y: 5)
             }
             .disabled(isLoading)
         }
@@ -277,34 +297,36 @@ struct SignUpView: View {
         } label: {
             HStack(spacing: 14) {
                 Image(systemName: systemImage)
-                    .poplurIconShader()
-                    .font(.system(size: 28, weight: .black))
-                    .foregroundStyle(type == .business ? Color.pink : Color.green)
+                    .font(.system(size: 26, weight: .black))
+                    .foregroundStyle(type == .business ? DS.Color.accent : Color(red: 0.2, green: 0.78, blue: 0.35))
                     .frame(width: 52, height: 52)
-                    .background(Circle().fill(Color.black.opacity(0.06)))
+                    .background(
+                        type == .business ? DS.Color.pinkCard : Color(red: 0.87, green: 0.97, blue: 0.88),
+                        in: Circle()
+                    )
 
                 VStack(alignment: .leading, spacing: 5) {
                     Text(title)
-                        .font(.system(size: 24, weight: .black, design: .rounded))
-                        .foregroundStyle(.black)
+                        .font(DS.Font.heading(22))
+                        .foregroundStyle(DS.Color.textPrimary)
                     Text(subtitle)
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.black.opacity(0.58))
+                        .font(DS.Font.caption())
+                        .foregroundStyle(DS.Color.textSecondary)
                         .multilineTextAlignment(.leading)
                 }
                 Spacer()
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 16, weight: .heavy))
-                    .foregroundStyle(.black.opacity(0.36))
+                    .font(.system(size: 15, weight: .heavy))
+                    .foregroundStyle(DS.Color.textSecondary)
             }
             .padding(18)
-            .background(
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .fill(Color.black.opacity(0.04))
-            )
+            .poplurCard()
             .overlay(
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .stroke(type == .business ? Color.pink.opacity(0.5) : Color.green.opacity(0.5), lineWidth: 1.5)
+                RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous)
+                    .stroke(
+                        type == .business ? DS.Color.accent.opacity(0.35) : Color(red: 0.2, green: 0.78, blue: 0.35).opacity(0.35),
+                        lineWidth: 1.5
+                    )
             )
         }
         .buttonStyle(.plain)
@@ -411,7 +433,7 @@ struct SignUpView: View {
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
-                    .background(Capsule().fill(Color.black))
+                    .background(Capsule().fill(DS.Color.accent))
             }
             .buttonStyle(.plain)
 
@@ -476,15 +498,12 @@ struct SignUpView: View {
     private func sectionPanel<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(title)
-                .font(.system(size: 18, weight: .black, design: .rounded))
-                .foregroundStyle(.black)
+                .font(DS.Font.heading(18))
+                .foregroundStyle(DS.Color.textPrimary)
             content()
         }
-        .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(Color.black.opacity(0.045))
-        )
+        .padding(18)
+        .poplurCard()
     }
 
     private func formTextField(
@@ -497,10 +516,14 @@ struct SignUpView: View {
             .focused($focusedField, equals: field)
             .keyboardType(keyboardType)
             .font(.system(size: 15, weight: .bold, design: .rounded))
-            .foregroundStyle(.black)
-            .tint(.black)
+            .foregroundStyle(DS.Color.textPrimary)
+            .tint(DS.Color.accent)
             .padding(14)
-            .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color.white))
+            .background(DS.Color.fill, in: RoundedRectangle(cornerRadius: DS.Radius.input, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: DS.Radius.input, style: .continuous)
+                    .stroke(DS.Color.border, lineWidth: 1)
+            )
     }
 
     private func secureField(_ placeholder: String, text: Binding<String>, field: Field) -> some View {
@@ -508,10 +531,14 @@ struct SignUpView: View {
             .focused($focusedField, equals: field)
             .textContentType(.oneTimeCode)
             .font(.system(size: 15, weight: .bold, design: .rounded))
-            .foregroundStyle(.black)
-            .tint(.black)
+            .foregroundStyle(DS.Color.textPrimary)
+            .tint(DS.Color.accent)
             .padding(14)
-            .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color.white))
+            .background(DS.Color.fill, in: RoundedRectangle(cornerRadius: DS.Radius.input, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: DS.Radius.input, style: .continuous)
+                    .stroke(DS.Color.border, lineWidth: 1)
+            )
     }
 
     private func multilineField(_ placeholder: String, text: Binding<String>, field: Field, minHeight: CGFloat) -> some View {
@@ -519,20 +546,24 @@ struct SignUpView: View {
             if text.wrappedValue.isEmpty {
                 Text(placeholder)
                     .font(.system(size: 15, weight: .bold, design: .rounded))
-                    .foregroundStyle(.black.opacity(0.34))
+                    .foregroundStyle(DS.Color.textSecondary)
                     .padding(.horizontal, 18)
                     .padding(.vertical, 16)
             }
             TextEditor(text: text)
                 .focused($focusedField, equals: field)
                 .font(.system(size: 15, weight: .bold, design: .rounded))
-                .foregroundStyle(.black)
-                .tint(.black)
+                .foregroundStyle(DS.Color.textPrimary)
+                .tint(DS.Color.accent)
                 .scrollContentBackground(.hidden)
                 .padding(10)
                 .frame(minHeight: minHeight)
         }
-        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color.white))
+        .background(DS.Color.fill, in: RoundedRectangle(cornerRadius: DS.Radius.input, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: DS.Radius.input, style: .continuous)
+                .stroke(DS.Color.border, lineWidth: 1)
+        )
     }
 
     private func binding(for method: BusinessVerificationMethod) -> Binding<Bool> {
@@ -740,84 +771,6 @@ struct SignUpView: View {
     private func hideKeyboard() {
         focusedField = nil
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-    }
-}
-
-struct AuthCubeView: View {
-    let title: String
-    let systemImage: String
-    var accent: Color = .pink
-    var spinToken: Int = 0
-    var isInteractive: Bool = false
-    var action: (() -> Void)?
-
-    @State private var selectedTab: AppTab = .map
-    @State private var previewHover = false
-    @State private var previewPopTrigger = 0
-    @State private var previewPopSoundEnabled = false
-    @State private var previewYawRightStep = 0
-    @State private var previewYawLeftStep = 0
-    @State private var previewHoldActive = false
-
-    var body: some View {
-        ZStack {
-            CubeTabView(
-                selectedTab: $selectedTab,
-                previewHover: $previewHover,
-                previewPopTrigger: $previewPopTrigger,
-                previewPopSoundEnabled: $previewPopSoundEnabled,
-                previewYawRightStep: $previewYawRightStep,
-                previewYawLeftStep: $previewYawLeftStep,
-                previewHoldActive: $previewHoldActive,
-                tintColor: accent,
-                baseColor: Color(red: 0.04, green: 0.03, blue: 0.10),
-                glowColor: accent,
-                glowOpacity: 0.78,
-                rotationSpeedMultiplier: 0.9,
-                enablePreviewSpin: false,
-                enableGlow: true
-            )
-            .frame(width: 170, height: 170)
-            .scaleEffect(0.86)
-            .allowsHitTesting(false)
-
-            if isInteractive, let action {
-                Button {
-                    action()
-                } label: {
-                    Color.clear
-                        .frame(width: 154, height: 154)
-                        .contentShape(Rectangle())
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel(title)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .frame(width: 170, height: 170)
-        .onAppear(perform: applyAuthFaceOverrides)
-        .onChange(of: title) { _, _ in applyAuthFaceOverrides() }
-        .onChange(of: systemImage) { _, _ in applyAuthFaceOverrides() }
-        .onChange(of: spinToken) { _, _ in
-            guard isInteractive else { return }
-            previewYawRightStep += 2
-            previewPopTrigger += 1
-            applyAuthFaceOverrides()
-        }
-    }
-
-    private func applyAuthFaceOverrides() {
-        for face in ["map", "camera", "feed", "profile"] {
-            NotificationCenter.default.post(
-                name: .CubeFaceOverrideChanged,
-                object: nil,
-                userInfo: [
-                    "face": face,
-                    "title": title,
-                    "systemImage": systemImage
-                ]
-            )
-        }
     }
 }
 

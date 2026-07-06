@@ -1,0 +1,277 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
+<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+  <asset>
+    <contributor>
+      <author>Assimp</author>
+      <authoring_tool>https://github.com/mikedh/trimesh</authoring_tool>
+    </contributor>
+    <created>2026-07-03T10:30:30</created>
+    <modified>2026-07-03T10:30:30</modified>
+    <unit name="meter" meter="1" />
+    <up_axis>Y_UP</up_axis>
+  </asset>
+  <library_images>
+  </library_images>
+  <library_effects>
+    <effect id="panel_purple_trim-fx" name="panel_purple_trim">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0.25   0   0.550000012   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">0.698039234   0.121568628   1   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">608.399963</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="polished_silver-fx" name="polished_silver">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">0.721568644   0.741176486   0.760784328   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">608.399963</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="brushed_gold-fx" name="brushed_gold">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">1   0.698039234   0.160784319   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">562.5</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="black_soft-fx" name="black_soft">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">0.0156862754   0.0156862754   0.0196078438   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">62.5</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="material_4-fx" name="">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">1   1   1   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">0</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+  </library_effects>
+  <library_materials>
+    <material id="panel_purple_trim" name="panel_purple_trim">
+      <instance_effect url="#panel_purple_trim-fx"/>
+    </material>
+    <material id="polished_silver" name="polished_silver">
+      <instance_effect url="#polished_silver-fx"/>
+    </material>
+    <material id="brushed_gold" name="brushed_gold">
+      <instance_effect url="#brushed_gold-fx"/>
+    </material>
+    <material id="black_soft" name="black_soft">
+      <instance_effect url="#black_soft-fx"/>
+    </material>
+    <material id="material_4" name="">
+      <instance_effect url="#material_4-fx"/>
+    </material>
+  </library_materials>
+  <library_geometries>
+    <geometry id="_05_02_Popular_Modelling_Studio_Light_ROOT_base_1" name="05_02_Popular_Modelling_Studio_Light_ROOT_base" >
+      <mesh>
+        <source id="_05_02_Popular_Modelling_Studio_Light_ROOT_base_1-positions" name="_05_02_Popular_Modelling_Studio_Light_ROOT_base_1-positions">
+          <float_array id="_05_02_Popular_Modelling_Studio_Light_ROOT_base_1-positions-array" count="198"> -1.32000005 0.0199999996 3.14499998 -1.32000005 0.0199999996 3.5250001 -1.39413428 0.0199999996 3.15230155 -1.32000005 0.0799999982 3.14499998 -1.39413428 0.0799999982 3.15230155 -1.32000005 0.0799999982 3.5250001 -1.46541965 0.0199999996 3.17392588 -1.46541965 0.0799999982 3.17392588 -1.53111672 0.0199999996 3.2090416 -1.53111672 0.0799999982 3.2090416 -1.58870053 0.0199999996 3.2562995 -1.58870053 0.0799999982 3.2562995 -1.63595843 0.0199999996 3.3138833 -1.63595843 0.0799999982 3.3138833 -1.67107427 0.0199999996 3.37958026 -1.67107427 0.0799999982 3.37958026 -1.69269836 0.0199999996 3.45086575 -1.69269836 0.0799999982 3.45086575 -1.70000005 0.0199999996 3.5250001 -1.70000005 0.0799999982 3.5250001 -1.69269836 0.0199999996 3.59913421 -1.69269836 0.0799999982 3.59913421 -1.67107427 0.0199999996 3.67041969 -1.67107427 0.0799999982 3.67041969 -1.63595843 0.0199999996 3.73611665 -1.63595843 0.0799999982 3.73611665 -1.58870053 0.0199999996 3.7937007 -1.58870053 0.0799999982 3.7937007 -1.53111672 0.0199999996 3.84095836 -1.53111672 0.0799999982 3.84095836 -1.46541965 0.0199999996 3.87607431 -1.46541965 0.0799999982 3.87607431 -1.39413428 0.0199999996 3.8976984 -1.39413428 0.0799999982 3.8976984 -1.32000005 0.0199999996 3.90499997 -1.32000005 0.0799999982 3.90499997 -1.2458657 0.0199999996 3.8976984 -1.2458657 0.0799999982 3.8976984 -1.17458034 0.0199999996 3.87607431 -1.17458034 0.0799999982 3.87607431 -1.10888326 0.0199999996 3.84095836 -1.10888326 0.0799999982 3.84095836 -1.05129945 0.0199999996 3.7937007 -1.05129945 0.0799999982 3.7937007 -1.00404155 0.0199999996 3.73611665 -1.00404155 0.0799999982 3.73611665 -0.968925774 0.0199999996 3.67041969 -0.968925774 0.0799999982 3.67041969 -0.947301567 0.0199999996 3.59913421 -0.947301567 0.0799999982 3.59913421 -0.939999998 0.0199999996 3.5250001 -0.939999998 0.0799999982 3.5250001 -0.947301567 0.0199999996 3.45086575 -0.947301567 0.0799999982 3.45086575 -0.968925774 0.0199999996 3.37958026 -0.968925774 0.0799999982 3.37958026 -1.00404155 0.0199999996 3.3138833 -1.00404155 0.0799999982 3.3138833 -1.05129945 0.0199999996 3.2562995 -1.05129945 0.0799999982 3.2562995 -1.10888326 0.0199999996 3.2090416 -1.10888326 0.0799999982 3.2090416 -1.17458034 0.0199999996 3.17392588 -1.17458034 0.0799999982 3.17392588 -1.2458657 0.0199999996 3.15230155 -1.2458657 0.0799999982 3.15230155 </float_array>
+          <technique_common>
+            <accessor count="66" offset="0" source="#_05_02_Popular_Modelling_Studio_Light_ROOT_base_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_05_02_Popular_Modelling_Studio_Light_ROOT_base_1-vertices">
+          <input semantic="POSITION" source="#_05_02_Popular_Modelling_Studio_Light_ROOT_base_1-positions" />
+        </vertices>
+        <polylist count="128" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_05_02_Popular_Modelling_Studio_Light_ROOT_base_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 34 32 34 33 33 34 35 33 35 5 34 1 36 34 36 35 35 36 37 35 37 5 36 1 38 36 38 37 37 38 39 37 39 5 38 1 40 38 40 39 39 40 41 39 41 5 40 1 42 40 42 41 41 42 43 41 43 5 42 1 44 42 44 43 43 44 45 43 45 5 44 1 46 44 46 45 45 46 47 45 47 5 46 1 48 46 48 47 47 48 49 47 49 5 48 1 50 48 50 49 49 50 51 49 51 5 50 1 52 50 52 51 51 52 53 51 53 5 52 1 54 52 54 53 53 54 55 53 55 5 54 1 56 54 56 55 55 56 57 55 57 5 56 1 58 56 58 57 57 58 59 57 59 5 58 1 60 58 60 59 59 60 61 59 61 5 60 1 62 60 62 61 61 62 63 61 63 5 62 1 64 62 64 63 63 64 65 63 65 5 64 1 0 64 0 65 65 0 3 65 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_05_02_Popular_Modelling_Studio_Light_part_01_1" name="05_02_Popular_Modelling_Studio_Light_part_01" >
+      <mesh>
+        <source id="_05_02_Popular_Modelling_Studio_Light_part_01_1-positions" name="_05_02_Popular_Modelling_Studio_Light_part_01_1-positions">
+          <float_array id="_05_02_Popular_Modelling_Studio_Light_part_01_1-positions-array" count="198"> -1.32000005 0.200916842 3.37861419 -1.32000005 0.200916842 3.39982939 -1.32413888 0.200916842 3.37902164 -1.32000005 0.752515972 3.37861419 -1.32413888 0.752515972 3.37902164 -1.32000005 0.752515972 3.39982939 -1.3281188 0.200916842 3.380229 -1.3281188 0.752515972 3.380229 -1.33178663 0.200916842 3.38218951 -1.33178663 0.752515972 3.38218951 -1.33500147 0.200916842 3.38482785 -1.33500147 0.752515972 3.38482785 -1.33763993 0.200916842 3.38804293 -1.33763993 0.752515972 3.38804293 -1.33960044 0.200916842 3.39171076 -1.33960044 0.752515972 3.39171076 -1.34080768 0.200916842 3.39569044 -1.34080768 0.752515972 3.39569044 -1.34121537 0.200916842 3.39982939 -1.34121537 0.752515972 3.39982939 -1.34080768 0.200916842 3.40396833 -1.34080768 0.752515972 3.40396833 -1.33960044 0.200916842 3.40794826 -1.33960044 0.752515972 3.40794826 -1.33763993 0.200916842 3.41161609 -1.33763993 0.752515972 3.41161609 -1.33500147 0.200916842 3.41483092 -1.33500147 0.752515972 3.41483092 -1.33178663 0.200916842 3.41746926 -1.33178663 0.752515972 3.41746926 -1.3281188 0.200916842 3.41942978 -1.3281188 0.752515972 3.41942978 -1.32413888 0.200916842 3.42063713 -1.32413888 0.752515972 3.42063713 -1.32000005 0.200916842 3.42104483 -1.32000005 0.752515972 3.42104483 -1.31586111 0.200916842 3.42063713 -1.31586111 0.752515972 3.42063713 -1.31188118 0.200916842 3.41942978 -1.31188118 0.752515972 3.41942978 -1.30821335 0.200916842 3.41746926 -1.30821335 0.752515972 3.41746926 -1.30499852 0.200916842 3.41483092 -1.30499852 0.752515972 3.41483092 -1.30236006 0.200916842 3.41161609 -1.30236006 0.752515972 3.41161609 -1.30039954 0.200916842 3.40794826 -1.30039954 0.752515972 3.40794826 -1.29919231 0.200916842 3.40396833 -1.29919231 0.752515972 3.40396833 -1.29878461 0.200916842 3.39982939 -1.29878461 0.752515972 3.39982939 -1.29919231 0.200916842 3.39569044 -1.29919231 0.752515972 3.39569044 -1.30039954 0.200916842 3.39171076 -1.30039954 0.752515972 3.39171076 -1.30236006 0.200916842 3.38804293 -1.30236006 0.752515972 3.38804293 -1.30499852 0.200916842 3.38482785 -1.30499852 0.752515972 3.38482785 -1.30821335 0.200916842 3.38218951 -1.30821335 0.752515972 3.38218951 -1.31188118 0.200916842 3.380229 -1.31188118 0.752515972 3.380229 -1.31586111 0.200916842 3.37902164 -1.31586111 0.752515972 3.37902164 </float_array>
+          <technique_common>
+            <accessor count="66" offset="0" source="#_05_02_Popular_Modelling_Studio_Light_part_01_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_05_02_Popular_Modelling_Studio_Light_part_01_1-vertices">
+          <input semantic="POSITION" source="#_05_02_Popular_Modelling_Studio_Light_part_01_1-positions" />
+        </vertices>
+        <polylist count="128" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_05_02_Popular_Modelling_Studio_Light_part_01_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 34 32 34 33 33 34 35 33 35 5 34 1 36 34 36 35 35 36 37 35 37 5 36 1 38 36 38 37 37 38 39 37 39 5 38 1 40 38 40 39 39 40 41 39 41 5 40 1 42 40 42 41 41 42 43 41 43 5 42 1 44 42 44 43 43 44 45 43 45 5 44 1 46 44 46 45 45 46 47 45 47 5 46 1 48 46 48 47 47 48 49 47 49 5 48 1 50 48 50 49 49 50 51 49 51 5 50 1 52 50 52 51 51 52 53 51 53 5 52 1 54 52 54 53 53 54 55 53 55 5 54 1 56 54 56 55 55 56 57 55 57 5 56 1 58 56 58 57 57 58 59 57 59 5 58 1 60 58 60 59 59 60 61 59 61 5 60 1 62 60 62 61 61 62 63 61 63 5 62 1 64 62 64 63 63 64 65 63 65 5 64 1 0 64 0 65 65 0 3 65 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_05_02_Popular_Modelling_Studio_Light_part_02_1" name="05_02_Popular_Modelling_Studio_Light_part_02" >
+      <mesh>
+        <source id="_05_02_Popular_Modelling_Studio_Light_part_02_1-positions" name="_05_02_Popular_Modelling_Studio_Light_part_02_1-positions">
+          <float_array id="_05_02_Popular_Modelling_Studio_Light_part_02_1-positions-array" count="102"> -1.17697525 0.777276874 3.46585846 -1.32000005 0.727057517 3.4846909 -1.19018698 0.80243808 3.45642304 -1.32000005 0.828891218 3.75624728 -1.20838726 0.824702501 3.4480741 -1.2308768 0.843214393 3.44113207 -1.25679135 0.857262492 3.43586397 -1.28513503 0.866306901 3.43247223 -1.31481838 0.870000005 3.43108749 -1.34470093 0.868199944 3.43176246 -1.37363434 0.860975802 3.43447137 -1.4005065 0.848605275 3.43911052 -1.42428482 0.831563771 3.44550109 -1.44405556 0.810506105 3.45339751 -1.459059 0.786241591 3.46249676 -1.46871841 0.759702682 3.47244883 -1.47266257 0.731909215 3.48287153 -1.47074008 0.703929305 3.49336386 -1.46302474 0.67683816 3.50352311 -1.44981301 0.651676953 3.51295853 -1.43161273 0.629412591 3.52130771 -1.40912318 0.6109007 3.52824974 -1.38320863 0.596852601 3.5335176 -1.35486507 0.587808192 3.53690934 -1.3251816 0.584115088 3.53829432 -1.29529905 0.585915148 3.53761911 -1.26636577 0.593139291 3.5349102 -1.23949349 0.605509758 3.53027129 -1.21571517 0.622551322 3.52388072 -1.19594443 0.643608928 3.51598406 -1.18094099 0.667873442 3.50688481 -1.17128158 0.69441241 3.49693274 -1.16733742 0.722205877 3.48651028 -1.16925991 0.750185788 3.47601771 </float_array>
+          <technique_common>
+            <accessor count="34" offset="0" source="#_05_02_Popular_Modelling_Studio_Light_part_02_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_05_02_Popular_Modelling_Studio_Light_part_02_1-vertices">
+          <input semantic="POSITION" source="#_05_02_Popular_Modelling_Studio_Light_part_02_1-positions" />
+        </vertices>
+        <polylist count="64" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_05_02_Popular_Modelling_Studio_Light_part_02_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 2 1 4 2 4 3 4 1 5 4 5 3 5 1 6 5 6 3 6 1 7 6 7 3 7 1 8 7 8 3 8 1 9 8 9 3 9 1 10 9 10 3 10 1 11 10 11 3 11 1 12 11 12 3 12 1 13 12 13 3 13 1 14 13 14 3 14 1 15 14 15 3 15 1 16 15 16 3 16 1 17 16 17 3 17 1 18 17 18 3 18 1 19 18 19 3 19 1 20 19 20 3 20 1 21 20 21 3 21 1 22 21 22 3 22 1 23 22 23 3 23 1 24 23 24 3 24 1 25 24 25 3 25 1 26 25 26 3 26 1 27 26 27 3 27 1 28 27 28 3 28 1 29 28 29 3 29 1 30 29 30 3 30 1 31 30 31 3 31 1 32 31 32 3 32 1 33 32 33 3 33 1 0 33 0 3 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_05_02_Popular_Modelling_Studio_Light_part_03_1" name="05_02_Popular_Modelling_Studio_Light_part_03" >
+      <mesh>
+        <source id="_05_02_Popular_Modelling_Studio_Light_part_03_1-positions" name="_05_02_Popular_Modelling_Studio_Light_part_03_1-positions">
+          <float_array id="_05_02_Popular_Modelling_Studio_Light_part_03_1-positions-array" count="24"> -1.51093817 0.150000006 3.50590611 -1.51093817 0.183944568 3.50590611 -1.51093817 0.150000006 3.29375267 -1.12906182 0.150000006 3.29375267 -1.51093817 0.183944568 3.29375267 -1.12906182 0.183944568 3.50590611 -1.12906182 0.150000006 3.50590611 -1.12906182 0.183944568 3.29375267 </float_array>
+          <technique_common>
+            <accessor count="8" offset="0" source="#_05_02_Popular_Modelling_Studio_Light_part_03_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_05_02_Popular_Modelling_Studio_Light_part_03_1-vertices">
+          <input semantic="POSITION" source="#_05_02_Popular_Modelling_Studio_Light_part_03_1-positions" />
+        </vertices>
+        <polylist count="12" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_05_02_Popular_Modelling_Studio_Light_part_03_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 3 0 2 2 1 4 4 3 2 0 5 1 6 0 3 6 5 0 1 5 4 7 3 4 4 5 7 7 6 3 5 6 7 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+  </library_geometries>
+  <library_controllers>
+  </library_controllers>
+  <library_visual_scenes>
+    <visual_scene id="ROOT" name="ROOT">
+      <node id="_05_02_Popular_Modelling_Studio_Light_ROOT_base" name="05_02_Popular_Modelling_Studio_Light_ROOT_base" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_05_02_Popular_Modelling_Studio_Light_ROOT_base_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#panel_purple_trim">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_05_02_Popular_Modelling_Studio_Light_part_01" name="05_02_Popular_Modelling_Studio_Light_part_01" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_05_02_Popular_Modelling_Studio_Light_part_01_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#polished_silver">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_05_02_Popular_Modelling_Studio_Light_part_02" name="05_02_Popular_Modelling_Studio_Light_part_02" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_05_02_Popular_Modelling_Studio_Light_part_02_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#brushed_gold">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_05_02_Popular_Modelling_Studio_Light_part_03" name="05_02_Popular_Modelling_Studio_Light_part_03" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_05_02_Popular_Modelling_Studio_Light_part_03_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#black_soft">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+    </visual_scene>
+  </library_visual_scenes>
+  <scene>
+    <instance_visual_scene url="#ROOT" />
+  </scene>
+</COLLADA>

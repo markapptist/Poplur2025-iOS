@@ -1,0 +1,277 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
+<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+  <asset>
+    <contributor>
+      <author>Assimp</author>
+      <authoring_tool>https://github.com/mikedh/trimesh</authoring_tool>
+    </contributor>
+    <created>2026-07-03T10:30:26</created>
+    <modified>2026-07-03T10:30:26</modified>
+    <unit name="meter" meter="1" />
+    <up_axis>Y_UP</up_axis>
+  </asset>
+  <library_images>
+  </library_images>
+  <library_effects>
+    <effect id="panel_pink_trim-fx" name="panel_pink_trim">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0.5   0.0500000007   0.200000003   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">1   0.200000003   0.600000024   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">608.399963</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="black_soft-fx" name="black_soft">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">0.0156862754   0.0156862754   0.0196078438   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">62.5</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="brushed_gold-fx" name="brushed_gold">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">1   0.698039234   0.160784319   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">562.5</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="red-fx" name="red">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">0.921568632   0.0509803928   0.0392156877   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">250</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="material_4-fx" name="">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">1   1   1   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">0</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+  </library_effects>
+  <library_materials>
+    <material id="panel_pink_trim" name="panel_pink_trim">
+      <instance_effect url="#panel_pink_trim-fx"/>
+    </material>
+    <material id="black_soft" name="black_soft">
+      <instance_effect url="#black_soft-fx"/>
+    </material>
+    <material id="brushed_gold" name="brushed_gold">
+      <instance_effect url="#brushed_gold-fx"/>
+    </material>
+    <material id="red" name="red">
+      <instance_effect url="#red-fx"/>
+    </material>
+    <material id="material_4" name="">
+      <instance_effect url="#material_4-fx"/>
+    </material>
+  </library_materials>
+  <library_geometries>
+    <geometry id="_03_01_Popular_Beauty_Lipstick_ROOT_base_1" name="03_01_Popular_Beauty_Lipstick_ROOT_base" >
+      <mesh>
+        <source id="_03_01_Popular_Beauty_Lipstick_ROOT_base_1-positions" name="_03_01_Popular_Beauty_Lipstick_ROOT_base_1-positions">
+          <float_array id="_03_01_Popular_Beauty_Lipstick_ROOT_base_1-positions-array" count="198"> 4.76000023 0.0199999996 -2.10500002 4.76000023 0.0199999996 -1.72500002 4.68586588 0.0199999996 -2.09769845 4.76000023 0.0799999982 -2.10500002 4.68586588 0.0799999982 -2.09769845 4.76000023 0.0799999982 -1.72500002 4.61458015 0.0199999996 -2.07607412 4.61458015 0.0799999982 -2.07607412 4.54888344 0.0199999996 -2.0409584 4.54888344 0.0799999982 -2.0409584 4.49129963 0.0199999996 -1.99370062 4.49129963 0.0799999982 -1.99370062 4.44404173 0.0199999996 -1.9361167 4.44404173 0.0799999982 -1.9361167 4.40892601 0.0199999996 -1.87041974 4.40892601 0.0799999982 -1.87041974 4.38730145 0.0199999996 -1.79913437 4.38730145 0.0799999982 -1.79913437 4.38000011 0.0199999996 -1.72500002 4.38000011 0.0799999982 -1.72500002 4.38730145 0.0199999996 -1.65086567 4.38730145 0.0799999982 -1.65086567 4.40892601 0.0199999996 -1.57958031 4.40892601 0.0799999982 -1.57958031 4.44404173 0.0199999996 -1.51388335 4.44404173 0.0799999982 -1.51388335 4.49129963 0.0199999996 -1.45629942 4.49129963 0.0799999982 -1.45629942 4.54888344 0.0199999996 -1.40904152 4.54888344 0.0799999982 -1.40904152 4.61458015 0.0199999996 -1.37392581 4.61458015 0.0799999982 -1.37392581 4.68586588 0.0199999996 -1.3523016 4.68586588 0.0799999982 -1.3523016 4.76000023 0.0199999996 -1.34500003 4.76000023 0.0799999982 -1.34500003 4.8341341 0.0199999996 -1.3523016 4.8341341 0.0799999982 -1.3523016 4.90541983 0.0199999996 -1.37392581 4.90541983 0.0799999982 -1.37392581 4.97111654 0.0199999996 -1.40904152 4.97111654 0.0799999982 -1.40904152 5.02870035 0.0199999996 -1.45629942 5.02870035 0.0799999982 -1.45629942 5.07595825 0.0199999996 -1.51388335 5.07595825 0.0799999982 -1.51388335 5.11107445 0.0199999996 -1.57958031 5.11107445 0.0799999982 -1.57958031 5.13269854 0.0199999996 -1.65086567 5.13269854 0.0799999982 -1.65086567 5.13999987 0.0199999996 -1.72500002 5.13999987 0.0799999982 -1.72500002 5.13269854 0.0199999996 -1.79913437 5.13269854 0.0799999982 -1.79913437 5.11107445 0.0199999996 -1.87041974 5.11107445 0.0799999982 -1.87041974 5.07595825 0.0199999996 -1.9361167 5.07595825 0.0799999982 -1.9361167 5.02870035 0.0199999996 -1.99370062 5.02870035 0.0799999982 -1.99370062 4.97111654 0.0199999996 -2.0409584 4.97111654 0.0799999982 -2.0409584 4.90541983 0.0199999996 -2.07607412 4.90541983 0.0799999982 -2.07607412 4.8341341 0.0199999996 -2.09769845 4.8341341 0.0799999982 -2.09769845 </float_array>
+          <technique_common>
+            <accessor count="66" offset="0" source="#_03_01_Popular_Beauty_Lipstick_ROOT_base_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_03_01_Popular_Beauty_Lipstick_ROOT_base_1-vertices">
+          <input semantic="POSITION" source="#_03_01_Popular_Beauty_Lipstick_ROOT_base_1-positions" />
+        </vertices>
+        <polylist count="128" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_03_01_Popular_Beauty_Lipstick_ROOT_base_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 34 32 34 33 33 34 35 33 35 5 34 1 36 34 36 35 35 36 37 35 37 5 36 1 38 36 38 37 37 38 39 37 39 5 38 1 40 38 40 39 39 40 41 39 41 5 40 1 42 40 42 41 41 42 43 41 43 5 42 1 44 42 44 43 43 44 45 43 45 5 44 1 46 44 46 45 45 46 47 45 47 5 46 1 48 46 48 47 47 48 49 47 49 5 48 1 50 48 50 49 49 50 51 49 51 5 50 1 52 50 52 51 51 52 53 51 53 5 52 1 54 52 54 53 53 54 55 53 55 5 54 1 56 54 56 55 55 56 57 55 57 5 56 1 58 56 58 57 57 58 59 57 59 5 58 1 60 58 60 59 59 60 61 59 61 5 60 1 62 60 62 61 61 62 63 61 63 5 62 1 64 62 64 63 63 64 65 63 65 5 64 1 0 64 0 65 65 0 3 65 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_03_01_Popular_Beauty_Lipstick_part_01_1" name="03_01_Popular_Beauty_Lipstick_part_01" >
+      <mesh>
+        <source id="_03_01_Popular_Beauty_Lipstick_part_01_1-positions" name="_03_01_Popular_Beauty_Lipstick_part_01_1-positions">
+          <float_array id="_03_01_Popular_Beauty_Lipstick_part_01_1-positions-array" count="198"> 4.76000023 0.150000006 -1.8417567 4.76000023 0.150000006 -1.72500002 4.73722172 0.150000006 -1.8395133 4.76000023 0.480810821 -1.8417567 4.73722172 0.480810821 -1.8395133 4.76000023 0.480810821 -1.72500002 4.71531916 0.150000006 -1.83286917 4.71531916 0.480810821 -1.83286917 4.69513321 0.150000006 -1.82207966 4.69513321 0.480810821 -1.82207966 4.67744064 0.150000006 -1.80755949 4.67744064 0.480810821 -1.80755949 4.66292048 0.150000006 -1.78986657 4.66292048 0.480810821 -1.78986657 4.6521306 0.150000006 -1.76968086 4.6521306 0.480810821 -1.76968086 4.64548683 0.150000006 -1.74777806 4.64548683 0.480810821 -1.74777806 4.64324331 0.150000006 -1.72500002 4.64324331 0.480810821 -1.72500002 4.64548683 0.150000006 -1.70222187 4.64548683 0.480810821 -1.70222187 4.6521306 0.150000006 -1.68031907 4.6521306 0.480810821 -1.68031907 4.66292048 0.150000006 -1.66013348 4.66292048 0.480810821 -1.66013348 4.67744064 0.150000006 -1.64244056 4.67744064 0.480810821 -1.64244056 4.69513321 0.150000006 -1.62792027 4.69513321 0.480810821 -1.62792027 4.71531916 0.150000006 -1.61713088 4.71531916 0.480810821 -1.61713088 4.73722172 0.150000006 -1.61048675 4.73722172 0.480810821 -1.61048675 4.76000023 0.150000006 -1.60824323 4.76000023 0.480810821 -1.60824323 4.78277826 0.150000006 -1.61048675 4.78277826 0.480810821 -1.61048675 4.80468082 0.150000006 -1.61713088 4.80468082 0.480810821 -1.61713088 4.82486677 0.150000006 -1.62792027 4.82486677 0.480810821 -1.62792027 4.84255934 0.150000006 -1.64244056 4.84255934 0.480810821 -1.64244056 4.85707951 0.150000006 -1.66013348 4.85707951 0.480810821 -1.66013348 4.86786938 0.150000006 -1.68031907 4.86786938 0.480810821 -1.68031907 4.87451315 0.150000006 -1.70222187 4.87451315 0.480810821 -1.70222187 4.87675667 0.150000006 -1.72500002 4.87675667 0.480810821 -1.72500002 4.87451315 0.150000006 -1.74777806 4.87451315 0.480810821 -1.74777806 4.86786938 0.150000006 -1.76968086 4.86786938 0.480810821 -1.76968086 4.85707951 0.150000006 -1.78986657 4.85707951 0.480810821 -1.78986657 4.84255934 0.150000006 -1.80755949 4.84255934 0.480810821 -1.80755949 4.82486677 0.150000006 -1.82207966 4.82486677 0.480810821 -1.82207966 4.80468082 0.150000006 -1.83286917 4.80468082 0.480810821 -1.83286917 4.78277826 0.150000006 -1.8395133 4.78277826 0.480810821 -1.8395133 </float_array>
+          <technique_common>
+            <accessor count="66" offset="0" source="#_03_01_Popular_Beauty_Lipstick_part_01_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_03_01_Popular_Beauty_Lipstick_part_01_1-vertices">
+          <input semantic="POSITION" source="#_03_01_Popular_Beauty_Lipstick_part_01_1-positions" />
+        </vertices>
+        <polylist count="128" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_03_01_Popular_Beauty_Lipstick_part_01_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 34 32 34 33 33 34 35 33 35 5 34 1 36 34 36 35 35 36 37 35 37 5 36 1 38 36 38 37 37 38 39 37 39 5 38 1 40 38 40 39 39 40 41 39 41 5 40 1 42 40 42 41 41 42 43 41 43 5 42 1 44 42 44 43 43 44 45 43 45 5 44 1 46 44 46 45 45 46 47 45 47 5 46 1 48 46 48 47 47 48 49 47 49 5 48 1 50 48 50 49 49 50 51 49 51 5 50 1 52 50 52 51 51 52 53 51 53 5 52 1 54 52 54 53 53 54 55 53 55 5 54 1 56 54 56 55 55 56 57 55 57 5 56 1 58 56 58 57 57 58 59 57 59 5 58 1 60 58 60 59 59 60 61 59 61 5 60 1 62 60 62 61 61 62 63 61 63 5 62 1 64 62 64 63 63 64 65 63 65 5 64 1 0 64 0 65 65 0 3 65 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_03_01_Popular_Beauty_Lipstick_part_02_1" name="03_01_Popular_Beauty_Lipstick_part_02" >
+      <mesh>
+        <source id="_03_01_Popular_Beauty_Lipstick_part_02_1-positions" name="_03_01_Popular_Beauty_Lipstick_part_02_1-positions">
+          <float_array id="_03_01_Popular_Beauty_Lipstick_part_02_1-positions-array" count="198"> 4.76000023 0.480810821 -1.82229733 4.76000023 0.480810821 -1.72500002 4.7410183 0.480810821 -1.82042778 4.76000023 0.636486471 -1.82229733 4.7410183 0.636486471 -1.82042778 4.76000023 0.636486471 -1.72500002 4.72276592 0.480810821 -1.81489098 4.72276592 0.636486471 -1.81489098 4.70594454 0.480810821 -1.80589974 4.70594454 0.636486471 -1.80589974 4.69120026 0.480810821 -1.79379952 4.69120026 0.636486471 -1.79379952 4.67910004 0.480810821 -1.77905548 4.67910004 0.636486471 -1.77905548 4.6701088 0.480810821 -1.76223409 4.6701088 0.636486471 -1.76223409 4.66457224 0.480810821 -1.74398172 4.66457224 0.636486471 -1.74398172 4.66270256 0.480810821 -1.72500002 4.66270256 0.636486471 -1.72500002 4.66457224 0.480810821 -1.70601821 4.66457224 0.636486471 -1.70601821 4.6701088 0.480810821 -1.68776596 4.6701088 0.636486471 -1.68776596 4.67910004 0.480810821 -1.67094457 4.67910004 0.636486471 -1.67094457 4.69120026 0.480810821 -1.65620041 4.69120026 0.636486471 -1.65620041 4.70594454 0.480810821 -1.64410031 4.70594454 0.636486471 -1.64410031 4.72276592 0.480810821 -1.63510907 4.72276592 0.636486471 -1.63510907 4.7410183 0.480810821 -1.62957227 4.7410183 0.636486471 -1.62957227 4.76000023 0.480810821 -1.62770271 4.76000023 0.636486471 -1.62770271 4.77898169 0.480810821 -1.62957227 4.77898169 0.636486471 -1.62957227 4.79723406 0.480810821 -1.63510907 4.79723406 0.636486471 -1.63510907 4.81405544 0.480810821 -1.64410031 4.81405544 0.636486471 -1.64410031 4.82879972 0.480810821 -1.65620041 4.82879972 0.636486471 -1.65620041 4.84089994 0.480810821 -1.67094457 4.84089994 0.636486471 -1.67094457 4.84989119 0.480810821 -1.68776596 4.84989119 0.636486471 -1.68776596 4.85542774 0.480810821 -1.70601821 4.85542774 0.636486471 -1.70601821 4.85729742 0.480810821 -1.72500002 4.85729742 0.636486471 -1.72500002 4.85542774 0.480810821 -1.74398172 4.85542774 0.636486471 -1.74398172 4.84989119 0.480810821 -1.76223409 4.84989119 0.636486471 -1.76223409 4.84089994 0.480810821 -1.77905548 4.84089994 0.636486471 -1.77905548 4.82879972 0.480810821 -1.79379952 4.82879972 0.636486471 -1.79379952 4.81405544 0.480810821 -1.80589974 4.81405544 0.636486471 -1.80589974 4.79723406 0.480810821 -1.81489098 4.79723406 0.636486471 -1.81489098 4.77898169 0.480810821 -1.82042778 4.77898169 0.636486471 -1.82042778 </float_array>
+          <technique_common>
+            <accessor count="66" offset="0" source="#_03_01_Popular_Beauty_Lipstick_part_02_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_03_01_Popular_Beauty_Lipstick_part_02_1-vertices">
+          <input semantic="POSITION" source="#_03_01_Popular_Beauty_Lipstick_part_02_1-positions" />
+        </vertices>
+        <polylist count="128" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_03_01_Popular_Beauty_Lipstick_part_02_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 34 32 34 33 33 34 35 33 35 5 34 1 36 34 36 35 35 36 37 35 37 5 36 1 38 36 38 37 37 38 39 37 39 5 38 1 40 38 40 39 39 40 41 39 41 5 40 1 42 40 42 41 41 42 43 41 43 5 42 1 44 42 44 43 43 44 45 43 45 5 44 1 46 44 46 45 45 46 47 45 47 5 46 1 48 46 48 47 47 48 49 47 49 5 48 1 50 48 50 49 49 50 51 49 51 5 50 1 52 50 52 51 51 52 53 51 53 5 52 1 54 52 54 53 53 54 55 53 55 5 54 1 56 54 56 55 55 56 57 55 57 5 56 1 58 56 58 57 57 58 59 57 59 5 58 1 60 58 60 59 59 60 61 59 61 5 60 1 62 60 62 61 61 62 63 61 63 5 62 1 64 62 64 63 63 64 65 63 65 5 64 1 0 64 0 65 65 0 3 65 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_03_01_Popular_Beauty_Lipstick_part_03_1" name="03_01_Popular_Beauty_Lipstick_part_03" >
+      <mesh>
+        <source id="_03_01_Popular_Beauty_Lipstick_part_03_1-positions" name="_03_01_Popular_Beauty_Lipstick_part_03_1-positions">
+          <float_array id="_03_01_Popular_Beauty_Lipstick_part_03_1-positions-array" count="102"> 4.76000023 0.636486471 -1.82229733 4.76000023 0.636486471 -1.72500002 4.7410183 0.636486471 -1.82042778 4.76000023 0.870000005 -1.72500002 4.72276592 0.636486471 -1.81489098 4.70594454 0.636486471 -1.80589974 4.69120026 0.636486471 -1.79379952 4.67910004 0.636486471 -1.77905548 4.6701088 0.636486471 -1.76223409 4.66457224 0.636486471 -1.74398172 4.66270256 0.636486471 -1.72500002 4.66457224 0.636486471 -1.70601821 4.6701088 0.636486471 -1.68776596 4.67910004 0.636486471 -1.67094457 4.69120026 0.636486471 -1.65620041 4.70594454 0.636486471 -1.64410031 4.72276592 0.636486471 -1.63510907 4.7410183 0.636486471 -1.62957227 4.76000023 0.636486471 -1.62770271 4.77898169 0.636486471 -1.62957227 4.79723406 0.636486471 -1.63510907 4.81405544 0.636486471 -1.64410031 4.82879972 0.636486471 -1.65620041 4.84089994 0.636486471 -1.67094457 4.84989119 0.636486471 -1.68776596 4.85542774 0.636486471 -1.70601821 4.85729742 0.636486471 -1.72500002 4.85542774 0.636486471 -1.74398172 4.84989119 0.636486471 -1.76223409 4.84089994 0.636486471 -1.77905548 4.82879972 0.636486471 -1.79379952 4.81405544 0.636486471 -1.80589974 4.79723406 0.636486471 -1.81489098 4.77898169 0.636486471 -1.82042778 </float_array>
+          <technique_common>
+            <accessor count="34" offset="0" source="#_03_01_Popular_Beauty_Lipstick_part_03_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_03_01_Popular_Beauty_Lipstick_part_03_1-vertices">
+          <input semantic="POSITION" source="#_03_01_Popular_Beauty_Lipstick_part_03_1-positions" />
+        </vertices>
+        <polylist count="64" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_03_01_Popular_Beauty_Lipstick_part_03_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 2 1 4 2 4 3 4 1 5 4 5 3 5 1 6 5 6 3 6 1 7 6 7 3 7 1 8 7 8 3 8 1 9 8 9 3 9 1 10 9 10 3 10 1 11 10 11 3 11 1 12 11 12 3 12 1 13 12 13 3 13 1 14 13 14 3 14 1 15 14 15 3 15 1 16 15 16 3 16 1 17 16 17 3 17 1 18 17 18 3 18 1 19 18 19 3 19 1 20 19 20 3 20 1 21 20 21 3 21 1 22 21 22 3 22 1 23 22 23 3 23 1 24 23 24 3 24 1 25 24 25 3 25 1 26 25 26 3 26 1 27 26 27 3 27 1 28 27 28 3 28 1 29 28 29 3 29 1 30 29 30 3 30 1 31 30 31 3 31 1 32 31 32 3 32 1 33 32 33 3 33 1 0 33 0 3 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+  </library_geometries>
+  <library_controllers>
+  </library_controllers>
+  <library_visual_scenes>
+    <visual_scene id="ROOT" name="ROOT">
+      <node id="_03_01_Popular_Beauty_Lipstick_ROOT_base" name="03_01_Popular_Beauty_Lipstick_ROOT_base" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_03_01_Popular_Beauty_Lipstick_ROOT_base_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#panel_pink_trim">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_03_01_Popular_Beauty_Lipstick_part_01" name="03_01_Popular_Beauty_Lipstick_part_01" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_03_01_Popular_Beauty_Lipstick_part_01_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#black_soft">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_03_01_Popular_Beauty_Lipstick_part_02" name="03_01_Popular_Beauty_Lipstick_part_02" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_03_01_Popular_Beauty_Lipstick_part_02_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#brushed_gold">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_03_01_Popular_Beauty_Lipstick_part_03" name="03_01_Popular_Beauty_Lipstick_part_03" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_03_01_Popular_Beauty_Lipstick_part_03_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#red">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+    </visual_scene>
+  </library_visual_scenes>
+  <scene>
+    <instance_visual_scene url="#ROOT" />
+  </scene>
+</COLLADA>

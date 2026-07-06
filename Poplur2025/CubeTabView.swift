@@ -9,10 +9,11 @@ private let isRunningInPreviews: Bool = {
     ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1"
 }()
 
-// GLTFSceneKit can raise an Objective-C exception while decoding some generated GLB
-// files, which Swift cannot catch. Keep the generated SceneKit cube path active until
-// these runtime cube assets are converted to a SceneKit-native format.
-private let runtimeCubeGLBLoadingEnabled = false
+private let cubeSceneFaceTabs: [AppTab] = [.feed, .profile, .map, .record]
+
+// Gold GLB crashes (SIGSEGV in SCNSceneSource) — its runtimeModelAssetName returns nil so
+// it uses the procedural cube. All other skin GLBs are enabled.
+private let runtimeCubeGLBLoadingEnabled = true
 
 
 private enum CubeFaceImageCache {
@@ -665,8 +666,7 @@ private struct CubeSceneView: UIViewRepresentable {
 
     // MARK: - Scene
     private func initialYaw(for tab: AppTab) -> Float {
-        let tabs: [AppTab] = [.feed, .profile, .map, .record]
-        let index = tabs.firstIndex(of: tab) ?? 0
+        let index = cubeSceneFaceTabs.firstIndex(of: tab) ?? 0
         return Float(index) * (-Float.pi / 2)
     }
 
@@ -862,66 +862,11 @@ private struct CubeSceneView: UIViewRepresentable {
     }
 
     private func loadRuntimeGLBScene(from url: URL, assetName: String) -> SCNScene? {
-        let source = GLTFSceneSource(url: url, options: nil)
-        guard let scene = source.scene() else {
-            print("[CubeSceneView] Could not decode GLB runtime cube model: \(assetName) at \(url.path)")
-            return nil
-        }
-        return scene
+        RuntimeGLBLoader.loadScene(from: url, label: assetName)
     }
 
     private func normalizeRuntimeCubeModel(_ node: SCNNode) {
-        guard let bounds = runtimeBounds(for: node) else { return }
-        let minBounds = bounds.min
-        let maxBounds = bounds.max
-
-        let width = maxBounds.x - minBounds.x
-        let height = maxBounds.y - minBounds.y
-        let depth = maxBounds.z - minBounds.z
-        let maxExtent = max(width, max(height, depth))
-        guard maxExtent > 0 else { return }
-
-        let center = SCNVector3(
-            (minBounds.x + maxBounds.x) / 2,
-            (minBounds.y + maxBounds.y) / 2,
-            (minBounds.z + maxBounds.z) / 2
-        )
-        let scale = Float(1.3) / maxExtent
-        node.pivot = SCNMatrix4MakeTranslation(center.x, center.y, center.z)
-        node.scale = SCNVector3(scale, scale, scale)
-    }
-
-    private func runtimeBounds(for root: SCNNode) -> (min: SCNVector3, max: SCNVector3)? {
-        var minBounds = SCNVector3(Float.greatestFiniteMagnitude, Float.greatestFiniteMagnitude, Float.greatestFiniteMagnitude)
-        var maxBounds = SCNVector3(-Float.greatestFiniteMagnitude, -Float.greatestFiniteMagnitude, -Float.greatestFiniteMagnitude)
-        var foundGeometry = false
-
-        root.enumerateChildNodes { child, _ in
-            guard child.geometry != nil else { return }
-            foundGeometry = true
-            let bounds = child.boundingBox
-            let corners = [
-                SCNVector3(bounds.min.x, bounds.min.y, bounds.min.z),
-                SCNVector3(bounds.min.x, bounds.min.y, bounds.max.z),
-                SCNVector3(bounds.min.x, bounds.max.y, bounds.min.z),
-                SCNVector3(bounds.min.x, bounds.max.y, bounds.max.z),
-                SCNVector3(bounds.max.x, bounds.min.y, bounds.min.z),
-                SCNVector3(bounds.max.x, bounds.min.y, bounds.max.z),
-                SCNVector3(bounds.max.x, bounds.max.y, bounds.min.z),
-                SCNVector3(bounds.max.x, bounds.max.y, bounds.max.z)
-            ]
-            for corner in corners {
-                let point = child.convertPosition(corner, to: root)
-                minBounds.x = min(minBounds.x, point.x)
-                minBounds.y = min(minBounds.y, point.y)
-                minBounds.z = min(minBounds.z, point.z)
-                maxBounds.x = max(maxBounds.x, point.x)
-                maxBounds.y = max(maxBounds.y, point.y)
-                maxBounds.z = max(maxBounds.z, point.z)
-            }
-        }
-
-        return foundGeometry ? (minBounds, maxBounds) : nil
+        RuntimeGLBLoader.normalize(node)
     }
 
     private func prepareRuntimeCubeMaterials(_ node: SCNNode, assetName: String, skin: CubeSkin) {
@@ -1033,10 +978,8 @@ private struct CubeSceneView: UIViewRepresentable {
 
     private func makeMaterials(baseColor: Color) -> [SCNMaterial] {
         // SCNBox material order (Apple docs): 0=front(+Z) 1=right(+X) 2=back(-Z) 3=left(-X) 4=top(+Y) 5=bottom(-Y)
-        // yaw=0°   → front (+Z) = index 0 = Map
-        // yaw=-90° → right (+X) = index 1 = Camera
-        // yaw=-180°→ back  (-Z) = index 2 = Feed
-        // yaw=-270°→ left  (-X) = index 3 = Profile
+        // The first four entries match cubeSceneFaceTabs and the yaw/snap logic:
+        // yaw=0deg, -90deg, -180deg, -270deg => Feed, Profile, Map, Camera.
         let faceSpecs: [(String, String, AppTab)] = [
             ("Feed",     "tv.fill",        .feed),     // 0: +Z front
             ("Profile",  "person.fill",    .profile),  // 1: +X right
@@ -1312,7 +1255,7 @@ private struct CubeSceneView: UIViewRepresentable {
     class Coordinator: NSObject, UIGestureRecognizerDelegate {
         var parent: CubeSceneView
         weak var view: SCNView?
-        private let tabs: [AppTab] = [.map, .record, .feed, .profile]
+        private let tabs: [AppTab] = cubeSceneFaceTabs
         private var currentIndex: Int = 2
         var onSwipeUp: (() -> Void)?
         var onCubeTap: (() -> Void)?
@@ -1976,14 +1919,13 @@ private struct CubeSceneView: UIViewRepresentable {
                 self.lastTiltSnapTime = now
                 // Negative roll = tilt left = previous tab; positive = tilt right = next tab
                 let direction = roll < 0 ? -1 : 1
-                let tabs = [AppTab.map, .record, .feed, .profile]
-                let newIndex = (self.currentIndex + direction + tabs.count) % tabs.count
+                let newIndex = (self.currentIndex + direction + self.tabs.count) % self.tabs.count
                 self.rotateCube(cube, to: newIndex, animated: true, bouncy: true)
                 self.currentIndex = newIndex
-                self.parent.selectedTab = tabs[newIndex]
+                self.parent.selectedTab = self.tabs[newIndex]
                 self.haptic.impactOccurred(intensity: 0.9)
 
-                let newTab = tabs[newIndex]
+                let newTab = self.tabs[newIndex]
                 if newTab != .feed {
                     NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
                 }

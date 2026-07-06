@@ -18,6 +18,7 @@ struct RecordingCountdownView: View {
     @Binding var likesCount: Int
     @Binding var selectedTab: AppTab
     @Binding var radiusTrend: HomeView.RadiusTrend
+    @Binding var radiusMeters: Double
     /// When set on camera tab, shows detected user's post count instead of countdown
     var detectedUserPostCount: Int? = nil
 
@@ -34,6 +35,14 @@ struct RecordingCountdownView: View {
 
     private var shouldShowDetectedUser: Bool {
         selectedTab == .record && !isRecording && detectedUserPostCount != nil
+    }
+
+    private var formattedRadius: String {
+        if radiusMeters >= 1000 {
+            return String(format: "%.1f km", radiusMeters / 1000)
+        } else {
+            return "\(Int(radiusMeters)) m"
+        }
     }
 
     private var postCountAccentColor: Color {
@@ -142,10 +151,13 @@ struct RecordingCountdownView: View {
             }
             .frame(width: CounterSeparatorMetrics.separatorWidth, alignment: .center)
 
-            Text("unit")
+            Text(formattedRadius)
                 .font(.system(size: 14, weight: .medium))
-                .poplurTextShader(intensity: 0.45)
-                .hidden()
+                .foregroundStyle(.white.opacity(0.7))
+                .poplurTextShader(intensity: 0.65)
+                .minimumScaleFactor(0.5)
+                .lineLimit(1)
+                .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
                 .frame(height: CounterSeparatorMetrics.footerHeight, alignment: .top)
         }
         .padding(.horizontal, CounterSeparatorMetrics.horizontalPadding)
@@ -293,7 +305,7 @@ struct RecordingCountdownView: View {
             }
             .frame(width: CounterSeparatorMetrics.separatorWidth, alignment: .center)
             
-            Text(postCount == 1 ? "post" : "posts")
+            Text("\(postCount == 1 ? "post" : "posts") · \(formattedRadius)")
                 .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(.white.opacity(0.7))
                 .poplurTextShader(intensity: 0.65)
@@ -325,7 +337,8 @@ struct RecordingCountdownView_Previews: PreviewProvider {
                     postCount: .constant(42),
                     likesCount: .constant(126),
                     selectedTab: .constant(.record),
-                    radiusTrend: .constant(.neutral)
+                    radiusTrend: .constant(.neutral),
+                    radiusMeters: .constant(2500)
                 )
             }
             .previewDisplayName("Recording Start (10s)")
@@ -339,11 +352,12 @@ struct RecordingCountdownView_Previews: PreviewProvider {
                     postCount: .constant(42),
                     likesCount: .constant(126),
                     selectedTab: .constant(.record),
-                    radiusTrend: .constant(.neutral)
+                    radiusTrend: .constant(.neutral),
+                    radiusMeters: .constant(2500)
                 )
             }
             .previewDisplayName("Recording Mid (5s)")
-            
+
             // Recording complete preview
             ZStack {
                 Color.black.ignoresSafeArea()
@@ -353,11 +367,12 @@ struct RecordingCountdownView_Previews: PreviewProvider {
                     postCount: .constant(42),
                     likesCount: .constant(126),
                     selectedTab: .constant(.record),
-                    radiusTrend: .constant(.neutral)
+                    radiusTrend: .constant(.neutral),
+                    radiusMeters: .constant(2500)
                 )
             }
             .previewDisplayName("Recording Complete")
-            
+
             // Post count preview with upward trend (Map tab)
             ZStack {
                 Color.black.ignoresSafeArea()
@@ -367,11 +382,12 @@ struct RecordingCountdownView_Previews: PreviewProvider {
                     postCount: .constant(42),
                     likesCount: .constant(420),
                     selectedTab: .constant(.map),
-                    radiusTrend: .constant(.up)
+                    radiusTrend: .constant(.up),
+                    radiusMeters: .constant(2500)
                 )
             }
             .previewDisplayName("Post Count - Radius Up ⬆️")
-            
+
             // Post count preview with downward trend (Feed tab)
             ZStack {
                 Color.black.ignoresSafeArea()
@@ -381,11 +397,12 @@ struct RecordingCountdownView_Previews: PreviewProvider {
                     postCount: .constant(128),
                     likesCount: .constant(904),
                     selectedTab: .constant(.feed),
-                    radiusTrend: .constant(.down)
+                    radiusTrend: .constant(.down),
+                    radiusMeters: .constant(800)
                 )
             }
             .previewDisplayName("Post Count - Radius Down ⬇️")
-            
+
             // Single post preview (neutral)
             ZStack {
                 Color.black.ignoresSafeArea()
@@ -395,7 +412,8 @@ struct RecordingCountdownView_Previews: PreviewProvider {
                     postCount: .constant(1),
                     likesCount: .constant(12),
                     selectedTab: .constant(.profile),
-                    radiusTrend: .constant(.neutral)
+                    radiusTrend: .constant(.neutral),
+                    radiusMeters: .constant(1200)
                 )
             }
             .previewDisplayName("Post Count - Neutral")

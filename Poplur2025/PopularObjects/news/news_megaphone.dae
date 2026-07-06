@@ -1,0 +1,277 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
+<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+  <asset>
+    <contributor>
+      <author>Assimp</author>
+      <authoring_tool>https://github.com/mikedh/trimesh</authoring_tool>
+    </contributor>
+    <created>2026-07-03T10:30:40</created>
+    <modified>2026-07-03T10:30:40</modified>
+    <unit name="meter" meter="1" />
+    <up_axis>Y_UP</up_axis>
+  </asset>
+  <library_images>
+  </library_images>
+  <library_effects>
+    <effect id="panel_blue_trim-fx" name="panel_blue_trim">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0.150000006   0.5   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">0   0.478431374   1   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">608.399963</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="warm_white-fx" name="warm_white">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">0.929411769   0.921568632   0.87843138   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">202.5</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="blue-fx" name="blue">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">0.0588235296   0.321568638   0.949019611   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">302.5</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="black_soft-fx" name="black_soft">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">0.0156862754   0.0156862754   0.0196078438   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">62.5</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="material_4-fx" name="">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">1   1   1   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">0</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+  </library_effects>
+  <library_materials>
+    <material id="panel_blue_trim" name="panel_blue_trim">
+      <instance_effect url="#panel_blue_trim-fx"/>
+    </material>
+    <material id="warm_white" name="warm_white">
+      <instance_effect url="#warm_white-fx"/>
+    </material>
+    <material id="blue" name="blue">
+      <instance_effect url="#blue-fx"/>
+    </material>
+    <material id="black_soft" name="black_soft">
+      <instance_effect url="#black_soft-fx"/>
+    </material>
+    <material id="material_4" name="">
+      <instance_effect url="#material_4-fx"/>
+    </material>
+  </library_materials>
+  <library_geometries>
+    <geometry id="_09_08_Popular_News_Megaphone_ROOT_base_1" name="09_08_Popular_News_Megaphone_ROOT_base" >
+      <mesh>
+        <source id="_09_08_Popular_News_Megaphone_ROOT_base_1-positions" name="_09_08_Popular_News_Megaphone_ROOT_base_1-positions">
+          <float_array id="_09_08_Popular_News_Megaphone_ROOT_base_1-positions-array" count="198"> 7.4000001 0.0199999996 9.54500008 7.4000001 0.0199999996 9.92500019 7.32586575 0.0199999996 9.55230141 7.4000001 0.0799999982 9.54500008 7.32586575 0.0799999982 9.55230141 7.4000001 0.0799999982 9.92500019 7.2545805 0.0199999996 9.57392597 7.2545805 0.0799999982 9.57392597 7.1888833 0.0199999996 9.60904121 7.1888833 0.0799999982 9.60904121 7.1312995 0.0199999996 9.65629959 7.1312995 0.0799999982 9.65629959 7.0840416 0.0199999996 9.7138834 7.0840416 0.0799999982 9.7138834 7.04892588 0.0199999996 9.77958012 7.04892588 0.0799999982 9.77958012 7.02730179 0.0199999996 9.85086536 7.02730179 0.0799999982 9.85086536 7.01999998 0.0199999996 9.92500019 7.01999998 0.0799999982 9.92500019 7.02730179 0.0199999996 9.99913406 7.02730179 0.0799999982 9.99913406 7.04892588 0.0199999996 10.0704193 7.04892588 0.0799999982 10.0704193 7.0840416 0.0199999996 10.136117 7.0840416 0.0799999982 10.136117 7.1312995 0.0199999996 10.1937008 7.1312995 0.0799999982 10.1937008 7.1888833 0.0199999996 10.2409582 7.1888833 0.0799999982 10.2409582 7.2545805 0.0199999996 10.2760744 7.2545805 0.0799999982 10.2760744 7.32586575 0.0199999996 10.297698 7.32586575 0.0799999982 10.297698 7.4000001 0.0199999996 10.3050003 7.4000001 0.0799999982 10.3050003 7.47413445 0.0199999996 10.297698 7.47413445 0.0799999982 10.297698 7.54541969 0.0199999996 10.2760744 7.54541969 0.0799999982 10.2760744 7.61111689 0.0199999996 10.2409582 7.61111689 0.0799999982 10.2409582 7.6687007 0.0199999996 10.1937008 7.6687007 0.0799999982 10.1937008 7.7159586 0.0199999996 10.136117 7.7159586 0.0799999982 10.136117 7.75107431 0.0199999996 10.0704193 7.75107431 0.0799999982 10.0704193 7.7726984 0.0199999996 9.99913406 7.7726984 0.0799999982 9.99913406 7.78000021 0.0199999996 9.92500019 7.78000021 0.0799999982 9.92500019 7.7726984 0.0199999996 9.85086536 7.7726984 0.0799999982 9.85086536 7.75107431 0.0199999996 9.77958012 7.75107431 0.0799999982 9.77958012 7.7159586 0.0199999996 9.7138834 7.7159586 0.0799999982 9.7138834 7.6687007 0.0199999996 9.65629959 7.6687007 0.0799999982 9.65629959 7.61111689 0.0199999996 9.60904121 7.61111689 0.0799999982 9.60904121 7.54541969 0.0199999996 9.57392597 7.54541969 0.0799999982 9.57392597 7.47413445 0.0199999996 9.55230141 7.47413445 0.0799999982 9.55230141 </float_array>
+          <technique_common>
+            <accessor count="66" offset="0" source="#_09_08_Popular_News_Megaphone_ROOT_base_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_09_08_Popular_News_Megaphone_ROOT_base_1-vertices">
+          <input semantic="POSITION" source="#_09_08_Popular_News_Megaphone_ROOT_base_1-positions" />
+        </vertices>
+        <polylist count="128" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_09_08_Popular_News_Megaphone_ROOT_base_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 34 32 34 33 33 34 35 33 35 5 34 1 36 34 36 35 35 36 37 35 37 5 36 1 38 36 38 37 37 38 39 37 39 5 38 1 40 38 40 39 39 40 41 39 41 5 40 1 42 40 42 41 41 42 43 41 43 5 42 1 44 42 44 43 43 44 45 43 45 5 44 1 46 44 46 45 45 46 47 45 47 5 46 1 48 46 48 47 47 48 49 47 49 5 48 1 50 48 50 49 49 50 51 49 51 5 50 1 52 50 52 51 51 52 53 51 53 5 52 1 54 52 54 53 53 54 55 53 55 5 54 1 56 54 56 55 55 56 57 55 57 5 56 1 58 56 58 57 57 58 59 57 59 5 58 1 60 58 60 59 59 60 61 59 61 5 60 1 62 60 62 61 61 62 63 61 63 5 62 1 64 62 64 63 63 64 65 63 65 5 64 1 0 64 0 65 65 0 3 65 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_09_08_Popular_News_Megaphone_part_01_1" name="09_08_Popular_News_Megaphone_part_01" >
+      <mesh>
+        <source id="_09_08_Popular_News_Megaphone_part_01_1-positions" name="_09_08_Popular_News_Megaphone_part_01_1-positions">
+          <float_array id="_09_08_Popular_News_Megaphone_part_01_1-positions-array" count="102"> 7.16983604 0.521210551 9.66532803 7.16983604 0.521210551 9.92500019 7.16983604 0.571870089 9.67031765 7.76000023 0.521210551 9.92500019 7.16983604 0.620582819 9.68509388 7.16983604 0.66547668 9.70909023 7.16983604 0.704826474 9.74138451 7.16983604 0.737120092 9.78073406 7.16983604 0.761116326 9.82562733 7.16983604 0.775893152 9.87434006 7.16983604 0.780882716 9.92500019 7.16983604 0.775893152 9.97565937 7.16983604 0.761116326 10.0243721 7.16983604 0.737120092 10.0692663 7.16983604 0.704826474 10.1086159 7.16983604 0.66547668 10.1409092 7.16983604 0.620582819 10.1649055 7.16983604 0.571870089 10.1796827 7.16983604 0.521210551 10.1846724 7.16983604 0.470551044 10.1796827 7.16983604 0.421838343 10.1649055 7.16983604 0.376944482 10.1409092 7.16983604 0.337594658 10.1086159 7.16983604 0.3053011 10.0692663 7.16983604 0.281304806 10.0243721 7.16983604 0.266527981 9.97565937 7.16983604 0.261538446 9.92500019 7.16983604 0.266527981 9.87434006 7.16983604 0.281304806 9.82562733 7.16983604 0.3053011 9.78073406 7.16983604 0.337594658 9.74138451 7.16983604 0.376944482 9.70909023 7.16983604 0.421838343 9.68509388 7.16983604 0.470551044 9.67031765 </float_array>
+          <technique_common>
+            <accessor count="34" offset="0" source="#_09_08_Popular_News_Megaphone_part_01_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_09_08_Popular_News_Megaphone_part_01_1-vertices">
+          <input semantic="POSITION" source="#_09_08_Popular_News_Megaphone_part_01_1-positions" />
+        </vertices>
+        <polylist count="64" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_09_08_Popular_News_Megaphone_part_01_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 2 1 4 2 4 3 4 1 5 4 5 3 5 1 6 5 6 3 6 1 7 6 7 3 7 1 8 7 8 3 8 1 9 8 9 3 9 1 10 9 10 3 10 1 11 10 11 3 11 1 12 11 12 3 12 1 13 12 13 3 13 1 14 13 14 3 14 1 15 14 15 3 15 1 16 15 16 3 16 1 17 16 17 3 17 1 18 17 18 3 18 1 19 18 19 3 19 1 20 19 20 3 20 1 21 20 21 3 21 1 22 21 22 3 22 1 23 22 23 3 23 1 24 23 24 3 24 1 25 24 25 3 25 1 26 25 26 3 26 1 27 26 27 3 27 1 28 27 28 3 28 1 29 28 29 3 29 1 30 29 30 3 30 1 31 30 31 3 31 1 32 31 32 3 32 1 33 32 33 3 33 1 0 33 0 3 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_09_08_Popular_News_Megaphone_part_02_1" name="09_08_Popular_News_Megaphone_part_02" >
+      <mesh>
+        <source id="_09_08_Popular_News_Megaphone_part_02_1-positions" name="_09_08_Popular_News_Megaphone_part_02_1-positions">
+          <float_array id="_09_08_Popular_News_Megaphone_part_02_1-positions-array" count="198"> 7.03999996 0.521210551 9.83057404 7.03999996 0.521210551 9.92500019 7.03999996 0.539632201 9.83238792 7.18163919 0.521210551 9.83057404 7.18163919 0.539632201 9.83238792 7.18163919 0.521210551 9.92500019 7.03999996 0.557345927 9.83776188 7.18163919 0.557345927 9.83776188 7.03999996 0.573670983 9.84648705 7.18163919 0.573670983 9.84648705 7.03999996 0.587980032 9.85823059 7.18163919 0.587980032 9.85823059 7.03999996 0.599723101 9.87253952 7.18163919 0.599723101 9.87253952 7.03999996 0.608449042 9.88886452 7.18163919 0.608449042 9.88886452 7.03999996 0.61382246 9.90657806 7.18163919 0.61382246 9.90657806 7.03999996 0.615636826 9.92500019 7.18163919 0.615636826 9.92500019 7.03999996 0.61382246 9.94342136 7.18163919 0.61382246 9.94342136 7.03999996 0.608449042 9.96113491 7.18163919 0.608449042 9.96113491 7.03999996 0.599723101 9.97746086 7.18163919 0.599723101 9.97746086 7.03999996 0.587980032 9.99176979 7.18163919 0.587980032 9.99176979 7.03999996 0.573670983 10.0035124 7.18163919 0.573670983 10.0035124 7.03999996 0.557345927 10.0122385 7.18163919 0.557345927 10.0122385 7.03999996 0.539632201 10.0176115 7.18163919 0.539632201 10.0176115 7.03999996 0.521210551 10.0194263 7.18163919 0.521210551 10.0194263 7.03999996 0.502788961 10.0176115 7.18163919 0.502788961 10.0176115 7.03999996 0.485075235 10.0122385 7.18163919 0.485075235 10.0122385 7.03999996 0.468750179 10.0035124 7.18163919 0.468750179 10.0035124 7.03999996 0.45444116 9.99176979 7.18163919 0.45444116 9.99176979 7.03999996 0.442698032 9.97746086 7.18163919 0.442698032 9.97746086 7.03999996 0.43397212 9.96113491 7.18163919 0.43397212 9.96113491 7.03999996 0.428598732 9.94342136 7.18163919 0.428598732 9.94342136 7.03999996 0.426784337 9.92500019 7.18163919 0.426784337 9.92500019 7.03999996 0.428598732 9.90657806 7.18163919 0.428598732 9.90657806 7.03999996 0.43397212 9.88886452 7.18163919 0.43397212 9.88886452 7.03999996 0.442698032 9.87253952 7.18163919 0.442698032 9.87253952 7.03999996 0.45444116 9.85823059 7.18163919 0.45444116 9.85823059 7.03999996 0.468750179 9.84648705 7.18163919 0.468750179 9.84648705 7.03999996 0.485075235 9.83776188 7.18163919 0.485075235 9.83776188 7.03999996 0.502788961 9.83238792 7.18163919 0.502788961 9.83238792 </float_array>
+          <technique_common>
+            <accessor count="66" offset="0" source="#_09_08_Popular_News_Megaphone_part_02_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_09_08_Popular_News_Megaphone_part_02_1-vertices">
+          <input semantic="POSITION" source="#_09_08_Popular_News_Megaphone_part_02_1-positions" />
+        </vertices>
+        <polylist count="128" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_09_08_Popular_News_Megaphone_part_02_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 34 32 34 33 33 34 35 33 35 5 34 1 36 34 36 35 35 36 37 35 37 5 36 1 38 36 38 37 37 38 39 37 39 5 38 1 40 38 40 39 39 40 41 39 41 5 40 1 42 40 42 41 41 42 43 41 43 5 42 1 44 42 44 43 43 44 45 43 45 5 44 1 46 44 46 45 45 46 47 45 47 5 46 1 48 46 48 47 47 48 49 47 49 5 48 1 50 48 50 49 49 50 51 49 51 5 50 1 52 50 52 51 51 52 53 51 53 5 52 1 54 52 54 53 53 54 55 53 55 5 54 1 56 54 56 55 55 56 57 55 57 5 56 1 58 56 58 57 57 58 59 57 59 5 58 1 60 58 60 59 59 60 61 59 61 5 60 1 62 60 62 61 61 62 63 61 63 5 62 1 64 62 64 63 63 64 65 63 65 5 64 1 0 64 0 65 65 0 3 65 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_09_08_Popular_News_Megaphone_part_03_1" name="09_08_Popular_News_Megaphone_part_03" >
+      <mesh>
+        <source id="_09_08_Popular_News_Megaphone_part_03_1-positions" name="_09_08_Popular_News_Megaphone_part_03_1-positions">
+          <float_array id="_09_08_Popular_News_Megaphone_part_03_1-positions-array" count="198"> 7.40590143 0.379571229 9.97221279 7.40590143 0.379571229 9.92500019 7.39731693 0.382909656 9.97130585 7.3232789 0.167112216 9.97221279 7.31469393 0.170450643 9.97130585 7.3232789 0.167112216 9.92500019 7.3890624 0.386119783 9.96861935 7.3064394 0.173660785 9.96861935 7.38145494 0.389078259 9.96425629 7.29883194 0.176619262 9.96425629 7.37478685 0.391671389 9.95838451 7.29216385 0.179212376 9.95838451 7.36931467 0.393799514 9.95123005 7.28669167 0.181340501 9.95123005 7.3652482 0.395380855 9.94306755 7.2826252 0.182921842 9.94306755 7.36274433 0.396354645 9.93421078 7.28012133 0.183895633 9.93421078 7.3618989 0.396683455 9.92500019 7.27927589 0.184224427 9.92500019 7.36274433 0.396354645 9.9157896 7.28012133 0.183895633 9.9157896 7.3652482 0.395380855 9.90693188 7.2826252 0.182921842 9.90693188 7.36931467 0.393799514 9.89876938 7.28669167 0.181340501 9.89876938 7.37478685 0.391671389 9.89161491 7.29216385 0.179212376 9.89161491 7.38145494 0.389078259 9.88574409 7.29883194 0.176619262 9.88574409 7.3890624 0.386119783 9.88138103 7.3064394 0.173660785 9.88138103 7.39731693 0.382909656 9.87869453 7.31469393 0.170450643 9.87869453 7.40590143 0.379571229 9.87778664 7.3232789 0.167112216 9.87778664 7.41448593 0.376232803 9.87869453 7.3318634 0.16377379 9.87869453 7.42274094 0.373022676 9.88138103 7.34011793 0.160563648 9.88138103 7.4303484 0.370064199 9.88574409 7.34772539 0.157605171 9.88574409 7.43701649 0.367471069 9.89161491 7.35439348 0.155012056 9.89161491 7.44248867 0.365342945 9.89876938 7.35986567 0.152883932 9.89876938 7.44655514 0.363761604 9.90693188 7.36393213 0.151302591 9.90693188 7.44905901 0.362787813 9.9157896 7.366436 0.1503288 9.9157896 7.44990444 0.362459004 9.92500019 7.36728144 0.150000006 9.92500019 7.44905901 0.362787813 9.93421078 7.366436 0.1503288 9.93421078 7.44655514 0.363761604 9.94306755 7.36393213 0.151302591 9.94306755 7.44248867 0.365342945 9.95123005 7.35986567 0.152883932 9.95123005 7.43701649 0.367471069 9.95838451 7.35439348 0.155012056 9.95838451 7.4303484 0.370064199 9.96425629 7.34772539 0.157605171 9.96425629 7.42274094 0.373022676 9.96861935 7.34011793 0.160563648 9.96861935 7.41448593 0.376232803 9.97130585 7.3318634 0.16377379 9.97130585 </float_array>
+          <technique_common>
+            <accessor count="66" offset="0" source="#_09_08_Popular_News_Megaphone_part_03_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_09_08_Popular_News_Megaphone_part_03_1-vertices">
+          <input semantic="POSITION" source="#_09_08_Popular_News_Megaphone_part_03_1-positions" />
+        </vertices>
+        <polylist count="128" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_09_08_Popular_News_Megaphone_part_03_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 34 32 34 33 33 34 35 33 35 5 34 1 36 34 36 35 35 36 37 35 37 5 36 1 38 36 38 37 37 38 39 37 39 5 38 1 40 38 40 39 39 40 41 39 41 5 40 1 42 40 42 41 41 42 43 41 43 5 42 1 44 42 44 43 43 44 45 43 45 5 44 1 46 44 46 45 45 46 47 45 47 5 46 1 48 46 48 47 47 48 49 47 49 5 48 1 50 48 50 49 49 50 51 49 51 5 50 1 52 50 52 51 51 52 53 51 53 5 52 1 54 52 54 53 53 54 55 53 55 5 54 1 56 54 56 55 55 56 57 55 57 5 56 1 58 56 58 57 57 58 59 57 59 5 58 1 60 58 60 59 59 60 61 59 61 5 60 1 62 60 62 61 61 62 63 61 63 5 62 1 64 62 64 63 63 64 65 63 65 5 64 1 0 64 0 65 65 0 3 65 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+  </library_geometries>
+  <library_controllers>
+  </library_controllers>
+  <library_visual_scenes>
+    <visual_scene id="ROOT" name="ROOT">
+      <node id="_09_08_Popular_News_Megaphone_ROOT_base" name="09_08_Popular_News_Megaphone_ROOT_base" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_09_08_Popular_News_Megaphone_ROOT_base_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#panel_blue_trim">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_09_08_Popular_News_Megaphone_part_01" name="09_08_Popular_News_Megaphone_part_01" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_09_08_Popular_News_Megaphone_part_01_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#warm_white">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_09_08_Popular_News_Megaphone_part_02" name="09_08_Popular_News_Megaphone_part_02" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_09_08_Popular_News_Megaphone_part_02_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#blue">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_09_08_Popular_News_Megaphone_part_03" name="09_08_Popular_News_Megaphone_part_03" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_09_08_Popular_News_Megaphone_part_03_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#black_soft">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+    </visual_scene>
+  </library_visual_scenes>
+  <scene>
+    <instance_visual_scene url="#ROOT" />
+  </scene>
+</COLLADA>

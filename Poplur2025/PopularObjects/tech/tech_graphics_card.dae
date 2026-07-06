@@ -1,0 +1,310 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
+<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+  <asset>
+    <contributor>
+      <author>Assimp</author>
+      <authoring_tool>https://github.com/mikedh/trimesh</authoring_tool>
+    </contributor>
+    <created>2026-07-03T10:30:39</created>
+    <modified>2026-07-03T10:30:39</modified>
+    <unit name="meter" meter="1" />
+    <up_axis>Y_UP</up_axis>
+  </asset>
+  <library_images>
+  </library_images>
+  <library_effects>
+    <effect id="panel_green_trim-fx" name="panel_green_trim">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0.180000007   0.5   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">0.250980407   1   0   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">608.399963</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="brushed_gunmetal-fx" name="brushed_gunmetal">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">0.121568628   0.129411772   0.149019614   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">462.399994</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="black_soft-fx" name="black_soft">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">0.0156862754   0.0156862754   0.0196078438   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">62.5</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="brushed_gold-fx" name="brushed_gold">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">1   0.698039234   0.160784319   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">562.5</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="material_4-fx" name="">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">1   1   1   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">0</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+  </library_effects>
+  <library_materials>
+    <material id="panel_green_trim" name="panel_green_trim">
+      <instance_effect url="#panel_green_trim-fx"/>
+    </material>
+    <material id="brushed_gunmetal" name="brushed_gunmetal">
+      <instance_effect url="#brushed_gunmetal-fx"/>
+    </material>
+    <material id="black_soft" name="black_soft">
+      <instance_effect url="#black_soft-fx"/>
+    </material>
+    <material id="brushed_gold" name="brushed_gold">
+      <instance_effect url="#brushed_gold-fx"/>
+    </material>
+    <material id="material_4" name="">
+      <instance_effect url="#material_4-fx"/>
+    </material>
+  </library_materials>
+  <library_geometries>
+    <geometry id="_08_14_Popular_Tech_Graphics_Card_ROOT_base_1" name="08_14_Popular_Tech_Graphics_Card_ROOT_base" >
+      <mesh>
+        <source id="_08_14_Popular_Tech_Graphics_Card_ROOT_base_1-positions" name="_08_14_Popular_Tech_Graphics_Card_ROOT_base_1-positions">
+          <float_array id="_08_14_Popular_Tech_Graphics_Card_ROOT_base_1-positions-array" count="198"> 1.32000005 0.0199999996 10.6949997 1.32000005 0.0199999996 11.0749998 1.2458657 0.0199999996 10.702302 1.32000005 0.0799999982 10.6949997 1.2458657 0.0799999982 10.702302 1.32000005 0.0799999982 11.0749998 1.17458034 0.0199999996 10.7239256 1.17458034 0.0799999982 10.7239256 1.10888326 0.0199999996 10.7590418 1.10888326 0.0799999982 10.7590418 1.05129945 0.0199999996 10.8062992 1.05129945 0.0799999982 10.8062992 1.00404155 0.0199999996 10.863883 1.00404155 0.0799999982 10.863883 0.968925774 0.0199999996 10.9295807 0.968925774 0.0799999982 10.9295807 0.947301567 0.0199999996 11.0008659 0.947301567 0.0799999982 11.0008659 0.939999998 0.0199999996 11.0749998 0.939999998 0.0799999982 11.0749998 0.947301567 0.0199999996 11.1491346 0.947301567 0.0799999982 11.1491346 0.968925774 0.0199999996 11.2204199 0.968925774 0.0799999982 11.2204199 1.00404155 0.0199999996 11.2861166 1.00404155 0.0799999982 11.2861166 1.05129945 0.0199999996 11.3437004 1.05129945 0.0799999982 11.3437004 1.10888326 0.0199999996 11.3909588 1.10888326 0.0799999982 11.3909588 1.17458034 0.0199999996 11.426074 1.17458034 0.0799999982 11.426074 1.2458657 0.0199999996 11.4476986 1.2458657 0.0799999982 11.4476986 1.32000005 0.0199999996 11.4549999 1.32000005 0.0799999982 11.4549999 1.39413428 0.0199999996 11.4476986 1.39413428 0.0799999982 11.4476986 1.46541965 0.0199999996 11.426074 1.46541965 0.0799999982 11.426074 1.53111672 0.0199999996 11.3909588 1.53111672 0.0799999982 11.3909588 1.58870053 0.0199999996 11.3437004 1.58870053 0.0799999982 11.3437004 1.63595843 0.0199999996 11.2861166 1.63595843 0.0799999982 11.2861166 1.67107427 0.0199999996 11.2204199 1.67107427 0.0799999982 11.2204199 1.69269836 0.0199999996 11.1491346 1.69269836 0.0799999982 11.1491346 1.70000005 0.0199999996 11.0749998 1.70000005 0.0799999982 11.0749998 1.69269836 0.0199999996 11.0008659 1.69269836 0.0799999982 11.0008659 1.67107427 0.0199999996 10.9295807 1.67107427 0.0799999982 10.9295807 1.63595843 0.0199999996 10.863883 1.63595843 0.0799999982 10.863883 1.58870053 0.0199999996 10.8062992 1.58870053 0.0799999982 10.8062992 1.53111672 0.0199999996 10.7590418 1.53111672 0.0799999982 10.7590418 1.46541965 0.0199999996 10.7239256 1.46541965 0.0799999982 10.7239256 1.39413428 0.0199999996 10.702302 1.39413428 0.0799999982 10.702302 </float_array>
+          <technique_common>
+            <accessor count="66" offset="0" source="#_08_14_Popular_Tech_Graphics_Card_ROOT_base_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_08_14_Popular_Tech_Graphics_Card_ROOT_base_1-vertices">
+          <input semantic="POSITION" source="#_08_14_Popular_Tech_Graphics_Card_ROOT_base_1-positions" />
+        </vertices>
+        <polylist count="128" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_08_14_Popular_Tech_Graphics_Card_ROOT_base_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 34 32 34 33 33 34 35 33 35 5 34 1 36 34 36 35 35 36 37 35 37 5 36 1 38 36 38 37 37 38 39 37 39 5 38 1 40 38 40 39 39 40 41 39 41 5 40 1 42 40 42 41 41 42 43 41 43 5 42 1 44 42 44 43 43 44 45 43 45 5 44 1 46 44 46 45 45 46 47 45 47 5 46 1 48 46 48 47 47 48 49 47 49 5 48 1 50 48 50 49 49 50 51 49 51 5 50 1 52 50 52 51 51 52 53 51 53 5 52 1 54 52 54 53 53 54 55 53 55 5 54 1 56 54 56 55 55 56 57 55 57 5 56 1 58 56 58 57 57 58 59 57 59 5 58 1 60 58 60 59 59 60 61 59 61 5 60 1 62 60 62 61 61 62 63 61 63 5 62 1 64 62 64 63 63 64 65 63 65 5 64 1 0 64 0 65 65 0 3 65 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_08_14_Popular_Tech_Graphics_Card_part_01_1" name="08_14_Popular_Tech_Graphics_Card_part_01" >
+      <mesh>
+        <source id="_08_14_Popular_Tech_Graphics_Card_part_01_1-positions" name="_08_14_Popular_Tech_Graphics_Card_part_01_1-positions">
+          <float_array id="_08_14_Popular_Tech_Graphics_Card_part_01_1-positions-array" count="24"> 0.959999979 0.150000006 11.2319231 0.959999979 0.33461538 11.2319231 0.959999979 0.150000006 10.9180765 1.62461543 0.150000006 10.9180765 0.959999979 0.33461538 10.9180765 1.62461543 0.33461538 11.2319231 1.62461543 0.150000006 11.2319231 1.62461543 0.33461538 10.9180765 </float_array>
+          <technique_common>
+            <accessor count="8" offset="0" source="#_08_14_Popular_Tech_Graphics_Card_part_01_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_08_14_Popular_Tech_Graphics_Card_part_01_1-vertices">
+          <input semantic="POSITION" source="#_08_14_Popular_Tech_Graphics_Card_part_01_1-positions" />
+        </vertices>
+        <polylist count="12" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_08_14_Popular_Tech_Graphics_Card_part_01_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 3 0 2 2 1 4 4 3 2 0 5 1 6 0 3 6 5 0 1 5 4 7 3 4 4 5 7 7 6 3 5 6 7 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_08_14_Popular_Tech_Graphics_Card_part_02_1" name="08_14_Popular_Tech_Graphics_Card_part_02" >
+      <mesh>
+        <source id="_08_14_Popular_Tech_Graphics_Card_part_02_1-positions" name="_08_14_Popular_Tech_Graphics_Card_part_02_1-positions">
+          <float_array id="_08_14_Popular_Tech_Graphics_Card_part_02_1-positions-array" count="198"> 1.12615383 0.353076935 11.0011539 1.12615383 0.353076935 11.1119232 1.10454381 0.353076935 11.0032825 1.12615383 0.389999986 11.0011539 1.10454381 0.389999986 11.0032825 1.12615383 0.389999986 11.1119232 1.08376431 0.353076935 11.0095854 1.08376431 0.389999986 11.0095854 1.0646137 0.353076935 11.0198221 1.0646137 0.389999986 11.0198221 1.0478282 0.353076935 11.033597 1.0478282 0.389999986 11.033597 1.03405261 0.353076935 11.0503826 1.03405261 0.389999986 11.0503826 1.02381647 0.353076935 11.0695333 1.02381647 0.389999986 11.0695333 1.01751304 0.353076935 11.090313 1.01751304 0.389999986 11.090313 1.01538467 0.353076935 11.1119232 1.01538467 0.389999986 11.1119232 1.01751304 0.353076935 11.1335335 1.01751304 0.389999986 11.1335335 1.02381647 0.353076935 11.1543131 1.02381647 0.389999986 11.1543131 1.03405261 0.353076935 11.1734629 1.03405261 0.389999986 11.1734629 1.0478282 0.353076935 11.1902485 1.0478282 0.389999986 11.1902485 1.0646137 0.353076935 11.2040243 1.0646137 0.389999986 11.2040243 1.08376431 0.353076935 11.2142601 1.08376431 0.389999986 11.2142601 1.10454381 0.353076935 11.2205639 1.10454381 0.389999986 11.2205639 1.12615383 0.353076935 11.2226925 1.12615383 0.389999986 11.2226925 1.14776385 0.353076935 11.2205639 1.14776385 0.389999986 11.2205639 1.16854334 0.353076935 11.2142601 1.16854334 0.389999986 11.2142601 1.18769395 0.353076935 11.2040243 1.18769395 0.389999986 11.2040243 1.20447958 0.353076935 11.1902485 1.20447958 0.389999986 11.1902485 1.21825504 0.353076935 11.1734629 1.21825504 0.389999986 11.1734629 1.22849131 0.353076935 11.1543131 1.22849131 0.389999986 11.1543131 1.23479474 0.353076935 11.1335335 1.23479474 0.389999986 11.1335335 1.2369231 0.353076935 11.1119232 1.2369231 0.389999986 11.1119232 1.23479474 0.353076935 11.090313 1.23479474 0.389999986 11.090313 1.22849131 0.353076935 11.0695333 1.22849131 0.389999986 11.0695333 1.21825504 0.353076935 11.0503826 1.21825504 0.389999986 11.0503826 1.20447958 0.353076935 11.033597 1.20447958 0.389999986 11.033597 1.18769395 0.353076935 11.0198221 1.18769395 0.389999986 11.0198221 1.16854334 0.353076935 11.0095854 1.16854334 0.389999986 11.0095854 1.14776385 0.353076935 11.0032825 1.14776385 0.389999986 11.0032825 </float_array>
+          <technique_common>
+            <accessor count="66" offset="0" source="#_08_14_Popular_Tech_Graphics_Card_part_02_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_08_14_Popular_Tech_Graphics_Card_part_02_1-vertices">
+          <input semantic="POSITION" source="#_08_14_Popular_Tech_Graphics_Card_part_02_1-positions" />
+        </vertices>
+        <polylist count="128" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_08_14_Popular_Tech_Graphics_Card_part_02_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 34 32 34 33 33 34 35 33 35 5 34 1 36 34 36 35 35 36 37 35 37 5 36 1 38 36 38 37 37 38 39 37 39 5 38 1 40 38 40 39 39 40 41 39 41 5 40 1 42 40 42 41 41 42 43 41 43 5 42 1 44 42 44 43 43 44 45 43 45 5 44 1 46 44 46 45 45 46 47 45 47 5 46 1 48 46 48 47 47 48 49 47 49 5 48 1 50 48 50 49 49 50 51 49 51 5 50 1 52 50 52 51 51 52 53 51 53 5 52 1 54 52 54 53 53 54 55 53 55 5 54 1 56 54 56 55 55 56 57 55 57 5 56 1 58 56 58 57 57 58 59 57 59 5 58 1 60 58 60 59 59 60 61 59 61 5 60 1 62 60 62 61 61 62 63 61 63 5 62 1 64 62 64 63 63 64 65 63 65 5 64 1 0 64 0 65 65 0 3 65 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_08_14_Popular_Tech_Graphics_Card_part_03_1" name="08_14_Popular_Tech_Graphics_Card_part_03" >
+      <mesh>
+        <source id="_08_14_Popular_Tech_Graphics_Card_part_03_1-positions" name="_08_14_Popular_Tech_Graphics_Card_part_03_1-positions">
+          <float_array id="_08_14_Popular_Tech_Graphics_Card_part_03_1-positions-array" count="198"> 1.45846152 0.353076935 11.0011539 1.45846152 0.353076935 11.1119232 1.4368515 0.353076935 11.0032825 1.45846152 0.389999986 11.0011539 1.4368515 0.389999986 11.0032825 1.45846152 0.389999986 11.1119232 1.41607201 0.353076935 11.0095854 1.41607201 0.389999986 11.0095854 1.3969214 0.353076935 11.0198221 1.3969214 0.389999986 11.0198221 1.38013589 0.353076935 11.033597 1.38013589 0.389999986 11.033597 1.36636031 0.353076935 11.0503826 1.36636031 0.389999986 11.0503826 1.35612416 0.353076935 11.0695333 1.35612416 0.389999986 11.0695333 1.34982073 0.353076935 11.090313 1.34982073 0.389999986 11.090313 1.34769225 0.353076935 11.1119232 1.34769225 0.389999986 11.1119232 1.34982073 0.353076935 11.1335335 1.34982073 0.389999986 11.1335335 1.35612416 0.353076935 11.1543131 1.35612416 0.389999986 11.1543131 1.36636031 0.353076935 11.1734629 1.36636031 0.389999986 11.1734629 1.38013589 0.353076935 11.1902485 1.38013589 0.389999986 11.1902485 1.3969214 0.353076935 11.2040243 1.3969214 0.389999986 11.2040243 1.41607201 0.353076935 11.2142601 1.41607201 0.389999986 11.2142601 1.4368515 0.353076935 11.2205639 1.4368515 0.389999986 11.2205639 1.45846152 0.353076935 11.2226925 1.45846152 0.389999986 11.2226925 1.48007154 0.353076935 11.2205639 1.48007154 0.389999986 11.2205639 1.50085104 0.353076935 11.2142601 1.50085104 0.389999986 11.2142601 1.52000165 0.353076935 11.2040243 1.52000165 0.389999986 11.2040243 1.53678727 0.353076935 11.1902485 1.53678727 0.389999986 11.1902485 1.55056274 0.353076935 11.1734629 1.55056274 0.389999986 11.1734629 1.560799 0.353076935 11.1543131 1.560799 0.389999986 11.1543131 1.56710231 0.353076935 11.1335335 1.56710231 0.389999986 11.1335335 1.56923079 0.353076935 11.1119232 1.56923079 0.389999986 11.1119232 1.56710231 0.353076935 11.090313 1.56710231 0.389999986 11.090313 1.560799 0.353076935 11.0695333 1.560799 0.389999986 11.0695333 1.55056274 0.353076935 11.0503826 1.55056274 0.389999986 11.0503826 1.53678727 0.353076935 11.033597 1.53678727 0.389999986 11.033597 1.52000165 0.353076935 11.0198221 1.52000165 0.389999986 11.0198221 1.50085104 0.353076935 11.0095854 1.50085104 0.389999986 11.0095854 1.48007154 0.353076935 11.0032825 1.48007154 0.389999986 11.0032825 </float_array>
+          <technique_common>
+            <accessor count="66" offset="0" source="#_08_14_Popular_Tech_Graphics_Card_part_03_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_08_14_Popular_Tech_Graphics_Card_part_03_1-vertices">
+          <input semantic="POSITION" source="#_08_14_Popular_Tech_Graphics_Card_part_03_1-positions" />
+        </vertices>
+        <polylist count="128" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_08_14_Popular_Tech_Graphics_Card_part_03_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 34 32 34 33 33 34 35 33 35 5 34 1 36 34 36 35 35 36 37 35 37 5 36 1 38 36 38 37 37 38 39 37 39 5 38 1 40 38 40 39 39 40 41 39 41 5 40 1 42 40 42 41 41 42 43 41 43 5 42 1 44 42 44 43 43 44 45 43 45 5 44 1 46 44 46 45 45 46 47 45 47 5 46 1 48 46 48 47 47 48 49 47 49 5 48 1 50 48 50 49 49 50 51 49 51 5 50 1 52 50 52 51 51 52 53 51 53 5 52 1 54 52 54 53 53 54 55 53 55 5 54 1 56 54 56 55 55 56 57 55 57 5 56 1 58 56 58 57 57 58 59 57 59 5 58 1 60 58 60 59 59 60 61 59 61 5 60 1 62 60 62 61 61 62 63 61 63 5 62 1 64 62 64 63 63 64 65 63 65 5 64 1 0 64 0 65 65 0 3 65 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_08_14_Popular_Tech_Graphics_Card_part_04_1" name="08_14_Popular_Tech_Graphics_Card_part_04" >
+      <mesh>
+        <source id="_08_14_Popular_Tech_Graphics_Card_part_04_1-positions" name="_08_14_Popular_Tech_Graphics_Card_part_04_1-positions">
+          <float_array id="_08_14_Popular_Tech_Graphics_Card_part_04_1-positions-array" count="24"> 1.60615385 0.21461539 11.2411537 1.60615385 0.343846142 11.2411537 1.60615385 0.21461539 10.9088459 1.67999995 0.21461539 10.9088459 1.60615385 0.343846142 10.9088459 1.67999995 0.343846142 11.2411537 1.67999995 0.21461539 11.2411537 1.67999995 0.343846142 10.9088459 </float_array>
+          <technique_common>
+            <accessor count="8" offset="0" source="#_08_14_Popular_Tech_Graphics_Card_part_04_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_08_14_Popular_Tech_Graphics_Card_part_04_1-vertices">
+          <input semantic="POSITION" source="#_08_14_Popular_Tech_Graphics_Card_part_04_1-positions" />
+        </vertices>
+        <polylist count="12" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_08_14_Popular_Tech_Graphics_Card_part_04_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 3 0 2 2 1 4 4 3 2 0 5 1 6 0 3 6 5 0 1 5 4 7 3 4 4 5 7 7 6 3 5 6 7 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+  </library_geometries>
+  <library_controllers>
+  </library_controllers>
+  <library_visual_scenes>
+    <visual_scene id="ROOT" name="ROOT">
+      <node id="_08_14_Popular_Tech_Graphics_Card_ROOT_base" name="08_14_Popular_Tech_Graphics_Card_ROOT_base" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_08_14_Popular_Tech_Graphics_Card_ROOT_base_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#panel_green_trim">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_08_14_Popular_Tech_Graphics_Card_part_01" name="08_14_Popular_Tech_Graphics_Card_part_01" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_08_14_Popular_Tech_Graphics_Card_part_01_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#brushed_gunmetal">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_08_14_Popular_Tech_Graphics_Card_part_02" name="08_14_Popular_Tech_Graphics_Card_part_02" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_08_14_Popular_Tech_Graphics_Card_part_02_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#black_soft">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_08_14_Popular_Tech_Graphics_Card_part_03" name="08_14_Popular_Tech_Graphics_Card_part_03" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_08_14_Popular_Tech_Graphics_Card_part_03_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#black_soft">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_08_14_Popular_Tech_Graphics_Card_part_04" name="08_14_Popular_Tech_Graphics_Card_part_04" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_08_14_Popular_Tech_Graphics_Card_part_04_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#brushed_gold">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+    </visual_scene>
+  </library_visual_scenes>
+  <scene>
+    <instance_visual_scene url="#ROOT" />
+  </scene>
+</COLLADA>

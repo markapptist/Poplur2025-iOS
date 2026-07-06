@@ -154,35 +154,18 @@ extension FeedViewModel {
             let adCreativeKind: String?
             let sourceLanguageCode: String
 
-            switch i % 5 {
-            case 0, 1, 4:
-                mediaURL = demoVideoURLs[i % demoVideoURLs.count]
-                userID = demoUserIDs[i % demoUserIDs.count]
-                isPoplurAd = false
-                adHeadline = nil
-                adBody = nil
-                adCallToAction = nil
-                adCreativeKind = nil
-                sourceLanguageCode = posts[i].sourceLanguageCode
-            case 2:
-                mediaURL = demoAdMediaURLs[i % demoAdMediaURLs.count]
-                userID = "poplur_ad_demo_\(i)"
-                isPoplurAd = true
-                adHeadline = "See what is happening nearby"
-                adBody = "Poplur-owned creative slot for real human scenes and dimensional 3D figures."
-                adCallToAction = "Open Poplur"
-                adCreativeKind = i % 2 == 0 ? "Human creative" : "3D figure creative"
-                sourceLanguageCode = posts[i].sourceLanguageCode
-            default:
-                mediaURL = demoImageURL(for: i)
-                userID = posts[i].userID
-                isPoplurAd = false
-                adHeadline = nil
-                adBody = nil
-                adCallToAction = nil
-                adCreativeKind = nil
-                sourceLanguageCode = posts[i].sourceLanguageCode
-            }
+            let placement = FeedAdProbabilitySettings.placement(for: i, namespace: "viewModelDemo")
+
+            // Temporarily show only Poplur ad content in all slots
+            _ = placement
+            mediaURL = demoAdMediaURLs[i % demoAdMediaURLs.count]
+            userID = "poplur_ad_demo_\(i)"
+            isPoplurAd = true
+            adHeadline = nil
+            adBody = nil
+            adCallToAction = nil
+            adCreativeKind = nil
+            sourceLanguageCode = posts[i].sourceLanguageCode
 
             posts[i] = FeedPost(
                 id: posts[i].id,

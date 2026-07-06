@@ -26,8 +26,10 @@ struct TrendingPin: Identifiable, Equatable {
     /// Confetti intensity based on growth rate
     var confettiIntensity: Double {
         guard radius > previousRadius else { return 0 }
-        let growthRate = (radius - previousRadius) / previousRadius
-        return min(growthRate * 2, 1.0) // Cap at 1.0
+        let safePrev = max(previousRadius, 1.0)
+        let growthRate = (radius - previousRadius) / safePrev
+        let value = min(max(growthRate * 2, 0), 1.0)
+        return value.isFinite ? value : 0
     }
     
     static func == (lhs: TrendingPin, rhs: TrendingPin) -> Bool {
@@ -70,7 +72,8 @@ class ConfettiScene: SKScene {
         
         let emitter = createConfettiEmitter(color: color, intensity: intensity)
         emitter.position = position
-        emitter.particleBirthRate = CGFloat(30 * intensity) // Continuous emission
+        let safeIntensity = max(0, min(intensity.isFinite ? intensity : 0, 1))
+        emitter.particleBirthRate = CGFloat(30 * safeIntensity) // Continuous emission
         addChild(emitter)
         emitters[id] = emitter
     }
@@ -88,18 +91,19 @@ class ConfettiScene: SKScene {
     /// Create a confetti emitter node
     private func createConfettiEmitter(color: UIColor, intensity: Double) -> SKEmitterNode {
         let emitter = SKEmitterNode()
+        let safeIntensity = max(0, min(intensity.isFinite ? intensity : 0, 1))
         
         // Particle appearance
         emitter.particleTexture = SKTexture(image: createConfettiShape())
-        emitter.particleBirthRate = CGFloat(100 * intensity) // Burst rate
-        emitter.numParticlesToEmit = Int(50 * intensity) // Total particles in burst
+        emitter.particleBirthRate = CGFloat(100 * safeIntensity) // Burst rate
+        emitter.numParticlesToEmit = Int(50 * safeIntensity) // Total particles in burst
         emitter.particleLifetime = 3.0
         emitter.particleLifetimeRange = 1.0
         
         // Explosion pattern
         emitter.emissionAngle = CGFloat.pi / 2 // Up
         emitter.emissionAngleRange = CGFloat.pi * 2 // All directions
-        emitter.particleSpeed = 200 * intensity
+        emitter.particleSpeed = 200 * safeIntensity
         emitter.particleSpeedRange = 100
         
         // Gravity effect
@@ -313,7 +317,7 @@ class PinTrendingTracker: ObservableObject {
     private func calculateTrendingScore(for id: UUID) -> Double {
         guard let history = pinHistory[id], history.count >= 2 else { return 0 }
         
-        let recent = history.suffix(5) // Last 5 snapshots
+        let recent = Array(history.suffix(5)) // Last 5 snapshots — Array gives 0-based indices, unlike ArraySlice
         
         // Calculate average growth rate
         var totalGrowth = 0.0
@@ -502,3 +506,4 @@ private extension Double {
         return min(max(self, range.lowerBound), range.upperBound)
     }
 }
+

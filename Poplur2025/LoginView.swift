@@ -11,7 +11,6 @@ private final class LoginScene: SKScene {
     private let ticketNode = SKShapeNode()
     private let dotsNode = SKNode()
     private let scallopNode = SKShapeNode()
-    private let logoNode = SKSpriteNode()
 
     // Layout constants (SpriteKit points)
     private let cornerRadius: CGFloat = 24
@@ -31,7 +30,6 @@ private final class LoginScene: SKScene {
         buildTicketBackground()
         buildDots()
         buildScallop()
-        buildLogo()
         layoutAll()
     }
 
@@ -143,56 +141,10 @@ private final class LoginScene: SKScene {
         addChild(scallopNode)
     }
 
-    private func buildLogo() {
-        // Load logo.png as SKTexture
-        let texture: SKTexture
-        if let img = UIImage(named: "logo") {
-            texture = SKTexture(image: img)
-        } else {
-            let fallback = UIImage(systemName: "app.fill") ?? UIImage()
-            texture = SKTexture(image: fallback)
-        }
-
-        logoNode.texture = texture
-        logoNode.size = CGSize(width: 200, height: 200)
-        logoNode.anchorPoint = CGPoint(x: 0.5, y: 0.5)
-        logoNode.alpha = 1.0
-        logoNode.zPosition = 4
-
-        if logoNode.parent == nil {
-            addChild(logoNode)
-        }
-
-        // Floating animation
-        startFloating(node: logoNode, amplitude: 10, period: 2.6)
-    }
-
     private func layoutAll() {
-        // The scene fills the ticket card area that the SwiftUI view gives it.
-        // Position nodes within the scene’s size.
-
-        // Ticket background covers entire scene
         ticketNode.position = .zero
-
-        // Dots fill above the scallop area
         dotsNode.position = .zero
-
-        // Scallop at the bottom
-        scallopNode.position = CGPoint(x: 0, y: 0)
-
-        // Logo near the top area, similar to your SwiftUI layout
-        let topInset: CGFloat = 120
-        logoNode.position = CGPoint(x: size.width / 2, y: size.height - topInset)
-    }
-
-    private func startFloating(node: SKNode, amplitude: CGFloat, period: TimeInterval) {
-        node.removeAction(forKey: "floatForever")
-        let up = SKAction.moveBy(x: 0, y: amplitude, duration: period / 2)
-        up.timingMode = .easeInEaseOut
-        let down = SKAction.moveBy(x: 0, y: -amplitude, duration: period / 2)
-        down.timingMode = .easeInEaseOut
-        let cycle = SKAction.sequence([up, down])
-        node.run(.repeatForever(cycle), withKey: "floatForever")
+        scallopNode.position = .zero
     }
 
     private func gradientTexture(size: CGSize, colors: [UIColor], startPoint: CGPoint, endPoint: CGPoint) -> SKTexture {
@@ -216,10 +168,15 @@ private final class LoginScene: SKScene {
 // MARK: - SwiftUI LoginView: SpriteKit visuals + native TextFields
 
 struct LoginView: View {
+    @EnvironmentObject private var auth: AuthViewModel
+    @EnvironmentObject private var stripeCoordinator: StripeTransitionCoordinator
+    @Environment(\.dismiss) private var dismiss
     @State private var email = ""
     @State private var password = ""
     @State private var isLoginFailed = false
     @State private var isLoading = false
+    @State private var navigateToSignup = false
+    @State private var logoFloatOffset: CGFloat = 0
     @FocusState private var focusedField: Field?
 
     enum Field {
@@ -230,132 +187,146 @@ struct LoginView: View {
         ZStack {
             Color.white.ignoresSafeArea()
 
+            AuthConfettiBackground()
+
             VStack {
                 Spacer(minLength: 24)
 
                 // Ticket area backed by SpriteKit visuals
                 ZStack(alignment: .top) {
-                    // SpriteKit scene sized to the ticket card
+                    // SpriteKit scene: pink ticket card, dots, scallop (no logo — shown in SwiftUI below)
                     SpriteView(scene: makeLoginScene())
                         .background(Color.clear)
                         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                         .shadow(color: Color.black.opacity(0.08), radius: 16, x: 0, y: 8)
 
-                    // Overlay the interactive SwiftUI content (fields, button)
-                    VStack(spacing: 28) {
-                        Spacer().frame(height: 120 + 200 + 24) // space for logo area (200 high) + top inset
-
-                        // Email field row with icon + underline
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack(spacing: 12) {
-                                Image(systemName: "at.circle")
-                                    .poplurIconShader()
-                                    .font(.system(size: 20, weight: .semibold))
-                                    .foregroundColor(.white.opacity(0.95))
-                                TextField("E-Mail", text: $email)
-                                    .textInputAutocapitalization(.never)
-                                    .autocorrectionDisabled(true)
-                                    .keyboardType(.emailAddress)
-                                    .textContentType(.username)
-                                    .foregroundColor(.white)
-                                    .tint(.white)
-                                    .focused($focusedField, equals: .email)
+                    // Unified content overlay: floating logo → cube (back) → form fields
+                    VStack(spacing: 0) {
+                        // Floating Poplur logo
+                        Image("logo")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 110, height: 110)
+                            .padding(.top, 20)
+                            .offset(y: logoFloatOffset)
+                            .onAppear {
+                                withAnimation(
+                                    .easeInOut(duration: 1.3)
+                                    .repeatForever(autoreverses: true)
+                                ) { logoFloatOffset = -10 }
                             }
-                            Rectangle()
-                                .fill(Color.white.opacity(0.9))
-                                .frame(height: 1)
-                        }
 
-                        // Password field row with icon + "FORGOT" + underline
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                                Image(systemName: "lock")
-                                    .poplurIconShader()
-                                    .font(.system(size: 18, weight: .semibold))
-                                    .foregroundColor(.white.opacity(0.95))
+                        Spacer().frame(height: 10)
 
-                                SecureField("Password", text: $password)
-                                    .textContentType(.oneTimeCode) // suppress strong password banner
-                                    .foregroundColor(.white)
-                                    .tint(.white)
-                                    .focused($focusedField, equals: .password)
+                        // Login cube — tap to go back to Welcome
+                        LoginCubeView(onTap: { stripeCoordinator.trigger { dismiss() } })
+                            .frame(width: 200, height: 200)
 
-                                Spacer()
+                        Spacer().frame(height: 14)
 
-                                Button(action: forgotPassword) {
-                                    Text("FORGOT")
-                                        .font(.system(size: 12, weight: .bold, design: .rounded))
-                                        .kerning(0.5)
+                        // Form fields
+                        VStack(alignment: .leading, spacing: 20) {
+                            // Email field row with icon + underline
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack(spacing: 12) {
+                                    Image(systemName: "at.circle")
+                                        .poplurIconShader()
+                                        .font(.system(size: 20, weight: .semibold))
                                         .foregroundColor(.white.opacity(0.95))
+                                    TextField("E-Mail", text: $email)
+                                        .textInputAutocapitalization(.never)
+                                        .autocorrectionDisabled(true)
+                                        .keyboardType(.emailAddress)
+                                        .textContentType(.username)
+                                        .foregroundColor(.white)
+                                        .tint(.white)
+                                        .focused($focusedField, equals: .email)
                                 }
-                                .buttonStyle(.plain)
+                                Rectangle()
+                                    .fill(Color.white.opacity(0.9))
+                                    .frame(height: 1)
                             }
-                            Rectangle()
-                                .fill(Color.white.opacity(0.9))
-                                .frame(height: 1)
-                        }
 
-                        if isLoginFailed {
-                            Text("Invalid email or password. Please try again.")
-                                .font(.footnote)
-                                .foregroundColor(.white)
-                                .padding(.top, 4)
-                        }
+                            // Password field row with icon + "FORGOT" + underline
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                                    Image(systemName: "lock")
+                                        .poplurIconShader()
+                                        .font(.system(size: 18, weight: .semibold))
+                                        .foregroundColor(.white.opacity(0.95))
 
-                        // Sign In Button (kept as SwiftUI for best UX)
-                        Button(action: {
-                            hideKeyboard()
-                            loginUser()
-                        }) {
-                            ZStack {
-                                Capsule()
-                                    .fill(Color.white)
-                                    .shadow(color: Color.black.opacity(0.12), radius: 10, x: 0, y: 6)
-                                HStack(spacing: 8) {
-                                    if isLoading {
-                                        ProgressView()
-                                            .progressViewStyle(.circular)
-                                            .tint(.black)
+                                    SecureField("Password", text: $password)
+                                        .textContentType(.oneTimeCode) // suppress strong password banner
+                                        .foregroundColor(.white)
+                                        .tint(.white)
+                                        .focused($focusedField, equals: .password)
+
+                                    Spacer()
+
+                                    Button(action: forgotPassword) {
+                                        Text("FORGOT")
+                                            .font(.system(size: 12, weight: .bold, design: .rounded))
+                                            .kerning(0.5)
+                                            .foregroundColor(.white.opacity(0.95))
                                     }
-                                    Text("Sign In")
-                                        .font(.system(.headline, design: .rounded).weight(.bold))
-                                        .foregroundColor(.black)
+                                    .buttonStyle(.plain)
                                 }
-                                .padding(.vertical, 16)
+                                Rectangle()
+                                    .fill(Color.white.opacity(0.9))
+                                    .frame(height: 1)
                             }
-                            .frame(maxWidth: .infinity)
-                        }
-                        .disabled(isLoading || email.isEmpty || password.isEmpty)
 
-                        NavigationLink {
-                            SignUpView()
-                                .toolbar(.hidden, for: .navigationBar)
-                                .navigationBarBackButtonHidden(true)
-                        } label: {
-                            Text("New here? Create an account")
-                                .font(.system(size: 14, weight: .black, design: .rounded))
-                                .foregroundColor(.white.opacity(0.94))
+                            if isLoginFailed {
+                                Text("Invalid email or password. Please try again.")
+                                    .font(.footnote)
+                                    .foregroundColor(.white)
+                            }
+
+                            // Sign In Button
+                            Button(action: {
+                                hideKeyboard()
+                                loginUser()
+                            }) {
+                                ZStack {
+                                    Capsule()
+                                        .fill(Color.white)
+                                        .shadow(color: Color.black.opacity(0.12), radius: 10, x: 0, y: 6)
+                                    HStack(spacing: 8) {
+                                        if isLoading {
+                                            ProgressView()
+                                                .progressViewStyle(.circular)
+                                                .tint(.black)
+                                        }
+                                        Text("Sign In")
+                                            .font(.system(.headline, design: .rounded).weight(.bold))
+                                            .foregroundColor(.black)
+                                    }
+                                    .padding(.vertical, 16)
+                                }
+                                .frame(maxWidth: .infinity)
+                            }
+                            .disabled(isLoading || email.isEmpty || password.isEmpty)
+
+                            Button {
+                                hideKeyboard()
+                                stripeCoordinator.trigger { navigateToSignup = true }
+                            } label: {
+                                Text("New here? Create an account")
+                                    .font(.system(size: 14, weight: .black, design: .rounded))
+                                    .foregroundColor(.white.opacity(0.94))
+                            }
+                            .buttonStyle(.plain)
+                            .navigationDestination(isPresented: $navigateToSignup) {
+                                SignUpView()
+                                    .toolbar(.hidden, for: .navigationBar)
+                                    .navigationBarBackButtonHidden(true)
+                            }
                         }
-                        .buttonStyle(.plain)
+                        .padding(.horizontal, 24)
 
                         Spacer()
                     }
-                    .padding(.horizontal, 24)
                     .padding(.bottom, 24)
-
-                    HStack {
-                        Spacer()
-                        AuthCubeView(
-                            title: "Login",
-                            systemImage: "lock.fill",
-                            accent: .pink,
-                            spinToken: 0,
-                            isInteractive: false
-                        )
-                        .padding(.top, 26)
-                        .padding(.trailing, 26)
-                    }
-                    .allowsHitTesting(false)
                 }
                 .frame(maxWidth: 600)
                 .frame(height: 640)
@@ -368,6 +339,11 @@ struct LoginView: View {
             hideKeyboard()
         }
         .navigationBarTitleDisplayMode(.inline)
+        .onChange(of: auth.isAuthenticated) { _, authed in
+            if authed {
+                dismiss()
+            }
+        }
     }
 
     // Build a scene sized exactly to the ticket card frame (600x640 max, but we use container size)

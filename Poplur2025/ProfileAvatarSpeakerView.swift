@@ -14,8 +14,9 @@ struct ProfileAvatarSpeakerView: View {
     let skin: CubeSkin
 
     @State private var isSpeaking = false
-    @State private var synth = AVSpeechSynthesizer()
-    @State private var speechDelegate: ProfileSpeechDelegate?
+    @State private var speakText: String?
+    @State private var headLoaded = false
+    @State private var placeholderPulse = false
 
     var body: some View {
         let theme = skin.appTheme
@@ -35,8 +36,21 @@ struct ProfileAvatarSpeakerView: View {
                         .frame(width: size * 0.98, height: size * 0.98)
                         .shadow(color: palette.glow, radius: size * 0.18)
                 }
-                MarkHeadView(isSpeaking: $isSpeaking)
-                    .frame(width: size * 1.12, height: size * 1.20)
+                if !headLoaded {
+                    Circle()
+                        .fill(palette.accent.opacity(placeholderPulse ? 0.22 : 0.10))
+                        .frame(width: size * 0.72, height: size * 0.72)
+                        .animation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: placeholderPulse)
+                        .onAppear { placeholderPulse = true }
+                }
+                MarkHeadView(speakText: $speakText, onFinished: {
+                    isSpeaking = false
+                    speakText = nil
+                }, onLoaded: {
+                    withAnimation(.easeIn(duration: 0.4)) { headLoaded = true }
+                })
+                .frame(width: size * 1.12, height: size * 1.20)
+                .opacity(headLoaded ? 1 : 0)
                 if isSpeaking {
                     SpeechBubble(color: palette.accent)
                         .frame(width: size * 0.46, height: size * 0.34)
@@ -45,20 +59,43 @@ struct ProfileAvatarSpeakerView: View {
                 }
             }
             .frame(width: size * 1.42, height: size * 1.28)
+            .overlay(
+                RoundedRectangle(cornerRadius: size * 0.20, style: .continuous)
+                    .strokeBorder(
+                        palette.accent.opacity(isSpeaking ? 0.92 : 0.54),
+                        lineWidth: isSpeaking ? 3 : 1.5
+                    )
+                    .shadow(color: palette.accent.opacity(isSpeaking ? 0.75 : 0), radius: isSpeaking ? 14 : 0)
+                    .animation(.easeInOut(duration: 0.22), value: isSpeaking)
+            )
             .animation(.spring(response: 0.28, dampingFraction: 0.76), value: isSpeaking)
+            .onTapGesture { speakStats() }
 
             if isSpeaking {
                 speakingIndicator.offset(y: 8)
             } else {
-                Image(systemName: "waveform")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(theme.accent.opacity(0.80))
-                    .padding(5)
-                    .background(Circle().fill(Color.black.opacity(0.35)))
-                    .offset(y: 8)
+                Button {
+                    triggerWake()
+                } label: {
+                    Image(systemName: "waveform")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(theme.accent.opacity(0.90))
+                        .padding(5)
+                        .background(Circle().fill(Color.black.opacity(0.45)))
+                }
+                .buttonStyle(.plain)
+                .offset(y: 8)
             }
         }
-        .onTapGesture { speakStats() }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("PoplurWakeDetected"))) { _ in
+            triggerWake()
+        }
+    }
+
+    private func triggerWake() {
+        guard !isSpeaking else { return }
+        isSpeaking = true
+        speakText = "Hey! I'm here and listening."
     }
 
     private var speakingIndicator: some View {
@@ -75,22 +112,12 @@ struct ProfileAvatarSpeakerView: View {
     private func speakStats() {
         guard !isSpeaking else { stopSpeaking(); return }
         let km = totalRadiusKM < 1 ? "\(Int(totalRadiusKM * 1000)) meters" : String(format: "%.1f kilometres", totalRadiusKM)
-        let text = "You have \(postCount) posts and your total radius is \(km)."
         isSpeaking = true
-        let utterance = AVSpeechUtterance(string: text)
-        utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
-        utterance.rate = 0.50
-        utterance.pitchMultiplier = 0.98
-        utterance.volume = 0.9
-        let delegate = ProfileSpeechDelegate { isSpeaking = false }
-        speechDelegate = delegate
-        synth.delegate = delegate
-        PoplurEQSync.shared.configureAudioSession(for: .voicePrompt)
-        synth.speak(utterance)
+        speakText = "You have \(postCount) posts and your total radius is \(km)."
     }
 
     private func stopSpeaking() {
-        synth.stopSpeaking(at: .immediate)
+        speakText = nil
         isSpeaking = false
     }
 }
@@ -638,15 +665,3 @@ private struct SpeakBarView: View {
     }
 }
 
-// MARK: - Speech Delegate
-
-final class ProfileSpeechDelegate: NSObject, AVSpeechSynthesizerDelegate {
-    let onFinish: () -> Void
-    init(onFinish: @escaping () -> Void) { self.onFinish = onFinish }
-    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
-        DispatchQueue.main.async { self.onFinish() }
-    }
-    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
-        DispatchQueue.main.async { self.onFinish() }
-    }
-}

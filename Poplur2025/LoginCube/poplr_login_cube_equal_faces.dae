@@ -1,0 +1,551 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
+<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+  <asset>
+    <contributor>
+      <author>Assimp</author>
+      <authoring_tool>https://github.com/mikedh/trimesh</authoring_tool>
+    </contributor>
+    <created>2026-07-03T19:11:48</created>
+    <modified>2026-07-03T19:11:48</modified>
+    <unit name="meter" meter="1" />
+    <up_axis>Y_UP</up_axis>
+  </asset>
+  <library_cameras>
+    <camera id="camera_BF0CAD-camera" name="camera_BF0CAD" >
+      <optics>
+        <technique_common>
+          <perspective>
+            <xfov sid="xfov">57.822403</xfov>
+            <aspect_ratio>1.33333337</aspect_ratio>
+            <znear sid="znear">0.00999999978</znear>
+            <zfar sid="zfar">100</zfar>
+          </perspective>
+        </technique_common>
+      </optics>
+    </camera>
+  </library_cameras>
+  <library_images>
+    <image id="material_0-diffuse-image">
+      <init_from>poplr_login_cube_equal_faces_texture_0001.png</init_from>
+    </image>
+    <image id="material_1-diffuse-image">
+      <init_from>poplr_login_cube_equal_faces_texture_0002.png</init_from>
+    </image>
+    <image id="material_2-diffuse-image">
+      <init_from>poplr_login_cube_equal_faces_texture_0003.png</init_from>
+    </image>
+    <image id="material_3-diffuse-image">
+      <init_from>poplr_login_cube_equal_faces_texture_0004.png</init_from>
+    </image>
+    <image id="material_4-diffuse-image">
+      <init_from>poplr_login_cube_equal_faces_texture_0005.png</init_from>
+    </image>
+    <image id="material_5-diffuse-image">
+      <init_from>poplr_login_cube_equal_faces_texture_0006.png</init_from>
+    </image>
+  </library_images>
+  <library_effects>
+    <effect id="material_0-fx" name="">
+      <profile_COMMON>
+        <newparam sid="material_0-diffuse-surface">
+          <surface type="2D">
+            <init_from>material_0-diffuse-image</init_from>
+          </surface>
+        </newparam>
+        <newparam sid="material_0-diffuse-sampler">
+          <sampler2D>
+            <source>material_0-diffuse-surface</source>
+          </sampler2D>
+        </newparam>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <texture texture="material_0-diffuse-sampler" texcoord="CHANNEL0" />
+            </diffuse>
+            <shininess>
+              <float sid="shininess">148.388153</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="material_1-fx" name="">
+      <profile_COMMON>
+        <newparam sid="material_1-diffuse-surface">
+          <surface type="2D">
+            <init_from>material_1-diffuse-image</init_from>
+          </surface>
+        </newparam>
+        <newparam sid="material_1-diffuse-sampler">
+          <sampler2D>
+            <source>material_1-diffuse-surface</source>
+          </sampler2D>
+        </newparam>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <texture texture="material_1-diffuse-sampler" texcoord="CHANNEL0" />
+            </diffuse>
+            <shininess>
+              <float sid="shininess">148.388153</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="material_2-fx" name="">
+      <profile_COMMON>
+        <newparam sid="material_2-diffuse-surface">
+          <surface type="2D">
+            <init_from>material_2-diffuse-image</init_from>
+          </surface>
+        </newparam>
+        <newparam sid="material_2-diffuse-sampler">
+          <sampler2D>
+            <source>material_2-diffuse-surface</source>
+          </sampler2D>
+        </newparam>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <texture texture="material_2-diffuse-sampler" texcoord="CHANNEL0" />
+            </diffuse>
+            <shininess>
+              <float sid="shininess">148.388153</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="material_3-fx" name="">
+      <profile_COMMON>
+        <newparam sid="material_3-diffuse-surface">
+          <surface type="2D">
+            <init_from>material_3-diffuse-image</init_from>
+          </surface>
+        </newparam>
+        <newparam sid="material_3-diffuse-sampler">
+          <sampler2D>
+            <source>material_3-diffuse-surface</source>
+          </sampler2D>
+        </newparam>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <texture texture="material_3-diffuse-sampler" texcoord="CHANNEL0" />
+            </diffuse>
+            <shininess>
+              <float sid="shininess">148.388153</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="material_4-fx" name="">
+      <profile_COMMON>
+        <newparam sid="material_4-diffuse-surface">
+          <surface type="2D">
+            <init_from>material_4-diffuse-image</init_from>
+          </surface>
+        </newparam>
+        <newparam sid="material_4-diffuse-sampler">
+          <sampler2D>
+            <source>material_4-diffuse-surface</source>
+          </sampler2D>
+        </newparam>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <texture texture="material_4-diffuse-sampler" texcoord="CHANNEL0" />
+            </diffuse>
+            <shininess>
+              <float sid="shininess">148.388153</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="material_5-fx" name="">
+      <profile_COMMON>
+        <newparam sid="material_5-diffuse-surface">
+          <surface type="2D">
+            <init_from>material_5-diffuse-image</init_from>
+          </surface>
+        </newparam>
+        <newparam sid="material_5-diffuse-sampler">
+          <sampler2D>
+            <source>material_5-diffuse-surface</source>
+          </sampler2D>
+        </newparam>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <texture texture="material_5-diffuse-sampler" texcoord="CHANNEL0" />
+            </diffuse>
+            <shininess>
+              <float sid="shininess">148.388153</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="material_6-fx" name="">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">1   1   1   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">0</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+  </library_effects>
+  <library_materials>
+    <material id="material_0" name="">
+      <instance_effect url="#material_0-fx"/>
+    </material>
+    <material id="material_1" name="">
+      <instance_effect url="#material_1-fx"/>
+    </material>
+    <material id="material_2" name="">
+      <instance_effect url="#material_2-fx"/>
+    </material>
+    <material id="material_3" name="">
+      <instance_effect url="#material_3-fx"/>
+    </material>
+    <material id="material_4" name="">
+      <instance_effect url="#material_4-fx"/>
+    </material>
+    <material id="material_5" name="">
+      <instance_effect url="#material_5-fx"/>
+    </material>
+    <material id="material_6" name="">
+      <instance_effect url="#material_6-fx"/>
+    </material>
+  </library_materials>
+  <library_geometries>
+    <geometry id="Poplur_Login_Cube_logo_1" name="Poplur_Login_Cube_logo" >
+      <mesh>
+        <source id="Poplur_Login_Cube_logo_1-positions" name="Poplur_Login_Cube_logo_1-positions">
+          <float_array id="Poplur_Login_Cube_logo_1-positions-array" count="12"> -0.5 -0.5 0.5 0.5 -0.5 0.5 0.5 0.5 0.5 -0.5 0.5 0.5 </float_array>
+          <technique_common>
+            <accessor count="4" offset="0" source="#Poplur_Login_Cube_logo_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <source id="Poplur_Login_Cube_logo_1-tex0" name="Poplur_Login_Cube_logo_1-tex0">
+          <float_array id="Poplur_Login_Cube_logo_1-tex0-array" count="8"> 0 0 1 0 1 1 0 1 </float_array>
+          <technique_common>
+            <accessor count="4" offset="0" source="#Poplur_Login_Cube_logo_1-tex0-array" stride="2">
+              <param name="S" type="float" />
+              <param name="T" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="Poplur_Login_Cube_logo_1-vertices">
+          <input semantic="POSITION" source="#Poplur_Login_Cube_logo_1-positions" />
+        </vertices>
+        <polylist count="2" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#Poplur_Login_Cube_logo_1-vertices" />
+          <input offset="0" semantic="TEXCOORD" source="#Poplur_Login_Cube_logo_1-tex0" set="0" />
+          <vcount>3 3 </vcount>
+          <p>0 1 2 0 2 3 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="Poplur_Login_Cube_check_1" name="Poplur_Login_Cube_check" >
+      <mesh>
+        <source id="Poplur_Login_Cube_check_1-positions" name="Poplur_Login_Cube_check_1-positions">
+          <float_array id="Poplur_Login_Cube_check_1-positions-array" count="12"> 0.5 -0.5 -0.5 -0.5 -0.5 -0.5 -0.5 0.5 -0.5 0.5 0.5 -0.5 </float_array>
+          <technique_common>
+            <accessor count="4" offset="0" source="#Poplur_Login_Cube_check_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <source id="Poplur_Login_Cube_check_1-tex0" name="Poplur_Login_Cube_check_1-tex0">
+          <float_array id="Poplur_Login_Cube_check_1-tex0-array" count="8"> 0 0 1 0 1 1 0 1 </float_array>
+          <technique_common>
+            <accessor count="4" offset="0" source="#Poplur_Login_Cube_check_1-tex0-array" stride="2">
+              <param name="S" type="float" />
+              <param name="T" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="Poplur_Login_Cube_check_1-vertices">
+          <input semantic="POSITION" source="#Poplur_Login_Cube_check_1-positions" />
+        </vertices>
+        <polylist count="2" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#Poplur_Login_Cube_check_1-vertices" />
+          <input offset="0" semantic="TEXCOORD" source="#Poplur_Login_Cube_check_1-tex0" set="0" />
+          <vcount>3 3 </vcount>
+          <p>0 1 2 0 2 3 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="Poplur_Login_Cube_back_1" name="Poplur_Login_Cube_back" >
+      <mesh>
+        <source id="Poplur_Login_Cube_back_1-positions" name="Poplur_Login_Cube_back_1-positions">
+          <float_array id="Poplur_Login_Cube_back_1-positions-array" count="12"> -0.5 -0.5 -0.5 -0.5 -0.5 0.5 -0.5 0.5 0.5 -0.5 0.5 -0.5 </float_array>
+          <technique_common>
+            <accessor count="4" offset="0" source="#Poplur_Login_Cube_back_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <source id="Poplur_Login_Cube_back_1-tex0" name="Poplur_Login_Cube_back_1-tex0">
+          <float_array id="Poplur_Login_Cube_back_1-tex0-array" count="8"> 0 0 1 0 1 1 0 1 </float_array>
+          <technique_common>
+            <accessor count="4" offset="0" source="#Poplur_Login_Cube_back_1-tex0-array" stride="2">
+              <param name="S" type="float" />
+              <param name="T" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="Poplur_Login_Cube_back_1-vertices">
+          <input semantic="POSITION" source="#Poplur_Login_Cube_back_1-positions" />
+        </vertices>
+        <polylist count="2" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#Poplur_Login_Cube_back_1-vertices" />
+          <input offset="0" semantic="TEXCOORD" source="#Poplur_Login_Cube_back_1-tex0" set="0" />
+          <vcount>3 3 </vcount>
+          <p>0 1 2 0 2 3 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="Poplur_Login_Cube_forward_1" name="Poplur_Login_Cube_forward" >
+      <mesh>
+        <source id="Poplur_Login_Cube_forward_1-positions" name="Poplur_Login_Cube_forward_1-positions">
+          <float_array id="Poplur_Login_Cube_forward_1-positions-array" count="12"> 0.5 -0.5 0.5 0.5 -0.5 -0.5 0.5 0.5 -0.5 0.5 0.5 0.5 </float_array>
+          <technique_common>
+            <accessor count="4" offset="0" source="#Poplur_Login_Cube_forward_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <source id="Poplur_Login_Cube_forward_1-tex0" name="Poplur_Login_Cube_forward_1-tex0">
+          <float_array id="Poplur_Login_Cube_forward_1-tex0-array" count="8"> 0 0 1 0 1 1 0 1 </float_array>
+          <technique_common>
+            <accessor count="4" offset="0" source="#Poplur_Login_Cube_forward_1-tex0-array" stride="2">
+              <param name="S" type="float" />
+              <param name="T" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="Poplur_Login_Cube_forward_1-vertices">
+          <input semantic="POSITION" source="#Poplur_Login_Cube_forward_1-positions" />
+        </vertices>
+        <polylist count="2" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#Poplur_Login_Cube_forward_1-vertices" />
+          <input offset="0" semantic="TEXCOORD" source="#Poplur_Login_Cube_forward_1-tex0" set="0" />
+          <vcount>3 3 </vcount>
+          <p>0 1 2 0 2 3 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="Poplur_Login_Cube_question_1" name="Poplur_Login_Cube_question" >
+      <mesh>
+        <source id="Poplur_Login_Cube_question_1-positions" name="Poplur_Login_Cube_question_1-positions">
+          <float_array id="Poplur_Login_Cube_question_1-positions-array" count="12"> -0.5 0.5 0.5 0.5 0.5 0.5 0.5 0.5 -0.5 -0.5 0.5 -0.5 </float_array>
+          <technique_common>
+            <accessor count="4" offset="0" source="#Poplur_Login_Cube_question_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <source id="Poplur_Login_Cube_question_1-tex0" name="Poplur_Login_Cube_question_1-tex0">
+          <float_array id="Poplur_Login_Cube_question_1-tex0-array" count="8"> 0 0 1 0 1 1 0 1 </float_array>
+          <technique_common>
+            <accessor count="4" offset="0" source="#Poplur_Login_Cube_question_1-tex0-array" stride="2">
+              <param name="S" type="float" />
+              <param name="T" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="Poplur_Login_Cube_question_1-vertices">
+          <input semantic="POSITION" source="#Poplur_Login_Cube_question_1-positions" />
+        </vertices>
+        <polylist count="2" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#Poplur_Login_Cube_question_1-vertices" />
+          <input offset="0" semantic="TEXCOORD" source="#Poplur_Login_Cube_question_1-tex0" set="0" />
+          <vcount>3 3 </vcount>
+          <p>0 1 2 0 2 3 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="Poplur_Login_Cube_error_1" name="Poplur_Login_Cube_error" >
+      <mesh>
+        <source id="Poplur_Login_Cube_error_1-positions" name="Poplur_Login_Cube_error_1-positions">
+          <float_array id="Poplur_Login_Cube_error_1-positions-array" count="12"> -0.5 -0.5 -0.5 0.5 -0.5 -0.5 0.5 -0.5 0.5 -0.5 -0.5 0.5 </float_array>
+          <technique_common>
+            <accessor count="4" offset="0" source="#Poplur_Login_Cube_error_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <source id="Poplur_Login_Cube_error_1-tex0" name="Poplur_Login_Cube_error_1-tex0">
+          <float_array id="Poplur_Login_Cube_error_1-tex0-array" count="8"> 0 0 1 0 1 1 0 1 </float_array>
+          <technique_common>
+            <accessor count="4" offset="0" source="#Poplur_Login_Cube_error_1-tex0-array" stride="2">
+              <param name="S" type="float" />
+              <param name="T" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="Poplur_Login_Cube_error_1-vertices">
+          <input semantic="POSITION" source="#Poplur_Login_Cube_error_1-positions" />
+        </vertices>
+        <polylist count="2" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#Poplur_Login_Cube_error_1-vertices" />
+          <input offset="0" semantic="TEXCOORD" source="#Poplur_Login_Cube_error_1-tex0" set="0" />
+          <vcount>3 3 </vcount>
+          <p>0 1 2 0 2 3 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+  </library_geometries>
+  <library_controllers>
+  </library_controllers>
+  <library_visual_scenes>
+    <visual_scene id="world" name="world">
+      <node id="Poplur_Login_Cube_logo" name="Poplur_Login_Cube_logo" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#Poplur_Login_Cube_logo_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#material_0">
+                <bind_vertex_input semantic="CHANNEL0" input_semantic="TEXCOORD" input_set="0"/>
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="Poplur_Login_Cube_check" name="Poplur_Login_Cube_check" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#Poplur_Login_Cube_check_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#material_1">
+                <bind_vertex_input semantic="CHANNEL0" input_semantic="TEXCOORD" input_set="0"/>
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="Poplur_Login_Cube_back" name="Poplur_Login_Cube_back" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#Poplur_Login_Cube_back_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#material_2">
+                <bind_vertex_input semantic="CHANNEL0" input_semantic="TEXCOORD" input_set="0"/>
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="Poplur_Login_Cube_forward" name="Poplur_Login_Cube_forward" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#Poplur_Login_Cube_forward_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#material_3">
+                <bind_vertex_input semantic="CHANNEL0" input_semantic="TEXCOORD" input_set="0"/>
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="Poplur_Login_Cube_question" name="Poplur_Login_Cube_question" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#Poplur_Login_Cube_question_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#material_4">
+                <bind_vertex_input semantic="CHANNEL0" input_semantic="TEXCOORD" input_set="0"/>
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="Poplur_Login_Cube_error" name="Poplur_Login_Cube_error" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#Poplur_Login_Cube_error_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#material_5">
+                <bind_vertex_input semantic="CHANNEL0" input_semantic="TEXCOORD" input_set="0"/>
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="camera_BF0CAD" name="camera_BF0CAD" type="NODE">
+        <matrix sid="matrix">0.74314481 -0.314137787 0.590807259 1.79999995 0.669130623 0.348885357 -0.656157911 -2 0 0.882947564 0.469471574 1.39999998 0 0 0 1</matrix>
+        <instance_camera url="#camera_BF0CAD-camera"/>
+      </node>
+    </visual_scene>
+  </library_visual_scenes>
+  <scene>
+    <instance_visual_scene url="#world" />
+  </scene>
+</COLLADA>

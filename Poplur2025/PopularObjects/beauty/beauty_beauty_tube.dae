@@ -1,0 +1,221 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
+<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+  <asset>
+    <contributor>
+      <author>Assimp</author>
+      <authoring_tool>https://github.com/mikedh/trimesh</authoring_tool>
+    </contributor>
+    <created>2026-07-03T10:30:27</created>
+    <modified>2026-07-03T10:30:27</modified>
+    <unit name="meter" meter="1" />
+    <up_axis>Y_UP</up_axis>
+  </asset>
+  <library_images>
+  </library_images>
+  <library_effects>
+    <effect id="panel_pink_trim-fx" name="panel_pink_trim">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0.5   0.0500000007   0.200000003   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">1   0.200000003   0.600000024   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">608.399963</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="pink-fx" name="pink">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">1   0.278431386   0.619607866   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">302.5</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="warm_white-fx" name="warm_white">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">0.929411769   0.921568632   0.87843138   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">202.5</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="material_3-fx" name="">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">1   1   1   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">0</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+  </library_effects>
+  <library_materials>
+    <material id="panel_pink_trim" name="panel_pink_trim">
+      <instance_effect url="#panel_pink_trim-fx"/>
+    </material>
+    <material id="pink" name="pink">
+      <instance_effect url="#pink-fx"/>
+    </material>
+    <material id="warm_white" name="warm_white">
+      <instance_effect url="#warm_white-fx"/>
+    </material>
+    <material id="material_3" name="">
+      <instance_effect url="#material_3-fx"/>
+    </material>
+  </library_materials>
+  <library_geometries>
+    <geometry id="_03_10_Popular_Beauty_Beauty_Tube_ROOT_base_1" name="03_10_Popular_Beauty_Beauty_Tube_ROOT_base" >
+      <mesh>
+        <source id="_03_10_Popular_Beauty_Beauty_Tube_ROOT_base_1-positions" name="_03_10_Popular_Beauty_Beauty_Tube_ROOT_base_1-positions">
+          <float_array id="_03_10_Popular_Beauty_Beauty_Tube_ROOT_base_1-positions-array" count="198"> 10.04 0.0199999996 -0.954999983 10.04 0.0199999996 -0.574999988 9.96586609 0.0199999996 -0.947698414 10.04 0.0799999982 -0.954999983 9.96586609 0.0799999982 -0.947698414 10.04 0.0799999982 -0.574999988 9.89457989 0.0199999996 -0.926074207 9.89457989 0.0799999982 -0.926074207 9.82888317 0.0199999996 -0.890958428 9.82888317 0.0799999982 -0.890958428 9.77129936 0.0199999996 -0.843700588 9.77129936 0.0799999982 -0.843700588 9.72404194 0.0199999996 -0.78611666 9.72404194 0.0799999982 -0.78611666 9.68892574 0.0199999996 -0.720419705 9.68892574 0.0799999982 -0.720419705 9.66730118 0.0199999996 -0.649134338 9.66730118 0.0799999982 -0.649134338 9.65999985 0.0199999996 -0.574999988 9.65999985 0.0799999982 -0.574999988 9.66730118 0.0199999996 -0.500865698 9.66730118 0.0799999982 -0.500865698 9.68892574 0.0199999996 -0.429580301 9.68892574 0.0799999982 -0.429580301 9.72404194 0.0199999996 -0.363883317 9.72404194 0.0799999982 -0.363883317 9.77129936 0.0199999996 -0.306299418 9.77129936 0.0799999982 -0.306299418 9.82888317 0.0199999996 -0.259041548 9.82888317 0.0799999982 -0.259041548 9.89457989 0.0199999996 -0.223925784 9.89457989 0.0799999982 -0.223925784 9.96586609 0.0199999996 -0.202301592 9.96586609 0.0799999982 -0.202301592 10.04 0.0199999996 -0.194999993 10.04 0.0799999982 -0.194999993 10.1141348 0.0199999996 -0.202301592 10.1141348 0.0799999982 -0.202301592 10.18542 0.0199999996 -0.223925784 10.18542 0.0799999982 -0.223925784 10.2511168 0.0199999996 -0.259041548 10.2511168 0.0799999982 -0.259041548 10.3087006 0.0199999996 -0.306299418 10.3087006 0.0799999982 -0.306299418 10.355958 0.0199999996 -0.363883317 10.355958 0.0799999982 -0.363883317 10.3910742 0.0199999996 -0.429580301 10.3910742 0.0799999982 -0.429580301 10.4126987 0.0199999996 -0.500865698 10.4126987 0.0799999982 -0.500865698 10.4200001 0.0199999996 -0.574999988 10.4200001 0.0799999982 -0.574999988 10.4126987 0.0199999996 -0.649134338 10.4126987 0.0799999982 -0.649134338 10.3910742 0.0199999996 -0.720419705 10.3910742 0.0799999982 -0.720419705 10.355958 0.0199999996 -0.78611666 10.355958 0.0799999982 -0.78611666 10.3087006 0.0199999996 -0.843700588 10.3087006 0.0799999982 -0.843700588 10.2511168 0.0199999996 -0.890958428 10.2511168 0.0799999982 -0.890958428 10.18542 0.0199999996 -0.926074207 10.18542 0.0799999982 -0.926074207 10.1141348 0.0199999996 -0.947698414 10.1141348 0.0799999982 -0.947698414 </float_array>
+          <technique_common>
+            <accessor count="66" offset="0" source="#_03_10_Popular_Beauty_Beauty_Tube_ROOT_base_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_03_10_Popular_Beauty_Beauty_Tube_ROOT_base_1-vertices">
+          <input semantic="POSITION" source="#_03_10_Popular_Beauty_Beauty_Tube_ROOT_base_1-positions" />
+        </vertices>
+        <polylist count="128" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_03_10_Popular_Beauty_Beauty_Tube_ROOT_base_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 34 32 34 33 33 34 35 33 35 5 34 1 36 34 36 35 35 36 37 35 37 5 36 1 38 36 38 37 37 38 39 37 39 5 38 1 40 38 40 39 39 40 41 39 41 5 40 1 42 40 42 41 41 42 43 41 43 5 42 1 44 42 44 43 43 44 45 43 45 5 44 1 46 44 46 45 45 46 47 45 47 5 46 1 48 46 48 47 47 48 49 47 49 5 48 1 50 48 50 49 49 50 51 49 51 5 50 1 52 50 52 51 51 52 53 51 53 5 52 1 54 52 54 53 53 54 55 53 55 5 54 1 56 54 56 55 55 56 57 55 57 5 56 1 58 56 58 57 57 58 59 57 59 5 58 1 60 58 60 59 59 60 61 59 61 5 60 1 62 60 62 61 61 62 63 61 63 5 62 1 64 62 64 63 63 64 65 63 65 5 64 1 0 64 0 65 65 0 3 65 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_03_10_Popular_Beauty_Beauty_Tube_part_01_1" name="03_10_Popular_Beauty_Beauty_Tube_part_01" >
+      <mesh>
+        <source id="_03_10_Popular_Beauty_Beauty_Tube_part_01_1-positions" name="_03_10_Popular_Beauty_Beauty_Tube_part_01_1-positions">
+          <float_array id="_03_10_Popular_Beauty_Beauty_Tube_part_01_1-positions-array" count="24"> 9.90799999 0.150000006 -0.503000021 9.90799999 0.75 -0.503000021 9.90799999 0.150000006 -0.647000015 10.1719999 0.150000006 -0.647000015 9.90799999 0.75 -0.647000015 10.1719999 0.75 -0.503000021 10.1719999 0.150000006 -0.503000021 10.1719999 0.75 -0.647000015 </float_array>
+          <technique_common>
+            <accessor count="8" offset="0" source="#_03_10_Popular_Beauty_Beauty_Tube_part_01_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_03_10_Popular_Beauty_Beauty_Tube_part_01_1-vertices">
+          <input semantic="POSITION" source="#_03_10_Popular_Beauty_Beauty_Tube_part_01_1-positions" />
+        </vertices>
+        <polylist count="12" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_03_10_Popular_Beauty_Beauty_Tube_part_01_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 3 0 2 2 1 4 4 3 2 0 5 1 6 0 3 6 5 0 1 5 4 7 3 4 4 5 7 7 6 3 5 6 7 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_03_10_Popular_Beauty_Beauty_Tube_part_02_1" name="03_10_Popular_Beauty_Beauty_Tube_part_02" >
+      <mesh>
+        <source id="_03_10_Popular_Beauty_Beauty_Tube_part_02_1-positions" name="_03_10_Popular_Beauty_Beauty_Tube_part_02_1-positions">
+          <float_array id="_03_10_Popular_Beauty_Beauty_Tube_part_02_1-positions-array" count="126"> 10.04 0.773999989 -0.683000028 10.04 0.773999989 -0.574999988 10.0066261 0.773999989 -0.677714109 10.04 0.870000005 -0.683000028 10.0066261 0.870000005 -0.677714109 10.04 0.870000005 -0.574999988 9.97651958 0.773999989 -0.662373841 9.97651958 0.870000005 -0.662373841 9.95262623 0.773999989 -0.638480783 9.95262623 0.870000005 -0.638480783 9.93728542 0.773999989 -0.608373821 9.93728542 0.870000005 -0.608373821 9.93200016 0.773999989 -0.574999988 9.93200016 0.870000005 -0.574999988 9.93728542 0.773999989 -0.541626155 9.93728542 0.870000005 -0.541626155 9.95262623 0.773999989 -0.511519194 9.95262623 0.870000005 -0.511519194 9.97651958 0.773999989 -0.487626165 9.97651958 0.870000005 -0.487626165 10.0066261 0.773999989 -0.472285897 10.0066261 0.870000005 -0.472285897 10.04 0.773999989 -0.467000008 10.04 0.870000005 -0.467000008 10.0733738 0.773999989 -0.472285897 10.0733738 0.870000005 -0.472285897 10.1034803 0.773999989 -0.487626165 10.1034803 0.870000005 -0.487626165 10.1273737 0.773999989 -0.511519194 10.1273737 0.870000005 -0.511519194 10.1427145 0.773999989 -0.541626155 10.1427145 0.870000005 -0.541626155 10.1479998 0.773999989 -0.574999988 10.1479998 0.870000005 -0.574999988 10.1427145 0.773999989 -0.608373821 10.1427145 0.870000005 -0.608373821 10.1273737 0.773999989 -0.638480783 10.1273737 0.870000005 -0.638480783 10.1034803 0.773999989 -0.662373841 10.1034803 0.870000005 -0.662373841 10.0733738 0.773999989 -0.677714109 10.0733738 0.870000005 -0.677714109 </float_array>
+          <technique_common>
+            <accessor count="42" offset="0" source="#_03_10_Popular_Beauty_Beauty_Tube_part_02_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_03_10_Popular_Beauty_Beauty_Tube_part_02_1-vertices">
+          <input semantic="POSITION" source="#_03_10_Popular_Beauty_Beauty_Tube_part_02_1-positions" />
+        </vertices>
+        <polylist count="80" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_03_10_Popular_Beauty_Beauty_Tube_part_02_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 34 32 34 33 33 34 35 33 35 5 34 1 36 34 36 35 35 36 37 35 37 5 36 1 38 36 38 37 37 38 39 37 39 5 38 1 40 38 40 39 39 40 41 39 41 5 40 1 0 40 0 41 41 0 3 41 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+  </library_geometries>
+  <library_controllers>
+  </library_controllers>
+  <library_visual_scenes>
+    <visual_scene id="ROOT" name="ROOT">
+      <node id="_03_10_Popular_Beauty_Beauty_Tube_ROOT_base" name="03_10_Popular_Beauty_Beauty_Tube_ROOT_base" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_03_10_Popular_Beauty_Beauty_Tube_ROOT_base_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#panel_pink_trim">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_03_10_Popular_Beauty_Beauty_Tube_part_01" name="03_10_Popular_Beauty_Beauty_Tube_part_01" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_03_10_Popular_Beauty_Beauty_Tube_part_01_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#pink">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_03_10_Popular_Beauty_Beauty_Tube_part_02" name="03_10_Popular_Beauty_Beauty_Tube_part_02" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_03_10_Popular_Beauty_Beauty_Tube_part_02_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#warm_white">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+    </visual_scene>
+  </library_visual_scenes>
+  <scene>
+    <instance_visual_scene url="#ROOT" />
+  </scene>
+</COLLADA>

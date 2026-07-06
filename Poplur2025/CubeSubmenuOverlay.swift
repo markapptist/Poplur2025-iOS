@@ -1,5 +1,4 @@
 import SwiftUI
-import AudioToolbox
 import UIKit
 
 struct CubeSubmenuItem: Identifiable {
@@ -72,10 +71,11 @@ final class CubeMenuWheelController: ObservableObject {
     func scrub(deltaX: CGFloat, deltaY: CGFloat) {
         guard isVisible, items.count > 1 else { return }
         let layout = SettingsStore.shared.holdMenuLayoutPreference
-        let primaryDelta = layout == .horizontal ? deltaX : deltaY
+        let useVerticalScrub = abs(deltaY) >= abs(deltaX)
+        let primaryDelta = useVerticalScrub ? deltaY : (layout == .horizontal ? deltaX : deltaY)
         guard abs(primaryDelta) > 0.25 else { return }
 
-        let stepDistance = layout == .horizontal ? horizontalScrubStep : verticalScrubStep
+        let stepDistance = (useVerticalScrub || layout == .vertical) ? verticalScrubStep : horizontalScrubStep
         scrubRemainder += primaryDelta
 
         var steps = 0
@@ -113,7 +113,7 @@ final class CubeMenuWheelController: ObservableObject {
         let now = Date().timeIntervalSinceReferenceDate
         guard now - lastClickTime >= 0.055 else { return }
         lastClickTime = now
-        AudioServicesPlaySystemSound(1104)
+        PoplurSoundPlayer.shared.playPop(minimumInterval: 0.055)
         selectionFeedback.selectionChanged()
         selectionFeedback.prepare()
     }
@@ -138,6 +138,15 @@ struct CubeMenuWheelOverlay: View {
         GeometryReader { proxy in
             ZStack {
                 let skin = skinStore.current
+                Color.black
+                    .opacity(controller.isVisible ? 0.50 : 0)
+                    .ignoresSafeArea()
+
+                HoldMenuScrubHint(layout: layout)
+                    .opacity(controller.isVisible ? 1 : 0)
+                    .position(scrubHintPosition(in: proxy.size, layout: layout))
+                    .zIndex(10)
+
                 ForEach(Array(controller.items.enumerated()), id: \.element.id) { index, item in
                     let slot = slotIndex(for: index)
                     let selected = index == controller.selectedIndex
@@ -200,10 +209,10 @@ struct CubeMenuWheelOverlay: View {
 
         switch layout {
         case .horizontal:
-            let spacing = min(max(size.width * 0.23, 86), 112)
+            let spacing = min(max(size.width * 0.30, 122), 158)
             return CGPoint(x: center.x + CGFloat(relativeSlot) * spacing, y: center.y)
         case .vertical:
-            let spacing = min(max(size.height * 0.11, 92), 118)
+            let spacing = min(max(size.height * 0.15, 128), 162)
             return CGPoint(x: center.x, y: center.y + CGFloat(relativeSlot) * spacing)
         }
     }
@@ -215,6 +224,38 @@ struct CubeMenuWheelOverlay: View {
         case .vertical:
             return CGPoint(x: size.width / 2, y: size.height / 2)
         }
+    }
+
+    private func scrubHintPosition(in size: CGSize, layout: HoldMenuLayoutPreference) -> CGPoint {
+        let center = panelCenter(in: size, layout: layout)
+        let x = min(max(size.width - 58, 46), size.width - 42)
+        return CGPoint(x: x, y: center.y)
+    }
+}
+
+private struct HoldMenuScrubHint: View {
+    let layout: HoldMenuLayoutPreference
+
+    var body: some View {
+        VStack(spacing: 7) {
+            Image(systemName: "chevron.up")
+                .font(.system(size: 18, weight: .black))
+            Text("SCRUB")
+                .font(.system(size: 10, weight: .black, design: .rounded))
+                .rotationEffect(.degrees(-90))
+                .fixedSize()
+            Image(systemName: "chevron.down")
+                .font(.system(size: 18, weight: .black))
+        }
+        .foregroundStyle(.white)
+        .padding(.vertical, 14)
+        .padding(.horizontal, 10)
+        .background(.black.opacity(0.32), in: Capsule())
+        .overlay {
+            Capsule().stroke(.white.opacity(0.22), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.35), radius: 10, x: 0, y: 4)
+        .accessibilityLabel("Scrub up or down to browse")
     }
 }
 

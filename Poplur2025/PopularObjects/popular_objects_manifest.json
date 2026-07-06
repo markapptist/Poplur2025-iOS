@@ -1,0 +1,1982 @@
+[
+  {
+    "id": "burger",
+    "category": "food",
+    "sourcePrefix": "01_01_Popular_Food_Burger",
+    "file": "food/food_burger.glb",
+    "label": "Burger",
+    "channel": 1,
+    "item": 1
+  },
+  {
+    "id": "pizza_slice",
+    "category": "food",
+    "sourcePrefix": "01_02_Popular_Food_Pizza_Slice",
+    "file": "food/food_pizza_slice.glb",
+    "label": "Pizza Slice",
+    "channel": 1,
+    "item": 2
+  },
+  {
+    "id": "sushi",
+    "category": "food",
+    "sourcePrefix": "01_03_Popular_Food_Sushi",
+    "file": "food/food_sushi.glb",
+    "label": "Sushi",
+    "channel": 1,
+    "item": 3
+  },
+  {
+    "id": "french_fries",
+    "category": "food",
+    "sourcePrefix": "01_04_Popular_Food_French_Fries",
+    "file": "food/food_french_fries.glb",
+    "label": "French Fries",
+    "channel": 1,
+    "item": 4
+  },
+  {
+    "id": "taco",
+    "category": "food",
+    "sourcePrefix": "01_05_Popular_Food_Taco",
+    "file": "food/food_taco.glb",
+    "label": "Taco",
+    "channel": 1,
+    "item": 5
+  },
+  {
+    "id": "donut",
+    "category": "food",
+    "sourcePrefix": "01_06_Popular_Food_Donut",
+    "file": "food/food_donut.glb",
+    "label": "Donut",
+    "channel": 1,
+    "item": 6
+  },
+  {
+    "id": "cupcake",
+    "category": "food",
+    "sourcePrefix": "01_07_Popular_Food_Cupcake",
+    "file": "food/food_cupcake.glb",
+    "label": "Cupcake",
+    "channel": 1,
+    "item": 7
+  },
+  {
+    "id": "chicken_drumstick",
+    "category": "food",
+    "sourcePrefix": "01_08_Popular_Food_Chicken_Drumstick",
+    "file": "food/food_chicken_drumstick.glb",
+    "label": "Chicken Drumstick",
+    "channel": 1,
+    "item": 8
+  },
+  {
+    "id": "ice_cream_cone",
+    "category": "food",
+    "sourcePrefix": "01_09_Popular_Food_Ice_Cream_Cone",
+    "file": "food/food_ice_cream_cone.glb",
+    "label": "Ice Cream Cone",
+    "channel": 1,
+    "item": 9
+  },
+  {
+    "id": "hot_dog",
+    "category": "food",
+    "sourcePrefix": "01_10_Popular_Food_Hot_Dog",
+    "file": "food/food_hot_dog.glb",
+    "label": "Hot Dog",
+    "channel": 1,
+    "item": 10
+  },
+  {
+    "id": "sandwich",
+    "category": "food",
+    "sourcePrefix": "01_11_Popular_Food_Sandwich",
+    "file": "food/food_sandwich.glb",
+    "label": "Sandwich",
+    "channel": 1,
+    "item": 11
+  },
+  {
+    "id": "boba_tea",
+    "category": "food",
+    "sourcePrefix": "01_12_Popular_Food_Boba_Tea",
+    "file": "food/food_boba_tea.glb",
+    "label": "Boba Tea",
+    "channel": 1,
+    "item": 12
+  },
+  {
+    "id": "salad_bowl",
+    "category": "food",
+    "sourcePrefix": "01_13_Popular_Food_Salad_Bowl",
+    "file": "food/food_salad_bowl.glb",
+    "label": "Salad Bowl",
+    "channel": 1,
+    "item": 13
+  },
+  {
+    "id": "popcorn",
+    "category": "food",
+    "sourcePrefix": "01_14_Popular_Food_Popcorn",
+    "file": "food/food_popcorn.glb",
+    "label": "Popcorn",
+    "channel": 1,
+    "item": 14
+  },
+  {
+    "id": "avocado",
+    "category": "food",
+    "sourcePrefix": "01_15_Popular_Food_Avocado",
+    "file": "food/food_avocado.glb",
+    "label": "Avocado",
+    "channel": 1,
+    "item": 15
+  },
+  {
+    "id": "waffle",
+    "category": "food",
+    "sourcePrefix": "01_16_Popular_Food_Waffle",
+    "file": "food/food_waffle.glb",
+    "label": "Waffle",
+    "channel": 1,
+    "item": 16
+  },
+  {
+    "id": "cheese_wedge",
+    "category": "food",
+    "sourcePrefix": "01_17_Popular_Food_Cheese_Wedge",
+    "file": "food/food_cheese_wedge.glb",
+    "label": "Cheese Wedge",
+    "channel": 1,
+    "item": 17
+  },
+  {
+    "id": "coffee_cup",
+    "category": "food",
+    "sourcePrefix": "01_18_Popular_Food_Coffee_Cup",
+    "file": "food/food_coffee_cup.glb",
+    "label": "Coffee Cup",
+    "channel": 1,
+    "item": 18
+  },
+  {
+    "id": "cookie",
+    "category": "food",
+    "sourcePrefix": "01_19_Popular_Food_Cookie",
+    "file": "food/food_cookie.glb",
+    "label": "Cookie",
+    "channel": 1,
+    "item": 19
+  },
+  {
+    "id": "banana",
+    "category": "food",
+    "sourcePrefix": "01_20_Popular_Food_Banana",
+    "file": "food/food_banana.glb",
+    "label": "Banana",
+    "channel": 1,
+    "item": 20
+  },
+  {
+    "id": "dumbbell",
+    "category": "fitness",
+    "sourcePrefix": "02_01_Popular_Fitness_Dumbbell",
+    "file": "fitness/fitness_dumbbell.glb",
+    "label": "Dumbbell",
+    "channel": 2,
+    "item": 1
+  },
+  {
+    "id": "kettlebell",
+    "category": "fitness",
+    "sourcePrefix": "02_02_Popular_Fitness_Kettlebell",
+    "file": "fitness/fitness_kettlebell.glb",
+    "label": "Kettlebell",
+    "channel": 2,
+    "item": 2
+  },
+  {
+    "id": "shaker_bottle",
+    "category": "fitness",
+    "sourcePrefix": "02_03_Popular_Fitness_Shaker_Bottle",
+    "file": "fitness/fitness_shaker_bottle.glb",
+    "label": "Shaker Bottle",
+    "channel": 2,
+    "item": 3
+  },
+  {
+    "id": "running_shoe",
+    "category": "fitness",
+    "sourcePrefix": "02_04_Popular_Fitness_Running_Shoe",
+    "file": "fitness/fitness_running_shoe.glb",
+    "label": "Running Shoe",
+    "channel": 2,
+    "item": 4
+  },
+  {
+    "id": "smart_watch",
+    "category": "fitness",
+    "sourcePrefix": "02_05_Popular_Fitness_Smart_Watch",
+    "file": "fitness/fitness_smart_watch.glb",
+    "label": "Smart Watch",
+    "channel": 2,
+    "item": 5
+  },
+  {
+    "id": "headphones",
+    "category": "fitness",
+    "sourcePrefix": "02_06_Popular_Fitness_Headphones",
+    "file": "fitness/fitness_headphones.glb",
+    "label": "Headphones",
+    "channel": 2,
+    "item": 6
+  },
+  {
+    "id": "yoga_mat",
+    "category": "fitness",
+    "sourcePrefix": "02_07_Popular_Fitness_Yoga_Mat",
+    "file": "fitness/fitness_yoga_mat.glb",
+    "label": "Yoga Mat",
+    "channel": 2,
+    "item": 7
+  },
+  {
+    "id": "spin_bike",
+    "category": "fitness",
+    "sourcePrefix": "02_08_Popular_Fitness_Spin_Bike",
+    "file": "fitness/fitness_spin_bike.glb",
+    "label": "Spin Bike",
+    "channel": 2,
+    "item": 8
+  },
+  {
+    "id": "boxing_glove",
+    "category": "fitness",
+    "sourcePrefix": "02_09_Popular_Fitness_Boxing_Glove",
+    "file": "fitness/fitness_boxing_glove.glb",
+    "label": "Boxing Glove",
+    "channel": 2,
+    "item": 9
+  },
+  {
+    "id": "water_bottle",
+    "category": "fitness",
+    "sourcePrefix": "02_10_Popular_Fitness_Water_Bottle",
+    "file": "fitness/fitness_water_bottle.glb",
+    "label": "Water Bottle",
+    "channel": 2,
+    "item": 10
+  },
+  {
+    "id": "weight_plate",
+    "category": "fitness",
+    "sourcePrefix": "02_11_Popular_Fitness_Weight_Plate",
+    "file": "fitness/fitness_weight_plate.glb",
+    "label": "Weight Plate",
+    "channel": 2,
+    "item": 11
+  },
+  {
+    "id": "fitness_band",
+    "category": "fitness",
+    "sourcePrefix": "02_12_Popular_Fitness_Fitness_Band",
+    "file": "fitness/fitness_fitness_band.glb",
+    "label": "Fitness Band",
+    "channel": 2,
+    "item": 12
+  },
+  {
+    "id": "gym_bag",
+    "category": "fitness",
+    "sourcePrefix": "02_13_Popular_Fitness_Gym_Bag",
+    "file": "fitness/fitness_gym_bag.glb",
+    "label": "Gym Bag",
+    "channel": 2,
+    "item": 13
+  },
+  {
+    "id": "foam_roller",
+    "category": "fitness",
+    "sourcePrefix": "02_14_Popular_Fitness_Foam_Roller",
+    "file": "fitness/fitness_foam_roller.glb",
+    "label": "Foam Roller",
+    "channel": 2,
+    "item": 14
+  },
+  {
+    "id": "parallel_bars",
+    "category": "fitness",
+    "sourcePrefix": "02_15_Popular_Fitness_Parallel_Bars",
+    "file": "fitness/fitness_parallel_bars.glb",
+    "label": "Parallel Bars",
+    "channel": 2,
+    "item": 15
+  },
+  {
+    "id": "barbell",
+    "category": "fitness",
+    "sourcePrefix": "02_16_Popular_Fitness_Barbell",
+    "file": "fitness/fitness_barbell.glb",
+    "label": "Barbell",
+    "channel": 2,
+    "item": 16
+  },
+  {
+    "id": "medicine_ball",
+    "category": "fitness",
+    "sourcePrefix": "02_17_Popular_Fitness_Medicine_Ball",
+    "file": "fitness/fitness_medicine_ball.glb",
+    "label": "Medicine Ball",
+    "channel": 2,
+    "item": 17
+  },
+  {
+    "id": "jump_rope",
+    "category": "fitness",
+    "sourcePrefix": "02_18_Popular_Fitness_Jump_Rope",
+    "file": "fitness/fitness_jump_rope.glb",
+    "label": "Jump Rope",
+    "channel": 2,
+    "item": 18
+  },
+  {
+    "id": "flexed_arm",
+    "category": "fitness",
+    "sourcePrefix": "02_19_Popular_Fitness_Flexed_Arm",
+    "file": "fitness/fitness_flexed_arm.glb",
+    "label": "Flexed Arm",
+    "channel": 2,
+    "item": 19
+  },
+  {
+    "id": "heart_pulse",
+    "category": "fitness",
+    "sourcePrefix": "02_20_Popular_Fitness_Heart_Pulse",
+    "file": "fitness/fitness_heart_pulse.glb",
+    "label": "Heart Pulse",
+    "channel": 2,
+    "item": 20
+  },
+  {
+    "id": "lipstick",
+    "category": "beauty",
+    "sourcePrefix": "03_01_Popular_Beauty_Lipstick",
+    "file": "beauty/beauty_lipstick.glb",
+    "label": "Lipstick",
+    "channel": 3,
+    "item": 1
+  },
+  {
+    "id": "makeup_brush",
+    "category": "beauty",
+    "sourcePrefix": "03_02_Popular_Beauty_Makeup_Brush",
+    "file": "beauty/beauty_makeup_brush.glb",
+    "label": "Makeup Brush",
+    "channel": 3,
+    "item": 2
+  },
+  {
+    "id": "perfume",
+    "category": "beauty",
+    "sourcePrefix": "03_03_Popular_Beauty_Perfume",
+    "file": "beauty/beauty_perfume.glb",
+    "label": "Perfume",
+    "channel": 3,
+    "item": 3
+  },
+  {
+    "id": "foundation",
+    "category": "beauty",
+    "sourcePrefix": "03_04_Popular_Beauty_Foundation",
+    "file": "beauty/beauty_foundation.glb",
+    "label": "Foundation",
+    "channel": 3,
+    "item": 4
+  },
+  {
+    "id": "nail_polish",
+    "category": "beauty",
+    "sourcePrefix": "03_05_Popular_Beauty_Nail_Polish",
+    "file": "beauty/beauty_nail_polish.glb",
+    "label": "Nail Polish",
+    "channel": 3,
+    "item": 5
+  },
+  {
+    "id": "eyeshadow_palette",
+    "category": "beauty",
+    "sourcePrefix": "03_06_Popular_Beauty_Eyeshadow_Palette",
+    "file": "beauty/beauty_eyeshadow_palette.glb",
+    "label": "Eyeshadow Palette",
+    "channel": 3,
+    "item": 6
+  },
+  {
+    "id": "mascara",
+    "category": "beauty",
+    "sourcePrefix": "03_07_Popular_Beauty_Mascara",
+    "file": "beauty/beauty_mascara.glb",
+    "label": "Mascara",
+    "channel": 3,
+    "item": 7
+  },
+  {
+    "id": "cream_jar",
+    "category": "beauty",
+    "sourcePrefix": "03_08_Popular_Beauty_Cream_Jar",
+    "file": "beauty/beauty_cream_jar.glb",
+    "label": "Cream Jar",
+    "channel": 3,
+    "item": 8
+  },
+  {
+    "id": "lip_gloss",
+    "category": "beauty",
+    "sourcePrefix": "03_09_Popular_Beauty_Lip_Gloss",
+    "file": "beauty/beauty_lip_gloss.glb",
+    "label": "Lip Gloss",
+    "channel": 3,
+    "item": 9
+  },
+  {
+    "id": "beauty_tube",
+    "category": "beauty",
+    "sourcePrefix": "03_10_Popular_Beauty_Beauty_Tube",
+    "file": "beauty/beauty_beauty_tube.glb",
+    "label": "Beauty Tube",
+    "channel": 3,
+    "item": 10
+  },
+  {
+    "id": "beauty_blender",
+    "category": "beauty",
+    "sourcePrefix": "03_11_Popular_Beauty_Beauty_Blender",
+    "file": "beauty/beauty_beauty_blender.glb",
+    "label": "Beauty Blender",
+    "channel": 3,
+    "item": 11
+  },
+  {
+    "id": "compact_powder",
+    "category": "beauty",
+    "sourcePrefix": "03_12_Popular_Beauty_Compact_Powder",
+    "file": "beauty/beauty_compact_powder.glb",
+    "label": "Compact Powder",
+    "channel": 3,
+    "item": 12
+  },
+  {
+    "id": "serum_bottle",
+    "category": "beauty",
+    "sourcePrefix": "03_13_Popular_Beauty_Serum_Bottle",
+    "file": "beauty/beauty_serum_bottle.glb",
+    "label": "Serum Bottle",
+    "channel": 3,
+    "item": 13
+  },
+  {
+    "id": "false_lashes",
+    "category": "beauty",
+    "sourcePrefix": "03_14_Popular_Beauty_False_Lashes",
+    "file": "beauty/beauty_false_lashes.glb",
+    "label": "False Lashes",
+    "channel": 3,
+    "item": 14
+  },
+  {
+    "id": "hair_straightener",
+    "category": "beauty",
+    "sourcePrefix": "03_15_Popular_Beauty_Hair_Straightener",
+    "file": "beauty/beauty_hair_straightener.glb",
+    "label": "Hair Straightener",
+    "channel": 3,
+    "item": 15
+  },
+  {
+    "id": "hair_dryer",
+    "category": "beauty",
+    "sourcePrefix": "03_16_Popular_Beauty_Hair_Dryer",
+    "file": "beauty/beauty_hair_dryer.glb",
+    "label": "Hair Dryer",
+    "channel": 3,
+    "item": 16
+  },
+  {
+    "id": "face_mask",
+    "category": "beauty",
+    "sourcePrefix": "03_17_Popular_Beauty_Face_Mask",
+    "file": "beauty/beauty_face_mask.glb",
+    "label": "Face Mask",
+    "channel": 3,
+    "item": 17
+  },
+  {
+    "id": "powder_compact",
+    "category": "beauty",
+    "sourcePrefix": "03_18_Popular_Beauty_Powder_Compact",
+    "file": "beauty/beauty_powder_compact.glb",
+    "label": "Powder Compact",
+    "channel": 3,
+    "item": 18
+  },
+  {
+    "id": "nail_set",
+    "category": "beauty",
+    "sourcePrefix": "03_19_Popular_Beauty_Nail_Set",
+    "file": "beauty/beauty_nail_set.glb",
+    "label": "Nail Set",
+    "channel": 3,
+    "item": 19
+  },
+  {
+    "id": "vanity_mirror",
+    "category": "beauty",
+    "sourcePrefix": "03_20_Popular_Beauty_Vanity_Mirror",
+    "file": "beauty/beauty_vanity_mirror.glb",
+    "label": "Vanity Mirror",
+    "channel": 3,
+    "item": 20
+  },
+  {
+    "id": "soccer_ball",
+    "category": "sports",
+    "sourcePrefix": "04_01_Popular_Sports_Soccer_Ball",
+    "file": "sports/sports_soccer_ball.glb",
+    "label": "Soccer Ball",
+    "channel": 4,
+    "item": 1
+  },
+  {
+    "id": "basketball",
+    "category": "sports",
+    "sourcePrefix": "04_02_Popular_Sports_Basketball",
+    "file": "sports/sports_basketball.glb",
+    "label": "Basketball",
+    "channel": 4,
+    "item": 2
+  },
+  {
+    "id": "football",
+    "category": "sports",
+    "sourcePrefix": "04_03_Popular_Sports_Football",
+    "file": "sports/sports_football.glb",
+    "label": "Football",
+    "channel": 4,
+    "item": 3
+  },
+  {
+    "id": "tennis_ball",
+    "category": "sports",
+    "sourcePrefix": "04_04_Popular_Sports_Tennis_Ball",
+    "file": "sports/sports_tennis_ball.glb",
+    "label": "Tennis Ball",
+    "channel": 4,
+    "item": 4
+  },
+  {
+    "id": "baseball",
+    "category": "sports",
+    "sourcePrefix": "04_05_Popular_Sports_Baseball",
+    "file": "sports/sports_baseball.glb",
+    "label": "Baseball",
+    "channel": 4,
+    "item": 5
+  },
+  {
+    "id": "volleyball",
+    "category": "sports",
+    "sourcePrefix": "04_06_Popular_Sports_Volleyball",
+    "file": "sports/sports_volleyball.glb",
+    "label": "Volleyball",
+    "channel": 4,
+    "item": 6
+  },
+  {
+    "id": "golf_ball",
+    "category": "sports",
+    "sourcePrefix": "04_07_Popular_Sports_Golf_Ball",
+    "file": "sports/sports_golf_ball.glb",
+    "label": "Golf Ball",
+    "channel": 4,
+    "item": 7
+  },
+  {
+    "id": "boxing_glove",
+    "category": "sports",
+    "sourcePrefix": "04_08_Popular_Sports_Boxing_Glove",
+    "file": "sports/sports_boxing_glove.glb",
+    "label": "Boxing Glove",
+    "channel": 4,
+    "item": 8
+  },
+  {
+    "id": "helmet",
+    "category": "sports",
+    "sourcePrefix": "04_09_Popular_Sports_Helmet",
+    "file": "sports/sports_helmet.glb",
+    "label": "Helmet",
+    "channel": 4,
+    "item": 9
+  },
+  {
+    "id": "shuttlecock",
+    "category": "sports",
+    "sourcePrefix": "04_10_Popular_Sports_Shuttlecock",
+    "file": "sports/sports_shuttlecock.glb",
+    "label": "Shuttlecock",
+    "channel": 4,
+    "item": 10
+  },
+  {
+    "id": "hockey_puck",
+    "category": "sports",
+    "sourcePrefix": "04_11_Popular_Sports_Hockey_Puck",
+    "file": "sports/sports_hockey_puck.glb",
+    "label": "Hockey Puck",
+    "channel": 4,
+    "item": 11
+  },
+  {
+    "id": "tennis_racket",
+    "category": "sports",
+    "sourcePrefix": "04_12_Popular_Sports_Tennis_Racket",
+    "file": "sports/sports_tennis_racket.glb",
+    "label": "Tennis Racket",
+    "channel": 4,
+    "item": 12
+  },
+  {
+    "id": "baseball_bat",
+    "category": "sports",
+    "sourcePrefix": "04_13_Popular_Sports_Baseball_Bat",
+    "file": "sports/sports_baseball_bat.glb",
+    "label": "Baseball Bat",
+    "channel": 4,
+    "item": 13
+  },
+  {
+    "id": "bike_helmet",
+    "category": "sports",
+    "sourcePrefix": "04_14_Popular_Sports_Bike_Helmet",
+    "file": "sports/sports_bike_helmet.glb",
+    "label": "Bike Helmet",
+    "channel": 4,
+    "item": 14
+  },
+  {
+    "id": "trophy",
+    "category": "sports",
+    "sourcePrefix": "04_15_Popular_Sports_Trophy",
+    "file": "sports/sports_trophy.glb",
+    "label": "Trophy",
+    "channel": 4,
+    "item": 15
+  },
+  {
+    "id": "stopwatch",
+    "category": "sports",
+    "sourcePrefix": "04_16_Popular_Sports_Stopwatch",
+    "file": "sports/sports_stopwatch.glb",
+    "label": "Stopwatch",
+    "channel": 4,
+    "item": 16
+  },
+  {
+    "id": "cleats",
+    "category": "sports",
+    "sourcePrefix": "04_17_Popular_Sports_Cleats",
+    "file": "sports/sports_cleats.glb",
+    "label": "Cleats",
+    "channel": 4,
+    "item": 17
+  },
+  {
+    "id": "golf_club",
+    "category": "sports",
+    "sourcePrefix": "04_18_Popular_Sports_Golf_Club",
+    "file": "sports/sports_golf_club.glb",
+    "label": "Golf Club",
+    "channel": 4,
+    "item": 18
+  },
+  {
+    "id": "surfboard",
+    "category": "sports",
+    "sourcePrefix": "04_19_Popular_Sports_Surfboard",
+    "file": "sports/sports_surfboard.glb",
+    "label": "Surfboard",
+    "channel": 4,
+    "item": 19
+  },
+  {
+    "id": "basketball_hoop",
+    "category": "sports",
+    "sourcePrefix": "04_20_Popular_Sports_Basketball_Hoop",
+    "file": "sports/sports_basketball_hoop.glb",
+    "label": "Basketball Hoop",
+    "channel": 4,
+    "item": 20
+  },
+  {
+    "id": "camera",
+    "category": "modelling",
+    "sourcePrefix": "05_01_Popular_Modelling_Camera",
+    "file": "modelling/modelling_camera.glb",
+    "label": "Camera",
+    "channel": 5,
+    "item": 1
+  },
+  {
+    "id": "studio_light",
+    "category": "modelling",
+    "sourcePrefix": "05_02_Popular_Modelling_Studio_Light",
+    "file": "modelling/modelling_studio_light.glb",
+    "label": "Studio Light",
+    "channel": 5,
+    "item": 2
+  },
+  {
+    "id": "director_chair",
+    "category": "modelling",
+    "sourcePrefix": "05_03_Popular_Modelling_Director_Chair",
+    "file": "modelling/modelling_director_chair.glb",
+    "label": "Director Chair",
+    "channel": 5,
+    "item": 3
+  },
+  {
+    "id": "mannequin_torso",
+    "category": "modelling",
+    "sourcePrefix": "05_04_Popular_Modelling_Mannequin_Torso",
+    "file": "modelling/modelling_mannequin_torso.glb",
+    "label": "Mannequin Torso",
+    "channel": 5,
+    "item": 4
+  },
+  {
+    "id": "pose_model",
+    "category": "modelling",
+    "sourcePrefix": "05_05_Popular_Modelling_Pose_Model",
+    "file": "modelling/modelling_pose_model.glb",
+    "label": "Pose Model",
+    "channel": 5,
+    "item": 5
+  },
+  {
+    "id": "comp_cards",
+    "category": "modelling",
+    "sourcePrefix": "05_06_Popular_Modelling_Comp_Cards",
+    "file": "modelling/modelling_comp_cards.glb",
+    "label": "Comp Cards",
+    "channel": 5,
+    "item": 6
+  },
+  {
+    "id": "vanity_mirror",
+    "category": "modelling",
+    "sourcePrefix": "05_07_Popular_Modelling_Vanity_Mirror",
+    "file": "modelling/modelling_vanity_mirror.glb",
+    "label": "Vanity Mirror",
+    "channel": 5,
+    "item": 7
+  },
+  {
+    "id": "runway",
+    "category": "modelling",
+    "sourcePrefix": "05_08_Popular_Modelling_Runway",
+    "file": "modelling/modelling_runway.glb",
+    "label": "Runway",
+    "channel": 5,
+    "item": 8
+  },
+  {
+    "id": "high_heel",
+    "category": "modelling",
+    "sourcePrefix": "05_09_Popular_Modelling_High_Heel",
+    "file": "modelling/modelling_high_heel.glb",
+    "label": "High Heel",
+    "channel": 5,
+    "item": 9
+  },
+  {
+    "id": "portfolio_book",
+    "category": "modelling",
+    "sourcePrefix": "05_10_Popular_Modelling_Portfolio_Book",
+    "file": "modelling/modelling_portfolio_book.glb",
+    "label": "Portfolio Book",
+    "channel": 5,
+    "item": 10
+  },
+  {
+    "id": "agency_badge",
+    "category": "modelling",
+    "sourcePrefix": "05_11_Popular_Modelling_Agency_Badge",
+    "file": "modelling/modelling_agency_badge.glb",
+    "label": "Agency Badge",
+    "channel": 5,
+    "item": 11
+  },
+  {
+    "id": "measuring_tape",
+    "category": "modelling",
+    "sourcePrefix": "05_12_Popular_Modelling_Measuring_Tape",
+    "file": "modelling/modelling_measuring_tape.glb",
+    "label": "Measuring Tape",
+    "channel": 5,
+    "item": 12
+  },
+  {
+    "id": "headshots",
+    "category": "modelling",
+    "sourcePrefix": "05_13_Popular_Modelling_Headshots",
+    "file": "modelling/modelling_headshots.glb",
+    "label": "Headshots",
+    "channel": 5,
+    "item": 13
+  },
+  {
+    "id": "necklace_display",
+    "category": "modelling",
+    "sourcePrefix": "05_14_Popular_Modelling_Necklace_Display",
+    "file": "modelling/modelling_necklace_display.glb",
+    "label": "Necklace Display",
+    "channel": 5,
+    "item": 14
+  },
+  {
+    "id": "clipboard",
+    "category": "modelling",
+    "sourcePrefix": "05_15_Popular_Modelling_Clipboard",
+    "file": "modelling/modelling_clipboard.glb",
+    "label": "Clipboard",
+    "channel": 5,
+    "item": 15
+  },
+  {
+    "id": "sunglasses",
+    "category": "modelling",
+    "sourcePrefix": "05_16_Popular_Modelling_Sunglasses",
+    "file": "modelling/modelling_sunglasses.glb",
+    "label": "Sunglasses",
+    "channel": 5,
+    "item": 16
+  },
+  {
+    "id": "model_pose",
+    "category": "modelling",
+    "sourcePrefix": "05_17_Popular_Modelling_Model_Pose",
+    "file": "modelling/modelling_model_pose.glb",
+    "label": "Model Pose",
+    "channel": 5,
+    "item": 17
+  },
+  {
+    "id": "makeup_chair",
+    "category": "modelling",
+    "sourcePrefix": "05_18_Popular_Modelling_Makeup_Chair",
+    "file": "modelling/modelling_makeup_chair.glb",
+    "label": "Makeup Chair",
+    "channel": 5,
+    "item": 18
+  },
+  {
+    "id": "backdrop",
+    "category": "modelling",
+    "sourcePrefix": "05_19_Popular_Modelling_Backdrop",
+    "file": "modelling/modelling_backdrop.glb",
+    "label": "Backdrop",
+    "channel": 5,
+    "item": 19
+  },
+  {
+    "id": "crown",
+    "category": "modelling",
+    "sourcePrefix": "05_20_Popular_Modelling_Crown",
+    "file": "modelling/modelling_crown.glb",
+    "label": "Crown",
+    "channel": 5,
+    "item": 20
+  },
+  {
+    "id": "handbag",
+    "category": "fashion",
+    "sourcePrefix": "06_01_Popular_Fashion_Handbag",
+    "file": "fashion/fashion_handbag.glb",
+    "label": "Handbag",
+    "channel": 6,
+    "item": 1
+  },
+  {
+    "id": "hoodie",
+    "category": "fashion",
+    "sourcePrefix": "06_02_Popular_Fashion_Hoodie",
+    "file": "fashion/fashion_hoodie.glb",
+    "label": "Hoodie",
+    "channel": 6,
+    "item": 2
+  },
+  {
+    "id": "sneaker",
+    "category": "fashion",
+    "sourcePrefix": "06_03_Popular_Fashion_Sneaker",
+    "file": "fashion/fashion_sneaker.glb",
+    "label": "Sneaker",
+    "channel": 6,
+    "item": 3
+  },
+  {
+    "id": "sunglasses",
+    "category": "fashion",
+    "sourcePrefix": "06_04_Popular_Fashion_Sunglasses",
+    "file": "fashion/fashion_sunglasses.glb",
+    "label": "Sunglasses",
+    "channel": 6,
+    "item": 4
+  },
+  {
+    "id": "watch",
+    "category": "fashion",
+    "sourcePrefix": "06_05_Popular_Fashion_Watch",
+    "file": "fashion/fashion_watch.glb",
+    "label": "Watch",
+    "channel": 6,
+    "item": 5
+  },
+  {
+    "id": "t_shirt",
+    "category": "fashion",
+    "sourcePrefix": "06_06_Popular_Fashion_T_Shirt",
+    "file": "fashion/fashion_t_shirt.glb",
+    "label": "T Shirt",
+    "channel": 6,
+    "item": 6
+  },
+  {
+    "id": "jeans",
+    "category": "fashion",
+    "sourcePrefix": "06_07_Popular_Fashion_Jeans",
+    "file": "fashion/fashion_jeans.glb",
+    "label": "Jeans",
+    "channel": 6,
+    "item": 7
+  },
+  {
+    "id": "cap",
+    "category": "fashion",
+    "sourcePrefix": "06_08_Popular_Fashion_Cap",
+    "file": "fashion/fashion_cap.glb",
+    "label": "Cap",
+    "channel": 6,
+    "item": 8
+  },
+  {
+    "id": "puffer_jacket",
+    "category": "fashion",
+    "sourcePrefix": "06_09_Popular_Fashion_Puffer_Jacket",
+    "file": "fashion/fashion_puffer_jacket.glb",
+    "label": "Puffer Jacket",
+    "channel": 6,
+    "item": 9
+  },
+  {
+    "id": "belt",
+    "category": "fashion",
+    "sourcePrefix": "06_10_Popular_Fashion_Belt",
+    "file": "fashion/fashion_belt.glb",
+    "label": "Belt",
+    "channel": 6,
+    "item": 10
+  },
+  {
+    "id": "high_heel",
+    "category": "fashion",
+    "sourcePrefix": "06_11_Popular_Fashion_High_Heel",
+    "file": "fashion/fashion_high_heel.glb",
+    "label": "High Heel",
+    "channel": 6,
+    "item": 11
+  },
+  {
+    "id": "ring",
+    "category": "fashion",
+    "sourcePrefix": "06_12_Popular_Fashion_Ring",
+    "file": "fashion/fashion_ring.glb",
+    "label": "Ring",
+    "channel": 6,
+    "item": 12
+  },
+  {
+    "id": "necklace",
+    "category": "fashion",
+    "sourcePrefix": "06_13_Popular_Fashion_Necklace",
+    "file": "fashion/fashion_necklace.glb",
+    "label": "Necklace",
+    "channel": 6,
+    "item": 13
+  },
+  {
+    "id": "dress",
+    "category": "fashion",
+    "sourcePrefix": "06_14_Popular_Fashion_Dress",
+    "file": "fashion/fashion_dress.glb",
+    "label": "Dress",
+    "channel": 6,
+    "item": 14
+  },
+  {
+    "id": "shopping_bag",
+    "category": "fashion",
+    "sourcePrefix": "06_15_Popular_Fashion_Shopping_Bag",
+    "file": "fashion/fashion_shopping_bag.glb",
+    "label": "Shopping Bag",
+    "channel": 6,
+    "item": 15
+  },
+  {
+    "id": "perfume",
+    "category": "fashion",
+    "sourcePrefix": "06_16_Popular_Fashion_Perfume",
+    "file": "fashion/fashion_perfume.glb",
+    "label": "Perfume",
+    "channel": 6,
+    "item": 16
+  },
+  {
+    "id": "hanger",
+    "category": "fashion",
+    "sourcePrefix": "06_17_Popular_Fashion_Hanger",
+    "file": "fashion/fashion_hanger.glb",
+    "label": "Hanger",
+    "channel": 6,
+    "item": 17
+  },
+  {
+    "id": "wallet",
+    "category": "fashion",
+    "sourcePrefix": "06_18_Popular_Fashion_Wallet",
+    "file": "fashion/fashion_wallet.glb",
+    "label": "Wallet",
+    "channel": 6,
+    "item": 18
+  },
+  {
+    "id": "beanie",
+    "category": "fashion",
+    "sourcePrefix": "06_19_Popular_Fashion_Beanie",
+    "file": "fashion/fashion_beanie.glb",
+    "label": "Beanie",
+    "channel": 6,
+    "item": 19
+  },
+  {
+    "id": "black_sunglasses",
+    "category": "fashion",
+    "sourcePrefix": "06_20_Popular_Fashion_Black_Sunglasses",
+    "file": "fashion/fashion_black_sunglasses.glb",
+    "label": "Black Sunglasses",
+    "channel": 6,
+    "item": 20
+  },
+  {
+    "id": "headphones",
+    "category": "music",
+    "sourcePrefix": "07_01_Popular_Music_Headphones",
+    "file": "music/music_headphones.glb",
+    "label": "Headphones",
+    "channel": 7,
+    "item": 1
+  },
+  {
+    "id": "microphone",
+    "category": "music",
+    "sourcePrefix": "07_02_Popular_Music_Microphone",
+    "file": "music/music_microphone.glb",
+    "label": "Microphone",
+    "channel": 7,
+    "item": 2
+  },
+  {
+    "id": "speaker",
+    "category": "music",
+    "sourcePrefix": "07_03_Popular_Music_Speaker",
+    "file": "music/music_speaker.glb",
+    "label": "Speaker",
+    "channel": 7,
+    "item": 3
+  },
+  {
+    "id": "electric_guitar",
+    "category": "music",
+    "sourcePrefix": "07_04_Popular_Music_Electric_Guitar",
+    "file": "music/music_electric_guitar.glb",
+    "label": "Electric Guitar",
+    "channel": 7,
+    "item": 4
+  },
+  {
+    "id": "music_note",
+    "category": "music",
+    "sourcePrefix": "07_05_Popular_Music_Music_Note",
+    "file": "music/music_music_note.glb",
+    "label": "Music Note",
+    "channel": 7,
+    "item": 5
+  },
+  {
+    "id": "keyboard",
+    "category": "music",
+    "sourcePrefix": "07_06_Popular_Music_Keyboard",
+    "file": "music/music_keyboard.glb",
+    "label": "Keyboard",
+    "channel": 7,
+    "item": 6
+  },
+  {
+    "id": "vinyl_record",
+    "category": "music",
+    "sourcePrefix": "07_07_Popular_Music_Vinyl_Record",
+    "file": "music/music_vinyl_record.glb",
+    "label": "Vinyl Record",
+    "channel": 7,
+    "item": 7
+  },
+  {
+    "id": "boombox",
+    "category": "music",
+    "sourcePrefix": "07_08_Popular_Music_Boombox",
+    "file": "music/music_boombox.glb",
+    "label": "Boombox",
+    "channel": 7,
+    "item": 8
+  },
+  {
+    "id": "drum",
+    "category": "music",
+    "sourcePrefix": "07_09_Popular_Music_Drum",
+    "file": "music/music_drum.glb",
+    "label": "Drum",
+    "channel": 7,
+    "item": 9
+  },
+  {
+    "id": "xylophone",
+    "category": "music",
+    "sourcePrefix": "07_10_Popular_Music_Xylophone",
+    "file": "music/music_xylophone.glb",
+    "label": "Xylophone",
+    "channel": 7,
+    "item": 10
+  },
+  {
+    "id": "treble_clef",
+    "category": "music",
+    "sourcePrefix": "07_11_Popular_Music_Treble_Clef",
+    "file": "music/music_treble_clef.glb",
+    "label": "Treble Clef",
+    "channel": 7,
+    "item": 11
+  },
+  {
+    "id": "mixer",
+    "category": "music",
+    "sourcePrefix": "07_12_Popular_Music_Mixer",
+    "file": "music/music_mixer.glb",
+    "label": "Mixer",
+    "channel": 7,
+    "item": 12
+  },
+  {
+    "id": "cassette",
+    "category": "music",
+    "sourcePrefix": "07_13_Popular_Music_Cassette",
+    "file": "music/music_cassette.glb",
+    "label": "Cassette",
+    "channel": 7,
+    "item": 13
+  },
+  {
+    "id": "acoustic_guitar",
+    "category": "music",
+    "sourcePrefix": "07_14_Popular_Music_Acoustic_Guitar",
+    "file": "music/music_acoustic_guitar.glb",
+    "label": "Acoustic Guitar",
+    "channel": 7,
+    "item": 14
+  },
+  {
+    "id": "equalizer",
+    "category": "music",
+    "sourcePrefix": "07_15_Popular_Music_Equalizer",
+    "file": "music/music_equalizer.glb",
+    "label": "Equalizer",
+    "channel": 7,
+    "item": 15
+  },
+  {
+    "id": "maracas",
+    "category": "music",
+    "sourcePrefix": "07_16_Popular_Music_Maracas",
+    "file": "music/music_maracas.glb",
+    "label": "Maracas",
+    "channel": 7,
+    "item": 16
+  },
+  {
+    "id": "turntable",
+    "category": "music",
+    "sourcePrefix": "07_17_Popular_Music_Turntable",
+    "file": "music/music_turntable.glb",
+    "label": "Turntable",
+    "channel": 7,
+    "item": 17
+  },
+  {
+    "id": "music_app_icon",
+    "category": "music",
+    "sourcePrefix": "07_18_Popular_Music_Music_App_Icon",
+    "file": "music/music_music_app_icon.glb",
+    "label": "Music App Icon",
+    "channel": 7,
+    "item": 18
+  },
+  {
+    "id": "studio_monitor",
+    "category": "music",
+    "sourcePrefix": "07_19_Popular_Music_Studio_Monitor",
+    "file": "music/music_studio_monitor.glb",
+    "label": "Studio Monitor",
+    "channel": 7,
+    "item": 19
+  },
+  {
+    "id": "gold_record",
+    "category": "music",
+    "sourcePrefix": "07_20_Popular_Music_Gold_Record",
+    "file": "music/music_gold_record.glb",
+    "label": "Gold Record",
+    "channel": 7,
+    "item": 20
+  },
+  {
+    "id": "smartphone",
+    "category": "tech",
+    "sourcePrefix": "08_01_Popular_Tech_Smartphone",
+    "file": "tech/tech_smartphone.glb",
+    "label": "Smartphone",
+    "channel": 8,
+    "item": 1
+  },
+  {
+    "id": "laptop",
+    "category": "tech",
+    "sourcePrefix": "08_02_Popular_Tech_Laptop",
+    "file": "tech/tech_laptop.glb",
+    "label": "Laptop",
+    "channel": 8,
+    "item": 2
+  },
+  {
+    "id": "game_controller",
+    "category": "tech",
+    "sourcePrefix": "08_03_Popular_Tech_Game_Controller",
+    "file": "tech/tech_game_controller.glb",
+    "label": "Game Controller",
+    "channel": 8,
+    "item": 3
+  },
+  {
+    "id": "earbuds",
+    "category": "tech",
+    "sourcePrefix": "08_04_Popular_Tech_Earbuds",
+    "file": "tech/tech_earbuds.glb",
+    "label": "Earbuds",
+    "channel": 8,
+    "item": 4
+  },
+  {
+    "id": "smart_watch",
+    "category": "tech",
+    "sourcePrefix": "08_05_Popular_Tech_Smart_Watch",
+    "file": "tech/tech_smart_watch.glb",
+    "label": "Smart Watch",
+    "channel": 8,
+    "item": 5
+  },
+  {
+    "id": "vr_headset",
+    "category": "tech",
+    "sourcePrefix": "08_06_Popular_Tech_VR_Headset",
+    "file": "tech/tech_vr_headset.glb",
+    "label": "VR Headset",
+    "channel": 8,
+    "item": 6
+  },
+  {
+    "id": "drone",
+    "category": "tech",
+    "sourcePrefix": "08_07_Popular_Tech_Drone",
+    "file": "tech/tech_drone.glb",
+    "label": "Drone",
+    "channel": 8,
+    "item": 7
+  },
+  {
+    "id": "tablet",
+    "category": "tech",
+    "sourcePrefix": "08_08_Popular_Tech_Tablet",
+    "file": "tech/tech_tablet.glb",
+    "label": "Tablet",
+    "channel": 8,
+    "item": 8
+  },
+  {
+    "id": "camera",
+    "category": "tech",
+    "sourcePrefix": "08_09_Popular_Tech_Camera",
+    "file": "tech/tech_camera.glb",
+    "label": "Camera",
+    "channel": 8,
+    "item": 9
+  },
+  {
+    "id": "smart_speaker",
+    "category": "tech",
+    "sourcePrefix": "08_10_Popular_Tech_Smart_Speaker",
+    "file": "tech/tech_smart_speaker.glb",
+    "label": "Smart Speaker",
+    "channel": 8,
+    "item": 10
+  },
+  {
+    "id": "mouse",
+    "category": "tech",
+    "sourcePrefix": "08_11_Popular_Tech_Mouse",
+    "file": "tech/tech_mouse.glb",
+    "label": "Mouse",
+    "channel": 8,
+    "item": 11
+  },
+  {
+    "id": "keyboard",
+    "category": "tech",
+    "sourcePrefix": "08_12_Popular_Tech_Keyboard",
+    "file": "tech/tech_keyboard.glb",
+    "label": "Keyboard",
+    "channel": 8,
+    "item": 12
+  },
+  {
+    "id": "monitor",
+    "category": "tech",
+    "sourcePrefix": "08_13_Popular_Tech_Monitor",
+    "file": "tech/tech_monitor.glb",
+    "label": "Monitor",
+    "channel": 8,
+    "item": 13
+  },
+  {
+    "id": "graphics_card",
+    "category": "tech",
+    "sourcePrefix": "08_14_Popular_Tech_Graphics_Card",
+    "file": "tech/tech_graphics_card.glb",
+    "label": "Graphics Card",
+    "channel": 8,
+    "item": 14
+  },
+  {
+    "id": "robot_head",
+    "category": "tech",
+    "sourcePrefix": "08_15_Popular_Tech_Robot_Head",
+    "file": "tech/tech_robot_head.glb",
+    "label": "Robot Head",
+    "channel": 8,
+    "item": 15
+  },
+  {
+    "id": "power_bank",
+    "category": "tech",
+    "sourcePrefix": "08_16_Popular_Tech_Power_Bank",
+    "file": "tech/tech_power_bank.glb",
+    "label": "Power Bank",
+    "channel": 8,
+    "item": 16
+  },
+  {
+    "id": "hard_drive",
+    "category": "tech",
+    "sourcePrefix": "08_17_Popular_Tech_Hard_Drive",
+    "file": "tech/tech_hard_drive.glb",
+    "label": "Hard Drive",
+    "channel": 8,
+    "item": 17
+  },
+  {
+    "id": "router",
+    "category": "tech",
+    "sourcePrefix": "08_18_Popular_Tech_Router",
+    "file": "tech/tech_router.glb",
+    "label": "Router",
+    "channel": 8,
+    "item": 18
+  },
+  {
+    "id": "microchip",
+    "category": "tech",
+    "sourcePrefix": "08_19_Popular_Tech_Microchip",
+    "file": "tech/tech_microchip.glb",
+    "label": "Microchip",
+    "channel": 8,
+    "item": 19
+  },
+  {
+    "id": "light_bulb",
+    "category": "tech",
+    "sourcePrefix": "08_20_Popular_Tech_Light_Bulb",
+    "file": "tech/tech_light_bulb.glb",
+    "label": "Light Bulb",
+    "channel": 8,
+    "item": 20
+  },
+  {
+    "id": "newspaper",
+    "category": "news",
+    "sourcePrefix": "09_01_Popular_News_Newspaper",
+    "file": "news/news_newspaper.glb",
+    "label": "Newspaper",
+    "channel": 9,
+    "item": 1
+  },
+  {
+    "id": "news_microphone",
+    "category": "news",
+    "sourcePrefix": "09_02_Popular_News_News_Microphone",
+    "file": "news/news_news_microphone.glb",
+    "label": "News Microphone",
+    "channel": 9,
+    "item": 2
+  },
+  {
+    "id": "video_camera",
+    "category": "news",
+    "sourcePrefix": "09_03_Popular_News_Video_Camera",
+    "file": "news/news_video_camera.glb",
+    "label": "Video Camera",
+    "channel": 9,
+    "item": 3
+  },
+  {
+    "id": "globe",
+    "category": "news",
+    "sourcePrefix": "09_04_Popular_News_Globe",
+    "file": "news/news_globe.glb",
+    "label": "Globe",
+    "channel": 9,
+    "item": 4
+  },
+  {
+    "id": "satellite_dish",
+    "category": "news",
+    "sourcePrefix": "09_05_Popular_News_Satellite_Dish",
+    "file": "news/news_satellite_dish.glb",
+    "label": "Satellite Dish",
+    "channel": 9,
+    "item": 5
+  },
+  {
+    "id": "press_id",
+    "category": "news",
+    "sourcePrefix": "09_06_Popular_News_Press_ID",
+    "file": "news/news_press_id.glb",
+    "label": "Press ID",
+    "channel": 9,
+    "item": 6
+  },
+  {
+    "id": "notepad",
+    "category": "news",
+    "sourcePrefix": "09_07_Popular_News_Notepad",
+    "file": "news/news_notepad.glb",
+    "label": "Notepad",
+    "channel": 9,
+    "item": 7
+  },
+  {
+    "id": "megaphone",
+    "category": "news",
+    "sourcePrefix": "09_08_Popular_News_Megaphone",
+    "file": "news/news_megaphone.glb",
+    "label": "Megaphone",
+    "channel": 9,
+    "item": 8
+  },
+  {
+    "id": "news_van",
+    "category": "news",
+    "sourcePrefix": "09_09_Popular_News_News_Van",
+    "file": "news/news_news_van.glb",
+    "label": "News Van",
+    "channel": 9,
+    "item": 9
+  },
+  {
+    "id": "live_tv",
+    "category": "news",
+    "sourcePrefix": "09_10_Popular_News_Live_TV",
+    "file": "news/news_live_tv.glb",
+    "label": "Live TV",
+    "channel": 9,
+    "item": 10
+  },
+  {
+    "id": "news_laptop",
+    "category": "news",
+    "sourcePrefix": "09_11_Popular_News_News_Laptop",
+    "file": "news/news_news_laptop.glb",
+    "label": "News Laptop",
+    "channel": 9,
+    "item": 11
+  },
+  {
+    "id": "chat_bubbles",
+    "category": "news",
+    "sourcePrefix": "09_12_Popular_News_Chat_Bubbles",
+    "file": "news/news_chat_bubbles.glb",
+    "label": "Chat Bubbles",
+    "channel": 9,
+    "item": 12
+  },
+  {
+    "id": "hourglass",
+    "category": "news",
+    "sourcePrefix": "09_13_Popular_News_Hourglass",
+    "file": "news/news_hourglass.glb",
+    "label": "Hourglass",
+    "channel": 9,
+    "item": 13
+  },
+  {
+    "id": "chart",
+    "category": "news",
+    "sourcePrefix": "09_14_Popular_News_Chart",
+    "file": "news/news_chart.glb",
+    "label": "Chart",
+    "channel": 9,
+    "item": 14
+  },
+  {
+    "id": "fact_check",
+    "category": "news",
+    "sourcePrefix": "09_15_Popular_News_Fact_Check",
+    "file": "news/news_fact_check.glb",
+    "label": "Fact Check",
+    "channel": 9,
+    "item": 15
+  },
+  {
+    "id": "camera_lens",
+    "category": "news",
+    "sourcePrefix": "09_16_Popular_News_Camera_Lens",
+    "file": "news/news_camera_lens.glb",
+    "label": "Camera Lens",
+    "channel": 9,
+    "item": 16
+  },
+  {
+    "id": "typewriter",
+    "category": "news",
+    "sourcePrefix": "09_17_Popular_News_Typewriter",
+    "file": "news/news_typewriter.glb",
+    "label": "Typewriter",
+    "channel": 9,
+    "item": 17
+  },
+  {
+    "id": "reporter_microphone",
+    "category": "news",
+    "sourcePrefix": "09_18_Popular_News_Reporter_Microphone",
+    "file": "news/news_reporter_microphone.glb",
+    "label": "Reporter Microphone",
+    "channel": 9,
+    "item": 18
+  },
+  {
+    "id": "podium",
+    "category": "news",
+    "sourcePrefix": "09_19_Popular_News_Podium",
+    "file": "news/news_podium.glb",
+    "label": "Podium",
+    "channel": 9,
+    "item": 19
+  },
+  {
+    "id": "news_clipboard",
+    "category": "news",
+    "sourcePrefix": "09_20_Popular_News_News_Clipboard",
+    "file": "news/news_news_clipboard.glb",
+    "label": "News Clipboard",
+    "channel": 9,
+    "item": 20
+  },
+  {
+    "id": "eiffel_tower",
+    "category": "french",
+    "sourcePrefix": "10_01_Popular_French_Eiffel_Tower",
+    "file": "french/french_eiffel_tower.glb",
+    "label": "Eiffel Tower",
+    "channel": 10,
+    "item": 1
+  },
+  {
+    "id": "french_flag",
+    "category": "french",
+    "sourcePrefix": "10_02_Popular_French_French_Flag",
+    "file": "french/french_french_flag.glb",
+    "label": "French Flag",
+    "channel": 10,
+    "item": 2
+  },
+  {
+    "id": "croissant",
+    "category": "french",
+    "sourcePrefix": "10_03_Popular_French_Croissant",
+    "file": "french/french_croissant.glb",
+    "label": "Croissant",
+    "channel": 10,
+    "item": 3
+  },
+  {
+    "id": "beret",
+    "category": "french",
+    "sourcePrefix": "10_04_Popular_French_Beret",
+    "file": "french/french_beret.glb",
+    "label": "Beret",
+    "channel": 10,
+    "item": 4
+  },
+  {
+    "id": "espresso",
+    "category": "french",
+    "sourcePrefix": "10_05_Popular_French_Espresso",
+    "file": "french/french_espresso.glb",
+    "label": "Espresso",
+    "channel": 10,
+    "item": 5
+  },
+  {
+    "id": "cheese",
+    "category": "french",
+    "sourcePrefix": "10_06_Popular_French_Cheese",
+    "file": "french/french_cheese.glb",
+    "label": "Cheese",
+    "channel": 10,
+    "item": 6
+  },
+  {
+    "id": "wine",
+    "category": "french",
+    "sourcePrefix": "10_07_Popular_French_Wine",
+    "file": "french/french_wine.glb",
+    "label": "Wine",
+    "channel": 10,
+    "item": 7
+  },
+  {
+    "id": "macarons",
+    "category": "french",
+    "sourcePrefix": "10_08_Popular_French_Macarons",
+    "file": "french/french_macarons.glb",
+    "label": "Macarons",
+    "channel": 10,
+    "item": 8
+  },
+  {
+    "id": "bicycle",
+    "category": "french",
+    "sourcePrefix": "10_09_Popular_French_Bicycle",
+    "file": "french/french_bicycle.glb",
+    "label": "Bicycle",
+    "channel": 10,
+    "item": 9
+  },
+  {
+    "id": "baguette",
+    "category": "french",
+    "sourcePrefix": "10_10_Popular_French_Baguette",
+    "file": "french/french_baguette.glb",
+    "label": "Baguette",
+    "channel": 10,
+    "item": 10
+  },
+  {
+    "id": "perfume_bottle",
+    "category": "french",
+    "sourcePrefix": "10_11_Popular_French_Perfume_Bottle",
+    "file": "french/french_perfume_bottle.glb",
+    "label": "Perfume Bottle",
+    "channel": 10,
+    "item": 11
+  },
+  {
+    "id": "arc_de_triomphe",
+    "category": "french",
+    "sourcePrefix": "10_12_Popular_French_Arc_de_Triomphe",
+    "file": "french/french_arc_de_triomphe.glb",
+    "label": "Arc de Triomphe",
+    "channel": 10,
+    "item": 12
+  },
+  {
+    "id": "mime_mask",
+    "category": "french",
+    "sourcePrefix": "10_13_Popular_French_Mime_Mask",
+    "file": "french/french_mime_mask.glb",
+    "label": "Mime Mask",
+    "channel": 10,
+    "item": 13
+  },
+  {
+    "id": "lavender",
+    "category": "french",
+    "sourcePrefix": "10_14_Popular_French_Lavender",
+    "file": "french/french_lavender.glb",
+    "label": "Lavender",
+    "channel": 10,
+    "item": 14
+  },
+  {
+    "id": "poodle",
+    "category": "french",
+    "sourcePrefix": "10_15_Popular_French_Poodle",
+    "file": "french/french_poodle.glb",
+    "label": "Poodle",
+    "channel": 10,
+    "item": 15
+  },
+  {
+    "id": "cathedral",
+    "category": "french",
+    "sourcePrefix": "10_16_Popular_French_Cathedral",
+    "file": "french/french_cathedral.glb",
+    "label": "Cathedral",
+    "channel": 10,
+    "item": 16
+  },
+  {
+    "id": "dress_form",
+    "category": "french",
+    "sourcePrefix": "10_17_Popular_French_Dress_Form",
+    "file": "french/french_dress_form.glb",
+    "label": "Dress Form",
+    "channel": 10,
+    "item": 17
+  },
+  {
+    "id": "escargot",
+    "category": "french",
+    "sourcePrefix": "10_18_Popular_French_Escargot",
+    "file": "french/french_escargot.glb",
+    "label": "Escargot",
+    "channel": 10,
+    "item": 18
+  },
+  {
+    "id": "france_map",
+    "category": "french",
+    "sourcePrefix": "10_19_Popular_French_France_Map",
+    "file": "french/french_france_map.glb",
+    "label": "France Map",
+    "channel": 10,
+    "item": 19
+  },
+  {
+    "id": "street_lamp",
+    "category": "french",
+    "sourcePrefix": "10_20_Popular_French_Street_Lamp",
+    "file": "french/french_street_lamp.glb",
+    "label": "Street Lamp",
+    "channel": 10,
+    "item": 20
+  },
+  {
+    "id": "spain_flag",
+    "category": "spanish",
+    "sourcePrefix": "11_01_Popular_Spanish_Spain_Flag",
+    "file": "spanish/spanish_spain_flag.glb",
+    "label": "Spain Flag",
+    "channel": 11,
+    "item": 1
+  },
+  {
+    "id": "flamenco_dancer",
+    "category": "spanish",
+    "sourcePrefix": "11_02_Popular_Spanish_Flamenco_Dancer",
+    "file": "spanish/spanish_flamenco_dancer.glb",
+    "label": "Flamenco Dancer",
+    "channel": 11,
+    "item": 2
+  },
+  {
+    "id": "spanish_guitar",
+    "category": "spanish",
+    "sourcePrefix": "11_03_Popular_Spanish_Spanish_Guitar",
+    "file": "spanish/spanish_spanish_guitar.glb",
+    "label": "Spanish Guitar",
+    "channel": 11,
+    "item": 3
+  },
+  {
+    "id": "paella",
+    "category": "spanish",
+    "sourcePrefix": "11_04_Popular_Spanish_Paella",
+    "file": "spanish/spanish_paella.glb",
+    "label": "Paella",
+    "channel": 11,
+    "item": 4
+  },
+  {
+    "id": "soccer_ball",
+    "category": "spanish",
+    "sourcePrefix": "11_05_Popular_Spanish_Soccer_Ball",
+    "file": "spanish/spanish_soccer_ball.glb",
+    "label": "Soccer Ball",
+    "channel": 11,
+    "item": 5
+  },
+  {
+    "id": "hand_fan",
+    "category": "spanish",
+    "sourcePrefix": "11_06_Popular_Spanish_Hand_Fan",
+    "file": "spanish/spanish_hand_fan.glb",
+    "label": "Hand Fan",
+    "channel": 11,
+    "item": 6
+  },
+  {
+    "id": "bull",
+    "category": "spanish",
+    "sourcePrefix": "11_07_Popular_Spanish_Bull",
+    "file": "spanish/spanish_bull.glb",
+    "label": "Bull",
+    "channel": 11,
+    "item": 7
+  },
+  {
+    "id": "sangria",
+    "category": "spanish",
+    "sourcePrefix": "11_08_Popular_Spanish_Sangria",
+    "file": "spanish/spanish_sangria.glb",
+    "label": "Sangria",
+    "channel": 11,
+    "item": 8
+  },
+  {
+    "id": "sombrero",
+    "category": "spanish",
+    "sourcePrefix": "11_09_Popular_Spanish_Sombrero",
+    "file": "spanish/spanish_sombrero.glb",
+    "label": "Sombrero",
+    "channel": 11,
+    "item": 9
+  },
+  {
+    "id": "tapas",
+    "category": "spanish",
+    "sourcePrefix": "11_10_Popular_Spanish_Tapas",
+    "file": "spanish/spanish_tapas.glb",
+    "label": "Tapas",
+    "channel": 11,
+    "item": 10
+  },
+  {
+    "id": "sagrada_familia",
+    "category": "spanish",
+    "sourcePrefix": "11_11_Popular_Spanish_Sagrada_Familia",
+    "file": "spanish/spanish_sagrada_familia.glb",
+    "label": "Sagrada Familia",
+    "channel": 11,
+    "item": 11
+  },
+  {
+    "id": "beach_umbrella",
+    "category": "spanish",
+    "sourcePrefix": "11_12_Popular_Spanish_Beach_Umbrella",
+    "file": "spanish/spanish_beach_umbrella.glb",
+    "label": "Beach Umbrella",
+    "channel": 11,
+    "item": 12
+  },
+  {
+    "id": "olives",
+    "category": "spanish",
+    "sourcePrefix": "11_13_Popular_Spanish_Olives",
+    "file": "spanish/spanish_olives.glb",
+    "label": "Olives",
+    "channel": 11,
+    "item": 13
+  },
+  {
+    "id": "castanets",
+    "category": "spanish",
+    "sourcePrefix": "11_14_Popular_Spanish_Castanets",
+    "file": "spanish/spanish_castanets.glb",
+    "label": "Castanets",
+    "channel": 11,
+    "item": 14
+  },
+  {
+    "id": "olive_oil",
+    "category": "spanish",
+    "sourcePrefix": "11_15_Popular_Spanish_Olive_Oil",
+    "file": "spanish/spanish_olive_oil.glb",
+    "label": "Olive Oil",
+    "channel": 11,
+    "item": 15
+  },
+  {
+    "id": "chili_pepper",
+    "category": "spanish",
+    "sourcePrefix": "11_16_Popular_Spanish_Chili_Pepper",
+    "file": "spanish/spanish_chili_pepper.glb",
+    "label": "Chili Pepper",
+    "channel": 11,
+    "item": 16
+  },
+  {
+    "id": "surfboard",
+    "category": "spanish",
+    "sourcePrefix": "11_17_Popular_Spanish_Surfboard",
+    "file": "spanish/spanish_surfboard.glb",
+    "label": "Surfboard",
+    "channel": 11,
+    "item": 17
+  },
+  {
+    "id": "windmill",
+    "category": "spanish",
+    "sourcePrefix": "11_18_Popular_Spanish_Windmill",
+    "file": "spanish/spanish_windmill.glb",
+    "label": "Windmill",
+    "channel": 11,
+    "item": 18
+  },
+  {
+    "id": "orange_tree",
+    "category": "spanish",
+    "sourcePrefix": "11_19_Popular_Spanish_Orange_Tree",
+    "file": "spanish/spanish_orange_tree.glb",
+    "label": "Orange Tree",
+    "channel": 11,
+    "item": 19
+  },
+  {
+    "id": "sailboat",
+    "category": "spanish",
+    "sourcePrefix": "11_20_Popular_Spanish_Sailboat",
+    "file": "spanish/spanish_sailboat.glb",
+    "label": "Sailboat",
+    "channel": 11,
+    "item": 20
+  }
+]

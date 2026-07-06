@@ -1,0 +1,264 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
+<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+  <asset>
+    <contributor>
+      <author>Assimp</author>
+      <authoring_tool>https://github.com/mikedh/trimesh</authoring_tool>
+    </contributor>
+    <created>2026-07-03T10:30:33</created>
+    <modified>2026-07-03T10:30:33</modified>
+    <unit name="meter" meter="1" />
+    <up_axis>Y_UP</up_axis>
+  </asset>
+  <library_images>
+  </library_images>
+  <library_effects>
+    <effect id="panel_teal_trim-fx" name="panel_teal_trim">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0.419999987   0.349999994   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">0   1   0.87843138   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">608.399963</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="teal-fx" name="teal">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">0   0.721568644   0.678431392   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">302.5</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="material_2-fx" name="">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">1   1   1   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">0</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+  </library_effects>
+  <library_materials>
+    <material id="panel_teal_trim" name="panel_teal_trim">
+      <instance_effect url="#panel_teal_trim-fx"/>
+    </material>
+    <material id="teal" name="teal">
+      <instance_effect url="#teal-fx"/>
+    </material>
+    <material id="material_2" name="">
+      <instance_effect url="#material_2-fx"/>
+    </material>
+  </library_materials>
+  <library_geometries>
+    <geometry id="_06_14_Popular_Fashion_Dress_ROOT_base_1" name="06_14_Popular_Fashion_Dress_ROOT_base" >
+      <mesh>
+        <source id="_06_14_Popular_Fashion_Dress_ROOT_base_1-positions" name="_06_14_Popular_Fashion_Dress_ROOT_base_1-positions">
+          <float_array id="_06_14_Popular_Fashion_Dress_ROOT_base_1-positions-array" count="198"> 8.72000027 0.0199999996 5.44500017 8.72000027 0.0199999996 5.82499981 8.64586544 0.0199999996 5.4523015 8.72000027 0.0799999982 5.44500017 8.64586544 0.0799999982 5.4523015 8.72000027 0.0799999982 5.82499981 8.57458019 0.0199999996 5.47392559 8.57458019 0.0799999982 5.47392559 8.50888348 0.0199999996 5.50904131 8.50888348 0.0799999982 5.50904131 8.45129967 0.0199999996 5.55629921 8.45129967 0.0799999982 5.55629921 8.40404129 0.0199999996 5.6138835 8.40404129 0.0799999982 5.6138835 8.36892605 0.0199999996 5.67958021 8.36892605 0.0799999982 5.67958021 8.34730148 0.0199999996 5.75086546 8.34730148 0.0799999982 5.75086546 8.34000015 0.0199999996 5.82499981 8.34000015 0.0799999982 5.82499981 8.34730148 0.0199999996 5.89913416 8.34730148 0.0799999982 5.89913416 8.36892605 0.0199999996 5.97041988 8.36892605 0.0799999982 5.97041988 8.40404129 0.0199999996 6.0361166 8.40404129 0.0799999982 6.0361166 8.45129967 0.0199999996 6.09370041 8.45129967 0.0799999982 6.09370041 8.50888348 0.0199999996 6.14095831 8.50888348 0.0799999982 6.14095831 8.57458019 0.0199999996 6.17607403 8.57458019 0.0799999982 6.17607403 8.64586544 0.0199999996 6.19769859 8.64586544 0.0799999982 6.19769859 8.72000027 0.0199999996 6.20499992 8.72000027 0.0799999982 6.20499992 8.79413414 0.0199999996 6.19769859 8.79413414 0.0799999982 6.19769859 8.86541939 0.0199999996 6.17607403 8.86541939 0.0799999982 6.17607403 8.93111706 0.0199999996 6.14095831 8.93111706 0.0799999982 6.14095831 8.98870087 0.0199999996 6.09370041 8.98870087 0.0799999982 6.09370041 9.03595829 0.0199999996 6.0361166 9.03595829 0.0799999982 6.0361166 9.07107449 0.0199999996 5.97041988 9.07107449 0.0799999982 5.97041988 9.0926981 0.0199999996 5.89913416 9.0926981 0.0799999982 5.89913416 9.10000038 0.0199999996 5.82499981 9.10000038 0.0799999982 5.82499981 9.0926981 0.0199999996 5.75086546 9.0926981 0.0799999982 5.75086546 9.07107449 0.0199999996 5.67958021 9.07107449 0.0799999982 5.67958021 9.03595829 0.0199999996 5.6138835 9.03595829 0.0799999982 5.6138835 8.98870087 0.0199999996 5.55629921 8.98870087 0.0799999982 5.55629921 8.93111706 0.0199999996 5.50904131 8.93111706 0.0799999982 5.50904131 8.86541939 0.0199999996 5.47392559 8.86541939 0.0799999982 5.47392559 8.79413414 0.0199999996 5.4523015 8.79413414 0.0799999982 5.4523015 </float_array>
+          <technique_common>
+            <accessor count="66" offset="0" source="#_06_14_Popular_Fashion_Dress_ROOT_base_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_06_14_Popular_Fashion_Dress_ROOT_base_1-vertices">
+          <input semantic="POSITION" source="#_06_14_Popular_Fashion_Dress_ROOT_base_1-positions" />
+        </vertices>
+        <polylist count="128" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_06_14_Popular_Fashion_Dress_ROOT_base_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 34 32 34 33 33 34 35 33 35 5 34 1 36 34 36 35 35 36 37 35 37 5 36 1 38 36 38 37 37 38 39 37 39 5 38 1 40 38 40 39 39 40 41 39 41 5 40 1 42 40 42 41 41 42 43 41 43 5 42 1 44 42 44 43 43 44 45 43 45 5 44 1 46 44 46 45 45 46 47 45 47 5 46 1 48 46 48 47 47 48 49 47 49 5 48 1 50 48 50 49 49 50 51 49 51 5 50 1 52 50 52 51 51 52 53 51 53 5 52 1 54 52 54 53 53 54 55 53 55 5 54 1 56 54 56 55 55 56 57 55 57 5 56 1 58 56 58 57 57 58 59 57 59 5 58 1 60 58 60 59 59 60 61 59 61 5 60 1 62 60 62 61 61 62 63 61 63 5 62 1 64 62 64 63 63 64 65 63 65 5 64 1 0 64 0 65 65 0 3 65 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_06_14_Popular_Fashion_Dress_part_01_1" name="06_14_Popular_Fashion_Dress_part_01" >
+      <mesh>
+        <source id="_06_14_Popular_Fashion_Dress_part_01_1-positions" name="_06_14_Popular_Fashion_Dress_part_01_1-positions">
+          <float_array id="_06_14_Popular_Fashion_Dress_part_01_1-positions-array" count="102"> 8.72000027 0.150000006 5.46500015 8.72000027 0.150000006 5.82499981 8.64976788 0.150000006 5.47191715 8.72000027 0.658235312 5.82499981 8.58223438 0.150000006 5.49240351 8.51999474 0.150000006 5.52567101 8.4654417 0.150000006 5.57044172 8.42067051 0.150000006 5.62499475 8.38740349 0.150000006 5.68723392 8.36691761 0.150000006 5.75476742 8.35999966 0.150000006 5.82499981 8.36691761 0.150000006 5.89523268 8.38740349 0.150000006 5.96276617 8.42067051 0.150000006 6.02500534 8.4654417 0.150000006 6.07955837 8.51999474 0.150000006 6.12432909 8.58223438 0.150000006 6.15759659 8.64976788 0.150000006 6.17808247 8.72000027 0.150000006 6.18499994 8.79023266 0.150000006 6.17808247 8.85776615 0.150000006 6.15759659 8.92000484 0.150000006 6.12432909 8.97455883 0.150000006 6.07955837 9.01932907 0.150000006 6.02500534 9.05259705 0.150000006 5.96276617 9.07308292 0.150000006 5.89523268 9.07999992 0.150000006 5.82499981 9.07308292 0.150000006 5.75476742 9.05259705 0.150000006 5.68723392 9.01932907 0.150000006 5.62499475 8.97455883 0.150000006 5.57044172 8.92000484 0.150000006 5.52567101 8.85776615 0.150000006 5.49240351 8.79023266 0.150000006 5.47191715 </float_array>
+          <technique_common>
+            <accessor count="34" offset="0" source="#_06_14_Popular_Fashion_Dress_part_01_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_06_14_Popular_Fashion_Dress_part_01_1-vertices">
+          <input semantic="POSITION" source="#_06_14_Popular_Fashion_Dress_part_01_1-positions" />
+        </vertices>
+        <polylist count="64" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_06_14_Popular_Fashion_Dress_part_01_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 2 1 4 2 4 3 4 1 5 4 5 3 5 1 6 5 6 3 6 1 7 6 7 3 7 1 8 7 8 3 8 1 9 8 9 3 9 1 10 9 10 3 10 1 11 10 11 3 11 1 12 11 12 3 12 1 13 12 13 3 13 1 14 13 14 3 14 1 15 14 15 3 15 1 16 15 16 3 16 1 17 16 17 3 17 1 18 17 18 3 18 1 19 18 19 3 19 1 20 19 20 3 20 1 21 20 21 3 21 1 22 21 22 3 22 1 23 22 23 3 23 1 24 23 24 3 24 1 25 24 25 3 25 1 26 25 26 3 26 1 27 26 27 3 27 1 28 27 28 3 28 1 29 28 29 3 29 1 30 29 30 3 30 1 31 30 31 3 31 1 32 31 32 3 32 1 33 32 33 3 33 1 0 33 0 3 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_06_14_Popular_Fashion_Dress_part_02_1" name="06_14_Popular_Fashion_Dress_part_02" >
+      <mesh>
+        <source id="_06_14_Popular_Fashion_Dress_part_02_1-positions" name="_06_14_Popular_Fashion_Dress_part_02_1-positions">
+          <float_array id="_06_14_Popular_Fashion_Dress_part_02_1-positions-array" count="24"> 8.57176495 0.578823507 5.90970612 8.57176495 0.843529403 5.90970612 8.57176495 0.578823507 5.74029398 8.86823559 0.578823507 5.74029398 8.57176495 0.843529403 5.74029398 8.86823559 0.843529403 5.90970612 8.86823559 0.578823507 5.90970612 8.86823559 0.843529403 5.74029398 </float_array>
+          <technique_common>
+            <accessor count="8" offset="0" source="#_06_14_Popular_Fashion_Dress_part_02_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_06_14_Popular_Fashion_Dress_part_02_1-vertices">
+          <input semantic="POSITION" source="#_06_14_Popular_Fashion_Dress_part_02_1-positions" />
+        </vertices>
+        <polylist count="12" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_06_14_Popular_Fashion_Dress_part_02_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 3 0 2 2 1 4 4 3 2 0 5 1 6 0 3 6 5 0 1 5 4 7 3 4 4 5 7 7 6 3 5 6 7 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_06_14_Popular_Fashion_Dress_part_03_1" name="06_14_Popular_Fashion_Dress_part_03" >
+      <mesh>
+        <source id="_06_14_Popular_Fashion_Dress_part_03_1-positions" name="_06_14_Popular_Fashion_Dress_part_03_1-positions">
+          <float_array id="_06_14_Popular_Fashion_Dress_part_03_1-positions-array" count="198"> 8.55058861 0.742941201 5.86205864 8.55058861 0.742941201 5.82499981 8.54514694 0.747702062 5.86134672 8.40235329 0.573529422 5.86205864 8.39691162 0.578290284 5.86134672 8.40235329 0.573529422 5.82499981 8.53991508 0.752279937 5.85923767 8.39167976 0.582868218 5.85923767 8.53509331 0.756498992 5.8558135 8.38685799 0.587087214 5.8558135 8.53086758 0.760196984 5.8512044 8.38263226 0.590785205 5.8512044 8.52739906 0.763231874 5.84558868 8.37916374 0.593820095 5.84558868 8.52482128 0.765486956 5.8391819 8.37658596 0.596075237 5.8391819 8.52323437 0.766875684 5.83222961 8.37499905 0.597463906 5.83222961 8.5226984 0.767344594 5.82499981 8.37446308 0.597932816 5.82499981 8.52323437 0.766875684 5.81777 8.37499905 0.597463906 5.81777 8.52482128 0.765486956 5.8108182 8.37658596 0.596075237 5.8108182 8.52739906 0.763231874 5.80441141 8.37916374 0.593820095 5.80441141 8.53086758 0.760196984 5.79879522 8.38263226 0.590785205 5.79879522 8.53509331 0.756498992 5.79418659 8.38685799 0.587087214 5.79418659 8.53991508 0.752279937 5.79076195 8.39167976 0.582868218 5.79076195 8.54514694 0.747702062 5.78865337 8.39691162 0.578290284 5.78865337 8.55058861 0.742941201 5.78794098 8.40235329 0.573529422 5.78794098 8.55602932 0.73818028 5.78865337 8.407794 0.568768561 5.78865337 8.56126118 0.733602405 5.79076195 8.41302586 0.564190626 5.79076195 8.56608295 0.729383349 5.79418659 8.41784763 0.559971631 5.79418659 8.57030964 0.725685358 5.79879522 8.42207432 0.55627358 5.79879522 8.5737772 0.722650468 5.80441141 8.42554188 0.55323875 5.80441141 8.57635498 0.720395386 5.8108182 8.42811966 0.550983608 5.8108182 8.57794189 0.719006658 5.81777 8.42970657 0.549594939 5.81777 8.57847786 0.718537748 5.82499981 8.43024254 0.549126029 5.82499981 8.57794189 0.719006658 5.83222961 8.42970657 0.549594939 5.83222961 8.57635498 0.720395386 5.8391819 8.42811966 0.550983608 5.8391819 8.5737772 0.722650468 5.84558868 8.42554188 0.55323875 5.84558868 8.57030964 0.725685358 5.8512044 8.42207432 0.55627358 5.8512044 8.56608295 0.729383349 5.8558135 8.41784763 0.559971631 5.8558135 8.56126118 0.733602405 5.85923767 8.41302586 0.564190626 5.85923767 8.55602932 0.73818028 5.86134672 8.407794 0.568768561 5.86134672 </float_array>
+          <technique_common>
+            <accessor count="66" offset="0" source="#_06_14_Popular_Fashion_Dress_part_03_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_06_14_Popular_Fashion_Dress_part_03_1-vertices">
+          <input semantic="POSITION" source="#_06_14_Popular_Fashion_Dress_part_03_1-positions" />
+        </vertices>
+        <polylist count="128" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_06_14_Popular_Fashion_Dress_part_03_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 34 32 34 33 33 34 35 33 35 5 34 1 36 34 36 35 35 36 37 35 37 5 36 1 38 36 38 37 37 38 39 37 39 5 38 1 40 38 40 39 39 40 41 39 41 5 40 1 42 40 42 41 41 42 43 41 43 5 42 1 44 42 44 43 43 44 45 43 45 5 44 1 46 44 46 45 45 46 47 45 47 5 46 1 48 46 48 47 47 48 49 47 49 5 48 1 50 48 50 49 49 50 51 49 51 5 50 1 52 50 52 51 51 52 53 51 53 5 52 1 54 52 54 53 53 54 55 53 55 5 54 1 56 54 56 55 55 56 57 55 57 5 56 1 58 56 58 57 57 58 59 57 59 5 58 1 60 58 60 59 59 60 61 59 61 5 60 1 62 60 62 61 61 62 63 61 63 5 62 1 64 62 64 63 63 64 65 63 65 5 64 1 0 64 0 65 65 0 3 65 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_06_14_Popular_Fashion_Dress_part_04_1" name="06_14_Popular_Fashion_Dress_part_04" >
+      <mesh>
+        <source id="_06_14_Popular_Fashion_Dress_part_04_1-positions" name="_06_14_Popular_Fashion_Dress_part_04_1-positions">
+          <float_array id="_06_14_Popular_Fashion_Dress_part_04_1-positions-array" count="198"> 8.88941193 0.742941201 5.78794098 8.88941193 0.742941201 5.82499981 8.89485264 0.747702062 5.78865337 9.03764725 0.573529422 5.78794098 9.04308796 0.578290284 5.78865337 9.03764725 0.573529422 5.82499981 8.9000845 0.752279937 5.79076195 9.04831982 0.582868218 5.79076195 8.90490627 0.756498992 5.79418659 9.05314159 0.587087214 5.79418659 8.90913296 0.760196984 5.79879522 9.05736828 0.590785205 5.79879522 8.91260147 0.763231874 5.80441141 9.06083679 0.593820095 5.80441141 8.9151783 0.765486956 5.8108182 9.06341362 0.596075237 5.8108182 8.91676521 0.766875684 5.81777 9.06500053 0.597463906 5.81777 8.91730118 0.767344594 5.82499981 9.0655365 0.597932816 5.82499981 8.91676521 0.766875684 5.83222961 9.06500053 0.597463906 5.83222961 8.9151783 0.765486956 5.8391819 9.06341362 0.596075237 5.8391819 8.91260147 0.763231874 5.84558868 9.06083679 0.593820095 5.84558868 8.90913296 0.760196984 5.8512044 9.05736828 0.590785205 5.8512044 8.90490627 0.756498992 5.8558135 9.05314159 0.587087214 5.8558135 8.9000845 0.752279937 5.85923767 9.04831982 0.582868218 5.85923767 8.89485264 0.747702062 5.86134672 9.04308796 0.578290284 5.86134672 8.88941193 0.742941201 5.86205864 9.03764725 0.573529422 5.86205864 8.88397121 0.73818028 5.86134672 9.03220654 0.568768561 5.86134672 8.8787384 0.733602405 5.85923767 9.02697372 0.564190626 5.85923767 8.87391758 0.729383349 5.8558135 9.02215195 0.559971631 5.8558135 8.8696909 0.725685358 5.8512044 9.01792622 0.55627358 5.8512044 8.86622238 0.722650468 5.84558868 9.0144577 0.55323875 5.84558868 8.86364555 0.720395386 5.8391819 9.01188087 0.550983608 5.8391819 8.86205769 0.719006658 5.83222961 9.01029301 0.549594939 5.83222961 8.86152172 0.718537748 5.82499981 9.00975704 0.549126029 5.82499981 8.86205769 0.719006658 5.81777 9.01029301 0.549594939 5.81777 8.86364555 0.720395386 5.8108182 9.01188087 0.550983608 5.8108182 8.86622238 0.722650468 5.80441141 9.0144577 0.55323875 5.80441141 8.8696909 0.725685358 5.79879522 9.01792622 0.55627358 5.79879522 8.87391758 0.729383349 5.79418659 9.02215195 0.559971631 5.79418659 8.8787384 0.733602405 5.79076195 9.02697372 0.564190626 5.79076195 8.88397121 0.73818028 5.78865337 9.03220654 0.568768561 5.78865337 </float_array>
+          <technique_common>
+            <accessor count="66" offset="0" source="#_06_14_Popular_Fashion_Dress_part_04_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_06_14_Popular_Fashion_Dress_part_04_1-vertices">
+          <input semantic="POSITION" source="#_06_14_Popular_Fashion_Dress_part_04_1-positions" />
+        </vertices>
+        <polylist count="128" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_06_14_Popular_Fashion_Dress_part_04_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 34 32 34 33 33 34 35 33 35 5 34 1 36 34 36 35 35 36 37 35 37 5 36 1 38 36 38 37 37 38 39 37 39 5 38 1 40 38 40 39 39 40 41 39 41 5 40 1 42 40 42 41 41 42 43 41 43 5 42 1 44 42 44 43 43 44 45 43 45 5 44 1 46 44 46 45 45 46 47 45 47 5 46 1 48 46 48 47 47 48 49 47 49 5 48 1 50 48 50 49 49 50 51 49 51 5 50 1 52 50 52 51 51 52 53 51 53 5 52 1 54 52 54 53 53 54 55 53 55 5 54 1 56 54 56 55 55 56 57 55 57 5 56 1 58 56 58 57 57 58 59 57 59 5 58 1 60 58 60 59 59 60 61 59 61 5 60 1 62 60 62 61 61 62 63 61 63 5 62 1 64 62 64 63 63 64 65 63 65 5 64 1 0 64 0 65 65 0 3 65 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+  </library_geometries>
+  <library_controllers>
+  </library_controllers>
+  <library_visual_scenes>
+    <visual_scene id="ROOT" name="ROOT">
+      <node id="_06_14_Popular_Fashion_Dress_ROOT_base" name="06_14_Popular_Fashion_Dress_ROOT_base" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_06_14_Popular_Fashion_Dress_ROOT_base_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#panel_teal_trim">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_06_14_Popular_Fashion_Dress_part_01" name="06_14_Popular_Fashion_Dress_part_01" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_06_14_Popular_Fashion_Dress_part_01_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#teal">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_06_14_Popular_Fashion_Dress_part_02" name="06_14_Popular_Fashion_Dress_part_02" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_06_14_Popular_Fashion_Dress_part_02_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#teal">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_06_14_Popular_Fashion_Dress_part_03" name="06_14_Popular_Fashion_Dress_part_03" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_06_14_Popular_Fashion_Dress_part_03_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#teal">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_06_14_Popular_Fashion_Dress_part_04" name="06_14_Popular_Fashion_Dress_part_04" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_06_14_Popular_Fashion_Dress_part_04_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#teal">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+    </visual_scene>
+  </library_visual_scenes>
+  <scene>
+    <instance_visual_scene url="#ROOT" />
+  </scene>
+</COLLADA>

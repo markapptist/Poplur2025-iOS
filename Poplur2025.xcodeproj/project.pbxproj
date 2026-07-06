@@ -15,7 +15,8 @@
 		391605F72E3F4A0B000ACB3E /* FirebaseFirestoreCombine-Community in Frameworks */ = {isa = PBXBuildFile; productRef = 391605F62E3F4A0B000ACB3E /* FirebaseFirestoreCombine-Community */; };
 		391605F92E3F4A0B000ACB3E /* FirebaseStorage in Frameworks */ = {isa = PBXBuildFile; productRef = 391605F82E3F4A0B000ACB3E /* FirebaseStorage */; };
 		391605FB2E3F4A0B000ACB3E /* FirebaseStorageCombine-Community in Frameworks */ = {isa = PBXBuildFile; productRef = 391605FA2E3F4A0B000ACB3E /* FirebaseStorageCombine-Community */; };
-		B4C9B1002F68000100C0DE01 /* CubeModels in Resources */ = {isa = PBXBuildFile; fileRef = B4C9B1012F68000100C0DE01 /* CubeModels */; };
+		B4A1F0012F70000100C0DE01 /* FirebaseFunctions in Frameworks */ = {isa = PBXBuildFile; productRef = B4A1F0002F70000100C0DE01 /* FirebaseFunctions */; };
+		B4C9B1002F68000100C0DE01 /* Poplur2025/CubeModels in Resources */ = {isa = PBXBuildFile; fileRef = B4C9B1012F68000100C0DE01 /* Poplur2025/CubeModels */; };
 		F0640B822F3521FC0093A1F4 /* GoogleMaps3D in Frameworks */ = {isa = PBXBuildFile; productRef = F0640B812F3521FC0093A1F4 /* GoogleMaps3D */; };
 		F0640B842F3600000093A1F4 /* GLTFSceneKit in Frameworks */ = {isa = PBXBuildFile; productRef = F0640B832F3600000093A1F4 /* GLTFSceneKit */; };
 		F070D53D2F33B192006F44C8 /* GoogleMobileAds in Frameworks */ = {isa = PBXBuildFile; productRef = F070D53C2F33B192006F44C8 /* GoogleMobileAds */; };
@@ -42,7 +43,7 @@
 		391605C12E3F48FF000ACB3E /* Poplur2025.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Poplur2025.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		391605CE2E3F4902000ACB3E /* Poplur2025Tests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = Poplur2025Tests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		391605D82E3F4902000ACB3E /* Poplur2025UITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = Poplur2025UITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		B4C9B1012F68000100C0DE01 /* CubeModels */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Poplur2025/CubeModels; sourceTree = "<group>"; };
+		B4C9B1012F68000100C0DE01 /* Poplur2025/CubeModels */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Poplur2025/CubeModels; sourceTree = "<group>"; };
 		B4F100002F50000000000001 /* PoplurWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PoplurWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -52,7 +53,6 @@
 			membershipExceptions = (
 				CityTourMusicPlayerService.swift,
 				Enhanced3DBeaconMarker.swift,
-				"FeedFullscreenPage 2.swift",
 				Info.plist,
 				SceneKitMarkers.swift,
 				TrendOverlays.swift,
@@ -97,6 +97,7 @@
 				F0640B842F3600000093A1F4 /* GLTFSceneKit in Frameworks */,
 				391605ED2E3F4A0B000ACB3E /* FirebaseAppCheck in Frameworks */,
 				391605F12E3F4A0B000ACB3E /* FirebaseCore in Frameworks */,
+				B4A1F0012F70000100C0DE01 /* FirebaseFunctions in Frameworks */,
 				391605FB2E3F4A0B000ACB3E /* FirebaseStorageCombine-Community in Frameworks */,
 				391605F32E3F4A0B000ACB3E /* FirebaseDatabase in Frameworks */,
 				391605F72E3F4A0B000ACB3E /* FirebaseFirestoreCombine-Community in Frameworks */,
@@ -135,7 +136,7 @@
 			isa = PBXGroup;
 			children = (
 				391605C32E3F48FF000ACB3E /* Poplur2025 */,
-				B4C9B1012F68000100C0DE01 /* CubeModels */,
+				B4C9B1012F68000100C0DE01 /* Poplur2025/CubeModels */,
 				B4F100012F50000000000001 /* PoplurWatch */,
 				391605D12E3F4902000ACB3E /* Poplur2025Tests */,
 				391605DB2E3F4902000ACB3E /* Poplur2025UITests */,
@@ -185,6 +186,7 @@
 				391605EC2E3F4A0B000ACB3E /* FirebaseAppCheck */,
 				391605EE2E3F4A0B000ACB3E /* FirebaseAuth */,
 				391605F02E3F4A0B000ACB3E /* FirebaseCore */,
+				B4A1F0002F70000100C0DE01 /* FirebaseFunctions */,
 				391605F22E3F4A0B000ACB3E /* FirebaseDatabase */,
 				391605F42E3F4A0B000ACB3E /* FirebaseFirestore */,
 				391605F62E3F4A0B000ACB3E /* FirebaseFirestoreCombine-Community */,
@@ -325,7 +327,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				B4C9B1002F68000100C0DE01 /* CubeModels in Resources */,
+				B4C9B1002F68000100C0DE01 /* Poplur2025/CubeModels in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -556,6 +558,7 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_COMPILATION_MODE = incremental;
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "Poplur2025/Poplur2025-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -595,6 +598,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.apptist.Poplur2025;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "Poplur2025/Poplur2025-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -857,6 +861,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 391605EB2E3F4A0B000ACB3E /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
 			productName = "FirebaseStorageCombine-Community";
+		};
+		B4A1F0002F70000100C0DE01 /* FirebaseFunctions */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 391605EB2E3F4A0B000ACB3E /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseFunctions;
 		};
 		F0640B812F3521FC0093A1F4 /* GoogleMaps3D */ = {
 			isa = XCSwiftPackageProductDependency;

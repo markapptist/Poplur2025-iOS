@@ -1,0 +1,111 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isSelf(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    function protectedPremiumAIFields() {
+      return [
+        'isPremium',
+        'premiumTier',
+        'aiMonthlyLimit',
+        'aiUsedThisMonth',
+        'aiUsageMonth'
+      ];
+    }
+
+    function doesNotWritePremiumAIFields() {
+      return !request.resource.data.keys().hasAny(protectedPremiumAIFields());
+    }
+
+    function keepsPremiumAIFieldsUnchanged() {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(protectedPremiumAIFields());
+    }
+
+    match /users/{userId} {
+      allow read: if isSelf(userId);
+      allow create: if isSelf(userId) && doesNotWritePremiumAIFields();
+      allow update: if isSelf(userId) && keepsPremiumAIFieldsUnchanged();
+      allow delete: if false;
+
+      match /favorites/{favoriteId} {
+        allow read, write: if isSelf(userId);
+      }
+
+      match /radiusPurchases/{purchaseId} {
+        allow read: if isSelf(userId);
+        allow write: if false;
+      }
+    }
+
+    match /creatorCreditBalances/{userId} {
+      allow read: if isSelf(userId);
+      allow write: if false;
+    }
+
+    match /creatorCreditTransactions/{transactionId} {
+      allow read: if signedIn() && resource.data.userId == request.auth.uid;
+      allow write: if false;
+    }
+
+    match /aiGenerationJobs/{jobId} {
+      allow read: if signedIn() && resource.data.userId == request.auth.uid;
+      allow write: if false;
+    }
+
+    match /generatedAssets/{assetId} {
+      allow read: if signedIn() && resource.data.userId == request.auth.uid;
+      allow write: if false;
+    }
+
+    match /radiusBoostTransactions/{transactionId} {
+      allow read: if signedIn() && resource.data.userId == request.auth.uid;
+      allow write: if false;
+    }
+
+    match /aiCampaigns/{campaignId} {
+      allow read: if signedIn() && resource.data.ownerUid == request.auth.uid;
+      allow write: if false;
+    }
+
+    match /posts/{postId} {
+      allow read: if true;
+      allow create: if signedIn()
+        && (request.resource.data.userID == request.auth.uid
+          || request.resource.data.userId == request.auth.uid);
+      allow update, delete: if signedIn()
+        && (resource.data.userID == request.auth.uid
+          || resource.data.userId == request.auth.uid);
+    }
+
+    match /delivery_orders/{orderId} {
+      allow read: if signedIn()
+        && (resource.data.buyerUserId == request.auth.uid
+          || resource.data.merchantUserId == request.auth.uid
+          || resource.data.postOwnerId == request.auth.uid);
+      allow write: if false;
+    }
+
+    match /calls/{callId} {
+      allow read, write: if signedIn();
+    }
+
+    match /businesses/{businessId} {
+      allow read: if true;
+      allow create: if signedIn() && request.resource.data.ownerUserId == request.auth.uid;
+      allow update, delete: if signedIn() && resource.data.ownerUserId == request.auth.uid;
+    }
+
+    // Keep production rules explicit. Add additional collection rules here as new
+    // app features are made persistent.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

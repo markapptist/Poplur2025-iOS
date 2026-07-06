@@ -93,105 +93,102 @@ struct CommentSectionView: View {
                 
                 // Comment section card
                 VStack(spacing: 0) {
-                // Header
-                HStack {
-                    Text("Comments")
-                        .font(.headline)
-                        .foregroundStyle(.white)
-                    
-                    Spacer()
-                    
-                    Button(action: onDismiss) {
-                        Image(systemName: "xmark.circle.fill")
-                            .poplurIconShader()
-                            .font(.title2)
-                            .foregroundStyle(.white.opacity(0.6))
+                    // Header
+                    HStack {
+                        Text("Comments")
+                            .font(DS.Font.heading())
+                            .foregroundStyle(DS.Color.textPrimary)
+
+                        Spacer()
+
+                        Button(action: onDismiss) {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.title2)
+                                .foregroundStyle(DS.Color.textSecondary)
+                        }
                     }
-                }
-                .padding()
-                .background(.ultraThinMaterial)
-                
-                Divider()
-                
-                // Comments list
-                if comments.isEmpty {
-                    VStack(spacing: 16) {
-                        Image(systemName: "bubble.left.and.bubble.right")
-                            .poplurIconShader()
-                            .font(.system(size: 48))
-                            .foregroundStyle(.white.opacity(0.3))
-                        
-                        Text("No comments yet")
-                            .font(.subheadline)
-                            .foregroundStyle(.white.opacity(0.5))
-                        
-                        Text("Be the first to comment!")
-                            .font(.caption)
-                            .foregroundStyle(.white.opacity(0.3))
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(.ultraThinMaterial)
-                } else {
-                    ScrollView {
-                        LazyVStack(spacing: 16) {
-                            ForEach(comments) { comment in
-                                CommentRowView(
-                                    comment: comment,
-                                    onLike: {
-                                        toggleLike(for: comment.id)
-                                    },
-                                    onUsernameTap: {
-                                        // Navigate to user profile
-                                        NotificationCenter.default.post(
-                                            name: .ShowUserProfile,
-                                            object: comment.userID
-                                        )
-                                        onDismiss()
-                                    }
-                                )
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 14)
+                    .background(DS.Color.card)
+
+                    PoplurRowSeparator()
+
+                    // Comments list
+                    if comments.isEmpty {
+                        VStack(spacing: 16) {
+                            Image(systemName: "bubble.left.and.bubble.right")
+                                .font(.system(size: 44))
+                                .foregroundStyle(DS.Color.textSecondary.opacity(0.5))
+
+                            Text("No comments yet")
+                                .font(DS.Font.body())
+                                .foregroundStyle(DS.Color.textSecondary)
+
+                            Text("Be the first to comment!")
+                                .font(DS.Font.caption())
+                                .foregroundStyle(DS.Color.textSecondary.opacity(0.7))
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(DS.Color.background)
+                    } else {
+                        ScrollView {
+                            LazyVStack(spacing: 16) {
+                                ForEach(comments) { comment in
+                                    CommentRowView(
+                                        comment: comment,
+                                        onLike: { toggleLike(for: comment.id) },
+                                        onUsernameTap: {
+                                            NotificationCenter.default.post(
+                                                name: .ShowUserProfile,
+                                                object: comment.userID
+                                            )
+                                            onDismiss()
+                                        }
+                                    )
+                                }
                             }
+                            .padding()
                         }
-                        .padding()
+                        .background(DS.Color.background)
                     }
-                    .background(.ultraThinMaterial)
-                }
-                
-                Divider()
-                
-                // Comment input (placeholder for now)
-                HStack(spacing: 12) {
-                    TextField("Add a comment...", text: $newCommentText)
-                        .textFieldStyle(.plain)
-                        .padding(12)
-                        .background(Color.white.opacity(0.1))
-                        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-                        .foregroundStyle(.white)
-                        .focused($isTextFieldFocused)
-                    
-                    Button(action: {
-                        // Post comment action (placeholder)
-                        if !newCommentText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            // Future: Post comment to backend
-                            newCommentText = ""
-                            isTextFieldFocused = false
+
+                    PoplurRowSeparator()
+
+                    // Comment input
+                    HStack(spacing: 12) {
+                        TextField("Add a comment...", text: $newCommentText)
+                            .textFieldStyle(.plain)
+                            .font(DS.Font.body(15))
+                            .foregroundStyle(DS.Color.textPrimary)
+                            .tint(DS.Color.accent)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+                            .background(DS.Color.fill, in: Capsule())
+                            .focused($isTextFieldFocused)
+
+                        Button(action: {
+                            if !newCommentText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                newCommentText = ""
+                                isTextFieldFocused = false
+                            }
+                        }) {
+                            Image(systemName: "paperplane.fill")
+                                .font(.system(size: 20, weight: .bold))
+                                .foregroundStyle(newCommentText.isEmpty ? DS.Color.textSecondary : DS.Color.accent)
+                                .frame(width: 44, height: 44)
                         }
-                    }) {
-                        Image(systemName: "paperplane.fill")
-                            .poplurIconShader()
-                            .font(.title3)
-                            .foregroundStyle(newCommentText.isEmpty ? .white.opacity(0.3) : .blue)
+                        .disabled(newCommentText.isEmpty)
                     }
-                    .disabled(newCommentText.isEmpty)
-                }
-                .padding()
-                .background(.ultraThinMaterial)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(DS.Color.card)
                 }
                 .frame(maxWidth: .infinity)
                 .frame(height: 500)
-                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-                .shadow(color: .black.opacity(0.5), radius: 20, x: 0, y: 10)
-                .padding(.horizontal, 24)
-                .padding(.bottom, 60) // Position near bottom with some padding
+                .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
+                .shadow(color: DS.Shadow.hero.color, radius: DS.Shadow.hero.radius, x: DS.Shadow.hero.x, y: DS.Shadow.hero.y)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 60)
                 
                 Spacer()
                     .frame(height: 40)
@@ -279,55 +276,44 @@ private struct CommentRowView: View {
         HStack(alignment: .top, spacing: 12) {
             // Profile image placeholder
             Circle()
-                .fill(
-                    LinearGradient(
-                        colors: [.blue, .purple],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
+                .fill(DS.Color.pinkCard)
                 .frame(width: 36, height: 36)
                 .overlay {
                     Text(comment.username.prefix(1).uppercased())
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundStyle(DS.Color.accent)
                 }
-            
+
             VStack(alignment: .leading, spacing: 4) {
-                // Username and timestamp
                 HStack(spacing: 8) {
                     Button(action: onUsernameTap) {
                         Text(comment.username)
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                            .foregroundStyle(.white)
+                            .font(DS.Font.label())
+                            .foregroundStyle(DS.Color.textPrimary)
                     }
-                    
+
                     Text(timeAgoString(from: comment.timestamp))
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.5))
-                    
+                        .font(DS.Font.caption(12))
+                        .foregroundStyle(DS.Color.textSecondary)
+
                     Spacer()
                 }
-                
-                // Comment text
+
                 Text(comment.text)
-                    .font(.body)
-                    .foregroundStyle(.white.opacity(0.9))
+                    .font(DS.Font.body(15))
+                    .foregroundStyle(DS.Color.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
-                
-                // Like button
+
                 Button(action: onLike) {
                     HStack(spacing: 4) {
                         Image(systemName: comment.isLikedByCurrentUser ? "heart.fill" : "heart")
-                            .poplurIconShader()
-                            .font(.subheadline)
-                            .foregroundStyle(comment.isLikedByCurrentUser ? .red : .white.opacity(0.6))
-                        
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(comment.isLikedByCurrentUser ? DS.Color.accent : DS.Color.textSecondary)
+
                         if comment.likeCount > 0 {
                             Text("\(comment.likeCount)")
-                                .font(.caption)
-                                .foregroundStyle(.white.opacity(0.6))
+                                .font(DS.Font.caption(12))
+                                .foregroundStyle(DS.Color.textSecondary)
                         }
                     }
                 }

@@ -1,0 +1,231 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
+<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+  <asset>
+    <contributor>
+      <author>Assimp</author>
+      <authoring_tool>https://github.com/mikedh/trimesh</authoring_tool>
+    </contributor>
+    <created>2026-07-03T10:30:32</created>
+    <modified>2026-07-03T10:30:32</modified>
+    <unit name="meter" meter="1" />
+    <up_axis>Y_UP</up_axis>
+  </asset>
+  <library_images>
+  </library_images>
+  <library_effects>
+    <effect id="panel_teal_trim-fx" name="panel_teal_trim">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0.419999987   0.349999994   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">0   1   0.87843138   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">608.399963</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="teal-fx" name="teal">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">0   0.721568644   0.678431392   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">302.5</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="material_2-fx" name="">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">1   1   1   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">0</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+  </library_effects>
+  <library_materials>
+    <material id="panel_teal_trim" name="panel_teal_trim">
+      <instance_effect url="#panel_teal_trim-fx"/>
+    </material>
+    <material id="teal" name="teal">
+      <instance_effect url="#teal-fx"/>
+    </material>
+    <material id="material_2" name="">
+      <instance_effect url="#material_2-fx"/>
+    </material>
+  </library_materials>
+  <library_geometries>
+    <geometry id="_06_06_Popular_Fashion_T_Shirt_ROOT_base_1" name="06_06_Popular_Fashion_T_Shirt_ROOT_base" >
+      <mesh>
+        <source id="_06_06_Popular_Fashion_T_Shirt_ROOT_base_1-positions" name="_06_06_Popular_Fashion_T_Shirt_ROOT_base_1-positions">
+          <float_array id="_06_06_Popular_Fashion_T_Shirt_ROOT_base_1-positions-array" count="198"> 4.76000023 0.0199999996 4.29500008 4.76000023 0.0199999996 4.67500019 4.68586588 0.0199999996 4.30230141 4.76000023 0.0799999982 4.29500008 4.68586588 0.0799999982 4.30230141 4.76000023 0.0799999982 4.67500019 4.61458015 0.0199999996 4.32392597 4.61458015 0.0799999982 4.32392597 4.54888344 0.0199999996 4.35904169 4.54888344 0.0799999982 4.35904169 4.49129963 0.0199999996 4.40629959 4.49129963 0.0799999982 4.40629959 4.44404173 0.0199999996 4.4638834 4.44404173 0.0799999982 4.4638834 4.40892601 0.0199999996 4.52958012 4.40892601 0.0799999982 4.52958012 4.38730145 0.0199999996 4.60086584 4.38730145 0.0799999982 4.60086584 4.38000011 0.0199999996 4.67500019 4.38000011 0.0799999982 4.67500019 4.38730145 0.0199999996 4.74913454 4.38730145 0.0799999982 4.74913454 4.40892601 0.0199999996 4.82041979 4.40892601 0.0799999982 4.82041979 4.44404173 0.0199999996 4.8861165 4.44404173 0.0799999982 4.8861165 4.49129963 0.0199999996 4.94370079 4.49129963 0.0799999982 4.94370079 4.54888344 0.0199999996 4.99095869 4.54888344 0.0799999982 4.99095869 4.61458015 0.0199999996 5.02607441 4.61458015 0.0799999982 5.02607441 4.68586588 0.0199999996 5.0476985 4.68586588 0.0799999982 5.0476985 4.76000023 0.0199999996 5.05499983 4.76000023 0.0799999982 5.05499983 4.8341341 0.0199999996 5.0476985 4.8341341 0.0799999982 5.0476985 4.90541983 0.0199999996 5.02607441 4.90541983 0.0799999982 5.02607441 4.97111654 0.0199999996 4.99095869 4.97111654 0.0799999982 4.99095869 5.02870035 0.0199999996 4.94370079 5.02870035 0.0799999982 4.94370079 5.07595825 0.0199999996 4.8861165 5.07595825 0.0799999982 4.8861165 5.11107445 0.0199999996 4.82041979 5.11107445 0.0799999982 4.82041979 5.13269854 0.0199999996 4.74913454 5.13269854 0.0799999982 4.74913454 5.13999987 0.0199999996 4.67500019 5.13999987 0.0799999982 4.67500019 5.13269854 0.0199999996 4.60086584 5.13269854 0.0799999982 4.60086584 5.11107445 0.0199999996 4.52958012 5.11107445 0.0799999982 4.52958012 5.07595825 0.0199999996 4.4638834 5.07595825 0.0799999982 4.4638834 5.02870035 0.0199999996 4.40629959 5.02870035 0.0799999982 4.40629959 4.97111654 0.0199999996 4.35904169 4.97111654 0.0799999982 4.35904169 4.90541983 0.0199999996 4.32392597 4.90541983 0.0799999982 4.32392597 4.8341341 0.0199999996 4.30230141 4.8341341 0.0799999982 4.30230141 </float_array>
+          <technique_common>
+            <accessor count="66" offset="0" source="#_06_06_Popular_Fashion_T_Shirt_ROOT_base_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_06_06_Popular_Fashion_T_Shirt_ROOT_base_1-vertices">
+          <input semantic="POSITION" source="#_06_06_Popular_Fashion_T_Shirt_ROOT_base_1-positions" />
+        </vertices>
+        <polylist count="128" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_06_06_Popular_Fashion_T_Shirt_ROOT_base_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 34 32 34 33 33 34 35 33 35 5 34 1 36 34 36 35 35 36 37 35 37 5 36 1 38 36 38 37 37 38 39 37 39 5 38 1 40 38 40 39 39 40 41 39 41 5 40 1 42 40 42 41 41 42 43 41 43 5 42 1 44 42 44 43 43 44 45 43 45 5 44 1 46 44 46 45 45 46 47 45 47 5 46 1 48 46 48 47 47 48 49 47 49 5 48 1 50 48 50 49 49 50 51 49 51 5 50 1 52 50 52 51 51 52 53 51 53 5 52 1 54 52 54 53 53 54 55 53 55 5 54 1 56 54 56 55 55 56 57 55 57 5 56 1 58 56 58 57 57 58 59 57 59 5 58 1 60 58 60 59 59 60 61 59 61 5 60 1 62 60 62 61 61 62 63 61 63 5 62 1 64 62 64 63 63 64 65 63 65 5 64 1 0 64 0 65 65 0 3 65 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_06_06_Popular_Fashion_T_Shirt_part_01_1" name="06_06_Popular_Fashion_T_Shirt_part_01" >
+      <mesh>
+        <source id="_06_06_Popular_Fashion_T_Shirt_part_01_1-positions" name="_06_06_Popular_Fashion_T_Shirt_part_01_1-positions">
+          <float_array id="_06_06_Popular_Fashion_T_Shirt_part_01_1-positions-array" count="24"> 4.60313845 0.150000006 4.72274065 4.60313845 0.491003186 4.72274065 4.60313845 0.150000006 4.62725973 4.91686153 0.150000006 4.62725973 4.60313845 0.491003186 4.62725973 4.91686153 0.491003186 4.72274065 4.91686153 0.150000006 4.72274065 4.91686153 0.491003186 4.62725973 </float_array>
+          <technique_common>
+            <accessor count="8" offset="0" source="#_06_06_Popular_Fashion_T_Shirt_part_01_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_06_06_Popular_Fashion_T_Shirt_part_01_1-vertices">
+          <input semantic="POSITION" source="#_06_06_Popular_Fashion_T_Shirt_part_01_1-positions" />
+        </vertices>
+        <polylist count="12" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_06_06_Popular_Fashion_T_Shirt_part_01_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 3 0 2 2 1 4 4 3 2 0 5 1 6 0 3 6 5 0 1 5 4 7 3 4 4 5 7 7 6 3 5 6 7 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_06_06_Popular_Fashion_T_Shirt_part_02_1" name="06_06_Popular_Fashion_T_Shirt_part_02" >
+      <mesh>
+        <source id="_06_06_Popular_Fashion_T_Shirt_part_02_1-positions" name="_06_06_Popular_Fashion_T_Shirt_part_02_1-positions">
+          <float_array id="_06_06_Popular_Fashion_T_Shirt_part_02_1-positions-array" count="198"> 4.55539799 0.415982485 4.72615051 4.55539799 0.415982485 4.67500019 4.55169201 0.425247729 4.72516775 4.41899681 0.361421973 4.72615051 4.41529083 0.370687217 4.72516775 4.41899681 0.361421973 4.67500019 4.54812813 0.434156895 4.72225666 4.41172695 0.379596382 4.72225666 4.54484415 0.442367643 4.71753025 4.40844297 0.387807131 4.71753025 4.54196548 0.449564427 4.71116877 4.40556383 0.395003915 4.71116877 4.53960276 0.455470651 4.70341778 4.40320158 0.400910169 4.70341778 4.53784752 0.459859401 4.69457436 4.40144587 0.405298889 4.69457436 4.53676653 0.462561965 4.68497896 4.40036488 0.408001453 4.68497896 4.53640127 0.463474512 4.67500019 4.4000001 0.408914 4.67500019 4.53676653 0.462561965 4.66502094 4.40036488 0.408001453 4.66502094 4.53784752 0.459859401 4.65542555 4.40144587 0.405298889 4.65542555 4.53960276 0.455470651 4.64658213 4.40320158 0.400910169 4.64658213 4.54196548 0.449564427 4.63883114 4.40556383 0.395003915 4.63883114 4.54484415 0.442367643 4.63247013 4.40844297 0.387807131 4.63247013 4.54812813 0.434156895 4.62774324 4.41172695 0.379596382 4.62774324 4.55169201 0.425247729 4.62483215 4.41529083 0.370687217 4.62483215 4.55539799 0.415982485 4.62384939 4.41899681 0.361421973 4.62384939 4.55910397 0.406717241 4.62483215 4.42270279 0.352156729 4.62483215 4.56266785 0.397808075 4.62774324 4.42626667 0.343247563 4.62774324 4.5659523 0.389597327 4.63247013 4.42955065 0.335036814 4.63247013 4.56883097 0.382400542 4.63883114 4.43242979 0.32784003 4.63883114 4.57119322 0.376494318 4.64658213 4.43479204 0.321933806 4.64658213 4.57294893 0.372105569 4.65542555 4.43654776 0.317545056 4.65542555 4.57402992 0.369403005 4.66502094 4.43762875 0.314842492 4.66502094 4.5743947 0.368490458 4.67500019 4.43799353 0.313929945 4.67500019 4.57402992 0.369403005 4.68497896 4.43762875 0.314842492 4.68497896 4.57294893 0.372105569 4.69457436 4.43654776 0.317545056 4.69457436 4.57119322 0.376494318 4.70341778 4.43479204 0.321933806 4.70341778 4.56883097 0.382400542 4.71116877 4.43242979 0.32784003 4.71116877 4.5659523 0.389597327 4.71753025 4.42955065 0.335036814 4.71753025 4.56266785 0.397808075 4.72225666 4.42626667 0.343247563 4.72225666 4.55910397 0.406717241 4.72516775 4.42270279 0.352156729 4.72516775 </float_array>
+          <technique_common>
+            <accessor count="66" offset="0" source="#_06_06_Popular_Fashion_T_Shirt_part_02_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_06_06_Popular_Fashion_T_Shirt_part_02_1-vertices">
+          <input semantic="POSITION" source="#_06_06_Popular_Fashion_T_Shirt_part_02_1-positions" />
+        </vertices>
+        <polylist count="128" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_06_06_Popular_Fashion_T_Shirt_part_02_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 34 32 34 33 33 34 35 33 35 5 34 1 36 34 36 35 35 36 37 35 37 5 36 1 38 36 38 37 37 38 39 37 39 5 38 1 40 38 40 39 39 40 41 39 41 5 40 1 42 40 42 41 41 42 43 41 43 5 42 1 44 42 44 43 43 44 45 43 45 5 44 1 46 44 46 45 45 46 47 45 47 5 46 1 48 46 48 47 47 48 49 47 49 5 48 1 50 48 50 49 49 50 51 49 51 5 50 1 52 50 52 51 51 52 53 51 53 5 52 1 54 52 54 53 53 54 55 53 55 5 54 1 56 54 56 55 55 56 57 55 57 5 56 1 58 56 58 57 57 58 59 57 59 5 58 1 60 58 60 59 59 60 61 59 61 5 60 1 62 60 62 61 61 62 63 61 63 5 62 1 64 62 64 63 63 64 65 63 65 5 64 1 0 64 0 65 65 0 3 65 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_06_06_Popular_Fashion_T_Shirt_part_03_1" name="06_06_Popular_Fashion_T_Shirt_part_03" >
+      <mesh>
+        <source id="_06_06_Popular_Fashion_T_Shirt_part_03_1-positions" name="_06_06_Popular_Fashion_T_Shirt_part_03_1-positions">
+          <float_array id="_06_06_Popular_Fashion_T_Shirt_part_03_1-positions-array" count="198"> 4.96460199 0.415982485 4.62384939 4.96460199 0.415982485 4.67500019 4.96830797 0.425247729 4.62483215 5.10100317 0.361421973 4.62384939 5.10470915 0.370687217 4.62483215 5.10100317 0.361421973 4.67500019 4.97187185 0.434156895 4.62774324 5.10827303 0.379596382 4.62774324 4.97515583 0.442367643 4.63247013 5.11155748 0.387807131 4.63247013 4.9780345 0.449564427 4.63883114 5.11443615 0.395003915 4.63883114 4.98039722 0.455470651 4.64658213 5.1167984 0.400910169 4.64658213 4.98215246 0.459859401 4.65542555 5.11855412 0.405298889 4.65542555 4.98323393 0.462561965 4.66502094 5.11963511 0.408001453 4.66502094 4.98359871 0.463474512 4.67500019 5.11999989 0.408914 4.67500019 4.98323393 0.462561965 4.68497896 5.11963511 0.408001453 4.68497896 4.98215246 0.459859401 4.69457436 5.11855412 0.405298889 4.69457436 4.98039722 0.455470651 4.70341778 5.1167984 0.400910169 4.70341778 4.9780345 0.449564427 4.71116877 5.11443615 0.395003915 4.71116877 4.97515583 0.442367643 4.71753025 5.11155748 0.387807131 4.71753025 4.97187185 0.434156895 4.72225666 5.10827303 0.379596382 4.72225666 4.96830797 0.425247729 4.72516775 5.10470915 0.370687217 4.72516775 4.96460199 0.415982485 4.72615051 5.10100317 0.361421973 4.72615051 4.96089602 0.406717241 4.72516775 5.09729719 0.352156729 4.72516775 4.95733213 0.397808075 4.72225666 5.09373331 0.343247563 4.72225666 4.95404768 0.389597327 4.71753025 5.09044933 0.335036814 4.71753025 4.95116901 0.382400542 4.71116877 5.08757019 0.32784003 4.71116877 4.94880676 0.376494318 4.70341778 5.08520794 0.321933806 4.70341778 4.94705105 0.372105569 4.69457436 5.08345222 0.317545056 4.69457436 4.94597006 0.369403005 4.68497896 5.08237123 0.314842492 4.68497896 4.94560528 0.368490458 4.67500019 5.08200645 0.313929945 4.67500019 4.94597006 0.369403005 4.66502094 5.08237123 0.314842492 4.66502094 4.94705105 0.372105569 4.65542555 5.08345222 0.317545056 4.65542555 4.94880676 0.376494318 4.64658213 5.08520794 0.321933806 4.64658213 4.95116901 0.382400542 4.63883114 5.08757019 0.32784003 4.63883114 4.95404768 0.389597327 4.63247013 5.09044933 0.335036814 4.63247013 4.95733213 0.397808075 4.62774324 5.09373331 0.343247563 4.62774324 4.96089602 0.406717241 4.62483215 5.09729719 0.352156729 4.62483215 </float_array>
+          <technique_common>
+            <accessor count="66" offset="0" source="#_06_06_Popular_Fashion_T_Shirt_part_03_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_06_06_Popular_Fashion_T_Shirt_part_03_1-vertices">
+          <input semantic="POSITION" source="#_06_06_Popular_Fashion_T_Shirt_part_03_1-positions" />
+        </vertices>
+        <polylist count="128" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_06_06_Popular_Fashion_T_Shirt_part_03_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 34 32 34 33 33 34 35 33 35 5 34 1 36 34 36 35 35 36 37 35 37 5 36 1 38 36 38 37 37 38 39 37 39 5 38 1 40 38 40 39 39 40 41 39 41 5 40 1 42 40 42 41 41 42 43 41 43 5 42 1 44 42 44 43 43 44 45 43 45 5 44 1 46 44 46 45 45 46 47 45 47 5 46 1 48 46 48 47 47 48 49 47 49 5 48 1 50 48 50 49 49 50 51 49 51 5 50 1 52 50 52 51 51 52 53 51 53 5 52 1 54 52 54 53 53 54 55 53 55 5 54 1 56 54 56 55 55 56 57 55 57 5 56 1 58 56 58 57 57 58 59 57 59 5 58 1 60 58 60 59 59 60 61 59 61 5 60 1 62 60 62 61 61 62 63 61 63 5 62 1 64 62 64 63 63 64 65 63 65 5 64 1 0 64 0 65 65 0 3 65 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+  </library_geometries>
+  <library_controllers>
+  </library_controllers>
+  <library_visual_scenes>
+    <visual_scene id="ROOT" name="ROOT">
+      <node id="_06_06_Popular_Fashion_T_Shirt_ROOT_base" name="06_06_Popular_Fashion_T_Shirt_ROOT_base" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_06_06_Popular_Fashion_T_Shirt_ROOT_base_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#panel_teal_trim">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_06_06_Popular_Fashion_T_Shirt_part_01" name="06_06_Popular_Fashion_T_Shirt_part_01" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_06_06_Popular_Fashion_T_Shirt_part_01_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#teal">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_06_06_Popular_Fashion_T_Shirt_part_02" name="06_06_Popular_Fashion_T_Shirt_part_02" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_06_06_Popular_Fashion_T_Shirt_part_02_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#teal">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_06_06_Popular_Fashion_T_Shirt_part_03" name="06_06_Popular_Fashion_T_Shirt_part_03" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_06_06_Popular_Fashion_T_Shirt_part_03_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#teal">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+    </visual_scene>
+  </library_visual_scenes>
+  <scene>
+    <instance_visual_scene url="#ROOT" />
+  </scene>
+</COLLADA>

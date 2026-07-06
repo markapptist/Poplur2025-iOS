@@ -1,0 +1,254 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
+<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+  <asset>
+    <contributor>
+      <author>Assimp</author>
+      <authoring_tool>https://github.com/mikedh/trimesh</authoring_tool>
+    </contributor>
+    <created>2026-07-03T10:30:30</created>
+    <modified>2026-07-03T10:30:30</modified>
+    <unit name="meter" meter="1" />
+    <up_axis>Y_UP</up_axis>
+  </asset>
+  <library_images>
+  </library_images>
+  <library_effects>
+    <effect id="panel_purple_trim-fx" name="panel_purple_trim">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0.25   0   0.550000012   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">0.698039234   0.121568628   1   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">608.399963</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="dark_graphite-fx" name="dark_graphite">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">0.0392156877   0.0431372561   0.0549019612   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">302.5</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="cyan_emissive-fx" name="cyan_emissive">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0.349999994   0.75   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">0.0196078438   0.850980401   1   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">577.599976</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="material_3-fx" name="">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">1   1   1   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">0</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+  </library_effects>
+  <library_materials>
+    <material id="panel_purple_trim" name="panel_purple_trim">
+      <instance_effect url="#panel_purple_trim-fx"/>
+    </material>
+    <material id="dark_graphite" name="dark_graphite">
+      <instance_effect url="#dark_graphite-fx"/>
+    </material>
+    <material id="cyan_emissive" name="cyan_emissive">
+      <instance_effect url="#cyan_emissive-fx"/>
+    </material>
+    <material id="material_3" name="">
+      <instance_effect url="#material_3-fx"/>
+    </material>
+  </library_materials>
+  <library_geometries>
+    <geometry id="_05_08_Popular_Modelling_Runway_ROOT_base_1" name="05_08_Popular_Modelling_Runway_ROOT_base" >
+      <mesh>
+        <source id="_05_08_Popular_Modelling_Runway_ROOT_base_1-positions" name="_05_08_Popular_Modelling_Runway_ROOT_base_1-positions">
+          <float_array id="_05_08_Popular_Modelling_Runway_ROOT_base_1-positions-array" count="198"> 0 0.0199999996 4.29500008 0 0.0199999996 4.67500019 -0.07413432 0.0199999996 4.30230141 0 0.0799999982 4.29500008 -0.07413432 0.0799999982 4.30230141 0 0.0799999982 4.67500019 -0.145419702 0.0199999996 4.32392597 -0.145419702 0.0799999982 4.32392597 -0.211116686 0.0199999996 4.35904169 -0.211116686 0.0799999982 4.35904169 -0.26870057 0.0199999996 4.40629959 -0.26870057 0.0799999982 4.40629959 -0.31595844 0.0199999996 4.4638834 -0.31595844 0.0799999982 4.4638834 -0.351074219 0.0199999996 4.52958012 -0.351074219 0.0799999982 4.52958012 -0.372698396 0.0199999996 4.60086584 -0.372698396 0.0799999982 4.60086584 -0.379999995 0.0199999996 4.67500019 -0.379999995 0.0799999982 4.67500019 -0.372698396 0.0199999996 4.74913454 -0.372698396 0.0799999982 4.74913454 -0.351074219 0.0199999996 4.82041979 -0.351074219 0.0799999982 4.82041979 -0.31595844 0.0199999996 4.8861165 -0.31595844 0.0799999982 4.8861165 -0.26870057 0.0199999996 4.94370079 -0.26870057 0.0799999982 4.94370079 -0.211116686 0.0199999996 4.99095869 -0.211116686 0.0799999982 4.99095869 -0.145419702 0.0199999996 5.02607441 -0.145419702 0.0799999982 5.02607441 -0.07413432 0.0199999996 5.0476985 -0.07413432 0.0799999982 5.0476985 -4.65365791e-17 0.0199999996 5.05499983 -4.65365791e-17 0.0799999982 5.05499983 0.07413432 0.0199999996 5.0476985 0.07413432 0.0799999982 5.0476985 0.145419702 0.0199999996 5.02607441 0.145419702 0.0799999982 5.02607441 0.211116686 0.0199999996 4.99095869 0.211116686 0.0799999982 4.99095869 0.26870057 0.0199999996 4.94370079 0.26870057 0.0799999982 4.94370079 0.31595844 0.0199999996 4.8861165 0.31595844 0.0799999982 4.8861165 0.351074219 0.0199999996 4.82041979 0.351074219 0.0799999982 4.82041979 0.372698396 0.0199999996 4.74913454 0.372698396 0.0799999982 4.74913454 0.379999995 0.0199999996 4.67500019 0.379999995 0.0799999982 4.67500019 0.372698396 0.0199999996 4.60086584 0.372698396 0.0799999982 4.60086584 0.351074219 0.0199999996 4.52958012 0.351074219 0.0799999982 4.52958012 0.31595844 0.0199999996 4.4638834 0.31595844 0.0799999982 4.4638834 0.26870057 0.0199999996 4.40629959 0.26870057 0.0799999982 4.40629959 0.211116686 0.0199999996 4.35904169 0.211116686 0.0799999982 4.35904169 0.145419702 0.0199999996 4.32392597 0.145419702 0.0799999982 4.32392597 0.07413432 0.0199999996 4.30230141 0.07413432 0.0799999982 4.30230141 </float_array>
+          <technique_common>
+            <accessor count="66" offset="0" source="#_05_08_Popular_Modelling_Runway_ROOT_base_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_05_08_Popular_Modelling_Runway_ROOT_base_1-vertices">
+          <input semantic="POSITION" source="#_05_08_Popular_Modelling_Runway_ROOT_base_1-positions" />
+        </vertices>
+        <polylist count="128" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_05_08_Popular_Modelling_Runway_ROOT_base_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 34 32 34 33 33 34 35 33 35 5 34 1 36 34 36 35 35 36 37 35 37 5 36 1 38 36 38 37 37 38 39 37 39 5 38 1 40 38 40 39 39 40 41 39 41 5 40 1 42 40 42 41 41 42 43 41 43 5 42 1 44 42 44 43 43 44 45 43 45 5 44 1 46 44 46 45 45 46 47 45 47 5 46 1 48 46 48 47 47 48 49 47 49 5 48 1 50 48 50 49 49 50 51 49 51 5 50 1 52 50 52 51 51 52 53 51 53 5 52 1 54 52 54 53 53 54 55 53 55 5 54 1 56 54 56 55 55 56 57 55 57 5 56 1 58 56 58 57 57 58 59 57 59 5 58 1 60 58 60 59 59 60 61 59 61 5 60 1 62 60 62 61 61 62 63 61 63 5 62 1 64 62 64 63 63 64 65 63 65 5 64 1 0 64 0 65 65 0 3 65 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_05_08_Popular_Modelling_Runway_part_01_1" name="05_08_Popular_Modelling_Runway_part_01" >
+      <mesh>
+        <source id="_05_08_Popular_Modelling_Runway_part_01_1-positions" name="_05_08_Popular_Modelling_Runway_part_01_1-positions">
+          <float_array id="_05_08_Popular_Modelling_Runway_part_01_1-positions-array" count="24"> -0.167999998 0.150000006 5.03499985 -0.167999998 0.181999996 5.03499985 -0.167999998 0.150000006 4.31500006 0.167999998 0.150000006 4.31500006 -0.167999998 0.181999996 4.31500006 0.167999998 0.181999996 5.03499985 0.167999998 0.150000006 5.03499985 0.167999998 0.181999996 4.31500006 </float_array>
+          <technique_common>
+            <accessor count="8" offset="0" source="#_05_08_Popular_Modelling_Runway_part_01_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_05_08_Popular_Modelling_Runway_part_01_1-vertices">
+          <input semantic="POSITION" source="#_05_08_Popular_Modelling_Runway_part_01_1-positions" />
+        </vertices>
+        <polylist count="12" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_05_08_Popular_Modelling_Runway_part_01_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 3 0 2 2 1 4 4 3 2 0 5 1 6 0 3 6 5 0 1 5 4 7 3 4 4 5 7 7 6 3 5 6 7 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_05_08_Popular_Modelling_Runway_part_02_1" name="05_08_Popular_Modelling_Runway_part_02" >
+      <mesh>
+        <source id="_05_08_Popular_Modelling_Runway_part_02_1-positions" name="_05_08_Popular_Modelling_Runway_part_02_1-positions">
+          <float_array id="_05_08_Popular_Modelling_Runway_part_02_1-positions-array" count="198"> -0.134399995 0.214000002 4.43499994 -0.143999994 0.214000002 4.43499994 -0.134584457 0.215872869 4.43499994 -0.134399995 0.214000002 4.91499996 -0.134584457 0.215872869 4.91499996 -0.143999994 0.214000002 4.91499996 -0.135130763 0.217673764 4.43499994 -0.135130763 0.217673764 4.91499996 -0.136017889 0.21933347 4.43499994 -0.136017889 0.21933347 4.91499996 -0.13721177 0.220788226 4.43499994 -0.13721177 0.220788226 4.91499996 -0.138666525 0.221982107 4.43499994 -0.138666525 0.221982107 4.91499996 -0.140326232 0.222869247 4.43499994 -0.140326232 0.222869247 4.91499996 -0.142127126 0.223415539 4.43499994 -0.142127126 0.223415539 4.91499996 -0.143999994 0.2236 4.43499994 -0.143999994 0.2236 4.91499996 -0.145872861 0.223415539 4.43499994 -0.145872861 0.223415539 4.91499996 -0.147673756 0.222869247 4.43499994 -0.147673756 0.222869247 4.91499996 -0.149333477 0.221982107 4.43499994 -0.149333477 0.221982107 4.91499996 -0.150788218 0.220788226 4.43499994 -0.150788218 0.220788226 4.91499996 -0.151982114 0.21933347 4.43499994 -0.151982114 0.21933347 4.91499996 -0.152869239 0.217673764 4.43499994 -0.152869239 0.217673764 4.91499996 -0.153415546 0.215872869 4.43499994 -0.153415546 0.215872869 4.91499996 -0.153600007 0.214000002 4.43499994 -0.153600007 0.214000002 4.91499996 -0.153415546 0.212127134 4.43499994 -0.153415546 0.212127134 4.91499996 -0.152869239 0.210326239 4.43499994 -0.152869239 0.210326239 4.91499996 -0.151982114 0.208666518 4.43499994 -0.151982114 0.208666518 4.91499996 -0.150788218 0.207211778 4.43499994 -0.150788218 0.207211778 4.91499996 -0.149333477 0.206017897 4.43499994 -0.149333477 0.206017897 4.91499996 -0.147673756 0.205130756 4.43499994 -0.147673756 0.205130756 4.91499996 -0.145872861 0.204584464 4.43499994 -0.145872861 0.204584464 4.91499996 -0.143999994 0.204400003 4.43499994 -0.143999994 0.204400003 4.91499996 -0.142127126 0.204584464 4.43499994 -0.142127126 0.204584464 4.91499996 -0.140326232 0.205130756 4.43499994 -0.140326232 0.205130756 4.91499996 -0.138666525 0.206017897 4.43499994 -0.138666525 0.206017897 4.91499996 -0.13721177 0.207211778 4.43499994 -0.13721177 0.207211778 4.91499996 -0.136017889 0.208666518 4.43499994 -0.136017889 0.208666518 4.91499996 -0.135130763 0.210326239 4.43499994 -0.135130763 0.210326239 4.91499996 -0.134584457 0.212127134 4.43499994 -0.134584457 0.212127134 4.91499996 </float_array>
+          <technique_common>
+            <accessor count="66" offset="0" source="#_05_08_Popular_Modelling_Runway_part_02_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_05_08_Popular_Modelling_Runway_part_02_1-vertices">
+          <input semantic="POSITION" source="#_05_08_Popular_Modelling_Runway_part_02_1-positions" />
+        </vertices>
+        <polylist count="128" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_05_08_Popular_Modelling_Runway_part_02_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 34 32 34 33 33 34 35 33 35 5 34 1 36 34 36 35 35 36 37 35 37 5 36 1 38 36 38 37 37 38 39 37 39 5 38 1 40 38 40 39 39 40 41 39 41 5 40 1 42 40 42 41 41 42 43 41 43 5 42 1 44 42 44 43 43 44 45 43 45 5 44 1 46 44 46 45 45 46 47 45 47 5 46 1 48 46 48 47 47 48 49 47 49 5 48 1 50 48 50 49 49 50 51 49 51 5 50 1 52 50 52 51 51 52 53 51 53 5 52 1 54 52 54 53 53 54 55 53 55 5 54 1 56 54 56 55 55 56 57 55 57 5 56 1 58 56 58 57 57 58 59 57 59 5 58 1 60 58 60 59 59 60 61 59 61 5 60 1 62 60 62 61 61 62 63 61 63 5 62 1 64 62 64 63 63 64 65 63 65 5 64 1 0 64 0 65 65 0 3 65 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_05_08_Popular_Modelling_Runway_part_03_1" name="05_08_Popular_Modelling_Runway_part_03" >
+      <mesh>
+        <source id="_05_08_Popular_Modelling_Runway_part_03_1-positions" name="_05_08_Popular_Modelling_Runway_part_03_1-positions">
+          <float_array id="_05_08_Popular_Modelling_Runway_part_03_1-positions-array" count="198"> 0.153600007 0.214000002 4.43499994 0.143999994 0.214000002 4.43499994 0.153415546 0.215872869 4.43499994 0.153600007 0.214000002 4.91499996 0.153415546 0.215872869 4.91499996 0.143999994 0.214000002 4.91499996 0.152869239 0.217673764 4.43499994 0.152869239 0.217673764 4.91499996 0.151982114 0.21933347 4.43499994 0.151982114 0.21933347 4.91499996 0.150788218 0.220788226 4.43499994 0.150788218 0.220788226 4.91499996 0.149333477 0.221982107 4.43499994 0.149333477 0.221982107 4.91499996 0.147673756 0.222869247 4.43499994 0.147673756 0.222869247 4.91499996 0.145872861 0.223415539 4.43499994 0.145872861 0.223415539 4.91499996 0.143999994 0.2236 4.43499994 0.143999994 0.2236 4.91499996 0.142127126 0.223415539 4.43499994 0.142127126 0.223415539 4.91499996 0.140326232 0.222869247 4.43499994 0.140326232 0.222869247 4.91499996 0.138666525 0.221982107 4.43499994 0.138666525 0.221982107 4.91499996 0.13721177 0.220788226 4.43499994 0.13721177 0.220788226 4.91499996 0.136017889 0.21933347 4.43499994 0.136017889 0.21933347 4.91499996 0.135130763 0.217673764 4.43499994 0.135130763 0.217673764 4.91499996 0.134584457 0.215872869 4.43499994 0.134584457 0.215872869 4.91499996 0.134399995 0.214000002 4.43499994 0.134399995 0.214000002 4.91499996 0.134584457 0.212127134 4.43499994 0.134584457 0.212127134 4.91499996 0.135130763 0.210326239 4.43499994 0.135130763 0.210326239 4.91499996 0.136017889 0.208666518 4.43499994 0.136017889 0.208666518 4.91499996 0.13721177 0.207211778 4.43499994 0.13721177 0.207211778 4.91499996 0.138666525 0.206017897 4.43499994 0.138666525 0.206017897 4.91499996 0.140326232 0.205130756 4.43499994 0.140326232 0.205130756 4.91499996 0.142127126 0.204584464 4.43499994 0.142127126 0.204584464 4.91499996 0.143999994 0.204400003 4.43499994 0.143999994 0.204400003 4.91499996 0.145872861 0.204584464 4.43499994 0.145872861 0.204584464 4.91499996 0.147673756 0.205130756 4.43499994 0.147673756 0.205130756 4.91499996 0.149333477 0.206017897 4.43499994 0.149333477 0.206017897 4.91499996 0.150788218 0.207211778 4.43499994 0.150788218 0.207211778 4.91499996 0.151982114 0.208666518 4.43499994 0.151982114 0.208666518 4.91499996 0.152869239 0.210326239 4.43499994 0.152869239 0.210326239 4.91499996 0.153415546 0.212127134 4.43499994 0.153415546 0.212127134 4.91499996 </float_array>
+          <technique_common>
+            <accessor count="66" offset="0" source="#_05_08_Popular_Modelling_Runway_part_03_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_05_08_Popular_Modelling_Runway_part_03_1-vertices">
+          <input semantic="POSITION" source="#_05_08_Popular_Modelling_Runway_part_03_1-positions" />
+        </vertices>
+        <polylist count="128" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_05_08_Popular_Modelling_Runway_part_03_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 34 32 34 33 33 34 35 33 35 5 34 1 36 34 36 35 35 36 37 35 37 5 36 1 38 36 38 37 37 38 39 37 39 5 38 1 40 38 40 39 39 40 41 39 41 5 40 1 42 40 42 41 41 42 43 41 43 5 42 1 44 42 44 43 43 44 45 43 45 5 44 1 46 44 46 45 45 46 47 45 47 5 46 1 48 46 48 47 47 48 49 47 49 5 48 1 50 48 50 49 49 50 51 49 51 5 50 1 52 50 52 51 51 52 53 51 53 5 52 1 54 52 54 53 53 54 55 53 55 5 54 1 56 54 56 55 55 56 57 55 57 5 56 1 58 56 58 57 57 58 59 57 59 5 58 1 60 58 60 59 59 60 61 59 61 5 60 1 62 60 62 61 61 62 63 61 63 5 62 1 64 62 64 63 63 64 65 63 65 5 64 1 0 64 0 65 65 0 3 65 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+  </library_geometries>
+  <library_controllers>
+  </library_controllers>
+  <library_visual_scenes>
+    <visual_scene id="ROOT" name="ROOT">
+      <node id="_05_08_Popular_Modelling_Runway_ROOT_base" name="05_08_Popular_Modelling_Runway_ROOT_base" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_05_08_Popular_Modelling_Runway_ROOT_base_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#panel_purple_trim">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_05_08_Popular_Modelling_Runway_part_01" name="05_08_Popular_Modelling_Runway_part_01" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_05_08_Popular_Modelling_Runway_part_01_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#dark_graphite">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_05_08_Popular_Modelling_Runway_part_02" name="05_08_Popular_Modelling_Runway_part_02" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_05_08_Popular_Modelling_Runway_part_02_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#cyan_emissive">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_05_08_Popular_Modelling_Runway_part_03" name="05_08_Popular_Modelling_Runway_part_03" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_05_08_Popular_Modelling_Runway_part_03_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#cyan_emissive">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+    </visual_scene>
+  </library_visual_scenes>
+  <scene>
+    <instance_visual_scene url="#ROOT" />
+  </scene>
+</COLLADA>

@@ -87,119 +87,159 @@ struct EditProfileView: View {
     }
 
     var body: some View {
-        VStack {
-            Text("Edit Profile")
-                .font(.title)
-                .padding()
+        ZStack {
+            DS.Color.background.ignoresSafeArea()
+            PoplurSparkleBackground().ignoresSafeArea()
 
-            // Profile Picture
-            if let selectedImage = selectedImage {
-                Image(uiImage: selectedImage)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: 150, height: 150)
-                    .clipShape(Circle())
-                    .padding()
-            } else {
-                if let imageUrl = user?.profilePictureURL {
-                    AsyncImage(url: imageUrl) { image in
-                        image.resizable()
-                             .scaledToFill()
-                             .frame(width: 150, height: 150)
-                             .clipShape(Circle())
-                    } placeholder: {
-                        ProgressView()
+            ScrollView {
+                VStack(spacing: 24) {
+                    // Header
+                    HStack {
+                        Button(action: { dismiss() }) {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 18, weight: .bold))
+                                .foregroundStyle(DS.Color.textPrimary)
+                                .frame(width: 40, height: 40)
+                                .background(DS.Color.fill, in: Circle())
+                        }
+                        .buttonStyle(.plain)
+
+                        Spacer()
+
+                        Text("Edit Profile")
+                            .font(DS.Font.heading())
+                            .foregroundStyle(DS.Color.textPrimary)
+
+                        Spacer()
+                        Color.clear.frame(width: 40, height: 40)
                     }
-                    .padding()
-                } else {
-                    Circle()
-                        .frame(width: 150, height: 150)
-                        .foregroundColor(.gray)
-                        .padding()
+                    .padding(.horizontal, 20)
+                    .padding(.top, 20)
+
+                    // Avatar
+                    VStack(spacing: 12) {
+                        Group {
+                            if let selectedImage = selectedImage {
+                                Image(uiImage: selectedImage)
+                                    .resizable()
+                                    .scaledToFill()
+                            } else if let imageUrl = user?.profilePictureURL {
+                                AsyncImage(url: imageUrl) { phase in
+                                    if let img = phase.image {
+                                        img.resizable().scaledToFill()
+                                    } else {
+                                        Circle().fill(DS.Color.fill)
+                                    }
+                                }
+                            } else {
+                                Circle()
+                                    .fill(DS.Color.pinkCard)
+                                    .overlay(
+                                        Image(systemName: "person.fill")
+                                            .font(.system(size: 40, weight: .medium))
+                                            .foregroundStyle(DS.Color.accent)
+                                    )
+                            }
+                        }
+                        .frame(width: 100, height: 100)
+                        .clipShape(Circle())
+                        .overlay(Circle().stroke(DS.Color.border, lineWidth: 2))
+                        .shadow(color: DS.Shadow.card.color, radius: DS.Shadow.card.radius, x: DS.Shadow.card.x, y: DS.Shadow.card.y)
+
+                        Button("Change Photo") {
+                            showImagePicker.toggle()
+                        }
+                        .font(DS.Font.label())
+                        .foregroundStyle(DS.Color.accent)
+                    }
+
+                    // Fields card
+                    VStack(spacing: 16) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Username")
+                                .font(DS.Font.label())
+                                .foregroundStyle(DS.Color.textSecondary)
+                            TextField("Username", text: $newUsername)
+                                .poplurInput()
+                        }
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Email")
+                                .font(DS.Font.label())
+                                .foregroundStyle(DS.Color.textSecondary)
+                            TextField("Email", text: $newEmail)
+                                .poplurInput()
+                                .keyboardType(.emailAddress)
+                                .textInputAutocapitalization(.never)
+                        }
+
+                        if user?.accountType == .business {
+                            businessEditor
+                        }
+                    }
+                    .padding(20)
+                    .poplurCard()
+                    .padding(.horizontal, 20)
+
+                    // Save button
+                    Button(action: saveProfile) {
+                        if isSaving {
+                            ProgressView().tint(.white)
+                        } else {
+                            Text("Save Changes")
+                        }
+                    }
+                    .poplurPrimaryButton()
+                    .padding(.horizontal, 20)
+                    .disabled(isSaving)
+
+                    Spacer(minLength: 40)
                 }
             }
-
-            Button("Change Profile Picture") {
-                showImagePicker.toggle()
-            }
-            .padding()
-
-            // Username and Email Fields
-            TextField("Username", text: $newUsername)
-                .padding()
-                .textFieldStyle(RoundedBorderTextFieldStyle())
-
-            TextField("Email", text: $newEmail)
-                .padding()
-                .textFieldStyle(RoundedBorderTextFieldStyle())
-                .keyboardType(.emailAddress)
-
-            if user?.accountType == .business {
-                businessEditor
-            }
-
-            // Save Button
-            Button(action: saveProfile) {
-                if isSaving {
-                    ProgressView()
-                } else {
-                    Text("Save Changes")
-                        .font(.title)
-                        .foregroundColor(.white)
-                        .padding()
-                        .background(Color.blue)
-                        .cornerRadius(10)
-                }
-            }
-            .padding()
-            .disabled(isSaving)
         }
         .sheet(isPresented: $showImagePicker) {
             ImagePickerView(selectedImage: $selectedImage, selectedVideoURL: $selectedVideoURL)
         }
-        .padding()
     }
 
     private var businessEditor: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 14) {
             Text("Business Profile")
-                .font(.headline)
-                .padding(.top, 8)
-            Text("Changing business name or address sends the profile back to verification review.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+                .font(DS.Font.heading(16))
+                .foregroundStyle(DS.Color.textPrimary)
+                .padding(.top, 4)
 
-            TextField("Business name", text: $businessName)
-                .textFieldStyle(RoundedBorderTextFieldStyle())
-            TextField("Business category", text: $businessCategory)
-                .textFieldStyle(RoundedBorderTextFieldStyle())
+            Text("Changing business name or address sends the profile back to verification review.")
+                .font(DS.Font.caption())
+                .foregroundStyle(DS.Color.textSecondary)
+
+            TextField("Business name", text: $businessName).poplurInput()
+            TextField("Business category", text: $businessCategory).poplurInput()
             TextField("Business description", text: $businessDescription, axis: .vertical)
                 .lineLimit(3, reservesSpace: true)
-                .textFieldStyle(RoundedBorderTextFieldStyle())
-            TextField("Business address", text: $businessAddress)
-                .textFieldStyle(RoundedBorderTextFieldStyle())
-            HStack {
+                .poplurInput()
+            TextField("Business address", text: $businessAddress).poplurInput()
+            HStack(spacing: 10) {
                 TextField("Latitude", text: $businessLatitude)
                     .keyboardType(.decimalPad)
-                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                    .poplurInput()
                 TextField("Longitude", text: $businessLongitude)
                     .keyboardType(.numbersAndPunctuation)
-                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                    .poplurInput()
             }
             TextField("Contact email", text: $businessContactEmail)
                 .keyboardType(.emailAddress)
-                .textFieldStyle(RoundedBorderTextFieldStyle())
+                .poplurInput()
             TextField("Contact phone", text: $businessContactPhone)
                 .keyboardType(.phonePad)
-                .textFieldStyle(RoundedBorderTextFieldStyle())
+                .poplurInput()
             TextField("Website", text: $businessWebsite)
                 .keyboardType(.URL)
-                .textFieldStyle(RoundedBorderTextFieldStyle())
+                .poplurInput()
             TextField("Logo/photo notes", text: $businessLogoPhotoNotes, axis: .vertical)
                 .lineLimit(2, reservesSpace: true)
-                .textFieldStyle(RoundedBorderTextFieldStyle())
+                .poplurInput()
         }
-        .padding(.vertical, 8)
     }
 
     // MARK: - Save changes to Firestore and Firebase Storage

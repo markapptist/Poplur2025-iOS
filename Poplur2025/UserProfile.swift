@@ -11,6 +11,8 @@ struct UserProfile: Identifiable, Hashable, Codable {
     var profilePictureURL: URL?
     var accountType: PoplurAccountType
     var businessProfile: BusinessProfile?
+    var followerCount: Int
+    var followingCount: Int
 
     var isBusinessAccount: Bool {
         accountType == .business
@@ -37,7 +39,9 @@ struct UserProfile: Identifiable, Hashable, Codable {
         displayName: String? = nil,
         profilePictureURL: URL? = nil,
         accountType: PoplurAccountType = .user,
-        businessProfile: BusinessProfile? = nil
+        businessProfile: BusinessProfile? = nil,
+        followerCount: Int = 0,
+        followingCount: Int = 0
     ) {
         self.id = id
         self.username = username
@@ -46,6 +50,8 @@ struct UserProfile: Identifiable, Hashable, Codable {
         self.profilePictureURL = profilePictureURL
         self.accountType = accountType
         self.businessProfile = businessProfile
+        self.followerCount = followerCount
+        self.followingCount = followingCount
     }
 
     // Convenience initializer from Firestore document
@@ -76,6 +82,8 @@ struct UserProfile: Identifiable, Hashable, Codable {
         } else {
             self.accountType = self.businessProfile == nil ? .user : .business
         }
+        self.followerCount = data["followerCount"] as? Int ?? 0
+        self.followingCount = data["followingCount"] as? Int ?? 0
     }
 
     // Helper to serialize for Firestore writes

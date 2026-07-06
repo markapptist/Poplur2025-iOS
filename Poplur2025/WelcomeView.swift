@@ -60,7 +60,6 @@ private final class WelcomeScene: SKScene {
     private let backgroundAssetNames = ["slideup", "slideup_alt1", "slideup_alt2"]
     private let defaultBackgroundName = "slideup"
     private let logoAssetName = "logo"
-    private let signinAssetName = "signin"
 
     // Vertical offset to place the button relative to center (negative moves up, positive down)
     private let buttonVerticalOffset: CGFloat = -120
@@ -228,10 +227,10 @@ private final class WelcomeScene: SKScene {
                 bg.position = CGPoint(x: finalPosition.x, y: startY)
             }
 
-            // Drop + settle
-            let dropDuration: TimeInterval = 0.65
-            let settleDuration: TimeInterval = 0.20
-            let overshoot: CGFloat = 14
+            // Drop + settle (spring-like: overshoot past rest position, then settle back)
+            let dropDuration: TimeInterval = 0.8
+            let settleDuration: TimeInterval = 0.28
+            let overshoot: CGFloat = 22
 
             let deltaY = (finalPosition.y + overshoot) - bg.position.y
             let moveDown = SKAction.moveBy(x: 0, y: deltaY, duration: dropDuration)
@@ -256,8 +255,8 @@ private final class WelcomeScene: SKScene {
     // Strict sequence: first logo fade, then button fade (and shadow), then sound + confetti
     private func fadeLogoThenButton() {
         // Tunable timings
-        let logoFadeDuration: TimeInterval = 0.35
-        let buttonFadeDuration: TimeInterval = 0.35
+        let logoFadeDuration: TimeInterval = 0.45
+        let buttonFadeDuration: TimeInterval = 0.45
 
         // Logo
         if let logo = flowerNode.childNode(withName: "logo") as? SKSpriteNode {
@@ -270,11 +269,21 @@ private final class WelcomeScene: SKScene {
             }
             let fadeToFull = SKAction.fadeAlpha(to: 1.0, duration: logoFadeDuration)
             fadeToFull.timingMode = .easeIn
+            let fadeSequence = SKAction.sequence([jumpToHalf, fadeToFull])
+
+            // Logo drops in from above with a small spring overshoot, in parallel with the fade
+            let restPosition = CGPoint(x: size.width / 2, y: size.height - 240)
+            let dropDown = SKAction.move(to: CGPoint(x: restPosition.x, y: restPosition.y + 18), duration: logoFadeDuration * 1.15)
+            dropDown.timingMode = .easeOut
+            let settle = SKAction.move(to: restPosition, duration: logoFadeDuration * 0.45)
+            settle.timingMode = .easeInEaseOut
+            let dropSequence = SKAction.sequence([dropDown, settle])
+
+            let fadeAndDrop = SKAction.group([fadeSequence, dropSequence])
 
             // After logo completes, reveal the logo shadow, then start button fade
             let sequence = SKAction.sequence([
-                jumpToHalf,
-                fadeToFull,
+                fadeAndDrop,
                 SKAction.run { [weak self] in
                     // Reveal the logo shadow now
                     if let self, let shadow = self.flowerNode.children.first(where: { $0 !== logo && $0 is SKSpriteNode }) as? SKSpriteNode {
@@ -299,7 +308,7 @@ private final class WelcomeScene: SKScene {
         let fade = SKAction.fadeIn(withDuration: duration)
         fade.timingMode = .easeIn
 
-        if let signinSprite = childNode(withName: signinNodeName) as? SKSpriteNode {
+        if let signinSprite = childNode(withName: signinNodeName) {
             signinSprite.removeAllActions()
             signinSprite.alpha = 0.0
             let sequence = SKAction.sequence([
@@ -314,7 +323,7 @@ private final class WelcomeScene: SKScene {
             signinSprite.run(sequence, withKey: "buttonFade")
         }
 
-        if let shadowSprite = childNode(withName: buttonShadowName) as? SKSpriteNode {
+        if let shadowSprite = childNode(withName: buttonShadowName) {
             shadowSprite.removeAllActions()
             shadowSprite.alpha = 0.0
             shadowSprite.run(fade, withKey: "buttonShadowFade")
@@ -340,30 +349,13 @@ private final class WelcomeScene: SKScene {
             signupShadow.run(fade, withKey: "signupShadowFade")
         }
 
-        // After button fade finishes: play pop sound, then spawn confetti
-        let playPopThenConfetti = SKAction.sequence([
+        // After button fade finishes: play pop sound.
+        let playPop = SKAction.sequence([
             .wait(forDuration: duration),
-            .playSoundFileNamed("pop", waitForCompletion: false),
-            .run { [weak self] in
-                guard let self else { return }
-                let emitter = self.makeConfettiEmitter(size: self.size)
-                emitter.zPosition = 200 // above UI
-                emitter.position = CGPoint(x: self.size.width / 2, y: self.size.height + 40) // slightly above top
-                self.addChild(emitter)
-
-                // Let it run for >= 5 seconds, then stop birth and remove after particles dissipate
-                let birthWindow: TimeInterval = 5.5
-                let cleanup = SKAction.sequence([
-                    .wait(forDuration: birthWindow),
-                    .run { emitter.particleBirthRate = 0 },
-                    .wait(forDuration: 3.0), // allow remaining particles to fall out
-                    .removeFromParent()
-                ])
-                emitter.run(cleanup)
-            }
+            .playSoundFileNamed("pop", waitForCompletion: false)
         ])
         if !isRunningInPreviews {
-            self.run(playPopThenConfetti, withKey: "popThenConfetti")
+            self.run(playPop, withKey: "playPop")
         }
     }
 
@@ -417,100 +409,6 @@ private final class WelcomeScene: SKScene {
 
             coordinator.didTapSignUp = true
         }
-    }
-
-    // Create a confetti emitter that spans the top of the screen and falls down
-    private func makeConfettiEmitter(size: CGSize) -> SKEmitterNode {
-        let emitter = SKEmitterNode()
-
-        // Colors
-        let colors: [UIColor] = [
-            .systemPink, .systemOrange, .systemYellow,
-            .systemGreen, .systemBlue, .systemPurple
-        ]
-        let seq = SKKeyframeSequence(
-            keyframeValues: colors,
-            times: (0..<colors.count).map { NSNumber(value: Float($0) / Float(max(colors.count - 1, 1))) }
-        )
-        emitter.particleColorSequence = seq
-        emitter.particleColorBlendFactor = 1.0
-
-        // Confetti texture (rectangle) — visible size
-        let confettiSize = CGSize(width: 8, height: 15)
-        emitter.particleTexture = SKTexture(image: UIGraphicsImageRenderer(size: confettiSize).image { ctx in
-            UIColor.white.setFill()
-            ctx.fill(CGRect(origin: .zero, size: confettiSize))
-        })
-
-        // Position at (set by caller), span full width plus margin and a small vertical band
-        emitter.particlePositionRange = CGVector(dx: size.width + 400, dy: size.height * 2)
-
-        // Emit downward
-        emitter.emissionAngle = -.pi / 2         // straight down
-        emitter.emissionAngleRange = .pi / 6     // +/- 30 degrees spread
-
-        // Motion: initial downward speed plus downward acceleration for fall
-        emitter.particleSpeed = 120
-        emitter.particleSpeedRange = 80
-        emitter.yAcceleration = 200              // positive pulls downward
-        emitter.xAcceleration = 25
-
-        // Lifetime and rate (ensure reach bottom on tall screens and visible >= 5s)
-        emitter.particleBirthRate = 420          // denser to "fill" the screen
-        emitter.numParticlesToEmit = 0           // continuous; we'll stop later
-        emitter.particleLifetime = 7.5
-        emitter.particleLifetimeRange = 1.5
-
-        // Spin/scale/alpha
-        emitter.particleRotationRange = .pi
-        emitter.particleRotationSpeed = 3.0
-        emitter.particleScale = 1.0
-        emitter.particleScaleRange = 0.5
-        emitter.particleScaleSpeed = -0.06
-        emitter.particleAlpha = 1.0
-        emitter.particleAlphaRange = 0.1
-        emitter.particleAlphaSpeed = -0.05
-        emitter.particleBlendMode = .alpha
-
-        // Optional: immediate one-shot burst for visibility
-        let burst = SKEmitterNode()
-        burst.particleTexture = emitter.particleTexture
-        burst.particleColorSequence = emitter.particleColorSequence
-        burst.particleColorBlendFactor = 1.0
-        burst.position = .zero // local to emitter; inherits emitter's world position
-        burst.particlePositionRange = emitter.particlePositionRange
-        burst.emissionAngle = emitter.emissionAngle
-        burst.emissionAngleRange = emitter.emissionAngleRange
-        burst.particleBirthRate = 0
-        burst.numParticlesToEmit = 220
-        burst.particleLifetime = 6.5
-        burst.particleLifetimeRange = 1.0
-        burst.particleSpeed = 160
-        burst.particleSpeedRange = 100
-        burst.yAcceleration = 200
-        burst.xAcceleration = 25
-        burst.particleRotationRange = .pi
-        burst.particleRotationSpeed = 3.0
-        burst.particleScale = 1.0
-        burst.particleScaleRange = 0.5
-        burst.particleScaleSpeed = -0.06
-        burst.particleAlpha = 1.0
-        burst.particleAlphaRange = 0.1
-        burst.particleAlphaSpeed = -0.05
-        burst.particleBlendMode = .alpha
-
-        emitter.addChild(burst)
-
-        // Auto-stop and cleanup for burst
-        let removeBurst = SKAction.sequence([
-            .wait(forDuration: 0.05),
-            .run { burst.particleBirthRate = 0 },
-            .wait(forDuration: 7.0),
-            .removeFromParent()
-        ])
-        emitter.run(removeBurst)
-
-        return emitter
     }
 
     // External API to resize scene without recreating it
@@ -570,6 +468,8 @@ private final class WelcomeScene: SKScene {
 
         // Position somewhere near the top; adjust as desired
         let center = CGPoint(x: size.width/2, y: size.height - 240)
+        // Logo starts off the top of the screen and drops in (see fadeLogoThenButton)
+        let startPosition = CGPoint(x: center.x, y: size.height + 160)
 
         // Load the logo texture
         let texture: SKTexture
@@ -583,7 +483,7 @@ private final class WelcomeScene: SKScene {
         let sprite = SKSpriteNode(texture: texture)
         sprite.name = "logo"
         sprite.size = CGSize(width: 200, height: 200)
-        sprite.position = center
+        sprite.position = startPosition
         sprite.zPosition = 0
         sprite.anchorPoint = CGPoint(x: 0.5, y: 0.5)
 
@@ -638,42 +538,39 @@ private final class WelcomeScene: SKScene {
         proxy.removeFromParent()
         floor.removeFromParent()
 
-        // Create the sign-in sprite from assets
-        let texture: SKTexture
-        let baseSize: CGSize
-        if let uiImage = UIImage(named: signinAssetName) {
-            texture = SKTexture(image: uiImage)
-            baseSize = uiImage.size // points
-        } else {
-            let fallback = UIImage(systemName: "rectangle.and.hand.point.up.left.fill") ?? UIImage()
-            texture = SKTexture(image: fallback)
-            baseSize = fallback.size
-        }
-
-        // Compute size preserving aspect ratio with a max width
-        let maxWidth: CGFloat = 220 // adjust to taste
-        let scale = min(1.0, maxWidth / max(baseSize.width, 1))
-        let finalSize = CGSize(width: baseSize.width * scale, height: baseSize.height * scale)
-
-        // Visible sign-in sprite (static)
-        let signinSprite = SKSpriteNode(texture: texture)
-        signinSprite.name = signinNodeName
-        signinSprite.size = finalSize
-        signinSprite.zPosition = 21
-        signinSprite.alpha = 0.0 // start hidden; fade in after background animation
-        addChild(signinSprite)
-
-        // Optional soft shadow sprite
-        let shadowSprite = SKSpriteNode(texture: texture)
-        shadowSprite.name = buttonShadowName
-        shadowSprite.size = finalSize
-        shadowSprite.color = .black
-        shadowSprite.colorBlendFactor = 1.0
-        shadowSprite.alpha = 0.0 // start hidden together with button
-        shadowSprite.zPosition = 20.5
-        addChild(shadowSprite)
-
         let signupSize = CGSize(width: 220, height: 52)
+
+        // Sign In — same white capsule style as Sign Up.
+        let signinShadow = SKShapeNode(rectOf: signupSize, cornerRadius: signupSize.height / 2)
+        signinShadow.name = buttonShadowName
+        signinShadow.fillColor = UIColor.black.withAlphaComponent(0.18)
+        signinShadow.strokeColor = .clear
+        signinShadow.alpha = 0.0
+        signinShadow.zPosition = 20.4
+        addChild(signinShadow)
+
+        let signinNode = SKNode()
+        signinNode.name = signinNodeName
+        signinNode.zPosition = 21
+        signinNode.alpha = 0.0 // start hidden; fade in after background animation
+
+        let signinCapsule = SKShapeNode(rectOf: signupSize, cornerRadius: signupSize.height / 2)
+        signinCapsule.fillColor = .white
+        signinCapsule.strokeColor = UIColor.black.withAlphaComponent(0.08)
+        signinCapsule.lineWidth = 1.5
+        signinCapsule.zPosition = 0
+        signinNode.addChild(signinCapsule)
+
+        let signinLabel = SKLabelNode(text: "Sign In")
+        signinLabel.fontName = "AvenirNext-Heavy"
+        signinLabel.fontSize = 22
+        signinLabel.fontColor = .black
+        signinLabel.verticalAlignmentMode = .center
+        signinLabel.horizontalAlignmentMode = .center
+        signinLabel.zPosition = 1
+        signinNode.addChild(signinLabel)
+
+        addChild(signinNode)
         let signupShadow = SKShapeNode(rectOf: signupSize, cornerRadius: signupSize.height / 2)
         signupShadow.name = signupShadowName
         signupShadow.fillColor = UIColor.black.withAlphaComponent(0.18)
@@ -770,38 +667,126 @@ private final class WelcomeScene: SKScene {
         return SKTexture(image: image)
     }
 
-    // MARK: - Public: confetti replay on demand
-    func startConfettiNow() {
-        // Play the pop sound (optional) and spawn a new confetti emitter immediately.
-        let playPop = SKAction.playSoundFileNamed("pop", waitForCompletion: false)
-        self.run(playPop)
+}
 
-        let emitter = self.makeConfettiEmitter(size: self.size)
-        emitter.zPosition = 200
-        emitter.position = CGPoint(x: self.size.width / 2, y: self.size.height + 40)
-        self.addChild(emitter)
+private final class AuthConfettiScene: SKScene {
+    private var emitter: SKEmitterNode?
 
-        // Same lifecycle as before: run for ~5.5s, then stop birth and remove after particles dissipate.
-        let birthWindow: TimeInterval = 5.5
-        let cleanup = SKAction.sequence([
-            .wait(forDuration: birthWindow),
-            .run { emitter.particleBirthRate = 0 },
-            .wait(forDuration: 3.0),
-            .removeFromParent()
-        ])
-        emitter.run(cleanup)
+    override init(size: CGSize) {
+        super.init(size: size)
+        scaleMode = .resizeFill
+        backgroundColor = .clear
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func didMove(to view: SKView) {
+        view.allowsTransparency = true
+        view.backgroundColor = .clear
+        if view.preferredFramesPerSecond < 120 {
+            view.preferredFramesPerSecond = 120
+        }
+        startIfNeeded()
+    }
+
+    func resize(to newSize: CGSize) {
+        size = newSize
+        emitter?.position = CGPoint(x: newSize.width / 2, y: newSize.height + 40)
+        emitter?.particlePositionRange = CGVector(dx: newSize.width + 400, dy: newSize.height * 2)
+    }
+
+    private func startIfNeeded() {
+        guard emitter == nil else { return }
+        let emitter = makeEmitter(size: size)
+        emitter.zPosition = 1
+        emitter.position = CGPoint(x: size.width / 2, y: size.height + 40)
+        addChild(emitter)
+        self.emitter = emitter
+    }
+
+    private func makeEmitter(size: CGSize) -> SKEmitterNode {
+        let emitter = SKEmitterNode()
+        let colors: [UIColor] = [
+            .systemPink, .systemOrange, .systemYellow,
+            .systemGreen, .systemBlue, .systemPurple
+        ]
+        emitter.particleColorSequence = SKKeyframeSequence(
+            keyframeValues: colors,
+            times: (0..<colors.count).map { NSNumber(value: Float($0) / Float(max(colors.count - 1, 1))) }
+        )
+        emitter.particleColorBlendFactor = 1.0
+
+        let confettiSize = CGSize(width: 8, height: 15)
+        emitter.particleTexture = SKTexture(image: UIGraphicsImageRenderer(size: confettiSize).image { ctx in
+            UIColor.white.setFill()
+            ctx.fill(CGRect(origin: .zero, size: confettiSize))
+        })
+
+        emitter.particlePositionRange = CGVector(dx: size.width + 400, dy: 0)
+        emitter.emissionAngle = -.pi / 2
+        emitter.emissionAngleRange = .pi / 5
+        emitter.particleSpeed = 200
+        emitter.particleSpeedRange = 80
+        emitter.yAcceleration = -60
+        emitter.xAcceleration = 20
+        emitter.particleBirthRate = 420
+        emitter.numParticlesToEmit = 0
+        emitter.particleLifetime = 7.5
+        emitter.particleLifetimeRange = 1.5
+        emitter.particleRotationRange = .pi
+        emitter.particleRotationSpeed = 3.0
+        emitter.particleScale = 1.0
+        emitter.particleScaleRange = 0.5
+        emitter.particleScaleSpeed = -0.06
+        emitter.particleAlpha = 1.0
+        emitter.particleAlphaRange = 0.1
+        emitter.particleAlphaSpeed = -0.05
+        emitter.particleBlendMode = .alpha
+        return emitter
+    }
+}
+
+struct AuthConfettiBackground: View {
+    @State private var scene: AuthConfettiScene?
+
+    private func ensureScene(size: CGSize) -> AuthConfettiScene {
+        if let scene { return scene }
+        let newScene = AuthConfettiScene(size: size)
+        scene = newScene
+        return newScene
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            let scene = ensureScene(size: geo.size)
+            SpriteView(scene: scene, options: [.allowsTransparency])
+                .background(Color.clear)
+                .ignoresSafeArea()
+                .onChange(of: geo.size) { _, newSize in
+                    scene.resize(to: newSize)
+                }
+        }
+        .allowsHitTesting(false)
+        .onDisappear {
+            scene?.isPaused = true
+            scene?.removeAllActions()
+            scene?.removeAllChildren()
+            scene = nil
+        }
     }
 }
 
 struct WelcomeView: View {
     @EnvironmentObject private var auth: AuthViewModel
     @StateObject private var coordinator = WelcomeScene.Coordinator()
+    @EnvironmentObject private var stripeCoordinator: StripeTransitionCoordinator
 
     // Persist the scene to avoid rebuilds during early layout changes
     @State private var scene: WelcomeScene?
 
     @State private var navigateToLogin = false
     @State private var navigateToSignup = false
+    @State private var cubeVisible = false
 
     private func ensureScene(size: CGSize) -> WelcomeScene {
         if let s = scene { return s }
@@ -816,6 +801,12 @@ struct WelcomeView: View {
         scene?.removeAllActions()
         scene?.removeAllChildren()
         scene = nil
+    }
+
+    private func navigateWithoutTransition(_ update: () -> Void) {
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        withTransaction(transaction, update)
     }
 
     var body: some View {
@@ -839,34 +830,42 @@ struct WelcomeView: View {
                     }
                 }
 
+                AuthConfettiBackground()
+
+                // Cube rests below the buttons, centered near the bottom (matches Android's
+                // 200pt cube centered 174pt from the bottom), hovering in place on the
+                // Poplur logo face rather than spinning.
                 VStack {
                     Spacer()
-                    AuthCubeView(
-                        title: "Welcome",
-                        systemImage: "sparkles",
-                        accent: .green,
-                        spinToken: 0,
-                        isInteractive: false
-                    )
-                    .padding(.bottom, 58)
+                    LoginCubeView()
+                        .frame(width: 200, height: 200)
+                        .scaleEffect(cubeVisible ? 1 : 0.3)
+                        .opacity(cubeVisible ? 1 : 0)
+                        .padding(.bottom, 8)
                 }
                 .allowsHitTesting(false)
             }
             .onReceive(coordinator.$didTapSignIn) { tapped in
                 if tapped {
-                    navigateToLogin = true
                     coordinator.didTapSignIn = false
+                    stripeCoordinator.trigger {
+                        navigateWithoutTransition { navigateToLogin = true }
+                    }
                 }
             }
             .onReceive(coordinator.$didTapSignUp) { tapped in
                 if tapped {
-                    navigateToSignup = true
                     coordinator.didTapSignUp = false
+                    stripeCoordinator.trigger {
+                        navigateWithoutTransition { navigateToSignup = true }
+                    }
                 }
             }
             .onAppear {
-                if !isRunningInPreviews {
-                    scene?.startConfettiNow()
+                // Cube appears last, after the banner, logo, and buttons have landed.
+                cubeVisible = false
+                withAnimation(.spring(response: 0.6, dampingFraction: 0.62).delay(1.9)) {
+                    cubeVisible = true
                 }
             }
             .onChange(of: auth.isAuthenticated) { _, authed in
@@ -886,11 +885,14 @@ struct WelcomeView: View {
                 LoginView()
                     .toolbar(.hidden, for: .navigationBar)
                     .navigationBarBackButtonHidden(true)
+                    .environmentObject(auth)
+                    .environmentObject(stripeCoordinator)
             }
             .navigationDestination(isPresented: $navigateToSignup) {
                 SignUpView()
                     .toolbar(.hidden, for: .navigationBar)
                     .navigationBarBackButtonHidden(true)
+                    .environmentObject(stripeCoordinator)
             }
         }
     }

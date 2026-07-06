@@ -1,0 +1,24 @@
+{
+  "name": "poplur-functions",
+  "private": true,
+  "engines": {
+    "node": "20"
+  },
+  "main": "lib/index.js",
+  "scripts": {
+    "build": "tsc",
+    "lint": "tsc --noEmit",
+    "seed:creator-credits": "node scripts/seedCreatorCreditBalances.js",
+    "serve": "npm run build && firebase emulators:start --only auth,functions,firestore",
+    "deploy": "npm run build && firebase deploy --only functions,firestore:rules"
+  },
+  "dependencies": {
+    "@genkit-ai/google-genai": "^1.28.0",
+    "firebase-admin": "^13.4.0",
+    "firebase-functions": "^6.4.0",
+    "genkit": "^1.15.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  }
+}

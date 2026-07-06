@@ -1,0 +1,557 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
+<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+  <asset>
+    <contributor>
+      <author>Assimp</author>
+      <authoring_tool>https://github.com/mikedh/trimesh</authoring_tool>
+    </contributor>
+    <created>2026-07-03T10:30:35</created>
+    <modified>2026-07-03T10:30:35</modified>
+    <unit name="meter" meter="1" />
+    <up_axis>Y_UP</up_axis>
+  </asset>
+  <library_images>
+  </library_images>
+  <library_effects>
+    <effect id="panel_pink_trim-fx" name="panel_pink_trim">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0.5   0.0500000007   0.200000003   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">1   0.200000003   0.600000024   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">608.399963</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="brown_leather-fx" name="brown_leather">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">0.419607848   0.200000003   0.0784313753   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">202.5</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="red-fx" name="red">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">0.921568632   0.0509803928   0.0392156877   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">250</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="orange-fx" name="orange">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">1   0.458823532   0.0784313753   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">250</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="yellow-fx" name="yellow">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">1   0.850980401   0.0784313753   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">250</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="green-fx" name="green">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">0.121568628   0.721568644   0.180392161   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">250</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="cyan_emissive-fx" name="cyan_emissive">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0.349999994   0.75   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">0.0196078438   0.850980401   1   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">577.599976</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="blue-fx" name="blue">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">0.0588235296   0.321568638   0.949019611   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">302.5</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="purple-fx" name="purple">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">0.549019635   0.101960786   0.949019611   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">302.5</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="material_9-fx" name="">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">1   1   1   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">0</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+  </library_effects>
+  <library_materials>
+    <material id="panel_pink_trim" name="panel_pink_trim">
+      <instance_effect url="#panel_pink_trim-fx"/>
+    </material>
+    <material id="brown_leather" name="brown_leather">
+      <instance_effect url="#brown_leather-fx"/>
+    </material>
+    <material id="red" name="red">
+      <instance_effect url="#red-fx"/>
+    </material>
+    <material id="orange" name="orange">
+      <instance_effect url="#orange-fx"/>
+    </material>
+    <material id="yellow" name="yellow">
+      <instance_effect url="#yellow-fx"/>
+    </material>
+    <material id="green" name="green">
+      <instance_effect url="#green-fx"/>
+    </material>
+    <material id="cyan_emissive" name="cyan_emissive">
+      <instance_effect url="#cyan_emissive-fx"/>
+    </material>
+    <material id="blue" name="blue">
+      <instance_effect url="#blue-fx"/>
+    </material>
+    <material id="purple" name="purple">
+      <instance_effect url="#purple-fx"/>
+    </material>
+    <material id="material_9" name="">
+      <instance_effect url="#material_9-fx"/>
+    </material>
+  </library_materials>
+  <library_geometries>
+    <geometry id="_07_10_Popular_Music_Xylophone_ROOT_base_1" name="07_10_Popular_Music_Xylophone_ROOT_base" >
+      <mesh>
+        <source id="_07_10_Popular_Music_Xylophone_ROOT_base_1-positions" name="_07_10_Popular_Music_Xylophone_ROOT_base_1-positions">
+          <float_array id="_07_10_Popular_Music_Xylophone_ROOT_base_1-positions-array" count="198"> -4.76000023 0.0199999996 9.54500008 -4.76000023 0.0199999996 9.92500019 -4.8341341 0.0199999996 9.55230141 -4.76000023 0.0799999982 9.54500008 -4.8341341 0.0799999982 9.55230141 -4.76000023 0.0799999982 9.92500019 -4.90541983 0.0199999996 9.57392597 -4.90541983 0.0799999982 9.57392597 -4.97111654 0.0199999996 9.60904121 -4.97111654 0.0799999982 9.60904121 -5.02870035 0.0199999996 9.65629959 -5.02870035 0.0799999982 9.65629959 -5.07595825 0.0199999996 9.7138834 -5.07595825 0.0799999982 9.7138834 -5.11107445 0.0199999996 9.77958012 -5.11107445 0.0799999982 9.77958012 -5.13269854 0.0199999996 9.85086536 -5.13269854 0.0799999982 9.85086536 -5.13999987 0.0199999996 9.92500019 -5.13999987 0.0799999982 9.92500019 -5.13269854 0.0199999996 9.99913406 -5.13269854 0.0799999982 9.99913406 -5.11107445 0.0199999996 10.0704193 -5.11107445 0.0799999982 10.0704193 -5.07595825 0.0199999996 10.136117 -5.07595825 0.0799999982 10.136117 -5.02870035 0.0199999996 10.1937008 -5.02870035 0.0799999982 10.1937008 -4.97111654 0.0199999996 10.2409582 -4.97111654 0.0799999982 10.2409582 -4.90541983 0.0199999996 10.2760744 -4.90541983 0.0799999982 10.2760744 -4.8341341 0.0199999996 10.297698 -4.8341341 0.0799999982 10.297698 -4.76000023 0.0199999996 10.3050003 -4.76000023 0.0799999982 10.3050003 -4.68586588 0.0199999996 10.297698 -4.68586588 0.0799999982 10.297698 -4.61458015 0.0199999996 10.2760744 -4.61458015 0.0799999982 10.2760744 -4.54888344 0.0199999996 10.2409582 -4.54888344 0.0799999982 10.2409582 -4.49129963 0.0199999996 10.1937008 -4.49129963 0.0799999982 10.1937008 -4.44404173 0.0199999996 10.136117 -4.44404173 0.0799999982 10.136117 -4.40892601 0.0199999996 10.0704193 -4.40892601 0.0799999982 10.0704193 -4.38730145 0.0199999996 9.99913406 -4.38730145 0.0799999982 9.99913406 -4.38000011 0.0199999996 9.92500019 -4.38000011 0.0799999982 9.92500019 -4.38730145 0.0199999996 9.85086536 -4.38730145 0.0799999982 9.85086536 -4.40892601 0.0199999996 9.77958012 -4.40892601 0.0799999982 9.77958012 -4.44404173 0.0199999996 9.7138834 -4.44404173 0.0799999982 9.7138834 -4.49129963 0.0199999996 9.65629959 -4.49129963 0.0799999982 9.65629959 -4.54888344 0.0199999996 9.60904121 -4.54888344 0.0799999982 9.60904121 -4.61458015 0.0199999996 9.57392597 -4.61458015 0.0799999982 9.57392597 -4.68586588 0.0199999996 9.55230141 -4.68586588 0.0799999982 9.55230141 </float_array>
+          <technique_common>
+            <accessor count="66" offset="0" source="#_07_10_Popular_Music_Xylophone_ROOT_base_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_07_10_Popular_Music_Xylophone_ROOT_base_1-vertices">
+          <input semantic="POSITION" source="#_07_10_Popular_Music_Xylophone_ROOT_base_1-positions" />
+        </vertices>
+        <polylist count="128" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_07_10_Popular_Music_Xylophone_ROOT_base_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 34 32 34 33 33 34 35 33 35 5 34 1 36 34 36 35 35 36 37 35 37 5 36 1 38 36 38 37 37 38 39 37 39 5 38 1 40 38 40 39 39 40 41 39 41 5 40 1 42 40 42 41 41 42 43 41 43 5 42 1 44 42 44 43 43 44 45 43 45 5 44 1 46 44 46 45 45 46 47 45 47 5 46 1 48 46 48 47 47 48 49 47 49 5 48 1 50 48 50 49 49 50 51 49 51 5 50 1 52 50 52 51 51 52 53 51 53 5 52 1 54 52 54 53 53 54 55 53 55 5 54 1 56 54 56 55 55 56 57 55 57 5 56 1 58 56 58 57 57 58 59 57 59 5 58 1 60 58 60 59 59 60 61 59 61 5 60 1 62 60 62 61 61 62 63 61 63 5 62 1 64 62 64 63 63 64 65 63 65 5 64 1 0 64 0 65 65 0 3 65 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_07_10_Popular_Music_Xylophone_part_01_1" name="07_10_Popular_Music_Xylophone_part_01" >
+      <mesh>
+        <source id="_07_10_Popular_Music_Xylophone_part_01_1-positions" name="_07_10_Popular_Music_Xylophone_part_01_1-positions">
+          <float_array id="_07_10_Popular_Music_Xylophone_part_01_1-positions-array" count="24"> -5.11999989 0.150000006 10.0732355 -5.11999989 0.213529408 10.0732355 -5.11999989 0.150000006 9.77676487 -4.4000001 0.150000006 9.77676487 -5.11999989 0.213529408 9.77676487 -4.4000001 0.213529408 10.0732355 -4.4000001 0.150000006 10.0732355 -4.4000001 0.213529408 9.77676487 </float_array>
+          <technique_common>
+            <accessor count="8" offset="0" source="#_07_10_Popular_Music_Xylophone_part_01_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_07_10_Popular_Music_Xylophone_part_01_1-vertices">
+          <input semantic="POSITION" source="#_07_10_Popular_Music_Xylophone_part_01_1-positions" />
+        </vertices>
+        <polylist count="12" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_07_10_Popular_Music_Xylophone_part_01_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 3 0 2 2 1 4 4 3 2 0 5 1 6 0 3 6 5 0 1 5 4 7 3 4 4 5 7 7 6 3 5 6 7 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_07_10_Popular_Music_Xylophone_part_02_1" name="07_10_Popular_Music_Xylophone_part_02" >
+      <mesh>
+        <source id="_07_10_Popular_Music_Xylophone_part_02_1-positions" name="_07_10_Popular_Music_Xylophone_part_02_1-positions">
+          <float_array id="_07_10_Popular_Music_Xylophone_part_02_1-positions-array" count="24"> -5.08294106 0.245294124 10.0520592 -5.08294106 0.330000013 10.0520592 -5.08294106 0.245294124 9.79794121 -5.00882339 0.245294124 9.79794121 -5.08294106 0.330000013 9.79794121 -5.00882339 0.330000013 10.0520592 -5.00882339 0.245294124 10.0520592 -5.00882339 0.330000013 9.79794121 </float_array>
+          <technique_common>
+            <accessor count="8" offset="0" source="#_07_10_Popular_Music_Xylophone_part_02_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_07_10_Popular_Music_Xylophone_part_02_1-vertices">
+          <input semantic="POSITION" source="#_07_10_Popular_Music_Xylophone_part_02_1-positions" />
+        </vertices>
+        <polylist count="12" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_07_10_Popular_Music_Xylophone_part_02_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 3 0 2 2 1 4 4 3 2 0 5 1 6 0 3 6 5 0 1 5 4 7 3 4 4 5 7 7 6 3 5 6 7 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_07_10_Popular_Music_Xylophone_part_03_1" name="07_10_Popular_Music_Xylophone_part_03" >
+      <mesh>
+        <source id="_07_10_Popular_Music_Xylophone_part_03_1-positions" name="_07_10_Popular_Music_Xylophone_part_03_1-positions">
+          <float_array id="_07_10_Popular_Music_Xylophone_part_03_1-positions-array" count="24"> -4.98764706 0.245294124 10.0414705 -4.98764706 0.330000013 10.0414705 -4.98764706 0.245294124 9.80852985 -4.9135294 0.245294124 9.80852985 -4.98764706 0.330000013 9.80852985 -4.9135294 0.330000013 10.0414705 -4.9135294 0.245294124 10.0414705 -4.9135294 0.330000013 9.80852985 </float_array>
+          <technique_common>
+            <accessor count="8" offset="0" source="#_07_10_Popular_Music_Xylophone_part_03_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_07_10_Popular_Music_Xylophone_part_03_1-vertices">
+          <input semantic="POSITION" source="#_07_10_Popular_Music_Xylophone_part_03_1-positions" />
+        </vertices>
+        <polylist count="12" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_07_10_Popular_Music_Xylophone_part_03_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 3 0 2 2 1 4 4 3 2 0 5 1 6 0 3 6 5 0 1 5 4 7 3 4 4 5 7 7 6 3 5 6 7 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_07_10_Popular_Music_Xylophone_part_04_1" name="07_10_Popular_Music_Xylophone_part_04" >
+      <mesh>
+        <source id="_07_10_Popular_Music_Xylophone_part_04_1-positions" name="_07_10_Popular_Music_Xylophone_part_04_1-positions">
+          <float_array id="_07_10_Popular_Music_Xylophone_part_04_1-positions-array" count="24"> -4.89235306 0.245294124 10.0308819 -4.89235306 0.330000013 10.0308819 -4.89235306 0.245294124 9.81911755 -4.8182354 0.245294124 9.81911755 -4.89235306 0.330000013 9.81911755 -4.8182354 0.330000013 10.0308819 -4.8182354 0.245294124 10.0308819 -4.8182354 0.330000013 9.81911755 </float_array>
+          <technique_common>
+            <accessor count="8" offset="0" source="#_07_10_Popular_Music_Xylophone_part_04_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_07_10_Popular_Music_Xylophone_part_04_1-vertices">
+          <input semantic="POSITION" source="#_07_10_Popular_Music_Xylophone_part_04_1-positions" />
+        </vertices>
+        <polylist count="12" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_07_10_Popular_Music_Xylophone_part_04_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 3 0 2 2 1 4 4 3 2 0 5 1 6 0 3 6 5 0 1 5 4 7 3 4 4 5 7 7 6 3 5 6 7 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_07_10_Popular_Music_Xylophone_part_05_1" name="07_10_Popular_Music_Xylophone_part_05" >
+      <mesh>
+        <source id="_07_10_Popular_Music_Xylophone_part_05_1-positions" name="_07_10_Popular_Music_Xylophone_part_05_1-positions">
+          <float_array id="_07_10_Popular_Music_Xylophone_part_05_1-positions-array" count="24"> -4.79705906 0.245294124 10.0202942 -4.79705906 0.330000013 10.0202942 -4.79705906 0.245294124 9.82970619 -4.7229414 0.245294124 9.82970619 -4.79705906 0.330000013 9.82970619 -4.7229414 0.330000013 10.0202942 -4.7229414 0.245294124 10.0202942 -4.7229414 0.330000013 9.82970619 </float_array>
+          <technique_common>
+            <accessor count="8" offset="0" source="#_07_10_Popular_Music_Xylophone_part_05_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_07_10_Popular_Music_Xylophone_part_05_1-vertices">
+          <input semantic="POSITION" source="#_07_10_Popular_Music_Xylophone_part_05_1-positions" />
+        </vertices>
+        <polylist count="12" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_07_10_Popular_Music_Xylophone_part_05_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 3 0 2 2 1 4 4 3 2 0 5 1 6 0 3 6 5 0 1 5 4 7 3 4 4 5 7 7 6 3 5 6 7 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_07_10_Popular_Music_Xylophone_part_06_1" name="07_10_Popular_Music_Xylophone_part_06" >
+      <mesh>
+        <source id="_07_10_Popular_Music_Xylophone_part_06_1-positions" name="_07_10_Popular_Music_Xylophone_part_06_1-positions">
+          <float_array id="_07_10_Popular_Music_Xylophone_part_06_1-positions-array" count="24"> -4.70176458 0.245294124 10.0097055 -4.70176458 0.330000013 10.0097055 -4.70176458 0.245294124 9.84029388 -4.62764692 0.245294124 9.84029388 -4.70176458 0.330000013 9.84029388 -4.62764692 0.330000013 10.0097055 -4.62764692 0.245294124 10.0097055 -4.62764692 0.330000013 9.84029388 </float_array>
+          <technique_common>
+            <accessor count="8" offset="0" source="#_07_10_Popular_Music_Xylophone_part_06_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_07_10_Popular_Music_Xylophone_part_06_1-vertices">
+          <input semantic="POSITION" source="#_07_10_Popular_Music_Xylophone_part_06_1-positions" />
+        </vertices>
+        <polylist count="12" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_07_10_Popular_Music_Xylophone_part_06_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 3 0 2 2 1 4 4 3 2 0 5 1 6 0 3 6 5 0 1 5 4 7 3 4 4 5 7 7 6 3 5 6 7 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_07_10_Popular_Music_Xylophone_part_07_1" name="07_10_Popular_Music_Xylophone_part_07" >
+      <mesh>
+        <source id="_07_10_Popular_Music_Xylophone_part_07_1-positions" name="_07_10_Popular_Music_Xylophone_part_07_1-positions">
+          <float_array id="_07_10_Popular_Music_Xylophone_part_07_1-positions-array" count="24"> -4.60647058 0.245294124 9.99911785 -4.60647058 0.330000013 9.99911785 -4.60647058 0.245294124 9.85088253 -4.53235292 0.245294124 9.85088253 -4.60647058 0.330000013 9.85088253 -4.53235292 0.330000013 9.99911785 -4.53235292 0.245294124 9.99911785 -4.53235292 0.330000013 9.85088253 </float_array>
+          <technique_common>
+            <accessor count="8" offset="0" source="#_07_10_Popular_Music_Xylophone_part_07_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_07_10_Popular_Music_Xylophone_part_07_1-vertices">
+          <input semantic="POSITION" source="#_07_10_Popular_Music_Xylophone_part_07_1-positions" />
+        </vertices>
+        <polylist count="12" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_07_10_Popular_Music_Xylophone_part_07_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 3 0 2 2 1 4 4 3 2 0 5 1 6 0 3 6 5 0 1 5 4 7 3 4 4 5 7 7 6 3 5 6 7 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_07_10_Popular_Music_Xylophone_part_08_1" name="07_10_Popular_Music_Xylophone_part_08" >
+      <mesh>
+        <source id="_07_10_Popular_Music_Xylophone_part_08_1-positions" name="_07_10_Popular_Music_Xylophone_part_08_1-positions">
+          <float_array id="_07_10_Popular_Music_Xylophone_part_08_1-positions-array" count="24"> -4.51117659 0.245294124 9.98852921 -4.51117659 0.330000013 9.98852921 -4.51117659 0.245294124 9.86147022 -4.43705893 0.245294124 9.86147022 -4.51117659 0.330000013 9.86147022 -4.43705893 0.330000013 9.98852921 -4.43705893 0.245294124 9.98852921 -4.43705893 0.330000013 9.86147022 </float_array>
+          <technique_common>
+            <accessor count="8" offset="0" source="#_07_10_Popular_Music_Xylophone_part_08_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_07_10_Popular_Music_Xylophone_part_08_1-vertices">
+          <input semantic="POSITION" source="#_07_10_Popular_Music_Xylophone_part_08_1-positions" />
+        </vertices>
+        <polylist count="12" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_07_10_Popular_Music_Xylophone_part_08_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 3 0 2 2 1 4 4 3 2 0 5 1 6 0 3 6 5 0 1 5 4 7 3 4 4 5 7 7 6 3 5 6 7 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+  </library_geometries>
+  <library_controllers>
+  </library_controllers>
+  <library_visual_scenes>
+    <visual_scene id="ROOT" name="ROOT">
+      <node id="_07_10_Popular_Music_Xylophone_ROOT_base" name="07_10_Popular_Music_Xylophone_ROOT_base" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_07_10_Popular_Music_Xylophone_ROOT_base_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#panel_pink_trim">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_07_10_Popular_Music_Xylophone_part_01" name="07_10_Popular_Music_Xylophone_part_01" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_07_10_Popular_Music_Xylophone_part_01_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#brown_leather">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_07_10_Popular_Music_Xylophone_part_02" name="07_10_Popular_Music_Xylophone_part_02" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_07_10_Popular_Music_Xylophone_part_02_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#red">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_07_10_Popular_Music_Xylophone_part_03" name="07_10_Popular_Music_Xylophone_part_03" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_07_10_Popular_Music_Xylophone_part_03_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#orange">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_07_10_Popular_Music_Xylophone_part_04" name="07_10_Popular_Music_Xylophone_part_04" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_07_10_Popular_Music_Xylophone_part_04_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#yellow">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_07_10_Popular_Music_Xylophone_part_05" name="07_10_Popular_Music_Xylophone_part_05" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_07_10_Popular_Music_Xylophone_part_05_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#green">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_07_10_Popular_Music_Xylophone_part_06" name="07_10_Popular_Music_Xylophone_part_06" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_07_10_Popular_Music_Xylophone_part_06_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#cyan_emissive">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_07_10_Popular_Music_Xylophone_part_07" name="07_10_Popular_Music_Xylophone_part_07" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_07_10_Popular_Music_Xylophone_part_07_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#blue">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_07_10_Popular_Music_Xylophone_part_08" name="07_10_Popular_Music_Xylophone_part_08" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_07_10_Popular_Music_Xylophone_part_08_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#purple">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+    </visual_scene>
+  </library_visual_scenes>
+  <scene>
+    <instance_visual_scene url="#ROOT" />
+  </scene>
+</COLLADA>

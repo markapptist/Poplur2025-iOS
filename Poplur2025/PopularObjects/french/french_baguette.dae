@@ -1,0 +1,287 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
+<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+  <asset>
+    <contributor>
+      <author>Assimp</author>
+      <authoring_tool>https://github.com/mikedh/trimesh</authoring_tool>
+    </contributor>
+    <created>2026-07-03T10:30:43</created>
+    <modified>2026-07-03T10:30:43</modified>
+    <unit name="meter" meter="1" />
+    <up_axis>Y_UP</up_axis>
+  </asset>
+  <library_images>
+  </library_images>
+  <library_effects>
+    <effect id="panel_blue_trim-fx" name="panel_blue_trim">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0.150000006   0.5   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">0   0.478431374   1   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">608.399963</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="tan_bread-fx" name="tan_bread">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">0.78039217   0.478431374   0.200000003   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">122.500015</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="warm_white-fx" name="warm_white">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">0.929411769   0.921568632   0.87843138   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">202.5</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="material_3-fx" name="">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">1   1   1   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">0</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+  </library_effects>
+  <library_materials>
+    <material id="panel_blue_trim" name="panel_blue_trim">
+      <instance_effect url="#panel_blue_trim-fx"/>
+    </material>
+    <material id="tan_bread" name="tan_bread">
+      <instance_effect url="#tan_bread-fx"/>
+    </material>
+    <material id="warm_white" name="warm_white">
+      <instance_effect url="#warm_white-fx"/>
+    </material>
+    <material id="material_3" name="">
+      <instance_effect url="#material_3-fx"/>
+    </material>
+  </library_materials>
+  <library_geometries>
+    <geometry id="_10_10_Popular_French_Baguette_ROOT_base_1" name="10_10_Popular_French_Baguette_ROOT_base" >
+      <mesh>
+        <source id="_10_10_Popular_French_Baguette_ROOT_base_1-positions" name="_10_10_Popular_French_Baguette_ROOT_base_1-positions">
+          <float_array id="_10_10_Popular_French_Baguette_ROOT_base_1-positions-array" count="198"> -4.76000023 0.0199999996 14.7950001 -4.76000023 0.0199999996 15.1750002 -4.8341341 0.0199999996 14.8023014 -4.76000023 0.0799999982 14.7950001 -4.8341341 0.0799999982 14.8023014 -4.76000023 0.0799999982 15.1750002 -4.90541983 0.0199999996 14.823926 -4.90541983 0.0799999982 14.823926 -4.97111654 0.0199999996 14.8590412 -4.97111654 0.0799999982 14.8590412 -5.02870035 0.0199999996 14.9062996 -5.02870035 0.0799999982 14.9062996 -5.07595825 0.0199999996 14.9638834 -5.07595825 0.0799999982 14.9638834 -5.11107445 0.0199999996 15.0295801 -5.11107445 0.0799999982 15.0295801 -5.13269854 0.0199999996 15.1008654 -5.13269854 0.0799999982 15.1008654 -5.13999987 0.0199999996 15.1750002 -5.13999987 0.0799999982 15.1750002 -5.13269854 0.0199999996 15.2491341 -5.13269854 0.0799999982 15.2491341 -5.11107445 0.0199999996 15.3204193 -5.11107445 0.0799999982 15.3204193 -5.07595825 0.0199999996 15.386117 -5.07595825 0.0799999982 15.386117 -5.02870035 0.0199999996 15.4437008 -5.02870035 0.0799999982 15.4437008 -4.97111654 0.0199999996 15.4909582 -4.97111654 0.0799999982 15.4909582 -4.90541983 0.0199999996 15.5260744 -4.90541983 0.0799999982 15.5260744 -4.8341341 0.0199999996 15.547698 -4.8341341 0.0799999982 15.547698 -4.76000023 0.0199999996 15.5550003 -4.76000023 0.0799999982 15.5550003 -4.68586588 0.0199999996 15.547698 -4.68586588 0.0799999982 15.547698 -4.61458015 0.0199999996 15.5260744 -4.61458015 0.0799999982 15.5260744 -4.54888344 0.0199999996 15.4909582 -4.54888344 0.0799999982 15.4909582 -4.49129963 0.0199999996 15.4437008 -4.49129963 0.0799999982 15.4437008 -4.44404173 0.0199999996 15.386117 -4.44404173 0.0799999982 15.386117 -4.40892601 0.0199999996 15.3204193 -4.40892601 0.0799999982 15.3204193 -4.38730145 0.0199999996 15.2491341 -4.38730145 0.0799999982 15.2491341 -4.38000011 0.0199999996 15.1750002 -4.38000011 0.0799999982 15.1750002 -4.38730145 0.0199999996 15.1008654 -4.38730145 0.0799999982 15.1008654 -4.40892601 0.0199999996 15.0295801 -4.40892601 0.0799999982 15.0295801 -4.44404173 0.0199999996 14.9638834 -4.44404173 0.0799999982 14.9638834 -4.49129963 0.0199999996 14.9062996 -4.49129963 0.0799999982 14.9062996 -4.54888344 0.0199999996 14.8590412 -4.54888344 0.0799999982 14.8590412 -4.61458015 0.0199999996 14.823926 -4.61458015 0.0799999982 14.823926 -4.68586588 0.0199999996 14.8023014 -4.68586588 0.0799999982 14.8023014 </float_array>
+          <technique_common>
+            <accessor count="66" offset="0" source="#_10_10_Popular_French_Baguette_ROOT_base_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_10_10_Popular_French_Baguette_ROOT_base_1-vertices">
+          <input semantic="POSITION" source="#_10_10_Popular_French_Baguette_ROOT_base_1-positions" />
+        </vertices>
+        <polylist count="128" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_10_10_Popular_French_Baguette_ROOT_base_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 34 32 34 33 33 34 35 33 35 5 34 1 36 34 36 35 35 36 37 35 37 5 36 1 38 36 38 37 37 38 39 37 39 5 38 1 40 38 40 39 39 40 41 39 41 5 40 1 42 40 42 41 41 42 43 41 43 5 42 1 44 42 44 43 43 44 45 43 45 5 44 1 46 44 46 45 45 46 47 45 47 5 46 1 48 46 48 47 47 48 49 47 49 5 48 1 50 48 50 49 49 50 51 49 51 5 50 1 52 50 52 51 51 52 53 51 53 5 52 1 54 52 54 53 53 54 55 53 55 5 54 1 56 54 56 55 55 56 57 55 57 5 56 1 58 56 58 57 57 58 59 57 59 5 58 1 60 58 60 59 59 60 61 59 61 5 60 1 62 60 62 61 61 62 63 61 63 5 62 1 64 62 64 63 63 64 65 63 65 5 64 1 0 64 0 65 65 0 3 65 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_10_10_Popular_French_Baguette_part_01_1" name="10_10_Popular_French_Baguette_part_01" >
+      <mesh>
+        <source id="_10_10_Popular_French_Baguette_part_01_1-positions" name="_10_10_Popular_French_Baguette_part_01_1-positions">
+          <float_array id="_10_10_Popular_French_Baguette_part_01_1-positions-array" count="150"> -5.10206175 0.247379422 15.0759821 -5.10206175 0.247379422 15.1750002 -5.10670424 0.272583067 15.0793562 -4.41793823 0.373402148 15.0759821 -4.4225812 0.398605794 15.0793562 -4.41793823 0.373402148 15.1750002 -5.11103106 0.296069145 15.0892477 -4.42690754 0.422091872 15.0892477 -5.11474609 0.316237092 15.1049833 -4.43062258 0.442259818 15.1049833 -5.11759663 0.331712484 15.1254911 -4.43347359 0.457735211 15.1254911 -5.11938858 0.341440737 15.1493721 -4.43526554 0.467463464 15.1493721 -5.11999989 0.344758838 15.1750002 -4.43587685 0.470781565 15.1750002 -5.11938858 0.341440737 15.2006273 -4.43526554 0.467463464 15.2006273 -5.11759663 0.331712484 15.2245092 -4.43347359 0.457735211 15.2245092 -5.11474609 0.316237092 15.2450161 -4.43062258 0.442259818 15.2450161 -5.11103106 0.296069145 15.2607517 -4.42690754 0.422091872 15.2607517 -5.10670424 0.272583067 15.2706442 -4.4225812 0.398605794 15.2706442 -5.10206175 0.247379422 15.2740183 -4.41793823 0.373402148 15.2740183 -5.09741879 0.222175777 15.2706442 -4.41329575 0.348198503 15.2706442 -5.09309244 0.198689714 15.2607517 -4.40896893 0.324712425 15.2607517 -5.0893774 0.178521767 15.2450161 -4.40525389 0.304544508 15.2450161 -5.08652687 0.163046375 15.2245092 -4.40240335 0.289069086 15.2245092 -5.08473444 0.153318122 15.2006273 -4.4006114 0.279340863 15.2006273 -5.08412313 0.150000006 15.1750002 -4.4000001 0.276022732 15.1750002 -5.08473444 0.153318122 15.1493721 -4.4006114 0.279340863 15.1493721 -5.08652687 0.163046375 15.1254911 -4.40240335 0.289069086 15.1254911 -5.0893774 0.178521767 15.1049833 -4.40525389 0.304544508 15.1049833 -5.09309244 0.198689714 15.0892477 -4.40896893 0.324712425 15.0892477 -5.09741879 0.222175777 15.0793562 -4.41329575 0.348198503 15.0793562 </float_array>
+          <technique_common>
+            <accessor count="50" offset="0" source="#_10_10_Popular_French_Baguette_part_01_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_10_10_Popular_French_Baguette_part_01_1-vertices">
+          <input semantic="POSITION" source="#_10_10_Popular_French_Baguette_part_01_1-positions" />
+        </vertices>
+        <polylist count="96" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_10_10_Popular_French_Baguette_part_01_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 34 32 34 33 33 34 35 33 35 5 34 1 36 34 36 35 35 36 37 35 37 5 36 1 38 36 38 37 37 38 39 37 39 5 38 1 40 38 40 39 39 40 41 39 41 5 40 1 42 40 42 41 41 42 43 41 43 5 42 1 44 42 44 43 43 44 45 43 45 5 44 1 46 44 46 45 45 46 47 45 47 5 46 1 48 46 48 47 47 48 49 47 49 5 48 1 0 48 0 49 49 0 3 49 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_10_10_Popular_French_Baguette_part_02_1" name="10_10_Popular_French_Baguette_part_02" >
+      <mesh>
+        <source id="_10_10_Popular_French_Baguette_part_02_1-positions" name="_10_10_Popular_French_Baguette_part_02_1-positions">
+          <float_array id="_10_10_Popular_French_Baguette_part_02_1-positions-array" count="54"> -4.97603893 0.373402148 15.2182074 -4.97603893 0.373402148 15.2290096 -4.97887564 0.380493969 15.2213717 -4.88602257 0.409408659 15.2182074 -4.88885927 0.416500479 15.2213717 -4.88602257 0.409408659 15.2290096 -4.98005056 0.383431494 15.2290096 -4.89003468 0.419438004 15.2290096 -4.97887564 0.380493969 15.2366476 -4.88885927 0.416500479 15.2366476 -4.97603893 0.373402148 15.2398119 -4.88602257 0.409408659 15.2398119 -4.97320223 0.366310328 15.2366476 -4.88318586 0.402316809 15.2366476 -4.9720273 0.363372803 15.2290096 -4.88201094 0.399379283 15.2290096 -4.97320223 0.366310328 15.2213717 -4.88318586 0.402316809 15.2213717 </float_array>
+          <technique_common>
+            <accessor count="18" offset="0" source="#_10_10_Popular_French_Baguette_part_02_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_10_10_Popular_French_Baguette_part_02_1-vertices">
+          <input semantic="POSITION" source="#_10_10_Popular_French_Baguette_part_02_1-positions" />
+        </vertices>
+        <polylist count="32" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_10_10_Popular_French_Baguette_part_02_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 0 16 0 17 17 0 3 17 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_10_10_Popular_French_Baguette_part_03_1" name="10_10_Popular_French_Baguette_part_03" >
+      <mesh>
+        <source id="_10_10_Popular_French_Baguette_part_03_1-positions" name="_10_10_Popular_French_Baguette_part_03_1-positions">
+          <float_array id="_10_10_Popular_French_Baguette_part_03_1-positions-array" count="54"> -4.76000023 0.373402148 15.2182074 -4.76000023 0.373402148 15.2290096 -4.76283693 0.380493969 15.2213717 -4.66998386 0.409408659 15.2182074 -4.67282057 0.416500479 15.2213717 -4.66998386 0.409408659 15.2290096 -4.76401186 0.383431494 15.2290096 -4.67399549 0.419438004 15.2290096 -4.76283693 0.380493969 15.2366476 -4.67282057 0.416500479 15.2366476 -4.76000023 0.373402148 15.2398119 -4.66998386 0.409408659 15.2398119 -4.75716305 0.366310328 15.2366476 -4.66714716 0.402316809 15.2366476 -4.75598812 0.363372803 15.2290096 -4.66597223 0.399379283 15.2290096 -4.75716305 0.366310328 15.2213717 -4.66714716 0.402316809 15.2213717 </float_array>
+          <technique_common>
+            <accessor count="18" offset="0" source="#_10_10_Popular_French_Baguette_part_03_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_10_10_Popular_French_Baguette_part_03_1-vertices">
+          <input semantic="POSITION" source="#_10_10_Popular_French_Baguette_part_03_1-positions" />
+        </vertices>
+        <polylist count="32" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_10_10_Popular_French_Baguette_part_03_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 0 16 0 17 17 0 3 17 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_10_10_Popular_French_Baguette_part_04_1" name="10_10_Popular_French_Baguette_part_04" >
+      <mesh>
+        <source id="_10_10_Popular_French_Baguette_part_04_1-positions" name="_10_10_Popular_French_Baguette_part_04_1-positions">
+          <float_array id="_10_10_Popular_French_Baguette_part_04_1-positions-array" count="54"> -4.54396105 0.373402148 15.2182074 -4.54396105 0.373402148 15.2290096 -4.54679775 0.380493969 15.2213717 -4.45394468 0.409408659 15.2182074 -4.45678139 0.416500479 15.2213717 -4.45394468 0.409408659 15.2290096 -4.54797268 0.383431494 15.2290096 -4.45795631 0.419438004 15.2290096 -4.54679775 0.380493969 15.2366476 -4.45678139 0.416500479 15.2366476 -4.54396105 0.373402148 15.2398119 -4.45394468 0.409408659 15.2398119 -4.54112434 0.366310328 15.2366476 -4.45110798 0.402316809 15.2366476 -4.53994942 0.363372803 15.2290096 -4.44993305 0.399379283 15.2290096 -4.54112434 0.366310328 15.2213717 -4.45110798 0.402316809 15.2213717 </float_array>
+          <technique_common>
+            <accessor count="18" offset="0" source="#_10_10_Popular_French_Baguette_part_04_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_10_10_Popular_French_Baguette_part_04_1-vertices">
+          <input semantic="POSITION" source="#_10_10_Popular_French_Baguette_part_04_1-positions" />
+        </vertices>
+        <polylist count="32" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_10_10_Popular_French_Baguette_part_04_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 0 16 0 17 17 0 3 17 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+  </library_geometries>
+  <library_controllers>
+  </library_controllers>
+  <library_visual_scenes>
+    <visual_scene id="ROOT" name="ROOT">
+      <node id="_10_10_Popular_French_Baguette_ROOT_base" name="10_10_Popular_French_Baguette_ROOT_base" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_10_10_Popular_French_Baguette_ROOT_base_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#panel_blue_trim">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_10_10_Popular_French_Baguette_part_01" name="10_10_Popular_French_Baguette_part_01" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_10_10_Popular_French_Baguette_part_01_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#tan_bread">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_10_10_Popular_French_Baguette_part_02" name="10_10_Popular_French_Baguette_part_02" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_10_10_Popular_French_Baguette_part_02_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#warm_white">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_10_10_Popular_French_Baguette_part_03" name="10_10_Popular_French_Baguette_part_03" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_10_10_Popular_French_Baguette_part_03_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#warm_white">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_10_10_Popular_French_Baguette_part_04" name="10_10_Popular_French_Baguette_part_04" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_10_10_Popular_French_Baguette_part_04_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#warm_white">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+    </visual_scene>
+  </library_visual_scenes>
+  <scene>
+    <instance_visual_scene url="#ROOT" />
+  </scene>
+</COLLADA>

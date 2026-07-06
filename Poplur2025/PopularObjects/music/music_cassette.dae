@@ -1,0 +1,254 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
+<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+  <asset>
+    <contributor>
+      <author>Assimp</author>
+      <authoring_tool>https://github.com/mikedh/trimesh</authoring_tool>
+    </contributor>
+    <created>2026-07-03T10:30:36</created>
+    <modified>2026-07-03T10:30:36</modified>
+    <unit name="meter" meter="1" />
+    <up_axis>Y_UP</up_axis>
+  </asset>
+  <library_images>
+  </library_images>
+  <library_effects>
+    <effect id="panel_pink_trim-fx" name="panel_pink_trim">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0.5   0.0500000007   0.200000003   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">1   0.200000003   0.600000024   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">608.399963</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="warm_white-fx" name="warm_white">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">0.929411769   0.921568632   0.87843138   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">202.5</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="black_soft-fx" name="black_soft">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">0.0156862754   0.0156862754   0.0196078438   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">62.5</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="material_3-fx" name="">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">1   1   1   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">0</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+  </library_effects>
+  <library_materials>
+    <material id="panel_pink_trim" name="panel_pink_trim">
+      <instance_effect url="#panel_pink_trim-fx"/>
+    </material>
+    <material id="warm_white" name="warm_white">
+      <instance_effect url="#warm_white-fx"/>
+    </material>
+    <material id="black_soft" name="black_soft">
+      <instance_effect url="#black_soft-fx"/>
+    </material>
+    <material id="material_3" name="">
+      <instance_effect url="#material_3-fx"/>
+    </material>
+  </library_materials>
+  <library_geometries>
+    <geometry id="_07_13_Popular_Music_Cassette_ROOT_base_1" name="07_13_Popular_Music_Cassette_ROOT_base" >
+      <mesh>
+        <source id="_07_13_Popular_Music_Cassette_ROOT_base_1-positions" name="_07_13_Popular_Music_Cassette_ROOT_base_1-positions">
+          <float_array id="_07_13_Popular_Music_Cassette_ROOT_base_1-positions-array" count="198"> -7.4000001 0.0199999996 10.6949997 -7.4000001 0.0199999996 11.0749998 -7.47413445 0.0199999996 10.702302 -7.4000001 0.0799999982 10.6949997 -7.47413445 0.0799999982 10.702302 -7.4000001 0.0799999982 11.0749998 -7.54541969 0.0199999996 10.7239256 -7.54541969 0.0799999982 10.7239256 -7.61111689 0.0199999996 10.7590418 -7.61111689 0.0799999982 10.7590418 -7.6687007 0.0199999996 10.8062992 -7.6687007 0.0799999982 10.8062992 -7.7159586 0.0199999996 10.863883 -7.7159586 0.0799999982 10.863883 -7.75107431 0.0199999996 10.9295807 -7.75107431 0.0799999982 10.9295807 -7.7726984 0.0199999996 11.0008659 -7.7726984 0.0799999982 11.0008659 -7.78000021 0.0199999996 11.0749998 -7.78000021 0.0799999982 11.0749998 -7.7726984 0.0199999996 11.1491346 -7.7726984 0.0799999982 11.1491346 -7.75107431 0.0199999996 11.2204199 -7.75107431 0.0799999982 11.2204199 -7.7159586 0.0199999996 11.2861166 -7.7159586 0.0799999982 11.2861166 -7.6687007 0.0199999996 11.3437004 -7.6687007 0.0799999982 11.3437004 -7.61111689 0.0199999996 11.3909588 -7.61111689 0.0799999982 11.3909588 -7.54541969 0.0199999996 11.426074 -7.54541969 0.0799999982 11.426074 -7.47413445 0.0199999996 11.4476986 -7.47413445 0.0799999982 11.4476986 -7.4000001 0.0199999996 11.4549999 -7.4000001 0.0799999982 11.4549999 -7.32586575 0.0199999996 11.4476986 -7.32586575 0.0799999982 11.4476986 -7.2545805 0.0199999996 11.426074 -7.2545805 0.0799999982 11.426074 -7.1888833 0.0199999996 11.3909588 -7.1888833 0.0799999982 11.3909588 -7.1312995 0.0199999996 11.3437004 -7.1312995 0.0799999982 11.3437004 -7.0840416 0.0199999996 11.2861166 -7.0840416 0.0799999982 11.2861166 -7.04892588 0.0199999996 11.2204199 -7.04892588 0.0799999982 11.2204199 -7.02730179 0.0199999996 11.1491346 -7.02730179 0.0799999982 11.1491346 -7.01999998 0.0199999996 11.0749998 -7.01999998 0.0799999982 11.0749998 -7.02730179 0.0199999996 11.0008659 -7.02730179 0.0799999982 11.0008659 -7.04892588 0.0199999996 10.9295807 -7.04892588 0.0799999982 10.9295807 -7.0840416 0.0199999996 10.863883 -7.0840416 0.0799999982 10.863883 -7.1312995 0.0199999996 10.8062992 -7.1312995 0.0799999982 10.8062992 -7.1888833 0.0199999996 10.7590418 -7.1888833 0.0799999982 10.7590418 -7.2545805 0.0199999996 10.7239256 -7.2545805 0.0799999982 10.7239256 -7.32586575 0.0199999996 10.702302 -7.32586575 0.0799999982 10.702302 </float_array>
+          <technique_common>
+            <accessor count="66" offset="0" source="#_07_13_Popular_Music_Cassette_ROOT_base_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_07_13_Popular_Music_Cassette_ROOT_base_1-vertices">
+          <input semantic="POSITION" source="#_07_13_Popular_Music_Cassette_ROOT_base_1-positions" />
+        </vertices>
+        <polylist count="128" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_07_13_Popular_Music_Cassette_ROOT_base_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 34 32 34 33 33 34 35 33 35 5 34 1 36 34 36 35 35 36 37 35 37 5 36 1 38 36 38 37 37 38 39 37 39 5 38 1 40 38 40 39 39 40 41 39 41 5 40 1 42 40 42 41 41 42 43 41 43 5 42 1 44 42 44 43 43 44 45 43 45 5 44 1 46 44 46 45 45 46 47 45 47 5 46 1 48 46 48 47 47 48 49 47 49 5 48 1 50 48 50 49 49 50 51 49 51 5 50 1 52 50 52 51 51 52 53 51 53 5 52 1 54 52 54 53 53 54 55 53 55 5 54 1 56 54 56 55 55 56 57 55 57 5 56 1 58 56 58 57 57 58 59 57 59 5 58 1 60 58 60 59 59 60 61 59 61 5 60 1 62 60 62 61 61 62 63 61 63 5 62 1 64 62 64 63 63 64 65 63 65 5 64 1 0 64 0 65 65 0 3 65 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_07_13_Popular_Music_Cassette_part_01_1" name="07_13_Popular_Music_Cassette_part_01" >
+      <mesh>
+        <source id="_07_13_Popular_Music_Cassette_part_01_1-positions" name="_07_13_Popular_Music_Cassette_part_01_1-positions">
+          <float_array id="_07_13_Popular_Music_Cassette_part_01_1-positions-array" count="24"> -7.76000023 0.150000006 11.2790003 -7.76000023 0.462000012 11.2790003 -7.76000023 0.150000006 10.8710003 -7.03999996 0.150000006 10.8710003 -7.76000023 0.462000012 10.8710003 -7.03999996 0.462000012 11.2790003 -7.03999996 0.150000006 11.2790003 -7.03999996 0.462000012 10.8710003 </float_array>
+          <technique_common>
+            <accessor count="8" offset="0" source="#_07_13_Popular_Music_Cassette_part_01_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_07_13_Popular_Music_Cassette_part_01_1-vertices">
+          <input semantic="POSITION" source="#_07_13_Popular_Music_Cassette_part_01_1-positions" />
+        </vertices>
+        <polylist count="12" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_07_13_Popular_Music_Cassette_part_01_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 3 0 2 2 1 4 4 3 2 0 5 1 6 0 3 6 5 0 1 5 4 7 3 4 4 5 7 7 6 3 5 6 7 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_07_13_Popular_Music_Cassette_part_02_1" name="07_13_Popular_Music_Cassette_part_02" >
+      <mesh>
+        <source id="_07_13_Popular_Music_Cassette_part_02_1-positions" name="_07_13_Popular_Music_Cassette_part_02_1-positions">
+          <float_array id="_07_13_Popular_Music_Cassette_part_02_1-positions-array" count="198"> -7.59200001 0.474000007 11.0030003 -7.59200001 0.474000007 11.099 -7.61072874 0.474000007 11.0048447 -7.59200001 0.522000015 11.0030003 -7.61072874 0.522000015 11.0048447 -7.59200001 0.522000015 11.099 -7.62873745 0.474000007 11.0103073 -7.62873745 0.522000015 11.0103073 -7.64533472 0.474000007 11.0191793 -7.64533472 0.522000015 11.0191793 -7.65988207 0.474000007 11.0311174 -7.65988207 0.522000015 11.0311174 -7.67182112 0.474000007 11.0456648 -7.67182112 0.522000015 11.0456648 -7.68069267 0.474000007 11.0622625 -7.68069267 0.522000015 11.0622625 -7.68615532 0.474000007 11.0802717 -7.68615532 0.522000015 11.0802717 -7.6880002 0.474000007 11.099 -7.6880002 0.522000015 11.099 -7.68615532 0.474000007 11.1177282 -7.68615532 0.522000015 11.1177282 -7.68069267 0.474000007 11.1357374 -7.68069267 0.522000015 11.1357374 -7.67182112 0.474000007 11.1523352 -7.67182112 0.522000015 11.1523352 -7.65988207 0.474000007 11.1668825 -7.65988207 0.522000015 11.1668825 -7.64533472 0.474000007 11.1788206 -7.64533472 0.522000015 11.1788206 -7.62873745 0.474000007 11.1876926 -7.62873745 0.522000015 11.1876926 -7.61072874 0.474000007 11.1931553 -7.61072874 0.522000015 11.1931553 -7.59200001 0.474000007 11.1949997 -7.59200001 0.522000015 11.1949997 -7.57327127 0.474000007 11.1931553 -7.57327127 0.522000015 11.1931553 -7.55526257 0.474000007 11.1876926 -7.55526257 0.522000015 11.1876926 -7.53866529 0.474000007 11.1788206 -7.53866529 0.522000015 11.1788206 -7.52411795 0.474000007 11.1668825 -7.52411795 0.522000015 11.1668825 -7.5121789 0.474000007 11.1523352 -7.5121789 0.522000015 11.1523352 -7.50330734 0.474000007 11.1357374 -7.50330734 0.522000015 11.1357374 -7.4978447 0.474000007 11.1177282 -7.4978447 0.522000015 11.1177282 -7.49599981 0.474000007 11.099 -7.49599981 0.522000015 11.099 -7.4978447 0.474000007 11.0802717 -7.4978447 0.522000015 11.0802717 -7.50330734 0.474000007 11.0622625 -7.50330734 0.522000015 11.0622625 -7.5121789 0.474000007 11.0456648 -7.5121789 0.522000015 11.0456648 -7.52411795 0.474000007 11.0311174 -7.52411795 0.522000015 11.0311174 -7.53866529 0.474000007 11.0191793 -7.53866529 0.522000015 11.0191793 -7.55526257 0.474000007 11.0103073 -7.55526257 0.522000015 11.0103073 -7.57327127 0.474000007 11.0048447 -7.57327127 0.522000015 11.0048447 </float_array>
+          <technique_common>
+            <accessor count="66" offset="0" source="#_07_13_Popular_Music_Cassette_part_02_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_07_13_Popular_Music_Cassette_part_02_1-vertices">
+          <input semantic="POSITION" source="#_07_13_Popular_Music_Cassette_part_02_1-positions" />
+        </vertices>
+        <polylist count="128" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_07_13_Popular_Music_Cassette_part_02_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 34 32 34 33 33 34 35 33 35 5 34 1 36 34 36 35 35 36 37 35 37 5 36 1 38 36 38 37 37 38 39 37 39 5 38 1 40 38 40 39 39 40 41 39 41 5 40 1 42 40 42 41 41 42 43 41 43 5 42 1 44 42 44 43 43 44 45 43 45 5 44 1 46 44 46 45 45 46 47 45 47 5 46 1 48 46 48 47 47 48 49 47 49 5 48 1 50 48 50 49 49 50 51 49 51 5 50 1 52 50 52 51 51 52 53 51 53 5 52 1 54 52 54 53 53 54 55 53 55 5 54 1 56 54 56 55 55 56 57 55 57 5 56 1 58 56 58 57 57 58 59 57 59 5 58 1 60 58 60 59 59 60 61 59 61 5 60 1 62 60 62 61 61 62 63 61 63 5 62 1 64 62 64 63 63 64 65 63 65 5 64 1 0 64 0 65 65 0 3 65 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_07_13_Popular_Music_Cassette_part_03_1" name="07_13_Popular_Music_Cassette_part_03" >
+      <mesh>
+        <source id="_07_13_Popular_Music_Cassette_part_03_1-positions" name="_07_13_Popular_Music_Cassette_part_03_1-positions">
+          <float_array id="_07_13_Popular_Music_Cassette_part_03_1-positions-array" count="198"> -7.20800018 0.474000007 11.0030003 -7.20800018 0.474000007 11.099 -7.22672844 0.474000007 11.0048447 -7.20800018 0.522000015 11.0030003 -7.22672844 0.522000015 11.0048447 -7.20800018 0.522000015 11.099 -7.24473763 0.474000007 11.0103073 -7.24473763 0.522000015 11.0103073 -7.2613349 0.474000007 11.0191793 -7.2613349 0.522000015 11.0191793 -7.27588224 0.474000007 11.0311174 -7.27588224 0.522000015 11.0311174 -7.28782129 0.474000007 11.0456648 -7.28782129 0.522000015 11.0456648 -7.29669237 0.474000007 11.0622625 -7.29669237 0.522000015 11.0622625 -7.30215549 0.474000007 11.0802717 -7.30215549 0.522000015 11.0802717 -7.3039999 0.474000007 11.099 -7.3039999 0.522000015 11.099 -7.30215549 0.474000007 11.1177282 -7.30215549 0.522000015 11.1177282 -7.29669237 0.474000007 11.1357374 -7.29669237 0.522000015 11.1357374 -7.28782129 0.474000007 11.1523352 -7.28782129 0.522000015 11.1523352 -7.27588224 0.474000007 11.1668825 -7.27588224 0.522000015 11.1668825 -7.2613349 0.474000007 11.1788206 -7.2613349 0.522000015 11.1788206 -7.24473763 0.474000007 11.1876926 -7.24473763 0.522000015 11.1876926 -7.22672844 0.474000007 11.1931553 -7.22672844 0.522000015 11.1931553 -7.20800018 0.474000007 11.1949997 -7.20800018 0.522000015 11.1949997 -7.18927145 0.474000007 11.1931553 -7.18927145 0.522000015 11.1931553 -7.17126226 0.474000007 11.1876926 -7.17126226 0.522000015 11.1876926 -7.15466547 0.474000007 11.1788206 -7.15466547 0.522000015 11.1788206 -7.14011765 0.474000007 11.1668825 -7.14011765 0.522000015 11.1668825 -7.12817907 0.474000007 11.1523352 -7.12817907 0.522000015 11.1523352 -7.11930752 0.474000007 11.1357374 -7.11930752 0.522000015 11.1357374 -7.11384439 0.474000007 11.1177282 -7.11384439 0.522000015 11.1177282 -7.11199999 0.474000007 11.099 -7.11199999 0.522000015 11.099 -7.11384439 0.474000007 11.0802717 -7.11384439 0.522000015 11.0802717 -7.11930752 0.474000007 11.0622625 -7.11930752 0.522000015 11.0622625 -7.12817907 0.474000007 11.0456648 -7.12817907 0.522000015 11.0456648 -7.14011765 0.474000007 11.0311174 -7.14011765 0.522000015 11.0311174 -7.15466547 0.474000007 11.0191793 -7.15466547 0.522000015 11.0191793 -7.17126226 0.474000007 11.0103073 -7.17126226 0.522000015 11.0103073 -7.18927145 0.474000007 11.0048447 -7.18927145 0.522000015 11.0048447 </float_array>
+          <technique_common>
+            <accessor count="66" offset="0" source="#_07_13_Popular_Music_Cassette_part_03_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_07_13_Popular_Music_Cassette_part_03_1-vertices">
+          <input semantic="POSITION" source="#_07_13_Popular_Music_Cassette_part_03_1-positions" />
+        </vertices>
+        <polylist count="128" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_07_13_Popular_Music_Cassette_part_03_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 34 32 34 33 33 34 35 33 35 5 34 1 36 34 36 35 35 36 37 35 37 5 36 1 38 36 38 37 37 38 39 37 39 5 38 1 40 38 40 39 39 40 41 39 41 5 40 1 42 40 42 41 41 42 43 41 43 5 42 1 44 42 44 43 43 44 45 43 45 5 44 1 46 44 46 45 45 46 47 45 47 5 46 1 48 46 48 47 47 48 49 47 49 5 48 1 50 48 50 49 49 50 51 49 51 5 50 1 52 50 52 51 51 52 53 51 53 5 52 1 54 52 54 53 53 54 55 53 55 5 54 1 56 54 56 55 55 56 57 55 57 5 56 1 58 56 58 57 57 58 59 57 59 5 58 1 60 58 60 59 59 60 61 59 61 5 60 1 62 60 62 61 61 62 63 61 63 5 62 1 64 62 64 63 63 64 65 63 65 5 64 1 0 64 0 65 65 0 3 65 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+  </library_geometries>
+  <library_controllers>
+  </library_controllers>
+  <library_visual_scenes>
+    <visual_scene id="ROOT" name="ROOT">
+      <node id="_07_13_Popular_Music_Cassette_ROOT_base" name="07_13_Popular_Music_Cassette_ROOT_base" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_07_13_Popular_Music_Cassette_ROOT_base_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#panel_pink_trim">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_07_13_Popular_Music_Cassette_part_01" name="07_13_Popular_Music_Cassette_part_01" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_07_13_Popular_Music_Cassette_part_01_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#warm_white">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_07_13_Popular_Music_Cassette_part_02" name="07_13_Popular_Music_Cassette_part_02" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_07_13_Popular_Music_Cassette_part_02_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#black_soft">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_07_13_Popular_Music_Cassette_part_03" name="07_13_Popular_Music_Cassette_part_03" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_07_13_Popular_Music_Cassette_part_03_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#black_soft">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+    </visual_scene>
+  </library_visual_scenes>
+  <scene>
+    <instance_visual_scene url="#ROOT" />
+  </scene>
+</COLLADA>

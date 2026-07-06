@@ -82,6 +82,10 @@ struct ChannelObjectSceneView: UIViewRepresentable {
     func updateUIView(_ uiView: SCNView, context: Context) {}
 
     private func makeObjectNode() -> SCNNode {
+        if let popularObject = makePopularObjectNode() {
+            return popularObject
+        }
+
         if let assetName, let image = UIImage(named: assetName) {
             return texturedAssetObject(image: image)
         }
@@ -108,6 +112,36 @@ struct ChannelObjectSceneView: UIViewRepresentable {
         default:
             return generatedFallbackObject(label: sourceLabel ?? objectId)
         }
+    }
+
+    private func makePopularObjectNode() -> SCNNode? {
+        guard let url = PopularObjectCatalog.assetURL(for: objectId, channelId: channelId),
+              let scene = try? SCNScene(url: url, options: nil) else {
+            return nil
+        }
+
+        let content = SCNNode()
+        scene.rootNode.childNodes.forEach { child in
+            content.addChildNode(child.clone())
+        }
+        guard !content.childNodes.isEmpty else { return nil }
+
+        let (minBB, maxBB) = content.boundingBox
+        let dimensions = SCNVector3(maxBB.x - minBB.x, maxBB.y - minBB.y, maxBB.z - minBB.z)
+        let largestExtent = Swift.max(CGFloat(dimensions.x), Swift.max(CGFloat(dimensions.y), CGFloat(dimensions.z)))
+        guard largestExtent > 0.0001 else { return nil }
+
+        let center = SCNVector3(
+            (minBB.x + maxBB.x) * 0.5,
+            (minBB.y + maxBB.y) * 0.5,
+            (minBB.z + maxBB.z) * 0.5
+        )
+        content.position = SCNVector3(-center.x, -center.y, -center.z)
+        let wrapper = SCNNode()
+        let scale = Float(1.65 / largestExtent)
+        wrapper.scale = SCNVector3(scale, scale, scale)
+        wrapper.addChildNode(content)
+        return wrapper
     }
 
     private func sphereObject(color: UIColor, radius: CGFloat) -> SCNNode {

@@ -1,6 +1,7 @@
 import SwiftUI
 import SceneKit
 import UIKit
+import GLTFSceneKit
 
 struct HeadPreviewView: View {
     let modelURL: URL
@@ -23,12 +24,27 @@ struct HeadPreviewView: View {
 
 private struct HeadPreviewUnavailableView: View {
     var body: some View {
-        Color.clear
+        ZStack {
+            Circle()
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.08, green: 0.07, blue: 0.13),
+                            Color(red: 0.24, green: 0.12, blue: 0.36)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+            Image(systemName: "person.crop.circle.badge.exclamationmark")
+                .font(.system(size: 34, weight: .bold))
+                .foregroundStyle(.white.opacity(0.9))
+        }
     }
 }
 
 private struct HeadScenePreview: UIViewRepresentable {
-    static let supportedExtensions: Set<String> = ["usdz", "scn", "dae"]
+    static let supportedExtensions: Set<String> = ["usdz", "scn", "dae", "glb", "gltf"]
 
     let modelURL: URL
 
@@ -53,16 +69,31 @@ private struct HeadScenePreview: UIViewRepresentable {
         func load(_ url: URL, into view: SCNView) {
             self.view = view
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                guard let scene = try? SCNScene(url: url, options: [
-                    SCNSceneSource.LoadingOption.convertUnitsToMeters: true,
-                    SCNSceneSource.LoadingOption.convertToYUp: true
-                ]) else {
+                guard let scene = self?.loadScene(url) else {
                     print("[HeadPreviewView] Unsupported or unreadable model: \(url.lastPathComponent)")
                     return
                 }
                 DispatchQueue.main.async {
                     self?.configure(scene, in: view)
                 }
+            }
+        }
+
+        private func loadScene(_ url: URL) -> SCNScene? {
+            switch url.pathExtension.lowercased() {
+            case "glb", "gltf":
+                do {
+                    let source = try GLTFSceneSource(url: url, options: nil)
+                    return try source.scene()
+                } catch {
+                    print("[HeadPreviewView] GLTF load failed: \(error)")
+                    return nil
+                }
+            default:
+                return try? SCNScene(url: url, options: [
+                    SCNSceneSource.LoadingOption.convertUnitsToMeters: true,
+                    SCNSceneSource.LoadingOption.convertToYUp: true
+                ])
             }
         }
 

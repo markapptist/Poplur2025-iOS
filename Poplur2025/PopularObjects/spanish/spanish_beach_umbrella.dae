@@ -1,0 +1,277 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
+<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+  <asset>
+    <contributor>
+      <author>Assimp</author>
+      <authoring_tool>https://github.com/mikedh/trimesh</authoring_tool>
+    </contributor>
+    <created>2026-07-03T10:30:47</created>
+    <modified>2026-07-03T10:30:47</modified>
+    <unit name="meter" meter="1" />
+    <up_axis>Y_UP</up_axis>
+  </asset>
+  <library_images>
+  </library_images>
+  <library_effects>
+    <effect id="panel_orange_trim-fx" name="panel_orange_trim">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0.5   0.180000007   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">1   0.450980395   0   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">608.399963</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="brown_leather-fx" name="brown_leather">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">0.419607848   0.200000003   0.0784313753   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">202.5</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="red-fx" name="red">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">0.921568632   0.0509803928   0.0392156877   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">250</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="tan_bread-fx" name="tan_bread">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">0.78039217   0.478431374   0.200000003   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">122.500015</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="material_4-fx" name="">
+      <profile_COMMON>
+        <technique sid="standard">
+          <phong>
+            <emission>
+              <color sid="emission">0   0   0   1</color>
+            </emission>
+            <diffuse>
+              <color sid="diffuse">1   1   1   1</color>
+            </diffuse>
+            <shininess>
+              <float sid="shininess">0</float>
+            </shininess>
+            <transparency>
+              <float sid="transparency">1</float>
+            </transparency>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+  </library_effects>
+  <library_materials>
+    <material id="panel_orange_trim" name="panel_orange_trim">
+      <instance_effect url="#panel_orange_trim-fx"/>
+    </material>
+    <material id="brown_leather" name="brown_leather">
+      <instance_effect url="#brown_leather-fx"/>
+    </material>
+    <material id="red" name="red">
+      <instance_effect url="#red-fx"/>
+    </material>
+    <material id="tan_bread" name="tan_bread">
+      <instance_effect url="#tan_bread-fx"/>
+    </material>
+    <material id="material_4" name="">
+      <instance_effect url="#material_4-fx"/>
+    </material>
+  </library_materials>
+  <library_geometries>
+    <geometry id="_11_12_Popular_Spanish_Beach_Umbrella_ROOT_base_1" name="11_12_Popular_Spanish_Beach_Umbrella_ROOT_base" >
+      <mesh>
+        <source id="_11_12_Popular_Spanish_Beach_Umbrella_ROOT_base_1-positions" name="_11_12_Popular_Spanish_Beach_Umbrella_ROOT_base_1-positions">
+          <float_array id="_11_12_Popular_Spanish_Beach_Umbrella_ROOT_base_1-positions-array" count="198"> -1.32000005 0.0199999996 15.9449997 -1.32000005 0.0199999996 16.3250008 -1.39413428 0.0199999996 15.952302 -1.32000005 0.0799999982 15.9449997 -1.39413428 0.0799999982 15.952302 -1.32000005 0.0799999982 16.3250008 -1.46541965 0.0199999996 15.9739256 -1.46541965 0.0799999982 15.9739256 -1.53111672 0.0199999996 16.0090408 -1.53111672 0.0799999982 16.0090408 -1.58870053 0.0199999996 16.0562992 -1.58870053 0.0799999982 16.0562992 -1.63595843 0.0199999996 16.113884 -1.63595843 0.0799999982 16.113884 -1.67107427 0.0199999996 16.1795807 -1.67107427 0.0799999982 16.1795807 -1.69269836 0.0199999996 16.2508659 -1.69269836 0.0799999982 16.2508659 -1.70000005 0.0199999996 16.3250008 -1.70000005 0.0799999982 16.3250008 -1.69269836 0.0199999996 16.3991337 -1.69269836 0.0799999982 16.3991337 -1.67107427 0.0199999996 16.4704189 -1.67107427 0.0799999982 16.4704189 -1.63595843 0.0199999996 16.5361176 -1.63595843 0.0799999982 16.5361176 -1.58870053 0.0199999996 16.5937004 -1.58870053 0.0799999982 16.5937004 -1.53111672 0.0199999996 16.6409588 -1.53111672 0.0799999982 16.6409588 -1.46541965 0.0199999996 16.676075 -1.46541965 0.0799999982 16.676075 -1.39413428 0.0199999996 16.6976986 -1.39413428 0.0799999982 16.6976986 -1.32000005 0.0199999996 16.7049999 -1.32000005 0.0799999982 16.7049999 -1.2458657 0.0199999996 16.6976986 -1.2458657 0.0799999982 16.6976986 -1.17458034 0.0199999996 16.676075 -1.17458034 0.0799999982 16.676075 -1.10888326 0.0199999996 16.6409588 -1.10888326 0.0799999982 16.6409588 -1.05129945 0.0199999996 16.5937004 -1.05129945 0.0799999982 16.5937004 -1.00404155 0.0199999996 16.5361176 -1.00404155 0.0799999982 16.5361176 -0.968925774 0.0199999996 16.4704189 -0.968925774 0.0799999982 16.4704189 -0.947301567 0.0199999996 16.3991337 -0.947301567 0.0799999982 16.3991337 -0.939999998 0.0199999996 16.3250008 -0.939999998 0.0799999982 16.3250008 -0.947301567 0.0199999996 16.2508659 -0.947301567 0.0799999982 16.2508659 -0.968925774 0.0199999996 16.1795807 -0.968925774 0.0799999982 16.1795807 -1.00404155 0.0199999996 16.113884 -1.00404155 0.0799999982 16.113884 -1.05129945 0.0199999996 16.0562992 -1.05129945 0.0799999982 16.0562992 -1.10888326 0.0199999996 16.0090408 -1.10888326 0.0799999982 16.0090408 -1.17458034 0.0199999996 15.9739256 -1.17458034 0.0799999982 15.9739256 -1.2458657 0.0199999996 15.952302 -1.2458657 0.0799999982 15.952302 </float_array>
+          <technique_common>
+            <accessor count="66" offset="0" source="#_11_12_Popular_Spanish_Beach_Umbrella_ROOT_base_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_11_12_Popular_Spanish_Beach_Umbrella_ROOT_base_1-vertices">
+          <input semantic="POSITION" source="#_11_12_Popular_Spanish_Beach_Umbrella_ROOT_base_1-positions" />
+        </vertices>
+        <polylist count="128" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_11_12_Popular_Spanish_Beach_Umbrella_ROOT_base_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 34 32 34 33 33 34 35 33 35 5 34 1 36 34 36 35 35 36 37 35 37 5 36 1 38 36 38 37 37 38 39 37 39 5 38 1 40 38 40 39 39 40 41 39 41 5 40 1 42 40 42 41 41 42 43 41 43 5 42 1 44 42 44 43 43 44 45 43 45 5 44 1 46 44 46 45 45 46 47 45 47 5 46 1 48 46 48 47 47 48 49 47 49 5 48 1 50 48 50 49 49 50 51 49 51 5 50 1 52 50 52 51 51 52 53 51 53 5 52 1 54 52 54 53 53 54 55 53 55 5 54 1 56 54 56 55 55 56 57 55 57 5 56 1 58 56 58 57 57 58 59 57 59 5 58 1 60 58 60 59 59 60 61 59 61 5 60 1 62 60 62 61 61 62 63 61 63 5 62 1 64 62 64 63 63 64 65 63 65 5 64 1 0 64 0 65 65 0 3 65 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_11_12_Popular_Spanish_Beach_Umbrella_part_01_1" name="11_12_Popular_Spanish_Beach_Umbrella_part_01" >
+      <mesh>
+        <source id="_11_12_Popular_Spanish_Beach_Umbrella_part_01_1-positions" name="_11_12_Popular_Spanish_Beach_Umbrella_part_01_1-positions">
+          <float_array id="_11_12_Popular_Spanish_Beach_Umbrella_part_01_1-positions-array" count="198"> -1.32000005 0.197142854 16.3035717 -1.32000005 0.197142854 16.3250008 -1.32418048 0.197142854 16.3039837 -1.32000005 0.668571413 16.3035717 -1.32418048 0.668571413 16.3039837 -1.32000005 0.668571413 16.3250008 -1.32820034 0.197142854 16.3052025 -1.32820034 0.668571413 16.3052025 -1.33190513 0.197142854 16.3071823 -1.33190513 0.668571413 16.3071823 -1.33515227 0.197142854 16.3098469 -1.33515227 0.668571413 16.3098469 -1.33781719 0.197142854 16.3130951 -1.33781719 0.668571413 16.3130951 -1.33979738 0.197142854 16.3167992 -1.33979738 0.668571413 16.3167992 -1.34101677 0.197142854 16.3208199 -1.34101677 0.668571413 16.3208199 -1.34142852 0.197142854 16.3250008 -1.34142852 0.668571413 16.3250008 -1.34101677 0.197142854 16.3291798 -1.34101677 0.668571413 16.3291798 -1.33979738 0.197142854 16.3332005 -1.33979738 0.668571413 16.3332005 -1.33781719 0.197142854 16.3369045 -1.33781719 0.668571413 16.3369045 -1.33515227 0.197142854 16.3401527 -1.33515227 0.668571413 16.3401527 -1.33190513 0.197142854 16.3428173 -1.33190513 0.668571413 16.3428173 -1.32820034 0.197142854 16.3447971 -1.32820034 0.668571413 16.3447971 -1.32418048 0.197142854 16.3460159 -1.32418048 0.668571413 16.3460159 -1.32000005 0.197142854 16.3464279 -1.32000005 0.668571413 16.3464279 -1.3158195 0.197142854 16.3460159 -1.3158195 0.668571413 16.3460159 -1.31179965 0.197142854 16.3447971 -1.31179965 0.668571413 16.3447971 -1.30809498 0.197142854 16.3428173 -1.30809498 0.668571413 16.3428173 -1.30484772 0.197142854 16.3401527 -1.30484772 0.668571413 16.3401527 -1.30218279 0.197142854 16.3369045 -1.30218279 0.668571413 16.3369045 -1.30020261 0.197142854 16.3332005 -1.30020261 0.668571413 16.3332005 -1.29898322 0.197142854 16.3291798 -1.29898322 0.668571413 16.3291798 -1.29857147 0.197142854 16.3250008 -1.29857147 0.668571413 16.3250008 -1.29898322 0.197142854 16.3208199 -1.29898322 0.668571413 16.3208199 -1.30020261 0.197142854 16.3167992 -1.30020261 0.668571413 16.3167992 -1.30218279 0.197142854 16.3130951 -1.30218279 0.668571413 16.3130951 -1.30484772 0.197142854 16.3098469 -1.30484772 0.668571413 16.3098469 -1.30809498 0.197142854 16.3071823 -1.30809498 0.668571413 16.3071823 -1.31179965 0.197142854 16.3052025 -1.31179965 0.668571413 16.3052025 -1.3158195 0.197142854 16.3039837 -1.3158195 0.668571413 16.3039837 </float_array>
+          <technique_common>
+            <accessor count="66" offset="0" source="#_11_12_Popular_Spanish_Beach_Umbrella_part_01_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_11_12_Popular_Spanish_Beach_Umbrella_part_01_1-vertices">
+          <input semantic="POSITION" source="#_11_12_Popular_Spanish_Beach_Umbrella_part_01_1-positions" />
+        </vertices>
+        <polylist count="128" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_11_12_Popular_Spanish_Beach_Umbrella_part_01_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 34 32 34 33 33 34 35 33 35 5 34 1 36 34 36 35 35 36 37 35 37 5 36 1 38 36 38 37 37 38 39 37 39 5 38 1 40 38 40 39 39 40 41 39 41 5 40 1 42 40 42 41 41 42 43 41 43 5 42 1 44 42 44 43 43 44 45 43 45 5 44 1 46 44 46 45 45 46 47 45 47 5 46 1 48 46 48 47 47 48 49 47 49 5 48 1 50 48 50 49 49 50 51 49 51 5 50 1 52 50 52 51 51 52 53 51 53 5 52 1 54 52 54 53 53 54 55 53 55 5 54 1 56 54 56 55 55 56 57 55 57 5 56 1 58 56 58 57 57 58 59 57 59 5 58 1 60 58 60 59 59 60 61 59 61 5 60 1 62 60 62 61 61 62 63 61 63 5 62 1 64 62 64 63 63 64 65 63 65 5 64 1 0 64 0 65 65 0 3 65 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_11_12_Popular_Spanish_Beach_Umbrella_part_02_1" name="11_12_Popular_Spanish_Beach_Umbrella_part_02" >
+      <mesh>
+        <source id="_11_12_Popular_Spanish_Beach_Umbrella_part_02_1-positions" name="_11_12_Popular_Spanish_Beach_Umbrella_part_02_1-positions">
+          <float_array id="_11_12_Popular_Spanish_Beach_Umbrella_part_02_1-positions-array" count="150"> -1.32000005 0.668571413 16.016428 -1.32000005 0.668571413 16.3250008 -1.3602767 0.668571413 16.0190678 -1.32000005 0.84857142 16.3250008 -1.3998642 0.668571413 16.0269432 -1.4380852 0.668571413 16.039917 -1.47428572 0.668571413 16.0577698 -1.50784636 0.668571413 16.0801945 -1.53819299 0.668571413 16.1068077 -1.56480622 0.668571413 16.1371536 -1.58723068 0.668571413 16.1707134 -1.60508287 0.668571413 16.2069149 -1.61805713 0.668571413 16.2451363 -1.6259315 0.668571413 16.2847233 -1.62857139 0.668571413 16.3250008 -1.6259315 0.668571413 16.3652763 -1.61805713 0.668571413 16.4048634 -1.60508287 0.668571413 16.4430847 -1.58723068 0.668571413 16.4792862 -1.56480622 0.668571413 16.512846 -1.53819299 0.668571413 16.5431938 -1.50784636 0.668571413 16.5698071 -1.47428572 0.668571413 16.5922298 -1.4380852 0.668571413 16.6100826 -1.3998642 0.668571413 16.6230564 -1.3602767 0.668571413 16.6309319 -1.32000005 0.668571413 16.6335716 -1.27972341 0.668571413 16.6309319 -1.24013579 0.668571413 16.6230564 -1.20191479 0.668571413 16.6100826 -1.16571426 0.668571413 16.5922298 -1.13215363 0.668571413 16.5698071 -1.101807 0.668571413 16.5431938 -1.07519388 0.668571413 16.512846 -1.0527693 0.668571413 16.4792862 -1.03491712 0.668571413 16.4430847 -1.02194285 0.668571413 16.4048634 -1.01406848 0.668571413 16.3652763 -1.01142859 0.668571413 16.3250008 -1.01406848 0.668571413 16.2847233 -1.02194285 0.668571413 16.2451363 -1.03491712 0.668571413 16.2069149 -1.0527693 0.668571413 16.1707134 -1.07519388 0.668571413 16.1371536 -1.101807 0.668571413 16.1068077 -1.13215363 0.668571413 16.0801945 -1.16571426 0.668571413 16.0577698 -1.20191479 0.668571413 16.039917 -1.24013579 0.668571413 16.0269432 -1.27972341 0.668571413 16.0190678 </float_array>
+          <technique_common>
+            <accessor count="50" offset="0" source="#_11_12_Popular_Spanish_Beach_Umbrella_part_02_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_11_12_Popular_Spanish_Beach_Umbrella_part_02_1-vertices">
+          <input semantic="POSITION" source="#_11_12_Popular_Spanish_Beach_Umbrella_part_02_1-positions" />
+        </vertices>
+        <polylist count="96" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_11_12_Popular_Spanish_Beach_Umbrella_part_02_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 2 1 4 2 4 3 4 1 5 4 5 3 5 1 6 5 6 3 6 1 7 6 7 3 7 1 8 7 8 3 8 1 9 8 9 3 9 1 10 9 10 3 10 1 11 10 11 3 11 1 12 11 12 3 12 1 13 12 13 3 13 1 14 13 14 3 14 1 15 14 15 3 15 1 16 15 16 3 16 1 17 16 17 3 17 1 18 17 18 3 18 1 19 18 19 3 19 1 20 19 20 3 20 1 21 20 21 3 21 1 22 21 22 3 22 1 23 22 23 3 23 1 24 23 24 3 24 1 25 24 25 3 25 1 26 25 26 3 26 1 27 26 27 3 27 1 28 27 28 3 28 1 29 28 29 3 29 1 30 29 30 3 30 1 31 30 31 3 31 1 32 31 32 3 32 1 33 32 33 3 33 1 34 33 34 3 34 1 35 34 35 3 35 1 36 35 36 3 36 1 37 36 37 3 37 1 38 37 38 3 38 1 39 38 39 3 39 1 40 39 40 3 40 1 41 40 41 3 41 1 42 41 42 3 42 1 43 42 43 3 43 1 44 43 44 3 44 1 45 44 45 3 45 1 46 45 46 3 46 1 47 46 47 3 47 1 48 47 48 3 48 1 49 48 49 3 49 1 0 49 0 3 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+    <geometry id="_11_12_Popular_Spanish_Beach_Umbrella_part_03_1" name="11_12_Popular_Spanish_Beach_Umbrella_part_03" >
+      <mesh>
+        <source id="_11_12_Popular_Spanish_Beach_Umbrella_part_03_1-positions" name="_11_12_Popular_Spanish_Beach_Umbrella_part_03_1-positions">
+          <float_array id="_11_12_Popular_Spanish_Beach_Umbrella_part_03_1-positions-array" count="198"> -1.67999995 0.180000007 16.2950001 -1.67999995 0.180000007 16.3250008 -1.67999995 0.185852706 16.2955761 -0.959999979 0.180000007 16.2950001 -0.959999979 0.185852706 16.2955761 -0.959999979 0.180000007 16.3250008 -1.67999995 0.191480502 16.2972832 -0.959999979 0.191480502 16.2972832 -1.67999995 0.196667105 16.3000565 -0.959999979 0.196667105 16.3000565 -1.67999995 0.201213211 16.3037872 -0.959999979 0.201213211 16.3037872 -1.67999995 0.204944089 16.3083324 -0.959999979 0.204944089 16.3083324 -1.67999995 0.20771639 16.3135204 -0.959999979 0.20771639 16.3135204 -1.67999995 0.209423557 16.3191471 -0.959999979 0.209423557 16.3191471 -1.67999995 0.209999993 16.3250008 -0.959999979 0.209999993 16.3250008 -1.67999995 0.209423557 16.3308525 -0.959999979 0.209423557 16.3308525 -1.67999995 0.20771639 16.3364811 -0.959999979 0.20771639 16.3364811 -1.67999995 0.204944089 16.3416672 -0.959999979 0.204944089 16.3416672 -1.67999995 0.201213211 16.3462124 -0.959999979 0.201213211 16.3462124 -1.67999995 0.196667105 16.3499432 -0.959999979 0.196667105 16.3499432 -1.67999995 0.191480502 16.3527164 -0.959999979 0.191480502 16.3527164 -1.67999995 0.185852706 16.3544235 -0.959999979 0.185852706 16.3544235 -1.67999995 0.180000007 16.3549995 -0.959999979 0.180000007 16.3549995 -1.67999995 0.174147293 16.3544235 -0.959999979 0.174147293 16.3544235 -1.67999995 0.168519497 16.3527164 -0.959999979 0.168519497 16.3527164 -1.67999995 0.163332894 16.3499432 -0.959999979 0.163332894 16.3499432 -1.67999995 0.158786803 16.3462124 -0.959999979 0.158786803 16.3462124 -1.67999995 0.15505591 16.3416672 -0.959999979 0.15505591 16.3416672 -1.67999995 0.152283609 16.3364811 -0.959999979 0.152283609 16.3364811 -1.67999995 0.150576442 16.3308525 -0.959999979 0.150576442 16.3308525 -1.67999995 0.150000006 16.3250008 -0.959999979 0.150000006 16.3250008 -1.67999995 0.150576442 16.3191471 -0.959999979 0.150576442 16.3191471 -1.67999995 0.152283609 16.3135204 -0.959999979 0.152283609 16.3135204 -1.67999995 0.15505591 16.3083324 -0.959999979 0.15505591 16.3083324 -1.67999995 0.158786803 16.3037872 -0.959999979 0.158786803 16.3037872 -1.67999995 0.163332894 16.3000565 -0.959999979 0.163332894 16.3000565 -1.67999995 0.168519497 16.2972832 -0.959999979 0.168519497 16.2972832 -1.67999995 0.174147293 16.2955761 -0.959999979 0.174147293 16.2955761 </float_array>
+          <technique_common>
+            <accessor count="66" offset="0" source="#_11_12_Popular_Spanish_Beach_Umbrella_part_03_1-positions-array" stride="3">
+              <param name="X" type="float" />
+              <param name="Y" type="float" />
+              <param name="Z" type="float" />
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="_11_12_Popular_Spanish_Beach_Umbrella_part_03_1-vertices">
+          <input semantic="POSITION" source="#_11_12_Popular_Spanish_Beach_Umbrella_part_03_1-positions" />
+        </vertices>
+        <polylist count="128" material="defaultMaterial">
+          <input offset="0" semantic="VERTEX" source="#_11_12_Popular_Spanish_Beach_Umbrella_part_03_1-vertices" />
+          <vcount>3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 </vcount>
+          <p>0 1 2 0 2 3 3 2 4 3 4 5 2 1 6 2 6 4 4 6 7 4 7 5 6 1 8 6 8 7 7 8 9 7 9 5 8 1 10 8 10 9 9 10 11 9 11 5 10 1 12 10 12 11 11 12 13 11 13 5 12 1 14 12 14 13 13 14 15 13 15 5 14 1 16 14 16 15 15 16 17 15 17 5 16 1 18 16 18 17 17 18 19 17 19 5 18 1 20 18 20 19 19 20 21 19 21 5 20 1 22 20 22 21 21 22 23 21 23 5 22 1 24 22 24 23 23 24 25 23 25 5 24 1 26 24 26 25 25 26 27 25 27 5 26 1 28 26 28 27 27 28 29 27 29 5 28 1 30 28 30 29 29 30 31 29 31 5 30 1 32 30 32 31 31 32 33 31 33 5 32 1 34 32 34 33 33 34 35 33 35 5 34 1 36 34 36 35 35 36 37 35 37 5 36 1 38 36 38 37 37 38 39 37 39 5 38 1 40 38 40 39 39 40 41 39 41 5 40 1 42 40 42 41 41 42 43 41 43 5 42 1 44 42 44 43 43 44 45 43 45 5 44 1 46 44 46 45 45 46 47 45 47 5 46 1 48 46 48 47 47 48 49 47 49 5 48 1 50 48 50 49 49 50 51 49 51 5 50 1 52 50 52 51 51 52 53 51 53 5 52 1 54 52 54 53 53 54 55 53 55 5 54 1 56 54 56 55 55 56 57 55 57 5 56 1 58 56 58 57 57 58 59 57 59 5 58 1 60 58 60 59 59 60 61 59 61 5 60 1 62 60 62 61 61 62 63 61 63 5 62 1 64 62 64 63 63 64 65 63 65 5 64 1 0 64 0 65 65 0 3 65 3 5 </p>
+        </polylist>
+      </mesh>
+    </geometry>
+  </library_geometries>
+  <library_controllers>
+  </library_controllers>
+  <library_visual_scenes>
+    <visual_scene id="ROOT" name="ROOT">
+      <node id="_11_12_Popular_Spanish_Beach_Umbrella_ROOT_base" name="11_12_Popular_Spanish_Beach_Umbrella_ROOT_base" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_11_12_Popular_Spanish_Beach_Umbrella_ROOT_base_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#panel_orange_trim">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_11_12_Popular_Spanish_Beach_Umbrella_part_01" name="11_12_Popular_Spanish_Beach_Umbrella_part_01" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_11_12_Popular_Spanish_Beach_Umbrella_part_01_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#brown_leather">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_11_12_Popular_Spanish_Beach_Umbrella_part_02" name="11_12_Popular_Spanish_Beach_Umbrella_part_02" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_11_12_Popular_Spanish_Beach_Umbrella_part_02_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#red">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+      <node id="_11_12_Popular_Spanish_Beach_Umbrella_part_03" name="11_12_Popular_Spanish_Beach_Umbrella_part_03" type="NODE">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#_11_12_Popular_Spanish_Beach_Umbrella_part_03_1">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="defaultMaterial" target="#tan_bread">
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+    </visual_scene>
+  </library_visual_scenes>
+  <scene>
+    <instance_visual_scene url="#ROOT" />
+  </scene>
+</COLLADA>

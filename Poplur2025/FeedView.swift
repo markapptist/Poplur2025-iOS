@@ -34,6 +34,7 @@ struct FeedView: View {
     var homeChromeInactive: Bool = false
 
     @ObservedObject private var settings = SettingsStore.shared
+    @ObservedObject private var cubeSkinStore = CubeSkinStore.shared
     @StateObject private var fallbackLocationProvider = LocationProvider()
     @StateObject private var poleModel = PolePositionModel()
     private var activeLocationProvider: LocationProvider { fallbackLocationProvider }
@@ -193,7 +194,6 @@ struct FeedView: View {
         GeometryReader { geo in
             ZStack {
                 Color.black.ignoresSafeArea()
-                
                 ZStack {
                     if showTimelineView {
                         FeedTwitterTimelineView(
@@ -219,6 +219,8 @@ struct FeedView: View {
                             .background(Color.black)
                             .transition(.opacity.combined(with: .scale(scale: 0.96)))
                     }
+
+
                 }
                 .modifier(
                     FeedTimelineTransitionMotion(
@@ -397,6 +399,8 @@ struct FeedView: View {
 
                 presentBumper(for: post)
                 prefetchUpcomingBumpers(from: newIndex)
+
+                NotificationCenter.default.post(name: Notification.Name("FeedVideoDidAdvance"), object: nil)
             }
             .onAppear {
                 handleFeedReceiversAppear()
@@ -474,6 +478,9 @@ struct FeedView: View {
             isFeedReady = true
         }
         publishCurrentPostMetrics(duration: 0.35)
+
+        // Resume playback when returning to feed tab
+        FeedAudioManager.shared.activePlayer?.play()
     }
 
     private func publishSelectedChannel() {
@@ -941,54 +948,21 @@ struct FeedView: View {
                     }
             }
 
-            if !showTVGuide {
-                GeometryReader { proxy in
-                    Group {
-                        if useSpriteKitFeedChannelButtons {
-                            FeedChannelStepperSpriteKit2D(
-                                activeButton: activeFeedChannelButton,
-                                pressToken: feedChannelButtonPressToken,
-                                onUp: { changeFeedChannel(.up) },
-                                onDown: { changeFeedChannel(.down) }
-                            )
-                        } else {
-                            FeedChannelStepper3D(
-                                activeButton: activeFeedChannelButton,
-                                pressToken: feedChannelButtonPressToken,
-                                onUp: { changeFeedChannel(.up) },
-                                onDown: { changeFeedChannel(.down) }
-                            )
-                        }
-                    }
-                    .frame(width: 86, height: 226)
-                    .shadow(color: .black.opacity(0.45), radius: 12, x: 0, y: 6)
-                    .position(
-                        x: proxy.safeAreaInsets.leading + 28 + 43,
-                        y: proxy.size.height * 0.5
-                    )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-                    .allowsHitTesting(true)
-                }
-                .zIndex(26)
+            // Non-interactive heart animation
+            if showHeart {
+                Image(systemName: "heart.fill")
+                    .poplurIconShader()
+                    .font(.system(size: 120, weight: .bold))
+                    .foregroundStyle(.red)
+                    .shadow(color: .black.opacity(0.3), radius: 6, x: 0, y: 3)
+                    .transition(.scale.combined(with: .opacity))
+                    .allowsHitTesting(false)
+                    .zIndex(20)
             }
 
-            // Wrap overlays in a separate ZStack with allowsHitTesting(false) to avoid gesture conflicts and ensure no offset
-            ZStack {
-                if showHeart {
-                    Image(systemName: "heart.fill")
-                        .poplurIconShader()
-                        .font(.system(size: 120, weight: .bold))
-                        .foregroundStyle(.red)
-                        .shadow(color: .black.opacity(0.3), radius: 6, x: 0, y: 3)
-                        .transition(.scale.combined(with: .opacity))
-                        .zIndex(20)
-                }
-                overlayChrome
-                    .allowsHitTesting(false)
-                    .zIndex(25)
-            }
-            .allowsHitTesting(false)
-            .padding(.top, 0)
+            // Interactive social sidebar + author info
+            overlayChrome
+                .zIndex(25)
         }
     }
 
@@ -1061,10 +1035,31 @@ struct FeedView: View {
         }
     }
     
+    // MARK: - Channel stepper overlay (right-side CH+/CH- buttons)
+
     private var overlayChrome: some View {
-        // REMOVED: Grid icon button and all other chrome elements
-        // Overlay is now completely clean - only post info labels remain
-        EmptyView()
+        VStack {
+            Spacer()
+            if useSpriteKitFeedChannelButtons {
+                FeedChannelStepperSpriteKit2D(
+                    activeButton: activeFeedChannelButton,
+                    pressToken: feedChannelButtonPressToken,
+                    onUp: { changeFeedChannel(.up) },
+                    onDown: { changeFeedChannel(.down) }
+                )
+            } else {
+                FeedChannelStepper3D(
+                    activeButton: activeFeedChannelButton,
+                    pressToken: feedChannelButtonPressToken,
+                    onUp: { changeFeedChannel(.up) },
+                    onDown: { changeFeedChannel(.down) }
+                )
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .trailing)
+        .padding(.trailing, 12)
+        .padding(.bottom, 120)
+        .allowsHitTesting(true)
     }
 
     private var tvGuideChannels: [FeedTVGuideChannel] {
@@ -1306,15 +1301,18 @@ struct FeedView: View {
         tvTransitionOpacity = 1.0
 
         let token = tvTransitionToken
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.50) {
+        let fadeDuration: TimeInterval = 0.06
+        // Fade out near the end of the stripe animation — abandon if a newer transition took over
+        DispatchQueue.main.asyncAfter(deadline: .now() + kCommercialTransitionDuration - fadeDuration) {
             guard token == tvTransitionToken else { return }
-            withAnimation(.easeOut(duration: 0.20)) {
+            withAnimation(.easeOut(duration: fadeDuration)) {
                 tvTransitionOpacity = 0.0
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
-                guard token == tvTransitionToken else { return }
-                isTVTransitionVisible = false
-            }
+        }
+        // Hide after the full commercial duration
+        DispatchQueue.main.asyncAfter(deadline: .now() + kCommercialTransitionDuration) {
+            guard token == tvTransitionToken else { return }
+            isTVTransitionVisible = false
         }
     }
 
@@ -1577,9 +1575,10 @@ struct FeedView: View {
         }
     }
 
-    private func maybeShowAd(probability: Double = 0.18) {
-        let roll = Double.random(in: 0...1)
-        guard roll <= probability else { return }
+    private func maybeShowAd() {
+        let postID = posts[safe: currentIndex]?.id ?? "missing"
+        let namespace = "\(countries[selectedCountryIndex].code)_\(channels[selectedChannelIndex].id)_\(postID)"
+        guard FeedAdProbabilitySettings.shouldShowGoogleMobileAd(for: currentIndex, namespace: namespace) else { return }
         presentInterstitialOrFallback()
     }
 
@@ -1745,11 +1744,15 @@ struct FeedView: View {
     }
 
     nonisolated private static func googleDriveMediaURL(fileID: String) -> String {
-        "https://drive.google.com/uc?export=download&id=\(fileID)&type=video"
+        // "&type=video" is not a real Google Drive parameter and previously made this an
+        // invalid endpoint; AVPlayer would receive Drive's HTML page instead of video bytes
+        // and silently fail. The file also must be shared as "Anyone with the link" — Drive
+        // still serves an HTML sign-in/scan-warning page for private or very large files.
+        "https://drive.google.com/uc?export=download&id=\(fileID)"
     }
 
-    nonisolated private static let poplurChannelAdCreatives: [String: PoplurAdCreative] = [
-        "food": PoplurAdCreative(
+    nonisolated private static let poplurChannelAdCreatives: [String: [PoplurAdCreative]] = [
+        "food": [PoplurAdCreative(
             id: "food-drive-ad",
             channelID: "food",
             mediaURL: googleDriveMediaURL(fileID: "1cNOqd9w6gGpeoU7oMC1xf7iuUcv0l94E"),
@@ -1765,8 +1768,8 @@ struct FeedView: View {
             radius: 135_000,
             viewCount: 1_010,
             driveFileID: "1cNOqd9w6gGpeoU7oMC1xf7iuUcv0l94E"
-        ),
-        "sports": PoplurAdCreative(
+        )],
+        "sports": [PoplurAdCreative(
             id: "sports-drive-ad",
             channelID: "sports",
             mediaURL: googleDriveMediaURL(fileID: "1FmRd8-hKDd-pkOueGXjDuDS-SpGeIL27"),
@@ -1782,8 +1785,8 @@ struct FeedView: View {
             radius: 160_000,
             viewCount: 1_104,
             driveFileID: "1FmRd8-hKDd-pkOueGXjDuDS-SpGeIL27"
-        ),
-        "shopping": PoplurAdCreative(
+        )],
+        "shopping": [PoplurAdCreative(
             id: "shopping-drive-ad",
             channelID: "shopping",
             mediaURL: googleDriveMediaURL(fileID: "1nKmjGcUTQW1gn1FVkFMWVwn9ErtH7XmM"),
@@ -1799,8 +1802,8 @@ struct FeedView: View {
             radius: 125_000,
             viewCount: 980,
             driveFileID: "1nKmjGcUTQW1gn1FVkFMWVwn9ErtH7XmM"
-        ),
-        "music": PoplurAdCreative(
+        )],
+        "music": [PoplurAdCreative(
             id: "music-drive-ad",
             channelID: "music",
             mediaURL: googleDriveMediaURL(fileID: "1tfukw5oiNk1VtqEy4wcgToHKNzTq22kT"),
@@ -1816,8 +1819,8 @@ struct FeedView: View {
             radius: 150_000,
             viewCount: 1_070,
             driveFileID: "1tfukw5oiNk1VtqEy4wcgToHKNzTq22kT"
-        ),
-        "cartoon": PoplurAdCreative(
+        )],
+        "cartoon": [PoplurAdCreative(
             id: "cartoon-drive-ad",
             channelID: "cartoon",
             mediaURL: googleDriveMediaURL(fileID: "1NyDZewxeHe6R-aiziY5yBVCnwdeFTfZS"),
@@ -1833,8 +1836,8 @@ struct FeedView: View {
             radius: 118_000,
             viewCount: 875,
             driveFileID: "1NyDZewxeHe6R-aiziY5yBVCnwdeFTfZS"
-        ),
-        "kids": PoplurAdCreative(
+        )],
+        "kids": [PoplurAdCreative(
             id: "kids-drive-ad",
             channelID: "kids",
             mediaURL: googleDriveMediaURL(fileID: "1rx5BE095nIuA5lyZHictzB09-VsdiAIk"),
@@ -1850,8 +1853,8 @@ struct FeedView: View {
             radius: 110_000,
             viewCount: 820,
             driveFileID: "1rx5BE095nIuA5lyZHictzB09-VsdiAIk"
-        ),
-        "comedy": PoplurAdCreative(
+        )],
+        "comedy": [PoplurAdCreative(
             id: "comedy-drive-ad",
             channelID: "comedy",
             mediaURL: googleDriveMediaURL(fileID: "1Byb1h62MEdDd4xnPb6Ao-_dQXK9T02sX"),
@@ -1867,7 +1870,77 @@ struct FeedView: View {
             radius: 120_000,
             viewCount: 925,
             driveFileID: "1Byb1h62MEdDd4xnPb6Ao-_dQXK9T02sX"
-        )
+        )],
+        "spanish": [
+            PoplurAdCreative(
+                id: "spanish-drive-ad-1",
+                channelID: "spanish",
+                mediaURL: googleDriveMediaURL(fileID: "17YgYn6c2i2kxrssF-6UrBO6X4h6nHIRd"),
+                headline: "El canal en español está en vivo",
+                body: "Creadores, música, y momentos locales en español están activos en Poplur.",
+                callToAction: "Ver en Español",
+                creativeKind: "Spanish channel ad",
+                latitude: 40.4168,
+                longitude: -3.7038,
+                cityName: "Madrid",
+                countryName: "Spain",
+                countryFlag: "🇪🇸",
+                radius: 130_000,
+                viewCount: 940,
+                driveFileID: "17YgYn6c2i2kxrssF-6UrBO6X4h6nHIRd"
+            ),
+            PoplurAdCreative(
+                id: "spanish-drive-ad-2",
+                channelID: "spanish",
+                mediaURL: googleDriveMediaURL(fileID: "1q1lMCstW1QxxWmStwO8_YF2R5iImcl6O"),
+                headline: "Contenido en español cerca de ti",
+                body: "Descubre creadores y momentos en español dentro de tu radio de Poplur.",
+                callToAction: "Ver en Español",
+                creativeKind: "Spanish channel ad",
+                latitude: 19.4326,
+                longitude: -99.1332,
+                cityName: "Mexico City",
+                countryName: "Mexico",
+                countryFlag: "🇲🇽",
+                radius: 140_000,
+                viewCount: 1_015,
+                driveFileID: "1q1lMCstW1QxxWmStwO8_YF2R5iImcl6O"
+            ),
+            PoplurAdCreative(
+                id: "spanish-drive-ad-3",
+                channelID: "spanish",
+                mediaURL: googleDriveMediaURL(fileID: "1Z_Neqsj5eoDdDWQD_-J1S-_PTuCPrWq9"),
+                headline: "La energía latina está en vivo",
+                body: "Sigue las tendencias y creadores del canal en español en Poplur.",
+                callToAction: "Ver en Español",
+                creativeKind: "Spanish channel ad",
+                latitude: 4.7110,
+                longitude: -74.0721,
+                cityName: "Bogotá",
+                countryName: "Colombia",
+                countryFlag: "🇨🇴",
+                radius: 120_000,
+                viewCount: 865,
+                driveFileID: "1Z_Neqsj5eoDdDWQD_-J1S-_PTuCPrWq9"
+            )
+        ],
+        "french": [PoplurAdCreative(
+            id: "french-drive-ad",
+            channelID: "french",
+            mediaURL: googleDriveMediaURL(fileID: "1s_o1GcEjIl25uw4rlRtvE_VhpSf_EJjz"),
+            headline: "La chaîne française est en direct",
+            body: "Créateurs, musique, et moments locaux en français sont en direct sur Poplur.",
+            callToAction: "Regarder en Français",
+            creativeKind: "French channel ad",
+            latitude: 48.8566,
+            longitude: 2.3522,
+            cityName: "Paris",
+            countryName: "France",
+            countryFlag: "🇫🇷",
+            radius: 130_000,
+            viewCount: 955,
+            driveFileID: "1s_o1GcEjIl25uw4rlRtvE_VhpSf_EJjz"
+        )]
     ]
 
     nonisolated private static let poplurAdCreatives: [PoplurAdCreative] = [
@@ -1945,8 +2018,9 @@ struct FeedView: View {
     }
 
     nonisolated private static func poplurAdCreative(for index: Int, namespace: String, channel: String? = nil) -> PoplurAdCreative {
-        if let channel, let creative = poplurChannelAdCreatives[channel] {
-            return creative
+        if let channel, let creatives = poplurChannelAdCreatives[channel], !creatives.isEmpty {
+            let offset = stableMediaOffset(for: namespace)
+            return creatives[abs(index + offset) % creatives.count]
         }
         let offset = stableMediaOffset(for: namespace)
         return poplurAdCreatives[abs(index + offset) % poplurAdCreatives.count]
@@ -1958,19 +2032,20 @@ struct FeedView: View {
         case ad
     }
 
-    nonisolated private static func demoMediaKind(for index: Int) -> DemoMediaKind {
-        switch index % 5 {
-        case 1, 4:
-            return .video
-        case 2:
+    nonisolated private static func demoMediaKind(for index: Int, namespace: String = "global") -> DemoMediaKind {
+        if FeedAdProbabilitySettings.placement(for: index, namespace: namespace) == .poplurAd {
             return .ad
+        }
+        switch index % 4 {
+        case 1, 3:
+            return .video
         default:
             return .image
         }
     }
 
     nonisolated private static func balancedDemoMediaURL(for index: Int, namespace: String, channel: String? = nil) -> String {
-        switch demoMediaKind(for: index) {
+        switch demoMediaKind(for: index, namespace: namespace) {
         case .video:
             return reliableDemoVideoURLs[index % reliableDemoVideoURLs.count]
         case .image:
@@ -1993,8 +2068,8 @@ struct FeedView: View {
         return reliableDemoVideoURLs[abs(index + offset) % reliableDemoVideoURLs.count]
     }
 
-    nonisolated private static func demoUserID(regular regularUserID: String, for index: Int) -> String {
-        demoMediaKind(for: index) == .ad ? "poplur_ad_\(index)" : regularUserID
+    nonisolated private static func demoUserID(regular regularUserID: String, for index: Int, namespace: String = "global") -> String {
+        demoMediaKind(for: index, namespace: namespace) == .ad ? "poplur_ad_\(index)" : regularUserID
     }
 
     nonisolated private static func generateDemoPosts(start: Int, count: Int) -> [FeedPost] {
@@ -2007,8 +2082,8 @@ struct FeedView: View {
         for i in start..<end {
             let id = "demo_\(i)"
             let regularUserID = i % 3 == 0 ? "fake_user_\(i)" : String(format: "user_%06d", i)
-            let adCreative = demoMediaKind(for: i) == .ad ? poplurAdCreative(for: i, namespace: "global") : nil
-            let userID = adCreative.map { "poplur_ad_\($0.id)" } ?? demoUserID(regular: regularUserID, for: i)
+            let adCreative = demoMediaKind(for: i, namespace: "global") == .ad ? poplurAdCreative(for: i, namespace: "global") : nil
+            let userID = adCreative.map { "poplur_ad_\($0.id)" } ?? demoUserID(regular: regularUserID, for: i, namespace: "global")
             let mediaURL = balancedDemoMediaURL(for: i, namespace: "global")
             let latitude = adCreative?.latitude ?? (37.3349 + Double(i % 5) * 0.01)
             let longitude = adCreative?.longitude ?? (-122.0090 - Double(i % 7) * 0.01)
@@ -2125,14 +2200,15 @@ struct FeedView: View {
             let postSourceLanguage: PoplurLanguage = isLanguageChannel
                 ? (i % 2 == 0 ? channelLanguage : .english)
                 : .english
-            let adCreative: PoplurAdCreative? = (!isLanguageChannel && demoMediaKind(for: i) == .ad)
+            let feedNamespace = "\(country)_\(channel)"
+            let adCreative: PoplurAdCreative? = (!isLanguageChannel && demoMediaKind(for: i, namespace: feedNamespace) == .ad)
                 ? poplurAdCreative(for: i, namespace: "\(country)_\(channel)", channel: channel)
                 : nil
-            let feedUserID = adCreative.map { "poplur_ad_\($0.id)" } ?? demoUserID(regular: userID, for: i)
+            let feedUserID = adCreative.map { "poplur_ad_\($0.id)" } ?? demoUserID(regular: userID, for: i, namespace: feedNamespace)
 
             let mediaURL: String = isLanguageChannel
                 ? languageDemoVideoURL(for: i, language: postSourceLanguage)
-                : balancedDemoMediaURL(for: i, namespace: "\(country)_\(channel)", channel: channel)
+                : balancedDemoMediaURL(for: i, namespace: feedNamespace, channel: channel)
             
             // ✅ USE GLOBAL CITIES for coordinates - posts now come from all over the world!
             let city = globalCities[i % globalCities.count]
@@ -2220,8 +2296,8 @@ struct FeedView: View {
         for i in start..<end {
             let id = "\(country.lowercased())_demo_\(i)"
             let regularUserID = i % 3 == 0 ? "fake_user_\(i)" : String(format: "user_%06d", i)
-            let adCreative = demoMediaKind(for: i) == .ad ? poplurAdCreative(for: i, namespace: country) : nil
-            let userID = adCreative.map { "poplur_ad_\($0.id)" } ?? demoUserID(regular: regularUserID, for: i)
+            let adCreative = demoMediaKind(for: i, namespace: country) == .ad ? poplurAdCreative(for: i, namespace: country) : nil
+            let userID = adCreative.map { "poplur_ad_\($0.id)" } ?? demoUserID(regular: regularUserID, for: i, namespace: country)
             let mediaURL = balancedDemoMediaURL(for: i, namespace: country)
             // Shift coordinates slightly by country index to vary positions
             let baseLat = 37.3349 + Double(abs(country.hashValue % 20)) * 0.01

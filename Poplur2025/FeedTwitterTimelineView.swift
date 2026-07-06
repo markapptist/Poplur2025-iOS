@@ -169,7 +169,6 @@ struct FeedTwitterTimelineView: View {
     @State private var articles: [NewspaperSection] = []
     @State private var currentArticleIndex: Int = 0
     @State private var hapticGenerator = UIImpactFeedbackGenerator(style: .rigid)
-    @State private var popPlayer: AVAudioPlayer? = nil
     @StateObject private var narrator = NewsNarrator()
 
     private static let today: String = {
@@ -284,14 +283,7 @@ struct FeedTwitterTimelineView: View {
     }
 
     private func playPop() {
-        guard let url = Bundle.main.url(forResource: "pop", withExtension: "mp3")
-                     ?? Bundle.main.url(forResource: "pop", withExtension: "wav") else { return }
-        guard let player = try? AVAudioPlayer(contentsOf: url) else { return }
-        player.numberOfLoops = 0
-        player.volume = 0.9
-        player.prepareToPlay()
-        player.play()
-        popPlayer = player
+        PoplurSoundPlayer.shared.playPop(minimumInterval: 0.12)
     }
 }
 

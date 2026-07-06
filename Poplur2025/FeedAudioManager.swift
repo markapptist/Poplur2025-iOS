@@ -288,3 +288,24 @@ final class FeedAudioManager {
         PoplurEQSync.shared.configureAudioSession(for: .feedPlayback)
     }
 }
+
+// MARK: - PoplurSoundPlayer
+
+final class PoplurSoundPlayer {
+    static let shared = PoplurSoundPlayer()
+    private var popPlayer: AVAudioPlayer?
+
+    private init() {
+        if let url = Bundle.main.url(forResource: "pop", withExtension: "mp3") {
+            popPlayer = try? AVAudioPlayer(contentsOf: url)
+            popPlayer?.prepareToPlay()
+        }
+    }
+
+    func playPop(minimumInterval: TimeInterval = 0.18) {
+        guard PoplurEQSync.shared.shouldPlayTransientSound(minimumInterval: minimumInterval) else { return }
+        guard let p = popPlayer else { return }
+        if p.isPlaying { p.stop(); p.currentTime = 0 }
+        p.play()
+    }
+}

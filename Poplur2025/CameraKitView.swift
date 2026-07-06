@@ -121,6 +121,47 @@ struct CameraKitView: View {
             UserRecognitionOverlay(recognitionManager: userRecognition)
                 .zIndex(8)
                 .allowsHitTesting(true)
+
+            // Top-right camera controls: flip + torch
+            if !isRecording {
+                VStack(spacing: 14) {
+                    // Flip camera
+                    Button {
+                        controllerFlipAction()?()
+                    } label: {
+                        Image(systemName: "arrow.triangle.2.circlepath.camera.fill")
+                            .font(.system(size: 22, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .poplurIconShader()
+                            .frame(width: 50, height: 50)
+                            .background(.ultraThinMaterial, in: Circle())
+                            .shadow(color: .black.opacity(0.4), radius: 6, y: 3)
+                    }
+                    .buttonStyle(.plain)
+
+                    // Torch toggle
+                    Button {
+                        _ = controllerToggleTorch()
+                        isTorchOn.toggle()
+                        if isTorchOn { showScreenFlash = true }
+                        else { showScreenFlash = false }
+                    } label: {
+                        Image(systemName: isTorchOn ? "bolt.fill" : "bolt.slash.fill")
+                            .font(.system(size: 22, weight: .semibold))
+                            .foregroundStyle(isTorchOn ? Color.yellow : .white)
+                            .poplurIconShader()
+                            .frame(width: 50, height: 50)
+                            .background(.ultraThinMaterial, in: Circle())
+                            .shadow(color: .black.opacity(0.4), radius: 6, y: 3)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.top, 70)
+                .padding(.trailing, 14)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                .zIndex(9)
+                .allowsHitTesting(true)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .ignoresSafeArea()
@@ -129,13 +170,12 @@ struct CameraKitView: View {
             Task { @MainActor in
                 controller.userRecognitionManager = userRecognition
                 if controller.isReady {
-                    // Session already configured — just resume the stream
                     controller.resumeCapture()
                 } else {
                     await controller.prewarm()
                     await controller.startPreview()
-                    controller.preparePreviewIfNeeded()
                 }
+                controller.preparePreviewIfNeeded()
                 await userRecognition.startRecognitionSession()
                 print("👤 [UserRecognition] Session started")
             }

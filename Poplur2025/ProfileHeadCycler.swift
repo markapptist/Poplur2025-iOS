@@ -1,25 +1,15 @@
 import Foundation
 import SwiftUI
 
-// To enable AI 3D head generation, set your Replicate API key:
-//   UserDefaults.standard.set("<your_key>", forKey: "poplur_replicate_key")
-// Sign up at replicate.com → Account → API tokens.
-// Model used: lucataco/instant-mesh (single-image → GLB mesh).
-// Without a key the cycler still works with locally scanned USDZ models.
-
 @MainActor
 final class ProfileHeadCycler: ObservableObject {
     @Published private(set) var modelURL: URL? = nil
     @Published private(set) var is3DActive: Bool = false
     @Published private(set) var isGenerating: Bool = false
 
-    private let supportedRuntimeExtensions: Set<String> = ["usdz", "scn", "dae"]
+    private let supportedRuntimeExtensions: Set<String> = ["usdz", "scn", "dae", "glb", "gltf"]
     private var cycleTimer: Timer?
     private var generationTask: Task<Void, Never>?
-
-    private var apiKey: String {
-        UserDefaults.standard.string(forKey: "poplur_replicate_key") ?? ""
-    }
 
     /// Call when a profile loads. Pass `localModelURL` (face-scan USDZ) to skip network generation.
     func start(profileImageURL: URL?, localModelURL: URL?, userID: String) {
@@ -48,32 +38,15 @@ final class ProfileHeadCycler: ObservableObject {
                 }
             }
 
-            // Generate via Replicate (requires API key + public image URL)
-            guard let imageURL = profileImageURL, !self.apiKey.isEmpty else { return }
-            guard !Task.isCancelled else { return }
-
-            self.isGenerating = true
-            defer { self.isGenerating = false }
-            do {
-                let meshURL = try await self.callReplicate(imageURL: imageURL)
-                guard !Task.isCancelled else { return }
-                let ext = meshURL.pathExtension.isEmpty ? "glb" : meshURL.pathExtension
-                guard self.supportedRuntimeExtensions.contains(ext.lowercased()) else {
-                    print("[ProfileHeadCycler] Generated \(ext.uppercased()) head is not an iOS runtime format. Use USDZ, SCN, or DAE.")
-                    return
-                }
-                let dest = self.cachedURL(for: userID, ext: ext)!
-                let (tmp, _) = try await URLSession.shared.download(from: meshURL)
-                guard !Task.isCancelled else { return }
-                try? FileManager.default.removeItem(at: dest)
-                try FileManager.default.moveItem(at: tmp, to: dest)
-                self.modelURL = dest
+            if let bundled = self.bundledFallbackModelURL() {
+                self.modelURL = bundled
                 self.startCycling()
-            } catch {
-                if !(error is CancellationError) {
-                    print("[ProfileHeadCycler] generation error: \(error.localizedDescription)")
-                }
+                return
             }
+
+            // External 3D head generation must run through Poplur's backend Meshy provider.
+            // This client cycler only displays local scanned/cached runtime-safe models.
+            _ = profileImageURL
         }
     }
 
@@ -114,64 +87,17 @@ final class ProfileHeadCycler: ObservableObject {
         supportedRuntimeExtensions.contains(url.pathExtension.lowercased())
     }
 
-    // MARK: - Replicate API (lucataco/instant-mesh)
-
-    private func callReplicate(imageURL: URL) async throws -> URL {
-        guard let endpoint = URL(string: "https://api.replicate.com/v1/models/lucataco/instant-mesh/predictions") else {
-            throw URLError(.badURL)
-        }
-        var req = URLRequest(url: endpoint)
-        req.httpMethod = "POST"
-        req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = try JSONSerialization.data(withJSONObject: [
-            "input": [
-                "image_path": imageURL.absoluteString,
-                "do_remove_background": true,
-                "sample_steps": 75,
-                "num_multiview_images": 4
-            ] as [String: Any]
-        ])
-        let (data, _) = try await URLSession.shared.data(for: req)
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let id = json["id"] as? String else {
-            throw URLError(.cannotParseResponse)
-        }
-        return try await pollReplicate(id: id)
-    }
-
-    private func pollReplicate(id: String) async throws -> URL {
-        guard let url = URL(string: "https://api.replicate.com/v1/predictions/\(id)") else {
-            throw URLError(.badURL)
-        }
-        var req = URLRequest(url: url)
-        req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-
-        for _ in 0..<90 { // max 4.5 min
-            try await Task.sleep(nanoseconds: 3_000_000_000) // poll every 3s
-            try Task.checkCancellation()
-
-            let (data, _) = try await URLSession.shared.data(for: req)
-            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
-
-            switch json["status"] as? String {
-            case "succeeded":
-                // Output may be dict {"mesh": url} or array [url]
-                if let out = json["output"] as? [String: Any] {
-                    let s = out["mesh"] as? String ?? out["glb"] as? String
-                    if let s, let u = URL(string: s) { return u }
-                }
-                if let arr = json["output"] as? [String], let s = arr.first, let u = URL(string: s) {
-                    return u
-                }
-                throw URLError(.cannotParseResponse)
-            case "failed", "canceled":
-                let msg = json["error"] as? String ?? "Prediction failed"
-                throw NSError(domain: "Replicate", code: -1, userInfo: [NSLocalizedDescriptionKey: msg])
-            default:
-                continue
+    private func bundledFallbackModelURL() -> URL? {
+        for candidate in [
+            ("MarkHead_TalkingRig", "glb"),
+            ("MarkHead", "scn"),
+            ("MarkHead", "dae")
+        ] {
+            if let url = Bundle.main.url(forResource: candidate.0, withExtension: candidate.1) {
+                return url
             }
         }
-        throw NSError(domain: "Replicate", code: -2, userInfo: [NSLocalizedDescriptionKey: "Timed out after 4.5 min"])
+        return nil
     }
+
 }

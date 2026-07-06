@@ -128,6 +128,7 @@ final class SettingsStore: ObservableObject {
         static let holdMenuLayoutPreference = "settings.holdMenuLayoutPreference"
         static let transitionStylePreference = "settings.transitionStylePreference"
         static let tiltControlEnabled = "settings.tiltControlEnabled"
+        static let use3DLoadingScreen = "settings.use3DLoadingScreen"
     }
 
     // MARK: - Video duration limit
@@ -169,6 +170,18 @@ final class SettingsStore: ObservableObject {
         set {
             objectWillChange.send()
             defaults.set(newValue, forKey: Keys.hudSleepTimerEnabled)
+        }
+    }
+
+    // MARK: - Loading screen style
+
+    /// When true, the app-launch loading screen shows the spinning 3D login cube.
+    /// When false, it shows the simpler static/2D branded logo instead.
+    var use3DLoadingScreen: Bool {
+        get { defaults.object(forKey: Keys.use3DLoadingScreen) as? Bool ?? true }
+        set {
+            objectWillChange.send()
+            defaults.set(newValue, forKey: Keys.use3DLoadingScreen)
         }
     }
 

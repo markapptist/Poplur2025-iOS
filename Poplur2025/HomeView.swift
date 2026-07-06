@@ -3,7 +3,6 @@ import CoreLocation
 import AVFoundation
 import Combine
 import MediaPlayer
-import AudioToolbox
 import Foundation
 import SpriteKit
 
@@ -86,26 +85,32 @@ private struct HiddenSystemVolumeBridge: UIViewRepresentable {
 
 private struct HomeFeedLaunchCover: View {
     let showSlowDetails: Bool
+    @ObservedObject private var cubeSkinStore = CubeSkinStore.shared
+
     var body: some View {
-        _LaunchCoverRep()
+        _LaunchCoverRep(skin: cubeSkinStore.current)
             .ignoresSafeArea()
     }
 }
 
 private struct _LaunchCoverRep: UIViewRepresentable {
-    func makeUIView(context: Context) -> _LaunchCoverView { _LaunchCoverView() }
-    func updateUIView(_ uiView: _LaunchCoverView, context: Context) {}
+    let skin: CubeSkin
+
+    func makeUIView(context: Context) -> _LaunchCoverView {
+        _LaunchCoverView(skin: skin)
+    }
+
+    func updateUIView(_ uiView: _LaunchCoverView, context: Context) {
+        uiView.applySkin(skin)
+    }
 }
 
 private final class _LaunchCoverView: UIView {
 
     // MARK: Sublayers / subviews
     private let emitter       = CAEmitterLayer()
-    private let logoImageView: UIImageView = {
-        let skin = CubeSkinStore.shared.current
-        let image = UIImage(named: skin.logoAssetName) ?? UIImage(named: "logo")
-        return UIImageView(image: image)
-    }()
+    private let bannerImageView = UIImageView()
+    private let logoImageView = UIImageView()
     private let trackLayer    = CALayer()
     private let fillLayer     = CALayer()
     private let phaseLabel    = UILabel()
@@ -162,17 +167,32 @@ private final class _LaunchCoverView: UIView {
         .systemGreen, .systemBlue, .systemPurple,
     ]
 
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        backgroundColor = .white
+    init(skin: CubeSkin) {
+        super.init(frame: .zero)
+        applySkin(skin)
         setupSubviews()
     }
     required init?(coder: NSCoder) { fatalError() }
     deinit { phaseTimer?.invalidate(); popTimer?.invalidate() }
 
+    func applySkin(_ skin: CubeSkin) {
+        let theme = skin.appTheme
+        backgroundColor = theme.prefersLightContent ? .black : .white
+        bannerImageView.image = skin.bannerImage
+        logoImageView.image = UIImage(named: skin.logoAssetName) ?? UIImage(named: "logo")
+        trackLayer.backgroundColor = UIColor.black.withAlphaComponent(theme.prefersLightContent ? 0.16 : 0.10).cgColor
+        fillLayer.backgroundColor = skin.themeUIColor.cgColor
+        phaseLabel.textColor = theme.prefersLightContent ? UIColor.black.withAlphaComponent(0.60) : UIColor.white.withAlphaComponent(0.82)
+    }
+
     // MARK: - Setup
 
     private func setupSubviews() {
+        bannerImageView.contentMode = .scaleAspectFill
+        bannerImageView.clipsToBounds = true
+        bannerImageView.alpha = 0.86
+        addSubview(bannerImageView)
+
         // Confetti — GPU particle system, never touches the main thread per frame
         emitter.emitterShape = .line
         emitter.renderMode   = .unordered
@@ -183,19 +203,16 @@ private final class _LaunchCoverView: UIView {
         logoImageView.alpha = 0
         addSubview(logoImageView)
 
-        trackLayer.backgroundColor = UIColor.black.withAlphaComponent(0.12).cgColor
         trackLayer.cornerRadius = 2
         layer.addSublayer(trackLayer)
 
         // anchorPoint=(0, 0.5) keeps the left edge fixed while bounds.width animates rightward
-        fillLayer.backgroundColor = UIColor(red: 0, green: 0.471, blue: 1, alpha: 1).cgColor
         fillLayer.cornerRadius    = 2
         fillLayer.anchorPoint     = CGPoint(x: 0, y: 0.5)
         layer.addSublayer(fillLayer)
 
         phaseLabel.textAlignment = .center
         phaseLabel.font          = .systemFont(ofSize: 14, weight: .medium)
-        phaseLabel.textColor     = UIColor.black.withAlphaComponent(0.60)
         phaseLabel.numberOfLines = 2
         phaseLabel.text          = "AI \(phases[0])"
         addSubview(phaseLabel)
@@ -208,7 +225,7 @@ private final class _LaunchCoverView: UIView {
         guard bounds.width > 1 else { return }
 
         let cx = bounds.midX, cy = bounds.midY
-        let logoSz: CGFloat = 200
+        let logoSz: CGFloat = min(bounds.width * 0.60, 270)
         let barY    = cy + logoSz / 2 + 28
         let barLeft = cx - loadingBarWidth / 2
 
@@ -216,6 +233,7 @@ private final class _LaunchCoverView: UIView {
         emitter.emitterPosition = CGPoint(x: cx, y: -40)
         emitter.emitterSize     = CGSize(width: bounds.width + 400, height: bounds.height * 2)
 
+        bannerImageView.frame = bounds
         logoImageView.frame = CGRect(x: cx - logoSz/2, y: cy - logoSz/2, width: logoSz, height: logoSz)
         trackLayer.frame    = CGRect(x: barLeft, y: barY, width: loadingBarWidth, height: loadingBarHeight)
 
@@ -424,10 +442,10 @@ struct HomeView: View {
     @ObservedObject private var settings = SettingsStore.shared
     @ObservedObject private var cubeSkinStore = CubeSkinStore.shared
 
+    @EnvironmentObject private var stripeCoordinator: StripeTransitionCoordinator
     @Environment(\.homeViewIsPreviewRuntime) private var isPreviewRuntime
     @Environment(\.previewSelectedTab) private var previewSelectedTab
 
-    // Start on feed tab instead of record tab
     @State private var selectedTab: AppTab = .feed
 
     init(initialTab: AppTab = .feed) {
@@ -461,11 +479,13 @@ struct HomeView: View {
     @State private var bottomChromeVisible = false
     @State private var isFeedLaunchLoading = false
     @State private var feedLaunchSuppressionTask: Task<Void, Never>? = nil
+    @State private var hasPlayedFeedLaunchPop = false
     @State private var isMainTabChildRouteVisible = false
 
-    // HUD sleep timer
+    // HUD sleep: chrome sleeps after 3 passive video advances (no user touch)
     @State private var isChromeAsleep: Bool = false
     @State private var chromeSleepTask: Task<Void, Never>? = nil
+    @State private var passiveVideoAdvanceCount: Int = 0
 
     // Shared radius model controlling the global isometric bar value across all tabs
     @StateObject private var isometricBarModel = IsometricBarModel(radius: 0)
@@ -516,7 +536,8 @@ struct HomeView: View {
     }
 
     // Added state for cube yaw angle
-    @State private var cubeYawDegrees: Double = 90
+    @State private var cubeYawDegrees: Double = 0
+    @State private var cubeIntroPopped: Bool = false
 
     // Added per instructions to control initial yaw set once
     @State private var didSetInitialCubeYaw: Bool = false
@@ -669,32 +690,7 @@ struct HomeView: View {
     }
 
     private static func randomChannelObject(for channelId: String) -> String {
-        let options: [String]
-        switch channelId.lowercased() {
-        case "food":
-            options = ["banana", "cake", "fruit"]
-        case "beauty", "style":
-            options = ["lipstick", "compact", "sparkle"]
-        case "sports", "fitness":
-            options = ["ball", "trophy", "dumbbell"]
-        case "modelling":
-            options = ["camera", "spotlight", "star"]
-        case "fashion", "shopping":
-            options = ["dress", "shoe", "bag"]
-        case "music":
-            options = ["microphone", "note", "speaker"]
-        case "tech", "gaming":
-            options = ["laptop", "chip", "controller"]
-        case "news":
-            options = ["newspaper", "globe", "camera"]
-        case "french":
-            options = ["eiffel", "croissant", "beret"]
-        case "spanish":
-            options = ["guitar", "sun", "fan"]
-        default:
-            options = ["star", "globe", "sparkle"]
-        }
-        return options.randomElement() ?? "star"
+        PopularObjectCatalog.randomObject(for: channelId)
     }
 
     private static func cameraCubePopObject(for label: String) -> CameraCubePopObject {
@@ -730,41 +726,8 @@ struct HomeView: View {
     }
 
     private static func providedCameraObject(for normalizedLabel: String) -> (channelId: String, objectId: String)? {
-        let rules: [([String], String, String)] = [
-            (["banana"], "food", "banana"),
-            (["cake", "dessert", "pastry"], "food", "cake"),
-            (["fruit", "apple", "orange", "food", "meal", "plate", "sandwich", "pizza"], "food", "fruit"),
-            (["ball", "soccer", "basketball", "football", "tennis", "sports"], "sports", "ball"),
-            (["trophy", "award", "medal"], "sports", "trophy"),
-            (["dumbbell", "barbell", "weight", "exercise", "fitness"], "sports", "dumbbell"),
-            (["dress", "clothing", "shirt", "jacket", "fashion"], "fashion", "dress"),
-            (["shoe", "sneaker", "footwear", "boot"], "fashion", "shoe"),
-            (["bag", "purse", "handbag", "backpack"], "fashion", "bag"),
-            (["microphone", "mic", "karaoke"], "music", "microphone"),
-            (["note", "music", "instrument", "song"], "music", "note"),
-            (["speaker", "audio", "sound"], "music", "speaker"),
-            (["laptop", "computer", "keyboard", "monitor", "screen", "consumer electronics", "electronic equipment", "machine", "television", "tv", "tablet"], "tech", "laptop"),
-            (["chip", "circuit", "processor", "semiconductor"], "tech", "chip"),
-            (["controller", "game controller", "joystick", "gaming"], "tech", "controller"),
-            (["phone", "mobile phone", "cell phone", "telephone", "smartphone"], "tech", "phone"),
-            (["camera", "lens", "photography"], "modelling", "camera"),
-            (["spotlight", "lamp", "light"], "modelling", "spotlight"),
-            (["person", "human", "face", "portrait", "selfie"], "modelling", "spotlight"),
-            (["newspaper", "paper", "document", "book", "magazine"], "news", "newspaper"),
-            (["globe", "world", "earth", "map"], "news", "globe"),
-            (["eiffel", "tower"], "french", "eiffel"),
-            (["croissant"], "french", "croissant"),
-            (["beret", "hat"], "french", "beret"),
-            (["guitar"], "spanish", "guitar"),
-            (["sun"], "spanish", "sun"),
-            (["fan"], "spanish", "fan")
-        ]
-
-        return rules.first { rule in
-            rule.0.contains { normalizedLabel.contains($0) }
-        }.map { rule in
-            (channelId: rule.1, objectId: rule.2)
-        }
+        guard let objectId = PopularObjectCatalog.object(forDetectedLabel: normalizedLabel) else { return nil }
+        return (channelId: objectId.components(separatedBy: "_").first ?? "news", objectId: objectId)
     }
 
     private static func matchingCameraObjectAssetName(for normalizedLabel: String) -> String? {
@@ -1397,13 +1360,13 @@ struct HomeView: View {
     private enum RotationDirection { case left, right }
 
     private func yawForTab(_ tab: AppTab) -> Double {
-        // Define faces: record=0°, feed=90°, profile=180°, map=270°
+        // Face order matches CubeTabView: feed=0, profile=90, map=180, record=270.
         switch tab {
-        case .record: return 0
-        case .feed: return 90
-        case .profile: return 180
-        case .map: return 270
-        case .settings: return 0 // Settings not currently in rotation
+        case .feed: return 0
+        case .profile: return 90
+        case .map: return 180
+        case .record: return 270
+        case .settings: return 90
         }
     }
 
@@ -1429,28 +1392,28 @@ struct HomeView: View {
 
     private func nextTab(from tab: AppTab) -> AppTab {
         switch tab {
-        case .map: return .record
-        case .record: return .feed
-        case .feed: return .profile
+        case .feed:    return .profile
         case .profile: return .map
-        case .settings: return .feed // Settings not in rotation, default to feed
+        case .map:     return .record
+        case .record:  return .feed
+        case .settings: return .feed
         }
     }
 
     private func previousTab(from tab: AppTab) -> AppTab {
         switch tab {
-        case .map: return .profile
-        case .record: return .map
-        case .feed: return .record
+        case .feed:    return .record
+        case .record:  return .map
+        case .map:     return .profile
         case .profile: return .feed
-        case .settings: return .feed // Settings not in rotation, default to feed
+        case .settings: return .feed
         }
     }
 
     private func rotateCube(to newTab: AppTab, direction: RotationDirection) {
         let targetYaw = yawForTab(newTab)
         animateYaw(to: targetYaw, duration: 0.45, direction: direction)
-        selectedTab = newTab
+        stripeCoordinator.trigger { selectedTab = newTab }
     }
 
     @MainActor
@@ -1547,6 +1510,13 @@ struct HomeView: View {
     @ViewBuilder
     private var feedTabContent: some View {
         FeedView(homeChromeInactive: selectedTab == .feed && isChromeAsleep)
+            .onAppear {
+                guard !hasPlayedFeedLaunchPop else { return }
+                hasPlayedFeedLaunchPop = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    PoplurSoundPlayer.shared.playPop(minimumInterval: 0)
+                }
+            }
             .onDisappear {
                 // Ensure all feed players stop when leaving Feed tab view hierarchy
                 NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
@@ -1610,6 +1580,7 @@ struct HomeView: View {
     private func resetChromeSleepTimer() {
         chromeSleepTask?.cancel()
         chromeSleepTask = nil
+        passiveVideoAdvanceCount = 0
         if showFeedCommentComposer {
             if !isChromeAsleep {
                 withAnimation(.easeOut(duration: 0.35)) { isChromeAsleep = true }
@@ -1626,9 +1597,12 @@ struct HomeView: View {
         if isChromeAsleep {
             withAnimation(.easeIn(duration: 0.35)) { isChromeAsleep = false }
         }
-        chromeSleepTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 60_000_000_000) // 1 minute
-            guard !Task.isCancelled else { return }
+    }
+
+    private func onFeedVideoAdvanced() {
+        guard selectedTab == .feed, !isMainTabChildRouteVisible, !showFeedCommentComposer else { return }
+        passiveVideoAdvanceCount += 1
+        if passiveVideoAdvanceCount >= 3 {
             withAnimation(.easeOut(duration: 0.8)) { isChromeAsleep = true }
         }
     }
@@ -1824,76 +1798,17 @@ struct HomeView: View {
                 .zIndex(900)
             }
 
-            if isCubeVisibleOnCurrentRoute {
-                // 3D Cube tab control overlay — pinned to bottom
-                VStack(alignment: .center) {
+            // 3D cube navigation
+            if isCubeVisibleOnCurrentRoute && !isMainTabChildRouteVisible {
+                VStack {
                     Spacer()
-                    ZStack(alignment: .center) {
-                        CubeTabView(
-                            selectedTab: $selectedTab,
-                            tintColor: .indigo,
-                            onSwipeUp: {
-                                if selectedTab == .record {
-                                    NotificationCenter.default.post(name: Notification.Name("TriggerCameraCapture"), object: nil)
-                                } else {
-                                    NotificationCenter.default.post(name: Notification.Name("ShowRecordCaptureUI"), object: nil)
-                                }
-                            },
-                            onCubeTap: {
-                                if selectedTab == .map {
-                                    NotificationCenter.default.post(
-                                        name: Notification.Name("CenterMapOnUser"),
-                                        object: nil,
-                                        userInfo: nil
-                                    )
-                                } else if selectedTab == .profile {
-                                    NotificationCenter.default.post(
-                                        name: .CubeGlobalTap,
-                                        object: nil
-                                    )
-                                }
-                            }
-                            )
-                            .tint(.white)
-                            .scaleEffect(isCubeHiddenForObjectPop ? 0.01 : 1.0)
-                            .opacity(isCubeHiddenForObjectPop ? 0 : 1)
-                            .animation(.spring(response: 0.26, dampingFraction: 0.65), value: isCubeHiddenForObjectPop)
-
-                            activeCubePopObjectOverlay
-                    }
-                    .frame(maxWidth: .infinity, minHeight: 230, maxHeight: 230)
-                    .animation(.easeInOut(duration: 0.15), value: channelLogoVisible || cameraObjectPopVisible)
-                    .padding(.bottom, 8)
+                    CubeTabView(selectedTab: $selectedTab)
+                        .opacity(shouldSleepChromeForCurrentTab ? 0 : 1)
+                        .allowsHitTesting(!shouldSleepChromeForCurrentTab)
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.bottom, 24)
-	                .ignoresSafeArea(edges: .bottom)
-	                .animation(.easeInOut(duration: 0.15), value: channelLogoVisible || cameraObjectPopVisible)
-	                .allowsHitTesting(true)
-	                .zIndex(6000)
-                .gesture(
-                    DragGesture(minimumDistance: 20)
-                        .onEnded { value in
-                            // Detect swipe down; settings no longer accessible via tab
-                            if value.translation.height > 20, selectedTab == .profile {
-                                // No-op: settings access removed from tab navigation
-                            }
-                            // New swipe logic for cube rotation based on horizontal swipe
-                            let dx = value.translation.width
-                            let dy = value.translation.height
-                            if abs(dx) > abs(dy) {
-                                if dx < -20 {
-                                    // swipe left -> next tab, rotate right 90°
-                                    rotateCube(to: nextTab(from: selectedTab), direction: .right)
-                                } else if dx > 20 {
-                                    // swipe right -> previous tab, rotate left 90°
-                                    rotateCube(to: previousTab(from: selectedTab), direction: .left)
-                                }
-                            }
-                        }
-                )
-                .opacity(shouldSleepChromeForCurrentTab ? 0.2 : 1)
-                .allowsHitTesting(!shouldSleepChromeForCurrentTab)
+                .ignoresSafeArea(edges: .bottom)
+                .zIndex(6000)
+                .allowsHitTesting(true)
             }
 
 #if DEBUG
@@ -1959,6 +1874,7 @@ struct HomeView: View {
                             likesCount: $currentPostLikesCount,
                             selectedTab: $selectedTab,
                             radiusTrend: $radiusTrend,
+                            radiusMeters: $isometricBarModel.radius,
                             detectedUserPostCount: cameraDetectedPostCount
                         )
                         .frame(width: 150, alignment: .leading)
@@ -2077,6 +1993,37 @@ struct HomeView: View {
                 .allowsHitTesting(true)
             }
 
+            // Edge swipe navigation — left/right 60pt strips trigger tab rotation
+            GeometryReader { geo in
+                let edgeZone: CGFloat = 60
+                HStack(spacing: 0) {
+                    Color.clear
+                        .frame(width: edgeZone)
+                        .contentShape(Rectangle())
+                        .gesture(
+                            DragGesture(minimumDistance: 20, coordinateSpace: .local)
+                                .onEnded { value in
+                                    guard value.translation.width > 40 else { return }
+                                    rotateCube(to: previousTab(from: selectedTab), direction: .right)
+                                }
+                        )
+                    Spacer()
+                    Color.clear
+                        .frame(width: edgeZone)
+                        .contentShape(Rectangle())
+                        .gesture(
+                            DragGesture(minimumDistance: 20, coordinateSpace: .local)
+                                .onEnded { value in
+                                    guard value.translation.width < -40 else { return }
+                                    rotateCube(to: nextTab(from: selectedTab), direction: .left)
+                                }
+                        )
+                }
+                .frame(width: geo.size.width, height: geo.size.height)
+            }
+            .zIndex(8000)
+            .allowsHitTesting(true)
+
             PoplurAIAssistantOverlay(
                 controller: poplurAI,
                 accent: cubeSkinStore.current.appTheme.accent
@@ -2087,8 +2034,7 @@ struct HomeView: View {
         .fullScreenCover(isPresented: $showGames, onDismiss: {
             resetCubeFaceOverride("camera")
         }) {
-            PoplurGameLaunchView()
-                .environmentObject(deviceVolumeObserver)
+            PoplurFPSGameSheet()
         }
     }
 
@@ -2416,6 +2362,9 @@ struct HomeView: View {
                     channelLogoInfo = (id: id, name: name, emoji: emoji)
                 }
             }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("FeedVideoDidAdvance"))) { _ in
+                onFeedVideoAdvanced()
+            }
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("MLCubePopTrigger"))) { notification in
                 guard objectDetectionEnabled else { return }
                 guard let objects = notification.userInfo?["objects"] as? [DetectedObject] else { return }
@@ -2607,6 +2556,13 @@ struct HomeView: View {
                         .ignoresSafeArea()
                         .transition(.opacity)
                         .allowsHitTesting(false)
+                }
+            }
+            .onChange(of: showAppInitializationCover) { _, coverShowing in
+                if !coverShowing, !cubeIntroPopped {
+                    withAnimation(.spring(response: 0.52, dampingFraction: 0.52)) {
+                        cubeIntroPopped = true
+                    }
                 }
             }
             .animation(.easeOut(duration: 0.30), value: showAppInitializationCover)
@@ -3089,9 +3045,7 @@ struct HomeBarPlacementPreview: View {
     }
 
     private func playPopSound() {
-        // Use a lightweight system sound for preview pop feedback
-        let systemSoundID: SystemSoundID = 1104 // Tock-like sound
-        AudioServicesPlaySystemSound(systemSoundID)
+        PoplurSoundPlayer.shared.playPop()
     }
 
     private func startPreviewHoldRamp() {
@@ -3124,11 +3078,11 @@ struct HomeBarPlacementPreview: View {
 
     private func yawForTab(_ tab: AppTab) -> Double {
         switch tab {
-        case .record: return 0
-        case .feed: return 90
-        case .profile: return 180
-        case .map: return 270
-        case .settings: return 0 // Settings not currently in rotation
+        case .feed: return 0
+        case .profile: return 90
+        case .map: return 180
+        case .record: return 270
+        case .settings: return 90
         }
     }
 

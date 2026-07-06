@@ -12,12 +12,14 @@ import FirebaseFirestore
 struct AppSettingsView: View {
     @Environment(\.layoutPreviewMode) private var layoutPreviewMode
     @ObservedObject private var settings = SettingsStore.shared
+    @ObservedObject private var adProbabilitySettings = FeedAdProbabilitySettings.shared
     @ObservedObject private var cubeSkinStore = CubeSkinStore.shared
 
     @State private var pageIndex: Int = 0
     @State private var isPrivateAccount = false
     @State private var notificationsEnabled = true
     @AppStorage("poplur_use2DMap") private var use2DMap: Bool = false
+    @AppStorage("poplur_customMapTheme") private var customMapTheme: Bool = false
     @AppStorage("poplur_phoneXLMode") private var phoneXLMode: Bool = true
     @AppStorage("poplur_tvGuideFlipAnimation") private var tvGuideFlipAnimation: Bool = true
     @AppStorage("poplur_feedChannelButtonsSpriteKit2D") private var feedChannelButtonsSpriteKit2D: Bool = false
@@ -48,25 +50,21 @@ struct AppSettingsView: View {
     private var ticketWidth: CGFloat { min(screenSize.width - 24, 700) }
     private var ticketHeight: CGFloat { screenSize.height * 0.78 }
 
-    private var theme: CubeSkinAppTheme {
-        cubeSkinStore.current.appTheme
-    }
-
     init(initialPageIndex: Int = 0) {
         _pageIndex = State(initialValue: initialPageIndex)
     }
 
     var body: some View {
         ZStack {
-            CubeSkinThemedBackground(skin: cubeSkinStore.current)
+            DS.Color.background.ignoresSafeArea()
+            PoplurSparkleBackground().ignoresSafeArea()
 
             VStack(spacing: 0) {
-                // Start content at the very top – no top Spacer
                 ScrollViewReader { proxy in
                     VStack(spacing: 0) {
                         Text("Settings")
-                            .font(.system(size: 28, weight: .black, design: .rounded))
-                            .foregroundColor(theme.primaryText)
+                            .font(DS.Font.title())
+                            .foregroundColor(DS.Color.textPrimary)
                             .padding(.top, 22)
                             .padding(.bottom, 4)
 
@@ -74,15 +72,15 @@ struct AppSettingsView: View {
                     }
                     .frame(width: ticketWidth, height: ticketHeight)
                     .background(
-                        RoundedRectangle(cornerRadius: 28, style: .continuous)
-                            .fill(theme.surface)
+                        RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous)
+                            .fill(DS.Color.card)
                     )
                     .overlay(
-                        RoundedRectangle(cornerRadius: 28, style: .continuous)
-                            .stroke(theme.border, lineWidth: 1.2)
+                        RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous)
+                            .stroke(DS.Color.border, lineWidth: 1)
                     )
-                    .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
-                    .shadow(color: theme.shadow, radius: 18, x: 0, y: 12)
+                    .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
+                    .shadow(color: DS.Shadow.hero.color, radius: DS.Shadow.hero.radius, x: DS.Shadow.hero.x, y: DS.Shadow.hero.y)
                     .onReceive(NotificationCenter.default.publisher(for: .ResetTabToTop)) { _ in
                         withAnimation(.easeInOut(duration: 0.25)) {
                             proxy.scrollTo("top", anchor: .top)
@@ -107,7 +105,7 @@ struct AppSettingsView: View {
                 // Title
                 Text("Average Radius")
                     .font(.system(size: 22, weight: .heavy, design: .rounded))
-                    .foregroundColor(theme.primaryText)
+                    .foregroundColor(DS.Color.textPrimary)
                     .padding(.top, 16)
                     .frame(maxWidth: .infinity, alignment: .center)
 
@@ -116,7 +114,7 @@ struct AppSettingsView: View {
                         Spacer()
                         ProgressView()
                             .progressViewStyle(.circular)
-                            .tint(theme.accent)
+                            .tint(DS.Color.accent)
                         Spacer()
                     }
                     .padding(.vertical, 16)
@@ -128,8 +126,8 @@ struct AppSettingsView: View {
                             value: averageRadius,
                             maxValue: ringMax,
                             unit: "KM",
-                            accentColor: theme.accent,
-                            trackColor: theme.border.opacity(0.24),
+                            accentColor: DS.Color.accent,
+                            trackColor: DS.Color.border.opacity(0.24),
                             lineWidthFactor: 0.12
                         )
                         .frame(height: 260)
@@ -138,14 +136,14 @@ struct AppSettingsView: View {
                     }
                     Text("Posts counted: \(posts.count)")
                         .font(.system(size: 12, weight: .semibold, design: .rounded))
-                        .foregroundColor(theme.secondaryText)
+                        .foregroundColor(DS.Color.textSecondary)
                         .padding(.bottom, 44)
                 }
 
                 VStack(alignment: .center, spacing: 8) {
                     Text("Accumulated Radius")
                         .font(.system(size: 22, weight: .heavy, design: .rounded))
-                        .foregroundColor(theme.primaryText)
+                        .foregroundColor(DS.Color.textPrimary)
                         .frame(maxWidth: .infinity, alignment: .center)
 
                     if isLoadingStats {
@@ -153,24 +151,24 @@ struct AppSettingsView: View {
                             Spacer()
                             ProgressView()
                                 .progressViewStyle(.circular)
-                                .tint(theme.accent)
+                                .tint(DS.Color.accent)
                             Spacer()
                         }
                         .padding(.vertical, 20)
                     } else {
                         Text("You’ve reached")
                             .font(.system(size: 16, weight: .semibold, design: .rounded))
-                            .foregroundColor(theme.secondaryText)
+                            .foregroundColor(DS.Color.textSecondary)
                             .frame(maxWidth: .infinity, alignment: .center)
 
                         Text(formattedKM(totalRadius))
                             .font(.system(size: 44, weight: .heavy, design: .rounded))
-                            .foregroundColor(theme.primaryText)
+                            .foregroundColor(DS.Color.textPrimary)
                             .frame(maxWidth: .infinity, alignment: .center)
 
                         Text("in total")
                             .font(.system(size: 16, weight: .semibold, design: .rounded))
-                            .foregroundColor(theme.secondaryText)
+                            .foregroundColor(DS.Color.textSecondary)
                             .frame(maxWidth: .infinity, alignment: .center)
                     }
                 }
@@ -189,7 +187,7 @@ struct AppSettingsView: View {
                 // Title
                 Text("Account Options")
                     .font(.system(size: 22, weight: .heavy, design: .rounded))
-                    .foregroundColor(theme.primaryText)
+                    .foregroundColor(DS.Color.textPrimary)
                     .padding(.top, 16)
                     .frame(maxWidth: .infinity, alignment: .center)
 
@@ -198,6 +196,7 @@ struct AppSettingsView: View {
                     settingsToggleRow(title: "Private Account", isOn: $isPrivateAccount)
                     settingsToggleRow(title: "Notifications", isOn: $notificationsEnabled)
                     settingsToggleRow(title: "2D Map", isOn: $use2DMap)
+                    settingsToggleRow(title: "Custom Map Theme", isOn: $customMapTheme)
                     settingsToggleRow(title: "2D Feed Buttons", isOn: $feedChannelButtonsSpriteKit2D)
                     settingsToggleRow(title: "XL Phone", isOn: $phoneXLMode)
                     settingsToggleRow(
@@ -222,6 +221,13 @@ struct AppSettingsView: View {
                             set: { settings.tiltControlEnabled = $0 }
                         )
                     )
+                    settingsToggleRow(
+                        title: "3D Loading Screen",
+                        isOn: Binding(
+                            get: { settings.use3DLoadingScreen },
+                            set: { settings.use3DLoadingScreen = $0 }
+                        )
+                    )
                     profileHeadModePicker
                     settingsNavRow(title: "Email Address") { /* push email editor */ }
                     settingsNavRow(title: "Password") { /* push password editor */ }
@@ -231,7 +237,7 @@ struct AppSettingsView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Preferred Language")
                         .font(.system(size: 18, weight: .heavy, design: .rounded))
-                        .foregroundColor(theme.primaryText)
+                        .foregroundColor(DS.Color.textPrimary)
 
                     Picker(
                         "Preferred Language",
@@ -251,7 +257,7 @@ struct AppSettingsView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Appearance")
                         .font(.system(size: 18, weight: .heavy, design: .rounded))
-                        .foregroundColor(theme.primaryText)
+                        .foregroundColor(DS.Color.textPrimary)
 
                     Picker(
                         "Appearance",
@@ -271,7 +277,7 @@ struct AppSettingsView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Hold Menu")
                         .font(.system(size: 18, weight: .heavy, design: .rounded))
-                        .foregroundColor(theme.primaryText)
+                        .foregroundColor(DS.Color.textPrimary)
 
                     Picker(
                         "Hold Menu",
@@ -291,7 +297,7 @@ struct AppSettingsView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Transitions")
                         .font(.system(size: 18, weight: .heavy, design: .rounded))
-                        .foregroundColor(theme.primaryText)
+                        .foregroundColor(DS.Color.textPrimary)
 
                     Picker(
                         "Transitions",
@@ -308,6 +314,8 @@ struct AppSettingsView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
+                feedAdProbabilityControls
+
                 // Video duration quick action
                 VStack(alignment: .center, spacing: 8) {
                     Button {
@@ -316,15 +324,15 @@ struct AppSettingsView: View {
                     } label: {
                         Text("Limit videos to 10 seconds")
                             .font(.system(size: 16, weight: .heavy, design: .rounded))
-                            .foregroundColor(theme.primaryText)
+                            .foregroundColor(DS.Color.textPrimary)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 12)
-                            .background(theme.controlFill, in: Capsule())
+                            .background(DS.Color.fill, in: Capsule())
                     }
 
                     Text("Current limit: \(Int(maxDurationDisplay))s")
                         .font(.system(size: 14, weight: .semibold, design: .rounded))
-                        .foregroundColor(theme.secondaryText)
+                        .foregroundColor(DS.Color.textSecondary)
                         .frame(maxWidth: .infinity, alignment: .center)
                 }
 
@@ -335,10 +343,10 @@ struct AppSettingsView: View {
                     } label: {
                         Text("Seed NA (1000)")
                             .font(.system(size: 16, weight: .heavy, design: .rounded))
-                            .foregroundColor(theme.primaryText)
+                            .foregroundColor(DS.Color.textPrimary)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 12)
-                            .background(theme.controlFill, in: Capsule())
+                            .background(DS.Color.fill, in: Capsule())
                     }
 
                     Button {
@@ -346,10 +354,10 @@ struct AppSettingsView: View {
                     } label: {
                         Text("Start Simulator (dev: 120s/day)")
                             .font(.system(size: 16, weight: .heavy, design: .rounded))
-                            .foregroundColor(theme.primaryText)
+                            .foregroundColor(DS.Color.textPrimary)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 12)
-                            .background(theme.controlFill, in: Capsule())
+                            .background(DS.Color.fill, in: Capsule())
                     }
                     
                     Button {
@@ -380,7 +388,7 @@ struct AppSettingsView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Cube Skin")
                         .font(.system(size: 18, weight: .heavy, design: .rounded))
-                        .foregroundColor(theme.primaryText)
+                        .foregroundColor(DS.Color.textPrimary)
 
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 12) {
@@ -404,11 +412,11 @@ struct AppSettingsView: View {
                 Button(action: signOut) {
                     Text("Sign Out")
                         .font(.system(size: 18, weight: .heavy, design: .rounded))
-                        .foregroundColor(theme.primaryText)
+                        .foregroundColor(DS.Color.textPrimary)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 16)
-                        .background(theme.controlFill, in: Capsule())
-                        .shadow(color: theme.shadow, radius: 10, x: 0, y: 6)
+                        .background(DS.Color.fill, in: Capsule())
+                        .shadow(color: DS.Shadow.card.color, radius: 10, x: 0, y: 6)
                 }
                 .padding(.top, 8)
 
@@ -426,22 +434,22 @@ struct AppSettingsView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Profile Head")
                 .font(.system(size: 18, weight: .heavy, design: .rounded))
-                .foregroundColor(theme.primaryText)
+                .foregroundColor(DS.Color.textPrimary)
 
             HStack(spacing: 10) {
                 Image(systemName: "person.crop.circle.badge.checkmark")
                     .font(.system(size: 18, weight: .bold))
-                    .foregroundStyle(theme.accent)
+                    .foregroundStyle(DS.Color.accent)
                 Text("3D Mark Head")
                     .font(.system(size: 15, weight: .heavy, design: .rounded))
-                    .foregroundColor(theme.primaryText)
+                    .foregroundColor(DS.Color.textPrimary)
                 Spacer()
                 Text("Active")
                     .font(.system(size: 12, weight: .black, design: .rounded))
-                    .foregroundColor(theme.accent)
+                    .foregroundColor(DS.Color.accent)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 5)
-                    .background(theme.surfaceStrong, in: Capsule())
+                    .background(DS.Color.fillStrong, in: Capsule())
             }
             .onAppear {
                 profileAvatarIs3D = true
@@ -449,21 +457,91 @@ struct AppSettingsView: View {
 
             Text("Your profile uses the bundled 3D Mark head.")
                 .font(.system(size: 12, weight: .semibold, design: .rounded))
-                .foregroundColor(theme.secondaryText)
+                .foregroundColor(DS.Color.textSecondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 4)
+    }
+
+    private var feedAdProbabilityControls: some View {
+        let config = adProbabilitySettings.config
+        return VStack(alignment: .leading, spacing: 14) {
+            Text("Feed Ads")
+                .font(.system(size: 18, weight: .heavy, design: .rounded))
+                .foregroundColor(DS.Color.textPrimary)
+
+            VStack(spacing: 12) {
+                adPercentSlider(
+                    title: "Poplur Ads",
+                    value: config.poplurAdPercent,
+                    accent: DS.Color.accent
+                ) { value in
+                    adProbabilitySettings.setPercentages(
+                        poplur: value,
+                        googleMobile: adProbabilitySettings.googleMobileAdPercent
+                    )
+                }
+
+                adPercentSlider(
+                    title: "Google Mobile Ads",
+                    value: config.googleMobileAdPercent,
+                    accent: Color(red: 0.39, green: 1.0, blue: 0.31)
+                ) { value in
+                    adProbabilitySettings.setPercentages(
+                        poplur: adProbabilitySettings.poplurAdPercent,
+                        googleMobile: value
+                    )
+                }
+            }
+
+            Text("Normal feed content: \(percentLabel(config.contentPercent))")
+                .font(.system(size: 12, weight: .black, design: .rounded))
+                .foregroundColor(DS.Color.textSecondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func adPercentSlider(
+        title: String,
+        value: Double,
+        accent: Color,
+        onChange: @escaping (Double) -> Void
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack {
+                Text(title)
+                    .font(.system(size: 15, weight: .heavy, design: .rounded))
+                    .foregroundColor(DS.Color.textPrimary)
+                Spacer()
+                Text(percentLabel(value))
+                    .font(.system(size: 14, weight: .black, design: .rounded))
+                    .foregroundColor(accent)
+            }
+            Slider(
+                value: Binding(
+                    get: { value },
+                    set: { onChange($0) }
+                ),
+                in: 0...100,
+                step: 1
+            )
+            .tint(accent)
+        }
+    }
+
+    private func percentLabel(_ value: Double) -> String {
+        "\(Int(value.rounded()))%"
     }
 
     private func settingsToggleRow(title: String, isOn: Binding<Bool>) -> some View {
         HStack(alignment: .center, spacing: 12) {
             Text(title)
                 .font(.system(size: 18, weight: .heavy, design: .rounded))
-                .foregroundColor(theme.primaryText)
+                .foregroundColor(DS.Color.textPrimary)
             Spacer(minLength: 12)
             Toggle("", isOn: isOn)
                 .labelsHidden()
-                .toggleStyle(SwitchToggleStyle(tint: theme.accent))
+                .toggleStyle(SwitchToggleStyle(tint: DS.Color.accent))
         }
         .contentShape(Rectangle())
         .frame(maxWidth: .infinity, minHeight: 44)
@@ -474,12 +552,12 @@ struct AppSettingsView: View {
             HStack(alignment: .center, spacing: 12) {
                 Text(title)
                     .font(.system(size: 18, weight: .heavy, design: .rounded))
-                    .foregroundColor(theme.primaryText)
+                    .foregroundColor(DS.Color.textPrimary)
                 Spacer(minLength: 12)
                 Image(systemName: "arrow.right")
                     .poplurIconShader()
                     .font(.system(size: 18, weight: .bold))
-                    .foregroundColor(theme.accent)
+                    .foregroundColor(DS.Color.accent)
             }
             .frame(minHeight: 44)
         }
@@ -671,8 +749,6 @@ private struct CubeSkinPickerTile: View {
     let skin: CubeSkin
     let isSelected: Bool
 
-    private var theme: CubeSkinAppTheme { skin.appTheme }
-
     var body: some View {
         VStack(spacing: 6) {
             ZStack {
@@ -683,21 +759,21 @@ private struct CubeSkinPickerTile: View {
                     Image(systemName: "checkmark")
                         .poplurIconShader()
                         .font(.system(size: 18, weight: .black))
-                        .foregroundColor(theme.badgeText)
+                        .foregroundColor(.white)
                         .padding(8)
-                        .background(Circle().fill(theme.badgeFill))
+                        .background(Circle().fill(DS.Color.accent))
                 }
             }
             .frame(width: 62, height: 62)
             .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 13, style: .continuous)
-                    .stroke(isSelected ? theme.accent : theme.border.opacity(0.45), lineWidth: isSelected ? 3 : 1)
+                    .stroke(isSelected ? DS.Color.accent : DS.Color.border.opacity(0.45), lineWidth: isSelected ? 3 : 1)
             )
 
             Text(skin.displayName)
                 .font(.system(size: 10, weight: .black, design: .rounded))
-                .foregroundColor(isSelected ? theme.accent : CubeSkinStore.shared.current.appTheme.secondaryText)
+                .foregroundColor(isSelected ? DS.Color.accent : DS.Color.textSecondary)
                 .lineLimit(1)
                 .frame(width: 76)
         }

@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>POPLUR — Arcade FPS</title>
+  <script type="module" crossorigin src="./assets/index-CwhFayV5.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-DA3902mU.css">
+</head>
+<body>
+  <div id="arcade-wrapper">
+    <div id="arcade-cabinet">
+
+      <!-- Top marquee -->
+      <div id="marquee">
+        <div class="marquee-flower">&#10022;</div>
+        <div class="marquee-brand">
+          <span class="p-badge">P</span>
+          <span class="marquee-letters">poplur</span>
+          <span class="p-badge">P</span>
+        </div>
+        <div class="marquee-flower">&#10022;</div>
+      </div>
+
+      <!-- Monitor bezel -->
+      <div id="monitor-bezel">
+        <div id="screen-area">
+          <canvas id="game-canvas" width="640" height="400"></canvas>
+          <div id="scanlines"></div>
+          <div id="vignette"></div>
+        </div>
+      </div>
+
+      <!-- Speaker grilles -->
+      <div id="speakers">
+        <div class="speaker-grille left"></div>
+        <div class="speaker-grille right"></div>
+      </div>
+
+      <!-- Control panel -->
+      <div id="control-panel">
+        <div id="joystick-mount">
+          <div id="joystick-base">
+            <div id="joystick-shaft">
+              <div id="joystick-ball"></div>
+            </div>
+          </div>
+        </div>
+        <div id="button-panel">
+          <div class="btn-row top-row">
+            <button class="cab-btn btn-yellow" id="btn-start" title="START / FIRE">START</button>
+            <button class="cab-btn btn-pink" id="btn-select" title="SELECT">SELECT</button>
+          </div>
+          <div class="btn-row main-row">
+            <button class="cab-btn btn-green" id="btn-1" title="1"></button>
+            <button class="cab-btn btn-blue" id="btn-2" title="2"></button>
+            <button class="cab-btn btn-red" id="btn-3" title="3"></button>
+            <button class="cab-btn btn-orange" id="btn-4" title="4"></button>
+            <button class="cab-btn btn-purple" id="btn-5" title="5"></button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bottom logo strip -->
+      <div id="bottom-strip">
+        <span class="bottom-logo"><span class="p-icon">P</span> poplur</span>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Mobile touch overlay (injected outside cabinet) -->
+  <div id="touch-overlay"></div>
+
+</body>
+</html>

@@ -25,7 +25,8 @@ struct DMsListView: View {
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            DS.Color.background.ignoresSafeArea()
+            PoplurSparkleBackground().ignoresSafeArea()
 
             if let selectedThreadID {
                 DMThreadView(
@@ -95,7 +96,7 @@ struct DMsListView: View {
             .scrollIndicators(.hidden)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.black)
+        .background(DS.Color.background)
     }
 
     private var filteredThreads: [DMThread] {
@@ -114,24 +115,20 @@ private struct DMSearchField: View {
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: "magnifyingglass")
-                .poplurIconShader()
                 .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(Color(red: 0.58, green: 0.58, blue: 0.62))
+                .foregroundStyle(DS.Color.textSecondary)
 
             TextField("Search", text: $text)
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(.white)
-                .tint(.white)
+                .font(.system(size: 16, weight: .medium, design: .rounded))
+                .foregroundStyle(DS.Color.textPrimary)
+                .tint(DS.Color.accent)
                 .textInputAutocapitalization(.never)
                 .disableAutocorrection(true)
         }
-        .padding(.horizontal, 14)
-        .frame(height: 44)
-        .background(Color(red: 0.075, green: 0.075, blue: 0.085), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(.white.opacity(0.08), lineWidth: 1)
-        )
+        .padding(.horizontal, 16)
+        .frame(height: 46)
+        .background(DS.Color.card, in: Capsule())
+        .shadow(color: .black.opacity(0.06), radius: 10, x: 0, y: 4)
     }
 }
 
@@ -140,42 +137,27 @@ private struct DMTopBar: View {
     let onEdit: () -> Void
 
     var body: some View {
-        VStack(spacing: 14) {
-            Image("logo")
-                .resizable()
-                .scaledToFit()
-                .frame(width: 84, height: 84)
+        HStack(alignment: .center) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(DS.Font.title(30))
+                    .foregroundStyle(DS.Color.textPrimary)
 
-            HStack(alignment: .center) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(title)
-                        .font(.system(size: 34, weight: .bold))
-                        .foregroundStyle(.white)
-
-                    Text("Recent messages")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(Color(red: 0.58, green: 0.58, blue: 0.62))
-                }
-
-                Spacer()
-
-                Button(action: onEdit) {
-                    Image(systemName: "square.and.pencil")
-                        .poplurIconShader()
-                        .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 44, height: 44)
-                        .background(
-                            Color(red: 0.08, green: 0.08, blue: 0.09),
-                            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .stroke(.white.opacity(0.1), lineWidth: 1)
-                        )
-                }
-                .buttonStyle(.plain)
+                Text("Recent messages")
+                    .font(DS.Font.caption())
+                    .foregroundStyle(DS.Color.textSecondary)
             }
+
+            Spacer()
+
+            Button(action: onEdit) {
+                Image(systemName: "square.and.pencil")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(DS.Color.textPrimary)
+                    .frame(width: 44, height: 44)
+                    .background(DS.Color.fill, in: RoundedRectangle(cornerRadius: DS.Radius.small, style: .continuous))
+            }
+            .buttonStyle(.plain)
         }
     }
 }
@@ -195,21 +177,21 @@ private struct DMThreadRow: View {
                 VStack(alignment: .leading, spacing: 5) {
                     HStack(spacing: 8) {
                         Text(displayName)
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(.white)
+                            .font(.system(size: 17, weight: .bold, design: .rounded))
+                            .foregroundStyle(DS.Color.textPrimary)
                             .lineLimit(1)
 
                         Spacer(minLength: 6)
 
                         Text(lastTime)
-                            .font(.system(size: 13, weight: unreadCount > 0 ? .semibold : .regular))
-                            .foregroundStyle(unreadCount > 0 ? Color(red: 0.38, green: 1.0, blue: 0.47) : Color(red: 0.56, green: 0.56, blue: 0.59))
+                            .font(.system(size: 13, weight: unreadCount > 0 ? .bold : .medium, design: .rounded))
+                            .foregroundStyle(unreadCount > 0 ? DS.Color.accent : DS.Color.textSecondary)
                     }
 
                     HStack(spacing: 8) {
                         Text(thread.lastMessage?.text ?? "Start the conversation")
-                            .font(.system(size: 15, weight: unreadCount > 0 ? .semibold : .regular))
-                            .foregroundStyle(Color(red: 0.67, green: 0.67, blue: 0.71))
+                            .font(.system(size: 14, weight: unreadCount > 0 ? .semibold : .medium, design: .rounded))
+                            .foregroundStyle(DS.Color.textSecondary)
                             .lineLimit(1)
 
                         Spacer(minLength: 6)
@@ -217,13 +199,9 @@ private struct DMThreadRow: View {
                         if unreadCount > 0 {
                             Text("\(unreadCount)")
                                 .font(.system(size: 11, weight: .black))
-                                .foregroundStyle(.black)
+                                .foregroundStyle(.white)
                                 .frame(width: 21, height: 21)
-                                .background(Color(red: 0.38, green: 1.0, blue: 0.47), in: Circle())
-                        } else {
-                            Circle()
-                                .fill(Color(red: 0.23, green: 0.59, blue: 1.0))
-                                .frame(width: 8, height: 8)
+                                .background(DS.Color.accent, in: Circle())
                         }
                     }
                 }
@@ -232,9 +210,8 @@ private struct DMThreadRow: View {
                     onVideoCall(videoCallUser)
                 } label: {
                     Image(systemName: "video.fill")
-                        .poplurIconShader()
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(Color(red: 0.82, green: 0.82, blue: 0.86))
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(DS.Color.textSecondary)
                         .frame(width: 36, height: 36)
                 }
                 .buttonStyle(.plain)
@@ -293,12 +270,12 @@ struct DMThreadView: View {
                         Spacer()
                             .frame(height: 12)
                         Text("Today")
-                            .font(.system(size: 12, weight: .black))
-                            .foregroundStyle(Color(red: 0.62, green: 0.62, blue: 0.66))
+                            .font(.system(size: 12, weight: .black, design: .rounded))
+                            .foregroundStyle(DS.Color.textSecondary)
                             .padding(.horizontal, 14)
                             .padding(.vertical, 6)
-                            .background(Color(red: 0.08, green: 0.08, blue: 0.1), in: Capsule())
-                            .overlay(Capsule().stroke(.white.opacity(0.06), lineWidth: 1))
+                            .background(DS.Color.fill, in: Capsule())
+                            .overlay(Capsule().stroke(DS.Color.border, lineWidth: 1))
                             .padding(.bottom, 4)
                         ForEach(messages) { msg in
                             DMMessageBubble(message: msg, isMe: msg.senderID == store.currentUser.id)
@@ -323,7 +300,7 @@ struct DMThreadView: View {
                 .padding(.bottom, 14)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.black.ignoresSafeArea())
+        .background(DS.Color.background.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
         .fullScreenCover(isPresented: $showVideoCall) {
             DMCallCoordinatorView(calleeName: displayName, isVideo: true) { showVideoCall = false }
@@ -340,13 +317,13 @@ struct DMThreadView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(displayName)
-                    .font(.system(size: 22, weight: .black))
-                    .foregroundStyle(.white)
+                    .font(DS.Font.heading(20))
+                    .foregroundStyle(DS.Color.textPrimary)
                     .lineLimit(1)
 
                 Text("Active now")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(Color(red: 0.56, green: 0.56, blue: 0.59))
+                    .font(DS.Font.caption())
+                    .foregroundStyle(Color(red: 0.26, green: 0.80, blue: 0.32))
             }
             .padding(.leading, 12)
 
@@ -366,33 +343,22 @@ struct DMThreadView: View {
 
     private var composer: some View {
         HStack(spacing: 10) {
-            Button(action: {}) {
-                Image(systemName: "plus")
-                    .poplurIconShader()
-                    .font(.system(size: 22, weight: .black))
-                    .foregroundStyle(Color(red: 0.72, green: 0.72, blue: 0.78))
-                    .frame(width: 46, height: 46)
-                    .background(Color(red: 0.09, green: 0.09, blue: 0.1), in: Circle())
-                    .overlay(Circle().stroke(.white.opacity(0.1), lineWidth: 1))
-            }
-            .buttonStyle(.plain)
-
             TextField("Message \(displayName)", text: $draft)
-                .font(.system(size: 17, weight: .bold))
-                .foregroundStyle(.white)
-                .tint(.white)
+                .font(.system(size: 16, weight: .semibold, design: .rounded))
+                .foregroundStyle(DS.Color.textPrimary)
+                .tint(DS.Color.accent)
                 .padding(.horizontal, 18)
-                .frame(height: 56)
-                .background(Color(red: 0.09, green: 0.09, blue: 0.1), in: Capsule())
-                .overlay(Capsule().stroke(.white.opacity(0.12), lineWidth: 1))
+                .frame(height: 52)
+                .background(DS.Color.card, in: Capsule())
+                .overlay(Capsule().stroke(DS.Color.border, lineWidth: 1))
 
             Button(action: send) {
                 Image(systemName: "paperplane.fill")
-                    .poplurIconShader()
-                    .font(.system(size: 22, weight: .bold))
+                    .font(.system(size: 20, weight: .bold))
                     .foregroundStyle(.white)
-                    .frame(width: 52, height: 52)
+                    .frame(width: 50, height: 50)
                     .background(sendButtonColor, in: Circle())
+                    .shadow(color: sendButtonColor.opacity(0.35), radius: 8, x: 0, y: 4)
             }
             .buttonStyle(.plain)
             .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -401,8 +367,8 @@ struct DMThreadView: View {
 
     private var sendButtonColor: Color {
         draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        ? Color(red: 0.17, green: 0.17, blue: 0.19)
-        : Color(red: 0.23, green: 0.59, blue: 1.0)
+        ? DS.Color.fill
+        : DS.Color.accent
     }
 
     private var thread: DMThread? {
@@ -453,27 +419,26 @@ private struct DMMessageBubble: View {
 
             VStack(alignment: .leading, spacing: 7) {
                 Text(message.text)
-                    .font(.system(size: 17, weight: .bold))
+                    .font(.system(size: 16, weight: .semibold, design: .rounded))
                     .lineSpacing(2)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(isMe ? Color.white : DS.Color.textPrimary)
 
                 HStack(spacing: 4) {
                     Spacer(minLength: 20)
                     Text(DMRelativeTimeFormatter.shortTime(from: message.timestamp))
-                        .font(.system(size: 10, weight: .black))
-                        .foregroundStyle(.white.opacity(0.62))
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .foregroundStyle(isMe ? Color.white.opacity(0.70) : DS.Color.textSecondary)
                     if isMe {
                         Image(systemName: "checkmark")
-                            .poplurIconShader()
                             .font(.system(size: 10, weight: .black))
-                            .foregroundStyle(.white.opacity(0.72))
+                            .foregroundStyle(Color.white.opacity(0.80))
                     }
                 }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 11)
             .frame(maxWidth: UIScreen.main.bounds.width * 0.78, alignment: .leading)
-            .background(isMe ? Color(red: 0.23, green: 0.59, blue: 1.0) : Color(red: 0.11, green: 0.11, blue: 0.13))
+            .background(isMe ? DS.Color.accent : DS.Color.card)
             .clipShape(
                 UnevenRoundedRectangle(
                     topLeadingRadius: 22,
@@ -482,6 +447,7 @@ private struct DMMessageBubble: View {
                     topTrailingRadius: 22
                 )
             )
+            .shadow(color: isMe ? DS.Color.accent.opacity(0.25) : .black.opacity(0.05), radius: 8, x: 0, y: 3)
 
             if !isMe { Spacer(minLength: 0) }
         }
@@ -498,12 +464,11 @@ private struct DMCircleIconButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: systemName)
-                .poplurIconShader()
-                .font(.system(size: iconSize, weight: .black))
-                .foregroundStyle(.white)
+                .font(.system(size: iconSize, weight: .semibold))
+                .foregroundStyle(DS.Color.textPrimary)
                 .frame(width: size, height: size)
-                .background(Color(red: 0.09, green: 0.09, blue: 0.1), in: Circle())
-                .overlay(Circle().stroke(.white.opacity(0.09), lineWidth: 1))
+                .background(DS.Color.fill, in: Circle())
+                .overlay(Circle().stroke(DS.Color.border, lineWidth: 1))
         }
         .buttonStyle(.plain)
     }
@@ -516,20 +481,20 @@ private struct DMAvatarCircle: View {
     var body: some View {
         ZStack {
             Circle()
-                .fill(Color(red: 0.1, green: 0.1, blue: 0.12))
+                .fill(DS.Color.pinkCard)
             Text(initials)
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(.white)
+                .font(.system(size: 16, weight: .bold, design: .rounded))
+                .foregroundStyle(DS.Color.accent)
 
             if isOnline {
                 Circle()
-                    .fill(Color(red: 0.38, green: 1.0, blue: 0.47))
+                    .fill(Color(red: 0.22, green: 0.78, blue: 0.30))
                     .frame(width: 11, height: 11)
-                    .overlay(Circle().stroke(Color.black, lineWidth: 2))
+                    .overlay(Circle().stroke(DS.Color.card, lineWidth: 2))
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
             }
         }
-        .overlay(Circle().stroke(.white.opacity(0.12), lineWidth: 1))
+        .overlay(Circle().stroke(DS.Color.border, lineWidth: 1))
     }
 
     private var initials: String {

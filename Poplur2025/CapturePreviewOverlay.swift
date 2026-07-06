@@ -3,6 +3,7 @@ import AVFoundation
 import AVKit
 import CoreLocation
 import CoreImage
+import FirebaseAuth
 import UniformTypeIdentifiers
 
 // MARK: - TV analysis state
@@ -480,6 +481,7 @@ struct PostCaptureComposerOverlay: View {
     @State private var isPosting = false
     @State private var statusText = "Uploading your post..."
     @State private var usePoplurAI = false
+    @State private var showPoplurAIChat = false
     @State private var adPromptText: String = ""
     @State private var generatedAdImage: UIImage? = nil
     @State private var generatedAdVideoURL: URL? = nil
@@ -580,6 +582,23 @@ struct PostCaptureComposerOverlay: View {
             }
         }
         .navigationBarBackButtonHidden(true)
+        .fullScreenCover(isPresented: $showPoplurAIChat) {
+            PoplurAIChatView(
+                initialImage: image,
+                initialVideoURL: videoURL,
+                onDismiss: { showPoplurAIChat = false },
+                onPost: { resultImage, resultVideoURL in
+                    // Route the AI-edited result through the normal post flow
+                    usePoplurAI = true
+                    generatedAdImage = resultImage
+                    generatedAdVideoURL = resultVideoURL
+                    showPoplurAIChat = false
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                        withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) { step = .channel }
+                    }
+                }
+            )
+        }
         .sheet(isPresented: $showMusicPicker) {
             MusicDocumentPicker { url in
                 selectedMusicURL = url
@@ -857,12 +876,7 @@ struct PostCaptureComposerOverlay: View {
             .padding(.horizontal, 18)
 
             Button {
-                usePoplurAI = true
-                generatedAdImage = nil
-                generatedAdVideoURL = nil
-                generatedMeta = nil
-                generationError = nil
-                withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) { step = .adPrompt }
+                showPoplurAIChat = true
             } label: {
                 HStack(spacing: 9) {
                     Image(systemName: "sparkles")
@@ -2019,19 +2033,25 @@ private struct MusicDocumentPicker: UIViewControllerRepresentable {
 
 private enum AdGenerationService {
     static func generate(prompt: String) async throws -> UIImage {
-        var allowed = CharacterSet.urlPathAllowed
-        allowed.remove(charactersIn: "?#%/")
-        guard let encoded = prompt.addingPercentEncoding(withAllowedCharacters: allowed),
-              let url = URL(string: "https://image.pollinations.ai/prompt/\(encoded)?width=1080&height=1920&model=flux&nologo=true&enhance=false&seed=\(Int.random(in: 0...99999))")
-        else { throw AdGenerationError.generationFailed }
-
-        var req = URLRequest(url: url, timeoutInterval: 90)
-        req.setValue("Poplur/1.0", forHTTPHeaderField: "User-Agent")
-        let (data, response) = try await URLSession.shared.data(for: req)
+        guard let uid = Auth.auth().currentUser?.uid else { throw AdGenerationError.providerMustRunOnBackend }
+        let aiResponse = try await PoplurAIBackendClient().generate(
+            AIGenerationRequest(
+                userId: uid,
+                plan: .creator,
+                contentType: .image,
+                prompt: prompt,
+                inputAssetIds: [],
+                publishMetadata: nil,
+                campaignAssetTypes: [],
+                metadata: ["client": "ios", "surface": "ad_generation"]
+            )
+        )
+        guard let url = aiResponse.outputUrl else { throw AdGenerationError.generationFailed }
+        let (data, response) = try await URLSession.shared.data(from: url)
         guard let http = response as? HTTPURLResponse else { throw AdGenerationError.downloadFailed }
         guard http.statusCode == 200 else {
             if let body = String(data: data, encoding: .utf8) {
-                print("[FreeTierAdGenerationService] image failed \(http.statusCode): \(body)")
+                print("[PoplurAdGenerationService] image failed \(http.statusCode): \(body)")
             }
             throw AdGenerationError.downloadFailed
         }
@@ -2042,8 +2062,20 @@ private enum AdGenerationService {
 
 private enum VideoAdGenerationService {
     static func generate(prompt: String) async throws -> URL {
-        _ = prompt
-        // TODO: Queue POST /ai/generate/video through Poplur's backend and return the completed asset URL.
-        throw AdGenerationError.providerMustRunOnBackend
+        guard let uid = Auth.auth().currentUser?.uid else { throw AdGenerationError.providerMustRunOnBackend }
+        let response = try await PoplurAIBackendClient().generate(
+            AIGenerationRequest(
+                userId: uid,
+                plan: .creator,
+                contentType: .video,
+                prompt: prompt,
+                inputAssetIds: [],
+                publishMetadata: nil,
+                campaignAssetTypes: [],
+                metadata: ["client": "ios", "surface": "capture_preview"]
+            )
+        )
+        guard let url = response.outputUrl else { throw AdGenerationError.downloadFailed }
+        return url
     }
 }

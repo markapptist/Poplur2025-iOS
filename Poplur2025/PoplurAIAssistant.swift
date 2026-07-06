@@ -166,7 +166,7 @@ final class PoplurAIAssistantController: ObservableObject {
 
         do {
             let audioSession = AVAudioSession.sharedInstance()
-            PoplurEQSync.shared.configureAudioSession(for: .wakeRecognition)
+            PoplurEQSync.shared.configureAudioSession(for: .wakeRecognition, force: true)
 
             let request = SFSpeechAudioBufferRecognitionRequest()
             request.shouldReportPartialResults = true
@@ -415,12 +415,32 @@ final class PoplurAIAssistantController: ObservableObject {
         isIlluminated = true
         isListeningForCommand = true
         setStatus("Listening")
+        playWakeConfirmationPop()
+        NotificationCenter.default.post(name: Notification.Name("PoplurWakeDetected"), object: nil)
         wakeTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 6_000_000_000)
             self.isListeningForCommand = false
             self.isIlluminated = false
             self.lastHandledText = ""
             self.setStatus("Say Hey Poplur")
+        }
+    }
+
+    /// `.wakeRecognition` runs the audio session in `.measurement` mode for cleaner
+    /// speech-to-text input, but that mode also disables the output-side gain/DSP
+    /// that makes the pop cue audible everywhere else it's played in the app. Bump
+    /// the mode to `.default` just long enough for the pop to actually sound, then
+    /// drop back to `.measurement` so recognition accuracy is unaffected.
+    private func playWakeConfirmationPop() {
+        let session = AVAudioSession.sharedInstance()
+        let wasMeasurement = session.mode == .measurement
+        if wasMeasurement {
+            try? session.setMode(.default)
+        }
+        PoplurSoundPlayer.shared.playPop(minimumInterval: 0)
+        guard wasMeasurement else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            try? AVAudioSession.sharedInstance().setMode(.measurement)
         }
     }
 
