@@ -67,7 +67,7 @@ enum RuntimeGLBLoader {
             if !(minBB.x.isFinite && minBB.y.isFinite && minBB.z.isFinite && maxBB.x.isFinite && maxBB.y.isFinite && maxBB.z.isFinite) {
                 return
             }
-            if minBB == maxBB { // degenerate box
+            if (minBB.x == maxBB.x) && (minBB.y == maxBB.y) && (minBB.z == maxBB.z) { // degenerate box
                 return
             }
 
