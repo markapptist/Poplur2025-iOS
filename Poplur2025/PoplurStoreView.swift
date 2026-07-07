@@ -1,10 +1,14 @@
 import SwiftUI
 import SpriteKit
+import FirebaseAuth
 
 struct PoplurStoreView: View {
     @StateObject private var cart = CartViewModel()
+    @StateObject private var creditVM = CreatorCreditPurchaseViewModel()
     @State private var showingCart = false
     @State private var balance: Decimal = 100.00
+
+    private var userID: String? { Auth.auth().currentUser?.uid }
 
     static let radiusProducts: [StoreProduct] = [
         StoreProduct(
@@ -40,6 +44,8 @@ struct PoplurStoreView: View {
                 cartCount: cart.items.reduce(0) { $0 + $1.quantity },
                 radiusProducts: Self.radiusProducts,
                 creditCards: StoreCreditCard.catalog,
+                creditVM: creditVM,
+                userID: userID,
                 showCart: { showingCart = true },
                 addProduct: addProduct
             )
@@ -48,6 +54,15 @@ struct PoplurStoreView: View {
             CartSheet(cart: cart) {
                 cart.clear()
                 showingCart = false
+            }
+        }
+        .task {
+            async let products: () = creditVM.loadProducts()
+            if let uid = userID {
+                async let balance: () = creditVM.loadBalance(userID: uid)
+                _ = await (products, balance)
+            } else {
+                await products
             }
         }
     }
@@ -64,6 +79,8 @@ private struct StoreWebsiteContent: View {
     let cartCount: Int
     let radiusProducts: [StoreProduct]
     let creditCards: [StoreCreditCard]
+    @ObservedObject var creditVM: CreatorCreditPurchaseViewModel
+    let userID: String?
     let showCart: () -> Void
     let addProduct: (StoreProduct) -> Void
 
@@ -75,6 +92,8 @@ private struct StoreWebsiteContent: View {
                 .padding(.top, 8)
 
             StoreHeroSection()
+
+            StoreCreatorCreditsSection(creditVM: creditVM, userID: userID)
 
             StoreProductSection(products: radiusProducts, addProduct: addProduct)
 
@@ -333,6 +352,188 @@ private struct RadiusProductVisual: View {
             )
         default:
             return LinearGradient(colors: [.black, .gray], startPoint: .topLeading, endPoint: .bottomTrailing)
+        }
+    }
+}
+
+private struct StoreCreatorCreditsSection: View {
+    @ObservedObject var creditVM: CreatorCreditPurchaseViewModel
+    let userID: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .lastTextBaseline) {
+                Text("Creator Credits")
+                    .font(.system(size: 30, weight: .semibold))
+                    .foregroundColor(.black)
+
+                Spacer()
+
+                HStack(spacing: 5) {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(Color(red: 0.9, green: 0.2, blue: 0.6))
+
+                    if creditVM.isLoadingBalance {
+                        ProgressView().scaleEffect(0.7)
+                    } else {
+                        Text("\(creditVM.availableCredits) credits")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.black.opacity(0.58))
+                    }
+                }
+            }
+
+            Text("Used for AI image, video, voice, and music generation. Credits never expire.")
+                .font(.system(size: 14, weight: .regular))
+                .foregroundColor(.black.opacity(0.52))
+
+            if let msg = creditVM.message {
+                Text(msg)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(msg.lowercased().contains("failed") || msg.lowercased().contains("not") ? .red : Color(red: 0.0, green: 0.55, blue: 0.25))
+                    .padding(.vertical, 2)
+            }
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 16)], spacing: 16) {
+                ForEach(CreatorCreditPackage.allCases) { package in
+                    StoreCreditPackageCard(
+                        package: package,
+                        price: creditVM.displayPrice(for: package),
+                        isPurchasing: creditVM.isPurchasing(package),
+                        productsLoaded: !creditVM.productsByID.isEmpty
+                    ) {
+                        Task { await creditVM.buyCredits(package, userID: userID) }
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 22)
+        .padding(.vertical, 36)
+        .frame(maxWidth: 1080)
+        .frame(maxWidth: .infinity)
+        .background(Color(red: 0.975, green: 0.968, blue: 0.990))
+    }
+}
+
+private struct StoreCreditPackageCard: View {
+    let package: CreatorCreditPackage
+    let price: String
+    let isPurchasing: Bool
+    let productsLoaded: Bool
+    let buyAction: () -> Void
+
+    var body: some View {
+        VStack(spacing: 14) {
+            CreditPackageVisual(package: package)
+                .frame(height: 110)
+
+            VStack(spacing: 6) {
+                Text(package.title)
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundColor(.black)
+                    .multilineTextAlignment(.center)
+
+                Text(package.description)
+                    .font(.system(size: 13, weight: .regular))
+                    .foregroundColor(.black.opacity(0.56))
+                    .multilineTextAlignment(.center)
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 0)
+
+            HStack(spacing: 12) {
+                Text(price)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundColor(.black)
+
+                Spacer(minLength: 0)
+
+                Button(action: buyAction) {
+                    if isPurchasing {
+                        ProgressView()
+                            .frame(width: 60, height: 34)
+                    } else {
+                        Label("Buy", systemImage: "sparkles")
+                            .font(.system(size: 14, weight: .semibold))
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 9)
+                            .foregroundColor(.white)
+                            .background(
+                                Capsule()
+                                    .fill(productsLoaded
+                                          ? Color(red: 0.78, green: 0.12, blue: 0.52)
+                                          : Color.gray.opacity(0.5))
+                            )
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(isPurchasing || !productsLoaded)
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, minHeight: 280)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.white)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.black.opacity(0.065), lineWidth: 1)
+        )
+    }
+}
+
+private struct CreditPackageVisual: View {
+    let package: CreatorCreditPackage
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(gradient)
+                .poplurBrowserMetalGlass(intensity: 0.42)
+
+            VStack(spacing: 2) {
+                Text("\(package.credits)")
+                    .font(.system(size: 32, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+
+                Text("CREDITS")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(.white.opacity(0.76))
+            }
+
+            Image(systemName: "sparkles")
+                .font(.system(size: 16, weight: .bold))
+                .foregroundColor(.white.opacity(0.55))
+                .offset(x: 42, y: -26)
+
+            Image(systemName: "sparkles")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundColor(.white.opacity(0.38))
+                .offset(x: -38, y: 22)
+        }
+    }
+
+    private var gradient: LinearGradient {
+        switch package.credits {
+        case 100:
+            return LinearGradient(
+                colors: [Color(red: 0.70, green: 0.12, blue: 0.78), Color(red: 0.35, green: 0.10, blue: 0.82)],
+                startPoint: .topLeading, endPoint: .bottomTrailing
+            )
+        case 500:
+            return LinearGradient(
+                colors: [Color(red: 0.88, green: 0.16, blue: 0.52), Color(red: 0.60, green: 0.08, blue: 0.76)],
+                startPoint: .topLeading, endPoint: .bottomTrailing
+            )
+        default:
+            return LinearGradient(
+                colors: [Color(red: 0.06, green: 0.08, blue: 0.18), Color(red: 0.52, green: 0.10, blue: 0.62)],
+                startPoint: .topLeading, endPoint: .bottomTrailing
+            )
         }
     }
 }

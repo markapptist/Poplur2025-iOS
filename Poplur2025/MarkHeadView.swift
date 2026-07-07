@@ -96,8 +96,12 @@ final class MarkHeadViewCoordinator: NSObject, AVSpeechSynthesizerDelegate {
     }
 
     private func loadHeadScene() -> SCNScene? {
-        // Use SceneKit-native loaders only — GLTFSceneKit can SIGSEGV on some models,
-        // which is a signal (not an ObjC exception) and cannot be caught in-process.
+        // Primary: load MarkHead.scn from the Assets catalog data asset, then apply PBR textures.
+        if let scene = loadFromAssetsDataset() {
+            print("[MarkHeadView] Loaded MarkHead from Assets catalog")
+            return scene
+        }
+        // Fallback: bundle file paths (only present in debug builds with source-tree access).
         for candidate in [("MarkHead", "scn"), ("MarkHead", "dae")] {
             guard let url = Bundle.main.url(forResource: candidate.0, withExtension: candidate.1),
                   let scene = try? SCNScene(url: url, options: [
@@ -106,10 +110,47 @@ final class MarkHeadViewCoordinator: NSObject, AVSpeechSynthesizerDelegate {
                   ]) else {
                 continue
             }
-            print("[MarkHeadView] Loaded \(candidate.0).\(candidate.1)")
+            print("[MarkHeadView] Loaded \(candidate.0).\(candidate.1) from bundle")
+            applyMeshyTextures(to: scene)
             return scene
         }
         return makeProceduralFallbackScene()
+    }
+
+    private func loadFromAssetsDataset() -> SCNScene? {
+        guard let asset = NSDataAsset(name: "MarkHeadScene") else { return nil }
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("MarkHead_loaded.scn")
+        do {
+            try asset.data.write(to: tmp, options: .atomic)
+        } catch {
+            print("[MarkHeadView] Failed to write temp SCN: \(error)")
+            return nil
+        }
+        guard let scene = try? SCNScene(url: tmp, options: [
+            SCNSceneSource.LoadingOption.convertUnitsToMeters: true,
+            SCNSceneSource.LoadingOption.convertToYUp: true
+        ]) else { return nil }
+        applyMeshyTextures(to: scene)
+        return scene
+    }
+
+    private func applyMeshyTextures(to scene: SCNScene) {
+        let prefix = "Meshy_AI_Mark_character_head_3_0630045036_image-to-3d-texture"
+        let diffuse  = UIImage(named: "\(prefix)e")          // imageset name ends with extra 'e'
+        let normal   = UIImage(named: "\(prefix)_normal")
+        let metallic = UIImage(named: "\(prefix)_metallic")
+        let roughness = UIImage(named: "\(prefix)_roughness")
+        let emission = UIImage(named: "\(prefix)_emission")
+        scene.rootNode.enumerateHierarchy { node, _ in
+            node.geometry?.materials.forEach { mat in
+                mat.lightingModel = .physicallyBased
+                if let diffuse  { mat.diffuse.contents  = diffuse }
+                if let normal   { mat.normal.contents   = normal;  mat.normal.intensity = 0.8 }
+                if let metallic { mat.metalness.contents = metallic }
+                if let roughness { mat.roughness.contents = roughness }
+                if let emission { mat.emission.contents = emission; mat.emission.intensity = 0.15 }
+            }
+        }
     }
 
     private func makeProceduralFallbackScene() -> SCNScene {

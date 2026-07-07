@@ -9,6 +9,117 @@ import UniformTypeIdentifiers
 
 private let pinkAI = Color(red: 1, green: 0.176, blue: 0.588) // #FF2D96
 
+// MARK: - Theme
+
+enum PoplurAIChatTheme: String, CaseIterable {
+    case dark, warmDark, cardHeader, prelogin
+
+    var displayName: String {
+        switch self {
+        case .dark:       return "Dark"
+        case .warmDark:   return "Warm Dark"
+        case .cardHeader: return "Card Header"
+        case .prelogin:   return "Pre-login"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .dark:       return "moon.fill"
+        case .warmDark:   return "sparkle"
+        case .cardHeader: return "rectangle.topthird.inset.filled"
+        case .prelogin:   return "sun.max.fill"
+        }
+    }
+
+    var isLight: Bool    { self == .prelogin }
+    var isCard: Bool     { self == .cardHeader || self == .prelogin }
+    var isFullCard: Bool { self == .prelogin }
+
+    var screenBg: Color {
+        switch self {
+        case .dark:       return .black
+        case .warmDark:   return Color(red: 0.051, green: 0, blue: 0.031)
+        case .cardHeader: return Color(red: 0.051, green: 0, blue: 0.031)
+        case .prelogin:   return Color(red: 0.973, green: 0.929, blue: 0.961)
+        }
+    }
+
+    var brandNameColor: Color { isCard ? Color(.label) : .white }
+    var brandSubColor: Color  { pinkAI.opacity(isLight ? 0.65 : 0.8) }
+
+    var assistantBubbleBg: Color {
+        switch self {
+        case .dark:       return Color.white.opacity(0.08)
+        case .warmDark:   return pinkAI.opacity(0.1)
+        case .cardHeader: return Color.white.opacity(0.08)
+        case .prelogin:   return Color(red: 1, green: 0.941, blue: 0.965)
+        }
+    }
+    var assistantBubbleText: Color { isLight ? Color(.label) : Color.white.opacity(0.92) }
+
+    var chipBg: Color {
+        switch self {
+        case .dark:       return Color.white.opacity(0.07)
+        case .warmDark:   return pinkAI.opacity(0.1)
+        case .cardHeader: return Color.white.opacity(0.07)
+        case .prelogin:   return Color(red: 1, green: 0.941, blue: 0.965)
+        }
+    }
+    var chipText: Color   { isLight ? Color(.label) : Color.white.opacity(0.82) }
+    var chipBorder: Color {
+        switch self {
+        case .warmDark:   return pinkAI.opacity(0.38)
+        case .prelogin:   return pinkAI.opacity(0.28)
+        default:          return pinkAI.opacity(0.22)
+        }
+    }
+    var emptyStateText: Color { isLight ? Color(.secondaryLabel) : Color.white.opacity(0.55) }
+
+    var inputBarBg: Color       { isFullCard ? .white : Color.black.opacity(0.92) }
+    var inputFieldBg: Color     { isFullCard ? Color(UIColor.systemGray6) : Color.white.opacity(0.07) }
+    var inputTextColor: Color   { isLight ? Color(.label) : .white }
+    var placeholderColor: Color { isLight ? Color(.placeholderText) : Color.white.opacity(0.28) }
+
+    var modePillInactiveBg: Color   { isLight ? Color(UIColor.systemGray5) : Color.white.opacity(0.1) }
+    var modePillInactiveText: Color { isLight ? Color(.secondaryLabel) : Color.white.opacity(0.75) }
+    var plusButtonStroke: Color     { isLight ? Color(.separator) : pinkAI.opacity(0.35) }
+    var plusButtonIcon: Color       { isLight ? Color(.secondaryLabel) : Color.white.opacity(0.75) }
+    var micIcon: Color              { isLight ? Color(.secondaryLabel) : Color.white.opacity(0.6) }
+    var typingBg: Color             { isLight ? Color(UIColor.systemGray5) : Color.white.opacity(0.07) }
+    var genBubbleBg: Color          { isLight ? Color(UIColor.systemGray5) : Color.white.opacity(0.06) }
+    var genStepActive: Color        { isLight ? Color(.label) : .white }
+    var genStepInactive: Color      { isLight ? Color(.tertiaryLabel) : Color.white.opacity(0.28) }
+}
+
+private struct PAIThemeKey: EnvironmentKey {
+    static let defaultValue = PoplurAIChatTheme.prelogin
+}
+
+extension EnvironmentValues {
+    var paiTheme: PoplurAIChatTheme {
+        get { self[PAIThemeKey.self] }
+        set { self[PAIThemeKey.self] = newValue }
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func paiCard(radius: CGFloat, enabled: Bool) -> some View {
+        if enabled {
+            self.background(.white, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+                .padding(.horizontal, 10)
+        } else {
+            self
+        }
+    }
+
+    @ViewBuilder
+    func `if`<C: View>(_ condition: Bool, transform: (Self) -> C) -> some View {
+        if condition { transform(self) } else { self }
+    }
+}
+
 // MARK: - Data models
 
 enum PoplurAIChatRole { case user, assistant, generation }
@@ -65,6 +176,7 @@ struct PoplurAIChatMessage: Identifiable {
     var resultImage: UIImage? = nil
     var resultVideoURL: URL? = nil
     var isStreaming = false
+    var showStoreButton = false
     var timestamp = Date()
 }
 
@@ -83,6 +195,7 @@ private let kSuggestions: [PoplurAISuggestion] = [
     .init(emoji: "🎵", label: "Add music"),
     .init(emoji: "🗣", label: "Translate"),
     .init(emoji: "📈", label: "Make viral"),
+    .init(emoji: "🧠", label: "Brainstorm"),
 ]
 
 // MARK: - ViewModel
@@ -94,6 +207,8 @@ final class PoplurAIChatViewModel: ObservableObject {
     @Published var attachments: [PoplurAIChatAttachment] = []
     @Published var isGenerating = false
     @Published var showSuggestions = true
+    @Published var searchMode = false
+    @Published var smartMode = false
 
     var onPost: ((UIImage?, URL?) -> Void)?
 
@@ -134,7 +249,7 @@ final class PoplurAIChatViewModel: ObservableObject {
         var typingMsg = PoplurAIChatMessage(role: .assistant, text: "", isStreaming: true)
         let typingId = typingMsg.id
         messages.append(typingMsg)
-        try? await Task.sleep(nanoseconds: 1_100_000_000)
+        try? await Task.sleep(nanoseconds: 200_000_000)
         messages.removeAll { $0.id == typingId }
 
         let lower = msg.text.lowercased()
@@ -190,8 +305,6 @@ final class PoplurAIChatViewModel: ObservableObject {
         isGenerating = true
         let steps: [PoplurAIGenStep] = [
             .init(emoji: "✨", label: "Understanding..."),
-            .init(emoji: "🎬", label: "Creating cinematic LUT..."),
-            .init(emoji: "🎵", label: "Enhancing audio..."),
             .init(emoji: "🎨", label: "Applying effects..."),
             .init(emoji: "⚡️", label: "Rendering..."),
         ]
@@ -199,27 +312,15 @@ final class PoplurAIChatViewModel: ObservableObject {
         messages.append(genMsg)
         let genId = genMsg.id
 
+        // Start API call immediately — runs concurrently with the animation
+        async let apiWork = performGeneration(prompt: prompt)
+
         for i in 0..<steps.count {
-            try? await Task.sleep(nanoseconds: 850_000_000)
+            try? await Task.sleep(nanoseconds: 380_000_000)
             updateStep(genId: genId, index: i)
         }
 
-        let sourceImage = allAttachments().compactMap(\.image).first
-        let sourceVideo = allAttachments().compactMap(\.videoURL).first
-
-        var resultImage: UIImage? = nil
-        var resultVideo: URL? = nil
-        var errText: String? = nil
-
-        do {
-            if sourceVideo != nil {
-                resultVideo = try await callVideoGeneration(prompt: prompt)
-            } else {
-                resultImage = try await callImageGeneration(prompt: prompt, source: sourceImage)
-            }
-        } catch {
-            errText = error.localizedDescription
-        }
+        let (resultImage, resultVideo, errText) = await apiWork
 
         // Mark all done
         if let idx = messages.firstIndex(where: { $0.id == genId }) {
@@ -228,17 +329,40 @@ final class PoplurAIChatViewModel: ObservableObject {
                 messages[idx].steps[i].isCurrent = false
             }
         }
-        try? await Task.sleep(nanoseconds: 350_000_000)
+        try? await Task.sleep(nanoseconds: 200_000_000)
         messages.removeAll { $0.id == genId }
         isGenerating = false
 
         if let err = errText {
-            appendAssistant("Something went wrong: \(err)\n\nCheck your connection and try again.")
+            let needsStore = err == AIStackError.insufficientCredits.errorDescription
+                          || err == AIStackError.aiLockedForPlan.errorDescription
+            var msg = PoplurAIChatMessage(
+                role: .assistant,
+                text: needsStore ? "You need Creator Credits to generate AI content." : "Something went wrong: \(err)\n\nCheck your connection and try again.",
+                showStoreButton: needsStore
+            )
+            messages.append(msg)
         } else {
             var result = PoplurAIChatMessage(role: .assistant, text: "Done! Here's your result:")
             result.resultImage = resultImage
             result.resultVideoURL = resultVideo
             messages.append(result)
+        }
+    }
+
+    private func performGeneration(prompt: String) async -> (UIImage?, URL?, String?) {
+        let sourceImage = allAttachments().compactMap(\.image).first
+        let sourceVideo = allAttachments().compactMap(\.videoURL).first
+        do {
+            if sourceVideo != nil {
+                let url = try await callVideoGeneration(prompt: prompt)
+                return (nil, url, nil)
+            } else {
+                let img = try await callImageGeneration(prompt: prompt, source: sourceImage)
+                return (img, nil, nil)
+            }
+        } catch {
+            return (nil, nil, error.localizedDescription)
         }
     }
 
@@ -305,13 +429,15 @@ struct PoplurAIChatView: View {
 
     @StateObject private var vm = PoplurAIChatViewModel()
     @State private var showSettings = false
+    @State private var showStore = false
     @FocusState private var inputFocused: Bool
     @State private var glitterPhase: CGFloat = 0
+    @AppStorage("poplur_ai_chat_theme") private var theme: PoplurAIChatTheme = .prelogin
 
     var body: some View {
         ZStack(alignment: .bottom) {
             // Background
-            Color.black.ignoresSafeArea()
+            theme.screenBg.ignoresSafeArea()
             PoplurAIConfettiLayer()
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
@@ -335,17 +461,49 @@ struct PoplurAIChatView: View {
                 }
 
             // Main layout
-            VStack(spacing: 0) {
-                PAIChatHeader(onDismiss: onDismiss, onSettings: { showSettings = true })
-                Divider().overlay(pinkAI.opacity(0.28))
+            VStack(spacing: theme.isFullCard ? 8 : 0) {
+                // Header — white card for card themes, dark bar for dark themes
+                Group {
+                    if theme.isCard {
+                        PAIChatHeader(onDismiss: onDismiss, onSettings: { showSettings = true })
+                            .background(.white, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                            .padding(.horizontal, 10)
+                            .padding(.top, 4)
+                    } else {
+                        PAIChatHeader(onDismiss: onDismiss, onSettings: { showSettings = true })
+                            .background(Color.black.opacity(0.88))
+                    }
+                }
+
+                if !theme.isCard {
+                    Divider().overlay(pinkAI.opacity(0.28))
+                }
+
+                // Conversation — white card for prelogin
                 PAIConversationScroll(vm: vm, onPost: { img, url in onPost?(img, url); onDismiss() })
-                Divider().overlay(pinkAI.opacity(0.14))
+                    .paiCard(radius: 18, enabled: theme.isFullCard)
+
+                if !theme.isCard {
+                    Divider().overlay(pinkAI.opacity(0.14))
+                }
+
+                // Input bar — rounded card for prelogin
                 PAIInputBar(vm: vm, inputFocused: $inputFocused)
+                    .if(theme.isFullCard) {
+                        $0.clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                          .padding(.horizontal, 10)
+                          .padding(.bottom, 8)
+                    }
             }
         }
-        .preferredColorScheme(.dark)
+        .environment(\.paiTheme, theme)
+        .preferredColorScheme(theme.isLight ? .light : .dark)
         .onAppear { vm.loadInitialMedia(image: initialImage, videoURL: initialVideoURL) }
         .sheet(isPresented: $showSettings) { PAISettingsSheet() }
+        .sheet(isPresented: $showStore) { PoplurStoreView() }
+        .onReceive(NotificationCenter.default.publisher(for: .OpenPoplurStoreRequested)) { _ in
+            showStore = true
+        }
     }
 }
 
@@ -354,6 +512,7 @@ struct PoplurAIChatView: View {
 private struct PAIChatHeader: View {
     var onDismiss: () -> Void
     var onSettings: () -> Void
+    @Environment(\.paiTheme) private var theme
 
     var body: some View {
         HStack(spacing: 14) {
@@ -375,8 +534,8 @@ private struct PAIChatHeader: View {
                 HStack(spacing: 5) {
                     Text("poplur")
                         .font(.system(size: 22, weight: .black, design: .rounded))
-                        .foregroundStyle(.white)
-                        .poplurTextShader(intensity: 0.9)
+                        .foregroundStyle(theme.brandNameColor)
+                        .poplurTextShader(intensity: theme.isLight ? 0.0 : 0.9)
                     Text("AI")
                         .font(.system(size: 22, weight: .black, design: .rounded))
                         .foregroundStyle(pinkAI)
@@ -384,15 +543,17 @@ private struct PAIChatHeader: View {
                 }
                 HStack(spacing: 4) {
                     Image(systemName: "sparkle")
+                        .poplurIconShader()
                         .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(pinkAI.opacity(0.7))
+                        .foregroundStyle(theme.brandSubColor)
                     Text("stay connected.")
                         .font(.system(size: 11, weight: .semibold, design: .rounded))
-                        .foregroundStyle(pinkAI.opacity(0.8))
-                        .poplurTextShader(intensity: 0.72)
+                        .foregroundStyle(theme.brandSubColor)
+                        .poplurTextShader(intensity: theme.isLight ? 0.0 : 0.72)
                     Image(systemName: "sparkle")
+                        .poplurIconShader()
                         .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(pinkAI.opacity(0.7))
+                        .foregroundStyle(theme.brandSubColor)
                 }
             }
 
@@ -414,7 +575,7 @@ private struct PAIChatHeader: View {
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 14)
-        .background(.black.opacity(0.88))
+        // Background applied by parent based on theme (dark bar or white card)
     }
 }
 
@@ -556,6 +717,7 @@ private struct PAIAssistantBubble: View {
     let message: PoplurAIChatMessage
     var onPost: (UIImage?, URL?) -> Void
     @State private var appeared = false
+    @Environment(\.paiTheme) private var theme
 
     private let hasResult: Bool
     init(message: PoplurAIChatMessage, onPost: @escaping (UIImage?, URL?) -> Void) {
@@ -583,8 +745,32 @@ private struct PAIAssistantBubble: View {
                 } else if !message.text.isEmpty {
                     Text(message.text)
                         .font(.system(size: 15, weight: .medium, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.92))
+                        .foregroundStyle(theme.assistantBubbleText)
                         .fixedSize(horizontal: false, vertical: true)
+                        .if(theme.isLight) {
+                            $0.padding(.horizontal, 14).padding(.vertical, 11)
+                              .background(theme.assistantBubbleBg,
+                                          in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        }
+                }
+
+                if message.showStoreButton {
+                    Button {
+                        NotificationCenter.default.post(name: .OpenPoplurStoreRequested, object: nil)
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "creditcard.fill")
+                                .poplurIconShader()
+                                .font(.system(size: 12, weight: .bold))
+                            Text("Get Credits →")
+                                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                        }
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 9)
+                        .background(pinkAI, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+                    .padding(.top, 2)
                 }
 
                 if hasResult {
@@ -610,6 +796,7 @@ private struct PAIAssistantBubble: View {
 
 private struct PAITypingIndicator: View {
     @State private var phase = 0
+    @Environment(\.paiTheme) private var theme
     private let timer = Timer.publish(every: 0.45, on: .main, in: .common).autoconnect()
 
     var body: some View {
@@ -624,7 +811,7 @@ private struct PAITypingIndicator: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-        .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(theme.typingBg, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .onReceive(timer) { _ in
             phase = (phase + 1) % 3
         }
@@ -636,6 +823,7 @@ private struct PAITypingIndicator: View {
 private struct PAIGenerationBubble: View {
     let message: PoplurAIChatMessage
     @State private var appeared = false
+    @Environment(\.paiTheme) private var theme
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -657,8 +845,8 @@ private struct PAIGenerationBubble: View {
                         Text(step.label)
                             .font(.system(size: 13, weight: .semibold, design: .rounded))
                             .foregroundStyle(
-                                step.isCurrent ? .white :
-                                step.isComplete ? pinkAI.opacity(0.6) : .white.opacity(0.28)
+                                step.isCurrent ? theme.genStepActive :
+                                step.isComplete ? pinkAI.opacity(0.6) : theme.genStepInactive
                             )
                             .poplurTextShader(intensity: step.isCurrent ? 0.78 : 0.42)
                         Spacer()
@@ -676,7 +864,7 @@ private struct PAIGenerationBubble: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
-            .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .background(theme.genBubbleBg, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .stroke(pinkAI.opacity(0.25), lineWidth: 0.8)
@@ -800,6 +988,7 @@ private struct PAIMediaPreviewCard: View {
     private func metaBadge(icon: String, label: String) -> some View {
         HStack(spacing: 5) {
             Image(systemName: icon)
+                .poplurIconShader()
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(pinkAI.opacity(0.7))
             Text(label)
@@ -879,6 +1068,7 @@ private struct PAIVideoPlayer: UIViewRepresentable {
 
 private struct PAISuggestionGrid: View {
     @ObservedObject var vm: PoplurAIChatViewModel
+    @Environment(\.paiTheme) private var theme
 
     var body: some View {
         VStack(spacing: 16) {
@@ -895,8 +1085,8 @@ private struct PAISuggestionGrid: View {
                 }
                 Text("What would you like to create?")
                     .font(.system(size: 14, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.55))
-                    .poplurTextShader(intensity: 0.52)
+                    .foregroundStyle(theme.emptyStateText)
+                    .poplurTextShader(intensity: theme.isLight ? 0.0 : 0.52)
                     .multilineTextAlignment(.center)
             }
             .padding(.bottom, 8)
@@ -909,17 +1099,17 @@ private struct PAISuggestionGrid: View {
                             Text(s.emoji).font(.system(size: 16))
                             Text(s.label)
                                 .font(.system(size: 13, weight: .semibold, design: .rounded))
-                                .foregroundStyle(.white.opacity(0.82))
-                                .poplurTextShader(intensity: 0.62)
+                                .foregroundStyle(theme.chipText)
+                                .poplurTextShader(intensity: theme.isLight ? 0.0 : 0.62)
                                 .lineLimit(1)
                             Spacer(minLength: 0)
                         }
                         .padding(.horizontal, 12)
                         .padding(.vertical, 11)
-                        .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .background(theme.chipBg, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                         .overlay(
                             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .stroke(pinkAI.opacity(0.22), lineWidth: 0.8)
+                                .stroke(theme.chipBorder, lineWidth: 0.8)
                         )
                     }
                     .buttonStyle(PAIPressStyle())
@@ -935,6 +1125,7 @@ private struct PAISuggestionGrid: View {
 private struct PAIInputBar: View {
     @ObservedObject var vm: PoplurAIChatViewModel
     var inputFocused: FocusState<Bool>.Binding
+    @Environment(\.paiTheme) private var theme
 
     @State private var showPhotoPicker = false
     @State private var selectedPhoto: PhotosPickerItem? = nil
@@ -959,47 +1150,74 @@ private struct PAIInputBar: View {
             }
 
             HStack(alignment: .bottom, spacing: 0) {
-                // Left action buttons
-                HStack(spacing: 2) {
-                    inputIconButton("plus.circle.fill") {}
-                    inputIconButton("photo.fill") { showPhotoPicker = true }
-                    inputIconButton("video.fill") {}
-                    inputIconButton("waveform") {}
+                // Left: + attach
+                Button { showPhotoPicker = true } label: {
+                    ZStack {
+                        Circle()
+                            .stroke(theme.plusButtonStroke, lineWidth: 1.2)
+                            .frame(width: 34, height: 34)
+                        Image(systemName: "plus")
+                            .poplurIconShader()
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(theme.plusButtonIcon)
+                    }
                 }
-                .padding(.leading, 10)
-                .padding(.bottom, 8)
+                .buttonStyle(.plain)
+                .padding(.leading, 12)
+                .padding(.bottom, 6)
 
-                // Text field
-                ZStack(alignment: .topLeading) {
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .fill(Color.white.opacity(0.07))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                                .stroke(pinkAI.opacity(inputFocused.wrappedValue ? 0.45 : 0.16), lineWidth: 1)
-                        )
+                // Text field + mode pills
+                VStack(alignment: .leading, spacing: 4) {
+                    ZStack(alignment: .topLeading) {
+                        RoundedRectangle(cornerRadius: 22, style: .continuous)
+                            .fill(theme.inputFieldBg)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                                    .stroke(pinkAI.opacity(inputFocused.wrappedValue ? 0.45 : 0.16), lineWidth: 1)
+                            )
 
-                    if vm.inputText.isEmpty {
-                        Text("Describe how you'd like to edit your content...")
+                        if vm.inputText.isEmpty {
+                            Text("Ask Poplur AI anything...")
+                                .font(.system(size: 14, weight: .medium, design: .rounded))
+                                .foregroundStyle(theme.placeholderColor)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 12)
+                                .allowsHitTesting(false)
+                        }
+
+                        TextEditor(text: $vm.inputText)
                             .font(.system(size: 14, weight: .medium, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.28))
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 12)
-                            .allowsHitTesting(false)
+                            .foregroundStyle(theme.inputTextColor)
+                            .tint(pinkAI)
+                            .scrollContentBackground(.hidden)
+                            .background(Color.clear)
+                            .focused(inputFocused)
+                            .frame(minHeight: 36, maxHeight: 100)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
                     }
 
-                    TextEditor(text: $vm.inputText)
-                        .font(.system(size: 14, weight: .medium, design: .rounded))
-                        .foregroundStyle(.white)
-                        .tint(pinkAI)
-                        .scrollContentBackground(.hidden)
-                        .background(Color.clear)
-                        .focused(inputFocused)
-                        .frame(minHeight: 42, maxHeight: 120)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
+                    // Mode pills: Search + Smart
+                    HStack(spacing: 8) {
+                        PAIModePill(
+                            icon: "globe",
+                            label: "Search",
+                            isActive: vm.searchMode
+                        ) { vm.searchMode.toggle() }
+
+                        PAIModePill(
+                            icon: "sparkles",
+                            label: "Smart",
+                            isActive: vm.smartMode
+                        ) { vm.smartMode.toggle() }
+
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.leading, 6)
+                    .padding(.bottom, 4)
                 }
                 .padding(.horizontal, 8)
-                .padding(.vertical, 8)
+                .padding(.vertical, 6)
 
                 // Right: mic + generate
                 HStack(spacing: 8) {
@@ -1007,8 +1225,8 @@ private struct PAIInputBar: View {
                         Image(systemName: "mic.fill")
                             .poplurIconShader()
                             .font(.system(size: 17, weight: .bold))
-                            .foregroundStyle(.white.opacity(0.6))
-                            .frame(width: 36, height: 36)
+                            .foregroundStyle(theme.micIcon)
+                            .frame(width: 32, height: 32)
                     }
                     .buttonStyle(.plain)
 
@@ -1019,7 +1237,7 @@ private struct PAIInputBar: View {
                                 .fill(
                                     RadialGradient(
                                         colors: [pinkAI.opacity(0.95), Color(red: 0.8, green: 0.0, blue: 0.5)],
-                                        center: .center, startRadius: 0, endRadius: 22
+                                        center: .center, startRadius: 0, endRadius: 18
                                     )
                                 )
                                 .scaleEffect(glitterPulse ? 1.06 : 1.0)
@@ -1027,10 +1245,10 @@ private struct PAIInputBar: View {
 
                             Image(systemName: "arrow.up")
                                 .poplurIconShader()
-                                .font(.system(size: 17, weight: .black))
+                                .font(.system(size: 15, weight: .black))
                                 .foregroundStyle(.white)
                         }
-                        .frame(width: 44, height: 44)
+                        .frame(width: 38, height: 38)
                     }
                     .buttonStyle(PAIPressStyle())
                     .disabled(vm.isGenerating)
@@ -1041,10 +1259,10 @@ private struct PAIInputBar: View {
                     }
                 }
                 .padding(.trailing, 10)
-                .padding(.bottom, 8)
+                .padding(.bottom, 6)
             }
         }
-        .background(.black.opacity(0.92))
+        .background(theme.inputBarBg)
         .photosPicker(isPresented: $showPhotoPicker, selection: $selectedPhoto, matching: .any(of: [.images, .videos]))
         .onChange(of: selectedPhoto) { _, item in
             guard let item else { return }
@@ -1062,15 +1280,40 @@ private struct PAIInputBar: View {
         }
     }
 
-    private func inputIconButton(_ name: String, action: @escaping () -> Void) -> some View {
+}
+
+// MARK: - Mode pill (Search / Smart toggle)
+
+private struct PAIModePill: View {
+    let icon: String
+    let label: String
+    let isActive: Bool
+    let action: () -> Void
+    @Environment(\.paiTheme) private var theme
+
+    var body: some View {
         Button(action: action) {
-            Image(systemName: name)
-                .poplurIconShader()
-                .font(.system(size: 16, weight: .bold))
-                .foregroundStyle(.white.opacity(0.5))
-                .frame(width: 32, height: 32)
+            HStack(spacing: 5) {
+                Image(systemName: icon)
+                    .poplurIconShader()
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(isActive ? .black : theme.modePillInactiveText)
+                Text(label)
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .foregroundStyle(isActive ? .black : theme.modePillInactiveText)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(
+                isActive ? AnyShapeStyle(pinkAI) : AnyShapeStyle(theme.modePillInactiveBg),
+                in: Capsule()
+            )
+            .overlay(
+                Capsule()
+                    .stroke(pinkAI.opacity(isActive ? 0 : 0.3), lineWidth: 1)
+            )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PAIPressStyle())
     }
 }
 
@@ -1120,14 +1363,39 @@ private struct PAIAttachmentChip: View {
     }
 }
 
-// MARK: - Settings sheet (placeholder)
+// MARK: - Settings sheet
 
 private struct PAISettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @AppStorage("poplur_ai_chat_theme") private var theme: PoplurAIChatTheme = .prelogin
 
     var body: some View {
         NavigationStack {
             List {
+                Section("Chat Theme") {
+                    ForEach(PoplurAIChatTheme.allCases, id: \.self) { t in
+                        Button {
+                            theme = t
+                        } label: {
+                            HStack(spacing: 14) {
+                                Image(systemName: t.icon)
+                                    .foregroundStyle(pinkAI)
+                                    .frame(width: 22)
+                                Text(t.displayName)
+                                    .font(.system(size: 16, weight: .medium, design: .rounded))
+                                    .foregroundStyle(.primary)
+                                Spacer()
+                                if theme == t {
+                                    Image(systemName: "checkmark")
+                                        .font(.system(size: 13, weight: .bold))
+                                        .foregroundStyle(pinkAI)
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+
                 Section("Poplur AI") {
                     Label("Model: Gemini Pro Vision", systemImage: "cpu")
                     Label("Mode: Media Editing", systemImage: "wand.and.stars")

@@ -131,8 +131,8 @@ struct CameraKitView: View {
                     } label: {
                         Image(systemName: "arrow.triangle.2.circlepath.camera.fill")
                             .font(.system(size: 22, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .poplurIconShader()
+                            .foregroundStyle(Color(red: 0.28, green: 0.82, blue: 1.0))
+                            .poplurIconShader(intensity: 1.0)
                             .frame(width: 50, height: 50)
                             .background(.ultraThinMaterial, in: Circle())
                             .shadow(color: .black.opacity(0.4), radius: 6, y: 3)
@@ -148,8 +148,8 @@ struct CameraKitView: View {
                     } label: {
                         Image(systemName: isTorchOn ? "bolt.fill" : "bolt.slash.fill")
                             .font(.system(size: 22, weight: .semibold))
-                            .foregroundStyle(isTorchOn ? Color.yellow : .white)
-                            .poplurIconShader()
+                            .foregroundStyle(isTorchOn ? Color(red: 1.0, green: 0.85, blue: 0.2) : Color(red: 0.28, green: 0.82, blue: 1.0))
+                            .poplurIconShader(intensity: 1.0)
                             .frame(width: 50, height: 50)
                             .background(.ultraThinMaterial, in: Circle())
                             .shadow(color: .black.opacity(0.4), radius: 6, y: 3)

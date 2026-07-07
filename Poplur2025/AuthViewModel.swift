@@ -10,6 +10,9 @@ final class AuthViewModel: ObservableObject {
     /// True while Firebase is still resolving the persisted auth token.
     /// Used to show a neutral splash instead of flashing WelcomeView for returning users.
     @Published var isResolvingAuthState: Bool = true
+    /// Set to true by SignUpView on successful account creation. Consumed once by the
+    /// app-level transition to play the stripe (not the loading video).
+    @Published var didSignUp: Bool = false
 
     private var authHandle: AuthStateDidChangeListenerHandle?
 

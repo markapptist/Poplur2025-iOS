@@ -74,14 +74,8 @@ struct LoginCubeView: UIViewRepresentable {
         guard !container.childNodes.isEmpty else { return scene }
 
         RuntimeGLBLoader.normalize(container)
+        container.eulerAngles = SCNVector3(0, Float.pi, 0)
         scene.rootNode.addChildNode(container)
-
-        // Gentle hover
-        let up = SCNAction.moveBy(x: 0, y: 0.06, z: 0, duration: 1.4)
-        up.timingMode = .easeInEaseOut
-        let down = SCNAction.moveBy(x: 0, y: -0.06, z: 0, duration: 1.4)
-        down.timingMode = .easeInEaseOut
-        container.runAction(SCNAction.repeatForever(SCNAction.sequence([up, down])), forKey: "hover")
 
         // Periodic spring pop (~every 3.5s)
         let popUp = SCNAction.scale(to: 1.14, duration: 0.20)

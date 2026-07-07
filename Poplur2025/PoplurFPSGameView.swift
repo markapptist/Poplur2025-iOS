@@ -2,14 +2,16 @@ import SwiftUI
 import WebKit
 
 struct PoplurFPSGameSheet: View {
-    @Environment(\.dismiss) private var dismiss
+    var onClose: (() -> Void)? = nil
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
             _FPSWebView()
                 .ignoresSafeArea()
 
-            Button { dismiss() } label: {
+            Button {
+                onClose?()
+            } label: {
                 Image(systemName: "xmark.circle.fill")
                     .font(.system(size: 34, weight: .bold))
                     .foregroundStyle(.white)
@@ -29,8 +31,15 @@ private struct _FPSWebView: UIViewRepresentable {
         let config = WKWebViewConfiguration()
         config.allowsInlineMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
-        // Allow ES module scripts to load from file:// origin (required for type="module")
         config.preferences.setValue(true, forKey: "allowFileAccessFromFileURLs")
+
+        // Inject CSS to make the arcade cabinet fill the whole screen on mobile
+        let mobileCSSScript = WKUserScript(
+            source: mobileCSSInjection,
+            injectionTime: .atDocumentEnd,
+            forMainFrameOnly: true
+        )
+        config.userContentController.addUserScript(mobileCSSScript)
 
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.backgroundColor = .black
@@ -44,7 +53,6 @@ private struct _FPSWebView: UIViewRepresentable {
             withExtension: "html",
             subdirectory: "PoplurFPS"
         ) {
-            // Allow access to bundle root so the assets/ subfolder is reachable
             let bundleURL = Bundle.main.bundleURL
             webView.loadFileURL(indexURL, allowingReadAccessTo: bundleURL)
         }
@@ -53,4 +61,34 @@ private struct _FPSWebView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: WKWebView, context: Context) {}
+
+    private var mobileCSSInjection: String {
+        """
+        (function() {
+          var style = document.createElement('style');
+          // The game now renders its whole arcade cabinet + FPS on the canvas
+          // itself (see PoplurFPS/src). The page's own styles.css already
+          // centers and aspect-fits #game-canvas, so we must NOT force the
+          // canvas to fill the viewport (that stretches/distorts it). Keep this
+          // injection minimal: fullscreen black backdrop + no tap callouts.
+          style.textContent = `
+            html, body, #app {
+              height: 100vh !important;
+              width: 100vw !important;
+              overflow: hidden !important;
+              margin: 0 !important;
+              padding: 0 !important;
+              background: #000 !important;
+            }
+            * {
+              -webkit-tap-highlight-color: transparent !important;
+              -webkit-touch-callout: none !important;
+              -webkit-user-select: none !important;
+              user-select: none !important;
+            }
+          `;
+          document.head.appendChild(style);
+        })();
+        """
+    }
 }

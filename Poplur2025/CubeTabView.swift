@@ -9,7 +9,9 @@ private let isRunningInPreviews: Bool = {
     ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1"
 }()
 
-private let cubeSceneFaceTabs: [AppTab] = [.feed, .profile, .map, .record]
+// GLB face layout (all skins, no UV flip): +Z front=Profile, +X right=Map, -Z back=Camera, -X left=Feed.
+// This order drives yaw=0→Profile, yaw=-90°→Map, yaw=-180°→Camera, yaw=-270°→Feed.
+private let cubeSceneFaceTabs: [AppTab] = [.profile, .map, .record, .feed]
 
 // Cube models load via SceneKit's native .dae importer (assimp-converted from the trimesh GLBs),
 // NOT GLTFSceneKit — whose decoder SIGSEGVs on those GLBs (missing normals + 32-bit indices trip
@@ -95,7 +97,9 @@ private func parseCubeGLBNode(from url: URL) -> SCNNode? {
     var uvs = [CGPoint](repeating: .zero, count: vertexCount)
     if let uvIdx = attributes["TEXCOORD_0"] as? Int, let uv = slice(uvIdx), uv.comp == 5126,
        uv.count == vertexCount, let uf = floats(uv.offset, vertexCount * 2) {
-        for v in 0..<vertexCount { uvs[v] = CGPoint(x: CGFloat(uf[v * 2]), y: CGFloat(1 - uf[v * 2 + 1])) }
+        // No V-flip: these GLBs are authored with Metal/SceneKit UV convention (V=0 at top) already.
+        // Flipping would invert icons and swap the face→texture-region mapping.
+        for v in 0..<vertexCount { uvs[v] = CGPoint(x: CGFloat(uf[v * 2]), y: CGFloat(uf[v * 2 + 1])) }
     }
 
     var normals = [SCNVector3](repeating: SCNVector3(0, 0, 0), count: vertexCount)
@@ -814,19 +818,9 @@ private struct CubeSceneView: UIViewRepresentable {
         if let env = UIImage(named: "CubeEnv") {
             scene.lightingEnvironment.contents = env
         }
-        // Use non-zero IBL intensity when using a shaded model so rotation shows depth
-        if isRunningInPreviews {
-            scene.lightingEnvironment.intensity = 0.35
-        } else {
-            switch lightingModel {
-            case .physicallyBased:
-                scene.lightingEnvironment.intensity = 0.30
-            case .blinn, .lambert:
-                scene.lightingEnvironment.intensity = 0.15
-            default:
-                scene.lightingEnvironment.intensity = 0.0
-            }
-        }
+        // prepareRuntimeCubeMaterials always overrides materials to .physicallyBased,
+        // so use full IBL intensity regardless of the lightingModel parameter.
+        scene.lightingEnvironment.intensity = isRunningInPreviews ? 0.35 : 1.0
 
         // Slightly darker background helps depth; enable default lighting if needed
         // Removed: scene.background.contents = UIColor.clear
@@ -866,25 +860,19 @@ private struct CubeSceneView: UIViewRepresentable {
         scene.rootNode.addChildNode(groundNode)
         */
 
-        // Add subtle lights only when using shaded models, WITHOUT shadows (reverted to original)
-        if true {
-            let intensityDirectional: CGFloat = 80
-            let intensityOmni: CGFloat = 40
-            // Directional light
-            let dir = SCNLight()
-            dir.type = .directional
-            dir.intensity = intensityDirectional
-            let dirNode = SCNNode()
-            dirNode.light = dir
+        // Bright PBR lights — materials are always .physicallyBased so these need to be substantial.
+        do {
+            let ambient = SCNLight(); ambient.type = .ambient; ambient.intensity = 200
+            let ambientNode = SCNNode(); ambientNode.light = ambient
+            scene.rootNode.addChildNode(ambientNode)
+
+            let dir = SCNLight(); dir.type = .directional; dir.intensity = 700
+            let dirNode = SCNNode(); dirNode.light = dir
             dirNode.eulerAngles = SCNVector3(Float(30.0 * .pi / 180), Float(-45.0 * .pi / 180), 0)
             scene.rootNode.addChildNode(dirNode)
 
-            // Omni light
-            let omni = SCNLight()
-            omni.type = .omni
-            omni.intensity = intensityOmni
-            let omniNode = SCNNode()
-            omniNode.light = omni
+            let omni = SCNLight(); omni.type = .omni; omni.intensity = 350
+            let omniNode = SCNNode(); omniNode.light = omni
             omniNode.position = SCNVector3(-2, 1.5, 3)
             scene.rootNode.addChildNode(omniNode)
         }
@@ -1107,13 +1095,13 @@ private struct CubeSceneView: UIViewRepresentable {
 
     private func makeMaterials(baseColor: Color) -> [SCNMaterial] {
         // SCNBox material order (Apple docs): 0=front(+Z) 1=right(+X) 2=back(-Z) 3=left(-X) 4=top(+Y) 5=bottom(-Y)
-        // The first four entries match cubeSceneFaceTabs and the yaw/snap logic:
-        // yaw=0deg, -90deg, -180deg, -270deg => Feed, Profile, Map, Camera.
+        // Matches cubeSceneFaceTabs and GLB face layout (no UV flip):
+        // yaw=0deg, -90deg, -180deg, -270deg => Profile, Map, Camera, Feed.
         let faceSpecs: [(String, String, AppTab)] = [
-            ("Feed",     "tv.fill",        .feed),     // 0: +Z front
-            ("Profile",  "person.fill",    .profile),  // 1: +X right
-            ("Map",      "map.fill",       .map),      // 2: -Z back
-            ("Camera",   "camera.fill",    .record),   // 3: -X left
+            ("Profile",  "person.fill",    .profile),  // 0: +Z front
+            ("Map",      "map.fill",       .map),      // 1: +X right
+            ("Camera",   "camera.fill",    .record),   // 2: -Z back
+            ("Feed",     "tv.fill",        .feed),     // 3: -X left
             ("",         "fork.knife",     .settings), // 4: +Y top
             ("",         "p.circle.fill",  .settings), // 5: -Y bottom
         ]
@@ -1599,7 +1587,7 @@ private struct CubeSceneView: UIViewRepresentable {
                 self.applyDynamicFace(at: index)
             }
 
-            // TV Guide open/close → swap feed face icon (material[2] = -Z back = feed at yaw=-180°)
+            // TV Guide open/close → swap feed face icon (material[3] = -X left, visible at yaw=-270°)
             let tvOpenToken = NotificationCenter.default.addObserver(forName: .FeedTVGuideBecameVisible, object: nil, queue: .main) { [weak self] _ in
                 guard let self else { return }
                 self.isTVGuideOpen = true
@@ -1679,11 +1667,11 @@ private struct CubeSceneView: UIViewRepresentable {
         }
 
         func applyCurrentProfileIconOverride() {
-            applyDynamicFace(at: 1)
+            applyDynamicFace(at: 0)
         }
 
         func applyFeedFaceIcon() {
-            applyDynamicFace(at: 0)
+            applyDynamicFace(at: 3)
         }
 
         func applyAllDynamicFaces() {
@@ -1694,20 +1682,20 @@ private struct CubeSceneView: UIViewRepresentable {
 
         private static func faceMaterialIndex(for face: String) -> Int? {
             switch face.lowercased() {
-            case "feed": return 0
-            case "profile", "settings": return 1
-            case "map": return 2
-            case "camera", "record": return 3
+            case "profile", "settings": return 0
+            case "map": return 1
+            case "camera", "record": return 2
+            case "feed": return 3
             default: return nil
             }
         }
 
         private func defaultFaceSpec(for index: Int) -> (title: String, systemImage: String)? {
             switch index {
-            case 0: return ("Feed",    "tv.fill")
-            case 1: return ("Profile", "person.fill")
-            case 2: return ("Map",     "map.fill")
-            case 3: return ("Camera",  "camera.fill")
+            case 0: return ("Profile", "person.fill")
+            case 1: return ("Map",     "map.fill")
+            case 2: return ("Camera",  "camera.fill")
+            case 3: return ("Feed",    "tv.fill")
             default: return nil
             }
         }
@@ -1716,10 +1704,10 @@ private struct CubeSceneView: UIViewRepresentable {
             if let override = faceOverrides[index] {
                 return override
             }
-            if index == 0, isTVGuideOpen {
+            if index == 3, isTVGuideOpen {
                 return ("TV Guide", "list.and.film")
             }
-            if index == 1, let profileIconOverride {
+            if index == 0, let profileIconOverride {
                 return profileIconOverride
             }
             return defaultFaceSpec(for: index)
@@ -2659,5 +2647,134 @@ private struct CubeOnlyPreview: View {
             lastDirectPopError = "AVAudioPlayer failed: \(error.localizedDescription)"
             print("[CubeOnlyPreview] AVAudioPlayer error: \(error)")
         }
+    }
+}
+
+// MARK: - Back Cube
+
+/// Themed clone of the active cube skin shown when the user is inside a sub-page.
+/// The chevron overlays the front face; tapping anywhere on the cube goes back.
+struct BackCubeView: View {
+    let onBack: () -> Void
+
+    @ObservedObject private var skinStore = CubeSkinStore.shared
+
+    var body: some View {
+        ZStack {
+            _BackCubeSceneView(skin: skinStore.current)
+                .allowsHitTesting(false)
+
+            Image(systemName: "chevron.backward")
+                .font(.system(size: 30, weight: .bold))
+                .foregroundStyle(.white)
+                .shadow(color: .black.opacity(0.8), radius: 8, x: 0, y: 3)
+                .allowsHitTesting(false)
+        }
+        // Match the main cube's frame (CubeTabView is 200×200) so the back cube
+        // renders at the exact same on-screen size — same camera/normalize means
+        // the only scale difference was this frame. They swap in the same spot.
+        .frame(width: 200, height: 200)
+        .contentShape(Rectangle())
+        .onTapGesture { onBack() }
+    }
+}
+
+private struct _BackCubeSceneView: UIViewRepresentable {
+    let skin: CubeSkin
+
+    func makeUIView(context: Context) -> SCNView {
+        let scnView = SCNView(frame: .zero)
+        scnView.backgroundColor = .clear
+        scnView.antialiasingMode = .multisampling2X
+        scnView.isPlaying = false
+        scnView.scene = buildScene()
+        scnView.isPlaying = true
+        return scnView
+    }
+
+    func updateUIView(_ uiView: SCNView, context: Context) {}
+
+    private func buildScene() -> SCNScene {
+        let scene = SCNScene()
+        scene.background.contents = UIColor.clear
+        scene.lightingEnvironment.intensity = 1.0
+
+        // Camera — same position as the main cube scene
+        let cameraNode = SCNNode()
+        cameraNode.camera = SCNCamera()
+        cameraNode.camera?.fieldOfView = 40
+        cameraNode.camera?.zFar = 100
+        cameraNode.position = SCNVector3(0, 0, 5.0)
+        scene.rootNode.addChildNode(cameraNode)
+
+        // Bright PBR lights — same intensity as main cube scene
+        let ambient = SCNLight(); ambient.type = .ambient; ambient.intensity = 200
+        let ambientNode = SCNNode(); ambientNode.light = ambient
+        scene.rootNode.addChildNode(ambientNode)
+
+        let dir = SCNLight(); dir.type = .directional; dir.intensity = 700
+        let dirNode = SCNNode(); dirNode.light = dir
+        dirNode.eulerAngles = SCNVector3(Float(30 * Double.pi / 180), Float(-45 * Double.pi / 180), 0)
+        scene.rootNode.addChildNode(dirNode)
+
+        let omni = SCNLight(); omni.type = .omni; omni.intensity = 350
+        let omniNode = SCNNode(); omniNode.light = omni
+        omniNode.position = SCNVector3(-2, 1.5, 3)
+        scene.rootNode.addChildNode(omniNode)
+
+        if let node = makeBackCubeNode() {
+            node.name = "cube"
+            // yaw=0: +Z front face (Profile/the "home" face) toward camera
+            node.simdOrientation = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0))
+            scene.rootNode.addChildNode(node)
+
+            // Gentle hover so it feels interactive
+            let up   = SCNAction.moveBy(x: 0, y: 0.07, z: 0, duration: 0.95)
+            up.timingMode = .easeInEaseOut
+            let down = SCNAction.moveBy(x: 0, y: -0.07, z: 0, duration: 0.95)
+            down.timingMode = .easeInEaseOut
+            node.runAction(.repeatForever(.sequence([up, down])), forKey: "hover")
+        }
+
+        return scene
+    }
+
+    private func makeBackCubeNode() -> SCNNode? {
+        let assetName = skin.backButtonModelAssetName
+
+        // Same URL-resolution order as CubeTabView.runtimeCubeModelURL
+        let glbURL: URL? = {
+            if let url = Bundle.main.url(forResource: assetName, withExtension: "glb",
+                                          subdirectory: "CubeModels")
+                       ?? Bundle.main.url(forResource: assetName, withExtension: "glb") {
+                return url
+            }
+            #if DEBUG
+            let dir = URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent()
+                .appendingPathComponent("CubeModels", isDirectory: true)
+            let candidate = dir.appendingPathComponent("\(assetName).glb")
+            if FileManager.default.fileExists(atPath: candidate.path) { return candidate }
+            #endif
+            return nil
+        }()
+
+        guard let url = glbURL,
+              let cubeNode = cachedCubeGeometryNode(from: url) else { return nil }
+
+        let container = SCNNode()
+        let content   = SCNNode()
+        content.addChildNode(cubeNode.clone())
+        RuntimeGLBLoader.normalize(content)
+
+        content.enumerateChildNodes { child, _ in
+            child.geometry?.materials.forEach { mat in
+                mat.lightingModel = .physicallyBased
+                mat.isDoubleSided = true
+            }
+        }
+
+        container.addChildNode(content)
+        return container
     }
 }

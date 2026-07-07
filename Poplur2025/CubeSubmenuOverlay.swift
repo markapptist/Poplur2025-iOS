@@ -212,7 +212,7 @@ struct CubeMenuWheelOverlay: View {
             let spacing = min(max(size.width * 0.30, 122), 158)
             return CGPoint(x: center.x + CGFloat(relativeSlot) * spacing, y: center.y)
         case .vertical:
-            let spacing = min(max(size.height * 0.15, 128), 162)
+            let spacing = min(max(size.height * 0.17, 148), 188)
             return CGPoint(x: center.x, y: center.y + CGFloat(relativeSlot) * spacing)
         }
     }
@@ -356,50 +356,29 @@ private struct CubeMenuWheelItem: View, Equatable {
         && lhs.layout == rhs.layout
     }
 
-    private var accent: Color {
-        selected ? Color(uiColor: skin.borderAccentColor) : item.tint
-    }
-
-    private var iconColor: Color {
-        switch skin {
-        case .rubber, .toy:
-            return item.tint
-        default:
-            return Color(uiColor: skin.iconFillColor)
-        }
-    }
-
     private var tileSize: CGSize {
         switch layout {
         case .horizontal:
             return selected ? CGSize(width: 132, height: 132) : CGSize(width: 98, height: 98)
         case .vertical:
-            return selected ? CGSize(width: 166, height: 128) : CGSize(width: 124, height: 104)
+            return selected ? CGSize(width: 262, height: 152) : CGSize(width: 222, height: 120)
         }
     }
 
     var body: some View {
-        VStack(spacing: selected ? 8 : 5) {
+        VStack(spacing: selected ? 10 : 6) {
             menuIcon
-                .shadow(color: accent.opacity(selected ? 0.45 : 0.24), radius: selected ? 5 : 2)
-
             Text(item.title)
-                .font(.system(size: selected ? 17 : 13, weight: .heavy, design: .rounded))
-                .foregroundColor(iconColor)
+                .font(.system(size: selected ? 20 : 15, weight: .heavy, design: .rounded))
+                .foregroundColor(.white)
                 .lineLimit(1)
                 .minimumScaleFactor(0.62)
-                .shadow(color: accent.opacity(selected ? 0.36 : 0.18), radius: selected ? 3 : 1)
+                .shadow(color: .black.opacity(0.30), radius: 3, x: 0, y: 1)
         }
-        .padding(selected ? 12 : 9)
+        .padding(selected ? 14 : 10)
         .frame(width: tileSize.width, height: tileSize.height)
         .background {
-            HoldMenuDesignedTile(
-                skin: skin,
-                textureTab: textureTab,
-                accent: accent,
-                selected: selected,
-                cornerRadius: selected ? 24 : 18
-            )
+            HoldMenuDesignedTile(selected: selected, cornerRadius: selected ? 28 : 22)
         }
         .accessibilityLabel(item.title)
     }
@@ -409,97 +388,110 @@ private struct CubeMenuWheelItem: View, Equatable {
         if item.id == "camera-object-detection" {
             ZStack(alignment: .bottomTrailing) {
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: selected ? 38 : 28, weight: .semibold))
-                    .foregroundStyle(iconColor)
+                    .font(.system(size: selected ? 42 : 32, weight: .semibold))
+                    .foregroundStyle(Color.white)
                 Image(systemName: "eye.fill")
-                    .font(.system(size: selected ? 17 : 13, weight: .bold))
-                    .foregroundStyle(iconColor)
+                    .font(.system(size: selected ? 18 : 14, weight: .bold))
+                    .foregroundStyle(Color.white)
                     .padding(2)
                     .background(.black.opacity(0.35), in: Circle())
-                    .offset(x: selected ? 6 : 5, y: selected ? 6 : 5)
+                    .offset(x: selected ? 7 : 5, y: selected ? 7 : 5)
             }
-            .frame(width: selected ? 44 : 34, height: selected ? 44 : 34)
+            .frame(width: selected ? 48 : 36, height: selected ? 48 : 36)
+        } else if item.id == "notifications" {
+            Text("🔔")
+                .font(.system(size: selected ? 42 : 32))
+                .shadow(color: .black.opacity(0.6), radius: 0, x: 2, y: 3)
+                .shadow(color: .black.opacity(0.3), radius: 4, x: 3, y: 5)
         } else {
             Image(systemName: item.systemImage)
-                .font(.system(size: selected ? 38 : 28, weight: .semibold))
-                .foregroundStyle(iconColor)
+                .font(.system(size: selected ? 42 : 32, weight: .semibold))
+                .foregroundStyle(Color.white)
+                .shadow(color: .black.opacity(0.22), radius: 4, x: 0, y: 2)
         }
-    }
-
-    private var textureTab: AppTab {
-        let key = "\(item.id) \(item.title)".lowercased()
-        if key.contains("feed") || key.contains("like") || key.contains("comment") || key.contains("news") || key.contains("tv") || key.contains("caption") {
-            return .feed
-        }
-        if key.contains("profile") || key.contains("mail") || key.contains("settings") || key.contains("stats") || key.contains("notification") || key.contains("phone") || key.contains("store") || key.contains("back") {
-            return .settings
-        }
-        if key.contains("map") || key.contains("search") || key.contains("location") || key.contains("tour") {
-            return .map
-        }
-        if key.contains("camera") || key.contains("photo") || key.contains("video") || key.contains("live") || key.contains("post") || key.contains("ar") {
-            return .record
-        }
-        return .profile
     }
 }
 
 private struct HoldMenuDesignedTile: View {
-    let skin: CubeSkin
-    let textureTab: AppTab
-    let accent: Color
     let selected: Bool
     let cornerRadius: CGFloat
+
+    // Fixed sparkle positions: (x%, y%, radius pt)
+    private let sparkles: [(CGFloat, CGFloat, CGFloat)] = [
+        (0.10, 0.16, 2.5), (0.88, 0.11, 2.0), (0.24, 0.84, 3.0),
+        (0.78, 0.78, 2.5), (0.50, 0.18, 2.0), (0.93, 0.54, 2.5),
+        (0.06, 0.60, 2.0), (0.55, 0.93, 2.5), (0.34, 0.46, 1.5),
+        (0.72, 0.30, 2.0), (0.17, 0.90, 2.5), (0.62, 0.08, 2.0),
+        (0.42, 0.66, 1.5), (0.83, 0.63, 2.0), (0.28, 0.32, 1.5)
+    ]
+
+    private static let hotPink   = Color(red: 0.97, green: 0.13, blue: 0.53)
+    private static let deepPink  = Color(red: 0.83, green: 0.04, blue: 0.40)
+    private static let lightPink = Color(red: 1.00, green: 0.44, blue: 0.72)
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
 
-        Image(uiImage: skin.makeTexture(tab: textureTab))
-            .resizable()
-            .scaledToFill()
-            .clipShape(shape)
-            .overlay {
-                shape
-                    .fill(tileSheen)
-                    .blendMode(.screen)
-                    .opacity(selected ? 0.34 : 0.22)
-            }
-            .overlay {
-                shape
-                    .stroke(borderGradient, lineWidth: selected ? 3.5 : 2)
-            }
-            .overlay {
-                RoundedRectangle(cornerRadius: max(cornerRadius - 6, 8), style: .continuous)
-                    .stroke(Color.white.opacity(selected ? 0.32 : 0.18), lineWidth: 1)
-                    .padding(6)
-            }
-            .shadow(color: accent.opacity(selected ? 0.42 : 0.18), radius: selected ? 10 : 5, x: 0, y: 0)
-            .shadow(color: Color.black.opacity(selected ? 0.20 : 0.10), radius: selected ? 8 : 4, x: 0, y: 5)
-    }
+        ZStack {
+            // Pink gradient base
+            shape.fill(
+                LinearGradient(
+                    colors: [Self.lightPink, Self.hotPink, Self.deepPink],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
 
-    private var tileSheen: LinearGradient {
-        LinearGradient(
-            colors: [
-                Color.white.opacity(0.55),
-                Color.white.opacity(0.08),
-                accent.opacity(0.16),
-                Color.clear
-            ],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
-    }
+            // Sheen
+            shape.fill(
+                LinearGradient(
+                    colors: [
+                        Color.white.opacity(selected ? 0.30 : 0.18),
+                        Color.clear,
+                        Self.deepPink.opacity(0.15)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
+            .blendMode(.screen)
 
-    private var borderGradient: LinearGradient {
-        LinearGradient(
-            colors: [
-                Color.white.opacity(selected ? 0.52 : 0.28),
-                accent.opacity(selected ? 1.0 : 0.78),
-                Color.white.opacity(selected ? 0.38 : 0.18),
-                accent.opacity(selected ? 0.92 : 0.62)
-            ],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
+            // Sparkle dots
+            Canvas { ctx, size in
+                let opacity: CGFloat = selected ? 0.90 : 0.65
+                for (nx, ny, r) in sparkles {
+                    ctx.fill(
+                        Path(ellipseIn: CGRect(
+                            x: nx * size.width - r,
+                            y: ny * size.height - r,
+                            width: r * 2, height: r * 2
+                        )),
+                        with: .color(.white.opacity(opacity))
+                    )
+                }
+            }
+            .allowsHitTesting(false)
+
+            // Outer border
+            shape.stroke(
+                LinearGradient(
+                    colors: [
+                        Color.white.opacity(selected ? 0.68 : 0.38),
+                        Self.hotPink.opacity(0.5),
+                        Color.white.opacity(selected ? 0.48 : 0.28)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                ),
+                lineWidth: selected ? 2.5 : 1.5
+            )
+
+            // Inner highlight ring
+            RoundedRectangle(cornerRadius: max(cornerRadius - 5, 8), style: .continuous)
+                .stroke(Color.white.opacity(selected ? 0.30 : 0.16), lineWidth: 1)
+                .padding(5)
+        }
+        .shadow(color: Self.hotPink.opacity(selected ? 0.60 : 0.28), radius: selected ? 18 : 8, x: 0, y: 0)
+        .shadow(color: .black.opacity(selected ? 0.28 : 0.14), radius: selected ? 10 : 5, x: 0, y: 6)
     }
 }

@@ -135,6 +135,16 @@ struct Poplur2025App: App {
 
     @StateObject private var auth: AuthViewModel
     @StateObject private var stripeCoordinator = StripeTransitionCoordinator()
+    @StateObject private var deviceVolumeObserver = DeviceVolumeObserver()
+    @StateObject private var preLoginMusic = PreLoginMusicPlayer()
+    @State private var showAuthTransition = false
+
+    /// True only while WelcomeView (or its Login/Sign Up pushes) is the visible screen —
+    /// not during the brief auth-resolving spinner, so returning signed-in users never hear
+    /// a momentary blip of music before landing on HomeView.
+    private var isPreLoginVisible: Bool {
+        !auth.isAuthenticated && !auth.isResolvingAuthState
+    }
 
     init() {
         FirebaseBootstrap.configureIfNeeded()
@@ -163,13 +173,33 @@ struct Poplur2025App: App {
             // Global rounded font for the entire app
             .environment(\.font, .system(size: 16, weight: .semibold, design: .rounded))
             .environmentObject(stripeCoordinator)
+            .environmentObject(auth)
+            .environmentObject(deviceVolumeObserver)
             .overlay {
                 if stripeCoordinator.isVisible {
                     StripeTransitionOverlay(coordinator: stripeCoordinator)
                         .ignoresSafeArea()
                 }
             }
+            .overlay(alignment: .topLeading) {
+                if isPreLoginVisible {
+                    PoplurMuteButton(music: preLoginMusic)
+                        .padding(.leading, 20)
+                        .padding(.top, 12)
+                        .transition(.opacity)
+                }
+            }
+            .onChange(of: isPreLoginVisible) { _, isVisible in
+                if isVisible {
+                    preLoginMusic.start()
+                } else {
+                    preLoginMusic.stop()
+                }
+            }
             .onAppear {
+                if isPreLoginVisible {
+                    preLoginMusic.start()
+                }
                 let appearance = UITabBarAppearance()
                 appearance.configureWithTransparentBackground()
                 appearance.backgroundEffect = nil
@@ -200,19 +230,19 @@ struct Poplur2025App: App {
     private var authenticatedContent: some View {
         ZStack {
             if auth.isResolvingAuthState {
+                // Pre-login: spinning cube centered on white
                 ZStack {
                     Color.white.ignoresSafeArea()
-                    if SettingsStore.shared.use3DLoadingScreen {
-                        LoginCubeView()
-                            .frame(width: 200, height: 200)
-                    } else {
-                        Image("logo")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 200, height: 200)
-                    }
+                    LoginCubeLoadingView()
+                        .frame(width: 300, height: 300)
                 }
                 .transition(.opacity)
+            } else if showAuthTransition {
+                // Post-login: auth transition video
+                LoadingTransitionVideoView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .ignoresSafeArea()
+                    .transition(.opacity)
             } else if auth.isAuthenticated {
                 HomeView()
                     .environmentObject(auth)
@@ -224,10 +254,34 @@ struct Poplur2025App: App {
             } else {
                 WelcomeView()
                     .environmentObject(auth)
+                    .volumeBarsOverlay()
                     .transition(.opacity)
             }
         }
         .animation(.spring(response: 0.55, dampingFraction: 0.72), value: auth.isAuthenticated)
         .animation(.easeOut(duration: 0.3), value: auth.isResolvingAuthState)
+        .animation(.easeOut(duration: 0.3), value: showAuthTransition)
+        // Returning users: no transition — skip straight to HomeView when auth resolves.
+        // Fire auth transition only when the user explicitly signs in or signs up.
+        .onChange(of: auth.isAuthenticated) { oldValue, newValue in
+            guard newValue && !oldValue && !auth.isResolvingAuthState else { return }
+            if auth.didSignUp {
+                // New sign-up: play stripe animation, reset flag.
+                auth.didSignUp = false
+                stripeCoordinator.trigger { }
+            } else {
+                // Explicit sign-in: show the loading video before revealing the feed.
+                triggerAuthTransition()
+            }
+        }
+    }
+
+    private func triggerAuthTransition() {
+        showAuthTransition = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+            withAnimation(.easeOut(duration: 0.5)) {
+                showAuthTransition = false
+            }
+        }
     }
 }

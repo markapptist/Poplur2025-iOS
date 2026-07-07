@@ -222,14 +222,17 @@ struct FeedView: View {
 
 
                 }
-                .modifier(
-                    FeedTimelineTransitionMotion(
-                        style: settings.transitionStylePreference,
-                        isFlipping: isFlippingTimeline
-                    )
-                )
                 .animation(.spring(response: 0.48, dampingFraction: 0.82), value: showTimelineView)
-                .animation(.easeInOut(duration: 0.24), value: isFlippingTimeline)
+
+                // TV static covers the black while the first frame buffers.
+                // Removed instantly (no transition) once isReadyForDisplay fires.
+                if showInitialLoadingScreen {
+                    TVStaticLoopingView()
+                        .ignoresSafeArea()
+                        .allowsHitTesting(false)
+                        .zIndex(50)
+                        .transition(.identity)
+                }
 
                 if showFeedEntryLogo {
                     FeedEntryLogoPopView()
@@ -960,9 +963,6 @@ struct FeedView: View {
                     .zIndex(20)
             }
 
-            // Interactive social sidebar + author info
-            overlayChrome
-                .zIndex(25)
         }
     }
 
@@ -1035,32 +1035,6 @@ struct FeedView: View {
         }
     }
     
-    // MARK: - Channel stepper overlay (right-side CH+/CH- buttons)
-
-    private var overlayChrome: some View {
-        VStack {
-            Spacer()
-            if useSpriteKitFeedChannelButtons {
-                FeedChannelStepperSpriteKit2D(
-                    activeButton: activeFeedChannelButton,
-                    pressToken: feedChannelButtonPressToken,
-                    onUp: { changeFeedChannel(.up) },
-                    onDown: { changeFeedChannel(.down) }
-                )
-            } else {
-                FeedChannelStepper3D(
-                    activeButton: activeFeedChannelButton,
-                    pressToken: feedChannelButtonPressToken,
-                    onUp: { changeFeedChannel(.up) },
-                    onDown: { changeFeedChannel(.down) }
-                )
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .trailing)
-        .padding(.trailing, 12)
-        .padding(.bottom, 120)
-        .allowsHitTesting(true)
-    }
 
     private var tvGuideChannels: [FeedTVGuideChannel] {
         let fallbackNames = [
@@ -1947,7 +1921,7 @@ struct FeedView: View {
         PoplurAdCreative(
             id: "nearby-reel",
             channelID: "sponsored",
-            mediaURL: "asset://poplur_ad_real_humans",
+            mediaURL: googleDriveMediaURL(fileID: "1cNOqd9w6gGpeoU7oMC1xf7iuUcv0l94E"),
             headline: "Real people are already nearby",
             body: "Human-first Poplur ad slot for finding pop-ups, food, and people around you.",
             callToAction: "Open the map",
@@ -1959,12 +1933,12 @@ struct FeedView: View {
             countryFlag: "🇺🇸",
             radius: 125_000,
             viewCount: 840,
-            driveFileID: nil
+            driveFileID: "1cNOqd9w6gGpeoU7oMC1xf7iuUcv0l94E"
         ),
         PoplurAdCreative(
             id: "three-d-city-tour",
             channelID: "sponsored",
-            mediaURL: "asset://poplur_ad_3d_group",
+            mediaURL: googleDriveMediaURL(fileID: "1FmRd8-hKDd-pkOueGXjDuDS-SpGeIL27"),
             headline: "Your city is already talking",
             body: "3D human figures bring local radius discovery into a premium city ad slot.",
             callToAction: "Start a Poplur tour",
@@ -1976,12 +1950,12 @@ struct FeedView: View {
             countryFlag: "🇨🇦",
             radius: 95_000,
             viewCount: 730,
-            driveFileID: nil
+            driveFileID: "1FmRd8-hKDd-pkOueGXjDuDS-SpGeIL27"
         ),
         PoplurAdCreative(
             id: "radius-hero",
             channelID: "sponsored",
-            mediaURL: "asset://poplur_ad_3d_creator",
+            mediaURL: googleDriveMediaURL(fileID: "1nKmjGcUTQW1gn1FVkFMWVwn9ErtH7XmM"),
             headline: "Post it where it matters",
             body: "Dimensional creator-led ad slot for radius sharing, local discovery, and city energy.",
             callToAction: "Share with your radius",
@@ -1993,7 +1967,7 @@ struct FeedView: View {
             countryFlag: "🇺🇸",
             radius: 150_000,
             viewCount: 910,
-            driveFileID: nil
+            driveFileID: "1nKmjGcUTQW1gn1FVkFMWVwn9ErtH7XmM"
         )
     ]
 
@@ -2045,27 +2019,17 @@ struct FeedView: View {
     }
 
     nonisolated private static func balancedDemoMediaURL(for index: Int, namespace: String, channel: String? = nil) -> String {
-        switch demoMediaKind(for: index, namespace: namespace) {
-        case .video:
-            return reliableDemoVideoURLs[index % reliableDemoVideoURLs.count]
-        case .image:
-            return reliableDemoImageURL(for: index, namespace: namespace)
-        case .ad:
-            return poplurAdCreative(for: index, namespace: namespace, channel: channel).mediaURL
-        }
+        poplurAdCreative(for: index, namespace: namespace, channel: channel).mediaURL
     }
 
     nonisolated private static func languageDemoVideoURL(for index: Int, language: PoplurLanguage) -> String {
-        let offset: Int
+        let channel: String
         switch language {
-        case .english:
-            offset = 0
-        case .french:
-            offset = 1
-        case .spanish:
-            offset = 3
+        case .english: channel = "sports"
+        case .french:  channel = "french"
+        case .spanish: channel = "spanish"
         }
-        return reliableDemoVideoURLs[abs(index + offset) % reliableDemoVideoURLs.count]
+        return poplurAdCreative(for: index, namespace: language.rawValue, channel: channel).mediaURL
     }
 
     nonisolated private static func demoUserID(regular regularUserID: String, for index: Int, namespace: String = "global") -> String {
@@ -2349,12 +2313,7 @@ struct FeedView: View {
         var profilePosts: [FeedPost] = []
         for j in 0..<count {
             let additionalID = "\(country.lowercased())_\(channel)_\(userID)_profile_\(j)"
-            let mediaURL: String
-            if j % 5 == 4 {
-                mediaURL = reliableDemoImageURL(for: j, namespace: "\(country)_\(channel)_profile")
-            } else {
-                mediaURL = reliableDemoVideoURLs.randomElement() ?? fallbackDemoVideoURL
-            }
+            let mediaURL = poplurAdCreative(for: j, namespace: "\(country)_\(channel)_profile", channel: channel).mediaURL
             
             let city = globalCities.randomElement() ?? globalCities[0]
             let latitude = city.lat + Double.random(in: -0.05...0.05)

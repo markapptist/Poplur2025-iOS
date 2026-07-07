@@ -18,33 +18,18 @@ struct ErrorBannerView: View {
     }
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            if let bannerImage {
-                Image(uiImage: bannerImage)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                    .clipped()
-            } else {
-                LinearGradient(
-                    colors: [Color(red: 0.86, green: 0.15, blue: 0.24), Color(red: 0.68, green: 0.08, blue: 0.18)],
-                    startPoint: .top, endPoint: .bottom
-                )
-            }
-
-            HStack(spacing: 10) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 16, weight: .bold))
-                Text(message)
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .foregroundColor(.white)
-            .padding(.horizontal, 28)
-            .padding(.bottom, 22)
+        HStack(spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 16, weight: .bold))
+            Text(message)
+                .font(.system(size: 15, weight: .bold, design: .rounded))
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .frame(maxWidth: .infinity, minHeight: 130)
+        .foregroundColor(Color(red: 1.0, green: 45.0/255.0, blue: 150.0/255.0))
+        .padding(.horizontal, 28)
+        .padding(.vertical, 16)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -56,7 +41,6 @@ private struct ErrorBannerModifier: ViewModifier {
         content.overlay(alignment: .top) {
             if let message {
                 ErrorBannerView(message: message)
-                    .ignoresSafeArea(edges: .top)
                     .transition(.move(edge: .top).combined(with: .opacity))
                     .task(id: message) {
                         try? await Task.sleep(nanoseconds: autoDismissNanoseconds)

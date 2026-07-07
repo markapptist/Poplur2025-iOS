@@ -318,7 +318,10 @@ final class PoplurAIAssistantController: ObservableObject {
     }
 
     private var shouldPauseForAppAudio: Bool {
-        PoplurEQSync.shared.isAppAudioActive || AVAudioSession.sharedInstance().isOtherAudioPlaying
+        // Only pause for TTS/music output the app deliberately starts (tracked by PoplurEQSync).
+        // isOtherAudioPlaying also returns true for the app's own feed video, which would permanently
+        // block wake-word detection whenever the feed is visible — that's the wrong behavior.
+        PoplurEQSync.shared.isAppAudioActive
     }
 
     private func installEQSyncObserver() {

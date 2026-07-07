@@ -581,9 +581,10 @@ struct ProfileView: View {
                 openProfileSubmenuRoute(.notifications)
             } label: {
                 ZStack(alignment: .topTrailing) {
-                    Image(systemName: "bell.fill")
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundColor(DS.Color.textPrimary)
+                    Text("🔔")
+                        .font(.system(size: 22))
+                        .shadow(color: .black.opacity(0.55), radius: 0, x: 1.5, y: 2.5)
+                        .shadow(color: .black.opacity(0.25), radius: 3, x: 2, y: 4)
                     if hasUncheckedNotifications {
                         Circle()
                             .fill(DS.Color.accent)
@@ -1174,6 +1175,13 @@ struct ProfileView: View {
                 .onReceive(NotificationCenter.default.publisher(for: .cubeHoldEnded), perform: handleCubeHoldEnded)
                 .onReceive(NotificationCenter.default.publisher(for: Notification.Name("RecordTabBecameActive")), perform: handleRecordTabBecameActive)
                 .onReceive(NotificationCenter.default.publisher(for: .CubeGlobalTap), perform: handleCubeGlobalTap)
+                .onReceive(NotificationCenter.default.publisher(for: .CubeGoBack)) { _ in
+                    if isShowingMainTabChildRoute {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.78)) {
+                            closeProfileSubroutes()
+                        }
+                    }
+                }
         )
     }
 
@@ -1566,24 +1574,21 @@ struct ProfileView: View {
                             openProfileSubmenuRoute(.notifications)
                         } label: {
                             ZStack(alignment: .topTrailing) {
-                                Circle()
-                                    .fill(skinTheme.badgeFill)
-                                    .frame(width: 44, height: 44)
-                                Image(systemName: "bell.fill")
-                                    .poplurIconShader()
-                                    .font(.system(size: 20, weight: .semibold))
-                                    .foregroundColor(.white)
+                                Text("🔔")
+                                    .font(.system(size: 28))
+                                    .shadow(color: .black.opacity(0.6), radius: 0, x: 1.5, y: 2.5)
+                                    .shadow(color: .black.opacity(0.28), radius: 4, x: 2, y: 4)
                                     .frame(width: 44, height: 44)
                                 if hasUncheckedNotifications {
                                     Circle()
                                         .fill(Color.red)
                                         .frame(width: 10, height: 10)
-                                        .offset(x: 2, y: -2)
+                                        .offset(x: 4, y: -2)
                                 }
                             }
                         }
                         .buttonStyle(.plain)
-                        .padding(.leading, 24)
+                        .padding(.leading, 20)
                         .padding(.top, 20)
                         Spacer()
                     }

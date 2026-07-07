@@ -16,7 +16,10 @@
 		391605F92E3F4A0B000ACB3E /* FirebaseStorage in Frameworks */ = {isa = PBXBuildFile; productRef = 391605F82E3F4A0B000ACB3E /* FirebaseStorage */; };
 		391605FB2E3F4A0B000ACB3E /* FirebaseStorageCombine-Community in Frameworks */ = {isa = PBXBuildFile; productRef = 391605FA2E3F4A0B000ACB3E /* FirebaseStorageCombine-Community */; };
 		B4A1F0012F70000100C0DE01 /* FirebaseFunctions in Frameworks */ = {isa = PBXBuildFile; productRef = B4A1F0002F70000100C0DE01 /* FirebaseFunctions */; };
+		B4AU000000000004 /* Poplur2025/auth_transition.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = B4AU000000000002 /* Poplur2025/auth_transition.mp4 */; };
 		B4C9B1002F68000100C0DE01 /* Poplur2025/CubeModels in Resources */ = {isa = PBXBuildFile; fileRef = B4C9B1012F68000100C0DE01 /* Poplur2025/CubeModels */; };
+		B4F2A5002F68000100C0DE02 /* Poplur2025/PoplurFPS in Resources */ = {isa = PBXBuildFile; fileRef = B4F2A5012F68000100C0DE02 /* Poplur2025/PoplurFPS */; };
+		B4TV000000000003 /* Poplur2025/tv_static.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = B4TV000000000001 /* Poplur2025/tv_static.mp4 */; };
 		F0640B822F3521FC0093A1F4 /* GoogleMaps3D in Frameworks */ = {isa = PBXBuildFile; productRef = F0640B812F3521FC0093A1F4 /* GoogleMaps3D */; };
 		F0640B842F3600000093A1F4 /* GLTFSceneKit in Frameworks */ = {isa = PBXBuildFile; productRef = F0640B832F3600000093A1F4 /* GLTFSceneKit */; };
 		F070D53D2F33B192006F44C8 /* GoogleMobileAds in Frameworks */ = {isa = PBXBuildFile; productRef = F070D53C2F33B192006F44C8 /* GoogleMobileAds */; };
@@ -43,8 +46,11 @@
 		391605C12E3F48FF000ACB3E /* Poplur2025.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Poplur2025.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		391605CE2E3F4902000ACB3E /* Poplur2025Tests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = Poplur2025Tests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		391605D82E3F4902000ACB3E /* Poplur2025UITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = Poplur2025UITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		B4AU000000000002 /* Poplur2025/auth_transition.mp4 */ = {isa = PBXFileReference; lastKnownFileType = file; path = Poplur2025/auth_transition.mp4; sourceTree = "<group>"; };
 		B4C9B1012F68000100C0DE01 /* Poplur2025/CubeModels */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Poplur2025/CubeModels; sourceTree = "<group>"; };
 		B4F100002F50000000000001 /* PoplurWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PoplurWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B4F2A5012F68000100C0DE02 /* Poplur2025/PoplurFPS */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Poplur2025/PoplurFPS; sourceTree = "<group>"; };
+		B4TV000000000001 /* Poplur2025/tv_static.mp4 */ = {isa = PBXFileReference; lastKnownFileType = file; path = Poplur2025/tv_static.mp4; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -137,6 +143,9 @@
 			children = (
 				391605C32E3F48FF000ACB3E /* Poplur2025 */,
 				B4C9B1012F68000100C0DE01 /* Poplur2025/CubeModels */,
+				B4F2A5012F68000100C0DE02 /* Poplur2025/PoplurFPS */,
+				B4TV000000000001 /* Poplur2025/tv_static.mp4 */,
+				B4AU000000000002 /* Poplur2025/auth_transition.mp4 */,
 				B4F100012F50000000000001 /* PoplurWatch */,
 				391605D12E3F4902000ACB3E /* Poplur2025Tests */,
 				391605DB2E3F4902000ACB3E /* Poplur2025UITests */,
@@ -328,6 +337,9 @@
 			buildActionMask = 2147483647;
 			files = (
 				B4C9B1002F68000100C0DE01 /* Poplur2025/CubeModels in Resources */,
+				B4F2A5002F68000100C0DE02 /* Poplur2025/PoplurFPS in Resources */,
+				B4TV000000000003 /* Poplur2025/tv_static.mp4 in Resources */,
+				B4AU000000000004 /* Poplur2025/auth_transition.mp4 in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

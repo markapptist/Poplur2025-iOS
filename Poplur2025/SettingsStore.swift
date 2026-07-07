@@ -110,7 +110,7 @@ final class SettingsStore: ObservableObject {
             defaults.set(true, forKey: Keys.closedCaptionsEnabled)
         }
         if defaults.object(forKey: Keys.holdMenuLayoutPreference) == nil {
-            defaults.set(HoldMenuLayoutPreference.horizontal.rawValue, forKey: Keys.holdMenuLayoutPreference)
+            defaults.set(HoldMenuLayoutPreference.vertical.rawValue, forKey: Keys.holdMenuLayoutPreference)
         }
         if defaults.object(forKey: Keys.transitionStylePreference) == nil {
             defaults.set(TransitionStylePreference.twoD.rawValue, forKey: Keys.transitionStylePreference)

@@ -1,10 +1,10 @@
 import SwiftUI
+import AVFoundation
 
 // MARK: – Duration constant shared with FeedView
-let kCommercialTransitionDuration: TimeInterval = 1.0
+let kCommercialTransitionDuration: TimeInterval = 1.5
 
-// MARK: – Public entry point
-
+// MARK: – Channel/video-change transition (plays commercial_transition.mp4)
 struct PoplurTransitionFlash: View {
     let channelNumber: Int
     let channelCategory: String
@@ -15,156 +15,95 @@ struct PoplurTransitionFlash: View {
     }
 
     var body: some View {
-        PoplurStripeTransition()
+        CommercialTransitionVideoView()
             .ignoresSafeArea()
             .allowsHitTesting(false)
             .accessibilityHidden(true)
     }
 }
 
-// MARK: – Stripe transition
+// MARK: – Commercial transition video (one-shot, auto-fades)
 
-private let kStripeColors: [Color] = [
-    Color(red: 0.84, green: 0.02, blue: 0.47),   // deep magenta
-    Color(red: 0.54, green: 0.10, blue: 0.76),   // purple
-    .white,
-    Color(red: 1.00, green: 0.18, blue: 0.60),   // hot pink
-    Color(red: 0.58, green: 0.08, blue: 0.82),   // violet
-    Color(red: 0.97, green: 0.78, blue: 0.89),   // light pink
-    Color(red: 0.94, green: 0.10, blue: 0.52),   // deep pink
-    .white,
-]
-
-private struct ConfettiDot: Identifiable {
-    let id = UUID()
-    let x, y: CGFloat
-    let w, h: CGFloat
-    let angle: Double
-    let color: Color
+private struct CommercialTransitionVideoView: UIViewRepresentable {
+    func makeUIView(context: Context) -> CommercialTransitionUIView { CommercialTransitionUIView() }
+    func updateUIView(_ uiView: CommercialTransitionUIView, context: Context) {}
 }
 
-private func makeConfetti(count: Int = 28) -> [ConfettiDot] {
-    let palette: [Color] = [
-        Color(red: 1, green: 0.84, blue: 0),
-        Color(red: 1, green: 0.20, blue: 0.60),
-        .white,
-        Color(red: 0.94, green: 0.10, blue: 0.52),
-        Color(red: 0.82, green: 0.62, blue: 1.00),
-        Color(red: 1, green: 0.78, blue: 0.12),
-    ]
-    return (0..<count).map { _ in
-        ConfettiDot(
-            x: CGFloat.random(in: 0.05...0.95),
-            y: CGFloat.random(in: 0.10...0.90),
-            w: CGFloat.random(in: 5...11),
-            h: CGFloat.random(in: 3...7),
-            angle: Double.random(in: 0...360),
-            color: palette.randomElement()!
-        )
-    }
-}
+private final class CommercialTransitionUIView: UIView {
+    private var player: AVPlayer?
+    private var playerLayer: AVPlayerLayer?
 
-private struct PoplurStripeTransition: View {
-    private let stripeCount = 8
+    init() {
+        super.init(frame: .zero)
+        backgroundColor = .black
+        // commercial_transition first; fall back to feed_end_transition
+        let url = Bundle.main.url(forResource: "commercial_transition", withExtension: "mp4")
+               ?? Bundle.main.url(forResource: "feed_end_transition",   withExtension: "mp4")
+        guard let url else { return }
 
-    @State private var offsets: [CGFloat] = []
-    @State private var logoAlpha: Double = 0
-    @State private var logoScale: CGFloat = 0.45
-    @State private var confetti: [ConfettiDot] = []
+        let player = AVPlayer(url: url)
+        player.isMuted = false
+        let layer = AVPlayerLayer(player: player)
+        layer.videoGravity = .resizeAspectFill
+        self.layer.addSublayer(layer)
+        self.player = player
+        self.playerLayer = layer
+        player.play()
 
-    var body: some View {
-        GeometryReader { geo in
-            let W = geo.size.width
-            let H = geo.size.height
-            let sw = W / CGFloat(stripeCount)
-
-            ZStack {
-                Canvas { ctx, size in
-                    guard offsets.count == stripeCount else { return }
-                    for i in 0..<stripeCount {
-                        let le = offsets[i]
-                        var path = Path()
-                        path.move(to: CGPoint(x: le, y: 0))
-                        path.addLine(to: CGPoint(x: le + sw, y: 0))
-                        path.addLine(to: CGPoint(x: le + sw + H, y: H))
-                        path.addLine(to: CGPoint(x: le + H, y: H))
-                        path.closeSubpath()
-                        ctx.fill(path, with: .color(kStripeColors[i]))
-                        ctx.fill(path, with: .linearGradient(
-                            Gradient(stops: [
-                                .init(color: .white.opacity(0.44), location: 0),
-                                .init(color: .white.opacity(0.00), location: 0.55),
-                            ]),
-                            startPoint: CGPoint(x: 0, y: 0),
-                            endPoint: CGPoint(x: 0, y: H)
-                        ))
-                    }
-                    for dot in confetti {
-                        let cx = dot.x * size.width
-                        let cy = dot.y * size.height
-                        let rect = CGRect(x: cx - dot.w / 2, y: cy - dot.h / 2,
-                                         width: dot.w, height: dot.h)
-                        ctx.fill(Path(ellipseIn: rect), with: .color(dot.color))
-                    }
-                }
-
-                VStack(spacing: 10) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 20, style: .continuous)
-                            .fill(Color.white)
-                            .shadow(color: .black.opacity(0.22), radius: 12, x: 0, y: 6)
-                        Image("logo")
-                            .resizable()
-                            .scaledToFit()
-                            .padding(12)
-                    }
-                    .frame(width: 90, height: 90)
-                    Text("poplur")
-                        .font(.system(size: 22, weight: .black))
-                        .foregroundColor(Color(red: 0.18, green: 0.06, blue: 0.24))
-                }
-                .scaleEffect(logoScale)
-                .opacity(logoAlpha)
-            }
-            .onAppear {
-                offsets = Array(repeating: W, count: stripeCount)
-                run(W: W, H: H, sw: sw)
-            }
+        let fadeDuration: TimeInterval = 0.12
+        DispatchQueue.main.asyncAfter(deadline: .now() + kCommercialTransitionDuration - fadeDuration) {
+            UIView.animate(withDuration: fadeDuration) { layer.opacity = 0 }
         }
     }
 
-    private func run(W: CGFloat, H: CGFloat, sw: CGFloat) {
-        Task { @MainActor in
-            // Entry: rightmost stripe first, 28 ms stagger
-            for i in stride(from: stripeCount - 1, through: 0, by: -1) {
-                withAnimation(.interpolatingSpring(stiffness: 500, damping: 28)) {
-                    offsets[i] = CGFloat(i) * sw
-                }
-                try? await Task.sleep(nanoseconds: 28_000_000)
-            }
-            try? await Task.sleep(nanoseconds: 160_000_000)  // spring settle
+    required init?(coder: NSCoder) { fatalError() }
 
-            // Logo + confetti
-            confetti = makeConfetti()
-            withAnimation(.spring(response: 0.22, dampingFraction: 0.52)) { logoScale = 1.0 }
-            withAnimation(.easeIn(duration: 0.14)) { logoAlpha = 1.0 }
-
-            // Hold
-            try? await Task.sleep(nanoseconds: 220_000_000)
-
-            // Logo out
-            withAnimation(.easeOut(duration: 0.12)) { logoAlpha = 0.0 }
-
-            // Exit: leftmost stripe first, 26 ms stagger
-            let exitX: CGFloat = -(H + sw)
-            for i in 0..<stripeCount {
-                withAnimation(.interpolatingSpring(stiffness: 500, damping: 28)) {
-                    offsets[i] = exitX
-                }
-                try? await Task.sleep(nanoseconds: 26_000_000)
-            }
-            try? await Task.sleep(nanoseconds: 140_000_000)  // spring settle
-            confetti = []
-        }
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        playerLayer?.frame = bounds
     }
+
+    deinit { player?.pause() }
+}
+
+// MARK: – Looping TV static (shown while a feed video buffers)
+
+struct TVStaticLoopingView: UIViewRepresentable {
+    func makeUIView(context: Context) -> TVStaticLoopingUIView { TVStaticLoopingUIView() }
+    func updateUIView(_ uiView: TVStaticLoopingUIView, context: Context) {}
+}
+
+final class TVStaticLoopingUIView: UIView {
+    private var player: AVQueuePlayer?
+    private var looper: AVPlayerLooper?
+    private var playerLayer: AVPlayerLayer?
+
+    init() {
+        super.init(frame: .zero)
+        backgroundColor = .black
+        guard let url = Bundle.main.url(forResource: "tv_static", withExtension: "mp4") else {
+            print("[TVStaticLooping] tv_static.mp4 not found in bundle")
+            return
+        }
+        let item = AVPlayerItem(url: url)
+        let queuePlayer = AVQueuePlayer()
+        queuePlayer.isMuted = true
+        let looper = AVPlayerLooper(player: queuePlayer, templateItem: item)
+        let layer = AVPlayerLayer(player: queuePlayer)
+        layer.videoGravity = .resizeAspectFill
+        self.layer.addSublayer(layer)
+        self.player = queuePlayer
+        self.looper = looper
+        self.playerLayer = layer
+        queuePlayer.play()
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        playerLayer?.frame = bounds
+    }
+
+    deinit { player?.pause() }
 }

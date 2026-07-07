@@ -148,8 +148,7 @@ public enum CubeSkin: String, CaseIterable, Identifiable, Codable {
         case .rainbow:
             return "rainbow_neon_icon_cube"
         case .gold:
-            // gold_metallic_icon_cube.glb causes SIGSEGV inside Apple's SCNSceneSource — use procedural fallback
-            return nil
+            return "gold_metallic_icon_cube"
         case .toy:
             return "circus_carnival_icon_cube"
         case .chocolate:
@@ -160,6 +159,20 @@ public enum CubeSkin: String, CaseIterable, Identifiable, Codable {
             return "purple_sparkle_icon_cube"
         case .camo:
             return "military_camo_icon_cube"
+        }
+    }
+
+    public var backButtonModelAssetName: String {
+        switch self {
+        case .standard:    return "rubber_buttons_back_button_cube"
+        case .rainbow:     return "rainbow_neon_back_button_cube"
+        case .sparklePink: return "glitter_neon_back_button_cube"
+        case .gold:        return "gold_back_button_cube"
+        case .toy:         return "toy_box_back_button_cube"
+        case .chocolate:   return "chocolate_back_button_cube"
+        case .camo:        return "camo_back_button_cube"
+        case .rubber:      return "rubber_buttons_back_button_cube"
+        case .ice:         return "ice_back_button_cube"
         }
     }
 

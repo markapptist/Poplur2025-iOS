@@ -1,0 +1,12 @@
+# Dependencies
+node_modules/
+
+# Build output (the shipped copy lives in ../Poplur2025/PoplurFPS/)
+dist/
+
+# Vite / TS caches
+.vite/
+*.tsbuildinfo
+
+# OS
+.DS_Store

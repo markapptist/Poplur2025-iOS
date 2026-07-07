@@ -353,6 +353,7 @@ enum AIStackError: LocalizedError, Equatable {
     case negativeBalanceRejected
     case unsupportedProviderMethod(PoplurAIProvider, PoplurAIContentType)
     case providerMustRunOnBackend(PoplurAIProvider)
+    case backendError(Int)
     case invalidLocation
 
     var errorDescription: String? {
@@ -373,6 +374,8 @@ enum AIStackError: LocalizedError, Equatable {
             return "\(provider.displayName) does not support \(type.displayName)."
         case .providerMustRunOnBackend(let provider):
             return "\(provider.displayName) must be called through Poplur's backend."
+        case .backendError(let status):
+            return "Poplur AI returned an error (HTTP \(status)). Please try again."
         case .invalidLocation:
             return "Choose a real map location before publishing."
         }
@@ -481,11 +484,15 @@ struct PoplurAIBackendClient: Sendable {
             throw AIStackError.backendBaseURLMissing
         }
         guard (200..<300).contains(http.statusCode) else {
-            throw AIStackError.providerMustRunOnBackend(request.contentType.defaultProvider)
+            switch http.statusCode {
+            case 402: throw AIStackError.insufficientCredits
+            case 403: throw AIStackError.aiLockedForPlan
+            default:  throw AIStackError.backendError(http.statusCode)
+            }
         }
         let payload = try JSONSerialization.jsonObject(with: data) as? [String: Any]
         guard let job = payload?["job"] as? [String: Any] else {
-            throw AIStackError.providerMustRunOnBackend(request.contentType.defaultProvider)
+            throw AIStackError.backendError(http.statusCode)
         }
         return response(from: job, fallbackRequest: request)
     }

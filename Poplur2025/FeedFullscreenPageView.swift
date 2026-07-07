@@ -235,11 +235,8 @@ struct FeedFullscreenPageView: View {
                         self.onPlaybackTimeChanged(time.seconds)
                     }
                 }
-                if !self.isReadyToDisplay, time.seconds > 0.05 || p.timeControlStatus == .playing {
-                    self.isReadyToDisplay = true
-                    self.playbackStuck = false
-                    self.onReadyToDisplay()
-                }
+                // isReadyToDisplay is set exclusively by AVPlayerLayer.isReadyForDisplay
+                // via PlayerLayerView — do not set it here based on time or status.
                 let duration = p.currentItem?.duration.seconds ?? 0
                 guard duration.isFinite, duration > 2.0, time.seconds.isFinite else { return }
                 let remaining = duration - time.seconds
@@ -253,11 +250,7 @@ struct FeedFullscreenPageView: View {
                     p.playImmediately(atRate: 1.0)
                 }
                 self.hudTimeControl = p.timeControlStatus
-                if p.timeControlStatus == .playing || p.currentTime().seconds > 0.05 {
-                    self.isReadyToDisplay = true
-                    self.playbackStuck = false
-                    self.onReadyToDisplay()
-                }
+                // Do not set isReadyToDisplay here — only AVPlayerLayer.isReadyForDisplay drives it.
             }
 
             // Removed two existing playback stuck checks at 3s and 5s and replaced with a single 8s check
@@ -273,14 +266,10 @@ struct FeedFullscreenPageView: View {
 
         var body: some View {
             ZStack {
-                VideoLoadingPlaceholder(mediaKey: mediaKey)
-                    .opacity(isReadyToDisplay ? 0 : 1)
-                    .animation(.easeOut(duration: 0.2), value: isReadyToDisplay)
-
                 if let player {
                     PlayerLayerView(player: player, onReadyToDisplay: onReadyToDisplay, isReadyToDisplay: $isReadyToDisplay)
                         .opacity(isReadyToDisplay ? 1 : 0.01)
-                        .animation(.easeOut(duration: 0.2), value: isReadyToDisplay)
+                        .animation(.easeOut(duration: 0.5), value: isReadyToDisplay)
                         .onAppear {
                             if player.timeControlStatus != .playing {
                                 FeedAudioManager.shared.enableAudiblePlayback()
@@ -298,6 +287,12 @@ struct FeedFullscreenPageView: View {
                             }
                         }
                 }
+
+                // TV static overlays the video while buffering, then fades out when ready
+                VideoLoadingPlaceholder(mediaKey: mediaKey)
+                    .opacity(isReadyToDisplay ? 0 : 1)
+                    .animation(.easeOut(duration: 0.5), value: isReadyToDisplay)
+                    .allowsHitTesting(false)
 
                 if showEndTransition {
                     FeedEndTransitionOverlay {
@@ -396,13 +391,12 @@ struct FeedFullscreenPageView: View {
             view.translatesAutoresizingMaskIntoConstraints = false
             view.playerLayer.videoGravity = .resizeAspectFill
             view.onReadyForDisplayChanged = { ready in
+                // One-way latch: static only disappears when real frames arrive.
+                // Never flip back to false mid-playback (only teardownPlayer() resets).
+                guard ready, !isReadyToDisplay else { return }
                 DispatchQueue.main.async {
-                    if isReadyToDisplay != ready {
-                        isReadyToDisplay = ready
-                    }
-                    if ready {
-                        onReadyToDisplay()
-                    }
+                    isReadyToDisplay = true
+                    onReadyToDisplay()
                 }
             }
             view.player = player
@@ -411,13 +405,10 @@ struct FeedFullscreenPageView: View {
 
         func updateUIView(_ uiView: PlayerHostingView, context: Context) {
             uiView.onReadyForDisplayChanged = { ready in
+                guard ready, !isReadyToDisplay else { return }
                 DispatchQueue.main.async {
-                    if isReadyToDisplay != ready {
-                        isReadyToDisplay = ready
-                    }
-                    if ready {
-                        onReadyToDisplay()
-                    }
+                    isReadyToDisplay = true
+                    onReadyToDisplay()
                 }
             }
             uiView.player = player
@@ -699,6 +690,9 @@ struct FeedFullscreenPageView: View {
 
             mediaView
 
+            topRightInfo(size: size)
+                .zIndex(10)
+
             if shouldShowCaptions {
                 aiCaptionOverlay(size: size)
                     .zIndex(12)
@@ -710,14 +704,8 @@ struct FeedFullscreenPageView: View {
         let mediaKey: String
 
         var body: some View {
-            LinearGradient(
-                colors: [
-                    Color(red: 0.07, green: 0.0, blue: 0.12),
-                    Color(red: 0.84, green: 0.02, blue: 0.47).opacity(0.28)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
+            TVStaticLoopingView()
+                .ignoresSafeArea()
         }
     }
 

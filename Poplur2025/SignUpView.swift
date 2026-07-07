@@ -6,11 +6,11 @@ import SceneKit
 
 struct SignUpView: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var auth: AuthViewModel
     @EnvironmentObject private var stripeCoordinator: StripeTransitionCoordinator
     @State private var accountType: PoplurAccountType?
     @State private var signupStep: SignupStep = .accountType
     @State private var cubeSpinToken = 0
-    @State private var logoFloatOffset: CGFloat = 0
     @State private var email = ""
     @State private var password = ""
     @State private var confirmPassword = ""
@@ -104,6 +104,11 @@ struct SignUpView: View {
             .toolbar(.hidden, for: .navigationBar)
             .errorBanner($errorMessage)
             .onTapGesture { hideKeyboard() }
+            .overlay(alignment: .bottom) {
+                AuthAIGuide(screen: .signUp)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 20)
+            }
             .navigationDestination(isPresented: $isSignedUp) {
                 HomeView()
                     .toolbar(.hidden, for: .navigationBar)
@@ -121,20 +126,13 @@ struct SignUpView: View {
                     .resizable()
                     .scaledToFit()
                     .frame(width: 100, height: 100)
-                    .offset(y: logoFloatOffset)
-                    .onAppear {
-                        withAnimation(
-                            .easeInOut(duration: 1.3)
-                            .repeatForever(autoreverses: true)
-                        ) { logoFloatOffset = -8 }
-                    }
                 Spacer()
             }
             .padding(.bottom, 4)
 
             HStack {
                 Button {
-                    stripeCoordinator.trigger { dismiss() }
+                    dismiss()
                 } label: {
                     Image(systemName: "chevron.left")
                         .poplurIconShader()
@@ -181,7 +179,7 @@ struct SignUpView: View {
                 onTap: {
                     switch signupStep {
                     case .accountType:
-                        stripeCoordinator.trigger { dismiss() }
+                        dismiss()
                     default:
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.88)) {
                             errorMessage = nil
@@ -618,6 +616,7 @@ struct SignUpView: View {
                     await MainActor.run {
                         isLoading = false
                         isSignedUp = true
+                        auth.didSignUp = true
                     }
                 } catch {
                     await MainActor.run {

@@ -1108,6 +1108,7 @@ struct HomeView: View {
                 action: {
                     postCubeFaceOverride(face: "camera", title: "Games", systemImage: "gamecontroller.fill")
                     showGames = true
+                    isMainTabChildRouteVisible = true
                 }
             )
         ]
@@ -1800,13 +1801,30 @@ struct HomeView: View {
                 .zIndex(900)
             }
 
-            // 3D cube navigation
-            if isCubeVisibleOnCurrentRoute && !isMainTabChildRouteVisible {
+            // 3D cube navigation — always visible on every post-login page
+            if isCubeVisibleOnCurrentRoute {
                 VStack {
                     Spacer()
-                    CubeTabView(selectedTab: $selectedTab)
-                        .opacity(shouldSleepChromeForCurrentTab ? 0 : 1)
-                        .allowsHitTesting(!shouldSleepChromeForCurrentTab)
+                    ZStack {
+                        // Main cube: on a sub-page it pops OUT (scale down + fade)
+                        // so the back cube can pop IN in its place — the two are
+                        // never visible together.
+                        CubeTabView(selectedTab: $selectedTab)
+                            .scaleEffect(isMainTabChildRouteVisible ? 0.8 : 1, anchor: .bottom)
+                            .opacity((shouldSleepChromeForCurrentTab || isMainTabChildRouteVisible) ? 0 : 1)
+                            .allowsHitTesting(!shouldSleepChromeForCurrentTab && !isMainTabChildRouteVisible)
+
+                        // Back cube: same size as the main cube; pops in on any
+                        // sub-page as the main cube pops out (they swap in place).
+                        if isMainTabChildRouteVisible {
+                            BackCubeView(onBack: {
+                                NotificationCenter.default.post(name: .CubeGoBack, object: nil)
+                            })
+                            .allowsHitTesting(true)
+                            .transition(.scale(scale: 0.8, anchor: .bottom).combined(with: .opacity))
+                        }
+                    }
+                    .animation(.spring(response: 0.38, dampingFraction: 0.74), value: isMainTabChildRouteVisible)
                 }
                 .ignoresSafeArea(edges: .bottom)
                 .zIndex(6000)
@@ -2032,11 +2050,18 @@ struct HomeView: View {
             )
             .zIndex(9500)
 
-        }
-        .fullScreenCover(isPresented: $showGames, onDismiss: {
-            resetCubeFaceOverride("camera")
-        }) {
-            PoplurFPSGameSheet()
+            // Game overlay — ZStack so cube (zIndex 6000) stays on top; back arrow via isMainTabChildRouteVisible
+            if showGames {
+                PoplurFPSGameSheet(onClose: {
+                    showGames = false
+                    isMainTabChildRouteVisible = false
+                    resetCubeFaceOverride("camera")
+                })
+                .ignoresSafeArea()
+                .transition(.opacity)
+                .zIndex(5500)
+            }
+
         }
     }
 
@@ -2355,6 +2380,18 @@ struct HomeView: View {
             .onReceive(NotificationCenter.default.publisher(for: .MainTabChildRouteVisibilityChanged)) { notification in
                 isMainTabChildRouteVisible = (notification.object as? Bool) ?? false
                 resetChromeSleepTimer()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .CubeGoBack)) { _ in
+                if showGames {
+                    showGames = false
+                    isMainTabChildRouteVisible = false
+                    resetCubeFaceOverride("camera")
+                } else if showFeedCommentComposer {
+                    closeFeedCommentComposer()
+                } else if showLiveLocationPicker {
+                    closeLiveLocationPicker()
+                }
+                // ProfileView sub-routes handle .CubeGoBack themselves
             }
             .onReceive(NotificationCenter.default.publisher(for: .FeedChannelDidChange)) { notification in
                 if let info = notification.userInfo,

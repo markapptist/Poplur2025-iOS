@@ -4011,7 +4011,7 @@ struct MapViewProduction: View {
         use2DMap ? .standard : .hybrid(elevation: .realistic, showsTraffic: false)
     }
 
-    private let focusedLocationDistance: CLLocationDistance = 50
+    private let focusedLocationDistance: CLLocationDistance = 300
 
     @State private var fixedDistanceAlt: CLLocationDistance = 500
     @State private var camera: MapCameraPosition = .camera(
@@ -4104,14 +4104,19 @@ struct MapViewProduction: View {
     @State private var shownPostCountryFlag: String? = nil
     
     // Zoom slider state
-    @State private var zoomLevel: Double = 50
-    
+    @State private var zoomLevel: Double = 300
+
+    // Pinch super-zoom state
+    @State private var pinchStartCameraDistance: CLLocationDistance = 300
+    @State private var isPinchingMap = false
+    private let superZoomAmplification: Double = 6.0
+
     // Confetti system for trending pins
     @StateObject private var trendingTracker = PinTrendingTracker()
     @State private var showConfetti: Bool = true // Toggle confetti on/off
     private let userLocationPinID = UUID() // Stable ID for user location trending pin
     @State private var cubeHoldStartY: CGFloat? = nil // Track cube hold drag start position
-    @State private var initialZoomLevel: Double = 50
+    @State private var initialZoomLevel: Double = 300
     @State private var showIndoorMap: Bool = false
     @State private var indoorVenues: [MappedinVenue] = []
     @State private var selectedVenueSlug: String? = nil
@@ -4536,21 +4541,57 @@ struct MapViewProduction: View {
         // Stop any active operations and return to browsing
         mapState.cancelCurrentOperation()
         clearTourEffects()
-        
-        withAnimation(.easeInOut(duration: 0.55)) {
-            camera = .camera(
-                MapCamera(
-                    centerCoordinate: userCoordinate,
-                    distance: focusedLocationDistance,
-                    heading: camera.camera?.heading ?? 0,
-                    pitch: activePitch
-                )
-            )
-        }
-        fixedDistanceAlt = focusedLocationDistance
-        zoomLevel = focusedLocationDistance
 
-        refreshLocalContext(for: CLLocation(latitude: userCoordinate.latitude, longitude: userCoordinate.longitude))
+        let currentDistance = camera.camera?.distance ?? focusedLocationDistance
+
+        if currentDistance > 500_000 {
+            // Far away (globe / country view) — 2-step: pan at altitude → zoom in
+            isCameraTransitionInProgress = true
+            withAnimation(.easeInOut(duration: 1.0)) {
+                camera = .camera(
+                    MapCamera(
+                        centerCoordinate: userCoordinate,
+                        distance: min(currentDistance, tourZoomOutDistance),
+                        heading: 0,
+                        pitch: 0
+                    )
+                )
+            }
+            navigationTransitionTask = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard !Task.isCancelled else { return }
+                withAnimation(.easeInOut(duration: 1.2)) {
+                    camera = .camera(
+                        MapCamera(
+                            centerCoordinate: userCoordinate,
+                            distance: focusedLocationDistance,
+                            heading: 0,
+                            pitch: activePitch
+                        )
+                    )
+                }
+                fixedDistanceAlt = focusedLocationDistance
+                zoomLevel = focusedLocationDistance
+                isCameraTransitionInProgress = false
+                navigationTransitionTask = nil
+                refreshLocalContext(for: CLLocation(latitude: userCoordinate.latitude, longitude: userCoordinate.longitude))
+            }
+        } else {
+            // Already nearby — simple pan
+            withAnimation(.easeInOut(duration: 0.55)) {
+                camera = .camera(
+                    MapCamera(
+                        centerCoordinate: userCoordinate,
+                        distance: focusedLocationDistance,
+                        heading: camera.camera?.heading ?? 0,
+                        pitch: activePitch
+                    )
+                )
+            }
+            fixedDistanceAlt = focusedLocationDistance
+            zoomLevel = focusedLocationDistance
+            refreshLocalContext(for: CLLocation(latitude: userCoordinate.latitude, longitude: userCoordinate.longitude))
+        }
     }
     
     private func uploadPostToSelectedLocation() {
@@ -5111,7 +5152,7 @@ struct MapViewProduction: View {
             ZStack {
                 Map(
                     position: cameraBinding,
-                    interactionModes: use2DMap ? [.pan, .rotate, .zoom] : [.pan, .rotate, .pitch, .zoom]
+                    interactionModes: use2DMap ? [.pan, .rotate] : [.pan, .rotate, .pitch]
                 ) {
                 // Show user annotation with 3D blue pin when location is available
                 if let userCoord = liveUserCoordinate ?? locationManager.location?.coordinate {
@@ -5290,6 +5331,33 @@ struct MapViewProduction: View {
                     .onEnded { _ in
                         // Long press on map - no action (removed)
                         noteInteraction()
+                    }
+            )
+            .simultaneousGesture(
+                MagnificationGesture()
+                    .onChanged { scale in
+                        if !isPinchingMap {
+                            isPinchingMap = true
+                            pinchStartCameraDistance = camera.camera?.distance ?? zoomLevel
+                        }
+                        let delta = Double(scale) - 1.0
+                        let amplifiedScale = max(0.02, 1.0 + delta * superZoomAmplification)
+                        let newDistance = pinchStartCameraDistance / amplifiedScale
+                        let clamped = max(30, min(25_000_000, newDistance))
+                        camera = .camera(MapCamera(
+                            centerCoordinate: camera.camera?.centerCoordinate ?? CLLocationCoordinate2D(),
+                            distance: clamped,
+                            heading: camera.camera?.heading ?? 0,
+                            pitch: camera.camera?.pitch ?? 0
+                        ))
+                    }
+                    .onEnded { scale in
+                        isPinchingMap = false
+                        let delta = Double(scale) - 1.0
+                        let amplifiedScale = max(0.02, 1.0 + delta * superZoomAmplification)
+                        let finalDistance = max(30, min(25_000_000, pinchStartCameraDistance / amplifiedScale))
+                        zoomLevel = finalDistance
+                        fixedDistanceAlt = finalDistance
                     }
             )
                 

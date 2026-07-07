@@ -33,6 +33,7 @@ extension Notification.Name {
     static let CubeStopFlashing = Notification.Name("CubeStopFlashing")
     static let CubeProfileIconOverrideChanged = Notification.Name("CubeProfileIconOverrideChanged")
     static let CubeFaceOverrideChanged = Notification.Name("CubeFaceOverrideChanged")
+    static let CubeGoBack = Notification.Name("CubeGoBack")
     static let CenterMapOnUser = Notification.Name("CenterMapOnUser")
     
     // Feed and audio
@@ -64,6 +65,7 @@ extension Notification.Name {
     // Settings and UI
     static let OpenSettingsRequested = Notification.Name("OpenSettingsRequested")
     static let OpenDMsRequested = Notification.Name("OpenDMsRequested")
+    static let OpenPoplurStoreRequested = Notification.Name("OpenPoplurStoreRequested")
     static let MainTabChildRouteVisibilityChanged = Notification.Name("MainTabChildRouteVisibilityChanged")
     
     // User stats

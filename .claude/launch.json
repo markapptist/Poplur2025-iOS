@@ -4,9 +4,22 @@
     {
       "name": "poplur-fps",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--", "--port", "5174"],
+      "runtimeArgs": ["run", "dev", "--", "--port", "5174", "--host"],
       "port": 5174,
-      "cwd": "/Users/matrix/Downloads/poplur-fps"
+      "cwd": "PoplurFPS"
+    },
+    {
+      "name": "game-mockup",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "5175"],
+      "port": 5175,
+      "cwd": "Poplur2025/PoplurFPS"
+    },
+    {
+      "name": "docs",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "5176"],
+      "port": 5176
     }
   ]
 }

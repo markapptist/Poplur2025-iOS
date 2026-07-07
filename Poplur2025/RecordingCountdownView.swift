@@ -151,14 +151,28 @@ struct RecordingCountdownView: View {
             }
             .frame(width: CounterSeparatorMetrics.separatorWidth, alignment: .center)
 
-            Text(formattedRadius)
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(.white.opacity(0.7))
-                .poplurTextShader(intensity: 0.65)
-                .minimumScaleFactor(0.5)
-                .lineLimit(1)
-                .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
-                .frame(height: CounterSeparatorMetrics.footerHeight, alignment: .top)
+            HStack(spacing: 3) {
+                if radiusTrend != .neutral {
+                    Image(systemName: radiusTrend == .up ? "arrow.up" : "arrow.down")
+                        .poplurIconShader()
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(radiusTrend == .up ? Color.green : Color.red)
+                        .scaleEffect(arrowAnimation ? 1.0 : 0.85)
+                        .opacity(arrowAnimation ? 1.0 : 0.7)
+                        .animation(
+                            .easeInOut(duration: 0.6).repeatForever(autoreverses: true),
+                            value: arrowAnimation
+                        )
+                }
+                Text(formattedRadius)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.7))
+                    .poplurTextShader(intensity: 0.65)
+                    .minimumScaleFactor(0.5)
+                    .lineLimit(1)
+                    .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
+            }
+            .frame(height: CounterSeparatorMetrics.footerHeight, alignment: .top)
         }
         .padding(.horizontal, CounterSeparatorMetrics.horizontalPadding)
         .padding(.vertical, CounterSeparatorMetrics.verticalPadding)
