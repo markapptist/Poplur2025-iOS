@@ -155,7 +155,10 @@ struct Poplur2025App: App {
         WindowGroup {
             NavigationStack {
                 #if DEBUG
-                if let verificationTab = PoplurVerificationLaunch.tab {
+                if ProcessInfo.processInfo.environment["FPS_DEMO"] == "1" {
+                    // Launch straight into the native SpriteKit game (bypasses login) for verification.
+                    PoplurFPSGameSheet()
+                } else if let verificationTab = PoplurVerificationLaunch.tab {
                     HomeView(initialTab: verificationTab)
                         .environmentObject(AuthViewModel(previewAuthenticated: true))
                         .environment(\.layoutPreviewMode, true)

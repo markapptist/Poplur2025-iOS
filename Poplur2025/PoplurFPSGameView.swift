@@ -6,7 +6,8 @@ struct PoplurFPSGameSheet: View {
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
-            _FPSWebView()
+            // Native SpriteKit game (replaces the old WKWebView build).
+            FPSSpriteKitView()
                 .ignoresSafeArea()
 
             Button {
