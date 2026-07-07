@@ -1,3 +1,4 @@
+import Foundation
 import SceneKit
 import GLTFSceneKit
 
@@ -9,7 +10,40 @@ import GLTFSceneKit
 /// Apple's own SceneKit framework (no in-process exception handling can); each caller is
 /// responsible for verifying its specific asset doesn't trigger that before shipping it.
 enum RuntimeGLBLoader {
+    // GLB binary magic: ASCII "glTF"
+    private static let glbMagic: [UInt8] = [0x67, 0x6C, 0x54, 0x46]
+
+    /// Returns false when the file at `url` is NOT a real GLB binary (e.g. a Git LFS pointer stub).
+    /// GLTFSceneSource will SIGSEGV on non-GLB content — this guard prevents that crash.
+    private static func isValidGLB(at url: URL) -> Bool {
+        guard let fh = try? FileHandle(forReadingFrom: url) else { return false }
+        defer { try? fh.close() }
+        let header = fh.readData(ofLength: 4)
+        guard header.count == 4 else { return false }
+        return header.elementsEqual(glbMagic)
+    }
+
+    /// Caches decoded scenes by file path so each GLB is only ever run through GLTFSceneKit
+    /// ONCE. Re-invoking GLTFSceneSource.scene() repeatedly (e.g. a cube-heavy feed that rebuilds
+    /// an SCNView per post/scroll) is the trigger for GLTFSceneKit's intermittent native
+    /// EXC_BAD_ACCESS during decode — a signal we cannot catch in-process. Decoding once and
+    /// vending clones removes that trigger entirely (and is far cheaper).
+    ///
+    /// Callers MUST NOT mutate the returned scene's node graph in place — clone the nodes they
+    /// need (see `CubeTabView.makeRuntimeCubeModelNode`). Main-thread only (SceneKit affinity);
+    /// the cache is a plain dictionary guarded by that contract.
+    private static var sceneCache: [String: SCNScene] = [:]
+
     static func loadScene(from url: URL, label: String) -> SCNScene? {
+        if let cached = sceneCache[url.path] {
+            return cached
+        }
+
+        guard isValidGLB(at: url) else {
+            print("[RuntimeGLBLoader] Skipping \(label) — file is not a valid GLB binary (LFS stub or corrupt)")
+            return nil
+        }
+
         var decodedScene: SCNScene?
         do {
             try PLTryCatch.runCatchingException {
@@ -25,6 +59,7 @@ enum RuntimeGLBLoader {
             print("[RuntimeGLBLoader] Could not decode GLB: \(label) at \(url.path)")
             return nil
         }
+        sceneCache[url.path] = scene
         return scene
     }
 
@@ -108,3 +143,4 @@ enum RuntimeGLBLoader {
         return Bundle.main.url(forResource: assetName, withExtension: "glb")
     }
 }
+

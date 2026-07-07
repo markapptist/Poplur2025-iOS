@@ -46,7 +46,6 @@ final class MarkHeadViewCoordinator: NSObject, AVSpeechSynthesizerDelegate {
     private weak var scnView: SCNView?
     // morphMap: target name → (owning node, index in that node's SCNMorpher)
     private var morphMap: [String: (SCNNode, Int)] = [:]
-    private var fallbackMouthNode: SCNNode?
     private var isLoaded = false
 
     // ── Audio engine ──────────────────────────────────────────────────────
@@ -82,73 +81,65 @@ final class MarkHeadViewCoordinator: NSObject, AVSpeechSynthesizerDelegate {
         engine.attach(player)
     }
 
-    // MARK: Load GLB
+    // MARK: Load model
 
     func load(into view: SCNView) {
         scnView = view
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
-            let scene = self.loadGLB()
+            let scene = self.loadHeadScene()
             DispatchQueue.main.async {
                 if let scene { self.configure(scene, in: view) }
-                else { print("[MarkHeadView] MarkHead_TalkingRig.glb could not be loaded.") }
+                else { print("[MarkHeadView] No head model could be loaded.") }
             }
         }
     }
 
-    private func loadGLB() -> SCNScene? {
-        // GLTFSceneKit raises ObjC exceptions that Swift cannot catch — skip GLB loading
-        // and use the SceneKit-native fallback models directly.
+    private func loadHeadScene() -> SCNScene? {
+        // Use SceneKit-native loaders only — GLTFSceneKit can SIGSEGV on some models,
+        // which is a signal (not an ObjC exception) and cannot be caught in-process.
         for candidate in [("MarkHead", "scn"), ("MarkHead", "dae")] {
             guard let url = Bundle.main.url(forResource: candidate.0, withExtension: candidate.1),
                   let scene = try? SCNScene(url: url, options: [
-                    SCNSceneSource.LoadingOption.convertUnitsToMeters: true,
-                    SCNSceneSource.LoadingOption.convertToYUp: true
+                      SCNSceneSource.LoadingOption.convertUnitsToMeters: true,
+                      SCNSceneSource.LoadingOption.convertToYUp: true
                   ]) else {
                 continue
             }
-            print("[MarkHeadView] Loaded fallback model: \(candidate.0).\(candidate.1)")
+            print("[MarkHeadView] Loaded \(candidate.0).\(candidate.1)")
             return scene
         }
-
-        print("[MarkHeadView] Using procedural fallback head.")
         return makeProceduralFallbackScene()
     }
 
     private func makeProceduralFallbackScene() -> SCNScene {
         let scene = SCNScene()
         let root = SCNNode()
-
         let head = SCNNode(geometry: SCNSphere(radius: 0.42))
         head.geometry?.firstMaterial?.diffuse.contents = UIColor(red: 0.96, green: 0.68, blue: 0.46, alpha: 1)
         head.position = SCNVector3(0, 0.18, 0)
         root.addChildNode(head)
-
         let hair = SCNNode(geometry: SCNSphere(radius: 0.43))
         hair.geometry?.firstMaterial?.diffuse.contents = UIColor(red: 0.24, green: 0.11, blue: 0.04, alpha: 1)
         hair.scale = SCNVector3(1.04, 0.45, 0.96)
         hair.position = SCNVector3(0, 0.46, -0.02)
         root.addChildNode(hair)
-
-        for x in [-0.15, 0.15] {
+        for x in [-0.15, 0.15] as [Float] {
             let eye = SCNNode(geometry: SCNSphere(radius: 0.045))
             eye.geometry?.firstMaterial?.diffuse.contents = UIColor.white
-            eye.position = SCNVector3(Float(x), 0.25, 0.38)
+            eye.position = SCNVector3(x, 0.25, 0.38)
             root.addChildNode(eye)
-
             let pupil = SCNNode(geometry: SCNSphere(radius: 0.022))
             pupil.geometry?.firstMaterial?.diffuse.contents = UIColor.systemBlue
-            pupil.position = SCNVector3(Float(x), 0.25, 0.415)
+            pupil.position = SCNVector3(x, 0.25, 0.415)
             root.addChildNode(pupil)
         }
-
         let mouth = SCNNode(geometry: SCNTorus(ringRadius: 0.075, pipeRadius: 0.009))
         mouth.name = "jawOpen"
         mouth.geometry?.firstMaterial?.diffuse.contents = UIColor(red: 0.20, green: 0.04, blue: 0.03, alpha: 1)
         mouth.scale = SCNVector3(1.2, 0.38, 1)
         mouth.position = SCNVector3(0, 0.03, 0.405)
         root.addChildNode(mouth)
-
         scene.rootNode.addChildNode(root)
         return scene
     }
@@ -158,7 +149,7 @@ final class MarkHeadViewCoordinator: NSObject, AVSpeechSynthesizerDelegate {
         scene.background.contents = UIColor.clear
 
         let root = SCNNode()
-        imported.rootNode.childNodes.forEach { $0.removeFromParentNode(); root.addChildNode($0) }
+        imported.rootNode.childNodes.forEach { root.addChildNode($0.clone()) }
 
         // Discover every morph target across all nodes
         root.enumerateHierarchy { node, _ in
@@ -167,38 +158,6 @@ final class MarkHeadViewCoordinator: NSObject, AVSpeechSynthesizerDelegate {
                 guard let name = target.name, morphMap[name] == nil else { continue }
                 morphMap[name] = (node, i)
             }
-        }
-
-        // Apply PBR skin material for any node whose texture is missing or broken.
-        // SCNScene loads .scn with deleted textures as String/URL refs that render black.
-        root.enumerateHierarchy { node, _ in
-            node.geometry?.materials.forEach { mat in
-                let c = mat.diffuse.contents
-                let needsFallback = c == nil || c is String || c is URL
-                if needsFallback {
-                    mat.lightingModel = .physicallyBased
-                    mat.diffuse.contents   = UIColor(red: 0.97, green: 0.76, blue: 0.56, alpha: 1)
-                    mat.roughness.contents = Float(0.72)
-                    mat.metalness.contents = Float(0.0)
-                    mat.ambientOcclusion.contents = UIColor(white: 0.88, alpha: 1)
-                    mat.normal.contents    = nil
-                }
-            }
-        }
-
-        // If no morph targets were found (static mesh), attach a procedural animated mouth.
-        if morphMap.isEmpty {
-            let pill = SCNCapsule(capRadius: 0.072, height: 0.022)
-            pill.firstMaterial?.lightingModel = .physicallyBased
-            pill.firstMaterial?.diffuse.contents = UIColor(red: 0.14, green: 0.03, blue: 0.02, alpha: 1)
-            pill.firstMaterial?.roughness.contents = Float(0.85)
-            let mouthNode = SCNNode(geometry: pill)
-            mouthNode.name = "_fallbackMouth"
-            mouthNode.eulerAngles.x = Float.pi / 2
-            mouthNode.scale = SCNVector3(1.5, 0.18, 1.0)
-            mouthNode.position = SCNVector3(0, -0.18, 0.46)
-            root.addChildNode(mouthNode)
-            fallbackMouthNode = mouthNode
         }
 
         // Scale + centre the head
@@ -395,11 +354,6 @@ final class MarkHeadViewCoordinator: NSObject, AVSpeechSynthesizerDelegate {
             setMorph("viseme_O",    weight: 0)
         }
 
-        // Fallback mouth: animate scaleY on the procedural capsule when no morph targets exist
-        if let mouth = fallbackMouthNode {
-            let openY = 0.18 + jaw * 0.72
-            mouth.scale = SCNVector3(1.5, openY, 1.0)
-        }
     }
 
     // MARK: Morph helpers
@@ -429,7 +383,6 @@ final class MarkHeadViewCoordinator: NSObject, AVSpeechSynthesizerDelegate {
         lastText = nil
         currentJaw = 0; targetJaw = 0
         resetAllMorphs()
-        fallbackMouthNode?.scale = SCNVector3(1.5, 0.18, 1.0)
         scheduleBlink()
         onFinished()
     }

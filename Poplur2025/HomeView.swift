@@ -509,7 +509,7 @@ struct HomeView: View {
     @State private var postCaptureComposerItem: HomePostCaptureComposerItem? = nil
     @State private var showCameraRollWindow = false
     @State private var showGames = false
-    @StateObject private var deviceVolumeObserver = DeviceVolumeObserver()
+    @EnvironmentObject private var deviceVolumeObserver: DeviceVolumeObserver
 
     // Post count state (for displaying user's total posts)
     @State private var userPostCount: Int = 0
@@ -524,7 +524,8 @@ struct HomeView: View {
     }
 
     private var isCubeVisibleOnCurrentRoute: Bool {
-        [.map, .record, .feed, .profile].contains(selectedTab)
+        // Logged-in cube must appear on every top-level page (was missing on .settings).
+        [.map, .record, .feed, .profile, .settings].contains(selectedTab)
     }
 
     private var isLowerCubeHitAreaActive: Bool {
@@ -1413,7 +1414,7 @@ struct HomeView: View {
     private func rotateCube(to newTab: AppTab, direction: RotationDirection) {
         let targetYaw = yawForTab(newTab)
         animateYaw(to: targetYaw, duration: 0.45, direction: direction)
-        stripeCoordinator.trigger { selectedTab = newTab }
+        selectedTab = newTab
     }
 
     @MainActor
@@ -1676,6 +1677,7 @@ struct HomeView: View {
                     feedTabContent
                 }
             }
+            .transaction { $0.animation = nil }
 
             HiddenSystemVolumeBridge()
                 .frame(width: 1, height: 1)

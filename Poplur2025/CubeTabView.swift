@@ -11,9 +11,143 @@ private let isRunningInPreviews: Bool = {
 
 private let cubeSceneFaceTabs: [AppTab] = [.feed, .profile, .map, .record]
 
-// Gold GLB crashes (SIGSEGV in SCNSceneSource) — its runtimeModelAssetName returns nil so
-// it uses the procedural cube. All other skin GLBs are enabled.
+// Cube models load via SceneKit's native .dae importer (assimp-converted from the trimesh GLBs),
+// NOT GLTFSceneKit — whose decoder SIGSEGVs on those GLBs (missing normals + 32-bit indices trip
+// SCNSceneSource's C3DConvexPolyhedron path, an uncatchable native crash).
 private let runtimeCubeGLBLoadingEnabled = true
+
+// Parse each cube .glb ONCE into a native SCNGeometry node and reuse clones — a scrolling,
+// cube-heavy feed rebuilds an SCNView per post, so re-parsing every time is wasteful.
+// Main-thread only (all callers run makeScene() on the main queue).
+private var cubeModelNodeCache: [String: SCNNode] = [:]
+
+/// Returns a cached SCNNode for a cube .glb, parsing it natively on first use.
+private func cachedCubeGeometryNode(from url: URL) -> SCNNode? {
+    if let cached = cubeModelNodeCache[url.path] { return cached }
+    guard let node = parseCubeGLBNode(from: url) else { return nil }
+    cubeModelNodeCache[url.path] = node
+    return node
+}
+
+/// Builds a cube's SCNNode by parsing the GLB binary DIRECTLY into a native SCNGeometry — no
+/// SceneKit importer involved. GLTFSceneKit's GLB decoder SIGSEGVs on these trimesh cubes (an
+/// uncatchable native signal), and SceneKit's Collada importer rejects the assimp .dae, so we
+/// read POSITION/TEXCOORD_0/indices straight from the buffer and compute normals ourselves.
+/// The app overrides the material texture afterward (prepareRuntimeCubeMaterials).
+private func parseCubeGLBNode(from url: URL) -> SCNNode? {
+    guard let data = try? Data(contentsOf: url), data.count > 12 else { return nil }
+    func u32(_ o: Int) -> UInt32 { data.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: o, as: UInt32.self) } }
+    guard u32(0) == 0x4654_6C67 else { return nil } // 'glTF' little-endian
+    let total = min(Int(u32(8)), data.count)
+    var jsonData: Data?, binOffset: Int?, offset = 12
+    while offset + 8 <= total {
+        let chunkLen = Int(u32(offset)); let chunkType = u32(offset + 4); offset += 8
+        guard offset + chunkLen <= data.count else { break }
+        if chunkType == 0x4E4F_534A { jsonData = data.subdata(in: offset..<(offset + chunkLen)) }
+        else if chunkType == 0x004E_4942 { binOffset = offset }
+        offset += chunkLen
+    }
+    guard let jsonData, let binOffset,
+          let js = (try? JSONSerialization.jsonObject(with: jsonData)) as? [String: Any],
+          let accessors = js["accessors"] as? [[String: Any]],
+          let bufferViews = js["bufferViews"] as? [[String: Any]],
+          let meshes = js["meshes"] as? [[String: Any]],
+          let primitive = (meshes.first?["primitives"] as? [[String: Any]])?.first,
+          let attributes = primitive["attributes"] as? [String: Any],
+          let positionIdx = attributes["POSITION"] as? Int,
+          let indicesIdx = primitive["indices"] as? Int else { return nil }
+
+    func slice(_ i: Int) -> (offset: Int, count: Int, comp: Int)? {
+        guard i >= 0, i < accessors.count,
+              let bvIdx = accessors[i]["bufferView"] as? Int, bvIdx >= 0, bvIdx < bufferViews.count,
+              let count = accessors[i]["count"] as? Int,
+              let comp = accessors[i]["componentType"] as? Int else { return nil }
+        let bvOff = (bufferViews[bvIdx]["byteOffset"] as? Int) ?? 0
+        let aOff = (accessors[i]["byteOffset"] as? Int) ?? 0
+        return (binOffset + bvOff + aOff, count, comp)
+    }
+    func floats(_ off: Int, _ n: Int) -> [Float]? {
+        let bc = n * 4; guard off >= 0, off + bc <= data.count else { return nil }
+        var out = [Float](repeating: 0, count: n)
+        out.withUnsafeMutableBytes { data.copyBytes(to: $0.bindMemory(to: UInt8.self), from: off..<(off + bc)) }
+        return out
+    }
+
+    guard let pos = slice(positionIdx), pos.comp == 5126, let pf = floats(pos.offset, pos.count * 3) else { return nil }
+    let vertexCount = pos.count
+    var positions = [SCNVector3](); positions.reserveCapacity(vertexCount)
+    for v in 0..<vertexCount { positions.append(SCNVector3(pf[v * 3], pf[v * 3 + 1], pf[v * 3 + 2])) }
+
+    guard let ix = slice(indicesIdx) else { return nil }
+    var indices = [Int32]()
+    if ix.comp == 5125 { // UNSIGNED_INT
+        let bc = ix.count * 4; guard ix.offset + bc <= data.count else { return nil }
+        var raw = [UInt32](repeating: 0, count: ix.count)
+        raw.withUnsafeMutableBytes { data.copyBytes(to: $0.bindMemory(to: UInt8.self), from: ix.offset..<(ix.offset + bc)) }
+        indices = raw.map { Int32(truncatingIfNeeded: $0) }
+    } else if ix.comp == 5123 { // UNSIGNED_SHORT
+        let bc = ix.count * 2; guard ix.offset + bc <= data.count else { return nil }
+        var raw = [UInt16](repeating: 0, count: ix.count)
+        raw.withUnsafeMutableBytes { data.copyBytes(to: $0.bindMemory(to: UInt8.self), from: ix.offset..<(ix.offset + bc)) }
+        indices = raw.map { Int32($0) }
+    } else { return nil }
+
+    var uvs = [CGPoint](repeating: .zero, count: vertexCount)
+    if let uvIdx = attributes["TEXCOORD_0"] as? Int, let uv = slice(uvIdx), uv.comp == 5126,
+       uv.count == vertexCount, let uf = floats(uv.offset, vertexCount * 2) {
+        for v in 0..<vertexCount { uvs[v] = CGPoint(x: CGFloat(uf[v * 2]), y: CGFloat(1 - uf[v * 2 + 1])) }
+    }
+
+    var normals = [SCNVector3](repeating: SCNVector3(0, 0, 0), count: vertexCount)
+    var t = 0
+    while t + 2 < indices.count {
+        let a = Int(indices[t]), b = Int(indices[t + 1]), c = Int(indices[t + 2]); t += 3
+        guard a < vertexCount, b < vertexCount, c < vertexCount else { continue }
+        let pa = positions[a], pb = positions[b], pc = positions[c]
+        let nx = (pb.y - pa.y) * (pc.z - pa.z) - (pb.z - pa.z) * (pc.y - pa.y)
+        let ny = (pb.z - pa.z) * (pc.x - pa.x) - (pb.x - pa.x) * (pc.z - pa.z)
+        let nz = (pb.x - pa.x) * (pc.y - pa.y) - (pb.y - pa.y) * (pc.x - pa.x)
+        for i in [a, b, c] { normals[i] = SCNVector3(normals[i].x + nx, normals[i].y + ny, normals[i].z + nz) }
+    }
+    normals = normals.map { n in
+        let len = (n.x * n.x + n.y * n.y + n.z * n.z).squareRoot()
+        return len > 0 ? SCNVector3(n.x / len, n.y / len, n.z / len) : SCNVector3(0, 1, 0)
+    }
+
+    let geometry = SCNGeometry(sources: [
+        SCNGeometrySource(vertices: positions),
+        SCNGeometrySource(normals: normals),
+        SCNGeometrySource(textureCoordinates: uvs)
+    ], elements: [SCNGeometryElement(indices: indices, primitiveType: .triangles)])
+    let material = SCNMaterial()
+    // These GLBs embed their baseColor texture directly (images[].bufferView, no external URI) —
+    // pull it out here so prepareRuntimeCubeMaterials' `diffuseTexture ?? material.diffuse.contents`
+    // fallback has something real to fall back to instead of SCNMaterial's blank default.
+    if let embeddedDiffuse = embeddedBaseColorImage(js: js, data: data, binOffset: binOffset) {
+        material.diffuse.contents = embeddedDiffuse
+    }
+    geometry.firstMaterial = material
+    return SCNNode(geometry: geometry)
+}
+
+/// Extracts the glTF material's baseColorTexture image, which these GLBs embed inline
+/// (images[].bufferView pointing into the binary chunk) rather than referencing an external file.
+private func embeddedBaseColorImage(js: [String: Any], data: Data, binOffset: Int) -> UIImage? {
+    guard let materials = js["materials"] as? [[String: Any]],
+          let pbr = materials.first?["pbrMetallicRoughness"] as? [String: Any],
+          let baseColorTexture = pbr["baseColorTexture"] as? [String: Any],
+          let textureIdx = baseColorTexture["index"] as? Int,
+          let textures = js["textures"] as? [[String: Any]], textureIdx >= 0, textureIdx < textures.count,
+          let imageIdx = textures[textureIdx]["source"] as? Int,
+          let images = js["images"] as? [[String: Any]], imageIdx >= 0, imageIdx < images.count,
+          let bvIdx = images[imageIdx]["bufferView"] as? Int,
+          let bufferViews = js["bufferViews"] as? [[String: Any]], bvIdx >= 0, bvIdx < bufferViews.count,
+          let byteLength = bufferViews[bvIdx]["byteLength"] as? Int else { return nil }
+    let byteOffset = (bufferViews[bvIdx]["byteOffset"] as? Int) ?? 0
+    let start = binOffset + byteOffset
+    guard start >= 0, start + byteLength <= data.count else { return nil }
+    return UIImage(data: data.subdata(in: start..<(start + byteLength)))
+}
 
 
 private enum CubeFaceImageCache {
@@ -755,21 +889,11 @@ private struct CubeSceneView: UIViewRepresentable {
             scene.rootNode.addChildNode(omniNode)
         }
 
-        let generatedBox: SCNBox?
-        let node: SCNNode
-        if let runtimeModelNode = makeRuntimeCubeModelNode() {
-            generatedBox = nil
-            node = runtimeModelNode
-        } else {
-            // Lean fallback cube geometry with small chamfer (lower tessellation).
-            let box = SCNBox(width: 1.3, height: 1.3, length: 1.3, chamferRadius: 0.25)
-            box.chamferSegmentCount = 8
-            generatedBox = box
-            node = SCNNode(geometry: box)
+        guard let node = makeRuntimeCubeModelNode() else {
+            print("[CubeTabView] Themed cube GLB not loaded (LFS stubs not pulled — run git lfs pull)")
+            return scene
         }
         node.name = "cube"
-        // Removed shadow casting on cube
-        // node.castsShadow = true
         scene.rootNode.addChildNode(node)
 
         node.simdOrientation = simd_quatf(angle: initialYaw(for: selectedTab), axis: SIMD3<Float>(0, 1, 0))
@@ -786,46 +910,51 @@ private struct CubeSceneView: UIViewRepresentable {
             node.runAction(spin, forKey: "previewSpin")
         }
 
-        if let box = generatedBox {
-            var mats = makeMaterials(baseColor: baseColor)
-            // SCNBox with chamferRadius generates 26 geometry elements (6 faces + 12 edges + 8 corners).
-            // Any element beyond the materials array cycles, but chamfer UVs sample black tile corners.
-            // Fill all extra slots with a solid edge material so no chamfer ever shows black.
-            let elementCount = box.elementCount
-            if elementCount > mats.count {
-                let edgeMat = makeChamferEdgeMaterial()
-                while mats.count < elementCount { mats.append(edgeMat) }
-            }
-            box.materials = mats
-        }
-        // Cache materials for in-place mutation during updates
-        // Not here because coordinator is unavailable - handled in makeUIView
-
         return scene
+    }
+
+    private func loadLoginCubeDaeNode() -> SCNNode? {
+        // Try LoginCube/ subdirectory first, then bundle root (matches LoginCubeView.candidateSubdirectories)
+        let url = Bundle.main.url(forResource: "poplr_login_cube_equal_faces", withExtension: "dae", subdirectory: "LoginCube")
+               ?? Bundle.main.url(forResource: "poplr_login_cube_equal_faces", withExtension: "dae")
+        guard let url else {
+            print("[CubeTabView] poplr_login_cube_equal_faces.dae not found in bundle")
+            return nil
+        }
+        guard let daeScene = try? SCNScene(url: url, options: nil) else {
+            print("[CubeTabView] Failed to parse \(url.lastPathComponent)")
+            return nil
+        }
+        let container = SCNNode()
+        for child in daeScene.rootNode.childNodes {
+            child.removeFromParentNode()
+            container.addChildNode(child)
+        }
+        guard !container.childNodes.isEmpty else {
+            print("[CubeTabView] poplr_login_cube_equal_faces.dae has no child nodes")
+            return nil
+        }
+        RuntimeGLBLoader.normalize(container)
+        return container
     }
 
     private func makeRuntimeCubeModelNode() -> SCNNode? {
         guard runtimeCubeGLBLoadingEnabled,
               let assetName = currentSkin.runtimeModelAssetName else { return nil }
 
-        let loadedScene: SCNScene
-        if let glbURL = runtimeCubeModelURL(named: assetName, fileExtensions: ["glb"]),
-           let glbScene = loadRuntimeGLBScene(from: glbURL, assetName: assetName) {
-            loadedScene = glbScene
-        } else if let url = runtimeCubeModelURL(named: assetName, fileExtensions: ["usdz", "dae"]),
-            let daeScene = try? SCNScene(url: url, options: nil) {
-            loadedScene = daeScene
-        } else {
-            print("[CubeSceneView] Missing runtime cube model asset: \(assetName)")
-            return nil
-        }
-
         let container = SCNNode()
         let modelContent = SCNNode()
-        for child in loadedScene.rootNode.childNodes {
-            child.removeFromParentNode()
-            modelContent.addChildNode(child)
+        // Build the cube's geometry by parsing the .glb binary directly into a native SCNGeometry.
+        // GLTFSceneKit's GLB decoder SIGSEGVs on these trimesh cubes (uncatchable native signal) and
+        // SceneKit's Collada importer rejects the assimp .dae — a hand-built SCNGeometry needs no
+        // importer, so it can't crash or silently fail. Clone (don't reparent): the cached node is
+        // shared across every cube instance.
+        guard let glbURL = runtimeCubeModelURL(named: assetName, fileExtensions: ["glb"]),
+              let cubeNode = cachedCubeGeometryNode(from: glbURL) else {
+            print("[CubeSceneView] Could not load cube model: \(assetName)")
+            return nil
         }
+        modelContent.addChildNode(cubeNode.clone())
         guard !modelContent.childNodes.isEmpty else { return nil }
 
         normalizeRuntimeCubeModel(modelContent)
