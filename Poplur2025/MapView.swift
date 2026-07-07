@@ -4004,32 +4004,20 @@ struct MapViewProduction: View {
     @ObservedObject private var cubeSkinStore = CubeSkinStore.shared
 
     @AppStorage("poplur_use2DMap") private var use2DMap: Bool = false
-    // Custom map theme disabled — was causing crashes on some devices
-    private let customMapTheme: Bool = false
+    @AppStorage("poplur_customMapTheme") private var customMapTheme: Bool = false
     private var activePitch: CGFloat { use2DMap ? 0 : fixedPitchAlt }
 
     private var themedMapStyle: MapStyle {
-        if use2DMap { return .standard }
-        guard customMapTheme else {
-            return .hybrid(elevation: .realistic, showsTraffic: false)
-        }
-        switch cubeSkinStore.current {
-        case .ice, .rubber:
-            return .standard(elevation: .realistic)
-        case .camo, .chocolate:
-            return .standard(elevation: .realistic)
-        case .gold, .rainbow, .sparklePink, .toy, .standard:
-            return .hybrid(elevation: .realistic, showsTraffic: false)
-        }
+        use2DMap ? .standard : .hybrid(elevation: .realistic, showsTraffic: false)
     }
 
-    private let focusedLocationDistance: CLLocationDistance = 120
+    private let focusedLocationDistance: CLLocationDistance = 50
 
-    @State private var fixedDistanceAlt: CLLocationDistance = 120
+    @State private var fixedDistanceAlt: CLLocationDistance = 500
     @State private var camera: MapCameraPosition = .camera(
         MapCamera(
             centerCoordinate: CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194), // SF default, will update to user location
-            distance: 120,
+            distance: 500,
             heading: 0,
             pitch: 60
         )
@@ -4116,14 +4104,14 @@ struct MapViewProduction: View {
     @State private var shownPostCountryFlag: String? = nil
     
     // Zoom slider state
-    @State private var zoomLevel: Double = 120
+    @State private var zoomLevel: Double = 50
     
     // Confetti system for trending pins
     @StateObject private var trendingTracker = PinTrendingTracker()
     @State private var showConfetti: Bool = true // Toggle confetti on/off
     private let userLocationPinID = UUID() // Stable ID for user location trending pin
     @State private var cubeHoldStartY: CGFloat? = nil // Track cube hold drag start position
-    @State private var initialZoomLevel: Double = 120
+    @State private var initialZoomLevel: Double = 50
     @State private var showIndoorMap: Bool = false
     @State private var indoorVenues: [MappedinVenue] = []
     @State private var selectedVenueSlug: String? = nil
@@ -5082,8 +5070,8 @@ struct MapViewProduction: View {
             .onChanged { _ in noteInteraction() }
     }
 
-    // Pinch sensitivity multiplier — 1.0 = default MapKit feel, 2.0+ = very fast
-    private let pinchAmplification: Double = 2.2
+    // Pinch sensitivity multiplier — 1.0 = default MapKit feel, higher = more exaggerated
+    private let pinchAmplification: Double = 5.5
 
     @State private var pinchBaseDistance: Double? = nil
 
@@ -6896,9 +6884,10 @@ struct MapViewProduction: View {
         showConfetti = false
         isCameraTransitionInProgress = true
 
+        // Start at world view, then zoom in dramatically
         camera = .camera(MapCamera(
             centerCoordinate: coordinate,
-            distance: 10_000,
+            distance: 25_000_000,
             heading: 0,
             pitch: 0
         ))
@@ -6910,7 +6899,7 @@ struct MapViewProduction: View {
             isInitialMapLaunchPreparing = false
         }
 
-        try? await Task.sleep(nanoseconds: 240_000_000)
+        try? await Task.sleep(nanoseconds: 600_000_000)
         guard !Task.isCancelled else { return }
 
         currentCity = cityName
@@ -6919,7 +6908,7 @@ struct MapViewProduction: View {
         aiRecommendation = launchInsight.subtitle
         trendPopObjects = buildTrendPopObjects(center: coordinate, cityName: cityName, insight: launchInsight)
 
-        withAnimation(.easeInOut(duration: 2.2)) {
+        withAnimation(.easeInOut(duration: 3.5)) {
             camera = .camera(MapCamera(
                 centerCoordinate: coordinate,
                 distance: focusedLocationDistance,
