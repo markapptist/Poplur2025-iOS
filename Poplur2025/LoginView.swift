@@ -2,6 +2,7 @@ import SwiftUI
 import SpriteKit
 import UIKit
 import FirebaseAuth
+import LocalAuthentication
 
 // MARK: - SpriteKit Scene for Login visuals (pink ticket, dots, scallop, logo)
 
@@ -173,60 +174,65 @@ struct LoginView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var email = ""
     @State private var password = ""
-    @State private var isLoginFailed = false
+    @State private var loginErrorMessage: String? = nil
     @State private var isLoading = false
+    @State private var isBiometricLoading = false
     @State private var navigateToSignup = false
-    @State private var logoFloatOffset: CGFloat = 0
+    @State private var biometricAvailable = false
+    @State private var biometricType: LABiometryType = .none
+    @State private var hasSavedCredentials = false
+    @State private var showEnableFaceIDSheet = false
     @FocusState private var focusedField: Field?
 
-    enum Field {
-        case email, password
+    enum Field { case email, password }
+
+    private var biometricIcon: String {
+        biometricType == .touchID ? "touchid" : "faceid"
     }
+    private var biometricLabel: String {
+        biometricType == .touchID ? "Touch ID" : "Face ID"
+    }
+    private var showFaceIDHero: Bool { biometricAvailable && hasSavedCredentials }
 
     var body: some View {
         ZStack {
             Color.white.ignoresSafeArea()
-
             AuthConfettiBackground()
 
             VStack {
                 Spacer(minLength: 24)
 
-                // Ticket area backed by SpriteKit visuals
                 ZStack(alignment: .top) {
-                    // SpriteKit scene: pink ticket card, dots, scallop (no logo — shown in SwiftUI below)
                     SpriteView(scene: makeLoginScene())
                         .background(Color.clear)
                         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                         .shadow(color: Color.black.opacity(0.08), radius: 16, x: 0, y: 8)
 
-                    // Unified content overlay: floating logo → cube (back) → form fields
                     VStack(spacing: 0) {
-                        // Floating Poplur logo
+                        // Logo
                         Image("logo")
                             .resizable()
                             .scaledToFit()
                             .frame(width: 110, height: 110)
                             .padding(.top, 20)
-                            .offset(y: logoFloatOffset)
-                            .onAppear {
-                                withAnimation(
-                                    .easeInOut(duration: 1.3)
-                                    .repeatForever(autoreverses: true)
-                                ) { logoFloatOffset = -10 }
-                            }
 
                         Spacer().frame(height: 10)
 
-                        // Login cube — tap to go back to Welcome
-                        LoginCubeView(onTap: { stripeCoordinator.trigger { dismiss() } })
+                        // Cube — tap to go back
+                        LoginCubeView(onTap: { dismiss() })
                             .frame(width: 200, height: 200)
 
                         Spacer().frame(height: 14)
 
-                        // Form fields
                         VStack(alignment: .leading, spacing: 20) {
-                            // Email field row with icon + underline
+
+                            // ── Face ID hero ──────────────────────────────────
+                            if showFaceIDHero {
+                                faceIDHeroButton
+                                orDivider
+                            }
+
+                            // ── Email field ───────────────────────────────────
                             VStack(alignment: .leading, spacing: 6) {
                                 HStack(spacing: 12) {
                                     Image(systemName: "at.circle")
@@ -242,27 +248,22 @@ struct LoginView: View {
                                         .tint(.white)
                                         .focused($focusedField, equals: .email)
                                 }
-                                Rectangle()
-                                    .fill(Color.white.opacity(0.9))
-                                    .frame(height: 1)
+                                Rectangle().fill(Color.white.opacity(0.9)).frame(height: 1)
                             }
 
-                            // Password field row with icon + "FORGOT" + underline
+                            // ── Password field ────────────────────────────────
                             VStack(alignment: .leading, spacing: 6) {
                                 HStack(alignment: .firstTextBaseline, spacing: 12) {
                                     Image(systemName: "lock")
                                         .poplurIconShader()
                                         .font(.system(size: 18, weight: .semibold))
                                         .foregroundColor(.white.opacity(0.95))
-
                                     SecureField("Password", text: $password)
-                                        .textContentType(.oneTimeCode) // suppress strong password banner
+                                        .textContentType(.oneTimeCode)
                                         .foregroundColor(.white)
                                         .tint(.white)
                                         .focused($focusedField, equals: .password)
-
                                     Spacer()
-
                                     Button(action: forgotPassword) {
                                         Text("FORGOT")
                                             .font(.system(size: 12, weight: .bold, design: .rounded))
@@ -271,31 +272,24 @@ struct LoginView: View {
                                     }
                                     .buttonStyle(.plain)
                                 }
-                                Rectangle()
-                                    .fill(Color.white.opacity(0.9))
-                                    .frame(height: 1)
+                                Rectangle().fill(Color.white.opacity(0.9)).frame(height: 1)
                             }
 
-                            if isLoginFailed {
-                                Text("Invalid email or password. Please try again.")
+                            if let msg = loginErrorMessage {
+                                Text(msg)
                                     .font(.footnote)
                                     .foregroundColor(.white)
                             }
 
-                            // Sign In Button
-                            Button(action: {
-                                hideKeyboard()
-                                loginUser()
-                            }) {
+                            // ── Sign In button ────────────────────────────────
+                            Button(action: { hideKeyboard(); loginUser() }) {
                                 ZStack {
                                     Capsule()
                                         .fill(Color.white)
                                         .shadow(color: Color.black.opacity(0.12), radius: 10, x: 0, y: 6)
                                     HStack(spacing: 8) {
                                         if isLoading {
-                                            ProgressView()
-                                                .progressViewStyle(.circular)
-                                                .tint(.black)
+                                            ProgressView().progressViewStyle(.circular).tint(.black)
                                         }
                                         Text("Sign In")
                                             .font(.system(.headline, design: .rounded).weight(.bold))
@@ -305,11 +299,12 @@ struct LoginView: View {
                                 }
                                 .frame(maxWidth: .infinity)
                             }
-                            .disabled(isLoading || email.isEmpty || password.isEmpty)
+                            .disabled(isLoading || isBiometricLoading || email.isEmpty || password.isEmpty)
 
                             Button {
                                 hideKeyboard()
-                                stripeCoordinator.trigger { navigateToSignup = true }
+                                // No stripe transition on navigation — registration-only.
+                                navigateToSignup = true
                             } label: {
                                 Text("New here? Create an account")
                                     .font(.system(size: 14, weight: .black, design: .rounded))
@@ -329,29 +324,146 @@ struct LoginView: View {
                     .padding(.bottom, 24)
                 }
                 .frame(maxWidth: 600)
-                .frame(height: 640)
+                .frame(height: showFaceIDHero ? 700 : 640)
                 .padding(.horizontal, 24)
 
                 Spacer(minLength: 24)
             }
         }
-        .onTapGesture {
-            hideKeyboard()
+        .overlay(alignment: .bottom) {
+            AuthAIGuide(screen: .login)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 20)
         }
+        .sheet(isPresented: $showEnableFaceIDSheet) {
+            EnableFaceIDSheet(email: email, onEnable: {
+                PoplurKeychain.saveCredentials(email: email, password: password)
+                hasSavedCredentials = PoplurKeychain.hasCredentials
+            })
+            .presentationDetents([.height(300)])
+        }
+        .onAppear {
+            checkBiometrics()
+            // Auto-trigger Face ID if credentials are saved
+            if PoplurKeychain.hasCredentials {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    attemptBiometricSignIn()
+                }
+            }
+        }
+        .onTapGesture { hideKeyboard() }
         .navigationBarTitleDisplayMode(.inline)
         .onChange(of: auth.isAuthenticated) { _, authed in
-            if authed {
-                dismiss()
-            }
+            if authed { dismiss() }
         }
     }
 
-    // Build a scene sized exactly to the ticket card frame (600x640 max, but we use container size)
-    private func makeLoginScene() -> SKScene {
-        let sceneSize = CGSize(width: 600, height: 640)
-        let scene = LoginScene(size: sceneSize)
-        scene.scaleMode = .resizeFill
-        return scene
+    // MARK: - Face ID hero
+
+    @ViewBuilder
+    private var faceIDHeroButton: some View {
+        Button(action: attemptBiometricSignIn) {
+            HStack(spacing: 14) {
+                ZStack {
+                    Circle()
+                        .fill(Color.white.opacity(0.20))
+                        .frame(width: 52, height: 52)
+                    if isBiometricLoading {
+                        ProgressView().progressViewStyle(.circular).tint(.white)
+                    } else {
+                        Image(systemName: biometricIcon)
+                            .font(.system(size: 26, weight: .light))
+                            .foregroundColor(.white)
+                    }
+                }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Sign in with \(biometricLabel)")
+                        .font(.system(size: 16, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                    if let saved = PoplurKeychain.savedEmail {
+                        Text(saved)
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .foregroundColor(.white.opacity(0.72))
+                            .lineLimit(1)
+                    }
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.45))
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Color.white.opacity(0.18))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.25), lineWidth: 1)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(isBiometricLoading)
+
+        // Remove saved credentials link
+        Button {
+            PoplurKeychain.clearSavedCredentials()
+            hasSavedCredentials = false
+        } label: {
+            Text("Use a different account")
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundColor(.white.opacity(0.55))
+                .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private var orDivider: some View {
+        HStack(spacing: 10) {
+            Rectangle().fill(Color.white.opacity(0.28)).frame(height: 0.5)
+            Text("or sign in with email")
+                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .foregroundColor(.white.opacity(0.55))
+                .fixedSize()
+            Rectangle().fill(Color.white.opacity(0.28)).frame(height: 0.5)
+        }
+    }
+
+    // MARK: - Biometrics
+
+    private func checkBiometrics() {
+        let ctx = LAContext()
+        var error: NSError?
+        let canEval = ctx.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error)
+        biometricType = ctx.biometryType
+        biometricAvailable = canEval
+        hasSavedCredentials = PoplurKeychain.hasCredentials
+        if let saved = PoplurKeychain.savedEmail {
+            email = saved
+        }
+    }
+
+    func attemptBiometricSignIn() {
+        guard let savedEmail = PoplurKeychain.savedEmail,
+              let savedPassword = PoplurKeychain.retrievePassword(for: savedEmail) else { return }
+        let ctx = LAContext()
+        isBiometricLoading = true
+        ctx.evaluatePolicy(
+            .deviceOwnerAuthenticationWithBiometrics,
+            localizedReason: "Sign in to Poplur"
+        ) { success, _ in
+            DispatchQueue.main.async {
+                if success {
+                    self.email = savedEmail
+                    self.password = savedPassword
+                    self.loginUser()
+                } else {
+                    self.isBiometricLoading = false
+                }
+            }
+        }
     }
 
     // MARK: - Actions
@@ -359,46 +471,109 @@ struct LoginView: View {
     func loginUser() {
         guard !email.isEmpty, !password.isEmpty else { return }
         isLoading = true
-        isLoginFailed = false
+        isBiometricLoading = false
+        loginErrorMessage = nil
 
         Auth.auth().signIn(withEmail: email, password: password) { _, error in
             isLoading = false
             if let error = error {
-                print("Login failed with error: \(error.localizedDescription)")
-                self.isLoginFailed = true
+                print("Login failed: \(error.localizedDescription)")
+                self.loginErrorMessage = error.localizedDescription
             } else {
-                // Root NavigationStack (in App) will switch to HomeView automatically via AuthViewModel
-                self.isLoginFailed = false
+                // Offer Face ID save if biometrics available and nothing saved yet
+                if self.biometricAvailable && !self.hasSavedCredentials {
+                    self.showEnableFaceIDSheet = true
+                }
             }
         }
     }
 
     func forgotPassword() {
-        guard !email.isEmpty else {
-            // Optionally prompt user to enter email first
-            focusedField = .email
-            return
-        }
-        Auth.auth().sendPasswordReset(withEmail: email) { error in
-            if let error = error {
-                print("Password reset failed: \(error.localizedDescription)")
-            } else {
-                print("Password reset email sent.")
-            }
-        }
+        guard !email.isEmpty else { focusedField = .email; return }
+        Auth.auth().sendPasswordReset(withEmail: email) { _ in }
     }
 
     private func hideKeyboard() {
         focusedField = nil
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
+
+    private func makeLoginScene() -> SKScene {
+        let scene = LoginScene(size: CGSize(width: 600, height: 640))
+        scene.scaleMode = .resizeFill
+        return scene
+    }
+}
+
+// MARK: - Enable Face ID prompt sheet
+
+private struct EnableFaceIDSheet: View {
+    let email: String
+    let onEnable: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    private let brand = Color(red: 1, green: 0.18, blue: 0.59)
+
+    private var biometricIcon: String {
+        let ctx = LAContext()
+        var err: NSError?
+        ctx.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &err)
+        return ctx.biometryType == .touchID ? "touchid" : "faceid"
+    }
+
+    var body: some View {
+        VStack(spacing: 22) {
+            Spacer()
+
+            ZStack {
+                Circle().fill(brand.opacity(0.12)).frame(width: 72, height: 72)
+                Image(systemName: biometricIcon)
+                    .font(.system(size: 34, weight: .light))
+                    .foregroundColor(brand)
+            }
+
+            VStack(spacing: 6) {
+                Text("Enable Face ID?")
+                    .font(.system(size: 20, weight: .black, design: .rounded))
+                    .foregroundColor(.black)
+                Text("Sign in faster next time as \(email)")
+                    .font(.system(size: 14, weight: .medium, design: .rounded))
+                    .foregroundColor(.black.opacity(0.55))
+                    .multilineTextAlignment(.center)
+            }
+
+            VStack(spacing: 10) {
+                Button {
+                    onEnable()
+                    dismiss()
+                } label: {
+                    Text("Enable")
+                        .font(.system(size: 16, weight: .black, design: .rounded))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(Capsule().fill(brand))
+                }
+                .buttonStyle(.plain)
+
+                Button { dismiss() } label: {
+                    Text("Not Now")
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundColor(.black.opacity(0.5))
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 32)
+
+            Spacer()
+        }
+        .background(Color.white)
+    }
 }
 
 struct LoginView_Previews: PreviewProvider {
     static var previews: some View {
-        NavigationStack {
-            LoginView()
-        }
-        .preferredColorScheme(.light)
+        NavigationStack { LoginView() }
+            .preferredColorScheme(.light)
     }
 }

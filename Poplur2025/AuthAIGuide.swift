@@ -42,6 +42,7 @@ final class AuthAIGuideVM: ObservableObject {
     private let screen: AuthAIScreen
     private var typingTask: Task<Void, Never>?
     private let synthesizer = AVSpeechSynthesizer()
+    private var hasGreeted = false
 
     init(screen: AuthAIScreen) {
         self.screen = screen
@@ -64,8 +65,11 @@ final class AuthAIGuideVM: ObservableObject {
     }
 
     func startGreeting() {
-        guard displayedText.isEmpty else { return }
-        typeText(screen.greeting, delay: 22_000_000)
+        // Heard, not seen: speak the greeting once. No typewriter — appending to displayedText
+        // per character re-rendered the confetti-heavy pre-login view ~150x for nothing (lag).
+        guard !hasGreeted else { return }
+        hasGreeted = true
+        speak(screen.greeting)
     }
 
     func send() {

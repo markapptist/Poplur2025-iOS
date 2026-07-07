@@ -61,8 +61,27 @@ private final class WelcomeScene: SKScene {
     private let defaultBackgroundName = "slideup"
     private let logoAssetName = "logo"
 
-    // Vertical offset to place the button relative to center (negative moves up, positive down)
-    private let buttonVerticalOffset: CGFloat = -120
+    // Layout is anchored from the bottom of the screen (matching the login cube, which is
+    // pinned 8pt above the bottom edge) so the gap between logo/buttons/cube stays equal
+    // regardless of device height, rather than mixing top-, center-, and bottom-anchored math.
+    // cube: 200pt tall, 8pt bottom padding → cube spans [8, 208] from the bottom.
+    private let sectionSpacing: CGFloat = 28   // equal gap: logo↔buttons and buttons↔cube
+    private let buttonGap: CGFloat = 16        // tighter gap within the Sign In / Sign Up pair
+    private let buttonSize = CGSize(width: 220, height: 52)
+    private let logoSize: CGFloat = 200
+
+    private var signUpCenterY: CGFloat {
+        let bottom = 208 + sectionSpacing
+        return bottom + buttonSize.height / 2
+    }
+    private var signInCenterY: CGFloat {
+        let bottom = signUpCenterY + buttonSize.height / 2 + buttonGap
+        return bottom + buttonSize.height / 2
+    }
+    private var logoCenterY: CGFloat {
+        let bottom = signInCenterY + buttonSize.height / 2 + sectionSpacing
+        return bottom + logoSize / 2
+    }
 
     // Track size during animation to avoid size churn
     private var isAnimatingBackground = false
@@ -272,7 +291,7 @@ private final class WelcomeScene: SKScene {
             let fadeSequence = SKAction.sequence([jumpToHalf, fadeToFull])
 
             // Logo drops in from above with a small spring overshoot, in parallel with the fade
-            let restPosition = CGPoint(x: size.width / 2, y: size.height - 240)
+            let restPosition = CGPoint(x: size.width / 2, y: logoCenterY)
             let dropDown = SKAction.move(to: CGPoint(x: restPosition.x, y: restPosition.y + 18), duration: logoFadeDuration * 1.15)
             dropDown.timingMode = .easeOut
             let settle = SKAction.move(to: restPosition, duration: logoFadeDuration * 0.45)
@@ -290,10 +309,6 @@ private final class WelcomeScene: SKScene {
                         shadow.alpha = 0.2
                     }
                     self?.fadeButton(duration: buttonFadeDuration)
-                    // Start floating the logo after it is fully visible
-                    if let logo = self?.flowerNode.childNode(withName: "logo") as? SKSpriteNode {
-                        self?.startFloating(node: logo, amplitude: 10, period: 2.6, phaseOffset: 0.0)
-                    }
                 }
             ])
             logo.run(sequence, withKey: "logoHalfThenFullThenButton")
@@ -311,16 +326,7 @@ private final class WelcomeScene: SKScene {
         if let signinSprite = childNode(withName: signinNodeName) {
             signinSprite.removeAllActions()
             signinSprite.alpha = 0.0
-            let sequence = SKAction.sequence([
-                fade,
-                SKAction.run { [weak self, weak signinSprite] in
-                    // Begin floating after it’s visible; slight phase so it’s not perfectly synced with logo
-                    if let node = signinSprite {
-                        self?.startFloating(node: node, amplitude: 8, period: 2.4, phaseOffset: 0.5)
-                    }
-                }
-            ])
-            signinSprite.run(sequence, withKey: "buttonFade")
+            signinSprite.run(fade, withKey: "buttonFade")
         }
 
         if let shadowSprite = childNode(withName: buttonShadowName) {
@@ -332,15 +338,7 @@ private final class WelcomeScene: SKScene {
         if let signupNode = childNode(withName: signupNodeName) {
             signupNode.removeAllActions()
             signupNode.alpha = 0.0
-            let sequence = SKAction.sequence([
-                fade,
-                SKAction.run { [weak self, weak signupNode] in
-                    if let node = signupNode {
-                        self?.startFloating(node: node, amplitude: 6, period: 2.5, phaseOffset: 0.25)
-                    }
-                }
-            ])
-            signupNode.run(sequence, withKey: "signupButtonFade")
+            signupNode.run(fade, withKey: "signupButtonFade")
         }
 
         if let signupShadow = childNode(withName: signupShadowName) {
@@ -385,7 +383,10 @@ private final class WelcomeScene: SKScene {
         guard let touch = touches.first else { return }
         let location = touch.location(in: self)
 
-        if let signinSprite = childNode(withName: signinNodeName) as? SKSpriteNode,
+        // signinNode is a plain SKNode (see buildBouncingSignIn), not SKSpriteNode — the
+        // previous `as? SKSpriteNode` cast always failed, so this branch never ran and
+        // Sign In silently did nothing when tapped.
+        if let signinSprite = childNode(withName: signinNodeName),
            signinSprite.contains(location) {
             // Simple tap feedback
             let pulseDown = SKAction.scale(to: 0.96, duration: 0.06)
@@ -466,8 +467,9 @@ private final class WelcomeScene: SKScene {
         flowerNode.zPosition = 13
         addChild(flowerNode)
 
-        // Position somewhere near the top; adjust as desired
-        let center = CGPoint(x: size.width/2, y: size.height - 240)
+        // Anchored the same distance from the bottom as the buttons and cube, so the gap
+        // between each of them stays equal (see logoCenterY / signInCenterY / signUpCenterY).
+        let center = CGPoint(x: size.width/2, y: logoCenterY)
         // Logo starts off the top of the screen and drops in (see fadeLogoThenButton)
         let startPosition = CGPoint(x: center.x, y: size.height + 160)
 
@@ -482,7 +484,7 @@ private final class WelcomeScene: SKScene {
 
         let sprite = SKSpriteNode(texture: texture)
         sprite.name = "logo"
-        sprite.size = CGSize(width: 200, height: 200)
+        sprite.size = CGSize(width: logoSize, height: logoSize)
         sprite.position = startPosition
         sprite.zPosition = 0
         sprite.anchorPoint = CGPoint(x: 0.5, y: 0.5)
@@ -538,7 +540,7 @@ private final class WelcomeScene: SKScene {
         proxy.removeFromParent()
         floor.removeFromParent()
 
-        let signupSize = CGSize(width: 220, height: 52)
+        let signupSize = buttonSize
 
         // Sign In — same white capsule style as Sign Up.
         let signinShadow = SKShapeNode(rectOf: signupSize, cornerRadius: signupSize.height / 2)
@@ -604,17 +606,19 @@ private final class WelcomeScene: SKScene {
     }
 
     private func layoutAll() {
-        // Fixed baseline position for sign-in (no animation)
-        let midY = size.height / 2 + buttonVerticalOffset
-        let target = CGPoint(x: size.width/2, y: midY)
-
-        if let signinSprite = childNode(withName: signinNodeName) as? SKSpriteNode {
-            signinSprite.position = target
+        // Sign In sits above Sign Up, both anchored from the bottom (see signInCenterY /
+        // signUpCenterY) so spacing to the logo above and the cube below stays equal.
+        // Note: signinNode/signupNode are plain SKNode, not SKSpriteNode — casting to
+        // SKSpriteNode here always failed silently, which is why Sign In never actually
+        // moved off its default (0, 0) position. Position SKNode directly instead.
+        let signinTarget = CGPoint(x: size.width / 2, y: signInCenterY)
+        if let signinSprite = childNode(withName: signinNodeName) {
+            signinSprite.position = signinTarget
         }
-        if let shadowSprite = childNode(withName: buttonShadowName) as? SKSpriteNode {
-            shadowSprite.position = CGPoint(x: target.x, y: target.y - 6)
+        if let shadowSprite = childNode(withName: buttonShadowName) {
+            shadowSprite.position = CGPoint(x: signinTarget.x, y: signinTarget.y - 6)
         }
-        let signupTarget = CGPoint(x: target.x, y: target.y - 76)
+        let signupTarget = CGPoint(x: size.width / 2, y: signUpCenterY)
         if let signupNode = childNode(withName: signupNodeName) {
             signupNode.position = signupTarget
         }
@@ -683,9 +687,8 @@ private final class AuthConfettiScene: SKScene {
     override func didMove(to view: SKView) {
         view.allowsTransparency = true
         view.backgroundColor = .clear
-        if view.preferredFramesPerSecond < 120 {
-            view.preferredFramesPerSecond = 120
-        }
+        // Decorative background only — 60fps is plenty and halves GPU work vs. 120fps.
+        view.preferredFramesPerSecond = 60
         startIfNeeded()
     }
 
@@ -729,10 +732,13 @@ private final class AuthConfettiScene: SKScene {
         emitter.particleSpeedRange = 80
         emitter.yAcceleration = -60
         emitter.xAcceleration = 20
-        emitter.particleBirthRate = 420
+        // Light, continuous sprinkle rather than a dense storm — birthRate * lifetime is the
+        // max number of particles alive at once (was 420 * 7.5 ≈ 3150; now ~40 * 4 ≈ 160),
+        // which was the main source of lag on this screen.
+        emitter.particleBirthRate = 40
         emitter.numParticlesToEmit = 0
-        emitter.particleLifetime = 7.5
-        emitter.particleLifetimeRange = 1.5
+        emitter.particleLifetime = 4.0
+        emitter.particleLifetimeRange = 1.0
         emitter.particleRotationRange = .pi
         emitter.particleRotationSpeed = 3.0
         emitter.particleScale = 1.0
@@ -844,21 +850,28 @@ struct WelcomeView: View {
                         .padding(.bottom, 8)
                 }
                 .allowsHitTesting(false)
+
+                // AI guide sits at the top, above the logo landing zone
+                VStack(spacing: 0) {
+                    AuthAIGuide(screen: .welcome)
+                        .padding(.horizontal, 20)
+                        .padding(.top, 64)
+                    Spacer()
+                }
             }
             .onReceive(coordinator.$didTapSignIn) { tapped in
                 if tapped {
                     coordinator.didTapSignIn = false
-                    stripeCoordinator.trigger {
-                        navigateWithoutTransition { navigateToLogin = true }
-                    }
+                    // No stripe transition on navigation — the stripe video should ONLY play after
+                    // a successful registration (see Poplur2025App's auth.didSignUp branch).
+                    navigateWithoutTransition { navigateToLogin = true }
                 }
             }
             .onReceive(coordinator.$didTapSignUp) { tapped in
                 if tapped {
                     coordinator.didTapSignUp = false
-                    stripeCoordinator.trigger {
-                        navigateWithoutTransition { navigateToSignup = true }
-                    }
+                    // No stripe transition on navigation (registration-only — see above).
+                    navigateWithoutTransition { navigateToSignup = true }
                 }
             }
             .onAppear {
