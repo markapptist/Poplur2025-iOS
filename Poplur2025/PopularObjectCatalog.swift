@@ -68,6 +68,53 @@ enum PopularObjectCatalog {
     ]
     static let assetIds: Set<String> = Set(objectsByChannel.values.flatMap { $0 })
 
+    /// A single representative object for a channel — used when a location matches a
+    /// category (e.g. a stadium) but no more specific object name could be resolved.
+    static func representative(for channelId: String) -> String {
+        let reps: [String: String] = [
+            "sports": "sports_basketball",
+            "food": "food_burger",
+            "fashion": "fashion_handbag",
+            "beauty": "beauty_lipstick",
+            "fitness": "fitness_dumbbell",
+            "music": "music_microphone",
+            "news": "news_newspaper",
+            "tech": "tech_laptop",
+            "modelling": "modelling_camera",
+            "french": "french_eiffel_tower",
+            "spanish": "spanish_spanish_guitar",
+        ]
+        return reps[channelId] ?? objectsByChannel[channelId]?.first ?? "news_newspaper"
+    }
+
+    /// Find the most specific object whose asset id matches a keyword found in `nameHint`
+    /// (e.g. a POI named "…Basketball Arena" → `sports_basketball`). Prefers objects in
+    /// `channelId`, then falls back to any channel.
+    static func specificObject(nameHint: String, channelId: String) -> String? {
+        let words = Set(
+            nameHint.lowercased()
+                .components(separatedBy: CharacterSet.alphanumerics.inverted)
+                .filter { $0.count >= 3 }
+        )
+        guard !words.isEmpty else { return nil }
+
+        func match(in ids: [String]) -> String? {
+            for id in ids {
+                // suffix after "channel_"
+                let suffix = id.drop { $0 != "_" }.dropFirst().replacingOccurrences(of: "_", with: " ")
+                for word in words where suffix.contains(word) {
+                    return id
+                }
+            }
+            return nil
+        }
+
+        if let inChannel = objectsByChannel[channelId], let hit = match(in: inChannel) {
+            return hit
+        }
+        return match(in: objectsByChannel.values.flatMap { $0 })
+    }
+
     static func randomObject(for channelId: String) -> String {
         objects(for: channelId).randomElement() ?? "news_newspaper"
     }

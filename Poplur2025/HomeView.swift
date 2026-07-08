@@ -466,7 +466,7 @@ struct HomeView: View {
     // AR Filters
     @State private var arFilterManager: ARFilterManager?
     @State private var showARFilters = false
-    @AppStorage("CameraObjectDetectionEnabled") private var objectDetectionEnabled = false
+    @AppStorage("CameraObjectDetectionEnabled") private var objectDetectionEnabled = true
 
     // One-time flags to avoid doing heavy work repeatedly
     @State private var didTriggerFeedInitialLoad = false
@@ -633,6 +633,9 @@ struct HomeView: View {
     }
 
     private func triggerChannelLogoAnimation() {
+        // Disabled: the cube must never pop objects on the feed.
+        return
+        #if false
         guard selectedTab == .feed, !channelLogoVisible else { return }
         channelLogoObjectId = Self.randomChannelObject(for: channelLogoInfo.id)
         playChannelLogoPopSound()
@@ -653,9 +656,13 @@ struct HomeView: View {
             }
             channelLogoAnimTask = nil
         }
+        #endif
     }
 
     private func triggerCameraDetectionObjectPop(_ objects: [DetectedObject]) {
+        // Disabled: ML detection stays on, but the cube must never pop objects.
+        return
+        #if false
         guard selectedTab == .record, let primary = objects.first else { return }
 
         cameraObjectPopAnimTask?.cancel()
@@ -688,6 +695,7 @@ struct HomeView: View {
             }
             cameraObjectPopAnimTask = nil
         }
+        #endif
     }
 
     private func stopCameraDetectionObjectPop() {

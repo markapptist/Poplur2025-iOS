@@ -1311,6 +1311,18 @@ private struct TrendPopObject: Identifiable {
     let scale: CGFloat
     let delay: Double
     let seed: Int
+    var category: TrendCategory = .travel
+}
+
+/// Maps a popular-object channel to the trend category used only for marker tinting.
+private func trendCategory(forChannel channelId: String) -> TrendCategory {
+    switch channelId {
+    case "food": return .food
+    case "sports", "fitness": return .sports
+    case "fashion", "beauty", "modelling": return .clothes
+    case "music": return .music
+    default: return .travel
+    }
 }
 
 private enum PoplurRadioTopic: String, CaseIterable, Identifiable {
@@ -1922,55 +1934,8 @@ private func trendChannelObject(category: TrendCategory, seed: Int) -> (channelI
     return (channelId, PopularObjectCatalog.object(for: channelId, seed: seed))
 }
 
-private func buildTrendPopObjects(stop: PoplurTourStop, insight: AiTourInsight) -> [TrendPopObject] {
-    let seed = stableTourSeed(parts: stop.cityName, insight.id, insight.category.rawValue)
-    let count = trendPopCountMin + seed % trendPopCountRange
-    let lngScale = 0.0048
-    let latScale = 0.0036
-
-    return (0..<count).map { index in
-        let angle = 2.0 * Double.pi * Double(index) / Double(count) + Double(seed % 360) * Double.pi / 180.0
-        let radius = 0.36 + Double((index * 29 + seed) % 100) / 145.0
-        let objectSeed = (seed + index * 97) % 1_000_000
-        let channelObject = trendChannelObject(category: insight.category, seed: objectSeed)
-        return TrendPopObject(
-            coordinate: CLLocationCoordinate2D(
-                latitude: stop.coordinate.latitude + sin(angle) * latScale * radius,
-                longitude: stop.coordinate.longitude + cos(angle) * lngScale * radius
-            ),
-            channelId: channelObject.channelId,
-            objectId: channelObject.objectId,
-            scale: 0.9 + CGFloat((index * 17 + seed) % 28) / 100.0,
-            delay: Double(index) * 0.26,
-            seed: objectSeed
-        )
-    }
-}
-
-private func buildTrendPopObjects(center: CLLocationCoordinate2D, cityName: String, insight: AiTourInsight) -> [TrendPopObject] {
-    let seed = stableTourSeed(parts: cityName, insight.id, insight.category.rawValue)
-    let count = 12 + seed % 7
-    let lngScale = 0.0032
-    let latScale = 0.0025
-
-    return (0..<count).map { index in
-        let angle = 2.0 * Double.pi * Double(index) / Double(count) + Double(seed % 180) * Double.pi / 180.0
-        let radius = 0.34 + Double((index * 31 + seed) % 120) / 145.0
-        let objectSeed = (seed + index * 83) % 1_000_000
-        let channelObject = trendChannelObject(category: insight.category, seed: objectSeed)
-        return TrendPopObject(
-            coordinate: CLLocationCoordinate2D(
-                latitude: center.latitude + sin(angle) * latScale * radius,
-                longitude: center.longitude + cos(angle) * lngScale * radius
-            ),
-            channelId: channelObject.channelId,
-            objectId: channelObject.objectId,
-            scale: 0.92 + CGFloat((index * 13 + seed) % 30) / 100.0,
-            delay: Double(index) * 0.1,
-            seed: objectSeed
-        )
-    }
-}
+// NOTE: The old random circle-scatter (buildTrendPopObjects) was removed. Map objects now
+// pop over real points of interest that match the object — see MapView.refreshPOIPops(...).
 
 private func makeLocalTrendInsight(for cityName: String) -> AiTourInsight {
     let now = Int(Date().timeIntervalSince1970 / 900)
@@ -4037,6 +4002,10 @@ struct MapViewProduction: View {
     @State private var clickedCoordinate: CLLocationCoordinate2D? = nil  // Track clicked coordinate
     @State private var showPostPrompt: Bool = false  // Show "Post Here?" prompt
     @State private var isPoplurAIPostMode: Bool = false
+
+    // User-created AI games placed on the map (Game Maker → place → launch from pin).
+    @ObservedObject private var savedGamesStore = PoplurSavedGamesStore.shared
+    @State private var launchGame: PoplurSavedGame? = nil
     @State private var isInitialMapLaunchPreparing: Bool
     @State private var isInitialMapLaunchActive: Bool = false
     @State private var mapLaunchTask: Task<Void, Never>? = nil
@@ -4060,6 +4029,8 @@ struct MapViewProduction: View {
     @State private var activeTourMoment: PoplurLiveTourMoment? = nil
     @State private var localTrendInsight: AiTourInsight? = nil
     @State private var trendPopObjects: [TrendPopObject] = []
+    /// Last center we ran a POI object search for (throttles duplicate searches while panning).
+    @State private var lastPOIPopCenter: CLLocationCoordinate2D?
     @State private var musicWaveFrame: Int = 0
     @State private var showTourNowPlayingText: Bool = true
     @State private var currentLocationMusicStopID: String? = nil
@@ -4675,9 +4646,65 @@ struct MapViewProduction: View {
         let insight = makeLocalTrendInsight(for: titleCity)
         localTrendInsight = insight
         aiRecommendation = insight.subtitle
-        trendPopObjects = buildTrendPopObjects(center: coordinate, cityName: titleCity, insight: insight)
-        emitLocalTrendConfetti(center: coordinate, objects: trendPopObjects)
+        // Objects now pop over matching real POIs (see refreshPOIPops), driven by camera moves.
+        Task { await refreshPOIPops(center: coordinate) }
         playCurrentLocationMusicIfNeeded(cityName: titleCity, countryCode: countryCode, coordinate: coordinate, insight: insight)
+    }
+
+    // MARK: - POI object pops
+
+    /// Search real points of interest around `center` and pop the matching 3D object over
+    /// each one at its exact coordinate (basketball arena → basketball, etc.).
+    private func refreshPOIPops(center: CLLocationCoordinate2D) async {
+        // Throttle: skip if we already searched a very nearby center (rapid panning).
+        if let last = lastPOIPopCenter,
+           CLLocation(latitude: last.latitude, longitude: last.longitude)
+            .distance(from: CLLocation(latitude: center.latitude, longitude: center.longitude)) < 120 {
+            return
+        }
+        lastPOIPopCenter = center
+
+        let radius = poiSearchRadiusMeters()
+        let request = MKLocalPointsOfInterestRequest(center: center, radius: radius)
+        let search = MKLocalSearch(request: request)
+        guard let response = try? await search.start(), !Task.isCancelled else { return }
+
+        var objects: [TrendPopObject] = []
+        var placed: [CLLocationCoordinate2D] = []
+        for item in response.mapItems {
+            guard objects.count < 8 else { break }
+            guard let match = MapPOIObjectMatcher.match(for: item) else { continue }
+            let coord = item.placemark.coordinate
+            // Don't stack two objects on nearly the same spot.
+            if placed.contains(where: {
+                CLLocation(latitude: $0.latitude, longitude: $0.longitude)
+                    .distance(from: CLLocation(latitude: coord.latitude, longitude: coord.longitude)) < 60
+            }) { continue }
+            placed.append(coord)
+            let seed = abs((item.name ?? "\(objects.count)").hashValue) % 1_000_000
+            objects.append(TrendPopObject(
+                coordinate: coord,
+                channelId: match.channelId,
+                objectId: match.objectId,
+                scale: 1.0,
+                delay: Double(objects.count) * 0.08,
+                seed: seed,
+                category: trendCategory(forChannel: match.channelId)
+            ))
+        }
+
+        guard !Task.isCancelled else { return }
+        await MainActor.run {
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                trendPopObjects = objects
+            }
+        }
+    }
+
+    /// Search radius derived from the current zoom (camera altitude), clamped to a sane range.
+    private func poiSearchRadiusMeters() -> Double {
+        let distance = camera.camera?.distance ?? fixedDistanceAlt
+        return min(max(distance * 0.5, 300), 6_000)
     }
 
     private func playCurrentLocationMusicIfNeeded(cityName: String, countryCode: String?, coordinate: CLLocationCoordinate2D, insight: AiTourInsight?) {
@@ -5026,10 +5053,8 @@ struct MapViewProduction: View {
         try? await Task.sleep(nanoseconds: trendPopStartDelaySeconds * 1_000_000_000)
         guard mapState.isInTourMode, !Task.isCancelled else { return }
 
-        await MainActor.run {
-            PoplurSoundPlayer.shared.playPop()
-            trendPopObjects = buildTrendPopObjects(stop: focusStop, insight: insight)
-        }
+        PoplurSoundPlayer.shared.playPop()
+        await refreshPOIPops(center: focusStop.coordinate)
     }
 
     private func playTourRadioSegment(_ focus: PoplurTourFocus, cityStop: PoplurTourStop, index: Int, total: Int) async {
@@ -5109,8 +5134,13 @@ struct MapViewProduction: View {
             zoomLevel = distance
             fixedDistanceAlt = distance
         }
+
+        // Pop objects over the POIs now under the map (basketball arena → basketball, etc.).
+        if !isInitialMapLaunchActive, let center = newValue.camera?.centerCoordinate {
+            Task { await refreshPOIPops(center: center) }
+        }
     }
-    
+
     private var dragGesture: some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { _ in noteInteraction() }
@@ -5270,11 +5300,9 @@ struct MapViewProduction: View {
                     }
                 }
 
-                if let insight = activeTourInsight ?? (mapState.isInTourMode ? nil : localTrendInsight) {
-                    ForEach(trendPopObjects) { object in
-                        Annotation("", coordinate: object.coordinate) {
-                            TrendPopMarker(object: object, category: insight.category, skin: cubeSkinStore.current)
-                        }
+                ForEach(trendPopObjects) { object in
+                    Annotation("", coordinate: object.coordinate) {
+                        TrendPopMarker(object: object, category: object.category, skin: cubeSkinStore.current)
                     }
                 }
 
@@ -5289,6 +5317,17 @@ struct MapViewProduction: View {
                         .accessibilityLabel("Look inside \(venue.name)")
                     }
                 }
+
+                // User-created AI games placed on the map — tap a pin to play it.
+                ForEach(savedGamesStore.placedGames) { placed in
+                    if let coord = placed.coordinate {
+                        Annotation("", coordinate: coord) {
+                            PoplurGamePinMarker(config: placed.config)
+                                .onTapGesture { launchGame = placed }
+                                .id("map-game-\(placed.id)")
+                        }
+                    }
+                }
                 }
 #if POP_PREVIEW_LIGHT
                 .mapStyle(.standard)
@@ -5299,8 +5338,13 @@ struct MapViewProduction: View {
                 // Handle map tap based on current flow
                 if let coordinate = proxy.convert(location, from: .local) {
                     print("🗺️ [MapView] Map tapped at screen: \(location), converted to: \(coordinate.latitude), \(coordinate.longitude)")
-                    
-                    if isPoplurAIPostMode {
+
+                    // Placing a user-created game: drop it at the tapped spot.
+                    if let pending = savedGamesStore.pendingPlacement {
+                        savedGamesStore.place(pending, latitude: coordinate.latitude, longitude: coordinate.longitude)
+                        savedGamesStore.pendingPlacement = nil
+                        noteInteraction()
+                    } else if isPoplurAIPostMode {
                         selectPoplurAIMapPostCoordinate(coordinate)
                         noteInteraction()
                     } else if let flow = flowManager.currentFlow, flow.isCameraFirst {
@@ -5329,6 +5373,33 @@ struct MapViewProduction: View {
                     }
                 } else {
                     print("❌ [MapView] Failed to convert screen location to coordinate")
+                }
+            }
+            .fullScreenCover(item: $launchGame) { g in
+                PoplurGameLaunchView(presetConfig: g.config)
+                    .environmentObject(DeviceVolumeObserver())
+            }
+            .overlay(alignment: .top) {
+                if let pending = savedGamesStore.pendingPlacement {
+                    HStack(spacing: 10) {
+                        Image(systemName: "mappin.and.ellipse")
+                        Text("Tap where to place \"\(pending.config.gameName)\"")
+                            .font(.system(size: 14, weight: .bold, design: .rounded))
+                            .lineLimit(1)
+                        Spacer(minLength: 4)
+                        Button {
+                            savedGamesStore.pendingPlacement = nil
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                        }
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 16).padding(.vertical, 12)
+                    .background(Color(red: 1.0, green: 0.30, blue: 0.72).opacity(0.92),
+                                in: Capsule())
+                    .padding(.horizontal, 24)
+                    .padding(.top, 60)
+                    .transition(.move(edge: .top).combined(with: .opacity))
                 }
             }
             .gesture(
@@ -7006,21 +7077,34 @@ struct MapViewProduction: View {
         let launchInsight = insight ?? makeLocalTrendInsight(for: cityName)
         localTrendInsight = launchInsight
         aiRecommendation = launchInsight.subtitle
-        trendPopObjects = buildTrendPopObjects(center: coordinate, cityName: cityName, insight: launchInsight)
 
-        withAnimation(.easeInOut(duration: 3.5)) {
-            camera = .camera(MapCamera(
-                centerCoordinate: coordinate,
-                distance: focusedLocationDistance,
-                heading: 0,
-                pitch: activePitch
-            ))
+        // Gradual earth-zoom: descend through several altitudes so MapKit interpolates each
+        // segment smoothly (a single 25,000km → 120m animation snaps instead of zooming).
+        let descent: [(distance: CLLocationDistance, pitch: Double, duration: Double)] = [
+            (4_000_000, 0,           1.0),
+            (600_000,   0,           0.9),
+            (80_000,    0,           0.9),
+            (8_000,     activePitch * 0.5, 0.9),
+            (focusedLocationDistance, activePitch, 1.1),
+        ]
+        for step in descent {
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeInOut(duration: step.duration)) {
+                camera = .camera(MapCamera(
+                    centerCoordinate: coordinate,
+                    distance: step.distance,
+                    heading: 0,
+                    pitch: step.pitch
+                ))
+            }
+            try? await Task.sleep(nanoseconds: UInt64(step.duration * 1_000_000_000))
         }
-
-        try? await Task.sleep(nanoseconds: 2_500_000_000)
         guard !Task.isCancelled else { return }
 
-        emitLocalTrendConfetti(center: coordinate, objects: trendPopObjects)
+        try? await Task.sleep(nanoseconds: 400_000_000)
+        guard !Task.isCancelled else { return }
+
+        await refreshPOIPops(center: coordinate)
 
         try? await Task.sleep(nanoseconds: 700_000_000)
         guard !Task.isCancelled else { return }
