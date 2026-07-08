@@ -5256,11 +5256,9 @@ struct MapViewProduction: View {
                 
                 ForEach(filteredPosts()) { post in
                     Annotation("", coordinate: post.coordinate) {
-                        Enhanced3DBeaconMarker(
-                            color: cubeSkinStore.current.mapMarkerColor(role: .post, seed: post.title.hashValue),
-                            intensity: 0.6,
-                            skin: cubeSkinStore.current,
-                            role: .post
+                        PoplurPinAnnotationView(
+                            fallbackColor: cubeSkinStore.current.mapMarkerColor(role: .post, seed: post.title.hashValue),
+                            skin: cubeSkinStore.current
                         )
                             .id("map-post-\(post.id)-\(cubeSkinStore.current.rawValue)")
                             .frame(width: 80, height: 100)
