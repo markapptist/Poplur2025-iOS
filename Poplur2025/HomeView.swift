@@ -1112,7 +1112,8 @@ struct HomeView: View {
             CubeSubmenuItem(id: "cam-create", icon: HoldMenuIcons.create)     { postHoldMenuNavigate("create") },
             CubeSubmenuItem(id: "cam-home",   icon: HoldMenuIcons.home)       { postHoldMenuNavigate("home") },
             CubeSubmenuItem(id: "cam-chat",   icon: HoldMenuIcons.chat)       { postHoldMenuNavigate("chat") },
-            CubeSubmenuItem(id: "cam-store",  icon: HoldMenuIcons.store)      { postHoldMenuNavigate("store") }
+            CubeSubmenuItem(id: "cam-store",  icon: HoldMenuIcons.store)      { postHoldMenuNavigate("store") },
+            CubeSubmenuItem(id: "cam-games",  icon: HoldMenuIcons.games)      { postHoldMenuNavigate("games") }
         ]
     }
 
@@ -1161,6 +1162,10 @@ struct HomeView: View {
         case "cameraroll":
             selectedTab = .record
             NotificationCenter.default.post(name: .showCameraRollWindow, object: nil)
+        case "games":
+            selectedTab = .record
+            showGames = true
+            isMainTabChildRouteVisible = true
         case "create":
             selectedTab = .profile
             NotificationCenter.default.post(name: .OpenCreatorRequested, object: nil)
@@ -2117,7 +2122,7 @@ struct HomeView: View {
 
             // Game overlay — ZStack so cube (zIndex 6000) stays on top; back arrow via isMainTabChildRouteVisible
             if showGames {
-                PoplurFPSGameSheet(onClose: {
+                GamePickerView(onClose: {
                     showGames = false
                     isMainTabChildRouteVisible = false
                     resetCubeFaceOverride("camera")

@@ -41,6 +41,7 @@ enum HoldMenuIcons {
     // Camera sub-screens
     static let cameraRoll = HoldMenuIcon(asset: "HoldMenu_CameraRoll", title: "CAMERA ROLL", systemImage: "photo.on.rectangle.fill", tint: Color(red: 0.30, green: 0.55, blue: 1.0))
     static let create     = HoldMenuIcon(asset: "HoldMenu_Create",     title: "CREATE",      systemImage: "plus.circle.fill",        tint: Color(red: 1.0, green: 0.30, blue: 0.62))
+    static let games      = HoldMenuIcon(asset: "HoldMenu_Games",      title: "GAMES",       systemImage: "gamecontroller.fill",     tint: Color(red: 0.55, green: 0.20, blue: 1.0))
 
     // Map sub-screens
     static let locate   = HoldMenuIcon(asset: "HoldMenu_Search",   title: "LOCATE",   systemImage: "location.fill",        tint: Color(red: 1.0, green: 0.30, blue: 0.62))

@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import QuartzCore
 
 struct CubeSubmenuItem: Identifiable {
     let id: String
@@ -33,8 +34,19 @@ final class CubeMenuWheelController: ObservableObject {
     @Published private(set) var isVisible = false
     @Published private(set) var isClosing = false
 
-    private var scrubRemainder: CGFloat = 0
-    private let scrubStep: CGFloat = 80
+    /// Continuous wheel position in item units; the item at index == round(wheelOffset)
+    /// sits at center. Published so the overlay tracks the spin frame-by-frame.
+    @Published private(set) var wheelOffset: CGFloat = 0
+
+    private let pointsPerItem: CGFloat = 62   // drag sensitivity: finger travel per item (lower = more sensitive)
+    private let friction: CGFloat = 0.955     // per-tick velocity decay — the wheel-of-fortune glide
+    private let maxVelocity: CGFloat = 16     // items/sec cap so a hard flick stays controllable
+    private let snapVelocity: CGFloat = 0.9   // below this the wheel eases to the nearest item
+
+    private var velocity: CGFloat = 0         // items/sec, drives momentum after a flick
+    private var lastScrubTime: CFTimeInterval = 0
+    private var lastNotchIndex = 0
+    private var momentumTimer: Timer?
     private let selectionFeedback = UISelectionFeedbackGenerator()
 
     var isOnScreen: Bool { isVisible || isClosing }
@@ -47,16 +59,21 @@ final class CubeMenuWheelController: ObservableObject {
         guard !items.isEmpty else { return }
         self.items = items
         selectedIndex = 0
-        scrubRemainder = 0
+        wheelOffset = 0
+        velocity = 0
+        lastNotchIndex = 0
+        lastScrubTime = CACurrentMediaTime()
         isClosing = false
         selectionFeedback.prepare()
         PoplurEQSync.shared.begin(.holdMenu)
+        startMomentum()
         withAnimation(.spring(response: 0.36, dampingFraction: 0.70)) {
             isVisible = true
         }
     }
 
     func endHold(activateSelected: Bool) {
+        stopMomentum()
         let action = activateSelected ? selectedItem?.action : nil
         withAnimation(.easeInOut(duration: 0.2)) {
             isClosing = true
@@ -80,27 +97,72 @@ final class CubeMenuWheelController: ObservableObject {
         guard isVisible, items.count > 1 else { return }
         let primary = abs(deltaX) >= abs(deltaY) ? deltaX : deltaY
         guard abs(primary) > 0.25 else { return }
-        scrubRemainder += primary
 
-        while scrubRemainder >= scrubStep {
-            scrubRemainder -= scrubStep
-            advanceSelection(by: 1)
+        let now = CACurrentMediaTime()
+        let dt = max(now - lastScrubTime, 1.0 / 120.0)
+        lastScrubTime = now
+
+        // 1:1 finger tracking, then feed the flick speed into the spin velocity.
+        let slotDelta = primary / pointsPerItem
+        let instantaneous = (slotDelta / CGFloat(dt)).clampedMagnitude(to: maxVelocity)
+        velocity = (velocity * 0.35 + instantaneous * 0.65).clampedMagnitude(to: maxVelocity)
+
+        applyOffsetDelta(slotDelta)
+    }
+
+    // MARK: Momentum (wheel-of-fortune inertia)
+
+    private func startMomentum() {
+        momentumTimer?.invalidate()
+        let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.stepMomentum() }
         }
-        while scrubRemainder <= -scrubStep {
-            scrubRemainder += scrubStep
-            advanceSelection(by: -1)
+        RunLoop.main.add(timer, forMode: .common)
+        momentumTimer = timer
+    }
+
+    private func stopMomentum() {
+        momentumTimer?.invalidate()
+        momentumTimer = nil
+        velocity = 0
+    }
+
+    private func stepMomentum() {
+        guard isVisible, items.count > 1 else { return }
+        // Let the finger own the wheel while it's actively moving; inertia takes
+        // over only once the drag pauses (or the finger is held still).
+        guard CACurrentMediaTime() - lastScrubTime > 0.032 else { return }
+        let dt: CGFloat = 1.0 / 60.0
+
+        if abs(velocity) > snapVelocity {
+            applyOffsetDelta(velocity * dt)
+            velocity *= friction
+        } else if velocity != 0 || wheelOffset != wheelOffset.rounded() {
+            // Below spin threshold: ease to the nearest item and settle.
+            velocity = 0
+            let target = wheelOffset.rounded()
+            let remaining = target - wheelOffset
+            applyOffsetDelta(abs(remaining) < 0.001 ? remaining : remaining * 0.22)
         }
     }
 
-    private func advanceSelection(by offset: Int) {
-        guard isVisible, !items.isEmpty else { return }
-        let count = items.count
-        withAnimation(.spring(response: 0.28, dampingFraction: 0.70)) {
-            selectedIndex = (selectedIndex + offset + count) % count
+    /// Advance the continuous wheel position, keep it normalized, refresh the
+    /// selected index, and fire a haptic/pop each time a new item passes center.
+    private func applyOffsetDelta(_ delta: CGFloat) {
+        guard !items.isEmpty else { return }
+        let count = CGFloat(items.count)
+        var offset = (wheelOffset + delta).truncatingRemainder(dividingBy: count)
+        if offset < 0 { offset += count }
+        wheelOffset = offset
+
+        let notch = ((Int(offset.rounded()) % items.count) + items.count) % items.count
+        if notch != lastNotchIndex {
+            lastNotchIndex = notch
+            selectionFeedback.selectionChanged()
+            selectionFeedback.prepare()
+            PoplurSoundPlayer.shared.playPop(minimumInterval: 0.045)
         }
-        selectionFeedback.selectionChanged()
-        selectionFeedback.prepare()
-        PoplurSoundPlayer.shared.playPop(minimumInterval: 0.055)
+        if selectedIndex != notch { selectedIndex = notch }
     }
 
     private func finishClosing() {
@@ -149,9 +211,6 @@ struct CubeMenuWheelOverlay: View {
                     )
                     .ignoresSafeArea()
 
-                    headerPill
-                        .position(x: proxy.size.width / 2, y: proxy.size.height * 0.10)
-
                     wheelItems(in: proxy.size)
 
                     closeButton
@@ -171,35 +230,37 @@ struct CubeMenuWheelOverlay: View {
     @ViewBuilder
     private func wheelItems(in size: CGSize) -> some View {
         let center = CGPoint(x: size.width / 2, y: size.height * 0.46)
+        let count = controller.items.count
 
         ForEach(Array(controller.items.enumerated()), id: \.element.id) { index, item in
-            let slot = relativeSlot(for: index)
-            if abs(slot) <= 2 {
-                let selected = index == controller.selectedIndex
-                let distance = abs(slot)
-
+            let column   = wrappedColumn(for: index, count: count)
+            let distance = abs(column)
+            if distance <= 2.4 {
+                let selected  = index == controller.selectedIndex
+                let tileScale = max(0.78, 1 - distance * 0.13)
+                let tileX     = center.x + pow(distance, 1.5) * arcDepth
+                let tileY     = center.y + column * slotSpacing
+                let tileAlpha = max(0.0, min(1.0, 1.4 - distance * 0.42))
                 holdMenuWheelTile(item: item, selected: selected)
-                    .rotationEffect(.degrees(Double(slot) * -5))
-                    .scaleEffect(selected ? 1.0 : max(0.78, 1 - CGFloat(distance) * 0.13))
-                    .position(
-                        x: center.x - pow(CGFloat(distance), 1.5) * arcDepth,
-                        y: center.y + CGFloat(slot) * slotSpacing
-                    )
-                    .opacity(distance == 2 ? 0.55 : 1)
-                    .zIndex(selected ? 3 : Double(3 - distance))
-                    .animation(.spring(response: 0.30, dampingFraction: 0.72), value: controller.selectedIndex)
+                    .rotationEffect(.degrees(Double(column) * 5))
+                    .scaleEffect(tileScale)
+                    .position(x: tileX, y: tileY)
+                    .opacity(tileAlpha)
+                    .zIndex(3 - Double(distance))
             }
         }
     }
 
-    /// Signed slot offset of `index` from the selected item, wrapped so the
-    /// wheel is circular (…-2, -1, 0, +1, +2…).
-    private func relativeSlot(for index: Int) -> Int {
-        let count = controller.items.count
+    /// Continuous signed column of `index` relative to the live wheel position,
+    /// wrapped so the wheel is circular (…-2, -1, 0, +1, +2…). Driving the layout
+    /// off `wheelOffset` (not the rounded index) is what makes the spin smooth.
+    private func wrappedColumn(for index: Int, count: Int) -> CGFloat {
         guard count > 0 else { return 0 }
-        let centerSlot = count / 2
-        let slot = (index - controller.selectedIndex + centerSlot + count * 4) % count
-        return slot - centerSlot
+        let n = CGFloat(count)
+        var c = (CGFloat(index) - controller.wheelOffset).truncatingRemainder(dividingBy: n)
+        if c > n / 2 { c -= n }
+        if c <= -n / 2 { c += n }
+        return c
     }
 
     @ViewBuilder
@@ -208,10 +269,6 @@ struct CubeMenuWheelOverlay: View {
 
         VStack(spacing: 7) {
             ZStack {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .fill(Color.black)
-                    .frame(width: tileSize, height: tileSize)
-
                 if let imageName = item.iconImageName, !imageName.isEmpty {
                     Image(imageName)
                         .resizable()
@@ -282,4 +339,11 @@ struct CubeMenuWheelOverlay: View {
         .shadow(color: Self.neonPink.opacity(0.50), radius: 14, x: 0, y: 0)
     }
 
+}
+
+private extension CGFloat {
+    /// Clamp to ±limit while preserving sign.
+    func clampedMagnitude(to limit: CGFloat) -> CGFloat {
+        Swift.min(Swift.max(self, -limit), limit)
+    }
 }

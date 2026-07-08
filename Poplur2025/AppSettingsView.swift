@@ -138,21 +138,6 @@ struct AppSettingsView: View {
                             }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
-
-                        // Corner radius — how rounded the cube faces appear (live)
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack {
-                                Text("Corner Radius")
-                                    .font(.system(size: 15, weight: .semibold, design: .rounded))
-                                Spacer()
-                                Text("\(Int(cubeSkinStore.cornerRadius))")
-                                    .font(.system(size: 14, weight: .bold, design: .rounded))
-                                    .foregroundStyle(.secondary)
-                            }
-                            Slider(value: $cubeSkinStore.cornerRadius, in: 0...80, step: 1)
-                                .tint(SC.accent)
-                        }
-                        .padding(.top, 14)
                     }
 
                     section("ABOUT") {

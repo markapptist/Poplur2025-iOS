@@ -1363,8 +1363,7 @@ private struct CubeSceneView: UIViewRepresentable {
     private func faceBackgroundOnly(for tab: AppTab, baseColor: Color) -> UIImage {
         let skin = CubeSkinStore.shared.current
         let tabSuffix = (skin == .rubber) ? "_\(tab.title)" : ""
-        // Include the corner radius so adjusting it invalidates the cached face image.
-        let cacheKey = "face_bg_skin_\(skin.rawValue)\(tabSuffix)_cr\(Int(CubeSkinStore.shared.cornerRadius))"
+        let cacheKey = "face_bg_skin_\(skin.rawValue)\(tabSuffix)"
         if let skinImage = UIImage(named: skin.diffuseAssetName) {
             return CubeFaceImageCache.image(for: cacheKey) { skinImage }
         }
@@ -2709,35 +2708,22 @@ private struct CubeOnlyPreview: View {
 
 // MARK: - Back Cube
 
-/// Themed clone of the active cube skin shown when the user is inside a sub-page.
-/// The chevron overlays the front face; tapping anywhere on the cube goes back.
+/// Themed back-button cube shown when the user is inside a sub-page. It renders its
+/// own `*_back_button_cube.glb` (the back-arrow design is baked into the faces), so
+/// there's no chevron overlay. Tapping anywhere on the cube goes back.
 struct BackCubeView: View {
     let onBack: () -> Void
 
     @ObservedObject private var skinStore = CubeSkinStore.shared
 
     var body: some View {
-        ZStack {
-            _BackCubeSceneView(skin: skinStore.current)
-                .allowsHitTesting(false)
-
-            // The back cube reuses the themed icon-cube model (correct face mapping),
-            // so it carries no baked arrow — overlay a clear chevron to signal "back".
-            Image(systemName: "chevron.backward")
-                .font(.system(size: 30, weight: .heavy))
-                .foregroundStyle(.white)
-                .frame(width: 60, height: 60)
-                .background(.ultraThinMaterial, in: Circle())
-                .overlay(Circle().strokeBorder(.white.opacity(0.28), lineWidth: 1))
-                .shadow(color: .black.opacity(0.35), radius: 6, y: 2)
-                .allowsHitTesting(false)
-        }
-        // Match the main cube's frame (CubeTabView is 200×200) so the back cube
-        // renders at the exact same on-screen size — same camera/normalize means
-        // the only scale difference was this frame. They swap in the same spot.
-        .frame(width: 200, height: 200)
-        .contentShape(Rectangle())
-        .onTapGesture { onBack() }
+        _BackCubeSceneView(skin: skinStore.current)
+            .allowsHitTesting(false)
+            // Match the main cube's frame (CubeTabView is 200×200) so the back cube
+            // renders at the exact same on-screen size and swaps in the same spot.
+            .frame(width: 200, height: 200)
+            .contentShape(Rectangle())
+            .onTapGesture { onBack() }
     }
 }
 
@@ -2802,12 +2788,9 @@ private struct _BackCubeSceneView: UIViewRepresentable {
     }
 
     private func makeBackCubeNode() -> SCNNode? {
-        // Use the themed ICON cube model — its per-face textures are authored to map
-        // cleanly and align across edges. The *_back_button_cube.glb assets have
-        // corner-only textures with no centered content that don't line up across
-        // faces (looked "not mapped properly"); a chevron overlay in BackCubeView
-        // signals "back" instead of relying on a baked-in arrow.
-        let assetName = skin.runtimeModelAssetName ?? skin.backButtonModelAssetName
+        // Use the themed back-button cube GLB (`*_back_button_cube.glb`) — it has the
+        // back-arrow design baked into its faces, so no chevron overlay is needed.
+        let assetName = skin.backButtonModelAssetName
 
         // Same URL-resolution order as CubeTabView.runtimeCubeModelURL
         let glbURL: URL? = {
