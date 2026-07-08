@@ -13,6 +13,7 @@ import UIKit
 final class FPSGameScene: SKScene {
     private let game = FPSGame()
     private let renderer = FPSRenderer()
+    private let audio = FPSAudio()
     private var framebuffer: SKSpriteNode!
 
     private var lastTime: TimeInterval = 0
@@ -36,7 +37,14 @@ final class FPSGameScene: SKScene {
     private var panelBg: SKShapeNode!
     private var joyBase: SKShapeNode!
     private var joyThumb: SKShapeNode!
-    private var buttons: [SKShapeNode] = []   // [0]=fire [1]=interact [2..4]=weapons
+    private var buttons: [SKShapeNode] = []   // [0]=fire [1]=interact [2..4]=weapons (landscape translucent)
+
+    // Portrait arcade panel: real neon-panel sprites from the spritesheet as buttons.
+    private var panelButtons: [SKSpriteNode] = []   // [0]=fire [1]=use [2..4]=weapons
+    private var panelLabels: [SKLabelNode] = []      // weapon number labels on [2..4]
+    private var texFire: SKTexture?
+    private var texUse: SKTexture?
+    private var texWeapon: SKTexture?
 
     // Current-frame control geometry (scene coords, y-up)
     private var joyC = CGPoint.zero; private var joyR: CGFloat = 46
@@ -74,7 +82,21 @@ final class FPSGameScene: SKScene {
             buttons.append(b); addChild(b)
         }
 
+        // Portrait arcade buttons — real panel sprites from the spritesheet.
+        texFire   = panelTexture("09_doors_panels/door_panel_04.png")   // pink "P" panel
+        texUse    = panelTexture("09_doors_panels/door_panel_05.png")   // blue "P" panel
+        texWeapon = panelTexture("09_doors_panels/door_panel_06.png")   // blue panel (weapon slots)
+        for _ in 0..<5 {
+            let s = SKSpriteNode(); s.zPosition = 10; s.isHidden = true
+            panelButtons.append(s); addChild(s)
+            let l = SKLabelNode(fontNamed: "Menlo-Bold")
+            l.fontColor = .white; l.verticalAlignmentMode = .center; l.horizontalAlignmentMode = .center
+            l.zPosition = 11; l.isHidden = true
+            panelLabels.append(l); addChild(l)
+        }
+
         setChromeVisible(false)
+        game.onSound = { [weak self] sfx in self?.audio.play(sfx) }
         loadAssetsAsync()
     }
 
@@ -83,6 +105,23 @@ final class FPSGameScene: SKScene {
         marqueeBg.alpha = a; marqueeLabel.alpha = a; panelBg.alpha = a
         joyBase.alpha = a; joyThumb.alpha = a
         for b in buttons { b.alpha = a }
+        for s in panelButtons { s.alpha = a }
+        for l in panelLabels { l.alpha = a }
+    }
+
+    /// Load a spritesheet PNG as a nearest-filtered SKTexture (same bundle layout as FPSAssets).
+    private func panelTexture(_ rel: String) -> SKTexture? {
+        let parts = rel.split(separator: "/")
+        guard parts.count == 2 else { return nil }
+        let dir = "PoplurFPS/sprites/\(parts[0])"
+        let file = parts[1]
+        let name = (file as NSString).deletingPathExtension
+        let ext = (file as NSString).pathExtension
+        guard let url = Bundle.main.url(forResource: name, withExtension: ext, subdirectory: dir)
+                ?? Bundle.main.url(forResource: name, withExtension: ext, subdirectory: "PoplurFPS/sprites"),
+              let img = UIImage(contentsOfFile: url.path) else { return nil }
+        let t = SKTexture(image: img); t.filteringMode = .nearest
+        return t
     }
 
     private func loadAssetsAsync() {
@@ -137,9 +176,10 @@ final class FPSGameScene: SKScene {
             let bx0 = sw * 0.44
             let gap = (sw * 0.90 - bx0) / 4
             weaponCR = []
+            for b in buttons { b.isHidden = true }   // translucent buttons off in portrait
             for i in 0..<5 {
                 let c = CGPoint(x: bx0 + CGFloat(i) * gap, y: cy)
-                positionButton(i, center: c, radius: btnR, color: btnColors[i], translucent: false)
+                positionPanelButton(i, center: c, radius: btnR)
                 weaponCR.append((c, btnR))
             }
             fireC = weaponCR[0].0; fireR = btnR
@@ -147,6 +187,8 @@ final class FPSGameScene: SKScene {
             styleJoystick(translucent: false)
         } else {
             marqueeBg.isHidden = true; marqueeLabel.isHidden = true; panelBg.isHidden = true
+            for s in panelButtons { s.isHidden = true }
+            for l in panelLabels { l.isHidden = true }
             // Translucent floating controls
             joyR = sh * 0.14
             joyC = CGPoint(x: sw * 0.13, y: sh * 0.20)
@@ -171,6 +213,33 @@ final class FPSGameScene: SKScene {
         } else {
             joyBase.fillColor = UIColor(fpsHex: 0x1a1a26); joyBase.strokeColor = .clear
             joyThumb.fillColor = UIColor(fpsHex: 0x40404f); joyThumb.strokeColor = .clear
+        }
+    }
+
+    /// Portrait: place a real neon-panel sprite as button `i` (0=fire, 1=use, 2..4=weapons).
+    private func positionPanelButton(_ i: Int, center: CGPoint, radius: CGFloat) {
+        let s = panelButtons[i]
+        let lbl = panelLabels[i]
+        s.isHidden = false
+        s.texture = (i == 0) ? texFire : (i == 1 ? texUse : texWeapon)
+        // Panels are square; draw a touch larger than the touch radius so they read as buttons.
+        let side = radius * 2.3
+        s.size = CGSize(width: side, height: side)
+        s.position = center
+        s.color = .black
+        if i >= 2 {
+            lbl.isHidden = false
+            lbl.text = "\(i - 1)"
+            lbl.fontSize = radius * 0.85
+            lbl.position = center
+            let selected = game.player.weapon == (i - 2)
+            s.colorBlendFactor = selected ? 0 : 0.45   // dim unselected weapons
+            s.setScale(selected ? 1.08 : 1.0)
+            lbl.fontColor = selected ? UIColor(fpsHex: 0xffd700) : .white
+        } else {
+            lbl.isHidden = true
+            s.colorBlendFactor = 0
+            s.setScale(1.0)
         }
     }
 

@@ -44,6 +44,7 @@ struct PoplurAICreateView: View {
     @State private var destination: String = "Profile"
     @State private var wantsBoost: Bool = false
     @State private var showToolSheet = false
+    @State private var showGameMaker = false
 
     private let config = PoplurAIStackConfig.productionDefaults
 
@@ -66,6 +67,9 @@ struct PoplurAICreateView: View {
         }
         .sheet(isPresented: $showToolSheet) {
             toolSheet
+        }
+        .sheet(isPresented: $showGameMaker) {
+            PoplurGameMakerView()
         }
     }
 
@@ -168,7 +172,12 @@ struct PoplurAICreateView: View {
             selectedType = type
             status = .queued
             resultText = nil
-            showToolSheet = true
+            // The Games tool opens the dedicated Game Maker (create → save → place on map).
+            if type == .game {
+                showGameMaker = true
+            } else {
+                showToolSheet = true
+            }
         } label: {
             VStack(alignment: .leading, spacing: 12) {
                 Image(createIconAsset(for: type))

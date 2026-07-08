@@ -24,6 +24,11 @@ final class FPSGame {
     var loadProgress = 0.0
     var assets: FPSAssets?
 
+    /// Emits procedural SFX events; wired by the scene to FPSAudio.
+    var onSound: ((FPSSfx) -> Void)?
+    private var lastStep = 0
+    private var interactPrev = false
+
     private var menuFirePressed = false
     private var escPressed = false
 
@@ -67,7 +72,7 @@ final class FPSGame {
             let fire = input.fire || input.interact
             if up { selectedMenu = 0 }
             if down { selectedMenu = 1 }
-            if fire && !menuFirePressed { state = .zoom; zoomT = 0 }
+            if fire && !menuFirePressed { state = .zoom; zoomT = 0; onSound?(.menuSelect) }
             menuFirePressed = fire
 
         case .zoom:
@@ -85,25 +90,39 @@ final class FPSGame {
             player.update(dt, input, level)
             level.update(dt)
 
+            // Footstep clicks on each half-bob while moving.
+            let moving = input.w || input.s || input.a || input.d || input.left || input.right
+            let step = Int(player.bobPhase / .pi)
+            if moving && step != lastStep { onSound?(.footstep) }
+            lastStep = step
+
+            // Door "use" thunk on the rising edge of interact.
+            if input.interact && !interactPrev { onSound?(.door) }
+            interactPrev = input.interact
+
             if input.fire && player.canFire() { doShoot() }
 
             for e in enemies where !e.dead {
                 e.update(dt, player, level) { [weak self] in
-                    self?.player.takeDamage(e.def.damage)
+                    guard let self = self else { return }
+                    let before = self.player.health
+                    self.player.takeDamage(e.def.damage)
+                    if self.player.health < before { self.onSound?(.hurt) }
                 }
             }
 
             for p in pickups where !p.collected {
                 if p.tryCollect(player) {
                     score += (p.type >= 203) ? 500 : 50
+                    onSound?(.pickup)
                 }
             }
 
-            if player.dead { state = .dead }
+            if player.dead { state = .dead; onSound?(.lose) }
 
             if let boss = enemies.first(where: { $0.type == FPSK.sprBoss }),
                boss.dead, boss.deathTimer > 1.5 {
-                state = .win
+                state = .win; onSound?(.win)
             }
 
         case .paused:
@@ -128,6 +147,7 @@ final class FPSGame {
         let w = FPS_WEAPONS[player.weapon]
         player.consumeAmmo()
         muzzleFlash = 1
+        onSound?(.shoot(player.weapon))
 
         for _ in 0..<w.projectiles {
             let spread = (Double.random(in: 0..<1) - 0.5) * w.spread * 2
@@ -163,6 +183,9 @@ final class FPSGame {
                     kills += 1
                     score += e.def.score
                     player.score = score
+                    onSound?(.enemyDie)
+                } else {
+                    onSound?(.enemyHit)
                 }
             }
         }
