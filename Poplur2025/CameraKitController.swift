@@ -51,7 +51,7 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
     var userRecognitionManager: UserRecognitionManager?
 
     // Feature flags
-    var isMLDetectionEnabled: Bool = false
+    var isMLDetectionEnabled: Bool = true
 
     var recordPreviewViewController: UIViewController? { cameraPreviewViewController }
     var recordPreviewView: UIView? { nil }
