@@ -1,6 +1,20 @@
 import Foundation
 import SwiftUI
 
+// MARK: - Design palette (sampled from the Chats mockups)
+
+private enum ChatC {
+    static let pageBG    = Color(red: 253/255, green: 239/255, blue: 245/255) // #FDEFF5
+    static let card      = Color(red: 254/255, green: 245/255, blue: 249/255) // #FEF5F9
+    static let avatarBG  = Color(red: 253/255, green: 227/255, blue: 238/255) // #FDE3EE
+    static let accent    = Color(red: 255/255, green: 45/255,  blue: 130/255) // #FF2D82
+    static let title     = Color(red: 16/255,  green: 20/255,  blue: 38/255)
+    static let secondary = Color(red: 138/255, green: 138/255, blue: 150/255)
+    static let online    = Color(red: 71/255,  green: 200/255, blue: 61/255)
+    static let todayPill = Color(red: 250/255, green: 240/255, blue: 245/255)
+    static let iconGray  = Color(red: 150/255, green: 148/255, blue: 158/255)
+}
+
 struct MessagesRootView: View {
     @StateObject private var store = FakeDMStore()
 
@@ -25,8 +39,7 @@ struct DMsListView: View {
 
     var body: some View {
         ZStack {
-            DS.Color.background.ignoresSafeArea()
-            PoplurSparkleBackground().ignoresSafeArea()
+            ChatC.pageBG.ignoresSafeArea()
 
             if let selectedThreadID {
                 DMThreadView(
@@ -67,36 +80,29 @@ struct DMsListView: View {
                 onEdit: { showingNewThreadSheet = true }
             )
             .padding(.horizontal, 20)
-            .padding(.top, 18)
+            .padding(.top, 22)
 
             DMSearchField(text: $searchText)
                 .padding(.horizontal, 20)
-                .padding(.top, 18)
-                .padding(.bottom, 10)
+                .padding(.top, 22)
 
             ScrollView {
-                LazyVStack(spacing: 0) {
-                    ForEach(Array(filteredThreads.enumerated()), id: \.element.id) { index, thread in
+                LazyVStack(spacing: 14) {
+                    ForEach(filteredThreads, id: \.id) { thread in
                         DMThreadRow(thread: thread, store: store) {
                             selectedThreadID = thread.id
                         } onVideoCall: { user in
                             videoCallUser = user
                         }
-
-                        if index < filteredThreads.count - 1 {
-                            Divider()
-                                .overlay(Color.white.opacity(0.08))
-                                .padding(.leading, 88)
-                                .padding(.trailing, 20)
-                        }
                     }
                 }
-                .padding(.top, 2)
+                .padding(.horizontal, 20)
+                .padding(.top, 18)
+                .padding(.bottom, 30)
             }
             .scrollIndicators(.hidden)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(DS.Color.background)
     }
 
     private var filteredThreads: [DMThread] {
@@ -113,22 +119,22 @@ private struct DMSearchField: View {
     @Binding var text: String
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 14) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(DS.Color.textSecondary)
+                .font(.system(size: 22, weight: .heavy))
+                .foregroundStyle(ChatC.accent)
 
-            TextField("Search", text: $text)
-                .font(.system(size: 16, weight: .medium, design: .rounded))
-                .foregroundStyle(DS.Color.textPrimary)
-                .tint(DS.Color.accent)
+            TextField("", text: $text, prompt: Text("Search chats...").foregroundColor(ChatC.secondary))
+                .font(.system(size: 19, weight: .semibold, design: .rounded))
+                .foregroundStyle(ChatC.title)
+                .tint(ChatC.accent)
                 .textInputAutocapitalization(.never)
                 .disableAutocorrection(true)
         }
-        .padding(.horizontal, 16)
-        .frame(height: 46)
-        .background(DS.Color.card, in: Capsule())
-        .shadow(color: .black.opacity(0.06), radius: 10, x: 0, y: 4)
+        .padding(.horizontal, 22)
+        .frame(height: 62)
+        .background(ChatC.card, in: Capsule())
+        .shadow(color: .black.opacity(0.04), radius: 10, x: 0, y: 4)
     }
 }
 
@@ -138,24 +144,29 @@ private struct DMTopBar: View {
 
     var body: some View {
         HStack(alignment: .center) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(DS.Font.title(30))
-                    .foregroundStyle(DS.Color.textPrimary)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 12) {
+                    // Same icon shown in the hold-menu wheel that opens this screen.
+                    HoldMenuIconBadge(icon: HoldMenuIcons.chat, size: 40)
+                    Text(title)
+                        .font(.system(size: 40, weight: .black, design: .rounded))
+                        .foregroundStyle(ChatC.title)
+                }
 
                 Text("Recent messages")
-                    .font(DS.Font.caption())
-                    .foregroundStyle(DS.Color.textSecondary)
+                    .font(.system(size: 17, weight: .bold, design: .rounded))
+                    .foregroundStyle(ChatC.accent)
             }
 
             Spacer()
 
             Button(action: onEdit) {
                 Image(systemName: "square.and.pencil")
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(DS.Color.textPrimary)
-                    .frame(width: 44, height: 44)
-                    .background(DS.Color.fill, in: RoundedRectangle(cornerRadius: DS.Radius.small, style: .continuous))
+                    .font(.system(size: 24, weight: .bold))
+                    .foregroundStyle(ChatC.accent)
+                    .frame(width: 62, height: 62)
+                    .background(ChatC.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .shadow(color: .black.opacity(0.04), radius: 8, x: 0, y: 4)
             }
             .buttonStyle(.plain)
         }
@@ -170,54 +181,54 @@ private struct DMThreadRow: View {
 
     var body: some View {
         Button(action: onOpen) {
-            HStack(spacing: 14) {
+            HStack(spacing: 16) {
                 DMAvatarCircle(name: displayName, isOnline: true)
-                    .frame(width: 52, height: 52)
+                    .frame(width: 62, height: 62)
 
-                VStack(alignment: .leading, spacing: 5) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(displayName)
+                        .font(.system(size: 20, weight: .bold, design: .rounded))
+                        .foregroundStyle(ChatC.title)
+                        .lineLimit(1)
+
+                    Text(thread.lastMessage?.text ?? "Start the conversation")
+                        .font(.system(size: 17, weight: .medium, design: .rounded))
+                        .foregroundStyle(ChatC.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 8)
+
+                VStack(alignment: .trailing, spacing: 8) {
+                    Text(lastTime)
+                        .font(.system(size: 16, weight: .bold, design: .rounded))
+                        .foregroundStyle(ChatC.accent)
+
                     HStack(spacing: 8) {
-                        Text(displayName)
-                            .font(.system(size: 17, weight: .bold, design: .rounded))
-                            .foregroundStyle(DS.Color.textPrimary)
-                            .lineLimit(1)
-
-                        Spacer(minLength: 6)
-
-                        Text(lastTime)
-                            .font(.system(size: 13, weight: unreadCount > 0 ? .bold : .medium, design: .rounded))
-                            .foregroundStyle(unreadCount > 0 ? DS.Color.accent : DS.Color.textSecondary)
-                    }
-
-                    HStack(spacing: 8) {
-                        Text(thread.lastMessage?.text ?? "Start the conversation")
-                            .font(.system(size: 14, weight: unreadCount > 0 ? .semibold : .medium, design: .rounded))
-                            .foregroundStyle(DS.Color.textSecondary)
-                            .lineLimit(1)
-
-                        Spacer(minLength: 6)
-
                         if unreadCount > 0 {
                             Text("\(unreadCount)")
-                                .font(.system(size: 11, weight: .black))
+                                .font(.system(size: 15, weight: .black, design: .rounded))
                                 .foregroundStyle(.white)
-                                .frame(width: 21, height: 21)
-                                .background(DS.Color.accent, in: Circle())
+                                .frame(width: 32, height: 32)
+                                .background(ChatC.accent, in: Circle())
                         }
+
+                        Button {
+                            onVideoCall(videoCallUser)
+                        } label: {
+                            Image(systemName: "video.fill")
+                                .font(.system(size: 19, weight: .semibold))
+                                .foregroundStyle(ChatC.iconGray)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
-
-                Button {
-                    onVideoCall(videoCallUser)
-                } label: {
-                    Image(systemName: "video.fill")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(DS.Color.textSecondary)
-                        .frame(width: 36, height: 36)
-                }
-                .buttonStyle(.plain)
             }
-            .padding(.horizontal, 20)
-            .frame(height: 76)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 18)
+            .frame(maxWidth: .infinity)
+            .background(ChatC.card, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+            .shadow(color: .black.opacity(0.035), radius: 10, x: 0, y: 5)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -261,31 +272,30 @@ struct DMThreadView: View {
     var body: some View {
         VStack(spacing: 0) {
             detailTopBar
-                .padding(.horizontal, 16)
-                .padding(.top, 10)
+                .padding(.horizontal, 20)
+                .padding(.top, 12)
 
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(spacing: 10) {
-                        Spacer()
-                            .frame(height: 12)
+                    LazyVStack(spacing: 12) {
                         Text("Today")
-                            .font(.system(size: 12, weight: .black, design: .rounded))
-                            .foregroundStyle(DS.Color.textSecondary)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 6)
-                            .background(DS.Color.fill, in: Capsule())
-                            .overlay(Capsule().stroke(DS.Color.border, lineWidth: 1))
-                            .padding(.bottom, 4)
+                            .font(.system(size: 16, weight: .bold, design: .rounded))
+                            .foregroundStyle(ChatC.secondary)
+                            .padding(.horizontal, 22)
+                            .padding(.vertical, 10)
+                            .background(ChatC.todayPill, in: Capsule())
+                            .padding(.vertical, 10)
+
                         ForEach(messages) { msg in
                             DMMessageBubble(message: msg, isMe: msg.senderID == store.currentUser.id)
                                 .id(msg.id)
                         }
-                        Spacer()
-                            .frame(height: 12)
+
+                        Spacer().frame(height: 12)
                     }
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, 18)
                 }
+                .scrollIndicators(.hidden)
                 .onAppear {
                     scrollToBottom(proxy)
                     store.markThreadRead(threadID)
@@ -296,11 +306,11 @@ struct DMThreadView: View {
             }
 
             composer
-                .padding(.horizontal, 16)
-                .padding(.bottom, 14)
+                .padding(.horizontal, 18)
+                .padding(.bottom, 16)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(DS.Color.background.ignoresSafeArea())
+        .background(ChatC.pageBG.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
         .fullScreenCover(isPresented: $showVideoCall) {
             DMCallCoordinatorView(calleeName: displayName, isVideo: true) { showVideoCall = false }
@@ -313,50 +323,55 @@ struct DMThreadView: View {
     private var detailTopBar: some View {
         HStack(spacing: 0) {
             DMAvatarCircle(name: displayName, isOnline: true)
-                .frame(width: 48, height: 48)
+                .frame(width: 62, height: 62)
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(displayName)
-                    .font(DS.Font.heading(20))
-                    .foregroundStyle(DS.Color.textPrimary)
+                    .font(.system(size: 26, weight: .black, design: .rounded))
+                    .foregroundStyle(ChatC.title)
                     .lineLimit(1)
 
-                Text("Active now")
-                    .font(DS.Font.caption())
-                    .foregroundStyle(Color(red: 0.26, green: 0.80, blue: 0.32))
+                HStack(spacing: 5) {
+                    Circle()
+                        .fill(ChatC.online)
+                        .frame(width: 9, height: 9)
+                    Text("Active now")
+                        .font(.system(size: 16, weight: .bold, design: .rounded))
+                        .foregroundStyle(ChatC.online)
+                }
             }
-            .padding(.leading, 12)
+            .padding(.leading, 14)
 
             Spacer(minLength: 12)
 
-            HStack(spacing: 10) {
-                DMCircleIconButton(systemName: "phone.fill", size: 44, iconSize: 19) {
-                    showAudioCall = true
-                }
-                DMCircleIconButton(systemName: "video.fill", size: 44, iconSize: 20) {
-                    showVideoCall = true
-                }
+            HStack(spacing: 12) {
+                DMSquareIconButton(systemName: "phone.fill", iconSize: 22) { showAudioCall = true }
+                DMSquareIconButton(systemName: "video.fill", iconSize: 22) { showVideoCall = true }
             }
         }
         .frame(height: 92)
     }
 
     private var composer: some View {
-        HStack(spacing: 10) {
-            TextField("Message \(displayName)", text: $draft)
-                .font(.system(size: 16, weight: .semibold, design: .rounded))
-                .foregroundStyle(DS.Color.textPrimary)
-                .tint(DS.Color.accent)
-                .padding(.horizontal, 18)
-                .frame(height: 52)
-                .background(DS.Color.card, in: Capsule())
-                .overlay(Capsule().stroke(DS.Color.border, lineWidth: 1))
+        HStack(spacing: 12) {
+            TextField(
+                "",
+                text: $draft,
+                prompt: Text("Message \(displayName)").foregroundColor(ChatC.secondary)
+            )
+            .font(.system(size: 19, weight: .semibold, design: .rounded))
+            .foregroundStyle(ChatC.title)
+            .tint(ChatC.accent)
+            .padding(.horizontal, 22)
+            .frame(height: 64)
+            .background(ChatC.card, in: Capsule())
+            .shadow(color: .black.opacity(0.04), radius: 8, x: 0, y: 4)
 
             Button(action: send) {
                 Image(systemName: "paperplane.fill")
-                    .font(.system(size: 20, weight: .bold))
+                    .font(.system(size: 22, weight: .bold))
                     .foregroundStyle(.white)
-                    .frame(width: 50, height: 50)
+                    .frame(width: 58, height: 58)
                     .background(sendButtonColor, in: Circle())
                     .shadow(color: sendButtonColor.opacity(0.35), radius: 8, x: 0, y: 4)
             }
@@ -367,8 +382,8 @@ struct DMThreadView: View {
 
     private var sendButtonColor: Color {
         draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        ? DS.Color.fill
-        : DS.Color.accent
+        ? ChatC.accent.opacity(0.45)
+        : ChatC.accent
     }
 
     private var thread: DMThread? {
@@ -381,16 +396,6 @@ struct DMThreadView: View {
 
     private var displayName: String {
         store.displayNameForParticipants(thread?.participantIDs ?? [])
-    }
-
-    private var videoCallUser: DMUser {
-        let userID = thread?.participantIDs.first(where: { $0 != store.currentUser.id }) ?? threadID
-        return store.user(for: userID) ?? DMUser(
-            id: userID,
-            displayName: displayName,
-            handle: displayName.lowercased().replacingOccurrences(of: " ", with: "."),
-            avatarSystemImage: "person.circle.fill"
-        )
     }
 
     private func send() {
@@ -415,60 +420,53 @@ private struct DMMessageBubble: View {
 
     var body: some View {
         HStack {
-            if isMe { Spacer(minLength: 0) }
+            if isMe { Spacer(minLength: 40) }
 
-            VStack(alignment: .leading, spacing: 7) {
+            VStack(alignment: .leading, spacing: 10) {
                 Text(message.text)
-                    .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    .font(.system(size: 20, weight: .bold, design: .rounded))
                     .lineSpacing(2)
-                    .foregroundStyle(isMe ? Color.white : DS.Color.textPrimary)
+                    .foregroundStyle(isMe ? Color.white : ChatC.title)
+                    .fixedSize(horizontal: false, vertical: true)
 
                 HStack(spacing: 4) {
                     Spacer(minLength: 20)
                     Text(DMRelativeTimeFormatter.shortTime(from: message.timestamp))
-                        .font(.system(size: 10, weight: .bold, design: .rounded))
-                        .foregroundStyle(isMe ? Color.white.opacity(0.70) : DS.Color.textSecondary)
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundStyle(isMe ? Color.white.opacity(0.75) : ChatC.secondary)
                     if isMe {
                         Image(systemName: "checkmark")
-                            .font(.system(size: 10, weight: .black))
-                            .foregroundStyle(Color.white.opacity(0.80))
+                            .font(.system(size: 12, weight: .black))
+                            .foregroundStyle(Color.white.opacity(0.8))
                     }
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 11)
-            .frame(maxWidth: UIScreen.main.bounds.width * 0.78, alignment: .leading)
-            .background(isMe ? DS.Color.accent : DS.Color.card)
-            .clipShape(
-                UnevenRoundedRectangle(
-                    topLeadingRadius: 22,
-                    bottomLeadingRadius: isMe ? 22 : 6,
-                    bottomTrailingRadius: isMe ? 6 : 22,
-                    topTrailingRadius: 22
-                )
-            )
-            .shadow(color: isMe ? DS.Color.accent.opacity(0.25) : .black.opacity(0.05), radius: 8, x: 0, y: 3)
+            .padding(.horizontal, 22)
+            .padding(.vertical, 18)
+            .frame(maxWidth: UIScreen.main.bounds.width * 0.80, alignment: .leading)
+            .background(isMe ? ChatC.accent : ChatC.card)
+            .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+            .shadow(color: isMe ? ChatC.accent.opacity(0.22) : .black.opacity(0.05), radius: 10, x: 0, y: 4)
 
-            if !isMe { Spacer(minLength: 0) }
+            if !isMe { Spacer(minLength: 40) }
         }
         .frame(maxWidth: .infinity)
     }
 }
 
-private struct DMCircleIconButton: View {
+private struct DMSquareIconButton: View {
     let systemName: String
-    let size: CGFloat
     let iconSize: CGFloat
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             Image(systemName: systemName)
-                .font(.system(size: iconSize, weight: .semibold))
-                .foregroundStyle(DS.Color.textPrimary)
-                .frame(width: size, height: size)
-                .background(DS.Color.fill, in: Circle())
-                .overlay(Circle().stroke(DS.Color.border, lineWidth: 1))
+                .font(.system(size: iconSize, weight: .bold))
+                .foregroundStyle(ChatC.accent)
+                .frame(width: 58, height: 58)
+                .background(ChatC.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .shadow(color: .black.opacity(0.04), radius: 8, x: 0, y: 4)
         }
         .buttonStyle(.plain)
     }
@@ -481,20 +479,19 @@ private struct DMAvatarCircle: View {
     var body: some View {
         ZStack {
             Circle()
-                .fill(DS.Color.pinkCard)
+                .fill(ChatC.avatarBG)
             Text(initials)
-                .font(.system(size: 16, weight: .bold, design: .rounded))
-                .foregroundStyle(DS.Color.accent)
+                .font(.system(size: 24, weight: .bold, design: .rounded))
+                .foregroundStyle(ChatC.accent)
 
             if isOnline {
                 Circle()
-                    .fill(Color(red: 0.22, green: 0.78, blue: 0.30))
-                    .frame(width: 11, height: 11)
-                    .overlay(Circle().stroke(DS.Color.card, lineWidth: 2))
+                    .fill(ChatC.online)
+                    .frame(width: 15, height: 15)
+                    .overlay(Circle().stroke(ChatC.card, lineWidth: 2.5))
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
             }
         }
-        .overlay(Circle().stroke(DS.Color.border, lineWidth: 1))
     }
 
     private var initials: String {
@@ -552,7 +549,7 @@ private struct NewThreadPickerView: View {
                             Spacer()
                             Image(systemName: selected.contains(user.id) ? "checkmark.circle.fill" : "circle")
                                 .poplurIconShader()
-                                .foregroundColor(selected.contains(user.id) ? Color.accentColor : Color.secondary)
+                                .foregroundColor(selected.contains(user.id) ? ChatC.accent : Color.secondary)
                         }
                     }
                     .buttonStyle(.plain)

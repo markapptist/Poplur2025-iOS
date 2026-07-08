@@ -174,6 +174,7 @@ struct ProfileView: View {
     @State private var navigateToMessages = false
     @State private var showPopularPhone = false
     @State private var showNotifications = false
+    @State private var showNotificationBanner = false
     @State private var showStats = false
     @State private var showCreatorDashboard = false
     @State private var hasUncheckedNotifications = true
@@ -301,62 +302,12 @@ struct ProfileView: View {
 
     private var cubeSubmenuItems: [CubeSubmenuItem] {
         [
-            CubeSubmenuItem(
-                id: "mail",
-                title: "Mail",
-                systemImage: "envelope.fill",
-                tint: Color(red: 0.42, green: 1.0, blue: 0.33)
-            ) {
-                openProfileSubmenuRoute(.mail)
-            },
-            CubeSubmenuItem(
-                id: "settings",
-                title: "Settings",
-                systemImage: "gearshape.fill",
-                tint: .indigo
-            ) {
-                openProfileSubmenuRoute(.settings)
-            },
-            CubeSubmenuItem(
-                id: "stats",
-                title: "Stats",
-                systemImage: "chart.pie.fill",
-                tint: .cyan
-            ) {
-                openProfileSubmenuRoute(.stats)
-            },
-            CubeSubmenuItem(
-                id: "notifications",
-                title: "Notifications",
-                systemImage: "bell.fill",
-                tint: .orange
-            ) {
-                openProfileSubmenuRoute(.notifications)
-            },
-            CubeSubmenuItem(
-                id: "phone",
-                title: "Phone",
-                systemImage: "phone.fill",
-                tint: .teal
-            ) {
-                openProfileSubmenuRoute(.phone)
-            },
-            CubeSubmenuItem(
-                id: "store",
-                title: "Store",
-                systemImage: "cart.fill",
-                tint: Color(red: 0.95, green: 0.55, blue: 0.16)
-            ) {
-                openProfileSubmenuRoute(.store)
-            },
-            CubeSubmenuItem(
-                id: "creator",
-                title: "Credits",
-                systemImage: "bolt.circle.fill",
-                tint: Color(red: 0.36, green: 1.0, blue: 0.42)
-            ) {
-                openProfileSubmenuRoute(.creator)
-            }
+            CubeSubmenuItem(id: "mail",     icon: HoldMenuIcons.mail)     { openProfileSubmenuRoute(.mail) },
+            CubeSubmenuItem(id: "settings", icon: HoldMenuIcons.settings) { openProfileSubmenuRoute(.settings) },
+            CubeSubmenuItem(id: "stats",    icon: HoldMenuIcons.stats)    { openProfileSubmenuRoute(.stats) },
+            CubeSubmenuItem(id: "phone",    icon: HoldMenuIcons.phone)    { openProfileSubmenuRoute(.phone) },
+            CubeSubmenuItem(id: "store",    icon: HoldMenuIcons.store)    { openProfileSubmenuRoute(.store) },
+            CubeSubmenuItem(id: "creator",  icon: HoldMenuIcons.credits)  { openProfileSubmenuRoute(.creator) }
         ]
     }
     
@@ -578,7 +529,10 @@ struct ProfileView: View {
 
             // Notification bell
             Button {
-                openProfileSubmenuRoute(.notifications)
+                withAnimation(.spring(response: 0.40, dampingFraction: 0.78)) {
+                    showNotificationBanner.toggle()
+                    if showNotificationBanner { hasUncheckedNotifications = false; notificationCenter.markAllRead() }
+                }
             } label: {
                 ZStack(alignment: .topTrailing) {
                     Text("🔔")
@@ -960,16 +914,25 @@ struct ProfileView: View {
                 .zIndex(51)
         }
 
-        if showNotifications {
-            ProfileNotificationsView(
-                notifications: profileNotifications,
-                onMarkRead: {
-                    hasUncheckedNotifications = false
-                    notificationCenter.markAllRead()
+        if showNotificationBanner {
+            Color.black.opacity(0.001)
+                .ignoresSafeArea()
+                .onTapGesture {
+                    withAnimation(.spring(response: 0.40, dampingFraction: 0.78)) {
+                        showNotificationBanner = false
+                    }
                 }
-            )
-            .transition(.opacity)
-            .zIndex(52)
+                .zIndex(55)
+
+            VStack {
+                ProfileNotificationBanner(notifications: profileNotifications)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .zIndex(56)
+                Spacer()
+            }
+            .ignoresSafeArea(edges: .top)
+            .allowsHitTesting(false)
+            .zIndex(56)
         }
 
         if showRadiusStore {
@@ -1115,6 +1078,16 @@ struct ProfileView: View {
 
     var body: some View {
         profileScene
+#if DEBUG
+            .overlay(alignment: .top) {
+                if UITestHooks.isEnabled {
+                    VStack(spacing: 2) {
+                        UITestScreenMarker(name: "Profile")
+                        UITestActionStrip(prefix: "UITestWheel", submenuItems: cubeSubmenuItems)
+                    }
+                }
+            }
+#endif
     }
 
     private var profileRootScene: some View {
@@ -1158,6 +1131,8 @@ struct ProfileView: View {
                 .onReceive(NotificationCenter.default.publisher(for: Notification.Name("OpenUserDetailForUser")), perform: handleOpenUserDetailForUser)
                 .onReceive(NotificationCenter.default.publisher(for: .OpenSettingsRequested), perform: handleOpenSettingsRequested)
                 .onReceive(NotificationCenter.default.publisher(for: .OpenDMsRequested), perform: handleOpenDMsRequested)
+                .onReceive(NotificationCenter.default.publisher(for: .OpenPoplurStoreRequested), perform: handleOpenStoreRequested)
+                .onReceive(NotificationCenter.default.publisher(for: .OpenCreatorRequested), perform: handleOpenCreatorRequested)
                 .onReceive(NotificationCenter.default.publisher(for: .PoplurAIShowAnalytics), perform: handlePoplurAIShowAnalytics)
                 .onReceive(NotificationCenter.default.publisher(for: .PoplurAIProfileSortRequested), perform: handlePoplurAIProfileSortRequested)
                 .onReceive(NotificationCenter.default.publisher(for: Notification.Name("LastTappedUserChanged")), perform: handleLastTappedUserChanged)
@@ -1333,6 +1308,16 @@ struct ProfileView: View {
         openProfileSubmenuRoute(.mail)
     }
 
+    private func handleOpenStoreRequested(_ notification: Notification) {
+        guard isOwnProfile else { return }
+        openProfileSubmenuRoute(.store)
+    }
+
+    private func handleOpenCreatorRequested(_ notification: Notification) {
+        guard isOwnProfile else { return }
+        openProfileSubmenuRoute(.creator)
+    }
+
     private func handlePoplurAIShowAnalytics(_ notification: Notification) {
         openProfileSubmenuRoute(.stats)
     }
@@ -1436,7 +1421,8 @@ struct ProfileView: View {
             print("✅ [ProfileView] Showing cube menu wheel")
             let backItem = CubeSubmenuItem(
                 id: "back",
-                title: "Back",
+                title: "BACK",
+                iconImageName: "HoldMenu_Back",
                 systemImage: "arrow.backward",
                 tint: .white
             ) {
@@ -1571,7 +1557,10 @@ struct ProfileView: View {
                     // Bell to the left of the head in 3D space
                     HStack {
                         Button {
-                            openProfileSubmenuRoute(.notifications)
+                            withAnimation(.spring(response: 0.40, dampingFraction: 0.78)) {
+                                showNotificationBanner.toggle()
+                                if showNotificationBanner { hasUncheckedNotifications = false; notificationCenter.markAllRead() }
+                            }
                         } label: {
                             ZStack(alignment: .topTrailing) {
                                 Text("🔔")
@@ -1628,17 +1617,6 @@ struct ProfileView: View {
             }
         }
         .frame(width: size, height: size)
-        .overlay(
-            RoundedRectangle(cornerRadius: isOwnProfile ? 24 : size / 2, style: .continuous)
-                .stroke(
-                    LinearGradient(
-                        colors: [skinTheme.accent, skinTheme.accent2.opacity(0.78)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 2
-                )
-        )
         .shadow(color: skinTheme.shadow, radius: 10, x: 0, y: 6)
         .animation(.spring(response: 0.55, dampingFraction: 0.72), value: isOwnProfile)
         .overlay(alignment: .bottomTrailing) {
@@ -2602,6 +2580,76 @@ struct ProfileView: View {
                 print("✅ [ProfileView] Demo post persisted with id=\(id)")
             }
         }
+    }
+}
+
+private struct ProfileNotificationBanner: View {
+    let notifications: [ProfileNotificationItem]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Notifications")
+                .font(.system(size: 20, weight: .black, design: .rounded))
+                .foregroundColor(.white)
+                .padding(.horizontal, 20)
+                .padding(.top, 56)
+                .padding(.bottom, 14)
+
+            if notifications.isEmpty {
+                Text("No notifications yet")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.72))
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 20)
+            } else {
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(spacing: 10) {
+                        ForEach(notifications.prefix(8)) { item in
+                            HStack(alignment: .top, spacing: 12) {
+                                ZStack(alignment: .topTrailing) {
+                                    Circle()
+                                        .fill(item.kind.color.opacity(0.18))
+                                        .frame(width: 40, height: 40)
+                                        .overlay {
+                                            Image(systemName: item.kind.iconName)
+                                                .poplurIconShader()
+                                                .font(.system(size: 17, weight: .bold))
+                                                .foregroundColor(item.kind.color)
+                                        }
+                                    if item.isUnchecked {
+                                        Circle().fill(Color.red).frame(width: 9, height: 9)
+                                    }
+                                }
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(item.title)
+                                        .font(.system(size: 14, weight: .heavy, design: .rounded))
+                                        .foregroundColor(.black)
+                                    Text(item.detail)
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundColor(.black.opacity(0.55))
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                                Spacer(minLength: 0)
+                            }
+                            .padding(14)
+                            .background(Color.white, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                            .shadow(color: .black.opacity(0.07), radius: 4, y: 2)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 20)
+                }
+                .frame(maxHeight: 340)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            Color(red: 1.0, green: 0.62, blue: 0.78)
+                .ignoresSafeArea(edges: .top)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous)
+            .offset(y: -28))
+        .shadow(color: .black.opacity(0.18), radius: 16, y: 8)
     }
 }
 

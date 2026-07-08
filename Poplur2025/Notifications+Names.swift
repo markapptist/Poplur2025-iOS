@@ -1,5 +1,6 @@
 import Foundation
 import CoreLocation
+import FirebaseCore
 import FirebaseAuth
 import FirebaseFirestore
 import UserNotifications
@@ -38,6 +39,8 @@ extension Notification.Name {
     
     // Feed and audio
     static let FeedChannelDidChange = Notification.Name("FeedChannelDidChange")
+    static let FeedChannelUp = Notification.Name("FeedChannelUp")
+    static let FeedChannelDown = Notification.Name("FeedChannelDown")
     static let PauseFeedAudio = Notification.Name("PauseFeedAudio")
     static let ResumeFeedAudio = Notification.Name("ResumeFeedAudio")
     static let PauseGlobalFeedAudio = Notification.Name("PauseGlobalFeedAudio")
@@ -64,8 +67,10 @@ extension Notification.Name {
     
     // Settings and UI
     static let OpenSettingsRequested = Notification.Name("OpenSettingsRequested")
+    static let HoldMenuNavigate = Notification.Name("HoldMenuNavigate")
     static let OpenDMsRequested = Notification.Name("OpenDMsRequested")
     static let OpenPoplurStoreRequested = Notification.Name("OpenPoplurStoreRequested")
+    static let OpenCreatorRequested = Notification.Name("OpenCreatorRequested")
     static let MainTabChildRouteVisibilityChanged = Notification.Name("MainTabChildRouteVisibilityChanged")
     
     // User stats
@@ -152,6 +157,10 @@ final class PoplurNotificationCenter: NSObject, ObservableObject, UNUserNotifica
     }
 
     func refreshDailyNotificationForCurrentUser() async {
+        // Guard against Firebase not being configured yet (Auth.auth() asserts if called before
+        // FirebaseApp.configure()). Reachable early via the UI-test auth bypass, which can show
+        // authenticatedContent before configuration completes.
+        guard FirebaseApp.app() != nil else { return }
         guard let uid = Auth.auth().currentUser?.uid else { return }
         do {
             let snapshot = try await Firestore.firestore()

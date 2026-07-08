@@ -501,6 +501,13 @@ struct HomeView: View {
     @State private var showFeedCommentComposer = false
     @State private var showLiveLocationPicker = false
 
+    // Channel button state (feed channel stepper in bottom HUD)
+    @State private var homeChannelButtonActive: FeedChannelButtonKind? = nil
+    @State private var homeChannelButtonToken: Int = 0
+    // Right-side HUD oscillation: radius ↔ trending view every 10 s (feed tab only)
+    @State private var showRadiusOnRight: Bool = true
+    @State private var radiusOscillationTask: Task<Void, Never>? = nil
+
     // Recording countdown state
     @State private var isRecording: Bool = false
     @State private var recordingSecondsRemaining: Int = 10
@@ -981,6 +988,37 @@ struct HomeView: View {
         }
     }
 
+    private func startRadiusOscillation() {
+        radiusOscillationTask?.cancel()
+        radiusOscillationTask = Task { @MainActor in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 10_000_000_000)
+                guard !Task.isCancelled else { break }
+                withAnimation(.easeInOut(duration: 0.5)) {
+                    showRadiusOnRight.toggle()
+                }
+            }
+        }
+    }
+
+    private func pressHomeChannelButton(_ direction: FeedChannelButtonKind) {
+        homeChannelButtonToken += 1
+        let token = homeChannelButtonToken
+        withAnimation(.easeInOut(duration: 0.12)) {
+            homeChannelButtonActive = direction
+        }
+        NotificationCenter.default.post(
+            name: direction == .up ? .FeedChannelUp : .FeedChannelDown,
+            object: nil
+        )
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.26) {
+            guard token == self.homeChannelButtonToken else { return }
+            withAnimation(.easeInOut(duration: 0.12)) {
+                self.homeChannelButtonActive = nil
+            }
+        }
+    }
+
     private func startRecordHoldRamp() {
         recordHoldTask?.cancel()
         let maxMeters: Double = 3_323_000.0
@@ -1063,117 +1101,82 @@ struct HomeView: View {
         }
     }
 
+    private func postHoldMenuNavigate(_ action: String) {
+        NotificationCenter.default.post(name: .HoldMenuNavigate, object: nil, userInfo: ["action": action])
+    }
+
+    /// Camera (record) wheel — routes to the camera's own sub-screens plus quick nav.
     private var cameraCubeMenuItems: [CubeSubmenuItem] {
         [
-            CubeSubmenuItem(
-                id: "camera-photo",
-                title: "Photo",
-                systemImage: "camera.fill",
-                tint: .green,
-                action: triggerCameraPhotoFromCubeMenu
-            ),
-            CubeSubmenuItem(
-                id: "camera-video",
-                title: "Video",
-                systemImage: "video.fill",
-                tint: .indigo,
-                action: triggerCameraVideoFromCubeMenu
-            ),
-            CubeSubmenuItem(
-                id: "camera-live",
-                title: "Live",
-                systemImage: "dot.radiowaves.left.and.right",
-                tint: .red,
-                action: toggleLiveVideoFromCubeMenu
-            ),
-            CubeSubmenuItem(
-                id: "camera-ar-filters",
-                title: "AR",
-                systemImage: "sparkles",
-                tint: .cyan,
-                action: openARFiltersFromCubeMenu
-            ),
-            CubeSubmenuItem(
-                id: "camera-object-detection",
-                title: objectDetectionEnabled ? "Detect On" : "Detect Off",
-                systemImage: "eye.magnifyingglass",
-                tint: objectDetectionEnabled ? .green : .orange,
-                action: toggleObjectDetectionFromCubeMenu
-            ),
-            CubeSubmenuItem(
-                id: "camera-games",
-                title: "Games",
-                systemImage: "gamecontroller.fill",
-                tint: .purple,
-                action: {
-                    postCubeFaceOverride(face: "camera", title: "Games", systemImage: "gamecontroller.fill")
-                    showGames = true
-                    isMainTabChildRouteVisible = true
-                }
-            )
+            CubeSubmenuItem(id: "cam-roll",   icon: HoldMenuIcons.cameraRoll) { postHoldMenuNavigate("cameraroll") },
+            CubeSubmenuItem(id: "cam-create", icon: HoldMenuIcons.create)     { postHoldMenuNavigate("create") },
+            CubeSubmenuItem(id: "cam-home",   icon: HoldMenuIcons.home)       { postHoldMenuNavigate("home") },
+            CubeSubmenuItem(id: "cam-chat",   icon: HoldMenuIcons.chat)       { postHoldMenuNavigate("chat") },
+            CubeSubmenuItem(id: "cam-store",  icon: HoldMenuIcons.store)      { postHoldMenuNavigate("store") }
         ]
     }
 
+    /// Feed wheel — routes to the feed's own sub-screens (TV Guide, News) plus channels.
     private var feedCubeMenuItems: [CubeSubmenuItem] {
         [
-            CubeSubmenuItem(
-                id: "feed-like",
-                title: "Like",
-                systemImage: "heart.fill",
-                tint: .pink,
-                action: {
-                    NotificationCenter.default.post(name: .FeedLikeCurrentPost, object: nil)
-                }
-            ),
-            CubeSubmenuItem(
-                id: "feed-comment",
-                title: "Comment",
-                systemImage: "bubble.left.and.bubble.right.fill",
-                tint: .cyan,
-                action: {
-                    postCubeFaceOverride(face: "feed", title: "Comment", systemImage: "bubble.left.and.bubble.right.fill")
-                    NotificationCenter.default.post(name: .FeedOpenCommentComposer, object: nil)
-                }
-            ),
-            CubeSubmenuItem(
-                id: "feed-profile",
-                title: "Profile",
-                systemImage: "person.crop.circle.fill",
-                tint: .indigo,
-                action: {
-                    NotificationCenter.default.post(name: .FeedOpenCurrentPostProfile, object: nil)
-                }
-            ),
-            CubeSubmenuItem(
-                id: "feed-news",
-                title: "News",
-                systemImage: "newspaper.fill",
-                tint: .red,
-                action: {
-                    postCubeFaceOverride(face: "feed", title: "News", systemImage: "newspaper.fill")
-                    NotificationCenter.default.post(name: .FeedOpenNews, object: nil)
-                }
-            ),
-            CubeSubmenuItem(
-                id: "feed-tv-guide",
-                title: "TV Guide",
-                systemImage: "tv.fill",
-                tint: .green,
-                action: {
-                    NotificationCenter.default.post(name: .FeedOpenTVGuide, object: nil)
-                }
-            ),
-            CubeSubmenuItem(
-                id: "feed-captions",
-                title: settings.closedCaptionsEnabled ? "CC On" : "CC Off",
-                systemImage: "text.bubble.fill",
-                tint: settings.closedCaptionsEnabled ? .mint : .gray,
-                action: {
-                    settings.toggleClosedCaptions()
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                }
-            )
+            CubeSubmenuItem(id: "feed-tvguide", icon: HoldMenuIcons.tvGuide) { postHoldMenuNavigate("tvguide") },
+            CubeSubmenuItem(id: "feed-news",    icon: HoldMenuIcons.news)    { postHoldMenuNavigate("news") },
+            CubeSubmenuItem(id: "feed-music",   icon: HoldMenuIcons.music)   { postHoldMenuNavigate("music") },
+            CubeSubmenuItem(id: "feed-youtube", icon: HoldMenuIcons.youtube) { postHoldMenuNavigate("youtube") },
+            CubeSubmenuItem(id: "feed-chat",    icon: HoldMenuIcons.chat)    { postHoldMenuNavigate("chat") }
         ]
+    }
+
+    /// Kept for the DEBUG UITest wheel strip; mirrors the feed wheel.
+    private var holdMenuNavItems: [CubeSubmenuItem] { feedCubeMenuItems }
+
+    /// Central handler for hold-menu navigation: switches the tab first (the
+    /// destination view must be mounted before its notification listener fires),
+    /// then posts the screen-specific follow-up.
+    private func handleHoldMenuNavigate(_ notification: Notification) {
+        guard let action = notification.userInfo?["action"] as? String else { return }
+        switch action {
+        case "home":
+            selectedTab = .feed
+        case "chat":
+            selectedTab = .profile
+            NotificationCenter.default.post(name: .OpenDMsRequested, object: nil)
+        case "music":
+            selectedTab = .feed
+            NotificationCenter.default.post(name: .PoplurAIGoToFeedChannel, object: nil, userInfo: ["query": "music"])
+        case "gifts", "store":
+            selectedTab = .profile
+            NotificationCenter.default.post(name: .OpenPoplurStoreRequested, object: nil)
+        case "youtube":
+            selectedTab = .feed
+            NotificationCenter.default.post(name: .PoplurAIGoToFeedChannel, object: nil, userInfo: ["query": "youtube"])
+        // Feed sub-screens
+        case "tvguide":
+            selectedTab = .feed
+            NotificationCenter.default.post(name: .FeedOpenTVGuide, object: nil)
+        case "news":
+            selectedTab = .feed
+            NotificationCenter.default.post(name: .FeedOpenNews, object: nil)
+        // Camera sub-screens
+        case "cameraroll":
+            selectedTab = .record
+            NotificationCenter.default.post(name: .showCameraRollWindow, object: nil)
+        case "create":
+            selectedTab = .profile
+            NotificationCenter.default.post(name: .OpenCreatorRequested, object: nil)
+        // Map sub-screens
+        case "locate":
+            selectedTab = .map
+            NotificationCenter.default.post(name: .CenterMapOnUser, object: nil)
+        case "post":
+            selectedTab = .map
+            NotificationCenter.default.post(name: .PoplurAIStartMapPost, object: nil)
+        case "tour":
+            selectedTab = .map
+            NotificationCenter.default.post(name: .PoplurAISetTourActive, object: nil, userInfo: ["active": true])
+        default:
+            break
+        }
     }
 
     private func postCubeFaceOverride(face: String, item: CubeSubmenuItem?) {
@@ -1766,6 +1769,13 @@ struct HomeView: View {
                 )
                 .transition(.opacity)
                 .zIndex(7200)
+                .onAppear { cameraControllerHolder.controller?.suspendCapture() }
+                .onDisappear {
+                    guard selectedTab == .record else { return }
+                    Task { @MainActor in
+                        await cameraControllerHolder.controller?.resumePreviewAfterInterruption()
+                    }
+                }
             }
 
             if let item = postCaptureComposerItem {
@@ -1779,6 +1789,13 @@ struct HomeView: View {
                 )
                 .transition(.opacity)
                 .zIndex(7250)
+                .onAppear { cameraControllerHolder.controller?.suspendCapture() }
+                .onDisappear {
+                    guard selectedTab == .record else { return }
+                    Task { @MainActor in
+                        await cameraControllerHolder.controller?.resumePreviewAfterInterruption()
+                    }
+                }
             }
 
             if selectedTab == .record {
@@ -1887,6 +1904,7 @@ struct HomeView: View {
                 VStack {
                     Spacer()
                     HStack(alignment: .counterSeparator) {
+                        // LEFT: recording countdown (hidden on feed tab — replaced by channel buttons overlay)
                         RecordingCountdownView(
                             isRecording: $isRecording,
                             secondsRemaining: $recordingSecondsRemaining,
@@ -1898,22 +1916,33 @@ struct HomeView: View {
                             detectedUserPostCount: cameraDetectedPostCount
                         )
                         .frame(width: 150, alignment: .leading)
+                        .opacity(selectedTab == .feed ? 0 : 1)
 
                         Spacer(minLength: 0)
 
-                        // Choose your preferred radius display style:
-                        // Option 1: Default card style (recommended)
-                        RadiusNumberDisplay(radiusMeters: $isometricBarModel.radius)
+                        // RIGHT: on feed tab oscillates every 10s between radius and trending view
+                        if selectedTab == .feed {
+                            ZStack(alignment: .trailing) {
+                                RadiusNumberDisplay(radiusMeters: $isometricBarModel.radius)
+                                    .opacity(showRadiusOnRight ? 1 : 0)
+                                RecordingCountdownView(
+                                    isRecording: $isRecording,
+                                    secondsRemaining: $recordingSecondsRemaining,
+                                    postCount: $userPostCount,
+                                    likesCount: $currentPostLikesCount,
+                                    selectedTab: $selectedTab,
+                                    radiusTrend: $radiusTrend,
+                                    radiusMeters: $isometricBarModel.radius,
+                                    detectedUserPostCount: cameraDetectedPostCount
+                                )
+                                .opacity(showRadiusOnRight ? 0 : 1)
+                            }
                             .frame(width: 150, alignment: .trailing)
-
-                        // Option 2: Compact badge style
-                        // RadiusNumberBadge(radiusMeters: $isometricBarModel.radius)
-
-                        // Option 3: Corner badge style
-                        // RadiusCornerBadge(radiusMeters: $isometricBarModel.radius)
-
-                        // Option 4: Icon-centered style
-                        // RadiusDisplayWithIcon(radiusMeters: $isometricBarModel.radius)
+                            .animation(.easeInOut(duration: 0.5), value: showRadiusOnRight)
+                        } else {
+                            RadiusNumberDisplay(radiusMeters: $isometricBarModel.radius)
+                                .frame(width: 150, alignment: .trailing)
+                        }
                     }
                     .padding(.leading, safe.leading + 16)
                     .padding(.trailing, safe.trailing + 16)
@@ -1926,11 +1955,47 @@ struct HomeView: View {
                 .opacity(bottomChromeVisible && !isMainTabChildRouteVisible ? (shouldSleepChromeForCurrentTab ? 0.2 : 1) : 0)
                 .onAppear {
                     revealBottomChromeIfNeeded()
+                    startRadiusOscillation()
+                }
+                .onDisappear {
+                    radiusOscillationTask?.cancel()
+                }
+                .onChange(of: selectedTab) { _, newTab in
+                    if newTab == .feed {
+                        startRadiusOscillation()
+                    } else {
+                        radiusOscillationTask?.cancel()
+                        showRadiusOnRight = true
+                    }
                 }
             }
             .ignoresSafeArea(.container, edges: [.bottom, .leading, .trailing])
             .zIndex(1001)
             .allowsHitTesting(false)
+
+            // Channel buttons — separate interactive overlay shown on feed tab only
+            if selectedTab == .feed && bottomChromeVisible && !isMainTabChildRouteVisible {
+                GeometryReader { proxy in
+                    let safe = proxy.safeAreaInsets
+                    VStack {
+                        Spacer()
+                        HStack {
+                            FeedChannelStepper3D(
+                                activeButton: homeChannelButtonActive,
+                                pressToken: homeChannelButtonToken,
+                                onUp: { pressHomeChannelButton(.up) },
+                                onDown: { pressHomeChannelButton(.down) }
+                            )
+                            .padding(.leading, safe.leading + 32)
+                            .padding(.bottom, safe.bottom + 28)
+                            Spacer()
+                        }
+                    }
+                }
+                .ignoresSafeArea(.container, edges: [.bottom, .leading, .trailing])
+                .zIndex(1002)
+                .transition(.opacity)
+            }
 
             if deviceVolumeObserver.isShowing {
                 GeometryReader { proxy in
@@ -2442,12 +2507,11 @@ struct HomeView: View {
                         NotificationCenter.default.post(name: .ResumeFeedAudio, object: nil)
                     }
                 case .background:
-                    poplurAI.stop()
+                    poplurAI.enterBackground()
                     cameraControllerHolder.stopIfLoaded()
                     NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
                     NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
                 case .inactive:
-                    poplurAI.stop()
                     NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
                     NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
                 @unknown default:
@@ -2481,6 +2545,9 @@ struct HomeView: View {
         return step1
             .onReceive(NotificationCenter.default.publisher(for: .FeedOpenCommentComposer)) { _ in
                 openFeedCommentComposer()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .HoldMenuNavigate)) { notification in
+                handleHoldMenuNavigate(notification)
             }
             .onReceive(NotificationCenter.default.publisher(for: .SharedRadiusDidChange)) { note in
                 if let value = note.userInfo?["radius"] as? Double {
@@ -2608,6 +2675,22 @@ struct HomeView: View {
             .animation(.easeOut(duration: 0.18), value: showSlowInitializationDetails)
             .preferredColorScheme(settings.colorSchemePreference.colorScheme)
             // ─────────────────────────────────────────────────────────────────
+#if DEBUG
+            .overlay(alignment: .top) {
+                if UITestHooks.isEnabled {
+                    VStack(spacing: 2) {
+                        UITestScreenMarker(name: selectedTab.title)
+                        UITestActionStrip(prefix: "UITestTab", items: [
+                            ("feed", { selectedTab = .feed }),
+                            ("map", { selectedTab = .map }),
+                            ("record", { selectedTab = .record }),
+                            ("profile", { selectedTab = .profile })
+                        ])
+                        UITestActionStrip(prefix: "UITestWheel", submenuItems: holdMenuNavItems)
+                    }
+                }
+            }
+#endif
     }
 }
 
@@ -3384,12 +3467,11 @@ private struct CameraIconControlButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: systemName)
-                .poplurIconShader()
-                .font(.system(size: 18, weight: .bold))
-                .foregroundStyle(isActive ? Color.yellow : Color.white)
-                .frame(width: 44, height: 44)
-                .contentShape(Circle())
-                .shadow(color: .black.opacity(0.45), radius: 5, x: 0, y: 2)
+                .font(.system(size: 24, weight: .semibold))
+                .foregroundStyle(isActive ? Color(red: 1.0, green: 0.85, blue: 0.2) : .white)
+                .poplurIconShader(intensity: 1.0)
+                .frame(width: 50, height: 50)
+                .shadow(color: .black.opacity(0.55), radius: 4, y: 2)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(systemName.contains("bolt") ? "Toggle flash" : "Switch camera")

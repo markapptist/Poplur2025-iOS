@@ -4011,13 +4011,13 @@ struct MapViewProduction: View {
         use2DMap ? .standard : .hybrid(elevation: .realistic, showsTraffic: false)
     }
 
-    private let focusedLocationDistance: CLLocationDistance = 300
+    private let focusedLocationDistance: CLLocationDistance = 120
 
-    @State private var fixedDistanceAlt: CLLocationDistance = 500
+    @State private var fixedDistanceAlt: CLLocationDistance = 120
     @State private var camera: MapCameraPosition = .camera(
         MapCamera(
             centerCoordinate: CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194), // SF default, will update to user location
-            distance: 500,
+            distance: 120,
             heading: 0,
             pitch: 60
         )
@@ -4071,7 +4071,11 @@ struct MapViewProduction: View {
     @State private var lastContextRefreshLocation: CLLocation? = nil
     @State private var isCameraTransitionInProgress: Bool = false
 
-    private let mapLeftOverlayPadding: CGFloat = 28
+    // Centers the zoom slider knob on the RecordingCountdownView below it.
+    // Countdown center ≈ safeLeading + 16 (row lead) + 20 (hPad) + 45 (½ of 90pt
+    // numeric column) = 81; slider knob center = safeLeading + padding + 17 (½ of
+    // the 34pt slider frame) → padding = 64.
+    private let mapLeftOverlayPadding: CGFloat = 64
 
     // Auto-probed Look Around scene — nil means street view is unavailable at this location
     @State private var lookaroundScene: MKLookAroundScene? = nil
@@ -4104,10 +4108,11 @@ struct MapViewProduction: View {
     @State private var shownPostCountryFlag: String? = nil
     
     // Zoom slider state
-    @State private var zoomLevel: Double = 300
+    @State private var zoomLevel: Double = 120
+    private let mapZoomSliderHeight: CGFloat = 176
 
     // Pinch super-zoom state
-    @State private var pinchStartCameraDistance: CLLocationDistance = 300
+    @State private var pinchStartCameraDistance: CLLocationDistance = 120
     @State private var isPinchingMap = false
     private let superZoomAmplification: Double = 6.0
 
@@ -4116,7 +4121,7 @@ struct MapViewProduction: View {
     @State private var showConfetti: Bool = true // Toggle confetti on/off
     private let userLocationPinID = UUID() // Stable ID for user location trending pin
     @State private var cubeHoldStartY: CGFloat? = nil // Track cube hold drag start position
-    @State private var initialZoomLevel: Double = 300
+    @State private var initialZoomLevel: Double = 120
     @State private var showIndoorMap: Bool = false
     @State private var indoorVenues: [MappedinVenue] = []
     @State private var selectedVenueSlug: String? = nil
@@ -5760,21 +5765,44 @@ struct MapViewProduction: View {
         }
     }
 
+    @ViewBuilder
+    private var mapZoomSliderOverlay: some View {
+        GeometryReader { proxy in
+            VStack {
+                Spacer()
+                HStack {
+                    AnimatedZoomSlider(zoomLevel: $zoomLevel) { newZoom in
+                        updateMapZoom(to: newZoom)
+                    }
+                    .frame(width: 34, height: mapZoomSliderHeight)
+                    .shadow(color: .black.opacity(0.22), radius: 4, x: 0, y: 2)
+
+                    Spacer()
+                }
+                .padding(.leading, proxy.safeAreaInsets.leading + mapLeftOverlayPadding)
+                .padding(.bottom, proxy.safeAreaInsets.bottom + 120)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+        }
+        .zIndex(1000)
+    }
+
     private func updateMapZoom(to newZoom: Double) {
         guard let currentCoord = camera.camera?.centerCoordinate else { return }
         let heading = camera.camera?.heading ?? 0
         let clampedZoom = newZoom.clamped(to: 10...40_000_000)
 
-        withAnimation(.easeOut(duration: 0.2)) {
-            camera = .camera(
-                MapCamera(
-                    centerCoordinate: currentCoord,
-                    distance: clampedZoom,
-                    heading: heading,
-                    pitch: activePitch
-                )
+        // No withAnimation: the slider drives the camera directly so zooming in and
+        // out tracks the finger instantly (like the pinch gesture). The globe intro
+        // and per-location fly-ins keep their own animated transitions.
+        camera = .camera(
+            MapCamera(
+                centerCoordinate: currentCoord,
+                distance: clampedZoom,
+                heading: heading,
+                pitch: activePitch
             )
-        }
+        )
 
         fixedDistanceAlt = clampedZoom
     }
@@ -5948,6 +5976,8 @@ struct MapViewProduction: View {
 
                 // AI Recommendation Overlay
                 aiRecommendationOverlay
+
+                mapZoomSliderOverlay
 
                 weatherBadgeOverlay
 
@@ -6697,6 +6727,16 @@ struct MapViewProduction: View {
                 // Probe Look Around availability for the new center
                 probeLookaround(at: center)
             }
+#if DEBUG
+            .overlay(alignment: .top) {
+                if UITestHooks.isEnabled {
+                    VStack(spacing: 2) {
+                        UITestScreenMarker(name: "Map")
+                        UITestActionStrip(prefix: "UITestWheel", submenuItems: mapCubeMenuItems)
+                    }
+                }
+            }
+#endif
     }
 
     @ViewBuilder
@@ -6784,31 +6824,23 @@ struct MapViewProduction: View {
 
     // MARK: - Hold Menu
 
+    /// Map wheel — routes to the map's own sub-screens (locate, post, tour) plus quick nav.
     private var mapCubeMenuItems: [CubeSubmenuItem] {
         [
-            CubeSubmenuItem(id: "search", title: "Search", systemImage: "magnifyingglass", tint: .white) {
-                postMapCubeFaceOverride(title: "Search", systemImage: "magnifyingglass")
-                showAddressSearch = true
+            CubeSubmenuItem(id: "map-locate", icon: HoldMenuIcons.locate) {
+                NotificationCenter.default.post(name: .HoldMenuNavigate, object: nil, userInfo: ["action": "locate"])
             },
-            CubeSubmenuItem(id: "location", title: "Location", systemImage: "location.fill", tint: .white) {
-                postMapCubeFaceOverride(title: "Location", systemImage: "location.fill")
-                centerOnUserLocation()
+            CubeSubmenuItem(id: "map-post", icon: HoldMenuIcons.post) {
+                NotificationCenter.default.post(name: .HoldMenuNavigate, object: nil, userInfo: ["action": "post"])
             },
-            CubeSubmenuItem(id: "post", title: "Post Here", systemImage: "camera.fill", tint: .white) {
-                postMapCubeFaceOverride(title: "Post Here", systemImage: "camera.fill")
-                isPostPlacementMode = true
+            CubeSubmenuItem(id: "map-tour", icon: HoldMenuIcons.tour) {
+                NotificationCenter.default.post(name: .HoldMenuNavigate, object: nil, userInfo: ["action": "tour"])
             },
-            CubeSubmenuItem(id: "view-mode", title: use2DMap ? "3D Map" : "2D Map", systemImage: use2DMap ? "cube.fill" : "square.on.square.fill", tint: .blue) {
-                postMapCubeFaceOverride(title: use2DMap ? "3D Map" : "2D Map", systemImage: use2DMap ? "cube.fill" : "square.on.square.fill")
-                use2DMap.toggle()
+            CubeSubmenuItem(id: "map-home", icon: HoldMenuIcons.home) {
+                NotificationCenter.default.post(name: .HoldMenuNavigate, object: nil, userInfo: ["action": "home"])
             },
-            CubeSubmenuItem(id: "tour", title: mapState.isInTourMode ? "Stop Tour" : "Start Tour", systemImage: "map.fill", tint: .white) {
-                postMapCubeFaceOverride(title: mapState.isInTourMode ? "Stop Tour" : "Start Tour", systemImage: "map.fill")
-                if mapState.isInTourMode { stopTour() } else { startTour() }
-            },
-            CubeSubmenuItem(id: "message", title: "Add Message", systemImage: "message.fill", tint: .white) {
-                postMapCubeFaceOverride(title: "Message", systemImage: "message.fill")
-                showAddMessage = true
+            CubeSubmenuItem(id: "map-chat", icon: HoldMenuIcons.chat) {
+                NotificationCenter.default.post(name: .HoldMenuNavigate, object: nil, userInfo: ["action": "chat"])
             }
         ]
     }

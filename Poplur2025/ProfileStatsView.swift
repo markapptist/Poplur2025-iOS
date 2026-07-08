@@ -1,8 +1,23 @@
 import SwiftUI
 import FirebaseFirestore
-import SpriteKit
-import MapKit
 import UIKit
+
+// MARK: - Design palette (sampled from the Stats mockup)
+
+private enum StatsC {
+    static let pageBG      = Color(red: 253/255, green: 237/255, blue: 243/255) // #FDEDF3
+    static let title       = Color(red: 18/255,  green: 19/255,  blue: 26/255)
+    static let subtitle    = Color(red: 124/255, green: 122/255, blue: 133/255)
+    static let accent      = Color(red: 255/255, green: 45/255,  blue: 130/255) // #FF2D82
+    static let ringTrack   = Color(red: 246/255, green: 222/255, blue: 233/255) // #F6DEE9
+    static let postsCard   = Color(red: 254/255, green: 239/255, blue: 246/255) // #FEEFF6
+    static let goalCard    = Color(red: 242/255, green: 242/255, blue: 254/255) // #F2F2FE
+    static let goalLabel   = Color(red: 91/255,  green: 91/255,  blue: 214/255) // indigo
+    static let panelBG     = Color(red: 14/255,  green: 16/255,  blue: 20/255)  // #0E1014
+    static let cardBG      = Color(red: 28/255,  green: 31/255,  blue: 40/255)  // #1C1F28
+    static let badgePill   = Color(red: 255/255, green: 227/255, blue: 172/255) // #FFE3AC
+    static let trophyNote  = Color(red: 156/255, green: 129/255, blue: 137/255)
+}
 
 struct ProfileStatsView: View {
     @Environment(\.layoutPreviewMode) private var layoutPreviewMode
@@ -14,13 +29,8 @@ struct ProfileStatsView: View {
     @State private var animatedProgress: Double = 0
     @State private var animatedRadiusKM: Double = 0
 
-    private var totalRadiusMeters: Int {
-        posts.reduce(0) { $0 + $1.radius }
-    }
-
-    private var totalRadiusKM: Double {
-        Double(totalRadiusMeters) / 1000.0
-    }
+    private var totalRadiusMeters: Int { posts.reduce(0) { $0 + $1.radius } }
+    private var totalRadiusKM: Double { Double(totalRadiusMeters) / 1000.0 }
 
     private var ringGoalKM: Double {
         max(10_000, ceil(max(totalRadiusKM, 1) / 5_000) * 5_000)
@@ -36,182 +46,211 @@ struct ProfileStatsView: View {
 
     var body: some View {
         ZStack {
-            DS.Color.background.ignoresSafeArea()
+            StatsC.pageBG.ignoresSafeArea()
 
             ScrollView {
-                VStack(spacing: 24) {
+                VStack(alignment: .leading, spacing: 30) {
                     header
 
                     if isLoading {
                         ProgressView()
-                            .tint(.black)
+                            .tint(StatsC.accent)
+                            .frame(maxWidth: .infinity)
                             .padding(.top, 90)
                     } else {
                         radiusRing
+                            .frame(maxWidth: .infinity)
+                        statCards
                         trophyRoom
-                        dominanceMap
-                        areaBreakdown
                     }
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, 22)
+                .padding(.horizontal, 22)
+                .padding(.top, 18)
                 .padding(.bottom, 120)
             }
             .scrollIndicators(.never)
         }
-        .task {
-            await loadStats()
-        }
+        .task { await loadStats() }
     }
 
-    // MARK: - Sections
+    // MARK: - Header
 
     private var header: some View {
-        VStack(spacing: 6) {
-            Text("Stats")
-                .font(.system(size: 34, weight: .black, design: .rounded))
-                .foregroundStyle(.black)
-            Text("Radius ownership, city dominance, and trophies")
-                .font(.system(size: 14, weight: .heavy, design: .rounded))
-                .foregroundStyle(.black.opacity(0.56))
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 12) {
+                    // Same icon shown in the hold-menu wheel that opens this screen.
+                    HoldMenuIconBadge(icon: HoldMenuIcons.stats, size: 44)
+                    Text("Stats")
+                        .font(.system(size: 44, weight: .black, design: .rounded))
+                        .foregroundStyle(StatsC.title)
+                }
+                Text("Radius ownership,\ncity dominance,\nand trophies")
+                    .font(.system(size: 17, weight: .semibold, design: .rounded))
+                    .foregroundStyle(StatsC.subtitle)
+                    .lineSpacing(3)
+            }
+            Spacer(minLength: 8)
+            Image("stats_sphere")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 130, height: 130)
+                .offset(y: -6)
         }
-        .frame(maxWidth: .infinity)
     }
+
+    // MARK: - Ring
 
     private var radiusRing: some View {
-        VStack(spacing: 16) {
-            AnimatedRadiusRing(
-                progress: animatedProgress,
-                radiusKM: animatedRadiusKM,
-                goalKM: ringGoalKM
-            )
-            .frame(width: 260, height: 260)
-            .padding(.top, 8)
+        AnimatedRadiusRing(
+            progress: animatedProgress,
+            radiusKM: animatedRadiusKM,
+            goalKM: ringGoalKM
+        )
+        .frame(width: 290, height: 290)
+    }
 
-            HStack(spacing: 12) {
-                statPill(title: "Posts", value: "\(posts.count)", tint: .black)
-                statPill(title: "Goal", value: formattedKM(ringGoalKM), tint: .cyan)
-            }
+    // MARK: - Posts / Goal cards
+
+    private var statCards: some View {
+        HStack(spacing: 14) {
+            statCard(
+                icon: "stats_ic_posts",
+                label: "POSTS",
+                labelColor: StatsC.accent,
+                value: "\(posts.count)",
+                background: StatsC.postsCard
+            )
+            statCard(
+                icon: "stats_ic_goal",
+                label: "GOAL",
+                labelColor: StatsC.goalLabel,
+                value: formattedKM(ringGoalKM),
+                background: StatsC.goalCard
+            )
         }
     }
+
+    private func statCard(
+        icon: String,
+        label: String,
+        labelColor: Color,
+        value: String,
+        background: Color
+    ) -> some View {
+        HStack(spacing: 12) {
+            Image(icon)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 56, height: 56)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label)
+                    .font(.system(size: 13, weight: .black, design: .rounded))
+                    .foregroundStyle(labelColor)
+                Text(value)
+                    .font(.system(size: 26, weight: .black, design: .rounded))
+                    .foregroundStyle(StatsC.title)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(background, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+
+    // MARK: - Trophy room
 
     private var trophyRoom: some View {
         let unlockedCount = trophies.filter(\.isUnlocked).count
         return VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Trophy Room")
-                        .font(.system(size: 22, weight: .black, design: .rounded))
-                        .foregroundStyle(.black)
-                    Text("Earn trophies by leveling up on Poplur.")
-                        .font(.system(size: 12, weight: .bold, design: .rounded))
-                        .foregroundStyle(.black.opacity(0.5))
-                }
+            HStack(alignment: .center) {
+                Text("Trophy Room")
+                    .font(.system(size: 28, weight: .heavy, design: .rounded))
+                    .foregroundStyle(StatsC.title)
                 Spacer()
                 Text("\(unlockedCount)/\(trophies.count)")
-                    .font(.system(size: 13, weight: .black, design: .rounded))
-                    .foregroundStyle(.black)
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 7)
-                    .background(Color.yellow.opacity(0.18), in: Capsule())
+                    .font(.system(size: 18, weight: .black, design: .rounded))
+                    .foregroundStyle(StatsC.title)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 10)
+                    .background(StatsC.badgePill, in: Capsule())
             }
 
-            ProfileTrophyRoomSpriteView(trophies: trophies)
-                .frame(height: 420)
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .stroke(Color.black.opacity(0.10), lineWidth: 1)
-                )
-        }
-    }
+            Text("Earn trophies by leveling up on Poplur.")
+                .font(.system(size: 14, weight: .bold, design: .rounded))
+                .foregroundStyle(StatsC.trophyNote)
 
-    private var dominanceMap: some View {
-        let validPosts = posts.filter { abs($0.latitude) > 0.001 }
-        return VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Text("World Takeover")
-                    .font(.system(size: 22, weight: .black, design: .rounded))
-                    .foregroundStyle(.black)
-                Spacer()
-                Text("\(dominanceAreas.count) zones")
-                    .font(.system(size: 12, weight: .black, design: .rounded))
-                    .foregroundStyle(.black.opacity(0.55))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Color.black.opacity(0.06), in: Capsule())
-            }
-
-            ProfileDominanceRealMapView(posts: validPosts)
-                .frame(height: 320)
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .stroke(Color.black.opacity(0.12), lineWidth: 1)
-                )
-
-            if validPosts.isEmpty {
-                Text("Post from a location to start your world takeover.")
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
-                    .foregroundStyle(.black.opacity(0.45))
-                    .frame(maxWidth: .infinity)
-                    .multilineTextAlignment(.center)
-                    .padding(.top, 4)
-            }
-        }
-    }
-
-    private var areaBreakdown: some View {
-        VStack(spacing: 10) {
-            ForEach(dominanceAreas) { area in
+            ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
-                    Circle()
-                        .fill(area.color)
-                        .frame(width: 13, height: 13)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(area.title)
-                            .font(.system(size: 15, weight: .black, design: .rounded))
-                            .foregroundStyle(.black)
-                        Text("\(area.postCount) posts inside this zone")
-                            .font(.system(size: 12, weight: .bold, design: .rounded))
-                            .foregroundStyle(.black.opacity(0.48))
+                    ForEach(trophies) { trophy in
+                        trophyCard(trophy)
                     }
-                    Spacer()
-                    Text("\(Int(round(area.percent)))%")
-                        .font(.system(size: 22, weight: .black, design: .rounded))
-                        .foregroundStyle(.black)
                 }
                 .padding(14)
-                .background(Color.black.opacity(0.035), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
-
-            if dominanceAreas.isEmpty {
-                Text("No radius areas yet")
-                    .font(.system(size: 16, weight: .black, design: .rounded))
-                    .foregroundStyle(.black.opacity(0.5))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 30)
-            }
+            .background(StatsC.panelBG, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         }
     }
 
-    // MARK: - Helpers
+    private func trophyCard(_ trophy: ProfileTrophy) -> some View {
+        let tint = Color(trophy.displayColor)
+        let on = trophy.isUnlocked
+        let accentColor = on ? tint : Color(white: 0.42)
 
-    private func statPill(title: String, value: String, tint: Color) -> some View {
-        VStack(spacing: 4) {
-            Text(title.uppercased())
-                .font(.system(size: 10, weight: .black, design: .rounded))
-                .foregroundStyle(.black.opacity(0.46))
-            Text(value)
-                .font(.system(size: 17, weight: .black, design: .rounded))
-                .foregroundStyle(.black)
+        return VStack(spacing: 12) {
+            trophyIcon(trophy)
+                .frame(width: 84, height: 84)
+
+            Text(trophy.title)
+                .font(.system(size: 15, weight: .bold, design: .rounded))
+                .foregroundStyle(on ? .white : Color(white: 0.62))
                 .lineLimit(1)
-                .minimumScaleFactor(0.72)
+                .minimumScaleFactor(0.8)
+
+            Text(on ? trophy.shortDescription : trophy.lockedHint)
+                .font(.system(size: 13, weight: .medium, design: .rounded))
+                .foregroundStyle(Color(white: on ? 0.78 : 0.5))
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .frame(height: 36, alignment: .top)
+
+            Circle()
+                .fill(accentColor)
+                .frame(width: 9, height: 9)
+                .padding(.top, 2)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 11)
-        .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .padding(.vertical, 16)
+        .padding(.horizontal, 10)
+        .frame(width: 152)
+        .background(StatsC.cardBG, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(accentColor.opacity(on ? 0.85 : 0.35), lineWidth: 1.5)
+        )
     }
+
+    /// Locked trophies always show the padlock art from the mockup.
+    /// Unlocked trophies use their own extracted art where one exists,
+    /// otherwise fall back to the trophy's tinted circle + emoji.
+    @ViewBuilder
+    private func trophyIcon(_ trophy: ProfileTrophy) -> some View {
+        if !trophy.isUnlocked {
+            Image("stats_tr_city").resizable().scaledToFit()
+        } else if let asset = trophy.unlockedIconAsset {
+            Image(asset).resizable().scaledToFit()
+        } else {
+            ZStack {
+                Circle().fill(Color(trophy.displayColor))
+                Text(trophy.emoji).font(.system(size: 34))
+            }
+        }
+    }
+
+    // MARK: - Data
 
     private func loadStats() async {
         await MainActor.run {
@@ -291,28 +330,29 @@ private struct AnimatedRadiusRing: View {
     var body: some View {
         GeometryReader { geo in
             let side = min(geo.size.width, geo.size.height)
-            let lw = side * 0.11
+            let lw = side * 0.135
             ZStack {
-                Circle().stroke(Color.black.opacity(0.08), lineWidth: lw)
+                Circle().stroke(StatsC.ringTrack, lineWidth: lw)
                 Circle()
-                    .trim(from: 0, to: progress)
+                    .trim(from: 0, to: max(progress, 0.0001))
                     .stroke(
-                        AngularGradient(colors: [.cyan, .mint, .yellow, .orange, .pink, .cyan], center: .center),
+                        StatsC.accent,
                         style: StrokeStyle(lineWidth: lw, lineCap: .round)
                     )
                     .rotationEffect(.degrees(-90))
-                    .shadow(color: .cyan.opacity(0.32), radius: 12, x: 0, y: 6)
-                VStack(spacing: 4) {
+                    .shadow(color: StatsC.accent.opacity(0.28), radius: 10, x: 0, y: 5)
+
+                VStack(spacing: 6) {
                     Text(fmt(radiusKM))
-                        .font(.system(size: side * 0.18, weight: .black, design: .rounded))
-                        .foregroundStyle(.black)
+                        .font(.system(size: side * 0.21, weight: .black, design: .rounded))
+                        .foregroundStyle(StatsC.title)
                         .contentTransition(.numericText())
                     Text("ACCUMULATED")
-                        .font(.system(size: side * 0.052, weight: .black, design: .rounded))
-                        .foregroundStyle(.black.opacity(0.5))
+                        .font(.system(size: side * 0.058, weight: .black, design: .rounded))
+                        .foregroundStyle(StatsC.accent)
                     Text("\(Int(progress * 100))% of \(fmt(goalKM))")
-                        .font(.system(size: side * 0.045, weight: .heavy, design: .rounded))
-                        .foregroundStyle(.black.opacity(0.42))
+                        .font(.system(size: side * 0.058, weight: .semibold, design: .rounded))
+                        .foregroundStyle(StatsC.title.opacity(0.72))
                 }
                 .minimumScaleFactor(0.7)
             }
@@ -332,11 +372,22 @@ private struct ProfileTrophy: Identifiable {
     let id: String
     let title: String
     let description: String
+    let shortDescription: String
     let lockedHint: String
     let emoji: String
     let isUnlocked: Bool
     let displayColor: UIColor
     let tier: Int
+
+    /// Art sliced from the Stats mockup, where the design provides it.
+    var unlockedIconAsset: String? {
+        switch id {
+        case "first-post":  return "stats_tr_first"
+        case "five-posts":  return "stats_tr_streak"
+        case "radius-100":  return "stats_tr_orbit"
+        default:            return nil
+        }
+    }
 
     static func make(posts: [Post], dominanceAreas: [ProfileDominanceArea], totalRadiusKM: Double) -> [ProfileTrophy] {
         let totalViews = posts.reduce(0) { $0 + $1.viewCount }
@@ -350,6 +401,7 @@ private struct ProfileTrophy: Identifiable {
                 id: "first-post",
                 title: "First Signal",
                 description: "Your first broadcast went out. Someone, somewhere, received it.",
+                shortDescription: "Broadcast sent out.",
                 lockedHint: "Make your first post",
                 emoji: "📡",
                 isUnlocked: posts.count >= 1,
@@ -360,6 +412,7 @@ private struct ProfileTrophy: Identifiable {
                 id: "five-posts",
                 title: "Creator Streak",
                 description: "Five transmissions deep. Your signal is becoming a frequency.",
+                shortDescription: "5 transmissions deep.",
                 lockedHint: "Post 5 times",
                 emoji: "🔥",
                 isUnlocked: posts.count >= 5,
@@ -370,6 +423,7 @@ private struct ProfileTrophy: Identifiable {
                 id: "radius-100",
                 title: "Orbit Starter",
                 description: "100 KM of owned airspace. You have claimed your first real territory.",
+                shortDescription: "100 KM of owned space.",
                 lockedHint: "Reach 100 KM total radius",
                 emoji: "🛸",
                 isUnlocked: totalRadiusKM >= 100,
@@ -380,6 +434,7 @@ private struct ProfileTrophy: Identifiable {
                 id: "radius-1000",
                 title: "City Builder",
                 description: "A thousand kilometers stacked. You are reshaping the map around you.",
+                shortDescription: "Reach 1,000 KM total radius.",
                 lockedHint: "Reach 1,000 KM total radius",
                 emoji: "🏙️",
                 isUnlocked: totalRadiusKM >= 1_000,
@@ -390,6 +445,7 @@ private struct ProfileTrophy: Identifiable {
                 id: "views-1000",
                 title: "Crowd Pull",
                 description: "A thousand eyes on your content. The audience has found you.",
+                shortDescription: "1,000 total views.",
                 lockedHint: "Get 1,000 total views",
                 emoji: "👁️",
                 isUnlocked: totalViews >= 1_000,
@@ -400,6 +456,7 @@ private struct ProfileTrophy: Identifiable {
                 id: "wide-radius",
                 title: "Wide Reach",
                 description: "One post spanning 250 KM. A single transmission, massive coverage.",
+                shortDescription: "One post spanning 250 KM.",
                 lockedHint: "One post with 250 KM radius",
                 emoji: "🌐",
                 isUnlocked: maxRadius >= 250_000,
@@ -410,6 +467,7 @@ private struct ProfileTrophy: Identifiable {
                 id: "three-zones",
                 title: "Zone Collector",
                 description: "Three zones under your control. The map is turning your color.",
+                shortDescription: "Dominate 3 map zones.",
                 lockedHint: "Dominate 3 map zones",
                 emoji: "🗺️",
                 isUnlocked: dominanceAreas.count >= 3,
@@ -420,6 +478,7 @@ private struct ProfileTrophy: Identifiable {
                 id: "traveler",
                 title: "Map Traveler",
                 description: "Posts dropped across the globe. You are always in motion.",
+                shortDescription: "Post from 3 areas.",
                 lockedHint: "Post from 3 different areas",
                 emoji: "✈️",
                 isUnlocked: uniqueBuckets.count >= 3,
@@ -430,236 +489,7 @@ private struct ProfileTrophy: Identifiable {
     }
 }
 
-// MARK: - Trophy Room SpriteKit (sticker cards)
-
-private struct ProfileTrophyRoomSpriteView: UIViewRepresentable {
-    let trophies: [ProfileTrophy]
-
-    func makeUIView(context: Context) -> SKView {
-        let v = SKView()
-        v.backgroundColor = .clear
-        v.isOpaque = false
-        v.ignoresSiblingOrder = true
-        v.preferredFramesPerSecond = 60
-        present(in: v)
-        return v
-    }
-
-    func updateUIView(_ v: SKView, context: Context) {
-        let key = trophies.map { $0.id + ($0.isUnlocked ? "1" : "0") }
-        if let cur = v.scene as? ProfileTrophyRoomScene, cur.trophyKey == key { return }
-        present(in: v)
-    }
-
-    private func present(in v: SKView) {
-        let scene = ProfileTrophyRoomScene(trophies: trophies)
-        scene.scaleMode = .aspectFill
-        v.presentScene(scene)
-    }
-}
-
-private final class ProfileTrophyRoomScene: SKScene {
-
-    let trophyKey: [String]
-    private let trophies: [ProfileTrophy]
-
-    // Layout: 4 cols × 2 rows inside 390 × 420
-    private let sceneW: CGFloat = 390
-    private let sceneH: CGFloat = 420
-    private let cols = 4
-    private let cardW: CGFloat = 86
-    private let cardH: CGFloat = 178
-
-    // y-up: row 0 (top visually) has higher y
-    private var rowY: [CGFloat] { [sceneH - 107, 107] }
-    private var colX: [CGFloat] {
-        (0..<cols).map { (CGFloat($0) + 0.5) * (sceneW / CGFloat(cols)) }
-    }
-
-    init(trophies: [ProfileTrophy]) {
-        self.trophies = trophies
-        self.trophyKey = trophies.map { $0.id + ($0.isUnlocked ? "1" : "0") }
-        super.init(size: CGSize(width: 390, height: 420))
-        backgroundColor = .clear
-    }
-    required init?(coder: NSCoder) { fatalError() }
-
-    override func didMove(to view: SKView) {
-        addBackground()
-        addHeader()
-        for (i, trophy) in trophies.enumerated() {
-            guard i / cols < rowY.count else { continue }
-            let card = makeCard(trophy: trophy, index: i)
-            card.position = CGPoint(x: colX[i % cols], y: rowY[i / cols])
-            addChild(card)
-        }
-    }
-
-    // MARK: Background
-
-    private func addBackground() {
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: sceneW, height: sceneH))
-        let img = renderer.image { ctx in
-            let c = ctx.cgContext
-            let colors = [UIColor(red: 0.07, green: 0.06, blue: 0.13, alpha: 1).cgColor,
-                          UIColor(red: 0.03, green: 0.03, blue: 0.07, alpha: 1).cgColor] as CFArray
-            let grad = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0, 1])!
-            c.drawLinearGradient(grad,
-                start: CGPoint(x: 0, y: sceneH), end: .zero, options: [])
-        }
-        let bg = SKSpriteNode(texture: SKTexture(image: img))
-        bg.position = CGPoint(x: sceneW / 2, y: sceneH / 2)
-        bg.size = CGSize(width: sceneW, height: sceneH)
-        bg.zPosition = -20
-        addChild(bg)
-    }
-
-    private func addHeader() {
-        let lbl = SKLabelNode(text: "✦  TROPHY ROOM  ✦")
-        lbl.fontName = UIFont.systemFont(ofSize: 1, weight: .heavy).fontName
-        lbl.fontSize = 10
-        lbl.fontColor = UIColor.white.withAlphaComponent(0.20)
-        lbl.horizontalAlignmentMode = .center
-        lbl.verticalAlignmentMode = .center
-        lbl.position = CGPoint(x: sceneW / 2, y: sceneH - 14)
-        lbl.zPosition = 5
-        addChild(lbl)
-    }
-
-    // MARK: Sticker Card
-
-    private func makeCard(trophy: ProfileTrophy, index: Int) -> SKNode {
-        let root = SKNode()
-        let on = trophy.isUnlocked
-        let tint = on ? trophy.displayColor : UIColor(white: 0.24, alpha: 1)
-
-        // Card background
-        let rect = CGRect(x: -cardW / 2, y: -cardH / 2, width: cardW, height: cardH)
-        let bg = SKShapeNode(path: UIBezierPath(roundedRect: rect, cornerRadius: 16).cgPath)
-        bg.fillColor   = on ? tint.withAlphaComponent(0.12) : UIColor(white: 0.10, alpha: 1)
-        bg.strokeColor = on ? tint.withAlphaComponent(0.36) : UIColor(white: 0.20, alpha: 1)
-        bg.lineWidth   = 1.5
-        bg.zPosition   = 0
-        root.addChild(bg)
-
-        // Sticker circle
-        let cR: CGFloat = 30
-        let cY: CGFloat = cardH / 2 - cR - 14
-        let circ = SKShapeNode(circleOfRadius: cR)
-        circ.position   = CGPoint(x: 0, y: cY)
-        circ.fillColor  = on ? tint.withAlphaComponent(0.17) : UIColor(white: 0.16, alpha: 1)
-        circ.strokeColor = on ? tint.withAlphaComponent(0.45) : UIColor(white: 0.28, alpha: 1)
-        circ.lineWidth  = 2
-        circ.zPosition  = 1
-        root.addChild(circ)
-
-        // Emoji sticker — locked shows 🔒
-        let emojiLabel = SKLabelNode(text: on ? trophy.emoji : "🔒")
-        emojiLabel.fontSize = 28
-        emojiLabel.horizontalAlignmentMode = .center
-        emojiLabel.verticalAlignmentMode   = .center
-        emojiLabel.position  = CGPoint(x: 0, y: cY)
-        emojiLabel.zPosition = 2
-        emojiLabel.alpha = on ? 1.0 : 0.40
-        root.addChild(emojiLabel)
-
-        // Title
-        let titleY: CGFloat = cY - cR - 10
-        let titleLbl = SKLabelNode(text: trophy.title)
-        titleLbl.fontName = UIFont.systemFont(ofSize: 1, weight: .bold).fontName
-        titleLbl.fontSize = 9.5
-        titleLbl.fontColor = on ? .white : UIColor(white: 0.50, alpha: 1)
-        titleLbl.horizontalAlignmentMode = .center
-        titleLbl.verticalAlignmentMode   = .top
-        titleLbl.position  = CGPoint(x: 0, y: titleY)
-        titleLbl.zPosition = 2
-        root.addChild(titleLbl)
-
-        // Description / locked hint — multiline
-        let descText = on ? trophy.description : trophy.lockedHint
-        let descLbl = SKLabelNode(text: descText)
-        descLbl.fontName = UIFont.systemFont(ofSize: 1, weight: .regular).fontName
-        descLbl.fontSize = 7.5
-        descLbl.fontColor = on ? UIColor(white: 0.70, alpha: 1) : UIColor(white: 0.36, alpha: 1)
-        descLbl.horizontalAlignmentMode = .center
-        descLbl.verticalAlignmentMode   = .top
-        descLbl.numberOfLines = 4
-        descLbl.preferredMaxLayoutWidth = cardW - 12
-        descLbl.position  = CGPoint(x: 0, y: titleY - 13)
-        descLbl.zPosition = 2
-        root.addChild(descLbl)
-
-        // Unlock indicator dot at bottom of card
-        let dot = SKShapeNode(circleOfRadius: 3)
-        dot.fillColor   = on ? tint : UIColor(white: 0.28, alpha: 1)
-        dot.strokeColor = .clear
-        dot.position    = CGPoint(x: 0, y: -cardH / 2 + 10)
-        dot.zPosition   = 2
-        root.addChild(dot)
-
-        if on {
-            // Outer glow ring
-            let glow = SKShapeNode(circleOfRadius: cR + 9)
-            glow.position    = CGPoint(x: 0, y: cY)
-            glow.fillColor   = tint.withAlphaComponent(0.07)
-            glow.strokeColor = tint.withAlphaComponent(0.11)
-            glow.lineWidth   = 1
-            glow.zPosition   = -1
-            root.addChild(glow)
-
-            // Floating animation — stagger by index so cards move at different phases
-            let offset = Double(index % 4) * 0.30
-            let up   = SKAction.moveBy(x: 0, y: 5, duration: 1.5 + Double(index % 3) * 0.12)
-            let down = SKAction.moveBy(x: 0, y: -5, duration: 1.5 + Double(index % 3) * 0.12)
-            up.timingMode = .easeInEaseOut
-            down.timingMode = .easeInEaseOut
-            root.run(.sequence([.wait(forDuration: offset), .repeatForever(.sequence([up, down]))]))
-
-            // Sparkle emitter above sticker circle
-            let emitter = SKEmitterNode()
-            emitter.particleTexture       = Self.sparkleTexture
-            emitter.particleBirthRate     = 1.6
-            emitter.particleLifetime      = 1.4
-            emitter.particleLifetimeRange = 0.5
-            emitter.particleSpeed         = 14
-            emitter.particleSpeedRange    = 8
-            emitter.emissionAngle         = .pi / 2
-            emitter.emissionAngleRange    = .pi * 2
-            emitter.particleScale         = 0.04
-            emitter.particleScaleRange    = 0.02
-            emitter.particleScaleSpeed    = -0.025
-            emitter.particleAlpha         = 0.85
-            emitter.particleAlphaSpeed    = -0.55
-            emitter.particleColor              = tint
-            emitter.particleColorBlendFactor   = 1.0
-            emitter.particleBlendMode          = .add
-            emitter.position  = CGPoint(x: 0, y: cY + cR + 4)
-            emitter.zPosition = 3
-            root.addChild(emitter)
-        }
-
-        return root
-    }
-
-    // Shared soft-circle particle texture for sparkles
-    private static let sparkleTexture: SKTexture = {
-        let sz = CGSize(width: 12, height: 12)
-        let img = UIGraphicsImageRenderer(size: sz).image { ctx in
-            let c = ctx.cgContext
-            let colors = [UIColor.white.cgColor,
-                          UIColor.white.withAlphaComponent(0).cgColor] as CFArray
-            let grad = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
-                                  colors: colors, locations: [0.0, 1.0])!
-            c.drawRadialGradient(grad,
-                startCenter: CGPoint(x: 6, y: 6), startRadius: 0,
-                endCenter:   CGPoint(x: 6, y: 6), endRadius:   6,
-                options: [])
-        }
-        return SKTexture(image: img)
-    }()
-}
-
-// MARK: - Dominance Area Model
+// MARK: - Dominance Area Model (still drives the Zone Collector trophy)
 
 private struct ProfileDominanceArea: Identifiable {
     let id: String
@@ -709,68 +539,5 @@ private struct ProfileDominanceArea: Identifiable {
             )
         }
         .sorted { $0.percent > $1.percent }
-    }
-}
-
-// MARK: - Real-World Dominance Map (MapKit)
-
-private struct ProfileDominanceRealMapView: UIViewRepresentable {
-    let posts: [Post]
-
-    func makeUIView(context: Context) -> MKMapView {
-        let map = MKMapView()
-        map.mapType          = .standard
-        map.isScrollEnabled  = false
-        map.isZoomEnabled    = false
-        map.isRotateEnabled  = false
-        map.isPitchEnabled   = false
-        map.showsUserLocation = false
-        map.showsCompass     = false
-        map.showsScale       = false
-        map.delegate = context.coordinator
-        return map
-    }
-
-    func updateUIView(_ map: MKMapView, context: Context) {
-        map.removeOverlays(map.overlays)
-
-        guard !posts.isEmpty else {
-            // Default world view when no posts yet
-            map.setRegion(MKCoordinateRegion(
-                center: CLLocationCoordinate2D(latitude: 20, longitude: 0),
-                span: MKCoordinateSpan(latitudeDelta: 130, longitudeDelta: 200)
-            ), animated: false)
-            return
-        }
-
-        // One circle overlay per post — radius is the post's real radius footprint
-        for post in posts {
-            let coord  = CLLocationCoordinate2D(latitude: post.latitude, longitude: post.longitude)
-            let radius = Double(max(post.radius, 8_000)) // 8 KM minimum to remain visible
-            map.addOverlay(MKCircle(center: coord, radius: radius), level: .aboveRoads)
-        }
-
-        // Auto-fit the visible rect to encompass every circle with padding
-        var rect = MKMapRect.null
-        for overlay in map.overlays { rect = rect.union(overlay.boundingMapRect) }
-        let pad = 0.38
-        map.setVisibleMapRect(
-            rect.insetBy(dx: -rect.size.width * pad, dy: -rect.size.height * pad),
-            animated: false
-        )
-    }
-
-    func makeCoordinator() -> Coordinator { Coordinator() }
-
-    final class Coordinator: NSObject, MKMapViewDelegate {
-        // Color gradient: more radius → deeper blue; each circle uses indigo fill
-        func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
-            guard let circle = overlay as? MKCircle else { return MKOverlayRenderer(overlay: overlay) }
-            let r = MKCircleRenderer(circle: circle)
-            r.fillColor   = UIColor(red: 0.18, green: 0.42, blue: 1.00, alpha: 0.18)
-            r.strokeColor = UIColor(red: 0.18, green: 0.42, blue: 1.00, alpha: 0.80)
-            r.lineWidth   = 2.5
-            return r
-        }
     }
 }
