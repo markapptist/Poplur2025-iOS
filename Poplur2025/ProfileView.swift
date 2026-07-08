@@ -662,6 +662,7 @@ struct ProfileView: View {
 
             ScrollView {
                 VStack(spacing: 0) {
+                    PoplurRefreshHeader().frame(height: 0)
                     Color.clear.frame(height: 0).id("top")
                     LazyVGrid(columns: columns, spacing: tileSpacing) {
                         ForEach(displayedPosts) { post in
@@ -705,6 +706,7 @@ struct ProfileView: View {
     private var messagesScroll: some View {
         ScrollView {
             VStack(spacing: 0) {
+                PoplurRefreshHeader().frame(height: 0)
                 Color.clear.frame(height: 0).id("top")
                 VStack(spacing: 18) {
                     VStack(spacing: 12) {

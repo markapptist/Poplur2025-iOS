@@ -4,6 +4,9 @@ import SpriteKit
 // MARK: - Poplur Games Launch View
 
 struct PoplurGameLaunchView: View {
+    /// When provided, launches this exact game instead of generating a random one.
+    var presetConfig: PoplurGameConfig? = nil
+
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var volumeObserver: DeviceVolumeObserver
     @State private var phase: LoadPhase = .loading
@@ -234,6 +237,14 @@ struct PoplurGameLaunchView: View {
     }
 
     private func loadConfig() async {
+        // A preset (user-created) game skips AI generation and goes straight to the card.
+        if let preset = presetConfig {
+            await MainActor.run {
+                config = preset
+                withAnimation(.spring(duration: 0.4)) { phase = .ready }
+            }
+            return
+        }
         let cfg = await PoplurGameService.shared.generateConfig()
         await MainActor.run {
             config = cfg
