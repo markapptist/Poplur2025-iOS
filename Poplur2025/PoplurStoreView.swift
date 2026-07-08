@@ -94,6 +94,7 @@ struct PoplurStoreView: View {
                     heroCard
                     categoryCard
                     popularProducts
+                    creatorCreditsSection
                     plusBanner
                     trustFooter
                 }
@@ -322,6 +323,88 @@ struct PoplurStoreView: View {
         }
         .padding(14)
         .frame(width: 176)
+        .background(StoreC.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .shadow(color: .black.opacity(0.035), radius: 8, x: 0, y: 4)
+    }
+
+    // MARK: - Creator Credits (buy AI credits here)
+
+    private var creatorCreditsSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .center) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Creator Credits")
+                        .font(.system(size: 22, weight: .black, design: .rounded))
+                        .foregroundStyle(StoreC.title)
+                    Text("For AI images, video & voice")
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                        .foregroundStyle(StoreC.secondary)
+                }
+                Spacer()
+                HStack(spacing: 6) {
+                    Image("create_ic_credits")
+                        .resizable().scaledToFit()
+                        .frame(width: 30, height: 30)
+                    Text("\(creditVM.availableCredits)")
+                        .font(.system(size: 20, weight: .black, design: .rounded))
+                        .foregroundStyle(StoreC.accent)
+                        .monospacedDigit()
+                }
+            }
+
+            if let message = creditVM.message {
+                Text(message)
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .foregroundStyle(StoreC.accent)
+            }
+
+            VStack(spacing: 12) {
+                ForEach(CreatorCreditPackage.allCases) { package in
+                    creditPackRow(package)
+                }
+            }
+        }
+    }
+
+    private func creditPackRow(_ package: CreatorCreditPackage) -> some View {
+        HStack(spacing: 14) {
+            Image("create_ic_credits")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 52, height: 52)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(package.title)
+                    .font(.system(size: 17, weight: .heavy, design: .rounded))
+                    .foregroundStyle(StoreC.title)
+                Text("\(package.credits) credits")
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .foregroundStyle(StoreC.secondary)
+            }
+
+            Spacer(minLength: 8)
+
+            Button {
+                Task { await creditVM.buyCredits(package, userID: userID) }
+            } label: {
+                Group {
+                    if creditVM.isPurchasing(package) {
+                        ProgressView().tint(.white)
+                    } else {
+                        Text(creditVM.displayPrice(for: package))
+                            .font(.system(size: 16, weight: .black, design: .rounded))
+                            .foregroundStyle(.white)
+                    }
+                }
+                .frame(minWidth: 76)
+                .padding(.vertical, 12)
+                .padding(.horizontal, 16)
+                .background(StoreC.accent, in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .disabled(creditVM.isPurchasing(package))
+        }
+        .padding(14)
         .background(StoreC.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .shadow(color: .black.opacity(0.035), radius: 8, x: 0, y: 4)
     }
