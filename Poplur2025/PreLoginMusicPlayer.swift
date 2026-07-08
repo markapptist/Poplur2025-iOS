@@ -88,12 +88,9 @@ struct PoplurMuteButton: View {
             }
         } label: {
             Image(systemName: music.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
-                .font(.system(size: 16, weight: .bold))
+                .font(.system(size: 20, weight: .bold))
                 .foregroundColor(DS.Color.accent)
                 .frame(width: 44, height: 44)
-                .background(Circle().fill(Color.white))
-                .overlay(Circle().stroke(Color.black.opacity(0.08), lineWidth: 1.5))
-                .shadow(color: .black.opacity(0.18), radius: 4, x: 0, y: 2)
         }
         .accessibilityLabel(music.isMuted ? "Unmute background music" : "Mute background music")
     }

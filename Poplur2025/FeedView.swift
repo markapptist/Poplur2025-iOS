@@ -91,6 +91,8 @@ struct FeedView: View {
     @State private var tvTransitionOpacity: Double = 0.0
     @State private var tvTransitionChannelNumber: Int = 101
     @State private var tvTransitionChannelCategory: String = "Food"
+    @State private var tvTransitionChannelIconAssetName: String? = nil
+    @State private var tvTransitionChannelEmoji: String = "📺"
     @State private var tvTransitionToken: Int = 0
     @State private var deliveryPost: FeedPost?
 
@@ -257,7 +259,9 @@ struct FeedView: View {
                 if isTVTransitionVisible {
                     PoplurTransitionFlash(
                         channelNumber: tvTransitionChannelNumber,
-                        channelCategory: tvTransitionChannelCategory
+                        channelCategory: tvTransitionChannelCategory,
+                        channelIconAssetName: tvTransitionChannelIconAssetName,
+                        channelEmoji: tvTransitionChannelEmoji
                     )
                         .id(tvTransitionToken)
                         .opacity(tvTransitionOpacity)
@@ -354,6 +358,12 @@ struct FeedView: View {
         .onReceive(NotificationCenter.default.publisher(for: .PoplurAIGoToFeedChannel)) { notification in
             guard let query = notification.userInfo?["query"] as? String else { return }
             openPoplurAIChannel(query: query)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .FeedChannelUp)) { _ in
+            changeFeedChannel(.up)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .FeedChannelDown)) { _ in
+            changeFeedChannel(.down)
         }
         .onReceive(NotificationCenter.default.publisher(for: .FeedOpenNews)) { _ in
             guard !posts.isEmpty else { return }
@@ -1268,8 +1278,10 @@ struct FeedView: View {
     private func flashTransition(targetChannelIndex: Int? = nil) {
         let channelIndex = targetChannelIndex ?? selectedChannelIndex
         let targetChannel = channels[safe: channelIndex] ?? channels[0]
-        tvTransitionChannelNumber = 101 + channelIndex
+        tvTransitionChannelNumber = targetChannel.number
         tvTransitionChannelCategory = targetChannel.name
+        tvTransitionChannelIconAssetName = targetChannel.iconAssetName
+        tvTransitionChannelEmoji = targetChannel.emoji
         tvTransitionToken += 1
         isTVTransitionVisible = true
         tvTransitionOpacity = 1.0

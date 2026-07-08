@@ -169,6 +169,11 @@ private final class LoginScene: SKScene {
 // MARK: - SwiftUI LoginView: SpriteKit visuals + native TextFields
 
 struct LoginView: View {
+    // Carousel mode: parent (WelcomeView) manages the background, confetti, and AI guide.
+    var isCarousel: Bool = false
+    var onBack: (() -> Void)? = nil
+    var onGoToSignUp: (() -> Void)? = nil
+
     @EnvironmentObject private var auth: AuthViewModel
     @EnvironmentObject private var stripeCoordinator: StripeTransitionCoordinator
     @Environment(\.dismiss) private var dismiss
@@ -196,8 +201,11 @@ struct LoginView: View {
 
     var body: some View {
         ZStack {
-            Color.white.ignoresSafeArea()
-            AuthConfettiBackground()
+            // In carousel mode the parent WelcomeView provides the white bg and confetti.
+            if !isCarousel {
+                Color.white.ignoresSafeArea()
+                AuthConfettiBackground()
+            }
 
             VStack {
                 Spacer(minLength: 24)
@@ -218,8 +226,8 @@ struct LoginView: View {
 
                         Spacer().frame(height: 10)
 
-                        // Cube — tap to go back
-                        LoginCubeView(onTap: { dismiss() })
+                        // Cube — tap to go back (carousel uses closure, standalone uses dismiss)
+                        LoginCubeView(onTap: { if let onBack { onBack() } else { stripeCoordinator.trigger { dismiss() } } })
                             .frame(width: 200, height: 200)
 
                         Spacer().frame(height: 14)
@@ -303,8 +311,8 @@ struct LoginView: View {
 
                             Button {
                                 hideKeyboard()
-                                // No stripe transition on navigation — registration-only.
-                                navigateToSignup = true
+                                if let onGoToSignUp { onGoToSignUp() }
+                                else { navigateToSignup = true }
                             } label: {
                                 Text("New here? Create an account")
                                     .font(.system(size: 14, weight: .black, design: .rounded))
@@ -331,9 +339,12 @@ struct LoginView: View {
             }
         }
         .overlay(alignment: .bottom) {
-            AuthAIGuide(screen: .login)
-                .padding(.horizontal, 20)
-                .padding(.bottom, 20)
+            // In carousel mode the parent WelcomeView's unified guide handles the greeting.
+            if !isCarousel {
+                AuthAIGuide(screen: .login)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 20)
+            }
         }
         .sheet(isPresented: $showEnableFaceIDSheet) {
             EnableFaceIDSheet(email: email, onEnable: {
@@ -354,7 +365,7 @@ struct LoginView: View {
         .onTapGesture { hideKeyboard() }
         .navigationBarTitleDisplayMode(.inline)
         .onChange(of: auth.isAuthenticated) { _, authed in
-            if authed { dismiss() }
+            if authed && !isCarousel { dismiss() }
         }
     }
 

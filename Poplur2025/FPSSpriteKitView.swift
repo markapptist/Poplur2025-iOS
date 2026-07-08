@@ -14,8 +14,11 @@ struct FPSSpriteKitView: UIViewRepresentable {
         view.showsNodeCount = false
         #endif
 
-        let scene = FPSGameScene(size: CGSize(width: FPSK.screenW, height: FPSK.screenH))
-        scene.scaleMode = .aspectFit
+        // Fill the view and adapt to rotation; the scene lays out its game "CRT"
+        // band + controls per orientation each frame.
+        let initial = UIScreen.main.bounds.size
+        let scene = FPSGameScene(size: initial == .zero ? CGSize(width: FPSK.screenW, height: FPSK.screenH) : initial)
+        scene.scaleMode = .resizeFill
         view.presentScene(scene)
         return view
     }

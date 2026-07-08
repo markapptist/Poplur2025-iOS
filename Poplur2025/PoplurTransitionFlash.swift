@@ -8,17 +8,47 @@ let kCommercialTransitionDuration: TimeInterval = 1.5
 struct PoplurTransitionFlash: View {
     let channelNumber: Int
     let channelCategory: String
+    var channelIconAssetName: String? = nil
+    var channelEmoji: String = "📺"
 
-    init(channelNumber: Int, channelCategory: String = "Poplur TV") {
+    init(channelNumber: Int, channelCategory: String = "Poplur TV", channelIconAssetName: String? = nil, channelEmoji: String = "📺") {
         self.channelNumber = channelNumber
         self.channelCategory = channelCategory
+        self.channelIconAssetName = channelIconAssetName
+        self.channelEmoji = channelEmoji
     }
 
     var body: some View {
-        CommercialTransitionVideoView()
-            .ignoresSafeArea()
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
+        ZStack {
+            CommercialTransitionVideoView()
+                .ignoresSafeArea()
+
+            // Channel logo centered on the static
+            VStack(spacing: 8) {
+                ChannelAssetIcon(
+                    assetName: channelIconAssetName,
+                    fallbackEmoji: channelEmoji,
+                    size: 80,
+                    fallbackFontSize: 64
+                )
+                .shadow(color: .black.opacity(0.7), radius: 12, x: 0, y: 4)
+
+                Text("CH \(channelNumber)")
+                    .font(.system(size: 18, weight: .black, design: .monospaced))
+                    .foregroundStyle(Color(red: 0.31, green: 1.0, blue: 0.25))
+                    .shadow(color: .black.opacity(0.8), radius: 6, x: 0, y: 2)
+
+                Text(channelCategory.uppercased())
+                    .font(.system(size: 13, weight: .heavy, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.85))
+                    .shadow(color: .black.opacity(0.7), radius: 4, x: 0, y: 1)
+                    .tracking(1.5)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 

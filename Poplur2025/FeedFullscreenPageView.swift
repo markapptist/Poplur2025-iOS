@@ -890,13 +890,15 @@ struct FeedFullscreenPageView: View {
                         .font(.system(size: 32))
                         .poplurTextShader(intensity: 0.58)
                 }
+                ChannelAssetIcon(assetName: channelIconAssetName, fallbackEmoji: channelEmoji, size: 38, fallbackFontSize: 32)
                 if post.isPoplurAd {
                     Text("AD")
-                        .font(.system(size: 22, weight: .black, design: .rounded))
+                        .font(.system(size: 15, weight: .black, design: .rounded))
                         .foregroundStyle(.white)
                         .poplurTextShader(intensity: 0.86)
-                } else {
-                    ChannelAssetIcon(assetName: channelIconAssetName, fallbackEmoji: channelEmoji, size: 38, fallbackFontSize: 32)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.red.opacity(0.78), in: Capsule())
                 }
             }
             

@@ -9,6 +9,10 @@ import SceneKit
 /// (EXC_BAD_ACCESS inside -[SCNSceneSource sceneWithClass:options:statusHandler:]) on this
 /// asset and on the main cube's GLB assets alike. The .dae + its 6 texture PNGs sit together
 /// in LoginCube/ and are loaded through the mature, native DAE import path instead.
+///
+/// When `onTap` is non-nil the cube acts as a back button and plays a periodic "peek" animation
+/// every ~3 s: it rotates 90° to reveal the back-arrow face, holds briefly, then rotates back to
+/// the Poplur logo face so the user knows it's interactive.
 struct LoginCubeView: UIViewRepresentable {
     private static let assetName = "poplr_login_cube_equal_faces"
     private static let candidateSubdirectories = ["LoginCube"]
@@ -22,7 +26,7 @@ struct LoginCubeView: UIViewRepresentable {
     func makeUIView(context: Context) -> SCNView {
         let view = SCNView()
         view.backgroundColor = .clear
-        view.scene = Self.makeScene()
+        view.scene = Self.makeScene(isBackButton: onTap != nil)
         view.autoenablesDefaultLighting = true
         view.allowsCameraControl = false
         view.isUserInteractionEnabled = onTap != nil
@@ -43,7 +47,7 @@ struct LoginCubeView: UIViewRepresentable {
         @objc func handleTap() { onTap?() }
     }
 
-    private static func makeScene() -> SCNScene {
+    private static func makeScene(isBackButton: Bool = false) -> SCNScene {
         let scene = SCNScene()
 
         let cameraNode = SCNNode()
@@ -84,6 +88,21 @@ struct LoginCubeView: UIViewRepresentable {
         popDown.timingMode = .easeInEaseOut
         let wait = SCNAction.wait(duration: 3.5, withRange: 1.5)
         container.runAction(SCNAction.repeatForever(SCNAction.sequence([wait, popUp, popDown])), forKey: "pop")
+
+        // Back-button peek: rotate 90° to reveal back-arrow face, hold, then rotate back.
+        // Fires every ~3 s so the user discovers the cube is tappable.
+        if isBackButton {
+            let peekWait = SCNAction.wait(duration: 3.0, withRange: 0.6)
+            // Rotate -90° around Y to show the adjacent (back-arrow) face
+            let peekTo = SCNAction.rotateBy(x: 0, y: -.pi / 2, z: 0, duration: 0.42)
+            peekTo.timingMode = .easeInEaseOut
+            let hold = SCNAction.wait(duration: 0.9)
+            // Rotate back +90° to restore the Poplur logo face
+            let peekBack = SCNAction.rotateBy(x: 0, y: .pi / 2, z: 0, duration: 0.42)
+            peekBack.timingMode = .easeInEaseOut
+            let peekCycle = SCNAction.sequence([peekWait, peekTo, hold, peekBack])
+            container.runAction(SCNAction.repeatForever(peekCycle), forKey: "peek")
+        }
 
         return scene
     }

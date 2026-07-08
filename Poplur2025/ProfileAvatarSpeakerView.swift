@@ -59,15 +59,6 @@ struct ProfileAvatarSpeakerView: View {
                 }
             }
             .frame(width: size * 1.42, height: size * 1.28)
-            .overlay(
-                RoundedRectangle(cornerRadius: size * 0.20, style: .continuous)
-                    .strokeBorder(
-                        palette.accent.opacity(isSpeaking ? 0.92 : 0.54),
-                        lineWidth: isSpeaking ? 3 : 1.5
-                    )
-                    .shadow(color: palette.accent.opacity(isSpeaking ? 0.75 : 0), radius: isSpeaking ? 14 : 0)
-                    .animation(.easeInOut(duration: 0.22), value: isSpeaking)
-            )
             .animation(.spring(response: 0.28, dampingFraction: 0.76), value: isSpeaking)
             .onTapGesture { speakStats() }
 

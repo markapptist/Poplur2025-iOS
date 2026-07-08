@@ -96,6 +96,168 @@ final class Poplur2025UITests: XCTestCase {
     }
 
     @MainActor
+    func testFullAppScreenshotSweep() throws {
+        continueAfterFailure = true
+        let app = XCUIApplication()
+        app.launch()
+
+        var shotIndex = 0
+        func shot(_ name: String) {
+            shotIndex += 1
+            let img = XCUIScreen.main.screenshot()
+            let att = XCTAttachment(screenshot: img)
+            att.name = String(format: "%03d_%@", shotIndex, name)
+            att.lifetime = .keepAlways
+            add(att)
+        }
+
+        let frame = app.windows.firstMatch.frame
+        let width = frame.width
+        let height = frame.height
+
+        // Mirrors WelcomeView.swift's private layout constants for its SpriteKit buttons (no
+        // accessibility elements exist on that canvas). Pre-login only — post-login navigation
+        // below uses real accessibility-identified test hooks instead (see UITestHooks.swift).
+        let sectionSpacing: CGFloat = 28
+        let buttonGap: CGFloat = 16
+        let buttonHeight: CGFloat = 52
+        let signUpCenterY = (208 + sectionSpacing) + buttonHeight / 2
+        let signInCenterY = signUpCenterY + buttonHeight / 2 + buttonGap + buttonHeight / 2
+
+        func tapWelcomeScene(x: CGFloat, y: CGFloat) {
+            let dx = x / width
+            let dy = 1 - (y / height)
+            app.coordinate(withNormalizedOffset: CGVector(dx: dx, dy: dy)).tap()
+        }
+
+        @discardableResult
+        func tapIfExists(_ element: XCUIElement, timeout: TimeInterval = 4) -> Bool {
+            if element.waitForExistence(timeout: timeout) {
+                element.tap()
+                return true
+            }
+            return false
+        }
+
+        func fillIfExists(_ element: XCUIElement, text: String, timeout: TimeInterval = 4) {
+            if element.waitForExistence(timeout: timeout) {
+                element.tap()
+                element.typeText(text)
+            }
+        }
+
+        func button(containing text: String) -> XCUIElement {
+            app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", text)).firstMatch
+        }
+
+        // MARK: - Pre-login (real flow — no bypass, so these show actual user-facing screens)
+
+        sleep(10)
+        shot("Welcome")
+
+        tapWelcomeScene(x: width / 2, y: signInCenterY)
+        sleep(2)
+        shot("Login")
+
+        // Login has no back control — fresh relaunch for the Sign Up flow.
+        app.terminate()
+        app.launch()
+        sleep(10)
+        tapWelcomeScene(x: width / 2, y: signUpCenterY)
+        sleep(1)
+        shot("SignUp_ChooseAccount")
+
+        // --- Business path, screenshot-only: submit() only fires at .review, so this is safely
+        // abandoned afterward without creating a business account. ---
+        tapIfExists(button(containing: "Business"))
+        sleep(1)
+        shot("SignUp_CreateLogin_Business")
+
+        let bizStamp = Int(Date().timeIntervalSince1970)
+        fillIfExists(app.textFields["Email"], text: "claude.ui.sweep.biz.\(bizStamp)@example.com")
+        fillIfExists(app.secureTextFields["Password"], text: "TestPass123!")
+        fillIfExists(app.secureTextFields["Confirm password"], text: "TestPass123!")
+
+        let continueButton = button(containing: "Continue")
+        tapIfExists(continueButton)
+        sleep(1)
+        shot("SignUp_BusinessProfile")
+
+        fillIfExists(app.textFields["Business name"], text: "Claude Test Biz")
+        fillIfExists(app.textFields["Business category"], text: "Food")
+        fillIfExists(app.textFields["Address / location on map"], text: "123 Main St, Toronto")
+        fillIfExists(app.textFields["Contact email"], text: "biz@example.com")
+
+        tapIfExists(continueButton)
+        sleep(1)
+        shot("SignUp_Verification_Empty")
+
+        tapIfExists(button(containing: "Verify My Business"))
+        tapIfExists(app.switches.firstMatch, timeout: 2)
+        tapIfExists(button(containing: "Business license"), timeout: 2)
+        fillIfExists(app.textViews.firstMatch, text: "Business license on file, available on request.")
+        sleep(1)
+        shot("SignUp_Verification_Filled")
+
+        tapIfExists(continueButton)
+        sleep(1)
+        shot("SignUp_Review")
+
+        // MARK: - Post-login (test-hook driven — bypasses real auth entirely, so this never
+        // depends on Firebase account creation succeeding or the app's own gesture recognition).
+
+        app.terminate()
+        app.launchArguments += ["-UITestAuthBypass", "-UITestHooks"]
+        app.launch()
+        sleep(8)
+
+        func tapHook(_ identifier: String, timeout: TimeInterval = 8) {
+            let el = app.buttons[identifier]
+            if el.waitForExistence(timeout: timeout) {
+                el.tap()
+            } else {
+                XCTFail("Missing test hook: \(identifier)")
+            }
+            sleep(2)
+        }
+
+        // Feed, Camera, and Map currently all share the same wheel content (HomeView.holdMenuNavItems).
+        let sharedWheelIds = ["nav-home", "nav-chat", "nav-music", "nav-gifts", "nav-youtube"]
+        let profileWheelIds = ["mail", "settings", "stats", "notifications", "phone", "store", "creator"]
+
+        shot("Feed")
+        for id in sharedWheelIds {
+            tapHook("UITestWheel_\(id)")
+            shot("Feed_\(id)")
+            tapHook("UITestTab_feed")
+        }
+
+        tapHook("UITestTab_profile")
+        shot("Profile")
+        for id in profileWheelIds {
+            tapHook("UITestWheel_\(id)")
+            shot("Profile_\(id)")
+            tapHook("UITestTab_profile")
+        }
+
+        tapHook("UITestTab_map")
+        shot("Map")
+        for id in sharedWheelIds {
+            tapHook("UITestWheel_\(id)")
+            shot("Map_\(id)")
+            tapHook("UITestTab_map")
+        }
+
+        tapHook("UITestTab_record")
+        shot("Camera")
+        for id in sharedWheelIds {
+            tapHook("UITestWheel_\(id)")
+            shot("Camera_\(id)")
+            tapHook("UITestTab_record")
+        }
+    }
+
+    @MainActor
     func testLaunchPerformance() throws {
         // This measures how long it takes to launch your application.
         measure(metrics: [XCTApplicationLaunchMetric()]) {

@@ -50,56 +50,84 @@ enum CounterSeparatorMetrics {
 
 struct RadiusNumberDisplay: View {
     @Binding var radiusMeters: Double
+    @ObservedObject private var settings = SettingsStore.shared
 
+    @State private var showMiles: Bool = false
+    @State private var unitCycleTask: Task<Void, Never>? = nil
+
+    private let metersPerMile: Double = 1609.344
     private var earthRadiusKilometers: Double { 6371 }
 
-    private var currentRadiusMeters: Double {
-        max(0, radiusMeters)
-    }
+    private var currentRadiusMeters: Double { max(0, radiusMeters) }
 
-    // Rank calculation based on percentage of Earth's radius
     private var rankPercentage: Double {
         guard earthRadiusKilometers > 0 else { return 0 }
         return currentRadiusMeters / (earthRadiusKilometers * 1000)
     }
-    
+
     private var rank: RadiusRank {
-        if rankPercentage >= 1.0 {
-            return .platinum
-        } else if rankPercentage >= 0.67 {
-            return .gold
-        } else if rankPercentage >= 0.33 {
-            return .silver
-        } else {
-            return .bronze
+        if rankPercentage >= 1.0 { return .platinum }
+        else if rankPercentage >= 0.67 { return .gold }
+        else if rankPercentage >= 0.33 { return .silver }
+        else { return .bronze }
+    }
+
+    private var displayingMiles: Bool {
+        switch settings.radiusUnitPreference {
+        case .milesOnly:   return true
+        case .kmOnly:      return false
+        case .animateBoth: return showMiles
         }
     }
-    
+
+    private var radiusInMiles: Double { currentRadiusMeters / metersPerMile }
+
     private var formattedCurrentRadius: String {
-        if currentRadiusMeters >= 10_000 {
-            return String(format: "%.0f", currentRadiusMeters / 1000)
-        } else if currentRadiusMeters >= 1000 {
-            return String(format: "%.1f", currentRadiusMeters / 1000)
+        if displayingMiles {
+            if radiusInMiles >= 1000 { return String(format: "%.0f", radiusInMiles) }
+            else if radiusInMiles >= 10 { return String(format: "%.1f", radiusInMiles) }
+            else { return String(format: "%.2f", radiusInMiles) }
         } else {
-            return String(format: "%.0f", currentRadiusMeters)
+            if currentRadiusMeters >= 10_000 { return String(format: "%.0f", currentRadiusMeters / 1000) }
+            else if currentRadiusMeters >= 1000 { return String(format: "%.1f", currentRadiusMeters / 1000) }
+            else { return String(format: "%.0f", currentRadiusMeters) }
         }
     }
 
     private var currentUnit: String {
-        currentRadiusMeters >= 1000 ? "km" : "m"
+        if displayingMiles { return "mi" }
+        return currentRadiusMeters >= 1000 ? "km" : "m"
     }
 
     private var formattedDenominatorRadius: String {
-        NumberFormatter.localizedString(from: NSNumber(value: Int(earthRadiusKilometers)), number: .decimal)
+        if displayingMiles {
+            let earthMiles = earthRadiusKilometers * 1000 / metersPerMile
+            return String(format: "%.0f", earthMiles)
+        }
+        return NumberFormatter.localizedString(from: NSNumber(value: Int(earthRadiusKilometers)), number: .decimal)
     }
 
-    private var denominatorUnit: String {
-        "km"
+    private var denominatorUnit: String { displayingMiles ? "mi" : "km" }
+
+    private func startUnitCycle() {
+        unitCycleTask?.cancel()
+        guard settings.radiusUnitPreference == .animateBoth else {
+            withAnimation(.easeInOut(duration: 0.35)) {
+                showMiles = settings.radiusUnitPreference == .milesOnly
+            }
+            return
+        }
+        unitCycleTask = Task { @MainActor in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 10_000_000_000)
+                guard !Task.isCancelled else { break }
+                withAnimation(.easeInOut(duration: 0.45)) { showMiles.toggle() }
+            }
+        }
     }
-    
+
     var body: some View {
         VStack(alignment: .trailing, spacing: 0) {
-            // Label with rank badge
             HStack(spacing: 6) {
                 Text("RADIUS")
                     .font(.system(size: 12, weight: .semibold))
@@ -107,8 +135,7 @@ struct RadiusNumberDisplay: View {
                     .poplurTextShader(intensity: 0.72)
                     .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
                     .kerning(1.2)
-                
-                // Rank badge
+
                 Image(systemName: rank.iconName)
                     .poplurIconShader()
                     .font(.system(size: 14, weight: .bold))
@@ -172,6 +199,7 @@ struct RadiusNumberDisplay: View {
                     .foregroundStyle(.white.opacity(0.78))
                     .poplurTextShader(intensity: 0.68)
                     .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
+                    .id(denominatorUnit)
             }
             .frame(maxWidth: .infinity, minHeight: CounterSeparatorMetrics.denominatorHeight, maxHeight: CounterSeparatorMetrics.denominatorHeight, alignment: .topTrailing)
 
@@ -186,7 +214,11 @@ struct RadiusNumberDisplay: View {
         }
         .animation(.spring(response: 0.5, dampingFraction: 0.75), value: radiusMeters)
         .animation(.spring(response: 0.4, dampingFraction: 0.7), value: rank)
+        .animation(.easeInOut(duration: 0.45), value: displayingMiles)
         .accessibilityLabel("Current radius \(formattedCurrentRadius) \(currentUnit)")
+        .onAppear { startUnitCycle() }
+        .onDisappear { unitCycleTask?.cancel() }
+        .onChange(of: settings.radiusUnitPreference) { _, _ in startUnitCycle() }
     }
 }
 
@@ -197,38 +229,30 @@ enum RadiusRank {
     case silver
     case gold
     case platinum
-    
+
     var color: Color {
         switch self {
-        case .bronze:
-            return Color(red: 0.8, green: 0.5, blue: 0.2) // Bronze
-        case .silver:
-            return Color(red: 0.75, green: 0.75, blue: 0.75) // Silver
-        case .gold:
-            return Color(red: 1.0, green: 0.84, blue: 0.0) // Gold
-        case .platinum:
-            return Color(red: 0.9, green: 1.0, blue: 1.0) // Platinum/Cyan
+        case .bronze:   return Color(red: 0.8, green: 0.5, blue: 0.2)
+        case .silver:   return Color(red: 0.75, green: 0.75, blue: 0.75)
+        case .gold:     return Color(red: 1.0, green: 0.84, blue: 0.0)
+        case .platinum: return Color(red: 0.9, green: 1.0, blue: 1.0)
         }
     }
-    
+
     var iconName: String {
         switch self {
-        case .bronze:
-            return "shield.fill"
-        case .silver:
-            return "shield.lefthalf.filled"
-        case .gold:
-            return "crown.fill"
-        case .platinum:
-            return "star.fill"
+        case .bronze:   return "shield.fill"
+        case .silver:   return "shield.lefthalf.filled"
+        case .gold:     return "crown.fill"
+        case .platinum: return "star.fill"
         }
     }
-    
+
     var name: String {
         switch self {
         case .bronze: return "Bronze"
         case .silver: return "Silver"
-        case .gold: return "Gold"
+        case .gold:   return "Gold"
         case .platinum: return "Platinum"
         }
     }

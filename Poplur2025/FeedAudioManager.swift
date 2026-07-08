@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import UIKit
 
 extension Notification.Name {
     static let poplurEQSyncChanged = Notification.Name("PoplurEQSyncChanged")
@@ -103,6 +104,7 @@ final class PoplurEQSync {
     }
 
     func shouldPlayTransientSound(minimumInterval: TimeInterval = 0.12) -> Bool {
+        guard UIApplication.shared.applicationState == .active else { return false }
         guard !isVoiceActive else { return false }
         return withLock { state in
             let now = Date().timeIntervalSinceReferenceDate

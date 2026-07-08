@@ -40,7 +40,9 @@ struct FeedChannelStepper3D: View {
     @ObservedObject private var skinStore = CubeSkinStore.shared
 
     var body: some View {
-        VStack(spacing: 12) {
+        // Plain up/down chevron buttons — no plate/background behind them,
+        // and no middle "CH" tile (they're just the two arrows now).
+        VStack(spacing: 20) {
             FeedChannelButtonHitTarget(accessibilityLabel: "Channel up", action: onUp) {
                 ThemedFeedChannelButton(
                     kind: .up,
@@ -50,16 +52,6 @@ struct FeedChannelStepper3D: View {
                 )
                 .frame(width: 76, height: 76)
             }
-
-            ThemedFeedChannelButton(
-                kind: .ch,
-                skin: skinStore.current,
-                isPressed: activeButton != nil,
-                pressToken: pressToken
-            )
-            .frame(width: 70, height: 50)
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
 
             FeedChannelButtonHitTarget(accessibilityLabel: "Channel down", action: onDown) {
                 ThemedFeedChannelButton(
@@ -71,7 +63,7 @@ struct FeedChannelStepper3D: View {
                 .frame(width: 76, height: 76)
             }
         }
-        .frame(width: 86, height: 226)
+        .frame(width: 86, height: 200)
     }
 }
 
@@ -82,33 +74,17 @@ private struct ThemedFeedChannelButton: View {
     let pressToken: Int
 
     private var theme: CubeSkinAppTheme { skin.appTheme }
-    private var isMiddle: Bool { kind == .ch }
-    private var cornerRadius: CGFloat {
-        switch skin {
-        case .camo, .gold, .chocolate: return isMiddle ? 12 : 14
-        case .toy: return isMiddle ? 14 : 20
-        default: return isMiddle ? 16 : 18
-        }
-    }
 
     var body: some View {
-        ZStack {
-            ThemedSkinPlate(
-                skin: skin,
-                tab: .feed,
-                cornerRadius: cornerRadius,
-                isPressed: isPressed,
-                borderWidth: skin == .ice ? 2.6 : 2,
-                glowRadius: glowRadius
-            )
-
-            icon
-                .foregroundStyle(iconStyle)
-                .shadow(color: glowColor, radius: skin == .camo ? 1 : 7)
-                .shadow(color: Color.black.opacity(skin == .toy ? 0.16 : 0.55), radius: 2, x: 0, y: 2)
-        }
-        .animation(.spring(response: 0.18, dampingFraction: 0.58), value: pressToken)
-        .animation(.spring(response: 0.20, dampingFraction: 0.62), value: isPressed)
+        // No background plate — just the themed chevron glyph. It keeps the skin's
+        // glossy shader + glow so it still reads as a button, and dips slightly when pressed.
+        icon
+            .foregroundStyle(iconStyle)
+            .shadow(color: glowColor, radius: skin == .camo ? 2 : 8)
+            .shadow(color: Color.black.opacity(skin == .toy ? 0.16 : 0.55), radius: 2, x: 0, y: 2)
+            .scaleEffect(isPressed ? 0.86 : 1)
+            .animation(.spring(response: 0.18, dampingFraction: 0.58), value: pressToken)
+            .animation(.spring(response: 0.20, dampingFraction: 0.62), value: isPressed)
     }
 
     @ViewBuilder
@@ -150,15 +126,6 @@ private struct ThemedFeedChannelButton: View {
         case .ice: return Color.white.opacity(0.78)
         case .sparklePink, .rainbow, .rubber: return theme.accent.opacity(0.86)
         default: return theme.shadow
-        }
-    }
-
-    private var glowRadius: CGFloat {
-        switch skin {
-        case .ice: return 16
-        case .sparklePink, .rainbow: return 18
-        case .camo: return 5
-        default: return 10
         }
     }
 }

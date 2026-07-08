@@ -1,5 +1,6 @@
 import SpriteKit
 import AVFoundation
+import UIKit
 
 class HomeFeedLaunchCoverScene: SKScene {
 
@@ -46,12 +47,12 @@ class HomeFeedLaunchCoverScene: SKScene {
 
         var spawnInterval: TimeInterval {
             switch self {
-            case .confetti: return 0.09
-            case .bubbles: return 0.07
-            case .smoke: return 0.11
-            case .rain: return 0.025
-            case .snow: return 0.055
-            case .sparkle: return 0.08
+            case .confetti: return 0.55
+            case .bubbles: return 0.45
+            case .smoke: return 0.60
+            case .rain: return 0.18
+            case .snow: return 0.35
+            case .sparkle: return 0.42
             }
         }
 
@@ -126,7 +127,7 @@ class HomeFeedLaunchCoverScene: SKScene {
     private func stopLaunchAudioAndActions() {
         removeAction(forKey: "popLoop")
         removeAction(forKey: "phaseLoop")
-        logoNode?.removeAllActions()
+        logoNode?.removeAction(forKey: "pop")
         loadingFill?.removeAllActions()
         popPlayer?.stop()
         popPlayer = nil
@@ -151,10 +152,7 @@ class HomeFeedLaunchCoverScene: SKScene {
                 SKAction.scale(to: 1.00, duration: 0.08)
             ])
         ])
-        logo.run(entrance) { [weak self] in self?.startIdlePulse() }
-
-        // Slow continuous rotation runs alongside everything else
-        logo.run(.repeatForever(.rotate(byAngle: 2 * .pi, duration: 12.0)), withKey: "rotate")
+        logo.run(entrance)
     }
 
     private func setupLoadingBar() {
@@ -239,15 +237,6 @@ class HomeFeedLaunchCoverScene: SKScene {
         run(.repeatForever(.sequence([.wait(forDuration: 0.9), advance])), withKey: "phaseLoop")
     }
 
-    private func startIdlePulse() {
-        logoNode?.removeAction(forKey: "idle")
-        let pulse = SKAction.sequence([
-            SKAction.scale(to: 1.05, duration: 0.85),
-            SKAction.scale(to: 0.95, duration: 0.85)
-        ])
-        logoNode?.run(.repeatForever(pulse), withKey: "idle")
-    }
-
     // MARK: - Pop loop — fires every 1.2 s
 
     private func startPopLoop() {
@@ -265,14 +254,13 @@ class HomeFeedLaunchCoverScene: SKScene {
     private func triggerPop() {
         guard let logo = logoNode else { return }
         playPopSound()
-        logo.removeAction(forKey: "idle")
         logo.run(.sequence([
             SKAction.scale(to: 1.42, duration: 0.09),
             SKAction.scale(to: 0.82, duration: 0.08),
             SKAction.scale(to: 1.12, duration: 0.07),
             SKAction.scale(to: 0.94, duration: 0.06),
             SKAction.scale(to: 1.00, duration: 0.05)
-        ])) { [weak self] in self?.startIdlePulse() }
+        ]), withKey: "pop")
         emitBurst(at: logo.position)
     }
 
@@ -458,19 +446,19 @@ class HomeFeedLaunchCoverScene: SKScene {
     private func emitBurst(at center: CGPoint) {
         switch currentParticleMode {
         case .confetti:
-            for i in 0..<28 {
+            for i in 0..<10 {
                 spawnBurstPiece(at: center, color: particlePalette[i % particlePalette.count], index: i)
             }
         case .bubbles:
-            for i in 0..<18 { spawnBubbleBurstPiece(at: center, index: i) }
+            for i in 0..<7 { spawnBubbleBurstPiece(at: center, index: i) }
         case .smoke:
-            for i in 0..<12 { spawnSmokeBurstPiece(at: center, index: i) }
+            for i in 0..<5 { spawnSmokeBurstPiece(at: center, index: i) }
         case .rain:
-            for i in 0..<22 { spawnRainBurstPiece(at: center, index: i) }
+            for i in 0..<8 { spawnRainBurstPiece(at: center, index: i) }
         case .snow:
-            for i in 0..<26 { spawnSnowBurstPiece(at: center, index: i) }
+            for i in 0..<9 { spawnSnowBurstPiece(at: center, index: i) }
         case .sparkle:
-            for i in 0..<34 { spawnSparkleBurstPiece(at: center, index: i) }
+            for i in 0..<12 { spawnSparkleBurstPiece(at: center, index: i) }
         }
     }
 
@@ -624,6 +612,7 @@ class HomeFeedLaunchCoverScene: SKScene {
     // MARK: - Pop sound
 
     private func playPopSound() {
+        guard UIApplication.shared.applicationState == .active else { return }
         guard let data = cachedPopWAV else { return }
         guard let player = try? AVAudioPlayer(data: data) else { return }
         player.volume = 0.62

@@ -17,6 +17,26 @@ final class AuthViewModel: ObservableObject {
     private var authHandle: AuthStateDidChangeListenerHandle?
 
     init() {
+        #if DEBUG
+        // UI-test only: skip real Firebase sign-in entirely so screenshot/navigation tests don't
+        // depend on account creation succeeding (avoids signup flakiness and the HomeView-eager-
+        // construction race in CallSessionManager). Never reachable in a release build.
+        if ProcessInfo.processInfo.arguments.contains("-UITestAuthBypass") {
+            self.currentUser = nil
+            self.authHandle = nil
+            // Wait for FirebaseApp.configure() (runs elsewhere at launch) to actually finish before
+            // flipping to signed-in — otherwise authenticatedContent mounts early and crashes on
+            // unguarded Auth.auth() calls. Deterministic poll, not a fixed sleep.
+            Task { @MainActor in
+                for _ in 0..<100 where FirebaseApp.app() == nil {
+                    try? await Task.sleep(nanoseconds: 100_000_000)
+                }
+                self.isAuthenticated = true
+                self.isResolvingAuthState = false
+            }
+            return
+        }
+        #endif
         guard FirebaseApp.app() != nil else {
             print("AuthViewModel: Firebase is not configured yet; starting signed out.")
             isResolvingAuthState = false

@@ -20,8 +20,6 @@ struct AnimatedZoomSlider: View {
             let knobY = metrics.trackTop + CGFloat(normalized) * metrics.trackHeight
 
             ZStack {
-                normalPlate(metrics: metrics)
-
                 VStack(spacing: 0) {
                     sliderIcon(systemName: "plus")
                         .frame(height: metrics.iconBand)
@@ -71,10 +69,12 @@ struct AnimatedZoomSlider: View {
         zoomLevel = newZoom
         onZoomChange(newZoom)
 
-        let step = Int((1 - normalized) * 8)
+        // One haptic per notch crossing (8 notches on the track).
+        let step = min(8, max(0, Int(normalized * 8)))
         if step != lastHapticStep {
             lastHapticStep = step
-            feedback.impactOccurred(intensity: 0.45)
+            feedback.impactOccurred(intensity: 0.6)
+            feedback.prepare()
         }
     }
 
@@ -89,17 +89,6 @@ struct AnimatedZoomSlider: View {
         let minLog = log10(minZoom)
         let maxLog = log10(maxZoom)
         return pow(10, minLog + normalized.clamped(to: 0...1) * (maxLog - minLog))
-    }
-
-    private func normalPlate(metrics: ZoomSliderMetrics) -> some View {
-        RoundedRectangle(cornerRadius: metrics.cornerRadius, style: .continuous)
-            .fill(Color.black.opacity(isDragging ? 0.72 : 0.58))
-            .overlay(
-                RoundedRectangle(cornerRadius: metrics.cornerRadius, style: .continuous)
-                    .stroke(Color.white.opacity(0.32), lineWidth: 1)
-            )
-            .shadow(color: .black.opacity(0.24), radius: 7, x: 0, y: 4)
-            .frame(width: metrics.plateWidth, height: metrics.plateHeight)
     }
 
     private func sliderIcon(systemName: String) -> some View {
@@ -132,7 +121,7 @@ struct AnimatedZoomSlider: View {
     }
 
     private func zoomKnob(isDragging: Bool) -> some View {
-        RoundedRectangle(cornerRadius: 6, style: .continuous)
+        RoundedRectangle(cornerRadius: 4, style: .continuous)
             .fill(
                 LinearGradient(
                     colors: [
@@ -144,7 +133,7 @@ struct AnimatedZoomSlider: View {
                 )
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
                     .stroke(Color.white.opacity(0.52), lineWidth: 1)
             )
             .shadow(color: .black.opacity(0.32), radius: isDragging ? 8 : 4, x: 0, y: 2)
@@ -163,9 +152,8 @@ private struct ZoomSliderMetrics {
     var trackCenterY: CGFloat { trackTop + trackHeight / 2 }
     var trackVisualWidth: CGFloat { 16 }
     var notchSpacing: CGFloat { max(8, (trackHeight - 28) / 7) }
-    var knobWidth: CGFloat { 28 }
-    var knobHeight: CGFloat { 20 }
-    var cornerRadius: CGFloat { 12 }
+    var knobWidth: CGFloat { 26 }
+    var knobHeight: CGFloat { 9 }
 }
 
 private extension Double {

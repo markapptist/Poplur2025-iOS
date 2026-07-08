@@ -1426,7 +1426,7 @@ private struct PAISettingsSheet: View {
 
 private struct PoplurAIConfettiLayer: View {
     @State private var particles: [PAIConfettiParticle] = []
-    private let timer = Timer.publish(every: 0.9, on: .main, in: .common).autoconnect()
+    private let timer = Timer.publish(every: 2.0, on: .main, in: .common).autoconnect()
 
     var body: some View {
         GeometryReader { geo in
@@ -1456,7 +1456,7 @@ private struct PoplurAIConfettiLayer: View {
     }
 
     private func spawnParticle(in size: CGSize) {
-        guard particles.count < 20 else { return }
+        guard particles.count < 8 else { return }
         particles.append(PAIConfettiParticle(bounds: size))
     }
 

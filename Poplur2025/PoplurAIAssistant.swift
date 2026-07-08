@@ -1,6 +1,7 @@
 import AVFoundation
 import Speech
 import SwiftUI
+import UIKit
 
 enum PoplurAIProfileSortOrder: String {
     case mostRadius
@@ -55,6 +56,7 @@ final class PoplurAIAssistantController: ObservableObject {
     private var audioSessionObserverTokens: [NSObjectProtocol] = []
     private var eqSyncObserverToken: NSObjectProtocol?
     private var isPausedForAppAudio = false
+    private var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
 
     var isAvailable: Bool {
         speechRecognizer?.isAvailable == true
@@ -94,6 +96,30 @@ final class PoplurAIAssistantController: ObservableObject {
         isIlluminated = false
         isListeningForCommand = false
         setStatus("Say Hey Poplur")
+        endBackgroundTask()
+    }
+
+    // Keep wake-word recognition alive while app is backgrounded.
+    // Requires UIBackgroundModes → audio in Info.plist.
+    func enterBackground() {
+        beginBackgroundTask()
+        // Clear visual-only state — no UI updates happen in background
+        isIlluminated = false
+        isListeningForCommand = false
+        transcript = ""
+    }
+
+    private func beginBackgroundTask() {
+        guard backgroundTaskID == .invalid else { return }
+        backgroundTaskID = UIApplication.shared.beginBackgroundTask(withName: "HeyPoplurWakeWord") { [weak self] in
+            self?.endBackgroundTask()
+        }
+    }
+
+    private func endBackgroundTask() {
+        guard backgroundTaskID != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(backgroundTaskID)
+        backgroundTaskID = .invalid
     }
 
     func showWakeTutorialPulse() {
@@ -318,10 +344,12 @@ final class PoplurAIAssistantController: ObservableObject {
     }
 
     private var shouldPauseForAppAudio: Bool {
-        // Only pause for TTS/music output the app deliberately starts (tracked by PoplurEQSync).
-        // isOtherAudioPlaying also returns true for the app's own feed video, which would permanently
-        // block wake-word detection whenever the feed is visible — that's the wrong behavior.
-        PoplurEQSync.shared.isAppAudioActive
+        // Only pause while the app is actively narrating (map radio / feed bumper voice),
+        // where recognition would transcribe the app's own speech. Feed video, rain ambience,
+        // and city music must NOT pause the wake word — the .playAndRecord/.mixWithOthers
+        // recognition session coexists with playback, and the feed is where users spend most
+        // of their time; pausing there made "Hey Poplur" appear completely dead.
+        PoplurEQSync.shared.isVoiceActive
     }
 
     private func installEQSyncObserver() {

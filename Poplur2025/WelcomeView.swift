@@ -719,7 +719,7 @@ private final class AuthConfettiScene: SKScene {
         )
         emitter.particleColorBlendFactor = 1.0
 
-        let confettiSize = CGSize(width: 8, height: 15)
+        let confettiSize = CGSize(width: 18, height: 34)
         emitter.particleTexture = SKTexture(image: UIGraphicsImageRenderer(size: confettiSize).image { ctx in
             UIColor.white.setFill()
             ctx.fill(CGRect(origin: .zero, size: confettiSize))
@@ -728,21 +728,21 @@ private final class AuthConfettiScene: SKScene {
         emitter.particlePositionRange = CGVector(dx: size.width + 400, dy: 0)
         emitter.emissionAngle = -.pi / 2
         emitter.emissionAngleRange = .pi / 5
-        emitter.particleSpeed = 200
-        emitter.particleSpeedRange = 80
-        emitter.yAcceleration = -60
+        emitter.particleSpeed = 220
+        emitter.particleSpeedRange = 90
+        emitter.yAcceleration = -65
         emitter.xAcceleration = 20
         // Light, continuous sprinkle rather than a dense storm — birthRate * lifetime is the
         // max number of particles alive at once (was 420 * 7.5 ≈ 3150; now ~40 * 4 ≈ 160),
         // which was the main source of lag on this screen.
-        emitter.particleBirthRate = 40
+        emitter.particleBirthRate = 45
         emitter.numParticlesToEmit = 0
-        emitter.particleLifetime = 4.0
+        emitter.particleLifetime = 4.2
         emitter.particleLifetimeRange = 1.0
         emitter.particleRotationRange = .pi
-        emitter.particleRotationSpeed = 3.0
-        emitter.particleScale = 1.0
-        emitter.particleScaleRange = 0.5
+        emitter.particleRotationSpeed = 2.5
+        emitter.particleScale = 1.6
+        emitter.particleScaleRange = 0.7
         emitter.particleScaleSpeed = -0.06
         emitter.particleAlpha = 1.0
         emitter.particleAlphaRange = 0.1
@@ -787,12 +787,21 @@ struct WelcomeView: View {
     @StateObject private var coordinator = WelcomeScene.Coordinator()
     @EnvironmentObject private var stripeCoordinator: StripeTransitionCoordinator
 
-    // Persist the scene to avoid rebuilds during early layout changes
     @State private var scene: WelcomeScene?
-
-    @State private var navigateToLogin = false
-    @State private var navigateToSignup = false
     @State private var cubeVisible = false
+    @State private var authPanel: CarouselPanel = .welcome
+    @State private var goingForward = true
+
+    private enum CarouselPanel: Int {
+        case welcome = 0, login = 1, signUp = 2
+        var aiScreen: AuthAIScreen {
+            switch self {
+            case .welcome: return .welcome
+            case .login:   return .login
+            case .signUp:  return .signUp
+            }
+        }
+    }
 
     private func ensureScene(size: CGSize) -> WelcomeScene {
         if let s = scene { return s }
@@ -802,45 +811,47 @@ struct WelcomeView: View {
     }
 
     private func teardownScene() {
-        // Pause and release the SpriteKit scene to avoid any CAMetalLayer churn
         scene?.isPaused = true
         scene?.removeAllActions()
         scene?.removeAllChildren()
         scene = nil
     }
 
-    private func navigateWithoutTransition(_ update: () -> Void) {
-        var transaction = Transaction(animation: nil)
-        transaction.disablesAnimations = true
-        withTransaction(transaction, update)
+    private func navigate(to panel: CarouselPanel) {
+        goingForward = panel.rawValue > authPanel.rawValue
+        withAnimation(.easeInOut(duration: 0.38)) {
+            authPanel = panel
+        }
     }
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                GeometryReader { geo in
-                    let s = ensureScene(size: geo.size)
-                    Group {
-                        if isRunningInPreviews {
-                            Color.white
-                                .overlay(Text("Welcome Preview").font(.headline))
-                        } else {
-                            SpriteView(scene: s)
-                        }
-                    }
-                    .background(Color.white)
-                    .ignoresSafeArea()
-                    .onChange(of: geo.size) { _, newSize in
-                        // Inform scene about size changes without recreating it
-                        s.resize(to: newSize)
+        ZStack {
+            Color.white.ignoresSafeArea()
+
+            // Welcome scene — stays in hierarchy; opacity and hit-testing controlled so it never
+            // gets recreated during carousel transitions (which would restart the animations).
+            GeometryReader { geo in
+                let s = ensureScene(size: geo.size)
+                Group {
+                    if isRunningInPreviews {
+                        Color.white.overlay(Text("Welcome Preview").font(.headline))
+                    } else {
+                        SpriteView(scene: s)
                     }
                 }
+                .background(Color.white)
+                .ignoresSafeArea()
+                .onChange(of: geo.size) { _, newSize in s.resize(to: newSize) }
+            }
+            .opacity(authPanel == .welcome ? 1 : 0)
+            .allowsHitTesting(authPanel == .welcome)
 
-                AuthConfettiBackground()
+            // Shared confetti — one instance for the entire auth flow; never restarted.
+            AuthConfettiBackground()
 
-                // Cube rests below the buttons, centered near the bottom (matches Android's
-                // 200pt cube centered 174pt from the bottom), hovering in place on the
-                // Poplur logo face rather than spinning.
+            // Decorative cube — only shown on the welcome panel; login/signup have their own
+            // interactive back-button cube and must not be obscured by this decoration.
+            if authPanel == .welcome {
                 VStack {
                     Spacer()
                     LoginCubeView()
@@ -850,63 +861,64 @@ struct WelcomeView: View {
                         .padding(.bottom, 8)
                 }
                 .allowsHitTesting(false)
+            }
 
-                // AI guide sits at the top, above the logo landing zone
-                VStack(spacing: 0) {
-                    AuthAIGuide(screen: .welcome)
-                        .padding(.horizontal, 20)
-                        .padding(.top, 64)
-                    Spacer()
-                }
+            // Single AI guide instance — screen switches with panel; .id() forces a fresh
+            // greeting (new VM) each time a new panel appears.
+            AuthAIGuide(screen: authPanel.aiScreen)
+                .id(authPanel)
+
+            // Login panel — slides in from the right on forward navigation
+            if authPanel == .login {
+                LoginView(
+                    isCarousel: true,
+                    onBack: { navigate(to: .welcome) },
+                    onGoToSignUp: { navigate(to: .signUp) }
+                )
+                .transition(.asymmetric(
+                    insertion: .move(edge: goingForward ? .trailing : .leading),
+                    removal:   .move(edge: goingForward ? .leading  : .trailing)
+                ))
+                .zIndex(goingForward ? 1 : 2)
             }
-            .onReceive(coordinator.$didTapSignIn) { tapped in
-                if tapped {
-                    coordinator.didTapSignIn = false
-                    // No stripe transition on navigation — the stripe video should ONLY play after
-                    // a successful registration (see Poplur2025App's auth.didSignUp branch).
-                    navigateWithoutTransition { navigateToLogin = true }
-                }
-            }
-            .onReceive(coordinator.$didTapSignUp) { tapped in
-                if tapped {
-                    coordinator.didTapSignUp = false
-                    // No stripe transition on navigation (registration-only — see above).
-                    navigateWithoutTransition { navigateToSignup = true }
-                }
-            }
-            .onAppear {
-                // Cube appears last, after the banner, logo, and buttons have landed.
-                cubeVisible = false
-                withAnimation(.spring(response: 0.6, dampingFraction: 0.62).delay(1.9)) {
-                    cubeVisible = true
-                }
-            }
-            .onChange(of: auth.isAuthenticated) { _, authed in
-                if authed {
-                    // Proactively tear down the SpriteKit scene before the root swaps to HomeView.
-                    navigateToLogin = false
-                    navigateToSignup = false
-                    teardownScene()
-                }
-            }
-            .onDisappear {
-                // Defensive: if WelcomeView disappears for any reason, release the scene.
-                teardownScene()
-            }
-            .navigationBarHidden(true)
-            .navigationDestination(isPresented: $navigateToLogin) {
-                LoginView()
-                    .toolbar(.hidden, for: .navigationBar)
-                    .navigationBarBackButtonHidden(true)
-                    .environmentObject(auth)
-                    .environmentObject(stripeCoordinator)
-            }
-            .navigationDestination(isPresented: $navigateToSignup) {
-                SignUpView()
-                    .toolbar(.hidden, for: .navigationBar)
-                    .navigationBarBackButtonHidden(true)
-                    .environmentObject(stripeCoordinator)
+
+            // Sign Up panel — slides in from the right on forward navigation
+            if authPanel == .signUp {
+                SignUpView(
+                    isCarousel: true,
+                    onBack: { navigate(to: .login) }
+                )
+                .transition(.asymmetric(
+                    insertion: .move(edge: goingForward ? .trailing : .leading),
+                    removal:   .move(edge: goingForward ? .leading  : .trailing)
+                ))
+                .zIndex(goingForward ? 2 : 1)
             }
         }
+        .onReceive(coordinator.$didTapSignIn) { tapped in
+            if tapped {
+                coordinator.didTapSignIn = false
+                navigate(to: .login)
+            }
+        }
+        .onReceive(coordinator.$didTapSignUp) { tapped in
+            if tapped {
+                coordinator.didTapSignUp = false
+                navigate(to: .signUp)
+            }
+        }
+        .onAppear {
+            cubeVisible = false
+            withAnimation(.spring(response: 0.6, dampingFraction: 0.62).delay(1.9)) {
+                cubeVisible = true
+            }
+        }
+        .onChange(of: auth.isAuthenticated) { _, authed in
+            if authed {
+                authPanel = .welcome
+                teardownScene()
+            }
+        }
+        .onDisappear { teardownScene() }
     }
 }

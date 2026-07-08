@@ -88,6 +88,14 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
 
         return true
     }
+
+    /// The app is portrait-only except while the PoplurFPS game is on screen, which
+    /// may rotate to landscape (immersive) or portrait (arcade cabinet).
+    static var fpsGameActive = false
+    func application(_ application: UIApplication,
+                     supportedInterfaceOrientationsFor window: UIWindow?) -> UIInterfaceOrientationMask {
+        AppDelegate.fpsGameActive ? .allButUpsideDown : .portrait
+    }
 }
 
 // Optional: only needed if you explicitly configured a SceneDelegate in Info.plist.
@@ -138,6 +146,7 @@ struct Poplur2025App: App {
     @StateObject private var deviceVolumeObserver = DeviceVolumeObserver()
     @StateObject private var preLoginMusic = PreLoginMusicPlayer()
     @State private var showAuthTransition = false
+    @Environment(\.scenePhase) private var scenePhase
 
     /// True only while WelcomeView (or its Login/Sign Up pushes) is the visible screen —
     /// not during the brief auth-resolving spinner, so returning signed-in users never hear
@@ -197,6 +206,19 @@ struct Poplur2025App: App {
                     preLoginMusic.start()
                 } else {
                     preLoginMusic.stop()
+                }
+            }
+            .onChange(of: scenePhase) { _, phase in
+                switch phase {
+                case .background, .inactive:
+                    preLoginMusic.stop()
+                    NotificationCenter.default.post(name: .StopMapAudio, object: nil)
+                case .active:
+                    if isPreLoginVisible {
+                        preLoginMusic.start()
+                    }
+                @unknown default:
+                    break
                 }
             }
             .onAppear {

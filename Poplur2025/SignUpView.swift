@@ -5,6 +5,10 @@ import PhotosUI
 import SceneKit
 
 struct SignUpView: View {
+    // Carousel mode: parent manages background, confetti, and AI guide.
+    var isCarousel: Bool = false
+    var onBack: (() -> Void)? = nil
+
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var auth: AuthViewModel
     @EnvironmentObject private var stripeCoordinator: StripeTransitionCoordinator
@@ -83,36 +87,50 @@ struct SignUpView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ZStack {
+        if isCarousel {
+            signUpContent
+        } else {
+            NavigationStack {
+                signUpContent
+                    .navigationDestination(isPresented: $isSignedUp) {
+                        HomeView()
+                            .toolbar(.hidden, for: .navigationBar)
+                            .navigationBarBackButtonHidden(true)
+                    }
+            }
+        }
+    }
+
+    @ViewBuilder private var signUpContent: some View {
+        ZStack {
+            // In carousel mode the parent WelcomeView provides the bg and confetti.
+            if !isCarousel {
                 Color.white.ignoresSafeArea()
                 AuthConfettiBackground()
-
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 22) {
-                        header
-                        signupCube
-                        signupStepContent
-                        walkthroughControls
-                    }
-                    .padding(.horizontal, 22)
-                    .padding(.top, 28)
-                    .padding(.bottom, 44)
-                }
             }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar(.hidden, for: .navigationBar)
-            .errorBanner($errorMessage)
-            .onTapGesture { hideKeyboard() }
-            .overlay(alignment: .bottom) {
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    header
+                    signupCube
+                    signupStepContent
+                    walkthroughControls
+                }
+                .padding(.horizontal, 22)
+                .padding(.top, 28)
+                .padding(.bottom, 44)
+            }
+        }
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .navigationBar)
+        .errorBanner($errorMessage)
+        .onTapGesture { hideKeyboard() }
+        .overlay(alignment: .bottom) {
+            // In carousel mode the parent WelcomeView's unified guide handles the greeting.
+            if !isCarousel {
                 AuthAIGuide(screen: .signUp)
                     .padding(.horizontal, 20)
                     .padding(.bottom, 20)
-            }
-            .navigationDestination(isPresented: $isSignedUp) {
-                HomeView()
-                    .toolbar(.hidden, for: .navigationBar)
-                    .navigationBarBackButtonHidden(true)
             }
         }
     }
@@ -132,7 +150,7 @@ struct SignUpView: View {
 
             HStack {
                 Button {
-                    dismiss()
+                    if let onBack { onBack() } else { dismiss() }
                 } label: {
                     Image(systemName: "chevron.left")
                         .poplurIconShader()
@@ -179,7 +197,7 @@ struct SignUpView: View {
                 onTap: {
                     switch signupStep {
                     case .accountType:
-                        dismiss()
+                        if let onBack { onBack() } else { dismiss() }
                     default:
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.88)) {
                             errorMessage = nil

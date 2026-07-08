@@ -24,3 +24,9 @@ DerivedData/
 
 # macOS
 .DS_Store
+
+# Claude Code local worktrees — transient, never commit
+.claude/worktrees/
+
+# Leftover from iCloud git recovery (renamed .git) — never commit
+.git-broken/

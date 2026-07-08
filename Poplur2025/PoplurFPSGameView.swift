@@ -24,6 +24,15 @@ struct PoplurFPSGameSheet: View {
         }
         .background(Color.black)
         .ignoresSafeArea()
+        .onAppear { AppDelegate.fpsGameActive = true }
+        .onDisappear {
+            AppDelegate.fpsGameActive = false
+            // Snap the app back to portrait when leaving the game.
+            if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
+                scene.requestGeometryUpdate(.iOS(interfaceOrientations: .portrait))
+                scene.windows.first?.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
+            }
+        }
     }
 }
 

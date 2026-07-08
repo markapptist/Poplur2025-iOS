@@ -1,4 +1,5 @@
 import Foundation
+import FirebaseCore
 import FirebaseAuth
 import FirebaseFirestore
 import Combine
@@ -45,13 +46,22 @@ final class CallSessionManager: ObservableObject {
     private var timerTask: Task<Void, Never>?
     private var timeoutTask: Task<Void, Never>?
 
-    private let db = Firestore.firestore()
+    // Lazy, not eager: `.shared` gets touched by HomeView.init (sometimes constructed
+    // speculatively by SwiftUI's navigationDestination before the view is really on-screen),
+    // which can happen before FirebaseApp.configure() finishes — Firestore.firestore() throws
+    // an uncaught exception if called that early. Deferring to first real use avoids the race.
+    private lazy var db = Firestore.firestore()
 
     private init() {}
 
     // MARK: - Start listening (call once after auth is confirmed)
 
     func startListeningForIncomingCalls() {
+        // HomeView calls this unconditionally from .onAppear — guard against FirebaseApp not
+        // being configured yet (e.g. UI-test auth bypass skips the normal wait for Firebase to
+        // resolve, so HomeView can appear before FirebaseApp.configure() finishes elsewhere).
+        // Auth.auth() itself asserts/crashes if called before configuration.
+        guard FirebaseApp.app() != nil else { return }
         let myId = Auth.auth().currentUser?.uid ?? ""
         guard !myId.isEmpty else { return }
 

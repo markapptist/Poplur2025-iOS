@@ -13,6 +13,33 @@ private let isRunningInPreviews: Bool = {
 // This order drives yaw=0→Profile, yaw=-90°→Map, yaw=-180°→Camera, yaw=-270°→Feed.
 private let cubeSceneFaceTabs: [AppTab] = [.profile, .map, .record, .feed]
 
+/// User-adjustable cube brightness. Scales the scene's IBL + all three lights.
+/// Stored 0.4...1.3, default 1.0. Settings posts `didChangeNotification` for live updates.
+enum CubeBrightness {
+    static let storageKey = "poplur_cubeBrightness"
+    static let didChangeNotification = Notification.Name("CubeBrightnessDidChange")
+    static let ambientNodeName = "cube-brightness-ambient"
+    static let directionalNodeName = "cube-brightness-directional"
+    static let omniNodeName = "cube-brightness-omni"
+    static let range: ClosedRange<Double> = 0.4...1.3
+
+    static var factor: CGFloat {
+        let stored = UserDefaults.standard.double(forKey: storageKey)
+        guard stored > 0 else { return 1.0 }
+        return CGFloat(min(max(stored, range.lowerBound), range.upperBound))
+    }
+
+    /// Re-applies the current factor to an already-built cube scene.
+    static func apply(to scene: SCNScene?, isPreview: Bool) {
+        guard let scene else { return }
+        let brightness = factor
+        scene.lightingEnvironment.intensity = (isPreview ? 0.35 : 1.0) * brightness
+        scene.rootNode.childNode(withName: ambientNodeName, recursively: false)?.light?.intensity = 200 * brightness
+        scene.rootNode.childNode(withName: directionalNodeName, recursively: false)?.light?.intensity = 700 * brightness
+        scene.rootNode.childNode(withName: omniNodeName, recursively: false)?.light?.intensity = 350 * brightness
+    }
+}
+
 // Cube models load via SceneKit's native .dae importer (assimp-converted from the trimesh GLBs),
 // NOT GLTFSceneKit — whose decoder SIGSEGVs on those GLBs (missing normals + 32-bit indices trip
 // SCNSceneSource's C3DConvexPolyhedron path, an uncatchable native crash).
@@ -53,11 +80,7 @@ private func parseCubeGLBNode(from url: URL) -> SCNNode? {
           let js = (try? JSONSerialization.jsonObject(with: jsonData)) as? [String: Any],
           let accessors = js["accessors"] as? [[String: Any]],
           let bufferViews = js["bufferViews"] as? [[String: Any]],
-          let meshes = js["meshes"] as? [[String: Any]],
-          let primitive = (meshes.first?["primitives"] as? [[String: Any]])?.first,
-          let attributes = primitive["attributes"] as? [String: Any],
-          let positionIdx = attributes["POSITION"] as? Int,
-          let indicesIdx = primitive["indices"] as? Int else { return nil }
+          let meshes = js["meshes"] as? [[String: Any]], !meshes.isEmpty else { return nil }
 
     func slice(_ i: Int) -> (offset: Int, count: Int, comp: Int)? {
         guard i >= 0, i < accessors.count,
@@ -75,70 +98,94 @@ private func parseCubeGLBNode(from url: URL) -> SCNNode? {
         return out
     }
 
-    guard let pos = slice(positionIdx), pos.comp == 5126, let pf = floats(pos.offset, pos.count * 3) else { return nil }
-    let vertexCount = pos.count
-    var positions = [SCNVector3](); positions.reserveCapacity(vertexCount)
-    for v in 0..<vertexCount { positions.append(SCNVector3(pf[v * 3], pf[v * 3 + 1], pf[v * 3 + 2])) }
+    // Builds one SCNNode for a glTF primitive. The main icon cubes are a single
+    // trimesh; the back-button cubes are SIX single-quad meshes, one per face,
+    // each with its own embedded texture — so every mesh must be parsed, not
+    // just the first (which used to leave the back cube as one flat quad).
+    func primitiveNode(_ primitive: [String: Any]) -> SCNNode? {
+        guard let attributes = primitive["attributes"] as? [String: Any],
+              let positionIdx = attributes["POSITION"] as? Int,
+              let indicesIdx = primitive["indices"] as? Int else { return nil }
 
-    guard let ix = slice(indicesIdx) else { return nil }
-    var indices = [Int32]()
-    if ix.comp == 5125 { // UNSIGNED_INT
-        let bc = ix.count * 4; guard ix.offset + bc <= data.count else { return nil }
-        var raw = [UInt32](repeating: 0, count: ix.count)
-        raw.withUnsafeMutableBytes { data.copyBytes(to: $0.bindMemory(to: UInt8.self), from: ix.offset..<(ix.offset + bc)) }
-        indices = raw.map { Int32(truncatingIfNeeded: $0) }
-    } else if ix.comp == 5123 { // UNSIGNED_SHORT
-        let bc = ix.count * 2; guard ix.offset + bc <= data.count else { return nil }
-        var raw = [UInt16](repeating: 0, count: ix.count)
-        raw.withUnsafeMutableBytes { data.copyBytes(to: $0.bindMemory(to: UInt8.self), from: ix.offset..<(ix.offset + bc)) }
-        indices = raw.map { Int32($0) }
-    } else { return nil }
+        guard let pos = slice(positionIdx), pos.comp == 5126, let pf = floats(pos.offset, pos.count * 3) else { return nil }
+        let vertexCount = pos.count
+        var positions = [SCNVector3](); positions.reserveCapacity(vertexCount)
+        for v in 0..<vertexCount { positions.append(SCNVector3(pf[v * 3], pf[v * 3 + 1], pf[v * 3 + 2])) }
 
-    var uvs = [CGPoint](repeating: .zero, count: vertexCount)
-    if let uvIdx = attributes["TEXCOORD_0"] as? Int, let uv = slice(uvIdx), uv.comp == 5126,
-       uv.count == vertexCount, let uf = floats(uv.offset, vertexCount * 2) {
-        // No V-flip: these GLBs are authored with Metal/SceneKit UV convention (V=0 at top) already.
-        // Flipping would invert icons and swap the face→texture-region mapping.
-        for v in 0..<vertexCount { uvs[v] = CGPoint(x: CGFloat(uf[v * 2]), y: CGFloat(uf[v * 2 + 1])) }
+        guard let ix = slice(indicesIdx) else { return nil }
+        var indices = [Int32]()
+        if ix.comp == 5125 { // UNSIGNED_INT
+            let bc = ix.count * 4; guard ix.offset + bc <= data.count else { return nil }
+            var raw = [UInt32](repeating: 0, count: ix.count)
+            raw.withUnsafeMutableBytes { data.copyBytes(to: $0.bindMemory(to: UInt8.self), from: ix.offset..<(ix.offset + bc)) }
+            indices = raw.map { Int32(truncatingIfNeeded: $0) }
+        } else if ix.comp == 5123 { // UNSIGNED_SHORT
+            let bc = ix.count * 2; guard ix.offset + bc <= data.count else { return nil }
+            var raw = [UInt16](repeating: 0, count: ix.count)
+            raw.withUnsafeMutableBytes { data.copyBytes(to: $0.bindMemory(to: UInt8.self), from: ix.offset..<(ix.offset + bc)) }
+            indices = raw.map { Int32($0) }
+        } else { return nil }
+
+        var uvs = [CGPoint](repeating: .zero, count: vertexCount)
+        if let uvIdx = attributes["TEXCOORD_0"] as? Int, let uv = slice(uvIdx), uv.comp == 5126,
+           uv.count == vertexCount, let uf = floats(uv.offset, vertexCount * 2) {
+            // No V-flip: these GLBs are authored with Metal/SceneKit UV convention (V=0 at top) already.
+            // Flipping would invert icons and swap the face→texture-region mapping.
+            for v in 0..<vertexCount { uvs[v] = CGPoint(x: CGFloat(uf[v * 2]), y: CGFloat(uf[v * 2 + 1])) }
+        }
+
+        var normals = [SCNVector3](repeating: SCNVector3(0, 0, 0), count: vertexCount)
+        var t = 0
+        while t + 2 < indices.count {
+            let a = Int(indices[t]), b = Int(indices[t + 1]), c = Int(indices[t + 2]); t += 3
+            guard a < vertexCount, b < vertexCount, c < vertexCount else { continue }
+            let pa = positions[a], pb = positions[b], pc = positions[c]
+            let nx = (pb.y - pa.y) * (pc.z - pa.z) - (pb.z - pa.z) * (pc.y - pa.y)
+            let ny = (pb.z - pa.z) * (pc.x - pa.x) - (pb.x - pa.x) * (pc.z - pa.z)
+            let nz = (pb.x - pa.x) * (pc.y - pa.y) - (pb.y - pa.y) * (pc.x - pa.x)
+            for i in [a, b, c] { normals[i] = SCNVector3(normals[i].x + nx, normals[i].y + ny, normals[i].z + nz) }
+        }
+        normals = normals.map { n in
+            let len = (n.x * n.x + n.y * n.y + n.z * n.z).squareRoot()
+            return len > 0 ? SCNVector3(n.x / len, n.y / len, n.z / len) : SCNVector3(0, 1, 0)
+        }
+
+        let geometry = SCNGeometry(sources: [
+            SCNGeometrySource(vertices: positions),
+            SCNGeometrySource(normals: normals),
+            SCNGeometrySource(textureCoordinates: uvs)
+        ], elements: [SCNGeometryElement(indices: indices, primitiveType: .triangles)])
+        let material = SCNMaterial()
+        // These GLBs embed their baseColor texture directly (images[].bufferView, no external URI) —
+        // pull it out here so prepareRuntimeCubeMaterials' `diffuseTexture ?? material.diffuse.contents`
+        // fallback has something real to fall back to instead of SCNMaterial's blank default.
+        let materialIdx = primitive["material"] as? Int ?? 0
+        if let embeddedDiffuse = embeddedBaseColorImage(js: js, data: data, binOffset: binOffset, materialIndex: materialIdx) {
+            material.diffuse.contents = embeddedDiffuse
+        }
+        geometry.firstMaterial = material
+        return SCNNode(geometry: geometry)
     }
 
-    var normals = [SCNVector3](repeating: SCNVector3(0, 0, 0), count: vertexCount)
-    var t = 0
-    while t + 2 < indices.count {
-        let a = Int(indices[t]), b = Int(indices[t + 1]), c = Int(indices[t + 2]); t += 3
-        guard a < vertexCount, b < vertexCount, c < vertexCount else { continue }
-        let pa = positions[a], pb = positions[b], pc = positions[c]
-        let nx = (pb.y - pa.y) * (pc.z - pa.z) - (pb.z - pa.z) * (pc.y - pa.y)
-        let ny = (pb.z - pa.z) * (pc.x - pa.x) - (pb.x - pa.x) * (pc.z - pa.z)
-        let nz = (pb.x - pa.x) * (pc.y - pa.y) - (pb.y - pa.y) * (pc.x - pa.x)
-        for i in [a, b, c] { normals[i] = SCNVector3(normals[i].x + nx, normals[i].y + ny, normals[i].z + nz) }
+    var faceNodes: [SCNNode] = []
+    for mesh in meshes {
+        for primitive in (mesh["primitives"] as? [[String: Any]]) ?? [] {
+            if let node = primitiveNode(primitive) { faceNodes.append(node) }
+        }
     }
-    normals = normals.map { n in
-        let len = (n.x * n.x + n.y * n.y + n.z * n.z).squareRoot()
-        return len > 0 ? SCNVector3(n.x / len, n.y / len, n.z / len) : SCNVector3(0, 1, 0)
-    }
-
-    let geometry = SCNGeometry(sources: [
-        SCNGeometrySource(vertices: positions),
-        SCNGeometrySource(normals: normals),
-        SCNGeometrySource(textureCoordinates: uvs)
-    ], elements: [SCNGeometryElement(indices: indices, primitiveType: .triangles)])
-    let material = SCNMaterial()
-    // These GLBs embed their baseColor texture directly (images[].bufferView, no external URI) —
-    // pull it out here so prepareRuntimeCubeMaterials' `diffuseTexture ?? material.diffuse.contents`
-    // fallback has something real to fall back to instead of SCNMaterial's blank default.
-    if let embeddedDiffuse = embeddedBaseColorImage(js: js, data: data, binOffset: binOffset) {
-        material.diffuse.contents = embeddedDiffuse
-    }
-    geometry.firstMaterial = material
-    return SCNNode(geometry: geometry)
+    guard !faceNodes.isEmpty else { return nil }
+    if faceNodes.count == 1 { return faceNodes[0] }
+    let container = SCNNode()
+    faceNodes.forEach(container.addChildNode)
+    return container
 }
 
-/// Extracts the glTF material's baseColorTexture image, which these GLBs embed inline
+/// Extracts a glTF material's baseColorTexture image, which these GLBs embed inline
 /// (images[].bufferView pointing into the binary chunk) rather than referencing an external file.
-private func embeddedBaseColorImage(js: [String: Any], data: Data, binOffset: Int) -> UIImage? {
+private func embeddedBaseColorImage(js: [String: Any], data: Data, binOffset: Int, materialIndex: Int = 0) -> UIImage? {
     guard let materials = js["materials"] as? [[String: Any]],
-          let pbr = materials.first?["pbrMetallicRoughness"] as? [String: Any],
+          materialIndex >= 0, materialIndex < materials.count,
+          let pbr = materials[materialIndex]["pbrMetallicRoughness"] as? [String: Any],
           let baseColorTexture = pbr["baseColorTexture"] as? [String: Any],
           let textureIdx = baseColorTexture["index"] as? Int,
           let textures = js["textures"] as? [[String: Any]], textureIdx >= 0, textureIdx < textures.count,
@@ -820,7 +867,7 @@ private struct CubeSceneView: UIViewRepresentable {
         }
         // prepareRuntimeCubeMaterials always overrides materials to .physicallyBased,
         // so use full IBL intensity regardless of the lightingModel parameter.
-        scene.lightingEnvironment.intensity = isRunningInPreviews ? 0.35 : 1.0
+        scene.lightingEnvironment.intensity = (isRunningInPreviews ? 0.35 : 1.0) * CubeBrightness.factor
 
         // Slightly darker background helps depth; enable default lighting if needed
         // Removed: scene.background.contents = UIColor.clear
@@ -861,18 +908,24 @@ private struct CubeSceneView: UIViewRepresentable {
         */
 
         // Bright PBR lights — materials are always .physicallyBased so these need to be substantial.
+        // Base intensities are scaled by the user's Cube Brightness setting (see CubeBrightness).
         do {
-            let ambient = SCNLight(); ambient.type = .ambient; ambient.intensity = 200
+            let brightness = CubeBrightness.factor
+
+            let ambient = SCNLight(); ambient.type = .ambient; ambient.intensity = 200 * brightness
             let ambientNode = SCNNode(); ambientNode.light = ambient
+            ambientNode.name = CubeBrightness.ambientNodeName
             scene.rootNode.addChildNode(ambientNode)
 
-            let dir = SCNLight(); dir.type = .directional; dir.intensity = 700
+            let dir = SCNLight(); dir.type = .directional; dir.intensity = 700 * brightness
             let dirNode = SCNNode(); dirNode.light = dir
+            dirNode.name = CubeBrightness.directionalNodeName
             dirNode.eulerAngles = SCNVector3(Float(30.0 * .pi / 180), Float(-45.0 * .pi / 180), 0)
             scene.rootNode.addChildNode(dirNode)
 
-            let omni = SCNLight(); omni.type = .omni; omni.intensity = 350
+            let omni = SCNLight(); omni.type = .omni; omni.intensity = 350 * brightness
             let omniNode = SCNNode(); omniNode.light = omni
+            omniNode.name = CubeBrightness.omniNodeName
             omniNode.position = SCNVector3(-2, 1.5, 3)
             scene.rootNode.addChildNode(omniNode)
         }
@@ -1310,7 +1363,8 @@ private struct CubeSceneView: UIViewRepresentable {
     private func faceBackgroundOnly(for tab: AppTab, baseColor: Color) -> UIImage {
         let skin = CubeSkinStore.shared.current
         let tabSuffix = (skin == .rubber) ? "_\(tab.title)" : ""
-        let cacheKey = "face_bg_skin_\(skin.rawValue)\(tabSuffix)"
+        // Include the corner radius so adjusting it invalidates the cached face image.
+        let cacheKey = "face_bg_skin_\(skin.rawValue)\(tabSuffix)_cr\(Int(CubeSkinStore.shared.cornerRadius))"
         if let skinImage = UIImage(named: skin.diffuseAssetName) {
             return CubeFaceImageCache.image(for: cacheKey) { skinImage }
         }
@@ -1612,6 +1666,9 @@ private struct CubeSceneView: UIViewRepresentable {
             // ML object detection → one-shot pop when camera finds something new
             NotificationCenter.default.addObserver(forName: Notification.Name("MLCubePopTrigger"), object: nil, queue: .main) { [weak self] _ in
                 self?.triggerPreviewPop()
+            }
+            NotificationCenter.default.addObserver(forName: CubeBrightness.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
+                CubeBrightness.apply(to: self?.view?.scene, isPreview: isRunningInPreviews)
             }
         }
 
@@ -2664,10 +2721,15 @@ struct BackCubeView: View {
             _BackCubeSceneView(skin: skinStore.current)
                 .allowsHitTesting(false)
 
+            // The back cube reuses the themed icon-cube model (correct face mapping),
+            // so it carries no baked arrow — overlay a clear chevron to signal "back".
             Image(systemName: "chevron.backward")
-                .font(.system(size: 30, weight: .bold))
+                .font(.system(size: 30, weight: .heavy))
                 .foregroundStyle(.white)
-                .shadow(color: .black.opacity(0.8), radius: 8, x: 0, y: 3)
+                .frame(width: 60, height: 60)
+                .background(.ultraThinMaterial, in: Circle())
+                .overlay(Circle().strokeBorder(.white.opacity(0.28), lineWidth: 1))
+                .shadow(color: .black.opacity(0.35), radius: 6, y: 2)
                 .allowsHitTesting(false)
         }
         // Match the main cube's frame (CubeTabView is 200×200) so the back cube
@@ -2740,7 +2802,12 @@ private struct _BackCubeSceneView: UIViewRepresentable {
     }
 
     private func makeBackCubeNode() -> SCNNode? {
-        let assetName = skin.backButtonModelAssetName
+        // Use the themed ICON cube model — its per-face textures are authored to map
+        // cleanly and align across edges. The *_back_button_cube.glb assets have
+        // corner-only textures with no centered content that don't line up across
+        // faces (looked "not mapped properly"); a chevron overlay in BackCubeView
+        // signals "back" instead of relying on a baked-in arrow.
+        let assetName = skin.runtimeModelAssetName ?? skin.backButtonModelAssetName
 
         // Same URL-resolution order as CubeTabView.runtimeCubeModelURL
         let glbURL: URL? = {

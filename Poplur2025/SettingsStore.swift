@@ -78,6 +78,22 @@ enum HoldMenuLayoutPreference: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+enum RadiusUnitPreference: String, CaseIterable, Identifiable, Sendable {
+    case milesOnly   = "milesOnly"
+    case kmOnly      = "kmOnly"
+    case animateBoth = "animateBoth"
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .milesOnly:   return "Miles Only"
+        case .kmOnly:      return "KM Only"
+        case .animateBoth: return "Animate Between Both"
+        }
+    }
+}
+
 enum TransitionStylePreference: String, CaseIterable, Identifiable, Sendable {
     case twoD = "2d"
     case threeD = "3d"
@@ -127,6 +143,7 @@ final class SettingsStore: ObservableObject {
         static let colorSchemePreference = "settings.colorSchemePreference"
         static let holdMenuLayoutPreference = "settings.holdMenuLayoutPreference"
         static let transitionStylePreference = "settings.transitionStylePreference"
+        static let radiusUnitPreference = "settings.radiusUnitPreference"
         static let tiltControlEnabled = "settings.tiltControlEnabled"
         static let use3DLoadingScreen = "settings.use3DLoadingScreen"
     }
@@ -245,6 +262,19 @@ final class SettingsStore: ObservableObject {
             } else {
                 CubeMotionPoster.shared.stop()
             }
+        }
+    }
+
+    // MARK: - Radius unit display
+
+    var radiusUnitPreference: RadiusUnitPreference {
+        get {
+            let raw = defaults.string(forKey: Keys.radiusUnitPreference) ?? RadiusUnitPreference.animateBoth.rawValue
+            return RadiusUnitPreference(rawValue: raw) ?? .animateBoth
+        }
+        set {
+            objectWillChange.send()
+            defaults.set(newValue.rawValue, forKey: Keys.radiusUnitPreference)
         }
     }
 

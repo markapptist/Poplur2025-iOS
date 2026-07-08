@@ -252,14 +252,16 @@ extension CubeSkin {
     /// Returns a 300×300 programmatic background texture for this skin.
     /// Only `.rubber` varies per face — all other skins ignore `tab`.
     func makeTexture(tab: AppTab = .map) -> UIImage {
-        let cacheKey = "\(rawValue)-\(String(describing: tab))" as NSString
+        let cornerValue = UserDefaults.standard.object(forKey: CubeSkinStore.cornerRadiusKey) as? Double
+            ?? CubeSkinStore.defaultCornerRadius
+        let cacheKey = "\(rawValue)-\(String(describing: tab))-\(Int(cornerValue))" as NSString
         if let cached = CubeSkinTextureCache.shared.object(forKey: cacheKey) {
             return cached
         }
 
         let size = CGSize(width: 300, height: 300)
         let rect = CGRect(origin: .zero, size: size)
-        let corner: CGFloat = 28
+        let corner = CGFloat(cornerValue)
         let image = UIGraphicsImageRenderer(size: size).image { ctx in
             let g = ctx.cgContext
             switch self {
@@ -498,6 +500,19 @@ public final class CubeSkinStore: ObservableObject {
     private let goldModelRolloutKey = "CubeSkin.goldMetallicModelRolloutApplied"
 
     @Published public private(set) var current: CubeSkin
+
+    /// Corner radius of the rounded design drawn on each cube face (see `makeTexture`).
+    /// User-adjustable in the Cube Skin settings; persisted and applied live.
+    public static let defaultCornerRadius: Double = 28
+    static let cornerRadiusKey = "CubeSkin.cornerRadius"
+    @Published public var cornerRadius: Double =
+        UserDefaults.standard.object(forKey: CubeSkinStore.cornerRadiusKey) as? Double ?? CubeSkinStore.defaultCornerRadius {
+        didSet {
+            UserDefaults.standard.set(cornerRadius, forKey: CubeSkinStore.cornerRadiusKey)
+            CubeSkinTextureCache.shared.removeAllObjects()   // face textures depend on the radius
+            NotificationCenter.default.post(name: .CubeSkinDidChange, object: current)
+        }
+    }
 
     private init() {
         if !UserDefaults.standard.bool(forKey: goldModelRolloutKey) {
