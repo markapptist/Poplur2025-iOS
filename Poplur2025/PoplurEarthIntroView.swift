@@ -1,20 +1,187 @@
 import SwiftUI
+import WebKit
 import SceneKit
 
 // MARK: - Poplur Earth Intro
 //
-// A stylised "clay Earth" GLB spinning inside a procedural starfield, shown as the
-// map-launch curtain. As the curtain fades, MapKit (already parked at a world view)
-// is revealed underneath and descends into the user's location — so the stylised
-// globe cross-dissolves into the real map zooming in.
+// Shows a Mapbox GL JS globe styled with the Poplur clay palette (clay-green land,
+// toy-blue water, near-black space, pink atmospheric rim) spinning slowly.
+// Falls back to the SCNSphere + earth_day texture when no Mapbox token is set.
 
 struct PoplurEarthIntroView: UIViewRepresentable {
-    /// Slowly dollies the camera toward the globe so the hand-off to the map carries momentum.
-    var pushIn: Bool = true
+    func makeUIView(context: Context) -> UIView {
+        let token = Secrets.mapboxToken
+        if token.isEmpty {
+            return makeFallbackView()
+        }
+        return makeWebGlobeView(token: token)
+    }
 
-    func makeUIView(context: Context) -> SCNView {
+    func updateUIView(_ uiView: UIView, context: Context) {}
+
+    // MARK: - Mapbox WebView globe
+
+    private func makeWebGlobeView(token: String) -> WKWebView {
+        let config = WKWebViewConfiguration()
+        config.allowsInlineMediaPlayback = true
+        let webView = WKWebView(frame: .zero, configuration: config)
+        webView.backgroundColor = UIColor(red: 5/255, green: 4/255, blue: 7/255, alpha: 1)
+        webView.isOpaque = false
+        webView.scrollView.isScrollEnabled = false
+        webView.scrollView.bounces = false
+        webView.isUserInteractionEnabled = false
+        // Base URL is api.mapbox.com so the inline HTML can load Mapbox CDN scripts.
+        webView.loadHTMLString(Self.globeHTML(token: token),
+                               baseURL: URL(string: "https://api.mapbox.com"))
+        return webView
+    }
+
+    // MARK: - Globe HTML
+
+    private static func globeHTML(token: String) -> String {
+        """
+        <!DOCTYPE html>
+        <html>
+        <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+        <link href="https://api.mapbox.com/mapbox-gl-js/v3.7.0/mapbox-gl.css" rel="stylesheet">
+        <script src="https://api.mapbox.com/mapbox-gl-js/v3.7.0/mapbox-gl.js"></script>
+        <style>
+          *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+          html, body { width: 100%; height: 100%; overflow: hidden; background: #050407; }
+          #map { width: 100%; height: 100%; }
+          /* Hide all Mapbox controls and attribution */
+          .mapboxgl-ctrl, .mapboxgl-ctrl-attrib-inner,
+          .mapboxgl-ctrl-logo { display: none !important; }
+        </style>
+        </head>
+        <body>
+        <div id="map"></div>
+        <script>
+        mapboxgl.accessToken = '\(token)';
+
+        const map = new mapboxgl.Map({
+          container: 'map',
+          // dark-v11 has predictable layer IDs for clay overrides
+          style: 'mapbox://styles/mapbox/dark-v11',
+          center: [20, 15],
+          zoom: 1.6,
+          pitch: 0,
+          bearing: 0,
+          projection: 'globe',
+          interactive: false,
+          attributionControl: false,
+          logoPosition: 'top-left',
+        });
+
+        map.on('load', () => {
+          // --- Clay color palette ---
+          const LAND     = '#3a7a2a';  // rich clay green
+          const LAND_HL  = '#62B548';  // bright clay green highlight
+          const WATER    = '#145D73';  // toy blue
+          const SPACE    = '#050407';  // near-black space
+          const PINK     = '#F63B9A';
+          const ROAD_DK  = '#09080A';
+
+          // Background (space)
+          try { map.setPaintProperty('background', 'background-color', SPACE); } catch(e) {}
+
+          // Land — dark-v11 uses 'land' as a fill layer
+          const landLayers = ['land', 'landcover', 'landcover-crop', 'landcover-grass',
+                              'landcover-scrub', 'landcover-snow', 'landcover-wood'];
+          landLayers.forEach(id => {
+            try { map.setPaintProperty(id, 'fill-color', LAND); } catch(e) {}
+          });
+
+          // Country/admin fills where applicable
+          const countryFills = ['country-label-sm', 'country-boundaries'];
+          countryFills.forEach(id => {
+            try { map.setPaintProperty(id, 'fill-color', LAND); } catch(e) {}
+          });
+
+          // Parks & national parks → brighter green
+          ['national-park', 'landuse', 'landuse-residential', 'park', 'park-label'].forEach(id => {
+            try { map.setPaintProperty(id, 'fill-color', LAND_HL); } catch(e) {}
+          });
+
+          // Water → toy blue
+          try { map.setPaintProperty('water', 'fill-color', WATER); } catch(e) {}
+          try { map.setPaintProperty('waterway', 'line-color', WATER); } catch(e) {}
+          try { map.setPaintProperty('waterway-shadow', 'line-color', WATER); } catch(e) {}
+
+          // Roads → dark; pink stitches on main roads
+          ['road-motorway-trunk', 'road-primary', 'road-secondary-tertiary',
+           'road-street', 'road-minor', 'road-path'].forEach(id => {
+            try { map.setPaintProperty(id, 'line-color', ROAD_DK); } catch(e) {}
+          });
+          ['road-motorway-trunk-case', 'road-primary-case'].forEach(id => {
+            try { map.setPaintProperty(id, 'line-color', PINK); } catch(e) {}
+          });
+
+          // Buildings → very dark
+          ['building', 'building-outline'].forEach(id => {
+            try {
+              map.setPaintProperty(id, 'fill-color', '#111014');
+              map.setPaintProperty(id, 'fill-outline-color', '#2A252B');
+            } catch(e) {}
+          });
+
+          // Admin boundaries → subtle pink
+          ['admin-0-boundary', 'admin-1-boundary', 'admin-0-boundary-disputed'].forEach(id => {
+            try {
+              map.setPaintProperty(id, 'line-color', 'rgba(246,59,154,0.25)');
+              map.setPaintProperty(id, 'line-width', 0.6);
+            } catch(e) {}
+          });
+
+          // --- Globe atmosphere ---
+          // Space behind the globe is near-black; pink rim on the atmosphere edge.
+          map.setFog({
+            'range': [0.5, 10],
+            'color': 'rgba(20, 93, 115, 0.08)',    // faint blue haze at horizon
+            'high-color': '#050407',
+            'horizon-blend': 0.035,
+            'space-color': '#050407',
+            'star-intensity': 0.25,
+          });
+
+          // Directional light to create a clay terminator (lit side vs dark side)
+          // Mapbox GL JS v3 light API:
+          try {
+            map.setLight({
+              anchor: 'viewport',
+              color: '#FFF2F8',
+              intensity: 0.28,
+              position: [1.5, 210, 30],
+            });
+          } catch(e) {}
+
+          // --- Auto-rotation ---
+          let bearing = 0;
+          function spinGlobe() {
+            bearing = (bearing + 0.055) % 360;
+            map.setBearing(-bearing);
+            requestAnimationFrame(spinGlobe);
+          }
+          spinGlobe();
+        });
+
+        // If the style fails to load (bad token, offline), show a dark fallback
+        map.on('error', e => {
+          document.getElementById('map').style.background = '#050407';
+        });
+        </script>
+        </body>
+        </html>
+        """
+    }
+
+    // MARK: - SCNSphere fallback (no token)
+
+    private func makeFallbackView() -> SCNView {
         let view = SCNView()
-        view.backgroundColor = .black
+        view.backgroundColor = UIColor(red: 5/255, green: 4/255, blue: 7/255, alpha: 1)
         view.antialiasingMode = .multisampling2X
         view.isUserInteractionEnabled = false
         view.rendersContinuously = true
@@ -23,17 +190,15 @@ struct PoplurEarthIntroView: UIViewRepresentable {
         scene.background.contents = Self.starfieldImage()
         view.scene = scene
 
-        // Camera
         let camera = SCNCamera()
         camera.fieldOfView = 38
         camera.zNear = 0.01
         camera.zFar = 100
-        let cameraNode = SCNNode()
-        cameraNode.camera = camera
-        cameraNode.position = SCNVector3(0, 0, 4.2)
-        scene.rootNode.addChildNode(cameraNode)
+        let camNode = SCNNode()
+        camNode.camera = camera
+        camNode.position = SCNVector3(0, 0, 4.0)
+        scene.rootNode.addChildNode(camNode)
 
-        // Lighting — soft ambient + a key light for a clean terminator on the clay.
         let ambient = SCNNode()
         ambient.light = SCNLight()
         ambient.light?.type = .ambient
@@ -50,53 +215,31 @@ struct PoplurEarthIntroView: UIViewRepresentable {
         key.look(at: SCNVector3Zero)
         scene.rootNode.addChildNode(key)
 
-        // Pivot holds the globe with a natural axial tilt and spins forever.
         let pivot = SCNNode()
-        pivot.eulerAngles = SCNVector3(0.15, 0, 0.41) // ~23.5° tilt
+        pivot.eulerAngles = SCNVector3(0.15, 0, 0.41)
         scene.rootNode.addChildNode(pivot)
         pivot.runAction(.repeatForever(.rotateBy(x: 0, y: .pi * 2, z: 0, duration: 26)))
-        context.coordinator.pivot = pivot
 
-        // SCNSceneSource._sceneWithClass crashes with SIGSEGV on ARM64 when processing the
-        // 46 MB poplur_clay_earth.glb; PLTryCatch cannot intercept native signals. Use the
-        // SCNSphere globe directly — earth_day texture gives it the same visual weight.
-        context.coordinator.addFallbackGlobe(to: pivot)
-
-        if pushIn {
-            let dolly = SCNAction.move(to: SCNVector3(0, 0, 3.2), duration: 6)
-            dolly.timingMode = .easeInEaseOut
-            cameraNode.runAction(dolly)
-        }
+        let sphere = SCNSphere(radius: 1.15)
+        sphere.segmentCount = 96
+        let m = SCNMaterial()
+        m.lightingModel = .physicallyBased
+        m.diffuse.contents = UIImage(named: "earth_day")
+            ?? UIColor(red: 0.2, green: 0.45, blue: 0.85, alpha: 1)
+        m.selfIllumination.contents = UIImage(named: "earth_night") ?? UIColor.clear
+        m.selfIllumination.intensity = 0.6
+        m.roughness.contents = 0.65
+        m.metalness.contents = 0.0
+        sphere.materials = [m]
+        let globeNode = SCNNode(geometry: sphere)
+        globeNode.opacity = 0
+        pivot.addChildNode(globeNode)
+        globeNode.runAction(.fadeIn(duration: 0.6))
 
         return view
     }
 
-    func updateUIView(_ uiView: SCNView, context: Context) {}
-
-    func makeCoordinator() -> Coordinator { Coordinator() }
-
-    final class Coordinator {
-        var pivot: SCNNode?
-
-        func addFallbackGlobe(to pivot: SCNNode) {
-            let sphere = SCNSphere(radius: 1.15)
-            sphere.segmentCount = 96
-            let m = SCNMaterial()
-            m.lightingModel = .physicallyBased
-            m.diffuse.contents = UIImage(named: "earth_day") ?? UIColor(red: 0.2, green: 0.45, blue: 0.85, alpha: 1)
-            m.selfIllumination.contents = UIImage(named: "earth_night") ?? UIColor.clear
-            m.selfIllumination.intensity = 0.6
-            m.roughness.contents = 0.65
-            m.metalness.contents = 0.0
-            sphere.materials = [m]
-            let node = SCNNode(geometry: sphere)
-            node.opacity = 0
-            pivot.addChildNode(node)
-            node.runAction(.fadeIn(duration: 0.6))
-        }
-    }
-
-    // MARK: Procedural starfield
+    // MARK: - Procedural starfield (used by fallback)
 
     private static var cachedStars: UIImage?
 
@@ -106,7 +249,6 @@ struct PoplurEarthIntroView: UIViewRepresentable {
         let renderer = UIGraphicsImageRenderer(size: size)
         let image = renderer.image { ctx in
             let cg = ctx.cgContext
-            // Deep-space vertical gradient.
             let colors = [
                 UIColor(red: 0.01, green: 0.01, blue: 0.05, alpha: 1).cgColor,
                 UIColor(red: 0.04, green: 0.02, blue: 0.10, alpha: 1).cgColor,
@@ -118,7 +260,6 @@ struct PoplurEarthIntroView: UIViewRepresentable {
                                       end: CGPoint(x: 0, y: size.height), options: [])
             }
             var gen = SystemRandomNumberGenerator()
-            // Faint dust
             for _ in 0..<1400 {
                 let x = CGFloat.random(in: 0..<size.width, using: &gen)
                 let y = CGFloat.random(in: 0..<size.height, using: &gen)
@@ -127,7 +268,6 @@ struct PoplurEarthIntroView: UIViewRepresentable {
                 cg.setFillColor(UIColor(white: 1, alpha: a).cgColor)
                 cg.fillEllipse(in: CGRect(x: x, y: y, width: r, height: r))
             }
-            // Bright stars with a hint of colour
             for _ in 0..<260 {
                 let x = CGFloat.random(in: 0..<size.width, using: &gen)
                 let y = CGFloat.random(in: 0..<size.height, using: &gen)
@@ -135,7 +275,8 @@ struct PoplurEarthIntroView: UIViewRepresentable {
                 let a = CGFloat.random(in: 0.6..<1.0, using: &gen)
                 let tint = [UIColor(white: 1, alpha: a),
                             UIColor(red: 0.7, green: 0.8, blue: 1, alpha: a),
-                            UIColor(red: 1, green: 0.85, blue: 0.7, alpha: a)].randomElement(using: &gen)!
+                            UIColor(red: 1, green: 0.85, blue: 0.7, alpha: a)
+                ].randomElement(using: &gen)!
                 cg.setFillColor(tint.cgColor)
                 cg.fillEllipse(in: CGRect(x: x, y: y, width: r, height: r))
             }
