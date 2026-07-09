@@ -27,7 +27,7 @@ class UserRecognitionManager: ObservableObject {
     
     // MARK: - Private Properties
     
-    private let db = Firestore.firestore()
+    private lazy var db = Firestore.firestore()
     private var faceDetectionRequest: VNDetectFaceRectanglesRequest?
     private var cachedUserProfiles: [String: UserProfile] = [:]
     private var lastRecognitionTime: Date = .distantPast

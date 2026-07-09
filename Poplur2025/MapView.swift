@@ -6774,8 +6774,6 @@ struct MapViewProduction: View {
                     return
                 }
                 guard let center = camera.camera?.centerCoordinate ?? locationManager.location?.coordinate else { return }
-                let lat = center.latitude
-                let lng = center.longitude
                 // MappedIn indoor venues disabled — feature turned off to prevent crashes
                 indoorVenueTask?.cancel()
                 indoorVenueTask = nil

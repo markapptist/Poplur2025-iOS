@@ -96,8 +96,8 @@ enum RuntimeGLBLoader {
             foundGeometry = true
             let bounds = child.boundingBox
 
-            var minBB = bounds.min
-            var maxBB = bounds.max
+            let minBB = bounds.min
+            let maxBB = bounds.max
             // Validate bounding box values; skip degenerate or non-finite boxes
             if !(minBB.x.isFinite && minBB.y.isFinite && minBB.z.isFinite && maxBB.x.isFinite && maxBB.y.isFinite && maxBB.z.isFinite) {
                 return
