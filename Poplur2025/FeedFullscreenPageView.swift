@@ -510,6 +510,7 @@ struct FeedFullscreenPageView: View {
                 .background(Color.black)
                 .contentShape(Rectangle())
                 .ignoresSafeArea()
+                .overlay { FeedChannelLogoBug() }
                 .onLongPressGesture(minimumDuration: 0.5) {
                     // Long press to show post location on map with user annotation
                     let coordinate = CLLocationCoordinate2D(latitude: post.latitude, longitude: post.longitude)
