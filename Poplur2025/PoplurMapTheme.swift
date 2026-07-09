@@ -56,7 +56,7 @@ public extension CubeSkin {
         case .rubber:      return .dark
         case .ice:         return .ice
         case .gold:        return .gold
-        case .sparklePink: return .glitter
+        case .sparklePink, .clay: return .glitter
         case .rainbow:     return .rainbow
         case .chocolate:   return .chocolate
         case .toy:         return .carnival

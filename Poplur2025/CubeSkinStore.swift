@@ -12,6 +12,7 @@ public enum CubeSkin: String, CaseIterable, Identifiable, Codable {
     case camo
     case rubber
     case ice
+    case clay
 
     public var id: String { rawValue }
 
@@ -21,7 +22,7 @@ public enum CubeSkin: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .standard: return "SkinRubber"
         case .rainbow: return "SkinRainbow"
-        case .sparklePink: return "SkinSparklePink"
+        case .sparklePink, .clay: return "SkinSparklePink"
         case .gold: return "SkinGold"
         case .toy: return "SkinToy"
         case .chocolate: return "SkinChocolate"
@@ -37,7 +38,7 @@ public enum CubeSkin: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .standard:    return "cubemaps 4"
         case .rainbow:     return "cubemaps"
-        case .sparklePink: return "cubemaps 5"
+        case .sparklePink, .clay: return "cubemaps 5"
         case .gold:        return "cubemaps 1"
         case .toy:         return "cubemaps 6"
         case .chocolate:   return "cubemaps 2"
@@ -56,7 +57,7 @@ public enum CubeSkin: String, CaseIterable, Identifiable, Codable {
         case .chocolate:   return "holdmenu 2"
         case .rubber:      return "holdmenu 3"
         case .gold:        return "holdmenu 4"
-        case .sparklePink: return "holdmenu 5"
+        case .sparklePink, .clay: return "holdmenu 5"
         case .rainbow:     return "holdmenu 6"
         case .toy:         return "holdmenu 7"
         }
@@ -73,6 +74,7 @@ public enum CubeSkin: String, CaseIterable, Identifiable, Codable {
         case .camo: return "Camo"
         case .rubber: return "Rubber"
         case .ice: return "Ice"
+        case .clay: return "Poplur Clay"
         }
     }
 
@@ -88,6 +90,7 @@ public enum CubeSkin: String, CaseIterable, Identifiable, Codable {
         case .camo:        return "logo_camo"
         case .rubber:      return "logo_rubber"
         case .ice:         return "logo_ice"
+        case .clay:        return "logo_clay"
         }
     }
 
@@ -95,7 +98,7 @@ public enum CubeSkin: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .standard:    return "theme_banner_default"
         case .rainbow:     return "theme_banner_rainbow"
-        case .sparklePink: return "theme_banner_sparkle_pink"
+        case .sparklePink, .clay: return "theme_banner_sparkle_pink"
         case .gold:        return "theme_banner_gold"
         case .toy:         return "theme_banner_toy"
         case .chocolate:   return "theme_banner_chocolate"
@@ -126,7 +129,7 @@ public enum CubeSkin: String, CaseIterable, Identifiable, Codable {
             return "theme_bg_default"
         case .rainbow:
             return "theme_bg_rainbow"
-        case .sparklePink:
+        case .sparklePink, .clay:
             return "theme_bg_sparkle_pink"
         case .gold:
             return "theme_bg_gold"
@@ -159,6 +162,8 @@ public enum CubeSkin: String, CaseIterable, Identifiable, Codable {
             return "purple_sparkle_icon_cube"
         case .camo:
             return "military_camo_icon_cube"
+        case .clay:
+            return "clay_icon_cube"
         }
     }
 
@@ -166,7 +171,7 @@ public enum CubeSkin: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .standard:    return "rubber_buttons_back_button_cube"
         case .rainbow:     return "rainbow_neon_back_button_cube"
-        case .sparklePink: return "glitter_neon_back_button_cube"
+        case .sparklePink, .clay: return "glitter_neon_back_button_cube"
         case .gold:        return "gold_back_button_cube"
         case .toy:         return "toy_box_back_button_cube"
         case .chocolate:   return "chocolate_back_button_cube"
@@ -181,7 +186,7 @@ public enum CubeSkin: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .standard:    return UIColor(red: 0.20, green: 0.65, blue: 0.90, alpha: 1)
         case .rainbow:     return UIColor(red: 0.55, green: 0.10, blue: 0.95, alpha: 1)
-        case .sparklePink: return UIColor(red: 1.00, green: 0.40, blue: 0.70, alpha: 1)
+        case .sparklePink, .clay: return UIColor(red: 1.00, green: 0.40, blue: 0.70, alpha: 1)
         case .gold:        return UIColor(red: 0.88, green: 0.68, blue: 0.10, alpha: 1)
         case .toy:         return UIColor(red: 0.95, green: 0.20, blue: 0.20, alpha: 1)
         case .chocolate:   return UIColor(red: 0.45, green: 0.25, blue: 0.08, alpha: 1)
@@ -196,7 +201,7 @@ public enum CubeSkin: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .standard:    return UIColor(red: 0.16, green: 0.88, blue: 1.00, alpha: 1)
         case .rainbow:     return UIColor(red: 0.60, green: 0.28, blue: 1.00, alpha: 1)
-        case .sparklePink: return UIColor(red: 1.00, green: 0.35, blue: 0.72, alpha: 1)
+        case .sparklePink, .clay: return UIColor(red: 1.00, green: 0.35, blue: 0.72, alpha: 1)
         case .gold:        return UIColor(red: 0.95, green: 0.78, blue: 0.18, alpha: 1)
         case .toy:         return UIColor(red: 0.92, green: 0.14, blue: 0.14, alpha: 1)
         case .chocolate:   return UIColor(red: 0.72, green: 0.40, blue: 0.08, alpha: 1)
@@ -210,7 +215,7 @@ public enum CubeSkin: String, CaseIterable, Identifiable, Codable {
     public var iconFillColor: UIColor {
         switch self {
         case .standard: return .white
-        case .rainbow, .sparklePink, .rubber: return .white
+        case .rainbow, .sparklePink, .rubber, .clay: return .white
         case .toy: return UIColor(red: 0.09, green: 0.24, blue: 0.88, alpha: 1)
         case .gold:        return UIColor(red: 1.00, green: 0.95, blue: 0.60, alpha: 1)
         case .chocolate:   return UIColor(red: 0.92, green: 0.65, blue: 0.25, alpha: 1)
@@ -223,7 +228,7 @@ public enum CubeSkin: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .standard:    return nil
         case .rainbow:     return "AppIconRainbow"
-        case .sparklePink: return "AppIconSparklePink"
+        case .sparklePink, .clay: return "AppIconSparklePink"
         case .gold:        return "AppIconGold"
         case .toy:         return "AppIconToy"
         case .chocolate:   return "AppIconChocolate"
@@ -408,8 +413,8 @@ extension CubeSkin {
                 UIColor(red: 0.48, green: 0.88, blue: 1.0, alpha: 0.52).setStroke()
                 iceBorder.stroke()
 
-            // ── SPARKLE PINK ─────────────────────────────────────────────────
-            case .sparklePink:
+            // ── SPARKLE PINK / CLAY ──────────────────────────────────────────
+            case .sparklePink, .clay:
                 UIBezierPath(roundedRect: rect.insetBy(dx: 6, dy: 6), cornerRadius: corner).addClip()
                 let pkC: [CGColor] = [
                     UIColor(red: 1.0, green: 0.44, blue: 0.72, alpha: 1).cgColor,
@@ -575,7 +580,7 @@ extension CubeSkin {
                 textureOpacity: 0.26,
                 prefersLightContent: true
             )
-        case .sparklePink:
+        case .sparklePink, .clay:
             return CubeSkinAppTheme(
                 background: Color(red: 0.14, green: 0.00, blue: 0.08),
                 backgroundMid: Color(red: 0.32, green: 0.02, blue: 0.22),
@@ -807,7 +812,7 @@ private struct CubeSkinBackdropMotif: View {
                 drawCamoBackdrop(in: &context, size: size)
             case .ice:
                 drawIceBackdrop(in: &context, size: size)
-            case .sparklePink:
+            case .sparklePink, .clay:
                 drawSparkleBackdrop(in: &context, size: size, base: .pink)
             case .rainbow:
                 drawRainbowBackdrop(in: &context, size: size)

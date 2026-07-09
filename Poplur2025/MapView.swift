@@ -821,7 +821,7 @@ private extension CubeSkin {
             if role == .user { return palette[3] }
             if role == .selected || role == .placement { return palette[4] }
             return palette[abs(seed) % palette.count]
-        case .sparklePink:
+        case .sparklePink, .clay:
             switch role {
             case .user: return Color(red: 1.00, green: 0.36, blue: 0.78)
             case .selected, .placement: return Color(red: 1.00, green: 0.54, blue: 0.88)
@@ -879,7 +879,7 @@ private extension CubeSkin {
             return ThemedMapMarkerMaterial(body: Color(red: 0.22, green: 0.30, blue: 0.13), highlight: mapMarkerColor(role: role), metalness: 0.20, roughness: 0.58, transparency: 0.78, glassAlpha: 0.06)
         case .toy:
             return ThemedMapMarkerMaterial(body: mapMarkerColor(role: role), highlight: Color.white, metalness: 0.34, roughness: 0.12, transparency: 0.82, glassAlpha: 0.10)
-        case .sparklePink, .rainbow:
+        case .sparklePink, .rainbow, .clay:
             return ThemedMapMarkerMaterial(body: baseColor, highlight: mapMarkerColor(role: role), metalness: 0.62, roughness: 0.06, transparency: 0.66, glassAlpha: 0.32)
         case .rubber, .standard:
             return ThemedMapMarkerMaterial(body: baseColor, highlight: mapMarkerColor(role: role), metalness: 0.46, roughness: 0.18, transparency: 0.70, glassAlpha: 0.18)
@@ -932,7 +932,7 @@ private extension CubeSkin {
                     endPoint: .bottomTrailing
                 )
             )
-        case .sparklePink, .rubber, .standard:
+        case .sparklePink, .rubber, .standard, .clay:
             return AnyShapeStyle(
                 LinearGradient(
                     colors: [appTheme.accent, appTheme.accent2],
@@ -5256,16 +5256,14 @@ struct MapViewProduction: View {
                 
                 ForEach(filteredPosts()) { post in
                     Annotation("", coordinate: post.coordinate) {
-                        Enhanced3DBeaconMarker(
-                            color: cubeSkinStore.current.mapMarkerColor(role: .post, seed: post.title.hashValue),
-                            intensity: 0.6,
-                            skin: cubeSkinStore.current,
-                            role: .post
+                        PoplurPinAnnotationView(
+                            fallbackColor: cubeSkinStore.current.mapMarkerColor(role: .post, seed: post.title.hashValue),
+                            skin: cubeSkinStore.current
                         )
                             .id("map-post-\(post.id)-\(cubeSkinStore.current.rawValue)")
                             .frame(width: 80, height: 100)
                     }
-                    
+
                     // Glowing circle with vibrant colors
                     MapCircle(center: post.coordinate, radius: post.radius)
                         .foregroundStyle(cubeSkinStore.current.mapCircleFill)
@@ -6097,32 +6095,14 @@ struct MapViewProduction: View {
 
     private var mapLaunchCurtain: some View {
         ZStack {
-            LinearGradient(
-                colors: [
-                    Color(red: 0.02, green: 0.04, blue: 0.05),
-                    Color(red: 0.08, green: 0.12, blue: 0.15)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea()
+            Color.black.ignoresSafeArea()
 
-            Canvas { context, size in
-                var path = Path()
-                for x in stride(from: CGFloat(0), through: size.width, by: 28) {
-                    path.move(to: CGPoint(x: x, y: 0))
-                    path.addLine(to: CGPoint(x: x, y: size.height))
-                }
-                for y in stride(from: CGFloat(0), through: size.height, by: 28) {
-                    path.move(to: CGPoint(x: 0, y: y))
-                    path.addLine(to: CGPoint(x: size.width, y: y))
-                }
-                context.stroke(path, with: .color(.white.opacity(0.055)), lineWidth: 0.5)
-            }
+            // Stylised clay Earth spinning in a starfield; cross-fades into the real map.
+            PoplurEarthIntroView()
+                .ignoresSafeArea()
 
-            VStack(spacing: 10) {
-                ProgressView()
-                    .tint(.white)
+            VStack(spacing: 8) {
+                Spacer()
                 Text(currentCity)
                     .font(.system(size: 18, weight: .black, design: .rounded))
                 Text(aiRecommendation)
@@ -6130,9 +6110,14 @@ struct MapViewProduction: View {
                     .multilineTextAlignment(.center)
                     .foregroundStyle(mapTextShader)
                     .fixedSize(horizontal: false, vertical: true)
+                ProgressView()
+                    .tint(.white)
+                    .padding(.top, 4)
             }
             .foregroundStyle(.white)
             .padding(.horizontal, 24)
+            .padding(.bottom, 80)
+            .shadow(color: .black.opacity(0.6), radius: 8, y: 2)
         }
         .ignoresSafeArea()
     }
@@ -7063,10 +7048,12 @@ struct MapViewProduction: View {
             pitch: 0
         ))
 
-        try? await Task.sleep(nanoseconds: 260_000_000)
+        // Hold on the spinning clay-Earth intro long enough to read before the real
+        // map is revealed underneath and descends into the location.
+        try? await Task.sleep(nanoseconds: 2_600_000_000)
         guard !Task.isCancelled else { return }
 
-        withAnimation(.easeOut(duration: 0.28)) {
+        withAnimation(.easeInOut(duration: 0.6)) {
             isInitialMapLaunchPreparing = false
         }
 

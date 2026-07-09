@@ -75,7 +75,7 @@ struct ThemedSkinPlate: View {
                 theme.accent.opacity(0.12),
                 theme.backgroundDeep.opacity(0.18)
             ]
-        case .sparklePink:
+        case .sparklePink, .clay:
             return [
                 Color.white.opacity(0.18),
                 theme.accent.opacity(0.16),
@@ -125,7 +125,7 @@ struct ThemedSkinPlate: View {
         switch skin {
         case .ice:
             return [Color.white.opacity(0.92), theme.accent, Color.white.opacity(0.72)]
-        case .sparklePink:
+        case .sparklePink, .clay:
             return [Color.white.opacity(0.72), theme.accent, theme.accent2]
         case .rainbow:
             return [.yellow, .green, .cyan, .pink]

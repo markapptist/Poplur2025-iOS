@@ -124,7 +124,7 @@ private struct ThemedFeedChannelButton: View {
     private var glowColor: Color {
         switch skin {
         case .ice: return Color.white.opacity(0.78)
-        case .sparklePink, .rainbow, .rubber: return theme.accent.opacity(0.86)
+        case .sparklePink, .rainbow, .rubber, .clay: return theme.accent.opacity(0.86)
         default: return theme.shadow
         }
     }

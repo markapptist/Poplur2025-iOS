@@ -184,7 +184,7 @@ private extension CubeSkin {
                 isToy: false,
                 hasHalo: false
             )
-        case .sparklePink:
+        case .sparklePink, .clay:
             return ProfileHeadPalette(
                 fill: Color(red: 0.50, green: 0.02, blue: 0.32),
                 face: Color(red: 0.84, green: 0.10, blue: 0.62),
