@@ -500,19 +500,21 @@ public extension Notification.Name {
 public final class CubeSkinStore: ObservableObject {
     public static let shared = CubeSkinStore()
     private let defaultsKey = "CubeSkin.rawValue"
-    private let goldModelRolloutKey = "CubeSkin.goldMetallicModelRolloutApplied"
+    /// Supersedes `CubeSkin.goldMetallicModelRolloutApplied`: clay is the new house skin,
+    /// so every install is moved onto it once. Users may still pick another skin afterwards.
+    private let clayModelRolloutKey = "CubeSkin.clayModelRolloutApplied"
 
     @Published public private(set) var current: CubeSkin
 
     private init() {
-        if !UserDefaults.standard.bool(forKey: goldModelRolloutKey) {
-            current = .gold
-            UserDefaults.standard.set(CubeSkin.gold.rawValue, forKey: defaultsKey)
-            UserDefaults.standard.set(true, forKey: goldModelRolloutKey)
+        if !UserDefaults.standard.bool(forKey: clayModelRolloutKey) {
+            current = .clay
+            UserDefaults.standard.set(CubeSkin.clay.rawValue, forKey: defaultsKey)
+            UserDefaults.standard.set(true, forKey: clayModelRolloutKey)
         } else if let raw = UserDefaults.standard.string(forKey: defaultsKey), let skin = CubeSkin(rawValue: raw) {
             current = skin
         } else {
-            current = .gold
+            current = .clay
         }
         syncAppIcon()
     }
