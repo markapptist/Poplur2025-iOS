@@ -6177,6 +6177,24 @@ struct MapViewProduction: View {
     }
     
     var body: some View {
+        if PoplurClayWebMap.isEnabled {
+            // Phase 1: the clay web map (Mapbox GL JS) is the map surface.
+            // Flip the "poplur_clay_web_map" default to fall back to MapKit.
+            PoplurClayMapView()
+                .ignoresSafeArea()
+                .toolbar(.hidden, for: .navigationBar)
+        } else {
+            legacyMapBody
+        }
+    }
+
+    private var legacyMapBody: AnyView {
+        AnyView(erasedLegacyMapBody)
+    }
+
+    // Erased head of the legacy chain — keeps the type-checker fast
+    private var legacyChainHead: AnyView {
+        AnyView(
         mapContentLayer
             .toolbar(.hidden, for: .navigationBar)
             .overlay {
@@ -6208,6 +6226,11 @@ struct MapViewProduction: View {
                         .zIndex(52)
                 }
             }
+        )
+    }
+
+    private var erasedLegacyMapBody: some View {
+        legacyChainHead
             .onAppear {
                 guard !layoutPreviewMode else { return }
                 handleOnAppear()
