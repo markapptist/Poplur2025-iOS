@@ -78,7 +78,8 @@ final class FPSAssets {
             ("door_normal", "09_doors_panels/door_panel_01.png"),
             ("door_locked", "09_doors_panels/door_panel_02.png"),
             ("door_pink",   "09_doors_panels/door_panel_03.png"),
-            ("pistol",  "02_weapons/pistol.png"),
+            // Midnight Sentinel: 3D GLB pre-rendered to a 9-frame aim strip (left → right).
+            ("pistol",  "02_weapons/sentinel_aim.png"),
             ("shotgun", "02_weapons/shotgun.png"),
             ("plasma",  "02_weapons/plasma.png"),
             ("rocket",  "02_weapons/rocket_launcher.png"),
@@ -103,7 +104,7 @@ final class FPSAssets {
             ("hud_armor",  "11_hud_ui/hud_armor.png"),
             ("hud_ammo",   "11_hud_ui/hud_ammo.png"),
             ("hud_slot",   "11_hud_ui/hud_weapon_slot.png"),
-            ("main_menu",  "01_title_screen/main_menu_screen.png"),
+            ("main_menu",  "01_title_screen/main_menu_crt.png"),
             ("logo",         "13_misc/pixel_p_logo.png"),
             ("levelup_sign", "10_decals_signs/level_up_sign.png"),
         ]

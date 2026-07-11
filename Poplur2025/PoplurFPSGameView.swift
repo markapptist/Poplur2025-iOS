@@ -4,14 +4,21 @@ import WebKit
 struct PoplurFPSGameSheet: View {
     var onClose: (() -> Void)? = nil
 
+    @Environment(\.dismiss) private var dismiss
+
+    /// Prefer the caller's handler; otherwise dismiss the presenting cover.
+    private func close() {
+        if let onClose { onClose() } else { dismiss() }
+    }
+
     var body: some View {
         ZStack(alignment: .topTrailing) {
             // Native SpriteKit game (replaces the old WKWebView build).
-            FPSSpriteKitView()
+            FPSSpriteKitView(onQuit: { close() })
                 .ignoresSafeArea()
 
             Button {
-                onClose?()
+                close()
             } label: {
                 Image(systemName: "xmark.circle.fill")
                     .font(.system(size: 34, weight: .bold))

@@ -46,6 +46,35 @@ final class FPSGameScene: SKScene {
     private var texUse: SKTexture?
     private var texWeapon: SKTexture?
 
+    /// The real Poplur cabinet artwork. In portrait it fills the screen and the live
+    /// game buffer is drawn into its CRT bezel; its painted joystick + buttons are the
+    /// touch targets. Coordinates below are fractions of the 1448x1086 artwork.
+    private var cabinetNode: SKSpriteNode!
+    private enum Cab {
+        static let bezel = CGRect(x: 0.2051, y: 0.2247, width: 0.5829, height: 0.5239)  // y-down
+        static let joy = (cx: 0.1885, cy: 0.8333, r: 0.0442)
+        static let btnR = 0.0276
+        static let btnCY = 0.8259
+        // green=fire, blue=use, pink=w1, red=w2, red=w3   (yellow START handled separately)
+        static let btnCX: [Double] = [0.5028, 0.6022, 0.4013, 0.7099, 0.8032]
+        static let startCX = 0.3066     // yellow "START" button → pause
+    }
+    private var startBtnC = CGPoint.zero
+    private var startBtnR: CGFloat = 0
+
+    /// Called when the player taps QUIT in the pause menu.
+    var onQuit: (() -> Void)?
+
+    // Pause button + pause menu (SpriteKit nodes so they're crisp and tappable)
+    private var pauseBtn: SKShapeNode!
+    private var pauseBtnFrame: CGRect = .zero
+    private var pauseOverlay: SKNode!
+    private var pauseDim: SKSpriteNode!
+    private var pauseTitle: SKLabelNode!
+    private var pauseOptionNodes: [(bg: SKShapeNode, label: SKLabelNode)] = []
+    private var pauseOptionFrames: [CGRect] = []
+    private let pauseOptions = ["RESUME", "RESTART", "QUIT"]
+
     // Current-frame control geometry (scene coords, y-up)
     private var joyC = CGPoint.zero; private var joyR: CGFloat = 46
     private var fireC = CGPoint.zero; private var fireR: CGFloat = 40
@@ -82,10 +111,11 @@ final class FPSGameScene: SKScene {
             buttons.append(b); addChild(b)
         }
 
-        // Portrait arcade buttons — real panel sprites from the spritesheet.
-        texFire   = panelTexture("09_doors_panels/door_panel_04.png")   // pink "P" panel
-        texUse    = panelTexture("09_doors_panels/door_panel_05.png")   // blue "P" panel
-        texWeapon = panelTexture("09_doors_panels/door_panel_06.png")   // blue panel (weapon slots)
+        // The real cabinet artwork sits behind everything in portrait.
+        cabinetNode = SKSpriteNode(texture: panelTexture("01_title_screen/cabinet.png"))
+        cabinetNode.zPosition = -1
+        cabinetNode.isHidden = true
+        addChild(cabinetNode)
         for _ in 0..<5 {
             let s = SKSpriteNode(); s.zPosition = 10; s.isHidden = true
             panelButtons.append(s); addChild(s)
@@ -95,9 +125,116 @@ final class FPSGameScene: SKScene {
             panelLabels.append(l); addChild(l)
         }
 
+        buildPauseUI()
         setChromeVisible(false)
         game.onSound = { [weak self] sfx in self?.audio.play(sfx) }
         loadAssetsAsync()
+    }
+
+    // MARK: Pause UI
+
+    private func buildPauseUI() {
+        // Small pause pill, shown top-left while playing.
+        pauseBtn = SKShapeNode(circleOfRadius: 20)
+        pauseBtn.fillColor = UIColor(white: 0, alpha: 0.42)
+        pauseBtn.strokeColor = UIColor(white: 1, alpha: 0.35)
+        pauseBtn.lineWidth = 1.5
+        pauseBtn.zPosition = 100
+        pauseBtn.isHidden = true
+        addChild(pauseBtn)
+        for dx in [CGFloat(-4), CGFloat(4)] {
+            let bar = SKSpriteNode(color: .white, size: CGSize(width: 3.4, height: 14))
+            bar.position = CGPoint(x: dx, y: 0)
+            pauseBtn.addChild(bar)
+        }
+
+        // Full-screen pause menu.
+        pauseOverlay = SKNode()
+        pauseOverlay.zPosition = 200
+        pauseOverlay.isHidden = true
+        addChild(pauseOverlay)
+
+        pauseDim = SKSpriteNode(color: UIColor(white: 0, alpha: 0.72), size: size)
+        pauseDim.anchorPoint = CGPoint(x: 0, y: 0)
+        pauseOverlay.addChild(pauseDim)
+
+        pauseTitle = SKLabelNode(fontNamed: "Menlo-Bold")
+        pauseTitle.text = "PAUSED"
+        pauseTitle.fontColor = UIColor(fpsHex: 0xff2d8a)
+        pauseTitle.verticalAlignmentMode = .center
+        pauseTitle.zPosition = 1
+        pauseOverlay.addChild(pauseTitle)
+
+        for title in pauseOptions {
+            let bg = SKShapeNode()
+            bg.fillColor = UIColor(fpsHex: 0x1a0030, alpha: 0.95)
+            bg.strokeColor = UIColor(fpsHex: 0xffd700)
+            bg.lineWidth = 2
+            bg.zPosition = 1
+            pauseOverlay.addChild(bg)
+
+            let lbl = SKLabelNode(fontNamed: "Menlo-Bold")
+            lbl.text = title
+            lbl.fontColor = .white
+            lbl.verticalAlignmentMode = .center
+            lbl.horizontalAlignmentMode = .center
+            lbl.zPosition = 2
+            pauseOverlay.addChild(lbl)
+
+            pauseOptionNodes.append((bg, lbl))
+        }
+    }
+
+    private func layoutPauseUI() {
+        let sw = size.width, sh = size.height
+        let playing = game.state == .playing
+        let paused = game.state == .paused
+
+        pauseBtn.isHidden = !playing
+        let pc = CGPoint(x: 44, y: sh - 56)
+        pauseBtn.position = pc
+        pauseBtnFrame = CGRect(x: pc.x - 26, y: pc.y - 26, width: 52, height: 52)
+
+        pauseOverlay.isHidden = !paused
+        guard paused else { return }
+
+        pauseDim.size = size
+        pauseDim.position = .zero
+
+        let bw = min(260, sw * 0.62), bh: CGFloat = 48, gap: CGFloat = 14
+        let total = CGFloat(pauseOptions.count) * bh + CGFloat(pauseOptions.count - 1) * gap
+        let top = sh / 2 + total / 2
+
+        pauseTitle.fontSize = min(44, sw * 0.11)
+        pauseTitle.position = CGPoint(x: sw / 2, y: top + 56)
+
+        pauseOptionFrames = []
+        for (i, node) in pauseOptionNodes.enumerated() {
+            let cy = top - CGFloat(i) * (bh + gap) - bh / 2
+            let rect = CGRect(x: sw / 2 - bw / 2, y: cy - bh / 2, width: bw, height: bh)
+            node.bg.path = CGPath(roundedRect: rect, cornerWidth: 12, cornerHeight: 12, transform: nil)
+            node.label.position = CGPoint(x: sw / 2, y: cy)
+            node.label.fontSize = 19
+            pauseOptionFrames.append(rect)
+        }
+    }
+
+    /// Drop any held joystick / fire / look touches so they don't stay latched across a pause.
+    private func releaseControlTouches() {
+        joyTouch = nil; fireTouch = nil; lookTouch = nil
+        joyVec = .zero; lookDX = 0
+        joyThumb.position = joyC
+    }
+
+    private func handlePauseTap(_ p: CGPoint) {
+        for (i, rect) in pauseOptionFrames.enumerated() where rect.contains(p) {
+            switch i {
+            case 0: game.resumeGame()
+            case 1: game.restartGame()
+            default: audio.play(.menuSelect); onQuit?()
+            }
+            return
+        }
     }
 
     private func setChromeVisible(_ v: Bool) {
@@ -147,49 +284,55 @@ final class FPSGameScene: SKScene {
     private func layout() {
         let sw = size.width, sh = size.height
         portrait = sh > sw
-        let playing = game.state == .playing || game.state == .paused ||
-                      game.state == .dead || game.state == .win
-        let scale = min(sw / 640, sh / 360)
-        let bw = 640 * scale, bh = 360 * scale
-        let bx = (sw - bw) / 2
-        let marqueeH = sh * 0.10
-        // y-up: portrait gameplay puts the band near the top.
-        let by = (portrait && playing) ? (sh - marqueeH - bh) : (sh - bh) / 2
 
-        framebuffer.position = CGPoint(x: bx, y: by)
-        framebuffer.size = CGSize(width: bw, height: bh)
+        if portrait, cabinetNode.texture != nil {
+            // ── Portrait: the real cabinet art fills the screen; the live game buffer
+            //    is drawn into its CRT bezel, and its painted controls are the buttons.
+            hideDrawnChrome()
+            cabinetNode.isHidden = false
 
-        if portrait && playing {
-            // Marquee above band
-            marqueeBg.path = CGPath(rect: CGRect(x: 0, y: sh - marqueeH, width: sw, height: marqueeH), transform: nil)
-            marqueeLabel.position = CGPoint(x: sw / 2, y: sh - marqueeH / 2)
-            marqueeLabel.fontSize = marqueeH * 0.42
-            marqueeBg.isHidden = false; marqueeLabel.isHidden = false
-            // Control panel below band
-            let panelTop = by                    // band bottom
-            panelBg.path = CGPath(rect: CGRect(x: 0, y: 0, width: sw, height: panelTop), transform: nil)
-            panelBg.isHidden = false
-            let cy = panelTop / 2
-            joyR = min(panelTop * 0.34, sw * 0.13)
-            joyC = CGPoint(x: sw * 0.20, y: cy)
-            let btnR = joyR * 0.55
-            let bx0 = sw * 0.44
-            let gap = (sw * 0.90 - bx0) / 4
-            weaponCR = []
-            for b in buttons { b.isHidden = true }   // translucent buttons off in portrait
-            for i in 0..<5 {
-                let c = CGPoint(x: bx0 + CGFloat(i) * gap, y: cy)
-                positionPanelButton(i, center: c, radius: btnR)
-                weaponCR.append((c, btnR))
-            }
-            fireC = weaponCR[0].0; fireR = btnR
-            interactC = weaponCR[1].0; interactR = btnR
-            styleJoystick(translucent: false)
+            let tex = cabinetNode.texture!.size()
+            let s = min(sw / tex.width, sh / tex.height)
+            let cw = tex.width * s, ch = tex.height * s
+            cabinetNode.size = CGSize(width: cw, height: ch)
+            cabinetNode.position = CGPoint(x: sw / 2, y: sh / 2)
+            let cabX = sw / 2 - cw / 2, cabY = sh / 2 - ch / 2
+
+            // Artwork coords are y-down; the scene is y-up.
+            func px(_ fx: Double) -> CGFloat { cabX + CGFloat(fx) * cw }
+            func py(_ fy: Double) -> CGFloat { cabY + ch - CGFloat(fy) * ch }
+
+            let bw = CGFloat(Cab.bezel.width) * cw
+            let bh = CGFloat(Cab.bezel.height) * ch
+            framebuffer.position = CGPoint(x: px(Cab.bezel.minX),
+                                           y: py(Cab.bezel.minY) - bh)
+            framebuffer.size = CGSize(width: bw, height: bh)
+
+            // The cabinet art already paints its own attract screen on the CRT — reveal it
+            // instead of drawing our menu (which would nest a second bezel inside the glass).
+            framebuffer.isHidden = (game.state == .menu || game.state == .zoom)
+
+            joyC = CGPoint(x: px(Cab.joy.cx), y: py(Cab.joy.cy))
+            joyR = CGFloat(Cab.joy.r) * cw
+
+            let br = CGFloat(Cab.btnR) * cw
+            weaponCR = Cab.btnCX.map { (CGPoint(x: px($0), y: py(Cab.btnCY)), br) }
+            fireC = weaponCR[0].0; fireR = br            // green
+            interactC = weaponCR[1].0; interactR = br    // blue
+            startBtnC = CGPoint(x: px(Cab.startCX), y: py(Cab.btnCY))
+            startBtnR = br
         } else {
-            marqueeBg.isHidden = true; marqueeLabel.isHidden = true; panelBg.isHidden = true
-            for s in panelButtons { s.isHidden = true }
-            for l in panelLabels { l.isHidden = true }
-            // Translucent floating controls
+            // ── Landscape: fullscreen game with translucent floating controls.
+            cabinetNode.isHidden = true
+            framebuffer.isHidden = false
+            hideDrawnChrome()
+            startBtnR = 0
+
+            let scale = min(sw / 640, sh / 360)
+            let bw = 640 * scale, bh = 360 * scale
+            framebuffer.position = CGPoint(x: (sw - bw) / 2, y: (sh - bh) / 2)
+            framebuffer.size = CGSize(width: bw, height: bh)
+
             joyR = sh * 0.14
             joyC = CGPoint(x: sw * 0.13, y: sh * 0.20)
             fireR = sh * 0.12; fireC = CGPoint(x: sw * 0.90, y: sh * 0.18)
@@ -202,11 +345,24 @@ final class FPSGameScene: SKScene {
         }
     }
 
+    /// Hides every piece of chrome the code used to draw itself.
+    private func hideDrawnChrome() {
+        marqueeBg.isHidden = true; marqueeLabel.isHidden = true; panelBg.isHidden = true
+        for s in panelButtons { s.isHidden = true }
+        for l in panelLabels { l.isHidden = true }
+        if portrait {
+            for b in buttons { b.isHidden = true }
+            joyBase.isHidden = true; joyThumb.isHidden = true
+        }
+    }
+
     private func styleJoystick(translucent: Bool) {
         joyBase.path = CGPath(ellipseIn: CGRect(x: -joyR, y: -joyR, width: joyR * 2, height: joyR * 2), transform: nil)
         joyBase.position = joyC
         joyThumb.path = CGPath(ellipseIn: CGRect(x: -joyR * 0.5, y: -joyR * 0.5, width: joyR, height: joyR), transform: nil)
         if joyTouch == nil { joyThumb.position = joyC }
+
+        joyBase.isHidden = false; joyThumb.isHidden = false
         if translucent {
             joyBase.fillColor = UIColor(white: 1, alpha: 0.12); joyBase.strokeColor = .clear
             joyThumb.fillColor = UIColor(red: 1, green: 0.3, blue: 0.72, alpha: 0.5); joyThumb.strokeColor = .clear
@@ -261,6 +417,7 @@ final class FPSGameScene: SKScene {
         let playing = game.state == .playing
         setChromeVisible(playing)
         layout()
+        layoutPauseUI()
 
         var input = FPSInput()
         if playing {
@@ -300,6 +457,21 @@ final class FPSGameScene: SKScene {
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        // The pause menu swallows all input while it's up.
+        if game.state == .paused {
+            if let t = touches.first { handlePauseTap(t.location(in: self)) }
+            return
+        }
+        if game.state == .playing, let t = touches.first {
+            let p = t.location(in: self)
+            // Pause pill (landscape) or the cabinet's painted START button (portrait).
+            if pauseBtnFrame.contains(p) || (startBtnR > 0 && dist(p, startBtnC) <= startBtnR + 6) {
+                releaseControlTouches()
+                game.pauseGame()
+                return
+            }
+        }
+
         for t in touches {
             let p = t.location(in: self)
             tapPending = true

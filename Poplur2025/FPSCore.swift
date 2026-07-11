@@ -54,8 +54,11 @@ struct FPSWeapon {
     let projectiles: Int
 }
 
+/// Horizontal aim-pose frames per weapon sprite (1 = single static image).
+let FPS_WEAPON_AIM_FRAMES: [Int] = [9, 1, 1, 1, 1]
+
 let FPS_WEAPONS: [FPSWeapon] = [
-    FPSWeapon(name: "PISTOL",  damage: 12, rate: 0.40, spread: 0.02, ammoType: 0, ammoPerShot: 1, projectiles: 1),
+    FPSWeapon(name: "SENTINEL", damage: 12, rate: 0.40, spread: 0.02, ammoType: 0, ammoPerShot: 1, projectiles: 1),
     FPSWeapon(name: "SHOTGUN", damage: 8,  rate: 0.85, spread: 0.12, ammoType: 1, ammoPerShot: 1, projectiles: 7),
     FPSWeapon(name: "PLASMA",  damage: 18, rate: 0.22, spread: 0.01, ammoType: 2, ammoPerShot: 1, projectiles: 1),
     FPSWeapon(name: "ROCKET",  damage: 60, rate: 1.10, spread: 0.00, ammoType: 3, ammoPerShot: 1, projectiles: 1),
@@ -230,6 +233,9 @@ final class FPSPlayer {
     var bobActive = false
     var flashAlpha = 0.0
     var weaponKick = 0.0
+    /// -1 = aiming hard left, 0 = straight ahead, +1 = hard right. Eases toward the
+    /// current turn so the weapon viewmodel swings instead of snapping.
+    var aimLean = 0.0
 
     var fireCooldown = 0.0
     var interactCooldown = 0.0
@@ -249,6 +255,15 @@ final class FPSPlayer {
             rotate((input.right ? 1 : -1) * FPSK.rotSpeed * dt)
         }
         if input.lookDX != 0 { rotate(input.lookDX * FPSK.mouseSens) }
+
+        // Aim lean: turning swings the weapon; releasing recentres it.
+        var target = 0.0
+        if input.right { target += 1 }
+        if input.left { target -= 1 }
+        target += max(-1, min(1, input.lookDX * FPSK.mouseSens * 26))
+        target = max(-1, min(1, target))
+        let k = min(1, dt * 7)
+        aimLean += (target - aimLean) * k
 
         let speed = FPSK.moveSpeed * dt
         let strafe = speed * 0.8

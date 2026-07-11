@@ -741,9 +741,9 @@ private final class AuthConfettiScene: SKScene {
         emitter.particleLifetimeRange = 1.0
         emitter.particleRotationRange = .pi
         emitter.particleRotationSpeed = 2.5
-        emitter.particleScale = 1.6
-        emitter.particleScaleRange = 0.7
-        emitter.particleScaleSpeed = -0.06
+        emitter.particleScale = 0.55
+        emitter.particleScaleRange = 0.22
+        emitter.particleScaleSpeed = -0.03
         emitter.particleAlpha = 1.0
         emitter.particleAlphaRange = 0.1
         emitter.particleAlphaSpeed = -0.05

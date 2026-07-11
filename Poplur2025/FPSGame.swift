@@ -60,6 +60,26 @@ final class FPSGame {
     /// DEBUG: jump straight into gameplay (used by the FPS_AUTOPLAY verification hook).
     func debugStartPlaying() { state = .playing; resetGame() }
 
+    // MARK: Pause menu control (driven by the scene's on-screen buttons)
+
+    func pauseGame() {
+        guard state == .playing else { return }
+        state = .paused
+        onSound?(.menuSelect)
+    }
+
+    func resumeGame() {
+        guard state == .paused else { return }
+        state = .playing
+        onSound?(.menuSelect)
+    }
+
+    func restartGame() {
+        state = .playing
+        resetGame()
+        onSound?(.menuSelect)
+    }
+
     func update(_ dt: Double, _ input: FPSInput) {
         switch state {
         case .loading:
@@ -225,7 +245,8 @@ final class FPSGame {
             if muzzleFlash > 0 {
                 r.tintFullScreen(UIColor(red: 1, green: 0.78, blue: 0.31, alpha: 1), alpha: CGFloat(muzzleFlash) * 0.18)
             }
-            r.drawWeapon(player, assets.weapons[FPS_WEAPON_KEYS[player.weapon]])
+            r.drawWeapon(player, assets.weapons[FPS_WEAPON_KEYS[player.weapon]],
+                         frames: FPS_WEAPON_AIM_FRAMES[player.weapon])
             r.renderHUD(player, assets, level, score: score, kills: kills, gameTime: gameTime)
 
             if state == .paused { r.renderPause() }

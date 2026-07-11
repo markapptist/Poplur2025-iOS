@@ -137,83 +137,27 @@ extension FPSRenderer {
 
     // MARK: Arcade cabinet + zoom intro
 
-    private func cabinetLayout() -> (cabL: CGFloat, cabTop: CGFloat, cw: CGFloat, ch: CGFloat,
-                                     marqY: CGFloat, marqH: CGFloat,
-                                     screenX: CGFloat, screenY: CGFloat, screenW: CGFloat, screenH: CGFloat) {
-        let W = CGFloat(w), H = CGFloat(h)
-        let cw: CGFloat = W * 0.46
-        let cabL = (W - cw) / 2
-        let cabTop: CGFloat = H * 0.03
-        let ch = H * 0.95
-        let marqH: CGFloat = H * 0.14
-        let marqY = cabTop + H * 0.02
-        let screenW = cw * 0.80
-        let screenX = cabL + (cw - screenW) / 2
-        let screenY = marqY + marqH + H * 0.05
-        let screenH = screenW * 0.82
-        return (cabL, cabTop, cw, ch, marqY, marqH, screenX, screenY, screenW, screenH)
-    }
-
-    /// t: 0 = full cabinet → 1 = zoomed into the CRT screen.
+    /// The cabinet is real artwork drawn by the scene; this buffer IS the CRT.
+    /// So the menu simply renders the supplied main-menu screen full-bleed.
     func renderMenuCabinet(_ assets: FPSAssets, selected: Int, tick: Double, t: Double) {
         let W = CGFloat(w), H = CGFloat(h)
-        let L = cabinetLayout()
-
-        // Dark arcade room
-        fillRect(0, 0, W, H, UIColor(fpsHex: 0x08000e))
-        radialVignette()
-
-        pushZoom(into: L, t: t) {
-            // Cabinet body
-            roundRect(L.cabL, L.cabTop + 26, L.cw, L.ch - 26, 12, fill: UIColor(fpsHex: 0x2a0838))
-            strokeRound(L.cabL, L.cabTop + 26, L.cw, L.ch - 26, 12, color: UIColor(fpsHex: 0xc8960a), lineWidth: 3)
-
-            // Marquee
-            roundRect(L.cabL, L.marqY, L.cw, L.marqH, 10, fill: UIColor(fpsHex: 0x1a0030))
-            strokeRound(L.cabL, L.marqY, L.cw, L.marqH, 10, color: GOLD, lineWidth: 2)
-            let logoSz: CGFloat = L.marqH * 0.62
-            if let logo = assets.misc["logo"] {
-                drawImage(logo, CGRect(x: L.cabL + 8, y: L.marqY + (L.marqH - logoSz) / 2, width: logoSz, height: logoSz))
-                drawImage(logo, CGRect(x: L.cabL + L.cw - 8 - logoSz, y: L.marqY + (L.marqH - logoSz) / 2, width: logoSz, height: logoSz))
-            }
-            drawText("poplur", x: L.cabL + L.cw / 2, y: L.marqY + L.marqH * 0.62, size: L.cw * 0.15, color: GOLD, align: .center)
-
-            // Screen bezel + CRT
-            let pad: CGFloat = 12
-            roundRect(L.screenX - pad, L.screenY - pad, L.screenW + pad * 2, L.screenH + pad * 2, 10, fill: UIColor(fpsHex: 0x0a0012))
-            if let menu = assets.menu["main_menu"] {
-                drawImage(menu, CGRect(x: L.screenX, y: L.screenY, width: L.screenW, height: L.screenH))
-            } else {
-                fillRect(L.screenX, L.screenY, L.screenW, L.screenH, UIColor(fpsHex: 0x100030))
-                drawText("START GAME", x: L.screenX + L.screenW / 2, y: L.screenY + L.screenH * 0.5, size: L.screenW * 0.11, color: GOLD, align: .center)
-            }
-            // Blink prompt strip
-            if Int(tick * 2) % 2 == 0 {
-                fillRect(L.screenX, L.screenY + L.screenH * 0.60, L.screenW, L.screenH * 0.16, UIColor(fpsHex: 0xffd700, alpha: 0.10))
-            }
-
-            // Controls bar
-            let ctrlY = L.screenY + L.screenH + 22
-            let ctrlH: CGFloat = 46
-            roundRect(L.cabL + 6, ctrlY, L.cw - 12, ctrlH, 8, fill: UIColor(fpsHex: 0x0d0020))
-            // Joystick
-            let jx = L.cabL + 34, jy = ctrlY + ctrlH / 2
-            fillCircle(jx, jy, 12, UIColor(white: 0.07, alpha: 1))
-            fillCircle(jx, jy - 14, 6, UIColor(fpsHex: 0x333333))
-            // Buttons
-            let btnColors: [UInt32] = [0xffd700, 0xff4db8, 0x00ff88, 0x4488ff, 0xff4db8]
-            for (i, c) in btnColors.enumerated() {
-                let bx = L.cabL + 76 + CGFloat(i) * 34
-                fillCircle(bx, jy, 11, UIColor(fpsHex: c))
-            }
+        if let menu = assets.menu["main_menu"] {
+            drawImage(menu, CGRect(x: 0, y: 0, width: W, height: H))
+        } else {
+            fillRect(0, 0, W, H, UIColor(fpsHex: 0x141b52))
+        }
+        // Blink the selected row of the artwork's "1 PLAYER / 2 PLAYER" menu.
+        let rowY = H * (selected == 0 ? 0.685 : 0.775)
+        if Int(tick * 2) % 2 == 0 {
+            fillRect(W * 0.30, rowY - H * 0.035, W * 0.42, H * 0.075,
+                     UIColor(fpsHex: 0xffd700, alpha: 0.16))
         }
     }
 
+    /// Dims the game band only — the pause menu itself is drawn by the scene
+    /// (crisp SpriteKit nodes, and tappable).
     func renderPause() {
-        let W = CGFloat(w), H = CGFloat(h)
-        tintFullScreen(.black, alpha: 0.6)
-        drawText("PAUSED", x: W / 2, y: H / 2, size: 42, color: PINK, align: .center)
-        drawText("tap to resume", x: W / 2, y: H / 2 + 40, size: 16, color: .white, align: .center)
+        tintFullScreen(.black, alpha: 0.55)
     }
 
     func renderDeath(_ alpha: Double) {

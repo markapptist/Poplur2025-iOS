@@ -4,6 +4,9 @@ import SpriteKit
 // MARK: - SwiftUI host for the native SpriteKit PoplurFPS game
 
 struct FPSSpriteKitView: UIViewRepresentable {
+    /// Invoked when the player picks QUIT in the in-game pause menu.
+    var onQuit: (() -> Void)? = nil
+
     func makeUIView(context: Context) -> SKView {
         let view = SKView(frame: .zero)
         view.ignoresSiblingOrder = true
@@ -19,6 +22,7 @@ struct FPSSpriteKitView: UIViewRepresentable {
         let initial = UIScreen.main.bounds.size
         let scene = FPSGameScene(size: initial == .zero ? CGSize(width: FPSK.screenW, height: FPSK.screenH) : initial)
         scene.scaleMode = .resizeFill
+        scene.onQuit = onQuit
         view.presentScene(scene)
         return view
     }

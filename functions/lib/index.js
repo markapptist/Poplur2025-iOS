@@ -147,6 +147,13 @@ async function reservePremiumAIUsage(uid) {
         };
     });
 }
+async function requirePremiumAIUser(uid) {
+    const snapshot = await db.collection("users").doc(uid).get();
+    const data = snapshot.data() ?? {};
+    if (!snapshot.exists || data.isPremium !== true) {
+        throw httpError(403, "ai_locked_for_plan", "Poplur AI radio host is included with Premium.");
+    }
+}
 async function refundPremiumAIUsage(uid, month) {
     const userRef = db.collection("users").doc(uid);
     try {
@@ -347,6 +354,7 @@ async function handleGenerate(uid, contentType, req, res) {
     }
 }
 async function handleRadioHost(uid, req, res) {
+    await requirePremiumAIUser(uid);
     const body = objectBody(req);
     const script = stringField(body.script, "script", 1800);
     const cityName = optionalStringField(body.cityName, 120) ?? "this stop";

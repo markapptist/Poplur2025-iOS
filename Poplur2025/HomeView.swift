@@ -231,7 +231,7 @@ private final class _LaunchCoverView: UIView {
 
         emitter.frame           = bounds
         emitter.emitterPosition = CGPoint(x: cx, y: -40)
-        emitter.emitterSize     = CGSize(width: bounds.width + 400, height: bounds.height * 2)
+        emitter.emitterSize     = CGSize(width: bounds.width, height: bounds.height * 2)
 
         bannerImageView.frame = bounds
         logoImageView.frame = CGRect(x: cx - logoSz/2, y: cy - logoSz/2, width: logoSz, height: logoSz)
@@ -256,22 +256,22 @@ private final class _LaunchCoverView: UIView {
     private func makeConfettiCells() -> [CAEmitterCell] {
         Self.palette.enumerated().map { i, color in
             let cell = CAEmitterCell()
-            cell.birthRate         = 70
-            cell.lifetime          = 7.5
-            cell.lifetimeRange     = 1.5
-            cell.velocity          = 120
-            cell.velocityRange     = 80
+            cell.birthRate         = 5        // was 70 per color — sparse, tasteful fall
+            cell.lifetime          = 6.0
+            cell.lifetimeRange     = 1.0
+            cell.velocity          = 85
+            cell.velocityRange     = 45
             cell.emissionLongitude = .pi      // straight down
-            cell.emissionRange     = .pi / 6
-            cell.spin              = 3.0
+            cell.emissionRange     = .pi / 7
+            cell.spin              = 2.0
             cell.spinRange         = .pi
-            cell.scale             = 1.0
-            cell.scaleRange        = 0.5
-            cell.scaleSpeed        = -0.06
+            cell.scale             = 0.5      // smaller pieces
+            cell.scaleRange        = 0.2
+            cell.scaleSpeed        = -0.05
             cell.alphaRange        = 0.1
-            cell.alphaSpeed        = -0.05
-            cell.xAcceleration     = 25
-            cell.yAcceleration     = 200
+            cell.alphaSpeed        = -0.06
+            cell.xAcceleration     = 16
+            cell.yAcceleration     = 150
             cell.contents          = confettiCGImage(color: color)
             return cell
         }
@@ -336,7 +336,7 @@ private final class _LaunchCoverView: UIView {
     // Each cycle the text advances to a new loading message.
     private func startLoadingLoop() {
         runBarCycle()
-        phaseTimer = Timer.scheduledTimer(withTimeInterval: 2.5, repeats: true) { [weak self] _ in
+        phaseTimer = Timer.scheduledTimer(withTimeInterval: 4.2, repeats: true) { [weak self] _ in
             guard let self else { return }
             self.phaseIdx = (self.phaseIdx + 1) % self.phases.count
             UIView.transition(with: self.phaseLabel, duration: 0.2, options: .transitionCrossDissolve) {
@@ -357,7 +357,7 @@ private final class _LaunchCoverView: UIView {
         let fill = CABasicAnimation(keyPath: "bounds")
         fill.fromValue      = NSValue(cgRect: CGRect(x: 0, y: 0, width: 8,              height: loadingBarHeight))
         fill.toValue        = NSValue(cgRect: CGRect(x: 0, y: 0, width: loadingBarWidth, height: loadingBarHeight))
-        fill.duration       = 2.4
+        fill.duration       = 4.0
         fill.timingFunction = CAMediaTimingFunction(name: .easeOut)
         fill.fillMode       = .forwards
         fill.isRemovedOnCompletion = false
@@ -474,13 +474,20 @@ struct HomeView: View {
     @State private var didTriggerProfileInitialLoad = false
     @State private var enableLowerHitArea: Bool = false
     @State private var didRunLaunchSequence = false
-    @State private var showAppInitializationCover = true
+    // Only show the full launch loading cover when it's actually needed — i.e. the
+    // first launch after install. On every later launch this starts false so the
+    // app goes straight to the feed with no loading screen.
+    static let firstLaunchDoneKey = "PoplurDidCompleteFirstLaunch"
+    @State private var showAppInitializationCover = !UserDefaults.standard.bool(forKey: HomeView.firstLaunchDoneKey)
     @State private var showSlowInitializationDetails = false
     @State private var bottomChromeVisible = false
     @State private var isFeedLaunchLoading = false
     @State private var feedLaunchSuppressionTask: Task<Void, Never>? = nil
     @State private var hasPlayedFeedLaunchPop = false
     @State private var isMainTabChildRouteVisible = false
+    @State private var showScreenStaticTransition = false
+    @State private var screenStaticTransitionToken = 0
+    @State private var screenStaticTransitionTask: Task<Void, Never>? = nil
 
     // HUD sleep: chrome sleeps after 3 passive video advances (no user touch)
     @State private var isChromeAsleep: Bool = false
@@ -1428,6 +1435,30 @@ struct HomeView: View {
         }
     }
 
+    @MainActor
+    private func playScreenStaticTransition(from oldTab: AppTab, to newTab: AppTab) {
+        guard oldTab != newTab,
+              oldTab != .feed,
+              newTab != .feed,
+              !PreviewEnvHomeView.isPreview,
+              !PreviewEnvHomeView.isVerificationLaunch else { return }
+
+        screenStaticTransitionTask?.cancel()
+        screenStaticTransitionToken += 1
+        withAnimation(.linear(duration: 0.04)) {
+            showScreenStaticTransition = true
+        }
+
+        screenStaticTransitionTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 620_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.12)) {
+                showScreenStaticTransition = false
+            }
+            screenStaticTransitionTask = nil
+        }
+    }
+
     private func rotateCube(to newTab: AppTab, direction: RotationDirection) {
         let targetYaw = yawForTab(newTab)
         animateYaw(to: targetYaw, duration: 0.45, direction: direction)
@@ -2140,6 +2171,15 @@ struct HomeView: View {
                 .zIndex(5500)
             }
 
+            if showScreenStaticTransition {
+                TVStaticLoopingView(isMuted: false, volume: 0.78)
+                    .id(screenStaticTransitionToken)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(true)
+                    .transition(.opacity)
+                    .zIndex(20_000)
+            }
+
         }
     }
 
@@ -2339,6 +2379,8 @@ struct HomeView: View {
         let step1 = rootStack
             .task {
                 guard showAppInitializationCover else { return }
+                // First launch is now underway — mark it so later launches skip the cover.
+                UserDefaults.standard.set(true, forKey: HomeView.firstLaunchDoneKey)
                 // Show loading bar + text immediately
                 withAnimation(.easeOut(duration: 0.18)) {
                     showSlowInitializationDetails = true
@@ -2377,7 +2419,8 @@ struct HomeView: View {
                     startChannelLogoTimer()
                 }
             }
-            .onChange(of: selectedTab) { _, newTab in
+            .onChange(of: selectedTab) { oldTab, newTab in
+                playScreenStaticTransition(from: oldTab, to: newTab)
                 applyInactiveTabResourcePolicy(activeTab: newTab)
 
                 if !didSetInitialCubeYaw {

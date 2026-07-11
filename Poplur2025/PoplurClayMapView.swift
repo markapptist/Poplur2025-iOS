@@ -1,5 +1,6 @@
 import SwiftUI
 import WebKit
+import UniformTypeIdentifiers
 
 // MARK: - Clay Web Map (Phase 1 embed)
 //
@@ -18,6 +19,16 @@ enum PoplurClayWebMap {
     static var isEnabled: Bool {
         UserDefaults.standard.object(forKey: "poplur_clay_web_map") as? Bool ?? true
     }
+
+    /// The web bundle is served over a custom scheme rather than `file://`.
+    /// A `file://` page has an opaque origin, so WebKit blocks the Vite bundle's
+    /// `<script type="module">`, its Web Workers and its dynamic `import()` calls —
+    /// the script never runs and the map renders as the page's #050407 background
+    /// (a black screen). A custom scheme gives a real origin where all three work.
+    static let scheme = "poplur-clay"
+    static let host = "app"
+
+    static var indexURL: URL? { URL(string: "\(scheme)://\(host)/index.html") }
 }
 
 struct PoplurClayMapView: UIViewRepresentable {
@@ -29,6 +40,12 @@ struct PoplurClayMapView: UIViewRepresentable {
         config.mediaTypesRequiringUserActionForPlayback = []
         config.userContentController.add(context.coordinator, name: "poplur")
 
+        let webRoot = Self.bundledRootURL()
+        if let webRoot {
+            config.setURLSchemeHandler(ClayMapSchemeHandler(rootDirectory: webRoot),
+                                       forURLScheme: PoplurClayWebMap.scheme)
+        }
+
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.isOpaque = false
         webView.backgroundColor = UIColor(red: 5/255, green: 4/255, blue: 7/255, alpha: 1)
@@ -37,8 +54,8 @@ struct PoplurClayMapView: UIViewRepresentable {
         webView.scrollView.contentInsetAdjustmentBehavior = .never
         context.coordinator.webView = webView
 
-        if let indexURL = Self.bundledIndexURL() {
-            webView.loadFileURL(indexURL, allowingReadAccessTo: indexURL.deletingLastPathComponent())
+        if webRoot != nil, let indexURL = PoplurClayWebMap.indexURL {
+            webView.load(URLRequest(url: indexURL))
         } else {
             print("[PoplurClayMapView] ClayMapWeb bundle missing — run poplur-clay-map/scripts/sync-mobile.sh")
         }
@@ -47,11 +64,70 @@ struct PoplurClayMapView: UIViewRepresentable {
 
     func updateUIView(_ uiView: WKWebView, context: Context) {}
 
-    /// Synchronized groups may keep the ClayMapWeb folder or flatten it into
-    /// the bundle root — accept either layout.
-    static func bundledIndexURL() -> URL? {
-        Bundle.main.url(forResource: "index", withExtension: "html", subdirectory: "ClayMapWeb")
-            ?? Bundle.main.url(forResource: "index", withExtension: "html")
+    /// Directory holding the synced web bundle (`ClayMapWeb/index.html` + assets).
+    /// Deliberately does *not* fall back to a bare `index.html` lookup: other
+    /// bundled web content (PoplurFPS) also ships an `index.html`, and loading
+    /// that here would silently render the wrong page.
+    static func bundledRootURL() -> URL? {
+        Bundle.main
+            .url(forResource: "index", withExtension: "html", subdirectory: "ClayMapWeb")?
+            .deletingLastPathComponent()
+    }
+
+    /// Serves the bundled ClayMapWeb files over `PoplurClayWebMap.scheme` so the page
+    /// gets a real origin (see the note on `PoplurClayWebMap`). Reads are confined to
+    /// `rootDirectory`.
+    final class ClayMapSchemeHandler: NSObject, WKURLSchemeHandler {
+        private let root: URL
+
+        init(rootDirectory: URL) {
+            self.root = rootDirectory.standardizedFileURL
+        }
+
+        func webView(_ webView: WKWebView, start urlSchemeTask: WKURLSchemeTask) {
+            guard let url = urlSchemeTask.request.url else {
+                urlSchemeTask.didFailWithError(URLError(.badURL))
+                return
+            }
+
+            var relativePath = url.path
+            if relativePath.isEmpty || relativePath == "/" { relativePath = "/index.html" }
+            let fileURL = root.appendingPathComponent(String(relativePath.dropFirst())).standardizedFileURL
+
+            // Confine reads to the bundle directory (no `../` traversal).
+            guard fileURL.path.hasPrefix(root.path + "/") || fileURL.path == root.path,
+                  let data = try? Data(contentsOf: fileURL) else {
+                urlSchemeTask.didFailWithError(URLError(.fileDoesNotExist))
+                return
+            }
+
+            let mime = Self.mimeType(forExtension: fileURL.pathExtension)
+            let response = URLResponse(
+                url: url,
+                mimeType: mime,
+                expectedContentLength: data.count,
+                textEncodingName: mime.hasPrefix("text/") || mime == "application/json" ? "utf-8" : nil
+            )
+            urlSchemeTask.didReceive(response)
+            urlSchemeTask.didReceive(data)
+            urlSchemeTask.didFinish()
+        }
+
+        func webView(_ webView: WKWebView, stop urlSchemeTask: WKURLSchemeTask) {}
+
+        private static func mimeType(forExtension ext: String) -> String {
+            switch ext.lowercased() {
+            case "html":         return "text/html"
+            case "js", "mjs":    return "text/javascript"
+            case "css":          return "text/css"
+            case "json":         return "application/json"
+            case "wasm":         return "application/wasm"
+            case "glb":          return "model/gltf-binary"
+            case "mp3":          return "audio/mpeg"
+            default:
+                return UTType(filenameExtension: ext)?.preferredMIMEType ?? "application/octet-stream"
+            }
+        }
     }
 
     final class Coordinator: NSObject, WKScriptMessageHandler {

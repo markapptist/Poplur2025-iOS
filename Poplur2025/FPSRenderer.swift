@@ -292,17 +292,37 @@ final class FPSRenderer {
         }
     }
 
-    func drawWeapon(_ player: FPSPlayer, _ img: FPSImage?) {
+    /// Draws the weapon viewmodel. `frames > 1` treats `img` as a horizontal strip of
+    /// aim poses (left → right); the frame is chosen from the player's aim lean so the
+    /// gun visibly swings as you turn.
+    func drawWeapon(_ player: FPSPlayer, _ img: FPSImage?, frames: Int = 1) {
         guard let img = img else { return }
         let H = CGFloat(h), W = CGFloat(w)
+
+        let n = max(1, frames)
+        let fw = img.w / n
+        var idx = 0
+        if n > 1 {
+            let lean = max(-1, min(1, player.aimLean))          // -1 = full left, +1 = full right
+            idx = Int((lean + 1) / 2 * Double(n - 1) + 0.5)
+            idx = max(0, min(n - 1, idx))
+        }
+
         let scale = (H * 0.62) / CGFloat(img.h)
-        let dw = CGFloat(img.w) * scale, dh = CGFloat(img.h) * scale
+        let dw = CGFloat(fw) * scale, dh = CGFloat(img.h) * scale
         let bobY = CGFloat(sin(player.bobPhase)) * 6
         let bobX = CGFloat(cos(player.bobPhase * 0.5)) * 3
         let kickY = CGFloat(player.weaponKick) * 30
         let dx = W / 2 - dw / 2 + bobX
         let dy = H - dh + bobY + kickY + 8
-        drawImage(img, CGRect(x: dx, y: dy, width: dw, height: dh))
+
+        if n == 1 {
+            drawImage(img, CGRect(x: dx, y: dy, width: dw, height: dh))
+        } else if let frame = img.cg.cropping(to: CGRect(x: idx * fw, y: 0, width: fw, height: img.h)) {
+            withUIKit {
+                UIImage(cgImage: frame).draw(in: CGRect(x: dx, y: dy, width: dw, height: dh))
+            }
+        }
     }
 
     func tintFullScreen(_ color: UIColor, alpha: CGFloat) {
@@ -320,5 +340,12 @@ extension UIColor {
                   green: CGFloat((hex >> 8) & 0xFF) / 255,
                   blue: CGFloat(hex & 0xFF) / 255,
                   alpha: alpha)
+    }
+
+    /// Multiplies RGB by `f` (keeps alpha) — used for button insets / shading.
+    func fpsScaled(_ f: CGFloat) -> UIColor {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        guard getRed(&r, green: &g, blue: &b, alpha: &a) else { return self }
+        return UIColor(red: r * f, green: g * f, blue: b * f, alpha: a)
     }
 }

@@ -179,6 +179,14 @@ async function reservePremiumAIUsage(uid: string): Promise<UsageReservation> {
   });
 }
 
+async function requirePremiumAIUser(uid: string): Promise<void> {
+  const snapshot = await db.collection("users").doc(uid).get();
+  const data = snapshot.data() ?? {};
+  if (!snapshot.exists || data.isPremium !== true) {
+    throw httpError(403, "ai_locked_for_plan", "Poplur AI radio host is included with Premium.");
+  }
+}
+
 async function refundPremiumAIUsage(uid: string, month: string): Promise<void> {
   const userRef = db.collection("users").doc(uid);
   try {
@@ -409,6 +417,7 @@ async function handleGenerate(
 }
 
 async function handleRadioHost(uid: string, req: Request, res: Response): Promise<void> {
+  await requirePremiumAIUser(uid);
   const body = objectBody(req);
   const script = stringField(body.script, "script", 1800);
   const cityName = optionalStringField(body.cityName, 120) ?? "this stop";

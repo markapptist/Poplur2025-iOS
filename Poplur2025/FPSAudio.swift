@@ -48,9 +48,11 @@ final class FPSAudio {
     }
 
     private func configureSession() {
-        // .ambient → mixes with other audio and respects the mute switch.
+        // .playback so the game is audible even with the ring/silent switch flipped —
+        // .ambient looks correct but leaves the game silent for anyone on mute.
+        // .mixWithOthers keeps whatever the user was already listening to alive.
         let s = AVAudioSession.sharedInstance()
-        try? s.setCategory(.ambient, options: [.mixWithOthers])
+        try? s.setCategory(.playback, mode: .default, options: [.mixWithOthers])
         try? s.setActive(true)
     }
 

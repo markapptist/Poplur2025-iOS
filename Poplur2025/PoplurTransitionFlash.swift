@@ -2,9 +2,9 @@ import SwiftUI
 import AVFoundation
 
 // MARK: – Duration constant shared with FeedView
-let kCommercialTransitionDuration: TimeInterval = 1.5
+let kCommercialTransitionDuration: TimeInterval = 0.45
 
-// MARK: – Channel/video-change transition (plays commercial_transition.mp4)
+// MARK: – Channel/video-change transition (no static video)
 struct PoplurTransitionFlash: View {
     let channelNumber: Int
     let channelCategory: String
@@ -20,10 +20,10 @@ struct PoplurTransitionFlash: View {
 
     var body: some View {
         ZStack {
-            CommercialTransitionVideoView()
+            Color.black.opacity(0.18)
                 .ignoresSafeArea()
 
-            // Channel logo centered on the static
+            // Channel logo centered briefly during the change
             VStack(spacing: 8) {
                 ChannelAssetIcon(
                     assetName: channelIconAssetName,
@@ -52,55 +52,19 @@ struct PoplurTransitionFlash: View {
     }
 }
 
-// MARK: – Commercial transition video (one-shot, auto-fades)
-
-private struct CommercialTransitionVideoView: UIViewRepresentable {
-    func makeUIView(context: Context) -> CommercialTransitionUIView { CommercialTransitionUIView() }
-    func updateUIView(_ uiView: CommercialTransitionUIView, context: Context) {}
-}
-
-private final class CommercialTransitionUIView: UIView {
-    private var player: AVPlayer?
-    private var playerLayer: AVPlayerLayer?
-
-    init() {
-        super.init(frame: .zero)
-        backgroundColor = .black
-        // commercial_transition first; fall back to feed_end_transition
-        let url = Bundle.main.url(forResource: "commercial_transition", withExtension: "mp4")
-               ?? Bundle.main.url(forResource: "feed_end_transition",   withExtension: "mp4")
-        guard let url else { return }
-
-        let player = AVPlayer(url: url)
-        player.isMuted = false
-        let layer = AVPlayerLayer(player: player)
-        layer.videoGravity = .resizeAspectFill
-        self.layer.addSublayer(layer)
-        self.player = player
-        self.playerLayer = layer
-        player.play()
-
-        let fadeDuration: TimeInterval = 0.12
-        DispatchQueue.main.asyncAfter(deadline: .now() + kCommercialTransitionDuration - fadeDuration) {
-            UIView.animate(withDuration: fadeDuration) { layer.opacity = 0 }
-        }
-    }
-
-    required init?(coder: NSCoder) { fatalError() }
-
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        playerLayer?.frame = bounds
-    }
-
-    deinit { player?.pause() }
-}
-
 // MARK: – Looping TV static (shown while a feed video buffers)
 
 struct TVStaticLoopingView: UIViewRepresentable {
-    func makeUIView(context: Context) -> TVStaticLoopingUIView { TVStaticLoopingUIView() }
-    func updateUIView(_ uiView: TVStaticLoopingUIView, context: Context) {}
+    var isMuted: Bool = true
+    var volume: Float = 1.0
+
+    func makeUIView(context: Context) -> TVStaticLoopingUIView {
+        TVStaticLoopingUIView(isMuted: isMuted, volume: volume)
+    }
+
+    func updateUIView(_ uiView: TVStaticLoopingUIView, context: Context) {
+        uiView.configure(isMuted: isMuted, volume: volume)
+    }
 }
 
 final class TVStaticLoopingUIView: UIView {
@@ -108,7 +72,7 @@ final class TVStaticLoopingUIView: UIView {
     private var looper: AVPlayerLooper?
     private var playerLayer: AVPlayerLayer?
 
-    init() {
+    init(isMuted: Bool = true, volume: Float = 1.0) {
         super.init(frame: .zero)
         backgroundColor = .black
         guard let url = Bundle.main.url(forResource: "tv_static", withExtension: "mp4") else {
@@ -117,7 +81,8 @@ final class TVStaticLoopingUIView: UIView {
         }
         let item = AVPlayerItem(url: url)
         let queuePlayer = AVQueuePlayer()
-        queuePlayer.isMuted = true
+        queuePlayer.isMuted = isMuted
+        queuePlayer.volume = volume
         let looper = AVPlayerLooper(player: queuePlayer, templateItem: item)
         let layer = AVPlayerLayer(player: queuePlayer)
         layer.videoGravity = .resizeAspectFill
@@ -129,6 +94,11 @@ final class TVStaticLoopingUIView: UIView {
     }
 
     required init?(coder: NSCoder) { fatalError() }
+
+    func configure(isMuted: Bool, volume: Float) {
+        player?.isMuted = isMuted
+        player?.volume = volume
+    }
 
     override func layoutSubviews() {
         super.layoutSubviews()

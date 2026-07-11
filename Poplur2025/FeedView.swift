@@ -1274,7 +1274,7 @@ struct FeedView: View {
         }
     }
 
-    /// Flashes the Poplur TV static tune card to mask post/channel/country changes.
+    /// Briefly shows the Poplur TV tune card to mask post/channel/country changes.
     private func flashTransition(targetChannelIndex: Int? = nil) {
         let channelIndex = targetChannelIndex ?? selectedChannelIndex
         let targetChannel = channels[safe: channelIndex] ?? channels[0]
