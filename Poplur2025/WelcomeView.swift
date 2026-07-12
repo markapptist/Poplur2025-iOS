@@ -31,6 +31,8 @@ private final class WelcomeScene: SKScene {
     private let floor = SKNode()
     private var backgroundNode: SKSpriteNode?
     private var didAnimateBackground = false
+    private var buttonTextShaders: [SKShader] = []
+    private var reduceMotionObserver: NSObjectProtocol?
 
     // Warm-up gate
     private var didWarmUp = false
@@ -103,6 +105,12 @@ private final class WelcomeScene: SKScene {
 
     required init?(coder: NSCoder) { nil }
 
+    deinit {
+        if let reduceMotionObserver {
+            NotificationCenter.default.removeObserver(reduceMotionObserver)
+        }
+    }
+
     override func didMove(to view: SKView) {
         // Make sure SKView is optimized
         view.ignoresSiblingOrder = true
@@ -121,6 +129,7 @@ private final class WelcomeScene: SKScene {
         // rings, so avoid rebuilding hundreds of overlapping SKShapeNodes.
         buildFlower()
         buildBouncingSignIn()
+        observeReduceMotionChanges()
         layoutAll()
 
         // Warm up the pop sound once to avoid first-play hitch later
@@ -516,6 +525,7 @@ private final class WelcomeScene: SKScene {
         // Static setup (no physics-driven animation)
         proxy.removeFromParent()
         floor.removeFromParent()
+        buttonTextShaders.removeAll(keepingCapacity: true)
 
         let signupSize = buttonSize
 
@@ -568,27 +578,114 @@ private final class WelcomeScene: SKScene {
         addChild(signupNode)
     }
 
-    private func makeButtonLabel(_ text: String) -> SKLabelNode {
-        let textShadow = NSShadow()
-        textShadow.shadowColor = UIColor.black.withAlphaComponent(0.16)
-        textShadow.shadowOffset = CGSize(width: 0, height: 1)
-        textShadow.shadowBlurRadius = 1
-
+    private func makeButtonLabel(_ text: String) -> SKNode {
+        let container = SKNode()
         let font = UIFont(name: "AvenirNext-Heavy", size: 22)
             ?? UIFont.systemFont(ofSize: 22, weight: .heavy)
-        let label = SKLabelNode()
-        label.attributedText = NSAttributedString(
-            string: text,
-            attributes: [
-                .font: font,
-                .foregroundColor: UIColor.black,
-                .shadow: textShadow,
-            ]
+
+        let shadow = SKLabelNode(text: text)
+        shadow.fontName = font.fontName
+        shadow.fontSize = 22
+        shadow.fontColor = UIColor.black.withAlphaComponent(0.16)
+        shadow.verticalAlignmentMode = .center
+        shadow.horizontalAlignmentMode = .center
+        shadow.position.y = -1
+        shadow.zPosition = 0
+        container.addChild(shadow)
+
+        let mask = SKLabelNode(text: text)
+        mask.fontName = font.fontName
+        mask.fontSize = 22
+        mask.fontColor = .white
+        mask.verticalAlignmentMode = .center
+        mask.horizontalAlignmentMode = .center
+
+        let crop = SKCropNode()
+        crop.maskNode = mask
+        crop.zPosition = 1
+
+        let maskFrame = mask.calculateAccumulatedFrame()
+        let fillSize = CGSize(
+            width: max(1, ceil(maskFrame.width)),
+            height: max(1, ceil(maskFrame.height))
         )
-        label.verticalAlignmentMode = .center
-        label.horizontalAlignmentMode = .center
-        label.zPosition = 1
-        return label
+        let shaderFill = SKSpriteNode(color: .white, size: fillSize)
+        shaderFill.shader = makeButtonTextShader(
+            aspectRatio: fillSize.height / fillSize.width
+        )
+        crop.addChild(shaderFill)
+        container.addChild(crop)
+
+        return container
+    }
+
+    private func makeButtonTextShader(aspectRatio: CGFloat) -> SKShader {
+        let source = """
+        void main() {
+            // CSS parity: 105deg gradient, 300% background width, and a 3.2s
+            // linear background-position sweep from 100% to -200%.
+            float motion = clamp(u_motion, 0.0, 1.0);
+            float progress = fract(u_time / 3.2);
+            float cssPosition = mix(1.0, -2.0, progress);
+            float animatedPhase = cssPosition * (2.0 / 3.0);
+            float reducedMotionPhase = 0.48 * (2.0 / 3.0);
+            float phase = mix(reducedMotionPhase, animatedPhase, motion);
+            float axis = v_tex_coord.x * 0.965926
+                       + (v_tex_coord.y - 0.5) * u_aspect * 0.258819;
+            float x = fract(axis / 3.0 + phase);
+            vec3 color;
+
+            if (x < 0.16) {
+                color = mix(vec3(0.031, 0.008, 0.027), vec3(0.357, 0.071, 0.220), x / 0.16);
+            } else if (x < 0.31) {
+                color = mix(vec3(0.357, 0.071, 0.220), vec3(1.000, 0.176, 0.541), (x - 0.16) / 0.15);
+            } else if (x < 0.45) {
+                color = mix(vec3(1.000, 0.176, 0.541), vec3(0.478, 0.000, 0.243), (x - 0.31) / 0.14);
+            } else if (x < 0.59) {
+                color = mix(vec3(0.478, 0.000, 0.243), vec3(0.086, 0.027, 0.067), (x - 0.45) / 0.14);
+            } else if (x < 0.76) {
+                color = mix(vec3(0.086, 0.027, 0.067), vec3(1.000, 0.302, 0.620), (x - 0.59) / 0.17);
+            } else if (x < 0.90) {
+                color = mix(vec3(1.000, 0.302, 0.620), vec3(0.165, 0.039, 0.114), (x - 0.76) / 0.14);
+            } else {
+                color = mix(vec3(0.165, 0.039, 0.114), vec3(0.031, 0.008, 0.027), (x - 0.90) / 0.10);
+            }
+
+            gl_FragColor = vec4(color, 1.0);
+        }
+        """
+        let shader = SKShader(source: source)
+        shader.addUniform(
+            SKUniform(
+                name: "u_motion",
+                float: UIAccessibility.isReduceMotionEnabled ? 0 : 1
+            )
+        )
+        shader.addUniform(
+            SKUniform(name: "u_aspect", float: Float(aspectRatio))
+        )
+        buttonTextShaders.append(shader)
+        return shader
+    }
+
+    private func observeReduceMotionChanges() {
+        if reduceMotionObserver == nil {
+            reduceMotionObserver = NotificationCenter.default.addObserver(
+                forName: UIAccessibility.reduceMotionStatusDidChangeNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                self?.updateButtonTextMotionPreference()
+            }
+        }
+        updateButtonTextMotionPreference()
+    }
+
+    private func updateButtonTextMotionPreference() {
+        let motion: Float = UIAccessibility.isReduceMotionEnabled ? 0 : 1
+        for shader in buttonTextShaders {
+            shader.uniformNamed("u_motion")?.floatValue = motion
+        }
     }
 
     private func layoutAll() {
