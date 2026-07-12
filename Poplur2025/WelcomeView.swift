@@ -69,18 +69,18 @@ private final class WelcomeScene: SKScene {
     private let logoAssetName = "logo"
 
     // Approved Welcome composition, normalized from the 390 × 845 Good Copy reference:
-    // logo at y=155, cube at y=350, Sign In at y=566, and Sign Up at y=635 (from the top).
-    // SpriteKit uses a bottom-left origin, so the foreground nodes use the corresponding
-    // normalized Y positions below. The cube is positioned in SwiftUI using the top-origin
-    // coordinate from the same reference.
+    // logo at y=155, cube at y=350, and Sign Up at y=635 (from the top). Sign In is
+    // derived from Sign Up so the canonical 28pt inter-button gap stays exact on iPhone
+    // and iPad instead of stretching with screen height.
     private let buttonSize = CGSize(width: 220, height: 52)
+    private let buttonGap: CGFloat = 28
     private let logoSize: CGFloat = 140
 
     private var signUpCenterY: CGFloat {
         size.height * (1 - 635.0 / 845.0)
     }
     private var signInCenterY: CGFloat {
-        size.height * (1 - 566.0 / 845.0)
+        signUpCenterY + buttonSize.height + buttonGap
     }
     private var logoCenterY: CGFloat {
         size.height * (1 - 155.0 / 845.0)
@@ -540,14 +540,7 @@ private final class WelcomeScene: SKScene {
         signinCapsule.zPosition = 0
         signinNode.addChild(signinCapsule)
 
-        let signinLabel = SKLabelNode(text: "Sign In")
-        signinLabel.fontName = "AvenirNext-Heavy"
-        signinLabel.fontSize = 22
-        signinLabel.fontColor = .black
-        signinLabel.verticalAlignmentMode = .center
-        signinLabel.horizontalAlignmentMode = .center
-        signinLabel.zPosition = 1
-        signinNode.addChild(signinLabel)
+        signinNode.addChild(makeButtonLabel("Sign In"))
 
         addChild(signinNode)
         let signupShadow = SKShapeNode(rectOf: signupSize, cornerRadius: signupSize.height / 2)
@@ -570,16 +563,32 @@ private final class WelcomeScene: SKScene {
         capsule.zPosition = 0
         signupNode.addChild(capsule)
 
-        let label = SKLabelNode(text: "Sign Up")
-        label.fontName = "AvenirNext-Heavy"
-        label.fontSize = 22
-        label.fontColor = .black
+        signupNode.addChild(makeButtonLabel("Sign Up"))
+
+        addChild(signupNode)
+    }
+
+    private func makeButtonLabel(_ text: String) -> SKLabelNode {
+        let textShadow = NSShadow()
+        textShadow.shadowColor = UIColor.black.withAlphaComponent(0.16)
+        textShadow.shadowOffset = CGSize(width: 0, height: 1)
+        textShadow.shadowBlurRadius = 1
+
+        let font = UIFont(name: "AvenirNext-Heavy", size: 22)
+            ?? UIFont.systemFont(ofSize: 22, weight: .heavy)
+        let label = SKLabelNode()
+        label.attributedText = NSAttributedString(
+            string: text,
+            attributes: [
+                .font: font,
+                .foregroundColor: UIColor.black,
+                .shadow: textShadow,
+            ]
+        )
         label.verticalAlignmentMode = .center
         label.horizontalAlignmentMode = .center
         label.zPosition = 1
-        signupNode.addChild(label)
-
-        addChild(signupNode)
+        return label
     }
 
     private func layoutAll() {
