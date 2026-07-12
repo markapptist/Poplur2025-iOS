@@ -146,6 +146,7 @@ struct Poplur2025App: App {
     @StateObject private var deviceVolumeObserver = DeviceVolumeObserver()
     @StateObject private var preLoginMusic = PreLoginMusicPlayer()
     @State private var showAuthTransition = false
+    @State private var isWelcomePanelVisible = true
     @Environment(\.scenePhase) private var scenePhase
 
     /// True only while WelcomeView (or its Login/Sign Up pushes) is the visible screen —
@@ -194,12 +195,15 @@ struct Poplur2025App: App {
                 }
             }
             .overlay(alignment: .topLeading) {
-                if isPreLoginVisible {
+                if isPreLoginVisible && !isWelcomePanelVisible {
                     PoplurMuteButton(music: preLoginMusic)
                         .padding(.leading, 20)
                         .padding(.top, 12)
                         .transition(.opacity)
                 }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .poplurWelcomePanelVisibilityChanged)) { note in
+                isWelcomePanelVisible = (note.object as? Bool) ?? true
             }
             .onChange(of: isPreLoginVisible) { _, isVisible in
                 if isVisible {

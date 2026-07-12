@@ -1,5 +1,6 @@
 import SwiftUI
 import SceneKit
+import simd
 
 /// The dedicated cube shown on pre-login screens (Welcome/Login/SignUp) — a fixed branding
 /// model, distinct from the per-skin navigation cube used after sign-in.
@@ -14,10 +15,16 @@ import SceneKit
 /// every ~3 s: it rotates 90° to reveal the back-arrow face, holds briefly, then rotates back to
 /// the Poplur logo face so the user knows it's interactive.
 struct LoginCubeView: UIViewRepresentable {
+    enum Face {
+        case brand
+        case forward
+    }
+
     private static let assetName = "poplr_login_cube_equal_faces"
     private static let candidateSubdirectories = ["LoginCube"]
 
     var onTap: (() -> Void)? = nil
+    var face: Face = .brand
 
     func makeCoordinator() -> Coordinator {
         Coordinator(onTap: onTap)
@@ -26,7 +33,7 @@ struct LoginCubeView: UIViewRepresentable {
     func makeUIView(context: Context) -> SCNView {
         let view = SCNView()
         view.backgroundColor = .clear
-        view.scene = Self.makeScene(isBackButton: onTap != nil)
+        view.scene = Self.makeScene(isBackButton: onTap != nil, face: face)
         view.autoenablesDefaultLighting = true
         view.allowsCameraControl = false
         view.isUserInteractionEnabled = onTap != nil
@@ -47,7 +54,7 @@ struct LoginCubeView: UIViewRepresentable {
         @objc func handleTap() { onTap?() }
     }
 
-    private static func makeScene(isBackButton: Bool = false) -> SCNScene {
+    private static func makeScene(isBackButton: Bool = false, face: Face = .brand) -> SCNScene {
         let scene = SCNScene()
 
         let cameraNode = SCNNode()
@@ -78,8 +85,28 @@ struct LoginCubeView: UIViewRepresentable {
         guard !container.childNodes.isEmpty else { return scene }
 
         RuntimeGLBLoader.normalize(container)
-        container.eulerAngles = SCNVector3(0, Float.pi, 0)
-        scene.rootNode.addChildNode(container)
+        let spinPivot = SCNNode()
+        spinPivot.addChildNode(container)
+        switch face {
+        case .brand:
+            container.eulerAngles = SCNVector3(0, Float.pi, 0)
+        case .forward:
+            // The approved Welcome pose presents the FORWARD (+X) face to camera and tips the
+            // adjacent OK (-Z) face toward the viewer as the cube's top surface.
+            let forwardToCamera = simd_quatf(angle: -.pi / 2, axis: SIMD3<Float>(0, 1, 0))
+            let okFaceToTop = simd_quatf(angle: .pi / 2, axis: SIMD3<Float>(0, 0, 1))
+            let revealTop = simd_quatf(angle: .pi / 10, axis: SIMD3<Float>(1, 0, 0))
+            container.simdOrientation = revealTop * okFaceToTop * forwardToCamera
+
+            // Claude's approved Welcome artifact idles at 12°/s. Keep that motion exclusive
+            // to the decorative Welcome cube so the interactive auth cubes retain their peek.
+            let idleSpin = SCNAction.rotateBy(x: 0, y: .pi * 2, z: 0, duration: 30)
+            idleSpin.timingMode = .linear
+            // Rotate the parent around screen/world vertical. Rotating the already-pitched
+            // model itself would tumble the OK face from top to front and bottom.
+            spinPivot.runAction(.repeatForever(idleSpin), forKey: "welcomeIdleSpin")
+        }
+        scene.rootNode.addChildNode(spinPivot)
 
         // Periodic spring pop (~every 3.5s)
         let popUp = SCNAction.scale(to: 1.14, duration: 0.20)

@@ -4,12 +4,18 @@ import CoreGraphics
 import UIKit
 import CoreImage
 
+extension Notification.Name {
+    static let poplurWelcomePanelVisibilityChanged = Notification.Name("poplurWelcomePanelVisibilityChanged")
+}
+
 private var isRunningInPreviews: Bool {
     let env = ProcessInfo.processInfo.environment
     return env["XCODE_RUNNING_FOR_PREVIEWS"] == "1" || env["XCODE_RUNNING_FOR_PLAYGROUNDS"] == "1"
 }
 
 private final class WelcomeScene: SKScene {
+
+    private let welcomePink = UIColor(red: 1, green: 45.0 / 255.0, blue: 150.0 / 255.0, alpha: 1)
 
     // Coordinator to communicate with SwiftUI
     final class Coordinator: ObservableObject {
@@ -57,30 +63,28 @@ private final class WelcomeScene: SKScene {
     private let bounceAreaHeight: CGFloat = 180
 
     // Asset names
-    private let backgroundAssetNames = ["slideup", "slideup_alt1", "slideup_alt2"]
-    private let defaultBackgroundName = "slideup"
+    // The primary ticket and sparkle alternate are shared with Android's
+    // launch-cover artwork, so both platforms open with the same Poplur world.
+    private let backgroundAssetNames = ["slideup_alt1"]
+    private let defaultBackgroundName = "slideup_alt1"
     private let logoAssetName = "logo"
 
-    // Layout is anchored from the bottom of the screen (matching the login cube, which is
-    // pinned 8pt above the bottom edge) so the gap between logo/buttons/cube stays equal
-    // regardless of device height, rather than mixing top-, center-, and bottom-anchored math.
-    // cube: 200pt tall, 8pt bottom padding → cube spans [8, 208] from the bottom.
-    private let sectionSpacing: CGFloat = 28   // equal gap: logo↔buttons and buttons↔cube
-    private let buttonGap: CGFloat = 16        // tighter gap within the Sign In / Sign Up pair
+    // Approved Welcome composition, normalized from the 390 × 845 Good Copy reference:
+    // logo at y=155, cube at y=350, Sign In at y=566, and Sign Up at y=635 (from the top).
+    // SpriteKit uses a bottom-left origin, so the foreground nodes use the corresponding
+    // normalized Y positions below. The cube is positioned in SwiftUI using the top-origin
+    // coordinate from the same reference.
     private let buttonSize = CGSize(width: 220, height: 52)
-    private let logoSize: CGFloat = 200
+    private let logoSize: CGFloat = 140
 
     private var signUpCenterY: CGFloat {
-        let bottom = 208 + sectionSpacing
-        return bottom + buttonSize.height / 2
+        size.height * (1 - 635.0 / 845.0)
     }
     private var signInCenterY: CGFloat {
-        let bottom = signUpCenterY + buttonSize.height / 2 + buttonGap
-        return bottom + buttonSize.height / 2
+        size.height * (1 - 566.0 / 845.0)
     }
     private var logoCenterY: CGFloat {
-        let bottom = signInCenterY + buttonSize.height / 2 + sectionSpacing
-        return bottom + logoSize / 2
+        size.height * (1 - 155.0 / 845.0)
     }
 
     // Track size during animation to avoid size churn
@@ -91,7 +95,7 @@ private final class WelcomeScene: SKScene {
         self.coordinator = coordinator
         super.init(size: size)
         scaleMode = .resizeFill
-        backgroundColor = .white
+        backgroundColor = welcomePink
 
         // Pipeline tuning
         self.view?.ignoresSiblingOrder = true
@@ -114,7 +118,8 @@ private final class WelcomeScene: SKScene {
             self?.buildBackground(using: self?.defaultBackgroundName ?? "")
             // Do not animate here; we wait for warm-up in update(_:)
         }
-        buildDottedOverlay()
+        // The ticket artifact already contains the world-map dots and radius
+        // rings, so avoid rebuilding hundreds of overlapping SKShapeNodes.
         buildFlower()
         buildScallopedBottom()
         buildBouncingSignIn()
@@ -172,15 +177,11 @@ private final class WelcomeScene: SKScene {
 
         guard let texture = backgroundTextures[name] ?? backgroundTextures[defaultBackgroundName] else { return }
 
-        // Pre-compute size bounds to pre-size node before adding
+        // Good Copy stretches the ticket to the phone frame with a small device-edge inset.
+        // Its artwork already includes the rounded top and scalloped bottom, so preserve the
+        // approved screen proportions rather than aspect-fitting it into a smaller card.
         let sceneSize = size
-        let baseSize = texture.size()
-        let targetWidth = sceneSize.width * 0.85
-        let targetHeight = sceneSize.height * 0.85
-        let sx = targetWidth / max(baseSize.width, 1)
-        let sy = targetHeight / max(baseSize.height, 1)
-        let fitScale = min(sx, sy)
-        let preSize = CGSize(width: baseSize.width * fitScale, height: baseSize.height * fitScale)
+        let preSize = ticketSize(for: sceneSize)
         lockedBackgroundSize = preSize
 
         let bg = SKSpriteNode(texture: texture, size: preSize)
@@ -198,7 +199,7 @@ private final class WelcomeScene: SKScene {
         addChild(bg)
 
         // Place offscreen initially; animation will start after warm-up in update(_:)
-        let finalPosition = CGPoint(x: sceneSize.width / 2, y: sceneSize.height / 2)
+        let finalPosition = ticketCenter(for: sceneSize)
         let startY = sceneSize.height + (preSize.height / 2) + 40
         bg.position = CGPoint(x: finalPosition.x, y: startY)
 
@@ -209,15 +210,8 @@ private final class WelcomeScene: SKScene {
     }
 
     private func sizeAndPlaceBackground(_ bg: SKSpriteNode, animateIfNeeded: Bool) {
-        guard let baseSize = bg.texture?.size() else { return }
-
         let sceneSize = size
-        let targetWidth = sceneSize.width * 0.85
-        let targetHeight = sceneSize.height * 0.85
-        let sx = targetWidth / max(baseSize.width, 1)
-        let sy = targetHeight / max(baseSize.height, 1)
-        let fitScale = min(sx, sy)
-        let idealSize = CGSize(width: baseSize.width * fitScale, height: baseSize.height * fitScale)
+        let idealSize = ticketSize(for: sceneSize)
 
         // Keep the size locked during the animation to prevent churn
         if !isAnimatingBackground {
@@ -235,7 +229,7 @@ private final class WelcomeScene: SKScene {
             }
         }
 
-        let finalPosition = CGPoint(x: sceneSize.width / 2, y: sceneSize.height / 2)
+        let finalPosition = ticketCenter(for: sceneSize)
 
         if animateIfNeeded {
             isAnimatingBackground = true
@@ -269,6 +263,19 @@ private final class WelcomeScene: SKScene {
             bg.removeAction(forKey: "bgDropIn")
             bg.position = finalPosition
         }
+    }
+
+    private func ticketSize(for sceneSize: CGSize) -> CGSize {
+        CGSize(
+            width: max(sceneSize.width - 14, 1),
+            height: max(sceneSize.height * (735.0 / 845.0), 1)
+        )
+    }
+
+    private func ticketCenter(for sceneSize: CGSize) -> CGPoint {
+        // The ticket begins 12pt from the top, leaving its scalloped edge above the pink footer.
+        let ticketHeight = ticketSize(for: sceneSize).height
+        return CGPoint(x: sceneSize.width / 2, y: sceneSize.height - 12 - ticketHeight / 2)
     }
 
     // Strict sequence: first logo fade, then button fade (and shadow), then sound + confetti
@@ -513,22 +520,24 @@ private final class WelcomeScene: SKScene {
         let height: CGFloat = 18
         let diameter: CGFloat = 18
         let spacing: CGFloat = 8
-        let total = Int((width + spacing) / (diameter + spacing))
+        let total = Int(ceil((width + spacing) / (diameter + spacing)))
         let y = height / 2
 
-        // Even-odd path: full rect with circles appended (holes)
-        let path = UIBezierPath(rect: CGRect(x: 0, y: 0, width: width, height: height))
+        // White perforation strip with Poplur-pink circular cuts.
+        let strip = SKShapeNode(rect: CGRect(x: 0, y: 0, width: width, height: height))
+        strip.fillColor = .white
+        strip.strokeColor = .clear
+        strip.lineWidth = 0
+        scallopMaskNode.addChild(strip)
+
         for i in 0..<total {
             let x = (CGFloat(i) * (diameter + spacing)) + diameter / 2
-            let circle = UIBezierPath(ovalIn: CGRect(x: x - diameter/2, y: y - diameter/2, width: diameter, height: diameter))
-            path.append(circle)
+            let cut = SKShapeNode(circleOfRadius: diameter / 2)
+            cut.fillColor = welcomePink
+            cut.strokeColor = .clear
+            cut.position = CGPoint(x: x, y: y)
+            scallopMaskNode.addChild(cut)
         }
-        let shape = SKShapeNode(path: path.cgPath)
-        shape.fillColor = .white
-        shape.strokeColor = .clear
-        shape.lineWidth = 0
-
-        scallopMaskNode.addChild(shape)
         scallopMaskNode.position = CGPoint(x: 0, y: 0)
         addChild(scallopMaskNode)
     }
@@ -839,7 +848,7 @@ struct WelcomeView: View {
                         SpriteView(scene: s)
                     }
                 }
-                .background(Color.white)
+                .background(Color(red: 1, green: 45.0 / 255.0, blue: 150.0 / 255.0))
                 .ignoresSafeArea()
                 .onChange(of: geo.size) { _, newSize in s.resize(to: newSize) }
             }
@@ -852,13 +861,15 @@ struct WelcomeView: View {
             // Decorative cube — only shown on the welcome panel; login/signup have their own
             // interactive back-button cube and must not be obscured by this decoration.
             if authPanel == .welcome {
-                VStack {
-                    Spacer()
-                    LoginCubeView()
-                        .frame(width: 200, height: 200)
+                GeometryReader { geo in
+                    LoginCubeView(face: .forward)
+                        .frame(width: 128, height: 128)
                         .scaleEffect(cubeVisible ? 1 : 0.3)
                         .opacity(cubeVisible ? 1 : 0)
-                        .padding(.bottom, 8)
+                        .position(
+                            x: geo.size.width / 2,
+                            y: geo.size.height * (350.0 / 845.0)
+                        )
                 }
                 .allowsHitTesting(false)
             }
@@ -908,10 +919,20 @@ struct WelcomeView: View {
             }
         }
         .onAppear {
+            NotificationCenter.default.post(
+                name: .poplurWelcomePanelVisibilityChanged,
+                object: authPanel == .welcome
+            )
             cubeVisible = false
             withAnimation(.spring(response: 0.6, dampingFraction: 0.62).delay(1.9)) {
                 cubeVisible = true
             }
+        }
+        .onChange(of: authPanel) { _, panel in
+            NotificationCenter.default.post(
+                name: .poplurWelcomePanelVisibilityChanged,
+                object: panel == .welcome
+            )
         }
         .onChange(of: auth.isAuthenticated) { _, authed in
             if authed {
@@ -919,6 +940,12 @@ struct WelcomeView: View {
                 teardownScene()
             }
         }
-        .onDisappear { teardownScene() }
+        .onDisappear {
+            NotificationCenter.default.post(
+                name: .poplurWelcomePanelVisibilityChanged,
+                object: false
+            )
+            teardownScene()
+        }
     }
 }
