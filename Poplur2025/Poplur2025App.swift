@@ -147,6 +147,7 @@ struct Poplur2025App: App {
     @StateObject private var preLoginMusic = PreLoginMusicPlayer()
     @State private var showAuthTransition = false
     @State private var isWelcomePanelVisible = true
+    @State private var showSplash: Bool
     @Environment(\.scenePhase) private var scenePhase
 
     /// True only while WelcomeView (or its Login/Sign Up pushes) is the visible screen —
@@ -159,6 +160,9 @@ struct Poplur2025App: App {
     init() {
         FirebaseBootstrap.configureIfNeeded()
         _auth = StateObject(wrappedValue: AuthViewModel())
+        _showSplash = State(
+            initialValue: !ProcessInfo.processInfo.arguments.contains("-SkipClaySplash")
+        )
     }
 
     var body: some Scene {
@@ -206,10 +210,15 @@ struct Poplur2025App: App {
                 isWelcomePanelVisible = (note.object as? Bool) ?? true
             }
             .onChange(of: isPreLoginVisible) { _, isVisible in
-                if isVisible {
+                if isVisible && !showSplash {
                     preLoginMusic.start()
                 } else {
                     preLoginMusic.stop()
+                }
+            }
+            .onChange(of: showSplash) { _, isVisible in
+                if !isVisible && isPreLoginVisible {
+                    preLoginMusic.start()
                 }
             }
             .onChange(of: scenePhase) { _, phase in
@@ -218,7 +227,7 @@ struct Poplur2025App: App {
                     preLoginMusic.stop()
                     NotificationCenter.default.post(name: .StopMapAudio, object: nil)
                 case .active:
-                    if isPreLoginVisible {
+                    if isPreLoginVisible && !showSplash {
                         preLoginMusic.start()
                     }
                 @unknown default:
@@ -226,7 +235,7 @@ struct Poplur2025App: App {
                 }
             }
             .onAppear {
-                if isPreLoginVisible {
+                if isPreLoginVisible && !showSplash {
                     preLoginMusic.start()
                 }
                 let appearance = UITabBarAppearance()
@@ -251,6 +260,19 @@ struct Poplur2025App: App {
                     UIOffset(horizontal: -1000, vertical: 0),
                     for: .default
                 )
+            }
+            .overlay {
+                if showSplash {
+                    PoplurClaySplashView {
+                        withAnimation(.easeOut(duration: 0.45)) {
+                            showSplash = false
+                        }
+                    }
+                    .environmentObject(auth)
+                    .ignoresSafeArea()
+                    .transition(.opacity)
+                    .zIndex(100)
+                }
             }
         }
     }

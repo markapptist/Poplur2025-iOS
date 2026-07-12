@@ -26,6 +26,7 @@ final class Poplur2025UITests: XCTestCase {
     func testExample() throws {
         // UI tests must launch the application that they test.
         let app = XCUIApplication()
+        app.launchArguments.append("-SkipClaySplash")
         app.launch()
 
         // Use XCTAssert and related functions to verify your tests produce the correct results.
@@ -34,6 +35,7 @@ final class Poplur2025UITests: XCTestCase {
     @MainActor
     func testCubeThemeTextureAfterSignup() throws {
         let app = XCUIApplication()
+        app.launchArguments.append("-SkipClaySplash")
         app.launch()
 
         let frame = app.windows.firstMatch.frame
@@ -99,6 +101,7 @@ final class Poplur2025UITests: XCTestCase {
     func testFullAppScreenshotSweep() throws {
         continueAfterFailure = true
         let app = XCUIApplication()
+        app.launchArguments.append("-SkipClaySplash")
         app.launch()
 
         var shotIndex = 0

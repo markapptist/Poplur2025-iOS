@@ -28,7 +28,6 @@ private final class WelcomeScene: SKScene {
     // Nodes
     private let dottedOverlayNode = SKNode()
     private let flowerNode = SKNode()
-    private let scallopMaskNode = SKShapeNode()
     private let floor = SKNode()
     private var backgroundNode: SKSpriteNode?
     private var didAnimateBackground = false
@@ -121,7 +120,6 @@ private final class WelcomeScene: SKScene {
         // The ticket artifact already contains the world-map dots and radius
         // rings, so avoid rebuilding hundreds of overlapping SKShapeNodes.
         buildFlower()
-        buildScallopedBottom()
         buildBouncingSignIn()
         layoutAll()
 
@@ -510,36 +508,6 @@ private final class WelcomeScene: SKScene {
 
         flowerNode.addChild(shadow)
         flowerNode.addChild(sprite)
-    }
-
-    private func buildScallopedBottom() {
-        scallopMaskNode.removeFromParent()
-        scallopMaskNode.zPosition = 14
-
-        let width = size.width
-        let height: CGFloat = 18
-        let diameter: CGFloat = 18
-        let spacing: CGFloat = 8
-        let total = Int(ceil((width + spacing) / (diameter + spacing)))
-        let y = height / 2
-
-        // White perforation strip with Poplur-pink circular cuts.
-        let strip = SKShapeNode(rect: CGRect(x: 0, y: 0, width: width, height: height))
-        strip.fillColor = .white
-        strip.strokeColor = .clear
-        strip.lineWidth = 0
-        scallopMaskNode.addChild(strip)
-
-        for i in 0..<total {
-            let x = (CGFloat(i) * (diameter + spacing)) + diameter / 2
-            let cut = SKShapeNode(circleOfRadius: diameter / 2)
-            cut.fillColor = welcomePink
-            cut.strokeColor = .clear
-            cut.position = CGPoint(x: x, y: y)
-            scallopMaskNode.addChild(cut)
-        }
-        scallopMaskNode.position = CGPoint(x: 0, y: 0)
-        addChild(scallopMaskNode)
     }
 
     // MARK: - Sign-in (static)

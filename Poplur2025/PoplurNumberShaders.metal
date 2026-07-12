@@ -77,3 +77,26 @@ using namespace metal;
 
     return half4(half3(boosted), color.a);
 }
+
+// Splash loading text: glossy Poplur pink with a moving highlight band.
+[[ stitchable ]] half4 poplurSplashText(float2 position, half4 color, float time, float intensity) {
+    if (color.a <= 0.01h) return color;
+
+    const float3 pink = float3(0.965, 0.231, 0.604);
+    const float3 highlight = float3(1.000, 0.541, 0.776);
+    const float3 deep = float3(0.788, 0.180, 0.494);
+
+    float vertical = clamp(position.y * 0.010, 0.0, 1.0);
+    float3 body = mix(highlight, deep, vertical);
+    body = mix(body, pink, 0.35);
+
+    float sweep = fract(time / 2.2);
+    float bandPosition = sweep * 520.0 - 60.0;
+    float band = exp(-pow((position.x - bandPosition) / 42.0, 2.0));
+    float pulse = sin(time * 2.4) * 0.5 + 0.5;
+
+    float3 result = body + band * float3(0.55, 0.35, 0.45) + pulse * 0.05;
+    result = mix(result, max(result, highlight), band * 0.6);
+    result = mix(body, result, clamp(intensity, 0.0, 1.0));
+    return half4(half3(result), color.a);
+}
