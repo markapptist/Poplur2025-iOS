@@ -31,8 +31,6 @@ private final class WelcomeScene: SKScene {
     private let floor = SKNode()
     private var backgroundNode: SKSpriteNode?
     private var didAnimateBackground = false
-    private var buttonTextShaders: [SKShader] = []
-    private var reduceMotionObserver: NSObjectProtocol?
 
     // Warm-up gate
     private var didWarmUp = false
@@ -105,12 +103,6 @@ private final class WelcomeScene: SKScene {
 
     required init?(coder: NSCoder) { nil }
 
-    deinit {
-        if let reduceMotionObserver {
-            NotificationCenter.default.removeObserver(reduceMotionObserver)
-        }
-    }
-
     override func didMove(to view: SKView) {
         // Make sure SKView is optimized
         view.ignoresSiblingOrder = true
@@ -129,7 +121,6 @@ private final class WelcomeScene: SKScene {
         // rings, so avoid rebuilding hundreds of overlapping SKShapeNodes.
         buildFlower()
         buildBouncingSignIn()
-        observeReduceMotionChanges()
         layoutAll()
 
         // Warm up the pop sound once to avoid first-play hitch later
@@ -184,11 +175,10 @@ private final class WelcomeScene: SKScene {
 
         guard let texture = backgroundTextures[name] ?? backgroundTextures[defaultBackgroundName] else { return }
 
-        // Good Copy stretches the ticket to the phone frame with a small device-edge inset.
-        // Its artwork already includes the rounded top and scalloped bottom, so preserve the
-        // approved screen proportions rather than aspect-fitting it into a smaller card.
+        // Keep the phone-ratio pink artwork proportional. It covers the viewport and
+        // center-crops on wider iPad layouts instead of stretching horizontally.
         let sceneSize = size
-        let preSize = ticketSize(for: sceneSize)
+        let preSize = ticketSize(for: sceneSize, texture: texture)
         lockedBackgroundSize = preSize
 
         let bg = SKSpriteNode(texture: texture, size: preSize)
@@ -218,7 +208,7 @@ private final class WelcomeScene: SKScene {
 
     private func sizeAndPlaceBackground(_ bg: SKSpriteNode, animateIfNeeded: Bool) {
         let sceneSize = size
-        let idealSize = ticketSize(for: sceneSize)
+        let idealSize = ticketSize(for: sceneSize, texture: bg.texture)
 
         // Keep the size locked during the animation to prevent churn
         if !isAnimatingBackground {
@@ -272,17 +262,22 @@ private final class WelcomeScene: SKScene {
         }
     }
 
-    private func ticketSize(for sceneSize: CGSize) -> CGSize {
-        CGSize(
-            width: max(sceneSize.width - 14, 1),
-            height: max(sceneSize.height * (735.0 / 845.0), 1)
-        )
+    private func ticketSize(for sceneSize: CGSize, texture: SKTexture?) -> CGSize {
+        let sceneSize = CGSize(width: max(sceneSize.width, 1), height: max(sceneSize.height, 1))
+        guard let texture else { return sceneSize }
+        let textureSize = texture.size()
+        guard textureSize.width > 0, textureSize.height > 0 else { return sceneSize }
+
+        let sceneAspect = sceneSize.width / sceneSize.height
+        let textureAspect = textureSize.width / textureSize.height
+        if textureAspect > sceneAspect {
+            return CGSize(width: sceneSize.height * textureAspect, height: sceneSize.height)
+        }
+        return CGSize(width: sceneSize.width, height: sceneSize.width / textureAspect)
     }
 
     private func ticketCenter(for sceneSize: CGSize) -> CGPoint {
-        // The ticket begins 12pt from the top, leaving its scalloped edge above the pink footer.
-        let ticketHeight = ticketSize(for: sceneSize).height
-        return CGPoint(x: sceneSize.width / 2, y: sceneSize.height - 12 - ticketHeight / 2)
+        CGPoint(x: sceneSize.width / 2, y: sceneSize.height / 2)
     }
 
     // Strict sequence: first logo fade, then button fade (and shadow), then sound + confetti
@@ -525,9 +520,9 @@ private final class WelcomeScene: SKScene {
         // Static setup (no physics-driven animation)
         proxy.removeFromParent()
         floor.removeFromParent()
-        buttonTextShaders.removeAll(keepingCapacity: true)
 
         let signupSize = buttonSize
+        let surfaceTexture = buttonSurfaceTexture(size: signupSize)
 
         // Sign In — same white capsule style as Sign Up.
         let signinShadow = SKShapeNode(rectOf: signupSize, cornerRadius: signupSize.height / 2)
@@ -543,10 +538,7 @@ private final class WelcomeScene: SKScene {
         signinNode.zPosition = 21
         signinNode.alpha = 0.0 // start hidden; fade in after background animation
 
-        let signinCapsule = SKShapeNode(rectOf: signupSize, cornerRadius: signupSize.height / 2)
-        signinCapsule.fillColor = .white
-        signinCapsule.strokeColor = UIColor.black.withAlphaComponent(0.08)
-        signinCapsule.lineWidth = 1.5
+        let signinCapsule = SKSpriteNode(texture: surfaceTexture, size: signupSize)
         signinCapsule.zPosition = 0
         signinNode.addChild(signinCapsule)
 
@@ -566,10 +558,7 @@ private final class WelcomeScene: SKScene {
         signupNode.zPosition = 21
         signupNode.alpha = 0.0
 
-        let capsule = SKShapeNode(rectOf: signupSize, cornerRadius: signupSize.height / 2)
-        capsule.fillColor = .white
-        capsule.strokeColor = UIColor.black.withAlphaComponent(0.08)
-        capsule.lineWidth = 1.5
+        let capsule = SKSpriteNode(texture: surfaceTexture, size: signupSize)
         capsule.zPosition = 0
         signupNode.addChild(capsule)
 
@@ -622,14 +611,9 @@ private final class WelcomeScene: SKScene {
     private func makeButtonTextShader(aspectRatio: CGFloat) -> SKShader {
         let source = """
         void main() {
-            // CSS parity: 105deg gradient, 300% background width, and a 3.2s
-            // linear background-position sweep from 100% to -200%.
-            float motion = clamp(u_motion, 0.0, 1.0);
-            float progress = fract(u_time / 3.2);
-            float cssPosition = mix(1.0, -2.0, progress);
-            float animatedPhase = cssPosition * (2.0 / 3.0);
-            float reducedMotionPhase = 0.48 * (2.0 / 3.0);
-            float phase = mix(reducedMotionPhase, animatedPhase, motion);
+            // Static approved shader pose: 105deg gradient at the canonical 48%
+            // background position. There is deliberately no time-based uniform.
+            float phase = 0.48 * (2.0 / 3.0);
             float axis = v_tex_coord.x * 0.965926
                        + (v_tex_coord.y - 0.5) * u_aspect * 0.258819;
             float x = fract(axis / 3.0 + phase);
@@ -656,36 +640,9 @@ private final class WelcomeScene: SKScene {
         """
         let shader = SKShader(source: source)
         shader.addUniform(
-            SKUniform(
-                name: "u_motion",
-                float: UIAccessibility.isReduceMotionEnabled ? 0 : 1
-            )
-        )
-        shader.addUniform(
             SKUniform(name: "u_aspect", float: Float(aspectRatio))
         )
-        buttonTextShaders.append(shader)
         return shader
-    }
-
-    private func observeReduceMotionChanges() {
-        if reduceMotionObserver == nil {
-            reduceMotionObserver = NotificationCenter.default.addObserver(
-                forName: UIAccessibility.reduceMotionStatusDidChangeNotification,
-                object: nil,
-                queue: .main
-            ) { [weak self] _ in
-                self?.updateButtonTextMotionPreference()
-            }
-        }
-        updateButtonTextMotionPreference()
-    }
-
-    private func updateButtonTextMotionPreference() {
-        let motion: Float = UIAccessibility.isReduceMotionEnabled ? 0 : 1
-        for shader in buttonTextShaders {
-            shader.uniformNamed("u_motion")?.floatValue = motion
-        }
     }
 
     private func layoutAll() {
@@ -752,6 +709,94 @@ private final class WelcomeScene: SKScene {
         layer.render(in: ctx)
         let image = UIGraphicsGetImageFromCurrentImageContext() ?? UIImage()
         return SKTexture(image: image)
+    }
+
+    private func buttonSurfaceTexture(size: CGSize) -> SKTexture {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = UIScreen.main.scale
+        format.opaque = false
+
+        let image = UIGraphicsImageRenderer(size: size, format: format).image { context in
+            let cg = context.cgContext
+            let rect = CGRect(origin: .zero, size: size)
+            let insetRect = rect.insetBy(dx: 0.75, dy: 0.75)
+            let radius = insetRect.height / 2
+            let capsule = UIBezierPath(roundedRect: insetRect, cornerRadius: radius)
+
+            cg.saveGState()
+            capsule.addClip()
+
+            let colorSpace = CGColorSpaceCreateDeviceRGB()
+            let baseColors = [
+                UIColor.white.cgColor,
+                UIColor(red: 1.0, green: 0.94, blue: 0.98, alpha: 1.0).cgColor,
+                UIColor(red: 0.88, green: 0.88, blue: 0.92, alpha: 1.0).cgColor,
+            ] as CFArray
+            if let gradient = CGGradient(
+                colorsSpace: colorSpace,
+                colors: baseColors,
+                locations: [0.0, 0.54, 1.0]
+            ) {
+                cg.drawLinearGradient(
+                    gradient,
+                    start: CGPoint(x: size.width * 0.22, y: 0),
+                    end: CGPoint(x: size.width * 0.82, y: size.height),
+                    options: []
+                )
+            }
+
+            let sheenColors = [
+                UIColor.white.withAlphaComponent(0.64).cgColor,
+                UIColor.white.withAlphaComponent(0.0).cgColor,
+            ] as CFArray
+            if let sheen = CGGradient(
+                colorsSpace: colorSpace,
+                colors: sheenColors,
+                locations: [0.0, 1.0]
+            ) {
+                cg.drawLinearGradient(
+                    sheen,
+                    start: CGPoint(x: 0, y: 0),
+                    end: CGPoint(x: size.width * 0.72, y: size.height * 0.72),
+                    options: []
+                )
+            }
+
+            let bottomShadeColors = [
+                UIColor.clear.cgColor,
+                UIColor.black.withAlphaComponent(0.11).cgColor,
+            ] as CFArray
+            if let bottomShade = CGGradient(
+                colorsSpace: colorSpace,
+                colors: bottomShadeColors,
+                locations: [0.45, 1.0]
+            ) {
+                cg.drawLinearGradient(
+                    bottomShade,
+                    start: CGPoint(x: size.width / 2, y: 0),
+                    end: CGPoint(x: size.width / 2, y: size.height),
+                    options: []
+                )
+            }
+
+            cg.restoreGState()
+
+            UIColor.white.withAlphaComponent(0.58).setStroke()
+            let highlight = UIBezierPath(
+                roundedRect: insetRect.insetBy(dx: 8, dy: 6),
+                cornerRadius: max(0, radius - 6)
+            )
+            highlight.lineWidth = 1
+            highlight.stroke()
+
+            UIColor.black.withAlphaComponent(0.10).setStroke()
+            capsule.lineWidth = 1.5
+            capsule.stroke()
+        }
+
+        let texture = SKTexture(image: image)
+        texture.filteringMode = .linear
+        return texture
     }
 
 }
