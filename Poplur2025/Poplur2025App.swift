@@ -76,16 +76,6 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
             CubeSkinStore.shared.syncAppIcon()
         }
 
-        // Claude API key for AI bumper scripts
-        if !Secrets.claudeAPIKey.isEmpty {
-            UserDefaults.standard.set(Secrets.claudeAPIKey, forKey: "poplur_claude_key")
-        }
-
-        // ElevenLabs TTS key — free tier, no card needed (elevenlabs.io)
-        if !Secrets.elevenLabsAPIKey.isEmpty {
-            UserDefaults.standard.set(Secrets.elevenLabsAPIKey, forKey: "poplur_elevenlabs_key")
-        }
-
         return true
     }
 

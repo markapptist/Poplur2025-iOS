@@ -226,9 +226,9 @@ public enum CubeSkin: String, CaseIterable, Identifiable, Codable {
 
     public var alternateAppIconName: String? {
         switch self {
-        case .standard:    return nil
+        case .standard, .clay: return nil
         case .rainbow:     return "AppIconRainbow"
-        case .sparklePink, .clay: return "AppIconSparklePink"
+        case .sparklePink: return "AppIconSparklePink"
         case .gold:        return "AppIconGold"
         case .toy:         return "AppIconToy"
         case .chocolate:   return "AppIconChocolate"
@@ -240,7 +240,7 @@ public enum CubeSkin: String, CaseIterable, Identifiable, Codable {
 
     public var appIconPreviewAssetName: String {
         switch self {
-        case .standard:    return "appicon_default"
+        case .standard, .clay: return "appicon_default"
         default:           return logoAssetName
         }
     }

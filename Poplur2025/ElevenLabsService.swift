@@ -2,7 +2,7 @@ import Foundation
 
 // Shared ElevenLabs TTS service used by both the feed bumper and the map radio host.
 // Free tier: 10,000 characters/month — sign up at https://elevenlabs.io, no card needed.
-// API key lives in Secrets.elevenLabsAPIKey (gitignored).
+// Configuration comes from AppSecrets and is never embedded in source.
 final class ElevenLabsService {
     static let shared = ElevenLabsService()
 
@@ -10,7 +10,7 @@ final class ElevenLabsService {
 
     private var apiKey: String {
         let ud = UserDefaults.standard.string(forKey: "poplur_elevenlabs_key") ?? ""
-        return ud.isEmpty ? Secrets.elevenLabsAPIKey : ud
+        return ud.isEmpty ? AppSecrets.elevenLabsAPIKey : ud
     }
 
     var isConfigured: Bool { !apiKey.isEmpty }
@@ -21,10 +21,10 @@ final class ElevenLabsService {
 
         var id: String {
             switch self {
-            case .english: return Secrets.elevenLabsVoiceID
+            case .english: return AppSecrets.elevenLabsVoiceID
             case .french:
-                let id = Secrets.elevenLabsFrenchVoiceID
-                return id.isEmpty ? Secrets.elevenLabsVoiceID : id
+                let id = AppSecrets.elevenLabsFrenchVoiceID
+                return id.isEmpty ? AppSecrets.elevenLabsVoiceID : id
             }
         }
     }

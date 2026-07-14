@@ -108,6 +108,6 @@ final class PoplurGameService {
     }
 
     private func apiKey() -> String? {
-        UserDefaults.standard.string(forKey: "poplur_claude_key") ?? Secrets.claudeAPIKey
+        AppSecrets.claudeAPIKey
     }
 }

@@ -10,7 +10,7 @@ import SceneKit
 
 struct PoplurEarthIntroView: UIViewRepresentable {
     func makeUIView(context: Context) -> UIView {
-        let token = Secrets.mapboxToken
+        let token = AppSecrets.mapboxToken
         if token.isEmpty {
             return makeFallbackView()
         }
