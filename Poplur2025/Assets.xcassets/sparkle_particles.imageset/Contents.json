@@ -1,0 +1,13 @@
+{
+  "images" : [
+    {
+      "filename" : "sparkle_particles.png",
+      "idiom" : "universal",
+      "scale" : "1x"
+    }
+  ],
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  }
+}

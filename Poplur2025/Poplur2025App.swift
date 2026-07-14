@@ -147,6 +147,7 @@ struct Poplur2025App: App {
     @StateObject private var preLoginMusic = PreLoginMusicPlayer()
     @State private var showAuthTransition = false
     @State private var isWelcomePanelVisible = true
+    @State private var showSplash = true
     @Environment(\.scenePhase) private var scenePhase
 
     /// True only while WelcomeView (or its Login/Sign Up pushes) is the visible screen —
@@ -206,10 +207,16 @@ struct Poplur2025App: App {
                 isWelcomePanelVisible = (note.object as? Bool) ?? true
             }
             .onChange(of: isPreLoginVisible) { _, isVisible in
-                if isVisible {
+                if isVisible && !showSplash {
                     preLoginMusic.start()
                 } else {
                     preLoginMusic.stop()
+                }
+            }
+            .onChange(of: showSplash) { _, splashing in
+                // once the splash clears, start pre-login music if we landed on Welcome
+                if !splashing && isPreLoginVisible {
+                    preLoginMusic.start()
                 }
             }
             .onChange(of: scenePhase) { _, phase in
@@ -218,7 +225,7 @@ struct Poplur2025App: App {
                     preLoginMusic.stop()
                     NotificationCenter.default.post(name: .StopMapAudio, object: nil)
                 case .active:
-                    if isPreLoginVisible {
+                    if isPreLoginVisible && !showSplash {
                         preLoginMusic.start()
                     }
                 @unknown default:
@@ -226,7 +233,7 @@ struct Poplur2025App: App {
                 }
             }
             .onAppear {
-                if isPreLoginVisible {
+                if isPreLoginVisible && !showSplash {
                     preLoginMusic.start()
                 }
                 let appearance = UITabBarAppearance()
@@ -252,6 +259,18 @@ struct Poplur2025App: App {
                     for: .default
                 )
             }
+            // Cold-launch clay splash: plays over everything, then routes underneath.
+            .overlay {
+                if showSplash {
+                    PoplurClaySplashView(onFinished: {
+                        withAnimation(.easeOut(duration: 0.45)) { showSplash = false }
+                    })
+                    .environmentObject(auth)
+                    .ignoresSafeArea()
+                    .transition(.opacity)
+                    .zIndex(100)
+                }
+            }
         }
     }
 
@@ -259,13 +278,10 @@ struct Poplur2025App: App {
     private var authenticatedContent: some View {
         ZStack {
             if auth.isResolvingAuthState {
-                // Pre-login: spinning cube centered on white
-                ZStack {
-                    Color.white.ignoresSafeArea()
-                    LoginCubeLoadingView()
-                        .frame(width: 300, height: 300)
-                }
-                .transition(.opacity)
+                // The clay splash is the only launch loader now — no white spinning-cube cover.
+                // Auth resolves behind the splash, so this dark placeholder is never actually seen.
+                Color(red: 0.039, green: 0.027, blue: 0.035).ignoresSafeArea()
+                    .transition(.opacity)
             } else if showAuthTransition {
                 // Post-login: auth transition video
                 LoadingTransitionVideoView()

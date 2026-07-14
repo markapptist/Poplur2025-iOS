@@ -34,6 +34,7 @@ final class Poplur2025UITests: XCTestCase {
     @MainActor
     func testCubeThemeTextureAfterSignup() throws {
         let app = XCUIApplication()
+        app.launchArguments += ["-SkipWalletIntro"]
         app.launch()
 
         let frame = app.windows.firstMatch.frame
@@ -99,6 +100,7 @@ final class Poplur2025UITests: XCTestCase {
     func testFullAppScreenshotSweep() throws {
         continueAfterFailure = true
         let app = XCUIApplication()
+        app.launchArguments += ["-SkipWalletIntro"]
         app.launch()
 
         var shotIndex = 0
