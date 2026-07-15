@@ -109,16 +109,20 @@ struct SignUpView: View {
                 AuthConfettiBackground()
             }
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
-                    header
-                    signupCube
-                    signupStepContent
-                    walkthroughControls
+            if signupStep == .accountType {
+                accountTypeCarouselPage
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 22) {
+                        header
+                        signupCube
+                        signupStepContent
+                        walkthroughControls
+                    }
+                    .padding(.horizontal, 22)
+                    .padding(.top, 28)
+                    .padding(.bottom, 44)
                 }
-                .padding(.horizontal, 22)
-                .padding(.top, 28)
-                .padding(.bottom, 44)
             }
         }
         .navigationBarTitleDisplayMode(.inline)
@@ -190,6 +194,78 @@ struct SignUpView: View {
         }
     }
 
+    /// The first signup step is a single carousel page. The two flexible gaps are peers, so the
+    /// account choices remain visually centered between the logo and the navigation cube across
+    /// compact and tall phones instead of drifting toward either edge.
+    private var accountTypeCarouselPage: some View {
+        GeometryReader { proxy in
+            ScrollView {
+                VStack(spacing: 0) {
+                    Image("logo")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 88, height: 88)
+                        .accessibilityLabel("Poplur")
+
+                    Spacer(minLength: 22)
+
+                    accountTypeCarouselUnit
+
+                    Spacer(minLength: 22)
+
+                    accountTypeNavigationCube
+                }
+                .padding(.horizontal, 22)
+                .padding(.top, 22)
+                .padding(.bottom, 24)
+                .frame(maxWidth: .infinity, minHeight: proxy.size.height)
+            }
+        }
+    }
+
+    private var accountTypeCarouselUnit: some View {
+        VStack(alignment: .center, spacing: 12) {
+            HStack(spacing: 10) {
+                HStack(spacing: 5) {
+                    ForEach(0..<SignupStep.allCases.count, id: \.self) { index in
+                        Capsule(style: .continuous)
+                            .fill(index == signupStep.rawValue ? Color.white : Color.white.opacity(0.42))
+                            .frame(width: index == signupStep.rawValue ? 18 : 7, height: 7)
+                    }
+                }
+
+                Text("1 / \(SignupStep.allCases.count)")
+                    .font(.system(size: 11, weight: .black, design: .rounded))
+                    .foregroundStyle(Color.white.opacity(0.82))
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Step 1 of \(SignupStep.allCases.count)")
+
+            Text("Choose Account")
+                .font(.system(size: 27, weight: .black, design: .rounded))
+                .foregroundStyle(.white)
+                .poplurTextShader(intensity: 0.9)
+
+            Text("Personal user account, or a verified business account.")
+                .font(.system(size: 14, weight: .bold, design: .rounded))
+                .foregroundStyle(Color.white.opacity(0.82))
+                .multilineTextAlignment(.center)
+
+            accountTypeSelection
+                .padding(.top, 2)
+        }
+        .frame(maxWidth: 430)
+    }
+
+    private var accountTypeNavigationCube: some View {
+        LoginCubeView(
+            onBack: { if let onBack { onBack() } else { dismiss() } },
+            onForward: advanceSignupStep
+        )
+        .frame(width: 132, height: 132)
+        .accessibilityLabel("Swipe between check and back, then tap to continue or go back")
+    }
+
     private var signupCube: some View {
         HStack {
             Spacer()
@@ -230,7 +306,11 @@ struct SignUpView: View {
 
     private var walkthroughControls: some View {
         HStack(spacing: 12) {
-            if signupStep != .accountType {
+            if signupStep == .accountType {
+                Spacer()
+                accountTypeNavigationCube
+                Spacer()
+            } else {
                 Button {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.88)) {
                         errorMessage = nil
@@ -242,29 +322,29 @@ struct SignUpView: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.black.opacity(0.72))
-            }
 
-            Spacer()
+                Spacer()
 
-            Button(action: advanceSignupStep) {
-                HStack(spacing: 10) {
-                    if isLoading {
-                        ProgressView()
-                            .tint(.white)
-                    } else {
-                        Image(systemName: nextActionIcon)
-                            .poplurIconShader()
+                Button(action: advanceSignupStep) {
+                    HStack(spacing: 10) {
+                        if isLoading {
+                            ProgressView()
+                                .tint(.white)
+                        } else {
+                            Image(systemName: nextActionIcon)
+                                .poplurIconShader()
+                        }
+                        Text(nextActionTitle)
                     }
-                    Text(nextActionTitle)
+                    .font(.system(size: 16, weight: .black, design: .rounded))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 13)
+                    .background(Capsule().fill(DS.Color.accent))
+                    .shadow(color: DS.Color.accent.opacity(0.30), radius: 10, x: 0, y: 5)
                 }
-                .font(.system(size: 16, weight: .black, design: .rounded))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 20)
-                .padding(.vertical, 13)
-                .background(Capsule().fill(DS.Color.accent))
-                .shadow(color: DS.Color.accent.opacity(0.30), radius: 10, x: 0, y: 5)
+                .disabled(isLoading)
             }
-            .disabled(isLoading)
         }
     }
 
@@ -285,21 +365,19 @@ struct SignUpView: View {
     private var accountTypeSelection: some View {
         VStack(spacing: 14) {
             accountTypeCard(
-                title: "User",
+                title: "Personal",
                 subtitle: "Personal profile, normal onboarding, post as yourself.",
-                systemImage: "person.crop.circle.fill",
                 type: .user
             )
             accountTypeCard(
                 title: "Business",
                 subtitle: "Business profile, map location, verification, badges, and business-only features.",
-                systemImage: "storefront.fill",
                 type: .business
             )
         }
     }
 
-    private func accountTypeCard(title: String, subtitle: String, systemImage: String, type: PoplurAccountType) -> some View {
+    private func accountTypeCard(title: String, subtitle: String, type: PoplurAccountType) -> some View {
         Button {
             withAnimation(.spring(response: 0.35, dampingFraction: 0.86)) {
                 accountType = type
@@ -308,13 +386,10 @@ struct SignUpView: View {
                 }
                 errorMessage = nil
                 cubeSpinToken += 1
-                signupStep = .account
             }
         } label: {
             HStack(spacing: 14) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 26, weight: .black))
-                    .foregroundStyle(type == .business ? DS.Color.accent : Color(red: 0.2, green: 0.78, blue: 0.35))
+                SignupAccount3DIcon(kind: type == .business ? .building : .profile)
                     .frame(width: 52, height: 52)
                     .background(
                         type == .business ? DS.Color.pinkCard : Color(red: 0.87, green: 0.97, blue: 0.88),
@@ -325,23 +400,24 @@ struct SignUpView: View {
                     Text(title)
                         .font(DS.Font.heading(22))
                         .foregroundStyle(DS.Color.textPrimary)
+                        .poplurTextShader(intensity: 0.9)
                     Text(subtitle)
                         .font(DS.Font.caption())
                         .foregroundStyle(DS.Color.textSecondary)
                         .multilineTextAlignment(.leading)
                 }
                 Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 15, weight: .heavy))
-                    .foregroundStyle(DS.Color.textSecondary)
+                Image(systemName: accountType == type ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 18, weight: .heavy))
+                    .foregroundStyle(DS.Color.accent)
             }
             .padding(18)
             .poplurCard()
             .overlay(
                 RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous)
                     .stroke(
-                        type == .business ? DS.Color.accent.opacity(0.35) : Color(red: 0.2, green: 0.78, blue: 0.35).opacity(0.35),
-                        lineWidth: 1.5
+                        accountType == type ? DS.Color.accent.opacity(0.75) : DS.Color.textSecondary.opacity(0.25),
+                        lineWidth: accountType == type ? 2 : 1.5
                     )
             )
         }
@@ -789,6 +865,47 @@ struct SignUpView: View {
         focusedField = nil
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
+}
+
+private struct SignupAccount3DIcon: UIViewRepresentable {
+    enum Kind { case profile, building }
+    let kind: Kind
+
+    func makeUIView(context: Context) -> SCNView {
+        let view = SCNView()
+        view.backgroundColor = .clear
+        view.autoenablesDefaultLighting = true
+        view.allowsCameraControl = false
+        view.antialiasingMode = .multisampling4X
+
+        let scene = SCNScene()
+        let camera = SCNNode()
+        camera.camera = SCNCamera()
+        camera.camera?.fieldOfView = 35
+        camera.position = SCNVector3(0, 0, 3.2)
+        scene.rootNode.addChildNode(camera)
+
+        let ambient = SCNNode()
+        ambient.light = SCNLight()
+        ambient.light?.type = .ambient
+        ambient.light?.intensity = 520
+        scene.rootNode.addChildNode(ambient)
+
+        let assetName = kind == .profile ? "MarkHead_TalkingRig" : "zoom_buildings"
+        let directories = kind == .profile ? ["", "Models"] : ["", "ClayMapWeb", "SignupModels"]
+        if let url = RuntimeGLBLoader.bundledURL(named: assetName, candidateSubdirectories: directories),
+           let loaded = RuntimeGLBLoader.loadScene(from: url, label: "signup_\(assetName)") {
+            let content = SCNNode()
+            loaded.rootNode.childNodes.forEach { content.addChildNode($0.clone()) }
+            RuntimeGLBLoader.normalize(content, targetExtent: 1.55)
+            content.eulerAngles = SCNVector3(-0.12, kind == .building ? -0.55 : 0.2, 0)
+            scene.rootNode.addChildNode(content)
+        }
+        view.scene = scene
+        return view
+    }
+
+    func updateUIView(_ uiView: SCNView, context: Context) {}
 }
 
 private struct FlowLayout<Content: View>: View {
