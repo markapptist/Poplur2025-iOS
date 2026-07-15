@@ -48,7 +48,11 @@ final class PoplurEQSync {
     func end(_ lane: Lane) {
         let changed = withLock { $0.activeLanes.remove(lane) != nil }
         if changed {
-            if lane == .feedBumper || lane == .mapRadio {
+            // Voice overlays share the playback session already used by Feed and Map.
+            // Re-applying that category as an overlay restarts the audio I/O path
+            // and is heard as a skip. Wake-word recognition restores its session
+            // explicitly after the microphone is stopped.
+            if lane == .feedBumper && !isActive(.feedVideo) {
                 restorePlaybackSessionAfterRecognition()
             }
             notifyChanged()
@@ -112,6 +116,14 @@ final class PoplurEQSync {
             state.lastTransientSoundAt = now
             return true
         }
+    }
+
+    /// Ensures a short in-app effect can play without changing the active media
+    /// session. Category/mode changes restart the audio I/O path and briefly cut Feed
+    /// playback, so preserve the current app-audio role whenever one is active.
+    func prepareAudioSessionForTransientSound() {
+        guard !isAppAudioActive else { return }
+        configureAudioSession(for: .ambientPlayback)
     }
 
     func configureAudioSession(for role: AudioSessionRole, force: Bool = false) {
