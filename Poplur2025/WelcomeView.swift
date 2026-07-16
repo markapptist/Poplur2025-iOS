@@ -26,11 +26,12 @@ private final class WelcomeScene: SKScene {
     let coordinator: Coordinator
 
     // Nodes
-    private let dottedOverlayNode = SKNode()
+    private let worldMapNode = SKNode()
     private let flowerNode = SKNode()
     private let floor = SKNode()
     private var backgroundNode: SKSpriteNode?
     private var didAnimateBackground = false
+    private var reduceMotion: Bool
 
     // Warm-up gate
     private var didWarmUp = false
@@ -90,8 +91,9 @@ private final class WelcomeScene: SKScene {
     private var isAnimatingBackground = false
     private var lockedBackgroundSize: CGSize?
 
-    init(size: CGSize, coordinator: Coordinator) {
+    init(size: CGSize, coordinator: Coordinator, reduceMotion: Bool) {
         self.coordinator = coordinator
+        self.reduceMotion = reduceMotion
         super.init(size: size)
         scaleMode = .resizeFill
         backgroundColor = welcomePink
@@ -117,8 +119,7 @@ private final class WelcomeScene: SKScene {
             self?.buildBackground(using: self?.defaultBackgroundName ?? "")
             // Do not animate here; we wait for warm-up in update(_:)
         }
-        // The ticket artifact already contains the world-map dots and radius
-        // rings, so avoid rebuilding hundreds of overlapping SKShapeNodes.
+        buildWorldMapOverlay()
         buildFlower()
         buildBouncingSignIn()
         layoutAll()
@@ -429,45 +430,195 @@ private final class WelcomeScene: SKScene {
             lockedBackgroundSize = nil // allow recompute to new ideal size
             sizeAndPlaceBackground(bg, animateIfNeeded: false)
         }
+        buildWorldMapOverlay()
         layoutAll()
+    }
+
+    func setReduceMotion(_ enabled: Bool) {
+        guard reduceMotion != enabled else { return }
+        reduceMotion = enabled
+        buildWorldMapOverlay()
     }
 
     // MARK: - Foreground Nodes
 
-    private func buildDottedOverlay() {
-        dottedOverlayNode.removeAllChildren()
-        dottedOverlayNode.zPosition = 12
-        addChild(dottedOverlayNode)
+    /// A portrait-filling dotted world map in normalized, top-origin coordinates.
+    /// The polygons intentionally span almost the entire canvas so the map remains
+    /// recognizable behind the Welcome foreground on both iPhone and iPad.
+    private static let normalizedContinents: [[CGPoint]] = [
+        // North America
+        [CGPoint(x: 0.02, y: 0.20), CGPoint(x: 0.06, y: 0.12),
+         CGPoint(x: 0.13, y: 0.07), CGPoint(x: 0.20, y: 0.10),
+         CGPoint(x: 0.25, y: 0.16), CGPoint(x: 0.31, y: 0.15),
+         CGPoint(x: 0.34, y: 0.22), CGPoint(x: 0.29, y: 0.28),
+         CGPoint(x: 0.25, y: 0.30), CGPoint(x: 0.22, y: 0.38),
+         CGPoint(x: 0.17, y: 0.43), CGPoint(x: 0.13, y: 0.37),
+         CGPoint(x: 0.09, y: 0.33), CGPoint(x: 0.04, y: 0.29)],
+        // Greenland
+        [CGPoint(x: 0.27, y: 0.04), CGPoint(x: 0.34, y: 0.05),
+         CGPoint(x: 0.37, y: 0.12), CGPoint(x: 0.33, y: 0.18),
+         CGPoint(x: 0.28, y: 0.14)],
+        // South America
+        [CGPoint(x: 0.17, y: 0.42), CGPoint(x: 0.23, y: 0.39),
+         CGPoint(x: 0.29, y: 0.44), CGPoint(x: 0.31, y: 0.51),
+         CGPoint(x: 0.29, y: 0.59), CGPoint(x: 0.28, y: 0.68),
+         CGPoint(x: 0.25, y: 0.78), CGPoint(x: 0.21, y: 0.87),
+         CGPoint(x: 0.19, y: 0.77), CGPoint(x: 0.17, y: 0.67),
+         CGPoint(x: 0.16, y: 0.56), CGPoint(x: 0.14, y: 0.48)],
+        // Europe
+        [CGPoint(x: 0.42, y: 0.23), CGPoint(x: 0.46, y: 0.18),
+         CGPoint(x: 0.51, y: 0.18), CGPoint(x: 0.56, y: 0.22),
+         CGPoint(x: 0.54, y: 0.28), CGPoint(x: 0.49, y: 0.30),
+         CGPoint(x: 0.44, y: 0.28)],
+        // Africa
+        [CGPoint(x: 0.42, y: 0.32), CGPoint(x: 0.49, y: 0.29),
+         CGPoint(x: 0.56, y: 0.33), CGPoint(x: 0.59, y: 0.42),
+         CGPoint(x: 0.56, y: 0.53), CGPoint(x: 0.53, y: 0.63),
+         CGPoint(x: 0.49, y: 0.70), CGPoint(x: 0.45, y: 0.62),
+         CGPoint(x: 0.42, y: 0.52), CGPoint(x: 0.39, y: 0.41)],
+        // Asia
+        [CGPoint(x: 0.52, y: 0.18), CGPoint(x: 0.61, y: 0.11),
+         CGPoint(x: 0.71, y: 0.08), CGPoint(x: 0.82, y: 0.11),
+         CGPoint(x: 0.91, y: 0.17), CGPoint(x: 0.98, y: 0.27),
+         CGPoint(x: 0.95, y: 0.35), CGPoint(x: 0.87, y: 0.39),
+         CGPoint(x: 0.82, y: 0.45), CGPoint(x: 0.75, y: 0.41),
+         CGPoint(x: 0.69, y: 0.36), CGPoint(x: 0.62, y: 0.35),
+         CGPoint(x: 0.57, y: 0.29), CGPoint(x: 0.53, y: 0.26)],
+        // South-east Asia
+        [CGPoint(x: 0.67, y: 0.40), CGPoint(x: 0.74, y: 0.42),
+         CGPoint(x: 0.81, y: 0.47), CGPoint(x: 0.85, y: 0.54),
+         CGPoint(x: 0.81, y: 0.59), CGPoint(x: 0.75, y: 0.54),
+         CGPoint(x: 0.70, y: 0.51), CGPoint(x: 0.66, y: 0.46)],
+        // Australia
+        [CGPoint(x: 0.76, y: 0.65), CGPoint(x: 0.83, y: 0.61),
+         CGPoint(x: 0.91, y: 0.64), CGPoint(x: 0.96, y: 0.71),
+         CGPoint(x: 0.92, y: 0.80), CGPoint(x: 0.85, y: 0.83),
+         CGPoint(x: 0.78, y: 0.77)],
+        // Japan
+        [CGPoint(x: 0.89, y: 0.29), CGPoint(x: 0.91, y: 0.26),
+         CGPoint(x: 0.93, y: 0.34), CGPoint(x: 0.90, y: 0.39)],
+        // Madagascar
+        [CGPoint(x: 0.58, y: 0.62), CGPoint(x: 0.60, y: 0.59),
+         CGPoint(x: 0.62, y: 0.70), CGPoint(x: 0.59, y: 0.77)],
+    ]
 
-        let insetTop: CGFloat = 24
-        let overlayWidth = min(600, size.width - 48)
-        let overlayHeight: CGFloat = 640 - insetTop - 18
-        let overlayMinY = max(size.height - 640 + insetTop, 0)
-        let overlayRect = CGRect(x: (size.width - overlayWidth)/2,
-                                 y: overlayMinY,
-                                 width: overlayWidth,
-                                 height: max(0, overlayHeight))
+    private func buildWorldMapOverlay() {
+        guard size.width > 1, size.height > 1 else { return }
 
-        let dotSize: CGFloat = 6
-        let spacingX: CGFloat = 10
-        let spacingY: CGFloat = 12
-        let cols = max(0, Int(overlayRect.width / (dotSize + spacingX)))
-        let rows = max(0, Int(overlayRect.height / (dotSize + spacingY)))
+        worldMapNode.removeFromParent()
+        worldMapNode.removeAllActions()
+        worldMapNode.removeAllChildren()
+        worldMapNode.zPosition = -90
+        addChild(worldMapNode)
 
-        for r in 0..<rows {
-            for c in 0..<cols {
-                let circle = SKShapeNode(circleOfRadius: dotSize/2)
-                let opacity: CGFloat = ((r + c) % 7 == 0) ? 0.9 : 0.35
-                circle.fillColor = UIColor(white: 1.0, alpha: opacity)
-                circle.strokeColor = .clear
-                let x = overlayRect.minX + CGFloat(c) * (dotSize + spacingX) + dotSize
-                let y = overlayRect.minY + CGFloat(r) * (dotSize + spacingY) + dotSize
-                circle.position = CGPoint(x: x, y: y)
-                circle.zPosition = 0
-                dottedOverlayNode.addChild(circle)
+        // One path renders every muted land dot. Only the sparse bright subset gets
+        // individual nodes, keeping the continuously animated node count modest.
+        let spacing = min(max(size.width / 42, 8), 15)
+        let radius = min(max(spacing * 0.22, 1.7), 3.1)
+        let columns = Int(ceil(size.width / spacing))
+        let rows = Int(ceil(size.height / spacing))
+        let basePath = CGMutablePath()
+        let highlights = SKNode()
+        highlights.name = "worldMapHighlights"
+        highlights.zPosition = 1
+
+        for row in 0...rows {
+            let topY = CGFloat(row) * spacing
+            let normalizedY = topY / size.height
+            guard normalizedY >= 0.04, normalizedY <= 0.91 else { continue }
+
+            for column in 0...columns {
+                let x = CGFloat(column) * spacing
+                let normalizedPoint = CGPoint(x: x / size.width, y: normalizedY)
+                guard Self.normalizedContinents.contains(where: {
+                    Self.contains(normalizedPoint, in: $0)
+                }) else { continue }
+
+                let scenePoint = CGPoint(x: x, y: size.height - topY)
+                basePath.addEllipse(in: CGRect(
+                    x: scenePoint.x - radius,
+                    y: scenePoint.y - radius,
+                    width: radius * 2,
+                    height: radius * 2
+                ))
+
+                let highlightHash = (row * 73 + column * 151 + row * column * 19) % 41
+                guard highlightHash < 4 else { continue }
+
+                let dot = SKShapeNode(circleOfRadius: radius * 1.12)
+                dot.position = scenePoint
+                dot.fillColor = .white
+                dot.strokeColor = .clear
+                dot.glowWidth = radius * 1.2
+                dot.blendMode = .add
+                dot.zPosition = 1
+                highlights.addChild(dot)
+                configureBlink(for: dot, row: row, column: column)
             }
         }
-        dottedOverlayNode.alpha = 0.25
+
+        let baseDots = SKShapeNode(path: basePath)
+        baseDots.name = "worldMapBaseDots"
+        baseDots.fillColor = UIColor(white: 1, alpha: 0.28)
+        baseDots.strokeColor = .clear
+        baseDots.lineWidth = 0
+        baseDots.zPosition = 0
+        worldMapNode.addChild(baseDots)
+        worldMapNode.addChild(highlights)
+    }
+
+    private func configureBlink(for dot: SKShapeNode, row: Int, column: Int) {
+        dot.removeAllActions()
+        dot.setScale(1)
+
+        guard !reduceMotion else {
+            dot.alpha = 0.95
+            return
+        }
+
+        let phaseSeed = (row * 37 + column * 97 + row * column * 11) % 100
+        let periodSeed = (row * 29 + column * 43 + row * column * 7) % 70
+        let phase = Double(phaseSeed) / 100 * 1.6
+        let rest = 0.55 + Double(periodSeed) / 100
+        dot.alpha = 0.42
+
+        let brighten = SKAction.group([
+            .fadeAlpha(to: 1, duration: 0.34),
+            .scale(to: 1.16, duration: 0.34),
+        ])
+        brighten.timingMode = .easeInEaseOut
+        let dim = SKAction.group([
+            .fadeAlpha(to: 0.36, duration: 0.48),
+            .scale(to: 0.94, duration: 0.48),
+        ])
+        dim.timingMode = .easeInEaseOut
+        let pulse = SKAction.sequence([
+            brighten,
+            .wait(forDuration: 0.20),
+            dim,
+            .wait(forDuration: rest),
+        ])
+        dot.run(.sequence([
+            .wait(forDuration: phase),
+            .repeatForever(pulse),
+        ]), withKey: "worldMapBlink")
+    }
+
+    private static func contains(_ point: CGPoint, in polygon: [CGPoint]) -> Bool {
+        guard polygon.count > 2 else { return false }
+        var isInside = false
+        var previous = polygon.count - 1
+
+        for current in polygon.indices {
+            let a = polygon[current]
+            let b = polygon[previous]
+            if (a.y > point.y) != (b.y > point.y) {
+                let intersectionX = (b.x - a.x) * (point.y - a.y) / (b.y - a.y) + a.x
+                if point.x < intersectionX { isInside.toggle() }
+            }
+            previous = current
+        }
+        return isInside
     }
 
     private func buildFlower() {
@@ -914,6 +1065,7 @@ struct WelcomeView: View {
     @EnvironmentObject private var auth: AuthViewModel
     @StateObject private var coordinator = WelcomeScene.Coordinator()
     @EnvironmentObject private var stripeCoordinator: StripeTransitionCoordinator
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var scene: WelcomeScene?
     @State private var cubeVisible = false
@@ -933,7 +1085,11 @@ struct WelcomeView: View {
 
     private func ensureScene(size: CGSize) -> WelcomeScene {
         if let s = scene { return s }
-        let s = WelcomeScene(size: size, coordinator: coordinator)
+        let s = WelcomeScene(
+            size: size,
+            coordinator: coordinator,
+            reduceMotion: reduceMotion
+        )
         scene = s
         return s
     }
@@ -970,6 +1126,9 @@ struct WelcomeView: View {
                 .background(Color(red: 1, green: 45.0 / 255.0, blue: 150.0 / 255.0))
                 .ignoresSafeArea()
                 .onChange(of: geo.size) { _, newSize in s.resize(to: newSize) }
+                .onChange(of: reduceMotion) { _, enabled in
+                    s.setReduceMotion(enabled)
+                }
             }
             .opacity(authPanel == .welcome ? 1 : 0)
             .allowsHitTesting(authPanel == .welcome)
