@@ -1,248 +1,323 @@
-import SwiftUI
 import AVFoundation
+import SwiftUI
 
-// MARK: - Launch splash
-
-/// Cold-launch splash: plays the clay intro clip full-bleed (1:1 device) with the
-/// app's pop sound, then raises a centered loading bar whose lines are drawn with a
-/// Metal shader. Stays up until auth has resolved, then routes underneath (Feed/Welcome).
+/// Cold-launch splash matching the canonical Good Copy: a looping clay scene with
+/// an always-visible shader-text loader and independently animated barber-pole fill.
 struct PoplurClaySplashView: View {
     @EnvironmentObject private var auth: AuthViewModel
-    var onFinished: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    @State private var lines: [String] = SplashLoadingLines.sessionLines()
-    @State private var currentMessage = ""
-    @State private var showLoader = false
-    @State private var progress: CGFloat = 0
-    @State private var authResolved = false
-    @State private var stopMessages = false
-    @State private var didStartLoader = false
+    let onFinished: () -> Void
+
+    @State private var progress: CGFloat = 0.04
+    @State private var messageIndex = 0
+    @State private var messageOpacity = 1.0
     @State private var didFinish = false
 
-    private let introDuration: Double = 2.83
-    private let fillDuration: Double = 3.2   // cosmetic slow creep — does NOT gate routing
-    private let minVisible: Double = 1.1     // brief floor so the slow fill is actually seen
+    private let minimumVisibleDuration: TimeInterval = 2.8
+    private let maximumAuthWait: TimeInterval = 8.0
+
+    private let messages = [
+        "Warming up the pinetrees",
+        "Rolling out the clay roads",
+        "Teaching the pin to drop",
+        "Sprinkling pink stars",
+        "Kneading the little mountains",
+        "Waking up the tugboat",
+        "Polishing the big P",
+        "Fluffing the clouds",
+    ]
 
     var body: some View {
-        ZStack {
-            Color(red: 0.039, green: 0.027, blue: 0.035).ignoresSafeArea()
+        GeometryReader { geometry in
+            let loaderWidth = min(geometry.size.width * 0.58, 215)
 
-            SplashVideoPlayer(resourceName: "poplur_splash", onEnded: startLoader)
-                .ignoresSafeArea()
+            ZStack {
+                Color(red: 0.039, green: 0.027, blue: 0.035)
 
-            if showLoader {
-                // soft radial scrim so the shader lines read over the busy clay scene
+                SplashLoopingVideoPlayer(resourceName: "poplur_splash")
+                    .ignoresSafeArea()
+
                 RadialGradient(
-                    colors: [Color.black.opacity(0.72), Color.black.opacity(0.30), .clear],
-                    center: .center, startRadius: 8, endRadius: 260
+                    colors: [Color.black.opacity(0.55), Color.black.opacity(0.20), .clear],
+                    center: UnitPoint(x: 0.5, y: 0.56),
+                    startRadius: 8,
+                    endRadius: max(geometry.size.width, geometry.size.height) * 0.45
                 )
                 .ignoresSafeArea()
-                .transition(.opacity)
+                .allowsHitTesting(false)
 
-                loader
-                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+                loader(width: loaderWidth)
+                    .position(
+                        x: geometry.size.width / 2,
+                        y: geometry.size.height * 0.68
+                    )
             }
+            .frame(width: geometry.size.width, height: geometry.size.height)
         }
-        .onAppear(perform: setup)
-        .onChange(of: auth.isResolvingAuthState) { _, resolving in
-            if !resolving { authResolved = true }
+        .background(Color(red: 0.039, green: 0.027, blue: 0.035))
+        .ignoresSafeArea()
+        .task {
+            await runProgressSequence()
         }
+        .task {
+            await rotateMessages()
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Loading Poplur")
+        .accessibilityValue(messages[messageIndex])
     }
 
-    private var loader: some View {
-        VStack(spacing: 15) {
-            Text(currentMessage)
-                .font(.system(size: 17, weight: .heavy, design: .rounded))
-                .multilineTextAlignment(.center)
+    private func loader(width: CGFloat) -> some View {
+        VStack(spacing: 16) {
+            Text(messages[messageIndex])
+                .font(.system(size: 20, weight: .heavy, design: .rounded))
                 .lineLimit(1)
-                .minimumScaleFactor(0.7)
+                .truncationMode(.tail)
+                .frame(width: width, height: 26)
                 .modifier(SplashShaderText())
-                .shadow(color: Color(red: 0.96, green: 0.23, blue: 0.60).opacity(0.5), radius: 12)
-                .id(currentMessage)
-                .transition(.opacity)
+                .shadow(
+                    color: Color(red: 0.957, green: 0.231, blue: 0.600).opacity(0.5),
+                    radius: 12
+                )
+                .opacity(messageOpacity)
 
-            GeometryReader { geo in
+            GeometryReader { track in
                 ZStack(alignment: .leading) {
-                    Capsule().fill(Color.white.opacity(0.14))
                     Capsule()
-                        .fill(LinearGradient(
-                            colors: [Color(red: 1, green: 0.54, blue: 0.78),
-                                     Color(red: 0.96, green: 0.23, blue: 0.60),
-                                     Color(red: 0.79, green: 0.18, blue: 0.49)],
-                            startPoint: .leading, endPoint: .trailing))
-                        .frame(width: max(0, geo.size.width * progress))
+                        .fill(Color(red: 0.110, green: 0.031, blue: 0.071).opacity(0.55))
+
+                    SplashBarberPoleFill(reduceMotion: reduceMotion)
+                        .frame(width: max(0, track.size.width * progress))
+                        .clipShape(Capsule())
+                        .shadow(
+                            color: Color(red: 0.957, green: 0.231, blue: 0.600).opacity(0.32),
+                            radius: 8
+                        )
+                }
+                .clipShape(Capsule())
+                .overlay {
+                    Capsule()
+                        .stroke(
+                            Color(red: 0.957, green: 0.231, blue: 0.600).opacity(0.35),
+                            lineWidth: 1
+                        )
                 }
             }
-            .frame(width: min(340, UIScreen.main.bounds.width * 0.82), height: 14)
-            .overlay(Capsule().strokeBorder(Color(red: 0.96, green: 0.23, blue: 0.60).opacity(0.35), lineWidth: 1))
+            .frame(width: width, height: 9)
         }
-        .padding(.horizontal, 30)
+        .frame(width: width)
+        .allowsHitTesting(false)
     }
 
-    // MARK: sequence
+    @MainActor
+    private func runProgressSequence() async {
+        let startedAt = Date()
 
-    private func setup() {
-        currentMessage = lines.first ?? "Loading Poplur"
-        if !auth.isResolvingAuthState { authResolved = true }
-
-        // audible pops even on the ring/silent switch; mix with anything already playing
-        let session = AVAudioSession.sharedInstance()
-        try? session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
-        try? session.setActive(true)
-
-        // refresh the funny lines for next launch (background, best-effort)
-        SplashLoadingLines.refreshFromClaudeInBackground()
-
-        // safety net: if the clip fails to signal its end, start the loader anyway
-        DispatchQueue.main.asyncAfter(deadline: .now() + introDuration + 0.6) {
-            startLoader()
-        }
-    }
-
-    private func startLoader() {
-        guard !didStartLoader else { return }
-        didStartLoader = true
-        withAnimation(.spring(response: 0.5, dampingFraction: 0.82)) { showLoader = true }
-        Task { await runLoader() }
-    }
-
-    private func runLoader() async {
-        let shownAt = Date()
-        rotateMessages()
-
-        // Cosmetic: let the bar creep up slowly toward near-full. This animation never
-        // gates completion — routing fires as soon as auth resolves, so the real load
-        // is not slowed by the slower fill.
-        await MainActor.run {
-            withAnimation(.easeOut(duration: fillDuration)) { progress = 0.9 }
-        }
-
-        // Finish the moment real load (auth) is known, after a short visible floor.
-        while !authResolved { try? await Task.sleep(nanoseconds: 60_000_000) }
-        let elapsed = Date().timeIntervalSince(shownAt)
-        if elapsed < minVisible {
-            try? await Task.sleep(nanoseconds: UInt64((minVisible - elapsed) * 1_000_000_000))
-        }
-        stopMessages = true
-
-        await MainActor.run {
-            withAnimation(.easeInOut(duration: 0.25)) {
-                currentMessage = SplashLoadingLines.destinationLine(loggedIn: auth.isAuthenticated)
-            }
-            withAnimation(.easeOut(duration: 0.5)) { progress = 1.0 }
-        }
-        try? await Task.sleep(nanoseconds: 700_000_000)
-        finish()
-    }
-
-    private func rotateMessages() {
-        Task {
-            var i = 1
-            while !stopMessages {
-                try? await Task.sleep(nanoseconds: 850_000_000)
-                if stopMessages { break }
-                let next = lines[i % lines.count]
-                await MainActor.run {
-                    withAnimation(.easeInOut(duration: 0.25)) { currentMessage = next }
-                }
-                i += 1
+        if reduceMotion {
+            progress = 0.70
+        } else {
+            withAnimation(.easeOut(duration: 4.0)) {
+                progress = 0.90
             }
         }
-    }
 
-    private func finish() {
-        guard !didFinish else { return }
+        while auth.isResolvingAuthState,
+              Date().timeIntervalSince(startedAt) < maximumAuthWait,
+              !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: 60_000_000)
+        }
+
+        guard !Task.isCancelled else { return }
+
+        let elapsed = Date().timeIntervalSince(startedAt)
+        if elapsed < minimumVisibleDuration {
+            try? await Task.sleep(
+                nanoseconds: UInt64((minimumVisibleDuration - elapsed) * 1_000_000_000)
+            )
+        }
+
+        guard !Task.isCancelled else { return }
+
+        withAnimation(.easeOut(duration: reduceMotion ? 0 : 0.5)) {
+            progress = 1.0
+        }
+        try? await Task.sleep(nanoseconds: reduceMotion ? 150_000_000 : 700_000_000)
+
+        guard !Task.isCancelled, !didFinish else { return }
         didFinish = true
         onFinished()
     }
+
+    @MainActor
+    private func rotateMessages() async {
+        while !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: 850_000_000)
+            guard !Task.isCancelled else { return }
+
+            if reduceMotion {
+                messageIndex = (messageIndex + 1) % messages.count
+                continue
+            }
+
+            withAnimation(.easeInOut(duration: 0.22)) {
+                messageOpacity = 0.18
+            }
+            try? await Task.sleep(nanoseconds: 220_000_000)
+            guard !Task.isCancelled else { return }
+
+            messageIndex = (messageIndex + 1) % messages.count
+            withAnimation(.easeInOut(duration: 0.22)) {
+                messageOpacity = 1.0
+            }
+        }
+    }
 }
 
-// MARK: - Shader-driven loading text
+private struct SplashBarberPoleFill: View {
+    let reduceMotion: Bool
 
-@available(iOS 17.0, *)
+    private let cycleDuration: TimeInterval = 0.7
+    private let patternWidth: CGFloat = 44
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: reduceMotion)) { timeline in
+            let fraction = reduceMotion
+                ? 0
+                : timeline.date.timeIntervalSinceReferenceDate
+                    .truncatingRemainder(dividingBy: cycleDuration) / cycleDuration
+            let offset = CGFloat(fraction) * patternWidth
+
+            Canvas(opaque: false, rendersAsynchronously: true) { context, size in
+                let bands: [(width: CGFloat, color: Color)] = [
+                    (15, Color(red: 1.000, green: 0.882, blue: 0.945)),
+                    (14, Color(red: 1.000, green: 0.525, blue: 0.769)),
+                    (15, Color(red: 0.961, green: 0.235, blue: 0.600)),
+                ]
+
+                var groupStart = -size.height - patternWidth - offset
+                while groupStart < size.width + size.height + patternWidth {
+                    var bandStart = groupStart
+                    for band in bands {
+                        var stripe = Path()
+                        stripe.move(to: CGPoint(x: bandStart, y: 0))
+                        stripe.addLine(to: CGPoint(x: bandStart + band.width, y: 0))
+                        stripe.addLine(
+                            to: CGPoint(x: bandStart + band.width - size.height, y: size.height)
+                        )
+                        stripe.addLine(to: CGPoint(x: bandStart - size.height, y: size.height))
+                        stripe.closeSubpath()
+                        context.fill(stripe, with: .color(band.color))
+                        bandStart += band.width
+                    }
+                    groupStart += patternWidth
+                }
+
+                let topHighlight = Path(
+                    CGRect(x: 0, y: 0, width: size.width, height: min(2, size.height * 0.3))
+                )
+                context.fill(topHighlight, with: .color(.white.opacity(0.45)))
+            }
+        }
+    }
+}
+
+@available(iOS 18.0, *)
 private struct SplashShaderTextRenderer: TextRenderer {
     var time: Double
+
     var animatableData: Double {
         get { time }
         set { time = newValue }
     }
+
     func draw(layout: Text.Layout, in context: inout GraphicsContext) {
         context.addFilter(
-            .colorShader(ShaderLibrary.poplurSplashText(.float(Float(time)), .float(1.0)))
+            .colorShader(
+                ShaderLibrary.poplurSplashText(.float(Float(time)), .float(1.0))
+            )
         )
-        for line in layout { context.draw(line) }
+        for line in layout {
+            context.draw(line)
+        }
     }
 }
 
-/// Paints text with the animated `poplurSplashText` Metal shader (glossy pink sweep).
-struct SplashShaderText: ViewModifier {
+private struct SplashShaderText: ViewModifier {
     @State private var epoch = Date()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @ViewBuilder
     func body(content: Content) -> some View {
-        if #available(iOS 17.0, *) {
-            if reduceMotion {
-                content.textRenderer(SplashShaderTextRenderer(time: 0))
-            } else {
-                TimelineView(.periodic(from: epoch, by: 1.0 / 20.0)) { timeline in
-                    let t = timeline.date.timeIntervalSince(epoch)
-                    content.textRenderer(SplashShaderTextRenderer(time: t))
-                }
+        if #available(iOS 18.0, *) {
+            TimelineView(.animation(minimumInterval: 1.0 / 20.0, paused: reduceMotion)) { timeline in
+                content.textRenderer(
+                    SplashShaderTextRenderer(
+                        time: reduceMotion ? 0 : timeline.date.timeIntervalSince(epoch)
+                    )
+                )
             }
         } else {
-            content.foregroundStyle(Color(red: 0.96, green: 0.23, blue: 0.60))
+            content.foregroundStyle(Color(red: 0.957, green: 0.231, blue: 0.600))
         }
     }
 }
 
-// MARK: - Full-bleed video (resizeAspectFill = 1:1 device, with sound)
-
-private struct SplashVideoPlayer: UIViewRepresentable {
+private struct SplashLoopingVideoPlayer: UIViewRepresentable {
     let resourceName: String
-    var onEnded: () -> Void
 
-    func makeCoordinator() -> Coordinator { Coordinator(onEnded: onEnded) }
-
-    final class Coordinator {
-        let onEnded: () -> Void
-        var player: AVPlayer?
-        var endObserver: NSObjectProtocol?
-        init(onEnded: @escaping () -> Void) { self.onEnded = onEnded }
-        deinit { if let o = endObserver { NotificationCenter.default.removeObserver(o) } }
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
     }
 
     func makeUIView(context: Context) -> PlayerView {
         let view = PlayerView()
         guard let url = Bundle.main.url(forResource: resourceName, withExtension: "mp4") else {
-            // no clip → let the loader start immediately
-            DispatchQueue.main.async { context.coordinator.onEnded() }
             return view
         }
+
         let item = AVPlayerItem(url: url)
-        let player = AVPlayer(playerItem: item)
-        player.isMuted = false
-        player.actionAtItemEnd = .pause
+        let player = AVQueuePlayer()
+        player.isMuted = true
+        player.actionAtItemEnd = .none
+
         context.coordinator.player = player
-        context.coordinator.endObserver = NotificationCenter.default.addObserver(
-            forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main
-        ) { _ in context.coordinator.onEnded() }
+        context.coordinator.looper = AVPlayerLooper(player: player, templateItem: item)
         view.playerLayer.player = player
-        view.playerLayer.videoGravity = .resizeAspectFill   // fill the whole device
+        view.playerLayer.videoGravity = .resizeAspectFill
         player.play()
         return view
     }
 
-    func updateUIView(_ uiView: PlayerView, context: Context) {}
+    func updateUIView(_ uiView: PlayerView, context: Context) {
+        if context.coordinator.player?.timeControlStatus != .playing {
+            context.coordinator.player?.play()
+        }
+    }
+
+    static func dismantleUIView(_ uiView: PlayerView, coordinator: Coordinator) {
+        coordinator.player?.pause()
+        uiView.playerLayer.player = nil
+    }
+
+    final class Coordinator {
+        var player: AVQueuePlayer?
+        var looper: AVPlayerLooper?
+    }
 
     final class PlayerView: UIView {
         let playerLayer = AVPlayerLayer()
+
         override init(frame: CGRect) {
             super.init(frame: frame)
             backgroundColor = UIColor(red: 0.039, green: 0.027, blue: 0.035, alpha: 1)
             layer.addSublayer(playerLayer)
         }
-        required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+        required init?(coder: NSCoder) {
+            fatalError("init(coder:) has not been implemented")
+        }
+
         override func layoutSubviews() {
             super.layoutSubviews()
             playerLayer.frame = bounds

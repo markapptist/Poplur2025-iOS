@@ -76,16 +76,6 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
             CubeSkinStore.shared.syncAppIcon()
         }
 
-        // Claude API key for AI bumper scripts
-        if !Secrets.claudeAPIKey.isEmpty {
-            UserDefaults.standard.set(Secrets.claudeAPIKey, forKey: "poplur_claude_key")
-        }
-
-        // ElevenLabs TTS key — free tier, no card needed (elevenlabs.io)
-        if !Secrets.elevenLabsAPIKey.isEmpty {
-            UserDefaults.standard.set(Secrets.elevenLabsAPIKey, forKey: "poplur_elevenlabs_key")
-        }
-
         return true
     }
 
@@ -147,7 +137,7 @@ struct Poplur2025App: App {
     @StateObject private var preLoginMusic = PreLoginMusicPlayer()
     @State private var showAuthTransition = false
     @State private var isWelcomePanelVisible = true
-    @State private var showSplash = true
+    @State private var showSplash: Bool
     @Environment(\.scenePhase) private var scenePhase
 
     /// True only while WelcomeView (or its Login/Sign Up pushes) is the visible screen —
@@ -160,6 +150,9 @@ struct Poplur2025App: App {
     init() {
         FirebaseBootstrap.configureIfNeeded()
         _auth = StateObject(wrappedValue: AuthViewModel())
+        _showSplash = State(
+            initialValue: !ProcessInfo.processInfo.arguments.contains("-SkipClaySplash")
+        )
     }
 
     var body: some Scene {
@@ -259,12 +252,13 @@ struct Poplur2025App: App {
                     for: .default
                 )
             }
-            // Cold-launch clay splash: plays over everything, then routes underneath.
             .overlay {
                 if showSplash {
-                    PoplurClaySplashView(onFinished: {
-                        withAnimation(.easeOut(duration: 0.45)) { showSplash = false }
-                    })
+                    PoplurClaySplashView {
+                        withAnimation(.easeOut(duration: 0.45)) {
+                            showSplash = false
+                        }
+                    }
                     .environmentObject(auth)
                     .ignoresSafeArea()
                     .transition(.opacity)

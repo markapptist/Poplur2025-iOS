@@ -26,13 +26,12 @@ private final class WelcomeScene: SKScene {
     let coordinator: Coordinator
 
     // Nodes
-    private let dottedOverlayNode = SKNode()
+    private let worldMapNode = SKNode()
     private let flowerNode = SKNode()
-    private let scallopMaskNode = SKShapeNode()
     private let floor = SKNode()
     private var backgroundNode: SKSpriteNode?
     private var didAnimateBackground = false
-    var suppressIntroSounds = false
+    private var reduceMotion: Bool
 
     // Warm-up gate
     private var didWarmUp = false
@@ -71,29 +70,30 @@ private final class WelcomeScene: SKScene {
     private let logoAssetName = "logo"
 
     // Approved Welcome composition, normalized from the 390 × 845 Good Copy reference:
-    // logo high, cube slightly above the vertical midline, and buttons in a lower band.
-    // SpriteKit uses a bottom-left origin, so the foreground nodes use the corresponding
-    // normalized Y positions below. The cube is positioned in SwiftUI using the top-origin
-    // coordinate from the same reference.
+    // logo at y=155, cube at y=350, and Sign Up at y=635 (from the top). Sign In is
+    // derived from Sign Up so the canonical 28pt inter-button gap stays exact on iPhone
+    // and iPad instead of stretching with screen height.
     private let buttonSize = CGSize(width: 220, height: 52)
+    private let buttonGap: CGFloat = 28
     private let logoSize: CGFloat = 140
 
     private var signUpCenterY: CGFloat {
-        size.height * (1 - 720.0 / 845.0)
+        size.height * (1 - 635.0 / 845.0)
     }
     private var signInCenterY: CGFloat {
-        size.height * (1 - 625.0 / 845.0)
+        signUpCenterY + buttonSize.height + buttonGap
     }
     private var logoCenterY: CGFloat {
-        size.height * (1 - 132.0 / 845.0)
+        size.height * (1 - 155.0 / 845.0)
     }
 
     // Track size during animation to avoid size churn
     private var isAnimatingBackground = false
     private var lockedBackgroundSize: CGSize?
 
-    init(size: CGSize, coordinator: Coordinator) {
+    init(size: CGSize, coordinator: Coordinator, reduceMotion: Bool) {
         self.coordinator = coordinator
+        self.reduceMotion = reduceMotion
         super.init(size: size)
         scaleMode = .resizeFill
         backgroundColor = welcomePink
@@ -119,15 +119,13 @@ private final class WelcomeScene: SKScene {
             self?.buildBackground(using: self?.defaultBackgroundName ?? "")
             // Do not animate here; we wait for warm-up in update(_:)
         }
-        // The ticket artifact already contains the world-map dots and radius
-        // rings, so avoid rebuilding hundreds of overlapping SKShapeNodes.
+        buildWorldMapOverlay()
         buildFlower()
-        buildScallopedBottom()
         buildBouncingSignIn()
         layoutAll()
 
         // Warm up the pop sound once to avoid first-play hitch later
-        if !isRunningInPreviews && !suppressIntroSounds {
+        if !isRunningInPreviews {
             let warmUp = SKAction.sequence([
                 .wait(forDuration: 0.05),
                 .playSoundFileNamed("pop", waitForCompletion: false)
@@ -178,8 +176,8 @@ private final class WelcomeScene: SKScene {
 
         guard let texture = backgroundTextures[name] ?? backgroundTextures[defaultBackgroundName] else { return }
 
-        // Good Copy is full-bleed now: the pink banner art covers the entire phone/tablet
-        // viewport instead of sitting inside a smaller ticket card.
+        // Keep the phone-ratio pink artwork proportional. It covers the viewport and
+        // center-crops on wider iPad layouts instead of stretching horizontally.
         let sceneSize = size
         let preSize = ticketSize(for: sceneSize, texture: texture)
         lockedBackgroundSize = preSize
@@ -364,7 +362,7 @@ private final class WelcomeScene: SKScene {
             .wait(forDuration: duration),
             .playSoundFileNamed("pop", waitForCompletion: false)
         ])
-        if !isRunningInPreviews && !suppressIntroSounds {
+        if !isRunningInPreviews {
             self.run(playPop, withKey: "playPop")
         }
     }
@@ -432,45 +430,195 @@ private final class WelcomeScene: SKScene {
             lockedBackgroundSize = nil // allow recompute to new ideal size
             sizeAndPlaceBackground(bg, animateIfNeeded: false)
         }
+        buildWorldMapOverlay()
         layoutAll()
+    }
+
+    func setReduceMotion(_ enabled: Bool) {
+        guard reduceMotion != enabled else { return }
+        reduceMotion = enabled
+        buildWorldMapOverlay()
     }
 
     // MARK: - Foreground Nodes
 
-    private func buildDottedOverlay() {
-        dottedOverlayNode.removeAllChildren()
-        dottedOverlayNode.zPosition = 12
-        addChild(dottedOverlayNode)
+    /// A portrait-filling dotted world map in normalized, top-origin coordinates.
+    /// The polygons intentionally span almost the entire canvas so the map remains
+    /// recognizable behind the Welcome foreground on both iPhone and iPad.
+    private static let normalizedContinents: [[CGPoint]] = [
+        // North America
+        [CGPoint(x: 0.02, y: 0.20), CGPoint(x: 0.06, y: 0.12),
+         CGPoint(x: 0.13, y: 0.07), CGPoint(x: 0.20, y: 0.10),
+         CGPoint(x: 0.25, y: 0.16), CGPoint(x: 0.31, y: 0.15),
+         CGPoint(x: 0.34, y: 0.22), CGPoint(x: 0.29, y: 0.28),
+         CGPoint(x: 0.25, y: 0.30), CGPoint(x: 0.22, y: 0.38),
+         CGPoint(x: 0.17, y: 0.43), CGPoint(x: 0.13, y: 0.37),
+         CGPoint(x: 0.09, y: 0.33), CGPoint(x: 0.04, y: 0.29)],
+        // Greenland
+        [CGPoint(x: 0.27, y: 0.04), CGPoint(x: 0.34, y: 0.05),
+         CGPoint(x: 0.37, y: 0.12), CGPoint(x: 0.33, y: 0.18),
+         CGPoint(x: 0.28, y: 0.14)],
+        // South America
+        [CGPoint(x: 0.17, y: 0.42), CGPoint(x: 0.23, y: 0.39),
+         CGPoint(x: 0.29, y: 0.44), CGPoint(x: 0.31, y: 0.51),
+         CGPoint(x: 0.29, y: 0.59), CGPoint(x: 0.28, y: 0.68),
+         CGPoint(x: 0.25, y: 0.78), CGPoint(x: 0.21, y: 0.87),
+         CGPoint(x: 0.19, y: 0.77), CGPoint(x: 0.17, y: 0.67),
+         CGPoint(x: 0.16, y: 0.56), CGPoint(x: 0.14, y: 0.48)],
+        // Europe
+        [CGPoint(x: 0.42, y: 0.23), CGPoint(x: 0.46, y: 0.18),
+         CGPoint(x: 0.51, y: 0.18), CGPoint(x: 0.56, y: 0.22),
+         CGPoint(x: 0.54, y: 0.28), CGPoint(x: 0.49, y: 0.30),
+         CGPoint(x: 0.44, y: 0.28)],
+        // Africa
+        [CGPoint(x: 0.42, y: 0.32), CGPoint(x: 0.49, y: 0.29),
+         CGPoint(x: 0.56, y: 0.33), CGPoint(x: 0.59, y: 0.42),
+         CGPoint(x: 0.56, y: 0.53), CGPoint(x: 0.53, y: 0.63),
+         CGPoint(x: 0.49, y: 0.70), CGPoint(x: 0.45, y: 0.62),
+         CGPoint(x: 0.42, y: 0.52), CGPoint(x: 0.39, y: 0.41)],
+        // Asia
+        [CGPoint(x: 0.52, y: 0.18), CGPoint(x: 0.61, y: 0.11),
+         CGPoint(x: 0.71, y: 0.08), CGPoint(x: 0.82, y: 0.11),
+         CGPoint(x: 0.91, y: 0.17), CGPoint(x: 0.98, y: 0.27),
+         CGPoint(x: 0.95, y: 0.35), CGPoint(x: 0.87, y: 0.39),
+         CGPoint(x: 0.82, y: 0.45), CGPoint(x: 0.75, y: 0.41),
+         CGPoint(x: 0.69, y: 0.36), CGPoint(x: 0.62, y: 0.35),
+         CGPoint(x: 0.57, y: 0.29), CGPoint(x: 0.53, y: 0.26)],
+        // South-east Asia
+        [CGPoint(x: 0.67, y: 0.40), CGPoint(x: 0.74, y: 0.42),
+         CGPoint(x: 0.81, y: 0.47), CGPoint(x: 0.85, y: 0.54),
+         CGPoint(x: 0.81, y: 0.59), CGPoint(x: 0.75, y: 0.54),
+         CGPoint(x: 0.70, y: 0.51), CGPoint(x: 0.66, y: 0.46)],
+        // Australia
+        [CGPoint(x: 0.76, y: 0.65), CGPoint(x: 0.83, y: 0.61),
+         CGPoint(x: 0.91, y: 0.64), CGPoint(x: 0.96, y: 0.71),
+         CGPoint(x: 0.92, y: 0.80), CGPoint(x: 0.85, y: 0.83),
+         CGPoint(x: 0.78, y: 0.77)],
+        // Japan
+        [CGPoint(x: 0.89, y: 0.29), CGPoint(x: 0.91, y: 0.26),
+         CGPoint(x: 0.93, y: 0.34), CGPoint(x: 0.90, y: 0.39)],
+        // Madagascar
+        [CGPoint(x: 0.58, y: 0.62), CGPoint(x: 0.60, y: 0.59),
+         CGPoint(x: 0.62, y: 0.70), CGPoint(x: 0.59, y: 0.77)],
+    ]
 
-        let insetTop: CGFloat = 24
-        let overlayWidth = min(600, size.width - 48)
-        let overlayHeight: CGFloat = 640 - insetTop - 18
-        let overlayMinY = max(size.height - 640 + insetTop, 0)
-        let overlayRect = CGRect(x: (size.width - overlayWidth)/2,
-                                 y: overlayMinY,
-                                 width: overlayWidth,
-                                 height: max(0, overlayHeight))
+    private func buildWorldMapOverlay() {
+        guard size.width > 1, size.height > 1 else { return }
 
-        let dotSize: CGFloat = 6
-        let spacingX: CGFloat = 10
-        let spacingY: CGFloat = 12
-        let cols = max(0, Int(overlayRect.width / (dotSize + spacingX)))
-        let rows = max(0, Int(overlayRect.height / (dotSize + spacingY)))
+        worldMapNode.removeFromParent()
+        worldMapNode.removeAllActions()
+        worldMapNode.removeAllChildren()
+        worldMapNode.zPosition = -90
+        addChild(worldMapNode)
 
-        for r in 0..<rows {
-            for c in 0..<cols {
-                let circle = SKShapeNode(circleOfRadius: dotSize/2)
-                let opacity: CGFloat = ((r + c) % 7 == 0) ? 0.9 : 0.35
-                circle.fillColor = UIColor(white: 1.0, alpha: opacity)
-                circle.strokeColor = .clear
-                let x = overlayRect.minX + CGFloat(c) * (dotSize + spacingX) + dotSize
-                let y = overlayRect.minY + CGFloat(r) * (dotSize + spacingY) + dotSize
-                circle.position = CGPoint(x: x, y: y)
-                circle.zPosition = 0
-                dottedOverlayNode.addChild(circle)
+        // One path renders every muted land dot. Only the sparse bright subset gets
+        // individual nodes, keeping the continuously animated node count modest.
+        let spacing = min(max(size.width / 42, 8), 15)
+        let radius = min(max(spacing * 0.22, 1.7), 3.1)
+        let columns = Int(ceil(size.width / spacing))
+        let rows = Int(ceil(size.height / spacing))
+        let basePath = CGMutablePath()
+        let highlights = SKNode()
+        highlights.name = "worldMapHighlights"
+        highlights.zPosition = 1
+
+        for row in 0...rows {
+            let topY = CGFloat(row) * spacing
+            let normalizedY = topY / size.height
+            guard normalizedY >= 0.04, normalizedY <= 0.91 else { continue }
+
+            for column in 0...columns {
+                let x = CGFloat(column) * spacing
+                let normalizedPoint = CGPoint(x: x / size.width, y: normalizedY)
+                guard Self.normalizedContinents.contains(where: {
+                    Self.contains(normalizedPoint, in: $0)
+                }) else { continue }
+
+                let scenePoint = CGPoint(x: x, y: size.height - topY)
+                basePath.addEllipse(in: CGRect(
+                    x: scenePoint.x - radius,
+                    y: scenePoint.y - radius,
+                    width: radius * 2,
+                    height: radius * 2
+                ))
+
+                let highlightHash = (row * 73 + column * 151 + row * column * 19) % 41
+                guard highlightHash < 4 else { continue }
+
+                let dot = SKShapeNode(circleOfRadius: radius * 1.12)
+                dot.position = scenePoint
+                dot.fillColor = .white
+                dot.strokeColor = .clear
+                dot.glowWidth = radius * 1.2
+                dot.blendMode = .add
+                dot.zPosition = 1
+                highlights.addChild(dot)
+                configureBlink(for: dot, row: row, column: column)
             }
         }
-        dottedOverlayNode.alpha = 0.25
+
+        let baseDots = SKShapeNode(path: basePath)
+        baseDots.name = "worldMapBaseDots"
+        baseDots.fillColor = UIColor(white: 1, alpha: 0.28)
+        baseDots.strokeColor = .clear
+        baseDots.lineWidth = 0
+        baseDots.zPosition = 0
+        worldMapNode.addChild(baseDots)
+        worldMapNode.addChild(highlights)
+    }
+
+    private func configureBlink(for dot: SKShapeNode, row: Int, column: Int) {
+        dot.removeAllActions()
+        dot.setScale(1)
+
+        guard !reduceMotion else {
+            dot.alpha = 0.95
+            return
+        }
+
+        let phaseSeed = (row * 37 + column * 97 + row * column * 11) % 100
+        let periodSeed = (row * 29 + column * 43 + row * column * 7) % 70
+        let phase = Double(phaseSeed) / 100 * 1.6
+        let rest = 0.55 + Double(periodSeed) / 100
+        dot.alpha = 0.42
+
+        let brighten = SKAction.group([
+            .fadeAlpha(to: 1, duration: 0.34),
+            .scale(to: 1.16, duration: 0.34),
+        ])
+        brighten.timingMode = .easeInEaseOut
+        let dim = SKAction.group([
+            .fadeAlpha(to: 0.36, duration: 0.48),
+            .scale(to: 0.94, duration: 0.48),
+        ])
+        dim.timingMode = .easeInEaseOut
+        let pulse = SKAction.sequence([
+            brighten,
+            .wait(forDuration: 0.20),
+            dim,
+            .wait(forDuration: rest),
+        ])
+        dot.run(.sequence([
+            .wait(forDuration: phase),
+            .repeatForever(pulse),
+        ]), withKey: "worldMapBlink")
+    }
+
+    private static func contains(_ point: CGPoint, in polygon: [CGPoint]) -> Bool {
+        guard polygon.count > 2 else { return false }
+        var isInside = false
+        var previous = polygon.count - 1
+
+        for current in polygon.indices {
+            let a = polygon[current]
+            let b = polygon[previous]
+            if (a.y > point.y) != (b.y > point.y) {
+                let intersectionX = (b.x - a.x) * (point.y - a.y) / (b.y - a.y) + a.x
+                if point.x < intersectionX { isInside.toggle() }
+            }
+            previous = current
+        }
+        return isInside
     }
 
     private func buildFlower() {
@@ -517,36 +665,6 @@ private final class WelcomeScene: SKScene {
         flowerNode.addChild(sprite)
     }
 
-    private func buildScallopedBottom() {
-        scallopMaskNode.removeFromParent()
-        scallopMaskNode.zPosition = 14
-
-        let width = size.width
-        let height: CGFloat = 18
-        let diameter: CGFloat = 18
-        let spacing: CGFloat = 8
-        let total = Int(ceil((width + spacing) / (diameter + spacing)))
-        let y = height / 2
-
-        // White perforation strip with Poplur-pink circular cuts.
-        let strip = SKShapeNode(rect: CGRect(x: 0, y: 0, width: width, height: height))
-        strip.fillColor = .white
-        strip.strokeColor = .clear
-        strip.lineWidth = 0
-        scallopMaskNode.addChild(strip)
-
-        for i in 0..<total {
-            let x = (CGFloat(i) * (diameter + spacing)) + diameter / 2
-            let cut = SKShapeNode(circleOfRadius: diameter / 2)
-            cut.fillColor = welcomePink
-            cut.strokeColor = .clear
-            cut.position = CGPoint(x: x, y: y)
-            scallopMaskNode.addChild(cut)
-        }
-        scallopMaskNode.position = CGPoint(x: 0, y: 0)
-        addChild(scallopMaskNode)
-    }
-
     // MARK: - Sign-in (static)
 
     private func buildBouncingSignIn() {
@@ -555,6 +673,7 @@ private final class WelcomeScene: SKScene {
         floor.removeFromParent()
 
         let signupSize = buttonSize
+        let surfaceTexture = buttonSurfaceTexture(size: signupSize)
 
         // Sign In — same white capsule style as Sign Up.
         let signinShadow = SKShapeNode(rectOf: signupSize, cornerRadius: signupSize.height / 2)
@@ -570,18 +689,11 @@ private final class WelcomeScene: SKScene {
         signinNode.zPosition = 21
         signinNode.alpha = 0.0 // start hidden; fade in after background animation
 
-        let signinCapsule = SKSpriteNode(texture: buttonSurfaceTexture(size: signupSize), size: signupSize)
+        let signinCapsule = SKSpriteNode(texture: surfaceTexture, size: signupSize)
         signinCapsule.zPosition = 0
         signinNode.addChild(signinCapsule)
 
-        let signinLabel = SKLabelNode(text: "Sign In")
-        signinLabel.fontName = "AvenirNext-Heavy"
-        signinLabel.fontSize = 22
-        signinLabel.fontColor = .black
-        signinLabel.verticalAlignmentMode = .center
-        signinLabel.horizontalAlignmentMode = .center
-        signinLabel.zPosition = 1
-        signinNode.addChild(signinLabel)
+        signinNode.addChild(makeButtonLabel("Sign In"))
 
         addChild(signinNode)
         let signupShadow = SKShapeNode(rectOf: signupSize, cornerRadius: signupSize.height / 2)
@@ -597,20 +709,91 @@ private final class WelcomeScene: SKScene {
         signupNode.zPosition = 21
         signupNode.alpha = 0.0
 
-        let capsule = SKSpriteNode(texture: buttonSurfaceTexture(size: signupSize), size: signupSize)
+        let capsule = SKSpriteNode(texture: surfaceTexture, size: signupSize)
         capsule.zPosition = 0
         signupNode.addChild(capsule)
 
-        let label = SKLabelNode(text: "Sign Up")
-        label.fontName = "AvenirNext-Heavy"
-        label.fontSize = 22
-        label.fontColor = .black
-        label.verticalAlignmentMode = .center
-        label.horizontalAlignmentMode = .center
-        label.zPosition = 1
-        signupNode.addChild(label)
+        signupNode.addChild(makeButtonLabel("Sign Up"))
 
         addChild(signupNode)
+    }
+
+    private func makeButtonLabel(_ text: String) -> SKNode {
+        let container = SKNode()
+        let font = UIFont(name: "AvenirNext-Heavy", size: 22)
+            ?? UIFont.systemFont(ofSize: 22, weight: .heavy)
+
+        let shadow = SKLabelNode(text: text)
+        shadow.fontName = font.fontName
+        shadow.fontSize = 22
+        shadow.fontColor = UIColor.black.withAlphaComponent(0.16)
+        shadow.verticalAlignmentMode = .center
+        shadow.horizontalAlignmentMode = .center
+        shadow.position.y = -1
+        shadow.zPosition = 0
+        container.addChild(shadow)
+
+        let mask = SKLabelNode(text: text)
+        mask.fontName = font.fontName
+        mask.fontSize = 22
+        mask.fontColor = .white
+        mask.verticalAlignmentMode = .center
+        mask.horizontalAlignmentMode = .center
+
+        let crop = SKCropNode()
+        crop.maskNode = mask
+        crop.zPosition = 1
+
+        let maskFrame = mask.calculateAccumulatedFrame()
+        let fillSize = CGSize(
+            width: max(1, ceil(maskFrame.width)),
+            height: max(1, ceil(maskFrame.height))
+        )
+        let shaderFill = SKSpriteNode(color: .white, size: fillSize)
+        shaderFill.shader = makeButtonTextShader(
+            aspectRatio: fillSize.height / fillSize.width
+        )
+        crop.addChild(shaderFill)
+        container.addChild(crop)
+
+        return container
+    }
+
+    private func makeButtonTextShader(aspectRatio: CGFloat) -> SKShader {
+        let source = """
+        void main() {
+            // Static approved shader pose: 105deg gradient at the canonical 48%
+            // background position. There is deliberately no time-based uniform.
+            float phase = 0.48 * (2.0 / 3.0);
+            float axis = v_tex_coord.x * 0.965926
+                       + (v_tex_coord.y - 0.5) * u_aspect * 0.258819;
+            float x = fract(axis / 3.0 + phase);
+            vec3 color;
+
+            if (x < 0.16) {
+                color = mix(vec3(0.031, 0.008, 0.027), vec3(0.357, 0.071, 0.220), x / 0.16);
+            } else if (x < 0.31) {
+                color = mix(vec3(0.357, 0.071, 0.220), vec3(1.000, 0.176, 0.541), (x - 0.16) / 0.15);
+            } else if (x < 0.45) {
+                color = mix(vec3(1.000, 0.176, 0.541), vec3(0.478, 0.000, 0.243), (x - 0.31) / 0.14);
+            } else if (x < 0.59) {
+                color = mix(vec3(0.478, 0.000, 0.243), vec3(0.086, 0.027, 0.067), (x - 0.45) / 0.14);
+            } else if (x < 0.76) {
+                color = mix(vec3(0.086, 0.027, 0.067), vec3(1.000, 0.302, 0.620), (x - 0.59) / 0.17);
+            } else if (x < 0.90) {
+                color = mix(vec3(1.000, 0.302, 0.620), vec3(0.165, 0.039, 0.114), (x - 0.76) / 0.14);
+            } else {
+                color = mix(vec3(0.165, 0.039, 0.114), vec3(0.031, 0.008, 0.027), (x - 0.90) / 0.10);
+            }
+
+            gl_FragColor = vec4(color, 1.0);
+        }
+        """
+        let shader = SKShader(source: source)
+        shader.addUniform(
+            SKUniform(name: "u_aspect", float: Float(aspectRatio))
+        )
+        return shader
     }
 
     private func layoutAll() {
@@ -698,9 +881,13 @@ private final class WelcomeScene: SKScene {
             let baseColors = [
                 UIColor.white.cgColor,
                 UIColor(red: 1.0, green: 0.94, blue: 0.98, alpha: 1.0).cgColor,
-                UIColor(red: 0.88, green: 0.88, blue: 0.92, alpha: 1.0).cgColor
+                UIColor(red: 0.88, green: 0.88, blue: 0.92, alpha: 1.0).cgColor,
             ] as CFArray
-            if let gradient = CGGradient(colorsSpace: colorSpace, colors: baseColors, locations: [0.0, 0.54, 1.0]) {
+            if let gradient = CGGradient(
+                colorsSpace: colorSpace,
+                colors: baseColors,
+                locations: [0.0, 0.54, 1.0]
+            ) {
                 cg.drawLinearGradient(
                     gradient,
                     start: CGPoint(x: size.width * 0.22, y: 0),
@@ -711,9 +898,13 @@ private final class WelcomeScene: SKScene {
 
             let sheenColors = [
                 UIColor.white.withAlphaComponent(0.64).cgColor,
-                UIColor.white.withAlphaComponent(0.0).cgColor
+                UIColor.white.withAlphaComponent(0.0).cgColor,
             ] as CFArray
-            if let sheen = CGGradient(colorsSpace: colorSpace, colors: sheenColors, locations: [0.0, 1.0]) {
+            if let sheen = CGGradient(
+                colorsSpace: colorSpace,
+                colors: sheenColors,
+                locations: [0.0, 1.0]
+            ) {
                 cg.drawLinearGradient(
                     sheen,
                     start: CGPoint(x: 0, y: 0),
@@ -724,9 +915,13 @@ private final class WelcomeScene: SKScene {
 
             let bottomShadeColors = [
                 UIColor.clear.cgColor,
-                UIColor.black.withAlphaComponent(0.11).cgColor
+                UIColor.black.withAlphaComponent(0.11).cgColor,
             ] as CFArray
-            if let bottomShade = CGGradient(colorsSpace: colorSpace, colors: bottomShadeColors, locations: [0.45, 1.0]) {
+            if let bottomShade = CGGradient(
+                colorsSpace: colorSpace,
+                colors: bottomShadeColors,
+                locations: [0.45, 1.0]
+            ) {
                 cg.drawLinearGradient(
                     bottomShade,
                     start: CGPoint(x: size.width / 2, y: 0),
@@ -738,7 +933,10 @@ private final class WelcomeScene: SKScene {
             cg.restoreGState()
 
             UIColor.white.withAlphaComponent(0.58).setStroke()
-            let highlight = UIBezierPath(roundedRect: insetRect.insetBy(dx: 8, dy: 6), cornerRadius: max(0, radius - 6))
+            let highlight = UIBezierPath(
+                roundedRect: insetRect.insetBy(dx: 8, dy: 6),
+                cornerRadius: max(0, radius - 6)
+            )
             highlight.lineWidth = 1
             highlight.stroke()
 
@@ -867,11 +1065,13 @@ struct WelcomeView: View {
     @EnvironmentObject private var auth: AuthViewModel
     @StateObject private var coordinator = WelcomeScene.Coordinator()
     @EnvironmentObject private var stripeCoordinator: StripeTransitionCoordinator
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var scene: WelcomeScene?
     @State private var cubeVisible = false
     @State private var authPanel: CarouselPanel = .welcome
     @State private var goingForward = true
+
     private enum CarouselPanel: Int {
         case welcome = 0, login = 1, signUp = 2
         var aiScreen: AuthAIScreen {
@@ -884,12 +1084,12 @@ struct WelcomeView: View {
     }
 
     private func ensureScene(size: CGSize) -> WelcomeScene {
-        if let s = scene {
-            s.suppressIntroSounds = false
-            return s
-        }
-        let s = WelcomeScene(size: size, coordinator: coordinator)
-        s.suppressIntroSounds = false
+        if let s = scene { return s }
+        let s = WelcomeScene(
+            size: size,
+            coordinator: coordinator,
+            reduceMotion: reduceMotion
+        )
         scene = s
         return s
     }
@@ -926,6 +1126,9 @@ struct WelcomeView: View {
                 .background(Color(red: 1, green: 45.0 / 255.0, blue: 150.0 / 255.0))
                 .ignoresSafeArea()
                 .onChange(of: geo.size) { _, newSize in s.resize(to: newSize) }
+                .onChange(of: reduceMotion) { _, enabled in
+                    s.setReduceMotion(enabled)
+                }
             }
             .opacity(authPanel == .welcome ? 1 : 0)
             .allowsHitTesting(authPanel == .welcome)
@@ -943,7 +1146,7 @@ struct WelcomeView: View {
                         .opacity(cubeVisible ? 1 : 0)
                         .position(
                             x: geo.size.width / 2,
-                            y: (geo.size.height / 2) - 18
+                            y: geo.size.height * (350.0 / 845.0)
                         )
                 }
                 .allowsHitTesting(false)
@@ -980,7 +1183,6 @@ struct WelcomeView: View {
                 ))
                 .zIndex(goingForward ? 2 : 1)
             }
-
         }
         .onReceive(coordinator.$didTapSignIn) { tapped in
             if tapped {

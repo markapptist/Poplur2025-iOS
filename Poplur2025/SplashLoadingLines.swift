@@ -44,7 +44,7 @@ enum SplashLoadingLines {
     /// Fire-and-forget: ask Claude for a fresh batch of lines and cache them for next launch.
     /// No-ops (silently) when there's no API key or the call fails — the pool always covers us.
     static func refreshFromClaudeInBackground() {
-        let key = UserDefaults.standard.string(forKey: "poplur_claude_key") ?? Secrets.claudeAPIKey
+        let key = AppSecrets.claudeAPIKey
         guard !key.isEmpty else { return }
 
         Task.detached(priority: .background) {

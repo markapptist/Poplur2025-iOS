@@ -26,6 +26,7 @@ final class Poplur2025UITests: XCTestCase {
     func testExample() throws {
         // UI tests must launch the application that they test.
         let app = XCUIApplication()
+        app.launchArguments += ["-SkipClaySplash", "-SkipWalletIntro"]
         app.launch()
 
         // Use XCTAssert and related functions to verify your tests produce the correct results.
@@ -34,20 +35,21 @@ final class Poplur2025UITests: XCTestCase {
     @MainActor
     func testCubeThemeTextureAfterSignup() throws {
         let app = XCUIApplication()
-        app.launchArguments += ["-SkipWalletIntro"]
+        app.launchArguments += ["-SkipClaySplash", "-SkipWalletIntro"]
         app.launch()
 
         let frame = app.windows.firstMatch.frame
         let width = frame.width
         let height = frame.height
 
-        // Mirrors WelcomeView.swift's private layout constants (sectionSpacing/buttonGap/buttonSize)
-        // so we can tap its SpriteKit-rendered Sign Up button, which has no accessibility element.
-        let sectionSpacing: CGFloat = 28
-        let buttonGap: CGFloat = 16
+        // Mirrors WelcomeView.swift's private layout constants so we can tap its
+        // SpriteKit-rendered buttons, which have no accessibility elements.
+        let referenceHeight: CGFloat = 845
+        let signUpTopY: CGFloat = 635
+        let buttonGap: CGFloat = 28
         let buttonHeight: CGFloat = 52
-        let signUpCenterY = (208 + sectionSpacing) + buttonHeight / 2
-        let signInCenterY = signUpCenterY + buttonHeight / 2 + buttonGap + buttonHeight / 2
+        let signUpCenterY = height * (1 - signUpTopY / referenceHeight)
+        let signInCenterY = signUpCenterY + buttonHeight + buttonGap
         _ = signInCenterY
 
         func tap(sceneX: CGFloat, sceneY: CGFloat) {
@@ -100,7 +102,7 @@ final class Poplur2025UITests: XCTestCase {
     func testFullAppScreenshotSweep() throws {
         continueAfterFailure = true
         let app = XCUIApplication()
-        app.launchArguments += ["-SkipWalletIntro"]
+        app.launchArguments += ["-SkipClaySplash", "-SkipWalletIntro"]
         app.launch()
 
         var shotIndex = 0
@@ -120,11 +122,12 @@ final class Poplur2025UITests: XCTestCase {
         // Mirrors WelcomeView.swift's private layout constants for its SpriteKit buttons (no
         // accessibility elements exist on that canvas). Pre-login only — post-login navigation
         // below uses real accessibility-identified test hooks instead (see UITestHooks.swift).
-        let sectionSpacing: CGFloat = 28
-        let buttonGap: CGFloat = 16
+        let referenceHeight: CGFloat = 845
+        let signUpTopY: CGFloat = 635
+        let buttonGap: CGFloat = 28
         let buttonHeight: CGFloat = 52
-        let signUpCenterY = (208 + sectionSpacing) + buttonHeight / 2
-        let signInCenterY = signUpCenterY + buttonHeight / 2 + buttonGap + buttonHeight / 2
+        let signUpCenterY = height * (1 - signUpTopY / referenceHeight)
+        let signInCenterY = signUpCenterY + buttonHeight + buttonGap
 
         func tapWelcomeScene(x: CGFloat, y: CGFloat) {
             let dx = x / width

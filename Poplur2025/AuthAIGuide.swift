@@ -102,7 +102,7 @@ final class AuthAIGuideVM: ObservableObject {
     }
 
     private func callClaude(question: String) async -> String {
-        let key = UserDefaults.standard.string(forKey: "poplur_claude_key") ?? Secrets.claudeAPIKey
+        let key = AppSecrets.claudeAPIKey
         guard !key.isEmpty, let url = URL(string: "https://api.anthropic.com/v1/messages") else {
             return screen.greeting
         }
