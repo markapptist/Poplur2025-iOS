@@ -513,8 +513,10 @@ private final class WelcomeScene: SKScene {
 
         // One path renders every muted land dot. Only the sparse bright subset gets
         // individual nodes, keeping the continuously animated node count modest.
-        let spacing = min(max(size.width / 42, 8), 15)
-        let radius = min(max(spacing * 0.22, 1.7), 3.1)
+        // Sample at roughly twice the previous area density while keeping each
+        // dot's visual weight proportional to the tighter grid.
+        let spacing = min(max(size.width / 59, 5.6), 10.6)
+        let radius = min(max(spacing * 0.22, 1.25), 2.35)
         let columns = Int(ceil(size.width / spacing))
         let rows = Int(ceil(size.height / spacing))
         let basePath = CGMutablePath()
