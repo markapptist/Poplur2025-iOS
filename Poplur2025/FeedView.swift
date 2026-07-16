@@ -1520,7 +1520,7 @@ struct FeedView: View {
     
     private func playOneShotPop() {
         guard PoplurEQSync.shared.shouldPlayTransientSound(minimumInterval: 0.14) else { return }
-        PoplurEQSync.shared.configureAudioSession(for: .ambientPlayback)
+        PoplurEQSync.shared.prepareAudioSessionForTransientSound()
         guard let url = Bundle.main.url(forResource: "pop", withExtension: "mp3")
             ?? Bundle.main.url(forResource: "pop", withExtension: "caf")
             ?? Bundle.main.url(forResource: "pop", withExtension: "wav") else {
@@ -2873,7 +2873,7 @@ final class TvPipHostView: UIView {
             currentURL = nil
             avPlayerLayer.player = player
             if player.timeControlStatus != .playing {
-                player.playImmediately(atRate: 1.0)
+                player.play()
             }
             return
         }

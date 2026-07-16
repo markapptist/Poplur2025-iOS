@@ -22,7 +22,13 @@ struct FeedBumperView: View {
 
     private func setupPlayer() {
         PoplurEQSync.shared.begin(.feedBumper)
-        PoplurEQSync.shared.configureAudioSession(for: .voicePrompt)
+        if PoplurEQSync.shared.isActive(.feedVideo) {
+            // Keep the active feed player's movie-playback session intact. The feed
+            // volume is already ducked through PoplurEQSync while the bumper speaks.
+            PoplurEQSync.shared.configureAudioSession(for: .feedPlayback)
+        } else {
+            PoplurEQSync.shared.configureAudioSession(for: .voicePrompt)
+        }
 
         if let audioData = payload.audioData,
            let p = try? AVAudioPlayer(data: audioData) {

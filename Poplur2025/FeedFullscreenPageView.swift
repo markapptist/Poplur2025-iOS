@@ -152,11 +152,14 @@ struct FeedFullscreenPageView: View {
             asset.resourceLoader.preloadsEligibleContentKeys = true
 
             let item = AVPlayerItem(asset: asset)
-            item.preferredForwardBufferDuration = 0
+            // Keep a small forward cushion for remote social video. The previous zero-target
+            // configuration, combined with forced immediate playback below, made brief network
+            // variability audible as repeated audio skips on physical devices.
+            item.preferredForwardBufferDuration = 5
             let p = AVPlayer(playerItem: item)
             p.allowsExternalPlayback = false
             p.isMuted = false
-            p.automaticallyWaitsToMinimizeStalling = false
+            p.automaticallyWaitsToMinimizeStalling = true
             p.preventsDisplaySleepDuringVideoPlayback = true
 
             itemObservation = item.observe(\.status, options: [.initial, .new]) { _, _ in
@@ -167,10 +170,8 @@ struct FeedFullscreenPageView: View {
                     case .readyToPlay:
                         self.itemFailed = false
                         self.playbackStuck = false
-                        p.seek(to: CMTime(seconds: 0.01, preferredTimescale: 600))
                         FeedAudioManager.shared.enableAudiblePlayback()
                         FeedAudioManager.shared.playExclusively(p)
-                        p.playImmediately(atRate: 1.0)
                         self.hudTimeControl = p.timeControlStatus
                     case .failed:
                         self.itemFailed = true
@@ -217,8 +218,10 @@ struct FeedFullscreenPageView: View {
                 object: item,
                 queue: .main
             ) { _ in
-                print("[Video] Playback stalled — attempting resume")
-                p.playImmediately(atRate: 1.0)
+                print("[Video] Playback stalled — waiting for the forward buffer")
+                // `play()` preserves automaticallyWaitsToMinimizeStalling. Forcing
+                // playImmediately here repeatedly drained the buffer and caused audio skips.
+                p.play()
             }
 
             player = p
@@ -247,7 +250,7 @@ struct FeedFullscreenPageView: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { self.hudTimeControl = p.timeControlStatus }
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                 if p.timeControlStatus != .playing {
-                    p.playImmediately(atRate: 1.0)
+                    p.play()
                 }
                 self.hudTimeControl = p.timeControlStatus
                 // Do not set isReadyToDisplay here — only AVPlayerLayer.isReadyForDisplay drives it.
@@ -273,12 +276,12 @@ struct FeedFullscreenPageView: View {
                         .onAppear {
                             if player.timeControlStatus != .playing {
                                 FeedAudioManager.shared.enableAudiblePlayback()
-                                player.playImmediately(atRate: 1.0)
+                                player.play()
                             }
                             DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
                                 if let p = self.player, p.timeControlStatus != .playing {
                                     FeedAudioManager.shared.enableAudiblePlayback()
-                                    p.playImmediately(atRate: 1.0)
+                                    p.play()
                                     self.hudTimeControl = p.timeControlStatus
                                     if p.timeControlStatus == .playing {
                                         self.playbackStuck = false
@@ -330,7 +333,7 @@ struct FeedFullscreenPageView: View {
         private func resumePlayer() {
             if let player {
                 FeedAudioManager.shared.enableAudiblePlayback()
-                player.playImmediately(atRate: 1.0)
+                player.play()
                 hudTimeControl = player.timeControlStatus
             } else {
                 setupPlayer()

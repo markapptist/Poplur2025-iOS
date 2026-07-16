@@ -18,6 +18,17 @@ final class AuthViewModel: ObservableObject {
 
     init() {
         #if DEBUG
+        // UI-test only: render the real signed-out flow deterministically without mutating the
+        // simulator's persisted Firebase session. This keeps performance tests on the requested
+        // Welcome/Login/Sign Up screens even when a developer is signed in locally.
+        if ProcessInfo.processInfo.arguments.contains("-UITestForceSignedOut") {
+            self.currentUser = nil
+            self.authHandle = nil
+            self.isAuthenticated = false
+            self.isResolvingAuthState = false
+            return
+        }
+
         // UI-test only: skip real Firebase sign-in entirely so screenshot/navigation tests don't
         // depend on account creation succeeding (avoids signup flakiness and the HomeView-eager-
         // construction race in CallSessionManager). Never reachable in a release build.

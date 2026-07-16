@@ -65,7 +65,7 @@ final class FeedViewModel: ObservableObject {
 // MARK: - Audio helpers
 extension FeedViewModel {
     func activateAmbientAudioSessionIfNeeded() {
-        PoplurEQSync.shared.configureAudioSession(for: .ambientPlayback)
+        PoplurEQSync.shared.prepareAudioSessionForTransientSound()
     }
 
     func deactivateAudioSessionIfPossible() {

@@ -207,7 +207,6 @@ struct Poplur2025App: App {
                 }
             }
             .onChange(of: showSplash) { _, splashing in
-                // once the splash clears, start pre-login music if we landed on Welcome
                 if !splashing && isPreLoginVisible {
                     preLoginMusic.start()
                 }
@@ -272,8 +271,8 @@ struct Poplur2025App: App {
     private var authenticatedContent: some View {
         ZStack {
             if auth.isResolvingAuthState {
-                // The clay splash is the only launch loader now — no white spinning-cube cover.
-                // Auth resolves behind the splash, so this dark placeholder is never actually seen.
+                // Match the approved, logo-free launch frame while Firebase restores the session.
+                // This is intentionally content-free: no unapproved loading screen is presented.
                 Color(red: 0.039, green: 0.027, blue: 0.035).ignoresSafeArea()
                     .transition(.opacity)
             } else if showAuthTransition {
