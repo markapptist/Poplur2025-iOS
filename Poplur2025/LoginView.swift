@@ -4,13 +4,12 @@ import UIKit
 import FirebaseAuth
 import LocalAuthentication
 
-// MARK: - SpriteKit Scene for Login visuals (pink ticket, dots, scallop, logo)
+// MARK: - SpriteKit Scene for Login visuals (pink ticket, scallop, logo)
 
 private final class LoginScene: SKScene {
 
     // Nodes
     private let ticketNode = SKShapeNode()
-    private let dotsNode = SKNode()
     private let scallopNode = SKShapeNode()
 
     // Layout constants (SpriteKit points)
@@ -29,7 +28,6 @@ private final class LoginScene: SKScene {
         view.ignoresSiblingOrder = true
 
         buildTicketBackground()
-        buildDots()
         buildScallop()
         layoutAll()
     }
@@ -84,37 +82,6 @@ private final class LoginScene: SKScene {
         addChild(ticketNode)
     }
 
-    private func buildDots() {
-        dotsNode.removeAllChildren()
-        dotsNode.zPosition = 2
-        addChild(dotsNode)
-
-        // Dots similar to DottedMapOverlay, but in SpriteKit
-        let dotSize: CGFloat = 6
-        let spacingX: CGFloat = 10
-        let spacingY: CGFloat = 12
-        let insetTop: CGFloat = 24
-
-        let usable = CGRect(x: 0, y: insetTop, width: size.width, height: max(0, size.height - insetTop - scallopHeight))
-        let cols = max(0, Int(usable.width / (dotSize + spacingX)))
-        let rows = max(0, Int(usable.height / (dotSize + spacingY)))
-
-        for r in 0..<rows {
-            for c in 0..<cols {
-                let circle = SKShapeNode(circleOfRadius: dotSize / 2)
-                let opacity: CGFloat = ((r + c) % 7 == 0) ? 0.9 : 0.35
-                circle.fillColor = UIColor(white: 1.0, alpha: opacity)
-                circle.strokeColor = .clear
-                let x = usable.minX + CGFloat(c) * (dotSize + spacingX) + dotSize
-                let y = usable.minY + CGFloat(r) * (dotSize + spacingY) + dotSize
-                circle.position = CGPoint(x: x, y: y)
-                dotsNode.addChild(circle)
-            }
-        }
-        dotsNode.alpha = 0.25
-        dotsNode.isUserInteractionEnabled = false
-    }
-
     private func buildScallop() {
         scallopNode.removeFromParent()
         scallopNode.zPosition = 3
@@ -144,7 +111,6 @@ private final class LoginScene: SKScene {
 
     private func layoutAll() {
         ticketNode.position = .zero
-        dotsNode.position = .zero
         scallopNode.position = .zero
     }
 

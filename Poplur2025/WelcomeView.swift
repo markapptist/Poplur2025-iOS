@@ -511,15 +511,12 @@ private final class WelcomeScene: SKScene {
         worldMapNode.zPosition = -90
         addChild(worldMapNode)
 
-        // One path renders every muted land dot. Only the sparse bright subset gets
-        // individual nodes, keeping the continuously animated node count modest.
-        // Sample at roughly twice the previous area density while keeping each
-        // dot's visual weight proportional to the tighter grid.
+        // Render only the newer animated highlight dots. The legacy static world-dot
+        // layer was removed from the approved pre-login treatment.
         let spacing = min(max(size.width / 59, 5.6), 10.6)
         let radius = min(max(spacing * 0.22, 1.25), 2.35)
         let columns = Int(ceil(size.width / spacing))
         let rows = Int(ceil(size.height / spacing))
-        let basePath = CGMutablePath()
         let highlights = SKNode()
         highlights.name = "worldMapHighlights"
         highlights.zPosition = 1
@@ -537,13 +534,6 @@ private final class WelcomeScene: SKScene {
                 }) else { continue }
 
                 let scenePoint = CGPoint(x: x, y: size.height - topY)
-                basePath.addEllipse(in: CGRect(
-                    x: scenePoint.x - radius,
-                    y: scenePoint.y - radius,
-                    width: radius * 2,
-                    height: radius * 2
-                ))
-
                 let highlightHash = (row * 73 + column * 151 + row * column * 19) % 41
                 guard highlightHash < 4 else { continue }
 
@@ -559,13 +549,6 @@ private final class WelcomeScene: SKScene {
             }
         }
 
-        let baseDots = SKShapeNode(path: basePath)
-        baseDots.name = "worldMapBaseDots"
-        baseDots.fillColor = UIColor(white: 1, alpha: 0.28)
-        baseDots.strokeColor = .clear
-        baseDots.lineWidth = 0
-        baseDots.zPosition = 0
-        worldMapNode.addChild(baseDots)
         worldMapNode.addChild(highlights)
     }
 
