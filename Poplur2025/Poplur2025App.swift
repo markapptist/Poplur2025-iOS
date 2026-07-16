@@ -76,16 +76,6 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
             CubeSkinStore.shared.syncAppIcon()
         }
 
-        // Claude API key for AI bumper scripts
-        if !Secrets.claudeAPIKey.isEmpty {
-            UserDefaults.standard.set(Secrets.claudeAPIKey, forKey: "poplur_claude_key")
-        }
-
-        // ElevenLabs TTS key — free tier, no card needed (elevenlabs.io)
-        if !Secrets.elevenLabsAPIKey.isEmpty {
-            UserDefaults.standard.set(Secrets.elevenLabsAPIKey, forKey: "poplur_elevenlabs_key")
-        }
-
         return true
     }
 
@@ -216,8 +206,9 @@ struct Poplur2025App: App {
                     preLoginMusic.stop()
                 }
             }
-            .onChange(of: showSplash) { _, isVisible in
-                if !isVisible && isPreLoginVisible {
+            .onChange(of: showSplash) { _, splashing in
+                // once the splash clears, start pre-login music if we landed on Welcome
+                if !splashing && isPreLoginVisible {
                     preLoginMusic.start()
                 }
             }
@@ -281,13 +272,10 @@ struct Poplur2025App: App {
     private var authenticatedContent: some View {
         ZStack {
             if auth.isResolvingAuthState {
-                // Pre-login: spinning cube centered on white
-                ZStack {
-                    Color.white.ignoresSafeArea()
-                    LoginCubeLoadingView()
-                        .frame(width: 300, height: 300)
-                }
-                .transition(.opacity)
+                // The clay splash is the only launch loader now — no white spinning-cube cover.
+                // Auth resolves behind the splash, so this dark placeholder is never actually seen.
+                Color(red: 0.039, green: 0.027, blue: 0.035).ignoresSafeArea()
+                    .transition(.opacity)
             } else if showAuthTransition {
                 // Post-login: auth transition video
                 LoadingTransitionVideoView()

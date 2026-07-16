@@ -115,7 +115,7 @@ final class BumperService: ObservableObject {
     // MARK: - Claude Script
 
     private func generateScript(for post: FeedPost, channelName: String, language: PoplurLanguage) async throws -> String {
-        let claudeKey = UserDefaults.standard.string(forKey: "poplur_claude_key") ?? Secrets.claudeAPIKey
+        let claudeKey = AppSecrets.claudeAPIKey
         guard !claudeKey.isEmpty else {
             return fallbackScript(for: post, channelName: channelName, language: language)
         }

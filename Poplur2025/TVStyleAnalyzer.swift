@@ -54,7 +54,7 @@ actor TVStyleAnalyzer {
     }
 
     private func callClaude(imageData: Data) async throws -> TVStyleMetadata {
-        let key = UserDefaults.standard.string(forKey: "poplur_claude_key") ?? Secrets.claudeAPIKey
+        let key = AppSecrets.claudeAPIKey
         guard !key.isEmpty else { throw TVAnalyzerError.noAPIKey }
 
         let prompt = """

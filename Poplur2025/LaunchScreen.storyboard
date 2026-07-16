@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Dark, logo-free launch screen that blends into the clay splash opening frame. -->
+<!-- Dark, logo-free launch screen so the OS launch image blends into the clay splash's
+     near-black opening frame (no white icon flash). Matches the Android dark launch. -->
 <document type="com.apple.InterfaceBuilder3.CocoaTouch.Storyboard.XIB" version="3.0" toolsVersion="32700.99.1234" targetRuntime="iOS.CocoaTouch" propertyAccessControl="none" useAutolayout="YES" launchScreen="YES" useTraitCollections="YES" useSafeAreas="YES" colorMatched="YES" initialViewController="POPLUR-LAUNCH-CONTROLLER">
     <device id="retina6_12" orientation="portrait" appearance="dark"/>
     <dependencies>
