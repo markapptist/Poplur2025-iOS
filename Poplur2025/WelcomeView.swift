@@ -3,6 +3,8 @@ import SpriteKit
 import CoreGraphics
 import UIKit
 import CoreImage
+import AVFoundation
+import CoreLocation
 
 extension Notification.Name {
     static let poplurWelcomePanelVisibilityChanged = Notification.Name("poplurWelcomePanelVisibilityChanged")
@@ -11,6 +13,15 @@ extension Notification.Name {
 private var isRunningInPreviews: Bool {
     let env = ProcessInfo.processInfo.environment
     return env["XCODE_RUNNING_FOR_PREVIEWS"] == "1" || env["XCODE_RUNNING_FOR_PLAYGROUNDS"] == "1"
+}
+
+@MainActor
+private final class WelcomeLocationPermissionRequester: NSObject, ObservableObject {
+    private let manager = CLLocationManager()
+
+    func requestWhenInUseAuthorization() {
+        manager.requestWhenInUseAuthorization()
+    }
 }
 
 private final class WelcomeScene: SKScene {
@@ -1065,7 +1076,9 @@ struct AuthConfettiBackground: View {
 
 struct WelcomeView: View {
     @EnvironmentObject private var auth: AuthViewModel
+    @EnvironmentObject private var preLoginMusic: PreLoginMusicPlayer
     @StateObject private var coordinator = WelcomeScene.Coordinator()
+    @StateObject private var locationManager = WelcomeLocationPermissionRequester()
     @EnvironmentObject private var stripeCoordinator: StripeTransitionCoordinator
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -1073,6 +1086,9 @@ struct WelcomeView: View {
     @State private var cubeVisible = false
     @State private var authPanel: CarouselPanel = .welcome
     @State private var goingForward = true
+    @State private var welcomePermissionsGranted = false
+    @State private var permissionPromptStarted = false
+    @State private var permissionTask: Task<Void, Never>?
 
     private enum CarouselPanel: Int {
         case welcome = 0, login = 1, signUp = 2
@@ -1110,6 +1126,66 @@ struct WelcomeView: View {
         }
     }
 
+    private var hasWelcomePermissions: Bool {
+        let cameraGranted = AVCaptureDevice.authorizationStatus(for: .video) == .authorized
+        let locationStatus = CLLocationManager.authorizationStatus()
+        let locationGranted = locationStatus == .authorizedWhenInUse || locationStatus == .authorizedAlways
+        return cameraGranted && locationGranted
+    }
+
+    private func requestWelcomePermissionsIfNeeded() {
+        guard authPanel == .welcome, !permissionPromptStarted else { return }
+        permissionPromptStarted = true
+        permissionTask?.cancel()
+        permissionTask = Task { @MainActor in
+            // Let the approved Welcome artwork settle before presenting the branded gate.
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            guard !Task.isCancelled, authPanel == .welcome else { return }
+
+            let cameraStatus = AVCaptureDevice.authorizationStatus(for: .video)
+            if cameraStatus != .authorized {
+                let decision = await PoplurPermissionCenter.shared.ask(
+                    kind: .camera,
+                    systemRequestAllowed: cameraStatus == .notDetermined
+                )
+                guard decision == .allow else { return }
+                if cameraStatus == .notDetermined {
+                    guard await AVCaptureDevice.requestAccess(for: .video) else { return }
+                } else {
+                    PoplurPermissionCenter.shared.openSettings()
+                    return
+                }
+            }
+
+            let locationStatus = CLLocationManager.authorizationStatus()
+            if locationStatus != .authorizedWhenInUse && locationStatus != .authorizedAlways {
+                let decision = await PoplurPermissionCenter.shared.ask(
+                    kind: .location,
+                    systemRequestAllowed: locationStatus == .notDetermined
+                )
+                guard decision == .allow else { return }
+                if locationStatus == .notDetermined {
+                    locationManager.requestWhenInUseAuthorization()
+                    // CLLocationManager reports authorization asynchronously. Wait for the
+                    // system sheet to resolve before lifting the cube.
+                    for _ in 0..<80 {
+                        try? await Task.sleep(nanoseconds: 250_000_000)
+                        if Task.isCancelled { return }
+                        let status = CLLocationManager.authorizationStatus()
+                        if status != .notDetermined { break }
+                    }
+                } else {
+                    PoplurPermissionCenter.shared.openSettings()
+                    return
+                }
+            }
+
+            withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
+                welcomePermissionsGranted = hasWelcomePermissions
+            }
+        }
+    }
+
     var body: some View {
         ZStack {
             Color.white.ignoresSafeArea()
@@ -1142,14 +1218,36 @@ struct WelcomeView: View {
             // interactive back-button cube and must not be obscured by this decoration.
             if authPanel == .welcome {
                 GeometryReader { geo in
+                    let cubeLift: CGFloat = welcomePermissionsGranted ? 24 : 0
                     LoginCubeView(face: .forward)
                         .frame(width: 128, height: 128)
                         .scaleEffect(cubeVisible ? 1 : 0.3)
                         .opacity(cubeVisible ? 1 : 0)
                         .position(
                             x: geo.size.width / 2,
-                            y: geo.size.height * (350.0 / 845.0)
+                            y: geo.size.height * (350.0 / 845.0) - cubeLift
                         )
+
+                    if welcomePermissionsGranted {
+                        VStack(spacing: 4) {
+                            Text(preLoginMusic.currentChannelTitle)
+                                .font(.system(size: 15, weight: .heavy, design: .rounded))
+                                .foregroundStyle(.white)
+                                .poplurTextShader(intensity: 0.8, animated: true)
+                            Text(preLoginMusic.currentAIScript)
+                                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                                .multilineTextAlignment(.center)
+                                .foregroundStyle(.white.opacity(0.92))
+                                .lineLimit(2)
+                                .padding(.horizontal, 34)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .position(
+                            x: geo.size.width / 2,
+                            y: geo.size.height * (350.0 / 845.0) + 86 - cubeLift
+                        )
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
                 }
                 .allowsHitTesting(false)
             }
@@ -1207,12 +1305,17 @@ struct WelcomeView: View {
             withAnimation(.spring(response: 0.6, dampingFraction: 0.62).delay(1.9)) {
                 cubeVisible = true
             }
+            welcomePermissionsGranted = hasWelcomePermissions
+            requestWelcomePermissionsIfNeeded()
         }
         .onChange(of: authPanel) { _, panel in
             NotificationCenter.default.post(
                 name: .poplurWelcomePanelVisibilityChanged,
                 object: panel == .welcome
             )
+            if panel == .welcome {
+                requestWelcomePermissionsIfNeeded()
+            }
         }
         .onChange(of: auth.isAuthenticated) { _, authed in
             if authed {

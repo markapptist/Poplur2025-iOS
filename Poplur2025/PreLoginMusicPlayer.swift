@@ -1,11 +1,8 @@
 import SwiftUI
 import AVFoundation
 
-/// Loops a single bundled ambient track behind the whole pre-login flow (Welcome, Login,
-/// Sign Up). Mute preference persists across launches via UserDefaults.
-///
-/// NOTE: expects a bundled audio file named `PreLoginMusicPlayer.assetName` (mp3). Add that
-/// asset to the app target — this player logs a warning and silently no-ops without it.
+/// Keeps the pre-login flow on the same audio treatment as Map: a local radio stream mixed
+/// with the Poplur AI host. Mute preference persists across launches via UserDefaults.
 @MainActor
 final class PreLoginMusicPlayer: ObservableObject {
     @Published var isMuted: Bool {
@@ -16,10 +13,16 @@ final class PreLoginMusicPlayer: ObservableObject {
         }
     }
 
-    private var player: AVAudioPlayer?
+    @Published private(set) var currentChannelTitle = "CBC Radio One Toronto"
+    @Published private(set) var currentAIScript = "Poplur AI is mixing your local radio."
+
+    private var player: AVPlayer?
     private static let mutedDefaultsKey = "poplur_prelogin_music_muted"
-    private static let assetName = "prelogin_ambient"
-    private static let playbackVolume: Float = 0.35
+    private static let radioURL = URL(string: "https://playerservices.streamtheworld.com/api/livestream-redirect/CBC_R1_TOR_H.mp3")!
+    private static let channelTitle = "CBC Radio One Toronto"
+    private static let aiStatusText = "Poplur AI is mixing your local radio."
+    private static let openingScript = "Welcome to Poplur Radio, live from your area. Poplur AI is mixing the local radio with what is happening around you. Stay with us."
+    private static let playbackVolume: Float = 0.42
 
     init() {
         isMuted = UserDefaults.standard.bool(forKey: Self.mutedDefaultsKey)
@@ -32,20 +35,13 @@ final class PreLoginMusicPlayer: ObservableObject {
             applyMuteState()
             return
         }
-        guard let url = Bundle.main.url(forResource: Self.assetName, withExtension: "mp3") else {
-            print("[PreLoginMusicPlayer] Missing bundled asset \(Self.assetName).mp3 — background music disabled.")
-            return
-        }
         do {
-            // .playback so the pre-login music + AI voice are audible even when the ring/silent
-            // switch is on (the onboarding audio is intentional); .mixWithOthers keeps it playing
-            // over any other audio the user has going and alongside the AI-guide speech synth.
+            // .playback keeps the intentional onboarding audio audible with the ring/silent
+            // switch on; .mixWithOthers lets the local radio and Poplur AI share the session.
             try AVAudioSession.sharedInstance().setCategory(.playback, options: [.mixWithOthers])
             try AVAudioSession.sharedInstance().setActive(true, options: [])
-            let newPlayer = try AVAudioPlayer(contentsOf: url)
-            newPlayer.numberOfLoops = -1
+            let newPlayer = AVPlayer(url: Self.radioURL)
             newPlayer.volume = Self.playbackVolume
-            newPlayer.prepareToPlay()
             player = newPlayer
             applyMuteState()
         } catch {
@@ -54,18 +50,30 @@ final class PreLoginMusicPlayer: ObservableObject {
     }
 
     func stop() {
-        player?.stop()
+        player?.pause()
         player = nil
+        PoplurMapRadioHost.shared.stop()
     }
 
     private func applyMuteState() {
         guard let player else { return }
         if isMuted {
-            player.pause()
-        } else if !player.isPlaying {
+            player.volume = 0
+            PoplurMapRadioHost.shared.stop()
+        } else {
+            player.volume = Self.playbackVolume
             player.play()
+            if !PoplurMapRadioHost.shared.isLive {
+                PoplurMapRadioHost.shared.speak(
+                    Self.openingScript,
+                    cityName: "your area",
+                    stopTitle: "Welcome",
+                    stationName: Self.channelTitle
+                )
+            }
         }
     }
+
 }
 
 private extension ProcessInfo {
@@ -92,6 +100,6 @@ struct PoplurMuteButton: View {
                 .foregroundColor(DS.Color.accent)
                 .frame(width: 44, height: 44)
         }
-        .accessibilityLabel(music.isMuted ? "Unmute background music" : "Mute background music")
+        .accessibilityLabel(music.isMuted ? "Unmute local radio" : "Mute local radio")
     }
 }

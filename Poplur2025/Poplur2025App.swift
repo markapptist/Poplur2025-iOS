@@ -182,6 +182,7 @@ struct Poplur2025App: App {
             .environmentObject(stripeCoordinator)
             .environmentObject(auth)
             .environmentObject(deviceVolumeObserver)
+            .environmentObject(preLoginMusic)
             .overlay {
                 if stripeCoordinator.isVisible {
                     StripeTransitionOverlay(coordinator: stripeCoordinator)
