@@ -24,37 +24,84 @@ struct LoginCubeView: UIViewRepresentable {
     private static let candidateSubdirectories = ["LoginCube"]
 
     var onTap: (() -> Void)? = nil
+    var onBack: (() -> Void)? = nil
+    var onForward: (() -> Void)? = nil
     var face: Face = .brand
 
+    private var isNavigationCube: Bool { onBack != nil || onForward != nil }
+
     func makeCoordinator() -> Coordinator {
-        Coordinator(onTap: onTap)
+        Coordinator(onTap: onTap, onBack: onBack, onForward: onForward)
     }
 
     func makeUIView(context: Context) -> SCNView {
         let view = SCNView()
         view.backgroundColor = .clear
-        view.scene = Self.makeScene(isBackButton: onTap != nil, face: face)
+        view.scene = Self.makeScene(isBackButton: onTap != nil, isNavigationCube: isNavigationCube, face: face)
         view.autoenablesDefaultLighting = true
         view.allowsCameraControl = false
-        view.isUserInteractionEnabled = onTap != nil
-        if onTap != nil {
+        view.isUserInteractionEnabled = onTap != nil || isNavigationCube
+        if view.isUserInteractionEnabled {
             let recognizer = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap))
             view.addGestureRecognizer(recognizer)
+        }
+        if isNavigationCube {
+            let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePan(_:)))
+            view.addGestureRecognizer(pan)
+            context.coordinator.navigationNode = view.scene?.rootNode.childNode(withName: "navigationCube", recursively: true)
         }
         return view
     }
 
     func updateUIView(_ uiView: SCNView, context: Context) {
         context.coordinator.onTap = onTap
+        context.coordinator.onBack = onBack
+        context.coordinator.onForward = onForward
     }
 
     final class Coordinator: NSObject {
         var onTap: (() -> Void)?
-        init(onTap: (() -> Void)?) { self.onTap = onTap }
-        @objc func handleTap() { onTap?() }
+        var onBack: (() -> Void)?
+        var onForward: (() -> Void)?
+        weak var navigationNode: SCNNode?
+        private var panStartX: CGFloat = 0
+        private(set) var isShowingBack = false
+
+        init(onTap: (() -> Void)?, onBack: (() -> Void)?, onForward: (() -> Void)?) {
+            self.onTap = onTap
+            self.onBack = onBack
+            self.onForward = onForward
+        }
+
+        @objc func handleTap() {
+            if onBack != nil || onForward != nil {
+                isShowingBack ? onBack?() : onForward?()
+            } else {
+                onTap?()
+            }
+        }
+
+        @objc func handlePan(_ recognizer: UIPanGestureRecognizer) {
+            switch recognizer.state {
+            case .began:
+                panStartX = recognizer.translation(in: recognizer.view).x
+            case .ended:
+                let delta = recognizer.translation(in: recognizer.view).x - panStartX
+                guard abs(delta) > 24 else { return }
+                isShowingBack.toggle()
+                let targetY: CGFloat = (isShowingBack ? .pi / 2 : .pi) + 0.56
+                SCNTransaction.begin()
+                SCNTransaction.animationDuration = 0.42
+                SCNTransaction.animationTimingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                navigationNode?.eulerAngles.y = Float(targetY)
+                SCNTransaction.commit()
+            default:
+                break
+            }
+        }
     }
 
-    private static func makeScene(isBackButton: Bool = false, face: Face = .brand) -> SCNScene {
+    private static func makeScene(isBackButton: Bool = false, isNavigationCube: Bool = false, face: Face = .brand) -> SCNScene {
         let scene = SCNScene()
 
         let cameraNode = SCNNode()
@@ -78,6 +125,7 @@ struct LoginCubeView: UIViewRepresentable {
         }
 
         let container = SCNNode()
+        container.name = isNavigationCube ? "navigationCube" : "loginCube"
         for child in loadedScene.rootNode.childNodes {
             child.removeFromParentNode()
             container.addChildNode(child)
@@ -87,7 +135,13 @@ struct LoginCubeView: UIViewRepresentable {
         RuntimeGLBLoader.normalize(container)
         let spinPivot = SCNNode()
         spinPivot.addChildNode(container)
-        switch face {
+        if isNavigationCube {
+            // Original DAE faces: OK/check is opposite the logo, while BACK is the adjacent face.
+            // Start on the check face; a horizontal swipe rotates exactly one quarter turn to BACK.
+            // A deliberate three-quarter pose keeps the active face readable while exposing
+            // enough of the top and adjacent side that the control cannot read as a flat tile.
+            container.eulerAngles = SCNVector3(-0.42, Float.pi + 0.56, 0)
+        } else { switch face {
         case .brand:
             container.eulerAngles = SCNVector3(0, Float.pi, 0)
         case .forward:
@@ -105,7 +159,7 @@ struct LoginCubeView: UIViewRepresentable {
             // Rotate the parent around screen/world vertical. Rotating the already-pitched
             // model itself would tumble the OK face from top to front and bottom.
             spinPivot.runAction(.repeatForever(idleSpin), forKey: "welcomeIdleSpin")
-        }
+        }}
         scene.rootNode.addChildNode(spinPivot)
 
         // Periodic spring pop (~every 3.5s)
@@ -118,7 +172,7 @@ struct LoginCubeView: UIViewRepresentable {
 
         // Back-button peek: rotate 90° to reveal back-arrow face, hold, then rotate back.
         // Fires every ~3 s so the user discovers the cube is tappable.
-        if isBackButton {
+        if isBackButton && !isNavigationCube {
             let peekWait = SCNAction.wait(duration: 3.0, withRange: 0.6)
             // Rotate -90° around Y to show the adjacent (back-arrow) face
             let peekTo = SCNAction.rotateBy(x: 0, y: -.pi / 2, z: 0, duration: 0.42)
