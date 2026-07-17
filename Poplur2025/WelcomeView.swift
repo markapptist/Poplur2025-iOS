@@ -41,6 +41,7 @@ private final class WelcomeScene: SKScene {
     private let flowerNode = SKNode()
     private let floor = SKNode()
     private var backgroundNode: SKSpriteNode?
+    private var dotFieldNode: SKSpriteNode?
     private var didAnimateBackground = false
     private var reduceMotion: Bool
 
@@ -126,10 +127,10 @@ private final class WelcomeScene: SKScene {
         #endif
 
         setupPhysics()
-        preloadBackgrounds { [weak self] in
-            self?.buildBackground(using: self?.defaultBackgroundName ?? "")
-            // Do not animate here; we wait for warm-up in update(_:)
-        }
+        // Prototype good-copy-welcome.html: flat #ff2d96 with an all-over quilted dot texture.
+        // The old slideup_alt1 ticket slab is gone; the scene backgroundColor supplies the flat
+        // pink and buildDotField() presses the dots over it.
+        buildDotField()
         buildWorldMapOverlay()
         buildFlower()
         buildBouncingSignIn()
@@ -441,8 +442,46 @@ private final class WelcomeScene: SKScene {
             lockedBackgroundSize = nil // allow recompute to new ideal size
             sizeAndPlaceBackground(bg, animateIfNeeded: false)
         }
+        buildDotField()
         buildWorldMapOverlay()
         layoutAll()
+    }
+
+    /// All-over quilted pressed-dot texture over the flat pink, matching the prototype
+    /// good-copy-welcome.html `.pink` layer:
+    /// radial-gradient(rgba(214,16,108,0.38) 1.6px, transparent 2.2px) on a 10px tile.
+    private func buildDotField() {
+        guard size.width > 1, size.height > 1 else { return }
+        dotFieldNode?.removeFromParent()
+
+        let spacing: CGFloat = 10
+        let dotRadius: CGFloat = 1.6
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = UIScreen.main.scale
+        format.opaque = false
+
+        let image = UIGraphicsImageRenderer(size: size, format: format).image { context in
+            let cg = context.cgContext
+            cg.setFillColor(UIColor(red: 214.0 / 255.0, green: 16.0 / 255.0, blue: 108.0 / 255.0, alpha: 0.38).cgColor)
+            var y = spacing / 2
+            while y < size.height {
+                var x = spacing / 2
+                while x < size.width {
+                    cg.fillEllipse(in: CGRect(x: x - dotRadius, y: y - dotRadius, width: dotRadius * 2, height: dotRadius * 2))
+                    x += spacing
+                }
+                y += spacing
+            }
+        }
+
+        let texture = SKTexture(image: image)
+        texture.filteringMode = .linear
+        let node = SKSpriteNode(texture: texture, size: size)
+        node.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+        node.position = CGPoint(x: size.width / 2, y: size.height / 2)
+        node.zPosition = -95
+        addChild(node)
+        dotFieldNode = node
     }
 
     func setReduceMotion(_ enabled: Bool) {
@@ -539,14 +578,12 @@ private final class WelcomeScene: SKScene {
 
             for column in 0...columns {
                 let x = CGFloat(column) * spacing
-                let normalizedPoint = CGPoint(x: x / size.width, y: normalizedY)
-                guard Self.normalizedContinents.contains(where: {
-                    Self.contains(normalizedPoint, in: $0)
-                }) else { continue }
-
+                // The prototype presses its dot field across the entire pink slab, so the living
+                // highlights are no longer gated to the continent silhouettes (which read as
+                // corner-clustered). Sprinkle a sparse, stable subset all over instead.
                 let scenePoint = CGPoint(x: x, y: size.height - topY)
                 let highlightHash = (row * 73 + column * 151 + row * column * 19) % 41
-                guard highlightHash < 4 else { continue }
+                guard highlightHash < 2 else { continue }
 
                 let dot = SKShapeNode(circleOfRadius: radius * 1.12)
                 dot.position = scenePoint
@@ -568,7 +605,7 @@ private final class WelcomeScene: SKScene {
         dot.setScale(1)
 
         guard !reduceMotion else {
-            dot.alpha = 0.95
+            dot.alpha = 0.5
             return
         }
 
@@ -576,15 +613,15 @@ private final class WelcomeScene: SKScene {
         let periodSeed = (row * 29 + column * 43 + row * column * 7) % 70
         let phase = Double(phaseSeed) / 100 * 1.6
         let rest = 0.55 + Double(periodSeed) / 100
-        dot.alpha = 0.42
+        dot.alpha = 0.28
 
         let brighten = SKAction.group([
-            .fadeAlpha(to: 1, duration: 0.34),
+            .fadeAlpha(to: 0.62, duration: 0.34),
             .scale(to: 1.16, duration: 0.34),
         ])
         brighten.timingMode = .easeInEaseOut
         let dim = SKAction.group([
-            .fadeAlpha(to: 0.36, duration: 0.48),
+            .fadeAlpha(to: 0.24, duration: 0.48),
             .scale(to: 0.94, duration: 0.48),
         ])
         dim.timingMode = .easeInEaseOut
@@ -719,38 +756,26 @@ private final class WelcomeScene: SKScene {
         let font = UIFont(name: "AvenirNext-Heavy", size: 22)
             ?? UIFont.systemFont(ofSize: 22, weight: .heavy)
 
+        // Pressed under-shadow — prototype dark-mode text-shadow (0 2.5px 0 #8e0f4c).
         let shadow = SKLabelNode(text: text)
         shadow.fontName = font.fontName
         shadow.fontSize = 22
-        shadow.fontColor = UIColor.black.withAlphaComponent(0.16)
+        shadow.fontColor = UIColor(red: 142.0 / 255.0, green: 15.0 / 255.0, blue: 76.0 / 255.0, alpha: 0.9)
         shadow.verticalAlignmentMode = .center
         shadow.horizontalAlignmentMode = .center
-        shadow.position.y = -1
+        shadow.position.y = -2
         shadow.zPosition = 0
         container.addChild(shadow)
 
-        let mask = SKLabelNode(text: text)
-        mask.fontName = font.fontName
-        mask.fontSize = 22
-        mask.fontColor = .white
-        mask.verticalAlignmentMode = .center
-        mask.horizontalAlignmentMode = .center
-
-        let crop = SKCropNode()
-        crop.maskNode = mask
-        crop.zPosition = 1
-
-        let maskFrame = mask.calculateAccumulatedFrame()
-        let fillSize = CGSize(
-            width: max(1, ceil(maskFrame.width)),
-            height: max(1, ceil(maskFrame.height))
-        )
-        let shaderFill = SKSpriteNode(color: .white, size: fillSize)
-        shaderFill.shader = makeButtonTextShader(
-            aspectRatio: fillSize.height / fillSize.width
-        )
-        crop.addChild(shaderFill)
-        container.addChild(crop)
+        // Solid pink clay text (#f4459c) — the dark-mode `.cap-btn .shader-text` colour.
+        let label = SKLabelNode(text: text)
+        label.fontName = font.fontName
+        label.fontSize = 22
+        label.fontColor = UIColor(red: 244.0 / 255.0, green: 69.0 / 255.0, blue: 156.0 / 255.0, alpha: 1.0)
+        label.verticalAlignmentMode = .center
+        label.horizontalAlignmentMode = .center
+        label.zPosition = 1
+        container.addChild(label)
 
         return container
     }
@@ -832,9 +857,11 @@ private final class WelcomeScene: SKScene {
                 return
             } else {
                 didWarmUp = true
-                if let bg = backgroundNode, !didAnimateBackground {
-                    sizeAndPlaceBackground(bg, animateIfNeeded: true)
+                if !didAnimateBackground {
                     didAnimateBackground = true
+                    // Flat pink now — there is no ticket slab to drop in, so reveal the logo
+                    // (which drops from the top) and then the buttons directly.
+                    fadeLogoThenButton()
                 }
             }
         }
@@ -873,27 +900,30 @@ private final class WelcomeScene: SKScene {
             cg.saveGState()
             capsule.addClip()
 
+            // Dark clay dough body — prototype good-copy-welcome.html dark-mode `.cap-btn`:
+            // linear-gradient(180deg, #322126, #241619, #16090d).
             let colorSpace = CGColorSpaceCreateDeviceRGB()
             let baseColors = [
-                UIColor.white.cgColor,
-                UIColor(red: 1.0, green: 0.94, blue: 0.98, alpha: 1.0).cgColor,
-                UIColor(red: 0.88, green: 0.88, blue: 0.92, alpha: 1.0).cgColor,
+                UIColor(red: 0.196, green: 0.129, blue: 0.149, alpha: 1.0).cgColor, // #322126
+                UIColor(red: 0.141, green: 0.086, blue: 0.098, alpha: 1.0).cgColor, // #241619
+                UIColor(red: 0.086, green: 0.035, blue: 0.051, alpha: 1.0).cgColor, // #16090d
             ] as CFArray
             if let gradient = CGGradient(
                 colorsSpace: colorSpace,
                 colors: baseColors,
-                locations: [0.0, 0.54, 1.0]
+                locations: [0.0, 0.58, 1.0]
             ) {
                 cg.drawLinearGradient(
                     gradient,
-                    start: CGPoint(x: size.width * 0.22, y: 0),
-                    end: CGPoint(x: size.width * 0.82, y: size.height),
+                    start: CGPoint(x: size.width / 2, y: 0),
+                    end: CGPoint(x: size.width / 2, y: size.height),
                     options: []
                 )
             }
 
+            // Soft top-left dough highlight (inset 0 3px 4px rgba(255,255,255,0.22)).
             let sheenColors = [
-                UIColor.white.withAlphaComponent(0.64).cgColor,
+                UIColor.white.withAlphaComponent(0.20).cgColor,
                 UIColor.white.withAlphaComponent(0.0).cgColor,
             ] as CFArray
             if let sheen = CGGradient(
@@ -909,14 +939,15 @@ private final class WelcomeScene: SKScene {
                 )
             }
 
+            // Pressed bottom shade (inset 0 -4px 7px rgba(0,0,0,0.5)).
             let bottomShadeColors = [
                 UIColor.clear.cgColor,
-                UIColor.black.withAlphaComponent(0.11).cgColor,
+                UIColor.black.withAlphaComponent(0.5).cgColor,
             ] as CFArray
             if let bottomShade = CGGradient(
                 colorsSpace: colorSpace,
                 colors: bottomShadeColors,
-                locations: [0.45, 1.0]
+                locations: [0.5, 1.0]
             ) {
                 cg.drawLinearGradient(
                     bottomShade,
@@ -928,17 +959,14 @@ private final class WelcomeScene: SKScene {
 
             cg.restoreGState()
 
-            UIColor.white.withAlphaComponent(0.58).setStroke()
-            let highlight = UIBezierPath(
-                roundedRect: insetRect.insetBy(dx: 8, dy: 6),
-                cornerRadius: max(0, radius - 6)
+            // Pink clay rim = the prototype's 6px #f4459c ring, which reads as a glow.
+            UIColor(red: 244.0 / 255.0, green: 69.0 / 255.0, blue: 156.0 / 255.0, alpha: 1.0).setStroke()
+            let rim = UIBezierPath(
+                roundedRect: insetRect.insetBy(dx: 2.5, dy: 2.5),
+                cornerRadius: max(0, radius - 2.5)
             )
-            highlight.lineWidth = 1
-            highlight.stroke()
-
-            UIColor.black.withAlphaComponent(0.10).setStroke()
-            capsule.lineWidth = 1.5
-            capsule.stroke()
+            rim.lineWidth = 5
+            rim.stroke()
         }
 
         let texture = SKTexture(image: image)
@@ -1211,26 +1239,29 @@ struct WelcomeView: View {
                             y: geo.size.height * (350.0 / 845.0) - cubeLift
                         )
 
-                    if welcomePermissionsGranted {
-                        VStack(spacing: 4) {
-                            Text(preLoginMusic.currentChannelTitle)
-                                .font(.system(size: 15, weight: .heavy, design: .rounded))
-                                .foregroundStyle(.white)
-                                .poplurTextShader(intensity: 0.8, animated: true)
-                            Text(preLoginMusic.currentAIScript)
-                                .font(.system(size: 12, weight: .semibold, design: .rounded))
-                                .multilineTextAlignment(.center)
-                                .foregroundStyle(.white.opacity(0.92))
-                                .lineLimit(2)
-                                .padding(.horizontal, 34)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .position(
-                            x: geo.size.width / 2,
-                            y: geo.size.height * (350.0 / 845.0) + 86 - cubeLift
-                        )
-                        .transition(.opacity.combined(with: .move(edge: .top)))
+                    // Prototype Welcome copy (good-copy-welcome.html clayText lines) — replaces
+                    // the old local-radio line; cream extruded clay type over the pink slab.
+                    VStack(spacing: 6) {
+                        Text("Welcome to Poplur!")
+                            .font(.system(size: 30, weight: .black, design: .rounded))
+                            .foregroundStyle(Color(red: 248.0 / 255.0, green: 239.0 / 255.0, blue: 220.0 / 255.0))
+                        Text("Post. Explore. Connect.\nExpand your world.")
+                            .font(.system(size: 17, weight: .heavy, design: .rounded))
+                            .multilineTextAlignment(.center)
+                            .foregroundStyle(Color(red: 248.0 / 255.0, green: 239.0 / 255.0, blue: 220.0 / 255.0))
+                        Text("Poplur AI is shaping tonight\u{2019}s map for you\u{2026}")
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                            .multilineTextAlignment(.center)
+                            .foregroundStyle(Color(red: 248.0 / 255.0, green: 239.0 / 255.0, blue: 220.0 / 255.0))
+                            .lineLimit(2)
+                            .padding(.horizontal, 30)
                     }
+                    .shadow(color: Color(red: 158.0 / 255.0, green: 14.0 / 255.0, blue: 78.0 / 255.0).opacity(0.5), radius: 4, y: 3)
+                    .frame(maxWidth: .infinity)
+                    .position(
+                        x: geo.size.width / 2,
+                        y: geo.size.height * (350.0 / 845.0) + 96 - cubeLift
+                    )
                 }
                 .allowsHitTesting(false)
             }
