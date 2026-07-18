@@ -4,6 +4,12 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Poplur — Splash</title>
+  <!-- Warm the approved Welcome assets while the barber-pole loader runs. -->
+  <link rel="preload" as="fetch" href="/poplur-clay-map/public/poplur_clay_cube.glb">
+  <link rel="preload" as="fetch" href="/Poplur2025-iOS/Poplur2025/MarkHead_TalkingRig.glb">
+  <link rel="preload" as="fetch" href="/poplur-clay-map/public/zoom_buildings.glb">
+  <link rel="preload" as="audio" href="/poplur-clay-map/public/radio_bed.wav">
+  <link rel="preload" as="audio" href="/Poplur2025-iOS/Poplur2025/pop.mp3">
   <style>
     * { box-sizing: border-box; }
     html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #0a0709; }
@@ -84,6 +90,8 @@
   <video autoplay muted loop playsinline aria-label="Poplur clay splash animation">
     <source src="/Poplur2025-iOS/Poplur2025/poplur_splash.mp4" type="video/mp4">
   </video>
+  <audio id="popSfx" preload="auto" src="/Poplur2025-iOS/Poplur2025/pop.mp3"></audio>
+  <audio id="radioBed" loop preload="auto" src="/poplur-clay-map/public/radio_bed.wav"></audio>
   <div class="splash-scrim"></div>
   <div class="loader-layer" aria-label="Splash loading progress">
     <div class="loader">
@@ -106,7 +114,46 @@
     ];
     const video = document.querySelector("video");
     const message = document.querySelector(".loading-text");
+    const popSfx = document.getElementById("popSfx");
+    const radioBed = document.getElementById("radioBed");
     let messageIndex = 0;
+    let audioOn = false;
+
+    try { sessionStorage.setItem("poplurSplashShown", "1"); } catch {}
+
+    function resumeRadio() {
+      try { radioBed.currentTime = parseFloat(sessionStorage.getItem("poplurRadio.t") || "0") || 0; } catch {}
+      radioBed.muted = false;
+      if (radioBed.volume === 1) radioBed.volume = 0.55;
+      radioBed.play().catch(() => {});
+    }
+    setInterval(() => {
+      if (!radioBed.paused) try { sessionStorage.setItem("poplurRadio.t", String(radioBed.currentTime)); } catch {}
+    }, 500);
+
+    function setAudio(on) {
+      audioOn = on;
+      if (on) resumeRadio();
+      else { popSfx.pause(); radioBed.pause(); }
+    }
+    setTimeout(() => {
+      if (!audioOn) radioBed.play().then(() => setAudio(true)).catch(() => {});
+    }, 300);
+    window.addEventListener("message", event => {
+      const data = event && event.data;
+      if (!data) return;
+      if (data.gcAudio === "on" || data.gclAudio === "on") setAudio(true);
+      if (data.gcAudio === "off" || data.gclAudio === "off") setAudio(false);
+    });
+    window.addEventListener("pointerdown", () => setAudio(true));
+
+    function pop() {
+      if (!audioOn) return;
+      popSfx.muted = false;
+      popSfx.volume = 0.45;
+      popSfx.currentTime = 0;
+      popSfx.play().catch(() => {});
+    }
 
     function rotateMessage() {
       message.classList.add("swap");
@@ -114,6 +161,7 @@
         messageIndex = (messageIndex + 1) % messages.length;
         message.textContent = messages[messageIndex];
         message.classList.remove("swap");
+        pop();
       }, 220);
     }
 

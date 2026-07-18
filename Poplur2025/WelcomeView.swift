@@ -1239,8 +1239,9 @@ struct WelcomeView: View {
                             y: geo.size.height * (350.0 / 845.0) - cubeLift
                         )
 
-                    // Prototype Welcome copy (good-copy-welcome.html clayText lines) — replaces
-                    // the old local-radio line; cream extruded clay type over the pink slab.
+                    // Prototype Welcome copy (good-copy-welcome.html clayText lines). Once the
+                    // Welcome permission gate is complete, replace the static AI teaser with the
+                    // live local-radio channel and the same Poplur AI host status used by Map.
                     VStack(spacing: 6) {
                         Text("Welcome to Poplur!")
                             .font(.system(size: 30, weight: .black, design: .rounded))
@@ -1249,12 +1250,27 @@ struct WelcomeView: View {
                             .font(.system(size: 17, weight: .heavy, design: .rounded))
                             .multilineTextAlignment(.center)
                             .foregroundStyle(Color(red: 248.0 / 255.0, green: 239.0 / 255.0, blue: 220.0 / 255.0))
-                        Text("Poplur AI is shaping tonight\u{2019}s map for you\u{2026}")
-                            .font(.system(size: 13, weight: .bold, design: .rounded))
-                            .multilineTextAlignment(.center)
-                            .foregroundStyle(Color(red: 248.0 / 255.0, green: 239.0 / 255.0, blue: 220.0 / 255.0))
-                            .lineLimit(2)
-                            .padding(.horizontal, 30)
+                        if welcomePermissionsGranted {
+                            Text(preLoginMusic.currentChannelTitle)
+                                .font(.system(size: 15, weight: .heavy, design: .rounded))
+                                .foregroundStyle(.white)
+                                .poplurTextShader(intensity: 0.8, animated: true)
+                            Text(preLoginMusic.currentAIScript)
+                                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                                .multilineTextAlignment(.center)
+                                .foregroundStyle(.white.opacity(0.92))
+                                .lineLimit(2)
+                                .padding(.horizontal, 34)
+                                .transition(.opacity.combined(with: .move(edge: .top)))
+                        } else {
+                            Text("Poplur AI is shaping tonight\u{2019}s map for you\u{2026}")
+                                .font(.system(size: 13, weight: .bold, design: .rounded))
+                                .multilineTextAlignment(.center)
+                                .foregroundStyle(Color(red: 248.0 / 255.0, green: 239.0 / 255.0, blue: 220.0 / 255.0))
+                                .lineLimit(2)
+                                .padding(.horizontal, 30)
+                                .transition(.opacity)
+                        }
                     }
                     .shadow(color: Color(red: 158.0 / 255.0, green: 14.0 / 255.0, blue: 78.0 / 255.0).opacity(0.5), radius: 4, y: 3)
                     .frame(maxWidth: .infinity)
