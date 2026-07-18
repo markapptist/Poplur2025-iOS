@@ -46,6 +46,19 @@ const ASSETS = [
   [join(WORKSPACE, "poplur-clay-map/node_modules/three/examples/jsm/utils/BufferGeometryUtils.js"),
    "poplur-clay-map/node_modules/three/examples/jsm/utils/BufferGeometryUtils.js"],
 
+  // Phase-2: Draco decoder. The compressed models use KHR_draco_mesh_compression,
+  // so the GLTFLoader needs a DRACOLoader + the wasm decoder. Bundle all three
+  // from the SAME vendored three.js version, offline, so the hero cube and the
+  // Choose-Account models decode when WebGL is available. The decoder dir matches
+  // the welcome's DRACOLoader.setDecoderPath (libs/draco/). Without these the
+  // meshes cannot decode and the 3D silently falls back to 2D even on real HW.
+  [join(WORKSPACE, "poplur-clay-map/node_modules/three/examples/jsm/loaders/DRACOLoader.js"),
+   "poplur-clay-map/node_modules/three/examples/jsm/loaders/DRACOLoader.js"],
+  [join(WORKSPACE, "poplur-clay-map/node_modules/three/examples/jsm/libs/draco/draco_wasm_wrapper.js"),
+   "poplur-clay-map/node_modules/three/examples/jsm/libs/draco/draco_wasm_wrapper.js"],
+  [join(WORKSPACE, "poplur-clay-map/node_modules/three/examples/jsm/libs/draco/draco_decoder.wasm"),
+   "poplur-clay-map/node_modules/three/examples/jsm/libs/draco/draco_decoder.wasm"],
+
   // Phase-2: COMPRESSED 3D models (user-approved compress + bundle all).
   // gltf-transform webp@1024 + Draco, staged in .codex/prelogin-assets-compressed/.
   // welcome hero cube — REPLACES the 33MB uncompressed model with the 859KB one.
@@ -125,6 +138,33 @@ function cleanWelcome(html) {
   //    schedule (there is no CSS cube — the source says so — the stage just stays
   //    empty, which is the approved GPU-less render). Also wrap each renderer
   //    construction in try/catch as a belt-and-suspenders guard.
+  // 6b. Draco decoder wiring — IDEMPOTENT. The bundled models are Draco-compressed
+  //     (KHR_draco_mesh_compression), so the GLTFLoader needs a DRACOLoader + the
+  //     wasm decoder (bundled offline by ASSETS at libs/draco/). The approved Good
+  //     Copy source now wires this itself; only inject when it does NOT, so we
+  //     never emit a duplicate `import {DRACOLoader}` (a module SyntaxError). Both
+  //     paths point at the SAME decoder dir we bundle.
+  const DRACO_PATH = "/poplur-clay-map/node_modules/three/examples/jsm/libs/draco/";
+  if (!/import\s*\{\s*DRACOLoader\s*\}/.test(out)) {
+    out = out.replace(
+      'import {GLTFLoader} from "three/addons/loaders/GLTFLoader.js";',
+      'import {GLTFLoader} from "three/addons/loaders/GLTFLoader.js";\nimport {DRACOLoader} from "three/addons/loaders/DRACOLoader.js";'
+    );
+  }
+  if (!/setDRACOLoader/.test(out)) {
+    out = out.replace(
+      "const loader = new GLTFLoader();",
+      `const loader = new GLTFLoader();
+
+// Phase-2 fallback wiring (only when the source did not already wire it): the
+// bundled models are Draco-compressed, so give the GLTFLoader a DRACOLoader whose
+// wasm decoder is bundled offline. Covers both the hero cube and Choose-Account.
+const __poplurDraco = new DRACOLoader();
+__poplurDraco.setDecoderPath("${DRACO_PATH}");
+loader.setDRACOLoader(__poplurDraco);`
+    );
+  }
+
   out = out.replace(
     "const loader = new GLTFLoader();",
     `const loader = new GLTFLoader();

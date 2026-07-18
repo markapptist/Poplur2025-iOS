@@ -1423,6 +1423,7 @@
 <script type="module">
 import * as THREE from "three";
 import {GLTFLoader} from "three/addons/loaders/GLTFLoader.js";
+import {DRACOLoader} from "three/addons/loaders/DRACOLoader.js";
 
 const loader = new GLTFLoader();
 
@@ -1448,6 +1449,10 @@ if (!POPLUR_WEBGL_OK) {
   } catch (e) {}
   if (window.__poplurCubeGLReady) { try { window.__poplurCubeGLReady(); } catch (e) {} }
 }
+// The cube GLB is Draco-compressed; give the loader a decoder or it can't parse it.
+const __clayDraco = new DRACOLoader();
+__clayDraco.setDecoderPath("/poplur-clay-map/node_modules/three/examples/jsm/libs/draco/");
+loader.setDRACOLoader(__clayDraco);
 
 // ── Sign-up account icons — the approved flow's live 3D renderer, ported ──
 if (POPLUR_WEBGL_OK) document.querySelectorAll("canvas[data-account-model]").forEach(canvas => {
