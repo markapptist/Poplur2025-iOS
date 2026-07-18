@@ -19,11 +19,16 @@ import UniformTypeIdentifiers
 // their sessionStorage handoff (the radio-bed play position) is preserved.
 //
 // Native ⇄ web bridge (poplur channel):
-//   web → Swift: window.webkit.messageHandlers.poplur.postMessage({type, ...})
-//     "pop"    → haptic tap
-//     "signIn" → AuthViewModel (TODO Phase 3 — web forms don't post yet)
-//     "signUp" → AuthViewModel (TODO Phase 3)
-//     "complete" → leave pre-login (handoff to post-login)
+//   web → Swift: window.webkit.messageHandlers.poplur.postMessage({action, ...})
+//
+// Phase-2 finalized action set (identical on iOS + Android — Android delivers the
+// same shape via PoplurNative.onAction(action, payloadJson)):
+//     "signIn"            → AuthViewModel sign-in  (Phase-3 stub: log, no faked success)
+//     "signUp"            → AuthViewModel sign-up   (Phase-3 stub: log, no faked success)
+//     "requestPermission" → { permission: "camera" | "location", choice }
+//                           (Phase-3 stub: log; real OS prompt lands in Phase 3)
+//     "complete"          → flow finished → onComplete() handoff to post-login
+//     "pop"               → haptic tap (auxiliary)
 
 enum PoplurPreloginWeb {
     // Custom scheme (not file://) so the page gets a real origin: ES modules,
@@ -178,8 +183,9 @@ struct PreloginWebView: UIViewRepresentable {
                                    didReceive message: WKScriptMessage) {
             guard message.name == "poplur" else { return }
             let body = message.body as? [String: Any]
-            guard let type = body?["type"] as? String else { return }
-            switch type {
+            // Finalized schema keys on `action`; tolerate legacy `type` too.
+            guard let action = (body?["action"] as? String) ?? (body?["type"] as? String) else { return }
+            switch action {
             case "pop":
                 popHaptic.impactOccurred()
             case "signIn":
@@ -188,15 +194,24 @@ struct PreloginWebView: UIViewRepresentable {
                 // success — a returning session still resolves through the
                 // existing AuthViewModel state listener.
                 let email = body?["email"] as? String ?? "<none>"
-                print("[PreloginWebView] signIn bridge received (email: \(email)) — Phase 3 stub, not wired to auth yet")
+                let method = body?["method"] as? String ?? "password"
+                print("[PreloginWebView] signIn bridge received (email: \(email), method: \(method)) — Phase 3 stub, not wired to auth yet")
             case "signUp":
                 // TODO Phase 3: route to AuthViewModel sign-up.
                 let email = body?["email"] as? String ?? "<none>"
-                print("[PreloginWebView] signUp bridge received (email: \(email)) — Phase 3 stub, not wired to auth yet")
+                let accountType = body?["accountType"] as? String ?? "<none>"
+                print("[PreloginWebView] signUp bridge received (email: \(email), accountType: \(accountType)) — Phase 3 stub, not wired to auth yet")
+            case "requestPermission":
+                // TODO Phase 3: trigger the real OS prompt (AVCaptureDevice /
+                // CLLocationManager). For now log only — do NOT fake a grant.
+                let permission = body?["permission"] as? String ?? "<none>"
+                let choice = body?["choice"] as? String ?? "<none>"
+                print("[PreloginWebView] requestPermission bridge received (permission: \(permission), choice: \(choice)) — Phase 3 stub, OS prompt not wired yet")
             case "complete":
+                // Flow finished → hand off to the existing post-login path.
                 onComplete()
             default:
-                break
+                print("[PreloginWebView] unhandled bridge action: \(action)")
             }
         }
     }

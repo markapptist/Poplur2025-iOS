@@ -28,33 +28,53 @@ const SPLASH_SRC = join(WORKSPACE, "good-copy-splash.html");
 const WELCOME_SRC = join(WORKSPACE, "good-copy-welcome.html");
 
 // ---- local assets the screens reference by absolute path --------------------
-// dest is the referenced URL path (minus leading slash) so a request served by
-// the custom scheme handler resolves 1:1 inside the bundle.
+// Each entry is [absoluteSource, destRelativeToBundle]. dest is the referenced
+// URL path (minus leading slash) so a request served by the custom scheme
+// handler resolves 1:1 inside the bundle. Because PreloginWeb is a *folder*
+// reference in project.pbxproj (lastKnownFileType = folder, like ClayMapWeb),
+// every file mirrored here ships in the app bundle automatically — no per-file
+// pbxproj build-file entry is needed.
+const COMPRESSED_DIR = join(WORKSPACE, ".codex/prelogin-assets-compressed");
+const CLAYMAP_PUBLIC = join(WORKSPACE, "poplur-clay-map/public");
+
 const ASSETS = [
-  // welcome hero cube renderer (three.js) + model
-  ["poplur-clay-map/node_modules/three/build/three.module.js",
+  // welcome hero cube renderer (three.js).
+  [join(WORKSPACE, "poplur-clay-map/node_modules/three/build/three.module.js"),
    "poplur-clay-map/node_modules/three/build/three.module.js"],
-  ["poplur-clay-map/node_modules/three/examples/jsm/loaders/GLTFLoader.js",
+  [join(WORKSPACE, "poplur-clay-map/node_modules/three/examples/jsm/loaders/GLTFLoader.js"),
    "poplur-clay-map/node_modules/three/examples/jsm/loaders/GLTFLoader.js"],
-  ["poplur-clay-map/node_modules/three/examples/jsm/utils/BufferGeometryUtils.js",
+  [join(WORKSPACE, "poplur-clay-map/node_modules/three/examples/jsm/utils/BufferGeometryUtils.js"),
    "poplur-clay-map/node_modules/three/examples/jsm/utils/BufferGeometryUtils.js"],
-  ["poplur-clay-map/public/poplur_icon_cube.glb",
+
+  // Phase-2: COMPRESSED 3D models (user-approved compress + bundle all).
+  // gltf-transform webp@1024 + Draco, staged in .codex/prelogin-assets-compressed/.
+  // welcome hero cube — REPLACES the 33MB uncompressed model with the 859KB one.
+  [join(COMPRESSED_DIR, "poplur_icon_cube.glb"),
    "poplur-clay-map/public/poplur_icon_cube.glb"],
+  // Sign-up · Choose-Account 3D icons — now under the 100MB cap, so they ship
+  // and render offline (MarkHead heads + Poplur building). welcome.html
+  // references these two by the paths on the right.
+  [join(COMPRESSED_DIR, "MarkHead_TalkingRig.glb"),
+   "Poplur2025-iOS/Poplur2025/MarkHead_TalkingRig.glb"],
+  [join(COMPRESSED_DIR, "zoom_buildings.glb"),
+   "poplur-clay-map/public/zoom_buildings.glb"],
+
+  // Phase-2: static 2D cube image — shown in place of the GL cube canvas when
+  // WebGL is unavailable (see cleanWelcome 2D-fallback injection).
+  [join(CLAYMAP_PUBLIC, "clay_cube.png"),
+   "poplur-clay-map/public/clay_cube.png"],
+
   // shared ambient radio bed (splash + welcome hand the play position off)
-  ["poplur-clay-map/public/radio_bed.wav",
+  [join(CLAYMAP_PUBLIC, "radio_bed.wav"),
    "poplur-clay-map/public/radio_bed.wav"],
   // splash media
-  ["Poplur2025-iOS/Poplur2025/poplur_splash.mp4",
+  [join(WORKSPACE, "Poplur2025-iOS/Poplur2025/poplur_splash.mp4"),
    "Poplur2025-iOS/Poplur2025/poplur_splash.mp4"],
-  ["Poplur2025-iOS/Poplur2025/pop.mp3",
+  [join(WORKSPACE, "Poplur2025-iOS/Poplur2025/pop.mp3"),
    "Poplur2025-iOS/Poplur2025/pop.mp3"],
-  ["Poplur2025-iOS/Poplur2025/Assets.xcassets/logo.imageset/logo1.png",
+  [join(WORKSPACE, "Poplur2025-iOS/Poplur2025/Assets.xcassets/logo.imageset/logo1.png"),
    "Poplur2025-iOS/Poplur2025/Assets.xcassets/logo.imageset/logo1.png"],
 ];
-// NOTE: MarkHead_TalkingRig.glb (106MB) and zoom_buildings.glb (8MB) are the
-// Sign-up · Choose-Account 3D icons — a Phase-2 screen. They are intentionally
-// NOT bundled here; offline they fail fast via the scheme handler (no hang) and
-// those icons simply do not render on that not-yet-shipped screen.
 
 function ensureDir(p) { mkdirSync(dirname(p), { recursive: true }); }
 
@@ -121,8 +141,15 @@ const POPLUR_WEBGL_OK = (function () {
       (c.getContext('webgl2') || c.getContext('webgl') || c.getContext('experimental-webgl')));
   } catch (e) { return false; }
 })();
-if (!POPLUR_WEBGL_OK && window.__poplurCubeGLReady) {
-  try { window.__poplurCubeGLReady(); } catch (e) {}
+if (!POPLUR_WEBGL_OK) {
+  // Phase-2 2D cube fallback: no WebGL, so swap the (hidden) GL cube canvas for
+  // the bundled static clay_cube.png. The .flat class reveals #cubeFlat; the
+  // stage still runs its rise/shrink choreography, just with a flat cube.
+  try {
+    var __flatStage = document.getElementById('lcubeStage');
+    if (__flatStage) __flatStage.classList.add('flat');
+  } catch (e) {}
+  if (window.__poplurCubeGLReady) { try { window.__poplurCubeGLReady(); } catch (e) {} }
 }`
   );
 
@@ -151,24 +178,118 @@ if (!POPLUR_WEBGL_OK && window.__poplurCubeGLReady) {
     "  let renderer; try { renderer = new THREE.WebGLRenderer({canvas, alpha:true, antialias:true}); } catch (e) { if (window.__poplurCubeGLReady) { try { window.__poplurCubeGLReady(); } catch (e2) {} } return; }"
   );
 
+  // 8. 2D cube fallback element. When WebGL is unavailable the GL cube canvas
+  //    (#cubeGL) never gets its `.gl` display:block, so nothing renders. Add a
+  //    bundled static clay cube image that the `.flat` class (set in the
+  //    WebGL-detect branch above) reveals in its place. No new network ref —
+  //    clay_cube.png is mirrored into the bundle by ASSETS.
+  out = out.replace(
+    '    <canvas id="cubeGL" aria-hidden="true"></canvas>',
+    '    <canvas id="cubeGL" aria-hidden="true"></canvas>\n    <img id="cubeFlat" src="/poplur-clay-map/public/clay_cube.png" alt="" aria-hidden="true">'
+  );
+  out = out.replace(
+    "  .cubeStage.gl #cubeGL { display: block; }",
+    "  .cubeStage.gl #cubeGL { display: block; }\n" +
+    "  /* Phase-2 2D cube fallback (no WebGL): static clay cube in place of the GL canvas. */\n" +
+    "  #cubeFlat { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: none; pointer-events: none; filter: drop-shadow(0 8px 16px rgba(90,20,60,.34)); }\n" +
+    "  .cubeStage.flat #cubeFlat { display: block; }"
+  );
+
+  // 9. Native bridge (Phase-2 web-embed). Define window.poplurBridge before any
+  //    handler wiring so permission dialogs + flow completion can post a defined
+  //    action set to the host. iOS: window.webkit.messageHandlers.poplur; Android
+  //    parity: PoplurNative.onAction(action, payloadJson). No network ref.
+  out = out.replace(
+    "<script>\n  const fit = () => {",
+    `<script>
+  // ── Native bridge (Phase-2 web-embed) ──────────────────────────────────────
+  // Defined action set (identical on iOS + Android):
+  //   signIn | signUp | requestPermission(permission: camera|location) | complete | pop
+  // iOS delivery:     window.webkit.messageHandlers.poplur.postMessage({action, ...})
+  // Android delivery: window.PoplurNative.onAction(action, JSON.stringify(rest))
+  // Auth + OS permission prompts stay Phase-3 stubs on the native side (log, no
+  // faked success); only the flow-completion 'complete' action drives the
+  // native handoff to the existing post-login path.
+  window.poplurBridge = (function () {
+    function post(msg) {
+      try {
+        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.poplur) {
+          window.webkit.messageHandlers.poplur.postMessage(msg);
+          return true;
+        }
+      } catch (e) {}
+      try {
+        if (window.PoplurNative && typeof window.PoplurNative.onAction === 'function') {
+          var rest = {}; for (var k in msg) { if (k !== 'action') rest[k] = msg[k]; }
+          window.PoplurNative.onAction(msg.action, JSON.stringify(rest));
+          return true;
+        }
+      } catch (e) {}
+      return false;
+    }
+    function assign(base, extra) { if (extra) { for (var k in extra) base[k] = extra[k]; } return base; }
+    return {
+      signIn: function (d) { return post(assign({ action: 'signIn' }, d)); },
+      signUp: function (d) { return post(assign({ action: 'signUp' }, d)); },
+      requestPermission: function (permission, d) { return post(assign({ action: 'requestPermission', permission: permission }, d)); },
+      complete: function (d) { return post(assign({ action: 'complete' }, d)); },
+      pop: function () { return post({ action: 'pop' }); }
+    };
+  })();
+  const fit = () => {`
+  );
+
+  // 9a. Sign-in (password) → post signIn intent (Phase-3 auth stub) before the
+  //     approved success gesture. No faked success — native only logs.
+  out = out.replace(
+    "      if (/.+@.+\\..+/.test(email) && pass.length >= 4) cubeSuccess()",
+    "      if (/.+@.+\\..+/.test(email) && pass.length >= 4) { if (window.poplurBridge) poplurBridge.signIn({ email: email, method: 'password' }); cubeSuccess() }"
+  );
+
+  // 9b. Face ID sign-in → post signIn intent (method faceid) then the gesture.
+  out = out.replace(
+    "    document.getElementById('faceIdBtn').addEventListener('click', cubeSuccess)",
+    "    document.getElementById('faceIdBtn').addEventListener('click', function () { if (window.poplurBridge) poplurBridge.signIn({ method: 'faceid' }); cubeSuccess() })"
+  );
+
+  // 9c. Sign-up completion → post signUp intent, then the 'complete' flow-done
+  //     action that native routes to the post-login handoff. finishSignup is the
+  //     single terminal for personal (photo) + business (review) sign-up.
+  out = out.replace(
+    "    function finishSignup(message) {\n      cubeSuccess()\n      if (window.__poplurShowAlert) window.__poplurShowAlert(message, 'Nice!')\n      setTimeout(function () { setPane(0) }, 1400)\n    }",
+    "    function finishSignup(message) {\n      var acctType = isBusiness() ? 'business' : 'personal'\n      if (window.poplurBridge) poplurBridge.signUp({ accountType: acctType })\n      cubeSuccess()\n      if (window.__poplurShowAlert) window.__poplurShowAlert(message, 'Nice!')\n      if (window.poplurBridge) poplurBridge.complete({ via: 'signUp', accountType: acctType })\n      setTimeout(function () { setPane(0) }, 1400)\n    }"
+  );
+
+  // 9d. Button pop → mirror the tap to the native haptic bridge.
+  out = out.replace(
+    "    function playPop() {\n      popSfx.muted = false",
+    "    function playPop() {\n      if (window.poplurBridge) poplurBridge.pop()\n      popSfx.muted = false"
+  );
+
+  // 9e. Location permission choice → post requestPermission/location (Phase-3
+  //     stub: native logs, real OS prompt lands later). Fires for every allow
+  //     variant; deny is still reported with its choice.
+  out = out.replace(
+    "          if (btn.dataset.permission !== 'location-deny') allowedAny = true\n          showPermission(permCamera)",
+    "          if (btn.dataset.permission !== 'location-deny') allowedAny = true\n          if (window.poplurBridge) poplurBridge.requestPermission('location', { choice: btn.dataset.permission })\n          showPermission(permCamera)"
+  );
+
+  // 9f. Camera-roll permission choice → post requestPermission/camera.
+  out = out.replace(
+    "          if (btn.dataset.permission === 'allow') allowedAny = true\n          sessionStorage.setItem('poplurWelcomePerms', '1')",
+    "          if (btn.dataset.permission === 'allow') allowedAny = true\n          if (window.poplurBridge) poplurBridge.requestPermission('camera', { choice: btn.dataset.permission })\n          sessionStorage.setItem('poplurWelcomePerms', '1')"
+  );
+
   return out;
 }
 
-// splash.html is already a clean, self-contained page. Only drop the two
-// `<link rel=preload>` hints for GLBs that are NOT bundled (MarkHead 106MB,
-// zoom_buildings 8MB — Phase-2 account-icon assets), so they don't emit 404
-// preload warnings. Everything else is verbatim; still zero network refs.
+// splash.html is already a clean, self-contained page with zero network refs.
+// Phase 2: all three preloaded GLBs (poplur_icon_cube, MarkHead_TalkingRig,
+// zoom_buildings) are now bundled (compressed), so the splash preload hints all
+// resolve against the local scheme handler and warm the models for the welcome
+// hero cube + Choose-Account icons. Nothing to strip — kept verbatim.
 function cleanSplash(html) {
-  let out = html;
-  out = out.replace(
-    /\n\s*<link rel="preload" as="fetch" href="\/Poplur2025-iOS\/Poplur2025\/MarkHead_TalkingRig\.glb">/,
-    ""
-  );
-  out = out.replace(
-    /\n\s*<link rel="preload" as="fetch" href="\/poplur-clay-map\/public\/zoom_buildings\.glb">/,
-    ""
-  );
-  return out;
+  return html;
 }
 
 // ---- run --------------------------------------------------------------------
@@ -181,10 +302,9 @@ writeFileSync(join(OUT, "splash.html"), splash);
 const welcome = cleanWelcome(readFileSync(WELCOME_SRC, "utf8"));
 writeFileSync(join(OUT, "welcome.html"), welcome);
 
-for (const [src, dest] of ASSETS) {
-  const from = join(WORKSPACE, src);
+for (const [from, dest] of ASSETS) {
   const to = join(OUT, dest);
-  if (!existsSync(from)) { console.warn(`[skip missing] ${src}`); continue; }
+  if (!existsSync(from)) { console.warn(`[skip missing] ${from}`); continue; }
   ensureDir(to);
   copyFileSync(from, to);
 }

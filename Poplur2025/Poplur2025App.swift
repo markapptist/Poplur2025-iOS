@@ -306,10 +306,17 @@ struct Poplur2025App: App {
                     }
                     .transition(.scale(scale: 0.88, anchor: .bottom).combined(with: .opacity))
             } else if usePreloginWebEmbed {
-                // Phase 1: the approved web splash → welcome, hosted edge-to-edge
+                // Phase 1/2: the approved web splash → welcome, hosted edge-to-edge
                 // in a WKWebView. Hands back to the post-login/home branch above
                 // when auth resolves (Firebase state listener flips isAuthenticated).
-                PreloginWebView(auth: auth)
+                PreloginWebView(auth: auth, onComplete: {
+                    // Phase-2 completion handoff. The web flow's `complete` action
+                    // arrives here as the single native seam to the post-login path.
+                    // Entry into HomeView still requires auth.isAuthenticated, which
+                    // Phase 3 flips via real Firebase auth — so this does NOT fake a
+                    // signed-in state, it just marks the handoff point.
+                    print("[Poplur2025App] pre-login web flow reported complete — handing off to post-login path (Phase 3 gates real entry via auth state)")
+                })
                     .ignoresSafeArea()
                     .transition(.opacity)
             } else {
