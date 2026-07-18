@@ -1,6 +1,7 @@
 import SwiftUI
 import WebKit
 import UniformTypeIdentifiers
+import FirebaseAuth
 
 // MARK: - Pre-login Web Embed (Phase 1)
 //
@@ -73,6 +74,15 @@ struct PreloginWebView: UIViewRepresentable {
         webView.scrollView.isScrollEnabled = false
         webView.scrollView.bounces = false
         webView.scrollView.contentInsetAdjustmentBehavior = .never
+        // BUG-1 fix: the pre-login layout is fixed/full-screen and must NEVER
+        // scroll. WebKit still scrolls its internal scrollView to lift a focused
+        // input above the keyboard, which displaces the fixed layout and does not
+        // reset on dismiss. Own the scrollView delegate and hard-clamp every
+        // contentOffset back to zero (the web side also resizes under the keyboard
+        // via interactive-widget=resizes-content, so the field stays reachable
+        // without moving the whole UI).
+        webView.scrollView.delegate = context.coordinator
+        webView.scrollView.keyboardDismissMode = .interactive
         // Force the iphone platform skin the GCL prototype uses: the welcome's
         // dark "pill" buttons live behind `@media (prefers-color-scheme: dark)`,
         // so pin the web content to dark regardless of the device appearance.
@@ -159,7 +169,7 @@ struct PreloginWebView: UIViewRepresentable {
         }
     }
 
-    final class Coordinator: NSObject, WKScriptMessageHandler {
+    final class Coordinator: NSObject, WKScriptMessageHandler, UIScrollViewDelegate {
         weak var webView: WKWebView?
         private let auth: AuthViewModel
         private let onComplete: () -> Void
@@ -168,6 +178,16 @@ struct PreloginWebView: UIViewRepresentable {
         init(auth: AuthViewModel, onComplete: @escaping () -> Void) {
             self.auth = auth
             self.onComplete = onComplete
+        }
+
+        // BUG-1 fix: keep the fixed full-screen pre-login pinned. Any attempt by
+        // WebKit to scroll (to lift a focused field over the keyboard) is clamped
+        // straight back to the top so the header/logo never fly off-screen and the
+        // layout resets cleanly when the keyboard dismisses.
+        func scrollViewDidScroll(_ scrollView: UIScrollView) {
+            if scrollView.contentOffset != .zero {
+                scrollView.contentOffset = .zero
+            }
         }
 
         /// After the splash beat, navigate the same web view to Welcome. Same
@@ -189,21 +209,60 @@ struct PreloginWebView: UIViewRepresentable {
             case "pop":
                 popHaptic.impactOccurred()
             case "signIn":
-                // TODO Phase 3: route to Firebase auth via AuthViewModel. The
-                // approved web forms do not post credentials yet, so do NOT fake
-                // success — a returning session still resolves through the
-                // existing AuthViewModel state listener.
-                let email = body?["email"] as? String ?? "<none>"
+                // BUG-2 fix: real Firebase sign-in, mirroring LoginView.loginUser().
+                // On success we do NOT fake anything — the AuthViewModel state
+                // listener flips isAuthenticated and the app transitions to
+                // post-login automatically. On error we post the message back to
+                // the web so the form can surface it.
                 let method = body?["method"] as? String ?? "password"
-                print("[PreloginWebView] signIn bridge received (email: \(email), method: \(method)) — Phase 3 stub, not wired to auth yet")
+                let email = (body?["email"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                let password = body?["password"] as? String ?? ""
+                if method == "faceid" {
+                    // Face ID isn't wired to the web embed yet (no saved-credential
+                    // biometric bridge). Do not fake success — tell the web plainly.
+                    print("[PreloginWebView] signIn(faceid) — not wired in web embed yet")
+                    postAuthResult(ok: false, error: "Face ID sign-in isn’t available here yet — use your email and password.")
+                    return
+                }
+                guard !email.isEmpty, !password.isEmpty else {
+                    print("[PreloginWebView] signIn missing credentials — ignoring (no fake success)")
+                    postAuthResult(ok: false, error: "Enter your email and password.")
+                    return
+                }
+                Auth.auth().signIn(withEmail: email, password: password) { [weak self] _, error in
+                    if let error {
+                        print("[PreloginWebView] signIn failed: \(error.localizedDescription)")
+                        self?.postAuthResult(ok: false, error: error.localizedDescription)
+                    } else {
+                        print("[PreloginWebView] signIn succeeded — auth-state listener will transition")
+                        self?.postAuthResult(ok: true, error: nil)
+                    }
+                }
             case "signUp":
-                // TODO Phase 3: route to AuthViewModel sign-up.
-                let email = body?["email"] as? String ?? "<none>"
-                let accountType = body?["accountType"] as? String ?? "<none>"
-                print("[PreloginWebView] signUp bridge received (email: \(email), accountType: \(accountType)) — Phase 3 stub, not wired to auth yet")
+                // BUG-2 fix: real Firebase account creation, mirroring
+                // SignUpView.submit(). Business-profile persistence stays Phase 3;
+                // success transitions via the same auth-state listener.
+                let email = (body?["email"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                let password = body?["password"] as? String ?? ""
+                let accountType = body?["accountType"] as? String ?? "personal"
+                guard !email.isEmpty, !password.isEmpty else {
+                    print("[PreloginWebView] signUp missing credentials — ignoring (no fake success)")
+                    postAuthResult(ok: false, error: "Enter your email and password to create your account.")
+                    return
+                }
+                Auth.auth().createUser(withEmail: email, password: password) { [weak self] _, error in
+                    if let error {
+                        print("[PreloginWebView] signUp failed: \(error.localizedDescription)")
+                        self?.postAuthResult(ok: false, error: error.localizedDescription)
+                    } else {
+                        print("[PreloginWebView] signUp succeeded (\(accountType)) — auth-state listener will transition")
+                        Task { @MainActor in self?.auth.didSignUp = true }
+                        self?.postAuthResult(ok: true, error: nil)
+                    }
+                }
             case "requestPermission":
-                // TODO Phase 3: trigger the real OS prompt (AVCaptureDevice /
-                // CLLocationManager). For now log only — do NOT fake a grant.
+                // Phase-3 stub (unchanged): log only, do NOT fake a grant. The real
+                // OS prompt (AVCaptureDevice / CLLocationManager) lands in Phase 3.
                 let permission = body?["permission"] as? String ?? "<none>"
                 let choice = body?["choice"] as? String ?? "<none>"
                 print("[PreloginWebView] requestPermission bridge received (permission: \(permission), choice: \(choice)) — Phase 3 stub, OS prompt not wired yet")
@@ -212,6 +271,20 @@ struct PreloginWebView: UIViewRepresentable {
                 onComplete()
             default:
                 print("[PreloginWebView] unhandled bridge action: \(action)")
+            }
+        }
+
+        /// Native → web auth callback. The web defines `window.poplurAuthResult`
+        /// to shake the cube + show the error banner on failure (and play the
+        /// success gesture on success, though the app is already transitioning).
+        private func postAuthResult(ok: Bool, error: String?) {
+            let payload: [String: Any] = ["ok": ok, "error": error ?? ""]
+            let json = (try? JSONSerialization.data(withJSONObject: payload))
+                .flatMap { String(data: $0, encoding: .utf8) } ?? "{\"ok\":\(ok)}"
+            DispatchQueue.main.async { [weak self] in
+                self?.webView?.evaluateJavaScript(
+                    "window.poplurAuthResult && window.poplurAuthResult(\(json))"
+                )
             }
         }
     }

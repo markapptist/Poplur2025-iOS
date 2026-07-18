@@ -129,6 +129,18 @@ function cleanWelcome(html) {
   //    host also sets overrideUserInterfaceStyle = .dark; both align to dark.
   out = out.replace(/:root\{color-scheme:light\}/, ":root{color-scheme:dark}");
 
+  // 6a. Keyboard hardening (BUG-1). The pre-login is a fixed full-screen layout;
+  //     when a field is focused iOS both (a) auto-zooms into sub-16px inputs and
+  //     (b) scrolls the layout up to clear the keyboard — both displace the UI.
+  //     `interactive-widget=resizes-content` makes the visual viewport resize
+  //     under the keyboard instead of shifting the layout, and maximum-scale=1 /
+  //     user-scalable=no disable the focus auto-zoom. Native additionally clamps
+  //     the scrollView offset to zero, so the header/logo never fly off-screen.
+  out = out.replace(
+    'content="width=device-width,initial-scale=1"',
+    'content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,interactive-widget=resizes-content"'
+  );
+
   // 7. WebGL/GPU-less hardening. The hero cube (and the account-icon icons) build
   //    a THREE.WebGLRenderer. On a software-GPU simulator or a context-starved
   //    device, WebGL is unavailable and the constructor THROWS — and on WKWebView
@@ -279,25 +291,56 @@ if (!POPLUR_WEBGL_OK) {
   const fit = () => {`
   );
 
-  // 9a. Sign-in (password) → post signIn intent (Phase-3 auth stub) before the
-  //     approved success gesture. No faked success — native only logs.
+  // 9a. Sign-in (password) → post {email, password} to REAL native Firebase auth.
+  //     Do NOT fake success: on a native host the auth-state listener transitions
+  //     the app on success and window.poplurAuthResult surfaces errors. Only in a
+  //     plain-browser preview (no native host, post() returns falsy) do we keep
+  //     the prototype success gesture.
   out = out.replace(
     "      if (/.+@.+\\..+/.test(email) && pass.length >= 4) cubeSuccess()",
-    "      if (/.+@.+\\..+/.test(email) && pass.length >= 4) { if (window.poplurBridge) poplurBridge.signIn({ email: email, method: 'password' }); cubeSuccess() }"
+    "      if (/.+@.+\\..+/.test(email) && pass.length >= 4) { var __p = window.poplurBridge && poplurBridge.signIn({ email: email, password: pass, method: 'password' }); if (!__p) cubeSuccess() }"
   );
 
-  // 9b. Face ID sign-in → post signIn intent (method faceid) then the gesture.
+  // 9b. Face ID sign-in → post {method:'faceid'} (native replies via
+  //     poplurAuthResult that it isn't wired yet — no faked success). Browser
+  //     preview keeps the prototype gesture.
   out = out.replace(
     "    document.getElementById('faceIdBtn').addEventListener('click', cubeSuccess)",
-    "    document.getElementById('faceIdBtn').addEventListener('click', function () { if (window.poplurBridge) poplurBridge.signIn({ method: 'faceid' }); cubeSuccess() })"
+    "    document.getElementById('faceIdBtn').addEventListener('click', function () { var __p = window.poplurBridge && poplurBridge.signIn({ method: 'faceid' }); if (!__p) cubeSuccess() })"
   );
 
-  // 9c. Sign-up completion → post signUp intent, then the 'complete' flow-done
-  //     action that native routes to the post-login handoff. finishSignup is the
-  //     single terminal for personal (photo) + business (review) sign-up.
+  // 9c. Sign-up completion → post {email, password, accountType} to REAL native
+  //     Firebase createUser (email/password captured from the Create-login pane,
+  //     which stays in the DOM). No faked success on a native host: success
+  //     transitions via the auth-state listener, errors arrive via
+  //     window.poplurAuthResult. Browser preview (no native host) keeps the
+  //     approved prototype choreography. Also defines poplurAuthResult in-scope.
   out = out.replace(
     "    function finishSignup(message) {\n      cubeSuccess()\n      if (window.__poplurShowAlert) window.__poplurShowAlert(message, 'Nice!')\n      setTimeout(function () { setPane(0) }, 1400)\n    }",
-    "    function finishSignup(message) {\n      var acctType = isBusiness() ? 'business' : 'personal'\n      if (window.poplurBridge) poplurBridge.signUp({ accountType: acctType })\n      cubeSuccess()\n      if (window.__poplurShowAlert) window.__poplurShowAlert(message, 'Nice!')\n      if (window.poplurBridge) poplurBridge.complete({ via: 'signUp', accountType: acctType })\n      setTimeout(function () { setPane(0) }, 1400)\n    }"
+    "    function finishSignup(message) {\n" +
+    "      var acctType = isBusiness() ? 'business' : 'personal'\n" +
+    "      var suEmail = '', suPass = ''\n" +
+    "      try {\n" +
+    "        var __em = document.querySelector('#paneCreateLogin input[type=\"email\"]')\n" +
+    "        var __pw = document.querySelectorAll('#paneCreateLogin input[type=\"password\"]')\n" +
+    "        suEmail = __em ? __em.value.trim() : ''\n" +
+    "        suPass = (__pw && __pw[0]) ? __pw[0].value : ''\n" +
+    "      } catch (e) {}\n" +
+    "      var __posted = window.poplurBridge && poplurBridge.signUp({ email: suEmail, password: suPass, accountType: acctType })\n" +
+    "      if (!__posted) {\n" +
+    "        cubeSuccess()\n" +
+    "        if (window.__poplurShowAlert) window.__poplurShowAlert(message, 'Nice!')\n" +
+    "        setTimeout(function () { setPane(0) }, 1400)\n" +
+    "      }\n" +
+    "    }\n" +
+    "    // Native -> web auth result: real Firebase sign-in/up outcome.\n" +
+    "    // Success -> brief gesture (the native app is already transitioning);\n" +
+    "    // failure -> the approved error banner + cube shake. In-scope so it can\n" +
+    "    // reach cubeSuccess()/signupError().\n" +
+    "    window.poplurAuthResult = function (res) {\n" +
+    "      if (res && res.ok) { cubeSuccess() }\n" +
+    "      else { signupError((res && res.error) || 'Something went wrong. Please try again.') }\n" +
+    "    }"
   );
 
   // 9d. Button pop → mirror the tap to the native haptic bridge.

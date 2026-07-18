@@ -1,4 +1,4 @@
-<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1"><style>:root{color-scheme:dark}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}</style></head><body>
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,interactive-widget=resizes-content"><style>:root{color-scheme:dark}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}</style></head><body>
 <title>Poplur &#8212; Welcome</title>
 <!-- Canonical Claude artifact 4d731082, adapted only to remove artifact/phone chrome inside Good Copy. -->
 <style>
@@ -1147,22 +1147,38 @@
     document.querySelector('#paneSignIn .paneBtn').addEventListener('click', function () {
       var email = document.querySelector('#paneSignIn .fieldMail').value.trim()
       var pass = document.querySelector('#paneSignIn .fieldPass').value
-      if (/.+@.+\..+/.test(email) && pass.length >= 4) { if (window.poplurBridge) poplurBridge.signIn({ email: email, method: 'password' }); cubeSuccess() }
+      if (/.+@.+\..+/.test(email) && pass.length >= 4) { var __p = window.poplurBridge && poplurBridge.signIn({ email: email, password: pass, method: 'password' }); if (!__p) cubeSuccess() }
       else signupError('That login doesn’t look right — check your email and password.')
     })
     // Face ID sign-in: the simulated scan succeeds straight away.
-    document.getElementById('faceIdBtn').addEventListener('click', function () { if (window.poplurBridge) poplurBridge.signIn({ method: 'faceid' }); cubeSuccess() })
+    document.getElementById('faceIdBtn').addEventListener('click', function () { var __p = window.poplurBridge && poplurBridge.signIn({ method: 'faceid' }); if (!__p) cubeSuccess() })
     // ── Multi-step sign-up: Choose Account → Create login → (business only:
     // Business profile → Verify → Review → Submit). Personal finishes after
     // Create login. Every step is a native pane matching the initial page. ──
     function isBusiness() { return document.querySelector('.acctB').classList.contains('on') }
     function finishSignup(message) {
       var acctType = isBusiness() ? 'business' : 'personal'
-      if (window.poplurBridge) poplurBridge.signUp({ accountType: acctType })
-      cubeSuccess()
-      if (window.__poplurShowAlert) window.__poplurShowAlert(message, 'Nice!')
-      if (window.poplurBridge) poplurBridge.complete({ via: 'signUp', accountType: acctType })
-      setTimeout(function () { setPane(0) }, 1400)
+      var suEmail = '', suPass = ''
+      try {
+        var __em = document.querySelector('#paneCreateLogin input[type="email"]')
+        var __pw = document.querySelectorAll('#paneCreateLogin input[type="password"]')
+        suEmail = __em ? __em.value.trim() : ''
+        suPass = (__pw && __pw[0]) ? __pw[0].value : ''
+      } catch (e) {}
+      var __posted = window.poplurBridge && poplurBridge.signUp({ email: suEmail, password: suPass, accountType: acctType })
+      if (!__posted) {
+        cubeSuccess()
+        if (window.__poplurShowAlert) window.__poplurShowAlert(message, 'Nice!')
+        setTimeout(function () { setPane(0) }, 1400)
+      }
+    }
+    // Native -> web auth result: real Firebase sign-in/up outcome.
+    // Success -> brief gesture (the native app is already transitioning);
+    // failure -> the approved error banner + cube shake. In-scope so it can
+    // reach cubeSuccess()/signupError().
+    window.poplurAuthResult = function (res) {
+      if (res && res.ok) { cubeSuccess() }
+      else { signupError((res && res.error) || 'Something went wrong. Please try again.') }
     }
     // Choose Account → Create login
     document.querySelector('#paneSignUp .paneBtn').addEventListener('click', function () { setPane(3) })
