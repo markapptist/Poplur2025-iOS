@@ -140,6 +140,15 @@ struct Poplur2025App: App {
     @State private var showSplash: Bool
     @Environment(\.scenePhase) private var scenePhase
 
+    /// Phase 1 web-embed migration: the pre-login flow (splash + welcome) is the
+    /// APPROVED web screens hosted in a WKWebView (`PreloginWebView`) rather than
+    /// native remakes. Flip to `false` to restore the native clay splash +
+    /// `WelcomeView` path — the migration is deliberately kept minimal and
+    /// reversible. When on: the native clay splash is neutralized (the web splash
+    /// shows instead) and the native pre-login music is silenced (the web splash
+    /// plays its own radio bed).
+    private let usePreloginWebEmbed = true
+
     /// True only while WelcomeView (or its Login/Sign Up pushes) is the visible screen —
     /// not during the brief auth-resolving spinner, so returning signed-in users never hear
     /// a momentary blip of music before landing on HomeView.
@@ -190,7 +199,9 @@ struct Poplur2025App: App {
                 }
             }
             .overlay(alignment: .topLeading) {
-                if isPreLoginVisible && !isWelcomePanelVisible {
+                // The web pre-login owns its own audio + mute affordance, so the
+                // native pre-login mute button is hidden while the web embed runs.
+                if isPreLoginVisible && !isWelcomePanelVisible && !usePreloginWebEmbed {
                     PoplurMuteButton(music: preLoginMusic)
                         .padding(.leading, 20)
                         .padding(.top, 12)
@@ -201,14 +212,14 @@ struct Poplur2025App: App {
                 isWelcomePanelVisible = (note.object as? Bool) ?? true
             }
             .onChange(of: isPreLoginVisible) { _, isVisible in
-                if isVisible && !showSplash {
+                if isVisible && !showSplash && !usePreloginWebEmbed {
                     preLoginMusic.start()
                 } else {
                     preLoginMusic.stop()
                 }
             }
             .onChange(of: showSplash) { _, splashing in
-                if !splashing && isPreLoginVisible {
+                if !splashing && isPreLoginVisible && !usePreloginWebEmbed {
                     preLoginMusic.start()
                 }
             }
@@ -218,7 +229,7 @@ struct Poplur2025App: App {
                     preLoginMusic.stop()
                     NotificationCenter.default.post(name: .StopMapAudio, object: nil)
                 case .active:
-                    if isPreLoginVisible && !showSplash {
+                    if isPreLoginVisible && !showSplash && !usePreloginWebEmbed {
                         preLoginMusic.start()
                     }
                 @unknown default:
@@ -226,7 +237,7 @@ struct Poplur2025App: App {
                 }
             }
             .onAppear {
-                if isPreLoginVisible && !showSplash {
+                if isPreLoginVisible && !showSplash && !usePreloginWebEmbed {
                     preLoginMusic.start()
                 }
                 let appearance = UITabBarAppearance()
@@ -253,7 +264,11 @@ struct Poplur2025App: App {
                 )
             }
             .overlay {
-                if showSplash {
+                // Phase 1: the native clay splash is neutralized — the APPROVED
+                // web splash (inside PreloginWebView) is the only intro now, so no
+                // native clay-intro plays before the web screens. Guarded by the
+                // flag so flipping it off restores the native splash overlay.
+                if showSplash && !usePreloginWebEmbed {
                     PoplurClaySplashView {
                         withAnimation(.easeOut(duration: 0.45)) {
                             showSplash = false
@@ -290,6 +305,13 @@ struct Poplur2025App: App {
                         WatchRadiusSync.shared.refreshAndSendRadius()
                     }
                     .transition(.scale(scale: 0.88, anchor: .bottom).combined(with: .opacity))
+            } else if usePreloginWebEmbed {
+                // Phase 1: the approved web splash → welcome, hosted edge-to-edge
+                // in a WKWebView. Hands back to the post-login/home branch above
+                // when auth resolves (Firebase state listener flips isAuthenticated).
+                PreloginWebView(auth: auth)
+                    .ignoresSafeArea()
+                    .transition(.opacity)
             } else {
                 WelcomeView()
                     .environmentObject(auth)

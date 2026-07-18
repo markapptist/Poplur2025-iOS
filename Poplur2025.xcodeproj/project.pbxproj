@@ -18,6 +18,7 @@
 		B4A1F0012F70000100C0DE01 /* FirebaseFunctions in Frameworks */ = {isa = PBXBuildFile; productRef = B4A1F0002F70000100C0DE01 /* FirebaseFunctions */; };
 		B4AU000000000004 /* Poplur2025/auth_transition.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = B4AU000000000002 /* Poplur2025/auth_transition.mp4 */; };
 		B4C1AF002F68000100C0DE10 /* ClayMapWeb in Resources */ = {isa = PBXBuildFile; fileRef = B4C1AF012F68000100C0DE10 /* ClayMapWeb */; };
+		B4C1AF002F68000100C0DE20 /* PreloginWeb in Resources */ = {isa = PBXBuildFile; fileRef = B4C1AF012F68000100C0DE20 /* PreloginWeb */; };
 		B4C9B1002F68000100C0DE01 /* Poplur2025/CubeModels in Resources */ = {isa = PBXBuildFile; fileRef = B4C9B1012F68000100C0DE01 /* Poplur2025/CubeModels */; };
 		B4F2A5002F68000100C0DE02 /* Poplur2025/PoplurFPS in Resources */ = {isa = PBXBuildFile; fileRef = B4F2A5012F68000100C0DE02 /* Poplur2025/PoplurFPS */; };
 		B4TV000000000003 /* Poplur2025/tv_static.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = B4TV000000000001 /* Poplur2025/tv_static.mp4 */; };
@@ -49,6 +50,7 @@
 		391605D82E3F4902000ACB3E /* Poplur2025UITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = Poplur2025UITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B4AU000000000002 /* Poplur2025/auth_transition.mp4 */ = {isa = PBXFileReference; lastKnownFileType = file; path = Poplur2025/auth_transition.mp4; sourceTree = "<group>"; };
 		B4C1AF012F68000100C0DE10 /* ClayMapWeb */ = {isa = PBXFileReference; lastKnownFileType = folder; path = ClayMapWeb; sourceTree = "<group>"; };
+		B4C1AF012F68000100C0DE20 /* PreloginWeb */ = {isa = PBXFileReference; lastKnownFileType = folder; path = PreloginWeb; sourceTree = "<group>"; };
 		B4C9B1012F68000100C0DE01 /* Poplur2025/CubeModels */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Poplur2025/CubeModels; sourceTree = "<group>"; };
 		B4F100002F50000000000001 /* PoplurWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PoplurWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B4F2A5012F68000100C0DE02 /* Poplur2025/PoplurFPS */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Poplur2025/PoplurFPS; sourceTree = "<group>"; };
@@ -146,6 +148,7 @@
 				391605C32E3F48FF000ACB3E /* Poplur2025 */,
 				B4C9B1012F68000100C0DE01 /* Poplur2025/CubeModels */,
 				B4C1AF012F68000100C0DE10 /* ClayMapWeb */,
+				B4C1AF012F68000100C0DE20 /* PreloginWeb */,
 				B4F2A5012F68000100C0DE02 /* Poplur2025/PoplurFPS */,
 				B4TV000000000001 /* Poplur2025/tv_static.mp4 */,
 				B4AU000000000002 /* Poplur2025/auth_transition.mp4 */,
@@ -341,6 +344,7 @@
 			files = (
 				B4C9B1002F68000100C0DE01 /* Poplur2025/CubeModels in Resources */,
 				B4C1AF002F68000100C0DE10 /* ClayMapWeb in Resources */,
+				B4C1AF002F68000100C0DE20 /* PreloginWeb in Resources */,
 				B4F2A5002F68000100C0DE02 /* Poplur2025/PoplurFPS in Resources */,
 				B4TV000000000003 /* Poplur2025/tv_static.mp4 in Resources */,
 				B4AU000000000004 /* Poplur2025/auth_transition.mp4 in Resources */,
