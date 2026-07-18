@@ -65,7 +65,11 @@ private struct CameraCubePopObject: Equatable {
     }
 }
 
-private struct HiddenSystemVolumeBridge: UIViewRepresentable {
+// Non-private so the pre-login web embed (Poplur2025App) can mount the same
+// system-HUD suppressor HomeView uses. Config is unchanged: a hidden MPVolumeView
+// (alpha 0.01, slider present but not interactive) that keeps iOS from drawing
+// its own volume HUD so the custom PoplurVolumeBars can show instead.
+struct HiddenSystemVolumeBridge: UIViewRepresentable {
     func makeUIView(context: Context) -> MPVolumeView {
         let view = MPVolumeView(frame: .zero)
         view.showsRouteButton = false

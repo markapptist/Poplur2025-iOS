@@ -318,6 +318,19 @@ struct Poplur2025App: App {
                     print("[Poplur2025App] pre-login web flow reported complete — handing off to post-login path (Phase 3 gates real entry via auth state)")
                 })
                     .ignoresSafeArea()
+                    // Pre-login volume: the web radio changes the system volume, so
+                    // suppress the iOS HUD (hidden MPVolumeView) and show the app's
+                    // custom PoplurVolumeBars instead — mirroring HomeView. The
+                    // deviceVolumeObserver env object is already injected app-level.
+                    // The bridge sits behind the WebView (hidden); volumeBarsOverlay
+                    // is a native overlay above the web content that ignores touches.
+                    .background(
+                        HiddenSystemVolumeBridge()
+                            .frame(width: 1, height: 1)
+                            .allowsHitTesting(false)
+                            .opacity(0.01)
+                    )
+                    .volumeBarsOverlay()
                     .transition(.opacity)
             } else {
                 WelcomeView()
