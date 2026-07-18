@@ -4,7 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Poplur — Splash</title>
-  <!-- Warm the approved Welcome assets while the barber-pole loader runs. -->
+  <!-- The splash covers the welcome's booting: warm every heavy asset the
+       welcome and sign-up need so they appear instantly composed. -->
   <link rel="preload" as="fetch" href="/poplur-clay-map/public/poplur_clay_cube.glb">
   <link rel="preload" as="fetch" href="/Poplur2025-iOS/Poplur2025/MarkHead_TalkingRig.glb">
   <link rel="preload" as="fetch" href="/poplur-clay-map/public/zoom_buildings.glb">
@@ -119,8 +120,12 @@
     let messageIndex = 0;
     let audioOn = false;
 
+    // Mark the splash as seen so the welcome renders settled instead of
+    // replaying its intro choreography in front of the user.
     try { sessionStorage.setItem("poplurSplashShown", "1"); } catch {}
 
+    // The radio starts here and hands its position to the next screen so the
+    // bed never restarts across pages.
     function resumeRadio() {
       try { radioBed.currentTime = parseFloat(sessionStorage.getItem("poplurRadio.t") || "0") || 0; } catch {}
       radioBed.muted = false;
@@ -131,11 +136,15 @@
       if (!radioBed.paused) try { sessionStorage.setItem("poplurRadio.t", String(radioBed.currentTime)); } catch {}
     }, 500);
 
+    // Audio can only start after a user gesture; the GCL preview grants it by
+    // posting gcAudio on hover, a real device by the first touch.
     function setAudio(on) {
       audioOn = on;
       if (on) resumeRadio();
       else { popSfx.pause(); radioBed.pause(); }
     }
+    // Attempt ambient autoplay — succeeds inside the prototype's frame,
+    // silently blocked elsewhere until a gesture or GCL grant.
     setTimeout(() => {
       if (!audioOn) radioBed.play().then(() => setAudio(true)).catch(() => {});
     }, 300);
