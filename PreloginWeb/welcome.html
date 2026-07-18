@@ -270,9 +270,11 @@
      dots, confetti, radio, and the spinning cube never move or restart. ── */
   .pane {
     position: absolute; inset: 0; z-index: 20; pointer-events: none;
+    transform: translateX(100%);
     transition: transform 0.55s cubic-bezier(0.22, 0.9, 0.3, 1);
     will-change: transform;
   }
+  #paneWelcome { transform: translateX(0); }
   .pane > * { pointer-events: auto; }
   .paneTitle { top: var(--content-top, 45%); width: 88%; font-size: clamp(18px, 6.1cqw, 27px); font-weight: 900; opacity: 1; translate: 0 0; }
   .paneBtn { position: absolute; left: 50%; transform: translateX(-50%); top: 66.5%; animation: none; opacity: 1; }
@@ -930,8 +932,13 @@
       if (cubeShown) return
       cubeShown = true
       stage.classList.remove('preshow')
-      stage.classList.add('popIn')
-      if (window.__poplurPop) window.__poplurPop()
+      // If the splash already ran (and warmed the cube GLB), reveal the cube
+      // already composed instead of replaying the pop-in choreography.
+      var splashShown = false; try { splashShown = sessionStorage.getItem('poplurSplashShown') === '1' } catch (e) {}
+      if (!splashShown) {
+        stage.classList.add('popIn')
+        if (window.__poplurPop) window.__poplurPop()
+      }
       setTimeout(function () {
         stage.classList.add('risen')                                   // rise + shrink
         if (window.__poplurComputeLayout) window.__poplurComputeLayout()
@@ -1375,10 +1382,26 @@ import {GLTFLoader} from "three/addons/loaders/GLTFLoader.js";
 
 const loader = new GLTFLoader();
 
+// Bundled-build hardening: WebGL may be unavailable (software-GPU simulator or a
+// context-starved device). Constructing THREE.WebGLRenderer would throw, and an
+// uncaught error blanks the whole WKWebView. Detect once; if missing, skip the
+// three.js cube entirely and reveal the intro on schedule (no CSS cube exists —
+// the stage stays empty, the approved GPU-less render).
+const POPLUR_WEBGL_OK = (function () {
+  try {
+    var c = document.createElement('canvas');
+    return !!(window.WebGLRenderingContext &&
+      (c.getContext('webgl2') || c.getContext('webgl') || c.getContext('experimental-webgl')));
+  } catch (e) { return false; }
+})();
+if (!POPLUR_WEBGL_OK && window.__poplurCubeGLReady) {
+  try { window.__poplurCubeGLReady(); } catch (e) {}
+}
+
 // ── Sign-up account icons — the approved flow's live 3D renderer, ported ──
-document.querySelectorAll("canvas[data-account-model]").forEach(canvas => {
+if (POPLUR_WEBGL_OK) document.querySelectorAll("canvas[data-account-model]").forEach(canvas => {
   // preserveDrawingBuffer so we can snapshot the single frame to an image.
-  const renderer = new THREE.WebGLRenderer({canvas, alpha:true, antialias:true, powerPreference:"low-power", preserveDrawingBuffer:true});
+  let renderer; try { renderer = new THREE.WebGLRenderer({canvas, alpha:true, antialias:true, powerPreference:"low-power", preserveDrawingBuffer:true}); } catch (e) { canvas.closest(".account-3d-icon")?.classList.add("model-error"); return; }
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   renderer.setSize(84, 84, false);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -1418,8 +1441,8 @@ document.querySelectorAll("canvas[data-account-model]").forEach(canvas => {
 (() => {
   const stage = document.getElementById("lcubeStage");
   const canvas = document.getElementById("cubeGL");
-  if (!stage || !canvas) return;
-  const renderer = new THREE.WebGLRenderer({canvas, alpha:true, antialias:true});
+  if (!stage || !canvas || !POPLUR_WEBGL_OK) return;
+  let renderer; try { renderer = new THREE.WebGLRenderer({canvas, alpha:true, antialias:true}); } catch (e) { if (window.__poplurCubeGLReady) { try { window.__poplurCubeGLReady(); } catch (e2) {} } return; }
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   renderer.setSize(254, 254, false);
   renderer.outputColorSpace = THREE.SRGBColorSpace;

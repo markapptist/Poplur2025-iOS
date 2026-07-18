@@ -96,11 +96,80 @@ function cleanWelcome(html) {
   //    host also sets overrideUserInterfaceStyle = .dark; both align to dark.
   out = out.replace(/:root\{color-scheme:light\}/, ":root{color-scheme:dark}");
 
+  // 7. WebGL/GPU-less hardening. The hero cube (and the account-icon icons) build
+  //    a THREE.WebGLRenderer. On a software-GPU simulator or a context-starved
+  //    device, WebGL is unavailable and the constructor THROWS — and on WKWebView
+  //    an uncaught error blanks the ENTIRE web view (the reported black screen).
+  //    Detect WebGL once up front; if it is missing, skip every three.js renderer
+  //    and fire the intro-ready hook so the choreography still reveals the copy on
+  //    schedule (there is no CSS cube — the source says so — the stage just stays
+  //    empty, which is the approved GPU-less render). Also wrap each renderer
+  //    construction in try/catch as a belt-and-suspenders guard.
+  out = out.replace(
+    "const loader = new GLTFLoader();",
+    `const loader = new GLTFLoader();
+
+// Bundled-build hardening: WebGL may be unavailable (software-GPU simulator or a
+// context-starved device). Constructing THREE.WebGLRenderer would throw, and an
+// uncaught error blanks the whole WKWebView. Detect once; if missing, skip the
+// three.js cube entirely and reveal the intro on schedule (no CSS cube exists —
+// the stage stays empty, the approved GPU-less render).
+const POPLUR_WEBGL_OK = (function () {
+  try {
+    var c = document.createElement('canvas');
+    return !!(window.WebGLRenderingContext &&
+      (c.getContext('webgl2') || c.getContext('webgl') || c.getContext('experimental-webgl')));
+  } catch (e) { return false; }
+})();
+if (!POPLUR_WEBGL_OK && window.__poplurCubeGLReady) {
+  try { window.__poplurCubeGLReady(); } catch (e) {}
+}`
+  );
+
+  // 7a. Only run the account-icon renderers when WebGL is present.
+  out = out.replace(
+    'document.querySelectorAll("canvas[data-account-model]").forEach(canvas => {',
+    'if (POPLUR_WEBGL_OK) document.querySelectorAll("canvas[data-account-model]").forEach(canvas => {'
+  );
+
+  // 7b. Non-fatal account-icon renderer construction.
+  out = out.replace(
+    '  const renderer = new THREE.WebGLRenderer({canvas, alpha:true, antialias:true, powerPreference:"low-power", preserveDrawingBuffer:true});',
+    '  let renderer; try { renderer = new THREE.WebGLRenderer({canvas, alpha:true, antialias:true, powerPreference:"low-power", preserveDrawingBuffer:true}); } catch (e) { canvas.closest(".account-3d-icon")?.classList.add("model-error"); return; }'
+  );
+
+  // 7c. Skip the hero-cube renderer when WebGL is absent.
+  out = out.replace(
+    "  if (!stage || !canvas) return;",
+    "  if (!stage || !canvas || !POPLUR_WEBGL_OK) return;"
+  );
+
+  // 7d. Non-fatal hero-cube renderer construction — fall back to the (empty)
+  //     stage and still fire the intro-ready hook instead of throwing.
+  out = out.replace(
+    "  const renderer = new THREE.WebGLRenderer({canvas, alpha:true, antialias:true});",
+    "  let renderer; try { renderer = new THREE.WebGLRenderer({canvas, alpha:true, antialias:true}); } catch (e) { if (window.__poplurCubeGLReady) { try { window.__poplurCubeGLReady(); } catch (e2) {} } return; }"
+  );
+
   return out;
 }
 
-// splash.html is already a clean, self-contained page — copy verbatim.
-function cleanSplash(html) { return html; }
+// splash.html is already a clean, self-contained page. Only drop the two
+// `<link rel=preload>` hints for GLBs that are NOT bundled (MarkHead 106MB,
+// zoom_buildings 8MB — Phase-2 account-icon assets), so they don't emit 404
+// preload warnings. Everything else is verbatim; still zero network refs.
+function cleanSplash(html) {
+  let out = html;
+  out = out.replace(
+    /\n\s*<link rel="preload" as="fetch" href="\/Poplur2025-iOS\/Poplur2025\/MarkHead_TalkingRig\.glb">/,
+    ""
+  );
+  out = out.replace(
+    /\n\s*<link rel="preload" as="fetch" href="\/poplur-clay-map\/public\/zoom_buildings\.glb">/,
+    ""
+  );
+  return out;
+}
 
 // ---- run --------------------------------------------------------------------
 if (existsSync(OUT)) rmSync(OUT, { recursive: true, force: true });
