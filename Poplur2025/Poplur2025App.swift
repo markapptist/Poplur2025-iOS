@@ -292,8 +292,10 @@ struct Poplur2025App: App {
                 Color(red: 0.039, green: 0.027, blue: 0.035).ignoresSafeArea()
                     .transition(.opacity)
             } else if showAuthTransition {
-                // Post-login: auth transition video
-                LoadingTransitionVideoView()
+                // Post-login: the APPROVED web Loading screen (clay globe + wordmark,
+                // Phase 3 web-embed) — the exact prototype screen, hosted in a
+                // WKWebView, replacing the old auth_transition.mp4.
+                PostLoginLoadingWebView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .ignoresSafeArea()
                     .transition(.opacity)
@@ -351,7 +353,8 @@ struct Poplur2025App: App {
                 auth.didSignUp = false
                 stripeCoordinator.trigger { }
             } else {
-                // Explicit sign-in: show the loading video before revealing the feed.
+                // Explicit sign-in: show the approved web Loading screen before
+                // revealing the home.
                 triggerAuthTransition()
             }
         }
@@ -359,7 +362,9 @@ struct Poplur2025App: App {
 
     private func triggerAuthTransition() {
         showAuthTransition = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+        // Hold the approved Loading screen long enough for the clay globe to decode
+        // and a rotating clay message to read before the home reveal.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) {
             withAnimation(.easeOut(duration: 0.5)) {
                 showAuthTransition = false
             }
