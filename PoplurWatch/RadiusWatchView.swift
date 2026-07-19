@@ -49,9 +49,10 @@ private struct ClayGlobeSceneView: WKInterfaceObjectRepresentable {
         scene.background.contents = UIColor(red: 0.122, green: 0.420, blue: 1.0, alpha: 1)
         let backdrop = SCNNode(geometry: SCNPlane(width: 11, height: 13))
         if let m = backdrop.geometry?.firstMaterial {
-            m.diffuse.contents = Self.backgroundImage()
             m.lightingModel = .constant
             m.isDoubleSided = true
+            m.diffuse.contents = UIColor(red: 0.122, green: 0.420, blue: 1.0, alpha: 1)
+            m.shaderModifiers = [.fragment: Self.dotShader]   // animated pulsing clay dots
         }
         backdrop.position = SCNVector3(0, 0.34, -8)
         scene.rootNode.addChildNode(backdrop)
@@ -65,6 +66,14 @@ private struct ClayGlobeSceneView: WKInterfaceObjectRepresentable {
         globeNode.runAction(.repeatForever(
             .rotateBy(x: 0, y: 2 * .pi, z: 0, duration: 12)
         ))
+
+        // The 3D "poplur" wordmark floats in front of the globe, facing forward
+        // (it holds still while the globe spins behind it).
+        if let word = Self.loadWordmark() {
+            RuntimeGlobe.normalize(word, targetExtent: 0.72)
+            word.position = SCNVector3(0, 0.55, 1.9)
+            scene.rootNode.addChildNode(word)
+        }
 
         // Camera framed so the globe rides in the upper ~60% of the face.
         let cameraNode = SCNNode()
@@ -117,6 +126,47 @@ private struct ClayGlobeSceneView: WKInterfaceObjectRepresentable {
         applyClayTextures(to: root)
         return root
     }
+
+    // The "poplur" wordmark ships as a self-contained USDZ; textures bound in code.
+    static func loadWordmark() -> SCNNode? {
+        guard let asset = NSDataAsset(name: "poplur_wordmark") else { return nil }
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("poplur_wordmark.usdz")
+        do { try asset.data.write(to: tmp, options: .atomic) } catch { return nil }
+        guard let scene = try? SCNScene(url: tmp, options: nil) else { return nil }
+        let root = SCNNode()
+        for child in scene.rootNode.childNodes { root.addChildNode(child) }
+        guard !root.childNodes.isEmpty else { return nil }
+        let base = UIImage(named: "word_basecolor")
+        let normalMap = UIImage(named: "word_normal")
+        let emissive = UIImage(named: "word_emissive")
+        root.enumerateChildNodes { node, _ in
+            guard let geometry = node.geometry else { return }
+            for material in geometry.materials {
+                material.lightingModel = .blinn
+                material.diffuse.contents = base
+                material.normal.contents = normalMap
+                material.emission.contents = emissive
+                material.specular.contents = UIColor(white: 0.12, alpha: 1)
+                material.shininess = 0.4
+            }
+        }
+        return root
+    }
+
+    // Fragment shader modifier: blue slab + pink clay dots that pulse over time.
+    static let dotShader = """
+    #pragma body
+    vec2 uv = _surface.diffuseTexcoord;
+    float hi = 1.0 - smoothstep(0.0, 0.55, distance(uv, vec2(0.5, 0.72)));
+    vec3 base = mix(vec3(0.122, 0.420, 1.0), vec3(0.184, 0.482, 1.0), hi * 0.5);
+    vec2 grid = vec2(uv.x * 46.0, uv.y * 55.0);
+    vec2 g = fract(grid) - 0.5;
+    float dotMask = 1.0 - smoothstep(0.12, 0.24, length(g));
+    float pulse = 0.5 + 0.5 * sin(u_time * 2.0 + (floor(grid.x) + floor(grid.y)) * 0.6);
+    float a = dotMask * (0.16 + 0.24 * pulse);
+    _output.color.rgb = mix(base, vec3(0.839, 0.063, 0.424), a);
+    _output.color.a = 1.0;
+    """
 
     // SceneKit's USD import reads geometry + UVs but not the usdz's textures,
     // so bind the baked JPEG maps (bundled as imagesets) onto every material.
