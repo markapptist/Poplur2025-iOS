@@ -300,13 +300,25 @@ struct Poplur2025App: App {
                     .ignoresSafeArea()
                     .transition(.opacity)
             } else if auth.isAuthenticated {
-                HomeView()
-                    .environmentObject(auth)
-                    .task(id: auth.currentUser?.uid) {
-                        await PoplurNotificationCenter.shared.refreshDailyNotificationForCurrentUser()
-                        WatchRadiusSync.shared.refreshAndSendRadius()
+                Group {
+                    if PoplurWebHome.isEnabled {
+                        // Phase 3: the APPROVED web home (poplur-clay-map ViewHarness
+                        // home twin, ?view=home) replaces the native HomeView. Native
+                        // power (camera/ML, live feed, notifications) is bridged in over
+                        // later phases through the same `poplur` channel. Flag-reversible
+                        // to HomeView via UserDefaults "poplur_web_home".
+                        PostLoginHomeWebView()
+                            .ignoresSafeArea()
+                    } else {
+                        HomeView()
+                            .environmentObject(auth)
                     }
-                    .transition(.scale(scale: 0.88, anchor: .bottom).combined(with: .opacity))
+                }
+                .task(id: auth.currentUser?.uid) {
+                    await PoplurNotificationCenter.shared.refreshDailyNotificationForCurrentUser()
+                    WatchRadiusSync.shared.refreshAndSendRadius()
+                }
+                .transition(.scale(scale: 0.88, anchor: .bottom).combined(with: .opacity))
             } else if usePreloginWebEmbed {
                 // Phase 1/2: the approved web splash → welcome, hosted edge-to-edge
                 // in a WKWebView. Hands back to the post-login/home branch above
