@@ -1,439 +1,455 @@
 import SwiftUI
 import WatchKit
 import SceneKit
-import AVFoundation
+import UIKit
 @preconcurrency import WatchConnectivity
 
 // MARK: - Types
 
 enum RadiusTrend { case up, down, stable }
 
-// MARK: - Static audio helpers (free functions — no actor isolation needed)
+// MARK: - Clay palette (matches the phone welcome / loading aesthetic)
 
-private func makeStaticWAV(duration: TimeInterval) -> Data {
-    let sampleRate  = 22_050
-    let sampleCount = max(1, Int(Double(sampleRate) * duration))
-    var samples: [Int16] = []
-    samples.reserveCapacity(sampleCount)
-    for i in 0..<sampleCount {
-        let fadeIn  = min(1.0, Double(i) / 440.0)
-        let fadeOut = min(1.0, Double(sampleCount - i) / 880.0)
-        let env     = fadeIn * fadeOut
-        let noise   = Double.random(in: -1.0...1.0) * 0.62 * env
-        let raw     = Int(noise * Double(Int16.max))
-        samples.append(Int16(min(Int(Int16.max), max(Int(Int16.min), raw))))
-    }
-    return makeWAVBytes(samples, sampleRate: sampleRate)
+private enum Clay {
+    // Blue "loading" slab the background fades to on the phone.
+    static let slab      = UIColor(red: 0.122, green: 0.420, blue: 1.0, alpha: 1)      // #1F6BFF
+    static let slabHi    = UIColor(red: 0.184, green: 0.482, blue: 1.0, alpha: 1)      // #2F7BFF
+    static let dot       = UIColor(red: 0.839, green: 0.063, blue: 0.424, alpha: 0.34) // pink stud
+    // Confetti — Apple system colors, same set as the phone auth confetti.
+    static let confetti: [UIColor] = [
+        UIColor(red: 1.00, green: 0.176, blue: 0.333, alpha: 1),
+        UIColor(red: 1.00, green: 0.584, blue: 0.00,  alpha: 1),
+        UIColor(red: 1.00, green: 0.800, blue: 0.00,  alpha: 1),
+        UIColor(red: 0.204, green: 0.780, blue: 0.349, alpha: 1),
+        UIColor(red: 0.00,  green: 0.478, blue: 1.00,  alpha: 1),
+        UIColor(red: 0.686, green: 0.322, blue: 0.871, alpha: 1)
+    ]
+    // Clay-pink readout gradient (white → pink), legible on blue.
+    static let pink: [Color] = [
+        Color(red: 1.0, green: 1.0, blue: 1.0),
+        Color(red: 1.0, green: 0.827, blue: 0.917),
+        Color(red: 1.0, green: 0.486, blue: 0.753),
+        Color(red: 0.961, green: 0.235, blue: 0.600)
+    ]
+    static let green = Color(red: 0.541, green: 1.0, blue: 0.651)
+    static let red   = Color(red: 1.0, green: 0.353, blue: 0.353)
 }
 
-private func makeWAVBytes(_ samples: [Int16], sampleRate: Int) -> Data {
-    var d = Data()
-    func u16(_ v: UInt16) { var b = v.littleEndian; withUnsafeBytes(of: &b) { d.append(contentsOf: $0) } }
-    func u32(_ v: UInt32) { var b = v.littleEndian; withUnsafeBytes(of: &b) { d.append(contentsOf: $0) } }
-    let ch: UInt16 = 1, bps: UInt16 = 16
-    let ds = UInt32(samples.count * 2)
-    d.append(contentsOf: "RIFF".utf8); u32(36 + ds)
-    d.append(contentsOf: "WAVE".utf8)
-    d.append(contentsOf: "fmt ".utf8); u32(16); u16(1); u16(ch)
-    u32(UInt32(sampleRate)); u32(UInt32(sampleRate) * UInt32(ch * bps / 8)); u16(ch * bps / 8); u16(bps)
-    d.append(contentsOf: "data".utf8); u32(ds)
-    for s in samples { var b = s.littleEndian; withUnsafeBytes(of: &b) { d.append(contentsOf: $0) } }
-    return d
-}
+// MARK: - Clay globe (real Poplur clay globe via GLTFSceneKit)
 
-// MARK: - 3D SceneKit globe
-
-private func makeEarthTexture() -> UIImage {
-    let width = 512
-    let height = 256
-    guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else { return UIImage() }
-    guard let ctx = CGContext(
-        data: nil,
-        width: width,
-        height: height,
-        bitsPerComponent: 8,
-        bytesPerRow: 0,
-        space: colorSpace,
-        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-    ) else { return UIImage() }
-
-    let w = CGFloat(width)
-    let h = CGFloat(height)
-
-    // Background ocean
-    ctx.setFillColor(UIColor(red: 0.06, green: 0.28, blue: 0.68, alpha: 1).cgColor)
-    ctx.fill(CGRect(x: 0, y: 0, width: w, height: h))
-
-    // Landmasses
-    ctx.setFillColor(UIColor(red: 0.20, green: 0.52, blue: 0.18, alpha: 1).cgColor)
-    ctx.fillEllipse(in: CGRect(x: w*0.04, y: h*0.08, width: w*0.17, height: h*0.30))
-    ctx.fillEllipse(in: CGRect(x: w*0.10, y: h*0.36, width: w*0.05, height: h*0.08))
-    ctx.fillEllipse(in: CGRect(x: w*0.12, y: h*0.48, width: w*0.11, height: h*0.34))
-    ctx.fillEllipse(in: CGRect(x: w*0.22, y: h*0.02, width: w*0.06, height: h*0.10))
-    ctx.fillEllipse(in: CGRect(x: w*0.46, y: h*0.07, width: w*0.07, height: h*0.16))
-    ctx.fillEllipse(in: CGRect(x: w*0.46, y: h*0.28, width: w*0.10, height: h*0.40))
-    ctx.fillEllipse(in: CGRect(x: w*0.53, y: h*0.28, width: w*0.06, height: h*0.14))
-    ctx.fillEllipse(in: CGRect(x: w*0.54, y: h*0.04, width: w*0.30, height: h*0.38))
-    ctx.fillEllipse(in: CGRect(x: w*0.60, y: h*0.35, width: w*0.07, height: h*0.18))
-    ctx.fillEllipse(in: CGRect(x: w*0.72, y: h*0.36, width: w*0.07, height: h*0.14))
-    ctx.fillEllipse(in: CGRect(x: w*0.76, y: h*0.56, width: w*0.10, height: h*0.14))
-
-    // Polar caps / clouds
-    ctx.setFillColor(UIColor(red: 0.88, green: 0.93, blue: 1.0, alpha: 1).cgColor)
-    ctx.fill(CGRect(x: 0, y: h*0.88, width: w, height: h*0.12))
-    ctx.fill(CGRect(x: 0, y: 0,      width: w, height: h*0.03))
-
-    guard let cgImage = ctx.makeImage() else { return UIImage() }
-    return UIImage(cgImage: cgImage)
-}
-
-private struct Globe3DSceneView: WKInterfaceObjectRepresentable {
+private struct ClayGlobeSceneView: WKInterfaceObjectRepresentable {
     typealias WKInterfaceObjectType = WKInterfaceSCNScene
 
     func makeWKInterfaceObject(context: Context) -> WKInterfaceSCNScene {
+        let scnScene = WKInterfaceSCNScene()
         let scene = SCNScene()
-        scene.background.contents = UIColor.black
+        // WKInterfaceSCNScene renders opaque and a single-image scene background
+        // would warp as an environment map, so put the blue clay-dot slab on a
+        // flat unlit plane behind the globe; solid blue fills any margin.
+        scene.background.contents = UIColor(red: 0.122, green: 0.420, blue: 1.0, alpha: 1)
+        let backdrop = SCNNode(geometry: SCNPlane(width: 11, height: 13))
+        if let m = backdrop.geometry?.firstMaterial {
+            m.lightingModel = .constant
+            m.isDoubleSided = true
+            m.diffuse.contents = UIColor(red: 0.122, green: 0.420, blue: 1.0, alpha: 1)
+            m.shaderModifiers = [.fragment: Self.dotShader]   // animated pulsing clay dots
+        }
+        backdrop.position = SCNVector3(0, 0.34, -8)
+        scene.rootNode.addChildNode(backdrop)
 
-        let sphere = SCNSphere(radius: 1.0)
-        sphere.segmentCount = 48
-
-        let mat = SCNMaterial()
-        mat.diffuse.contents  = makeEarthTexture()
-        mat.specular.contents = UIColor.white.withAlphaComponent(0.25)
-        mat.shininess = 0.4
-        mat.isDoubleSided = false
-        sphere.materials = [mat]
-
-        let globeNode = SCNNode(geometry: sphere)
-        globeNode.eulerAngles = SCNVector3(0, 0, Float(-23.5 * .pi / 180))
+        let globeNode = Self.loadClayGlobe() ?? Self.fallbackGlobe()
+        RuntimeGlobe.normalize(globeNode, targetExtent: 1.75)
+        globeNode.position = SCNVector3(0, 0.6, 0)          // sit in the upper area
+        globeNode.eulerAngles = SCNVector3(0, 0, Float(-15.0 * .pi / 180))  // gentle clay tilt
         scene.rootNode.addChildNode(globeNode)
 
-        let spin = SCNAction.repeatForever(
-            SCNAction.rotateBy(x: 0, y: 2 * .pi, z: 0, duration: 12)
-        )
-        globeNode.runAction(spin)
+        globeNode.runAction(.repeatForever(
+            .rotateBy(x: 0, y: 2 * .pi, z: 0, duration: 12)
+        ))
 
+        // The 3D "poplur" wordmark floats in front of the globe, facing forward
+        // (it holds still while the globe spins behind it).
+        if let word = Self.loadWordmark() {
+            RuntimeGlobe.normalize(word, targetExtent: 0.72)
+            word.position = SCNVector3(0, 0.55, 1.9)
+            scene.rootNode.addChildNode(word)
+        }
+
+        // Camera framed so the globe rides in the upper ~60% of the face.
         let cameraNode = SCNNode()
         cameraNode.camera = SCNCamera()
-        cameraNode.position = SCNVector3(0, 0.2, 3.0)
-        cameraNode.eulerAngles = SCNVector3(-0.06, 0, 0)
+        cameraNode.camera?.fieldOfView = 32
+        cameraNode.position = SCNVector3(0, 0.34, 3.5)
         scene.rootNode.addChildNode(cameraNode)
 
-        let sunNode = SCNNode()
-        let sun = SCNLight()
-        sun.type = .directional
-        sun.intensity = 900
-        sun.color = UIColor(red: 1.0, green: 0.97, blue: 0.90, alpha: 1)
-        sunNode.light = sun
-        sunNode.eulerAngles = SCNVector3(-0.4, -0.6, 0)
-        scene.rootNode.addChildNode(sunNode)
+        // Warm key + cool fill + soft ambient — matches the phone's clay lighting.
+        let key = SCNNode()
+        key.light = SCNLight()
+        key.light?.type = .directional
+        key.light?.intensity = 850
+        key.light?.color = UIColor(red: 1.0, green: 0.97, blue: 0.90, alpha: 1)
+        key.eulerAngles = SCNVector3(-0.5, -0.5, 0)
+        scene.rootNode.addChildNode(key)
 
-        let ambientNode = SCNNode()
-        let ambient = SCNLight()
-        ambient.type = .ambient
-        ambient.intensity = 200
-        ambientNode.light = ambient
-        scene.rootNode.addChildNode(ambientNode)
+        let fill = SCNNode()
+        fill.light = SCNLight()
+        fill.light?.type = .directional
+        fill.light?.intensity = 280
+        fill.light?.color = UIColor(red: 0.624, green: 0.816, blue: 1.0, alpha: 1)
+        fill.eulerAngles = SCNVector3(0.3, 0.8, 0)
+        scene.rootNode.addChildNode(fill)
 
-        let scnScene = WKInterfaceSCNScene()
+        let ambient = SCNNode()
+        ambient.light = SCNLight()
+        ambient.light?.type = .ambient
+        ambient.light?.intensity = 420
+        ambient.light?.color = UIColor(red: 0.85, green: 0.90, blue: 1.0, alpha: 1)
+        scene.rootNode.addChildNode(ambient)
+
         scnScene.scene = scene
         scnScene.preferredFramesPerSecond = 30
         return scnScene
     }
 
     func updateWKInterfaceObject(_ wkInterfaceObject: WKInterfaceSCNScene, context: Context) {}
-}
 
-// MARK: - Globe + trend indicator
+    // The clay globe ships as a self-contained USDZ (geometry + UVs), which
+    // SceneKit loads natively on watchOS — no third-party glTF decoder.
+    static func loadClayGlobe() -> SCNNode? {
+        guard let asset = NSDataAsset(name: "poplur_clay_globe") else { return nil }
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("poplur_clay_globe.usdz")
+        do { try asset.data.write(to: tmp, options: .atomic) } catch { return nil }
+        guard let scene = try? SCNScene(url: tmp, options: nil) else { return nil }
+        let root = SCNNode()
+        for child in scene.rootNode.childNodes { root.addChildNode(child) }
+        guard !root.childNodes.isEmpty else { return nil }
+        applyClayTextures(to: root)
+        return root
+    }
 
-private struct GlobeTrendView: View {
-    let trend: RadiusTrend
-    let arrowPhase: Double
+    // The "poplur" wordmark ships as a self-contained USDZ; textures bound in code.
+    static func loadWordmark() -> SCNNode? {
+        guard let asset = NSDataAsset(name: "poplur_wordmark") else { return nil }
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("poplur_wordmark.usdz")
+        do { try asset.data.write(to: tmp, options: .atomic) } catch { return nil }
+        guard let scene = try? SCNScene(url: tmp, options: nil) else { return nil }
+        let root = SCNNode()
+        for child in scene.rootNode.childNodes { root.addChildNode(child) }
+        guard !root.childNodes.isEmpty else { return nil }
+        let base = UIImage(named: "word_basecolor")
+        let normalMap = UIImage(named: "word_normal")
+        let emissive = UIImage(named: "word_emissive")
+        root.enumerateChildNodes { node, _ in
+            guard let geometry = node.geometry else { return }
+            for material in geometry.materials {
+                material.lightingModel = .blinn
+                material.diffuse.contents = base
+                material.normal.contents = normalMap
+                material.emission.contents = emissive
+                material.specular.contents = UIColor(white: 0.12, alpha: 1)
+                material.shininess = 0.4
+            }
+        }
+        return root
+    }
 
-    private let green  = Color(red: 0.20, green: 1.00, blue: 0.15)
-    private let red    = Color(red: 1.00, green: 0.18, blue: 0.12)
+    // Fragment shader modifier: blue slab + pink clay dots that pulse over time.
+    static let dotShader = """
+    #pragma body
+    vec2 uv = _surface.diffuseTexcoord;
+    float hi = 1.0 - smoothstep(0.0, 0.55, distance(uv, vec2(0.5, 0.72)));
+    vec3 base = mix(vec3(0.122, 0.420, 1.0), vec3(0.184, 0.482, 1.0), hi * 0.5);
+    vec2 grid = vec2(uv.x * 46.0, uv.y * 55.0);
+    vec2 g = fract(grid) - 0.5;
+    float dotMask = 1.0 - smoothstep(0.12, 0.24, length(g));
+    float pulse = 0.5 + 0.5 * sin(u_time * 2.0 + (floor(grid.x) + floor(grid.y)) * 0.6);
+    float a = dotMask * (0.16 + 0.24 * pulse);
+    _output.color.rgb = mix(base, vec3(0.839, 0.063, 0.424), a);
+    _output.color.a = 1.0;
+    """
 
-    var body: some View {
-        GeometryReader { geo in
-            let globeH = geo.size.height * 0.76
-            let arrowH = geo.size.height - globeH
-
-            VStack(spacing: 0) {
-                Globe3DSceneView()
-                    .frame(width: geo.size.width, height: globeH)
-
-                Canvas { ctx, size in
-                    let w = size.width, h = size.height
-                    let cx    = w * 0.50
-                    let arrowW  = w * 0.28
-                    let arrowH2 = h * 0.38
-                    let al = cx - arrowW / 2
-                    let ar = cx + arrowW / 2
-
-                    switch trend {
-                    case .up:
-                        let bounce  = CGFloat(sin(arrowPhase * .pi * 2)) * 2.5
-                        let arrowCY = h * 0.42 + bounce
-                        var p = Path()
-                        p.move(to:    CGPoint(x: cx, y: arrowCY - arrowH2))
-                        p.addLine(to: CGPoint(x: ar, y: arrowCY + arrowH2 * 0.2))
-                        p.addLine(to: CGPoint(x: cx + arrowW * 0.18, y: arrowCY + arrowH2 * 0.2))
-                        p.addLine(to: CGPoint(x: cx + arrowW * 0.18, y: arrowCY + arrowH2))
-                        p.addLine(to: CGPoint(x: cx - arrowW * 0.18, y: arrowCY + arrowH2))
-                        p.addLine(to: CGPoint(x: cx - arrowW * 0.18, y: arrowCY + arrowH2 * 0.2))
-                        p.addLine(to: CGPoint(x: al, y: arrowCY + arrowH2 * 0.2))
-                        p.closeSubpath()
-                        ctx.fill(p, with: .color(green))
-                    case .down:
-                        let bounce  = CGFloat(sin(arrowPhase * .pi * 2)) * 2.5
-                        let arrowCY = h * 0.42 + bounce
-                        var p = Path()
-                        p.move(to:    CGPoint(x: cx, y: arrowCY + arrowH2))
-                        p.addLine(to: CGPoint(x: ar, y: arrowCY - arrowH2 * 0.2))
-                        p.addLine(to: CGPoint(x: cx + arrowW * 0.18, y: arrowCY - arrowH2 * 0.2))
-                        p.addLine(to: CGPoint(x: cx + arrowW * 0.18, y: arrowCY - arrowH2))
-                        p.addLine(to: CGPoint(x: cx - arrowW * 0.18, y: arrowCY - arrowH2))
-                        p.addLine(to: CGPoint(x: cx - arrowW * 0.18, y: arrowCY - arrowH2 * 0.2))
-                        p.addLine(to: CGPoint(x: al, y: arrowCY - arrowH2 * 0.2))
-                        p.closeSubpath()
-                        ctx.fill(p, with: .color(red))
-                    case .stable:
-                        // No bounce — static dash
-                        let cy    = h * 0.42
-                        let dashW = arrowW * 0.70
-                        var p = Path()
-                        p.move(to:    CGPoint(x: cx - dashW / 2, y: cy))
-                        p.addLine(to: CGPoint(x: cx + dashW / 2, y: cy))
-                        ctx.stroke(p, with: .color(green.opacity(0.75)), lineWidth: 2.5)
-                    }
-                }
-                .frame(width: geo.size.width, height: arrowH)
+    // SceneKit's USD import reads geometry + UVs but not the usdz's textures,
+    // so bind the baked JPEG maps (bundled as imagesets) onto every material.
+    private static func applyClayTextures(to root: SCNNode) {
+        let base = UIImage(named: "clay_basecolor")
+        let normalMap = UIImage(named: "clay_normal")
+        let emissive = UIImage(named: "clay_emissive")
+        root.enumerateChildNodes { node, _ in
+            guard let geometry = node.geometry else { return }
+            for material in geometry.materials {
+                material.lightingModel = .blinn
+                material.diffuse.contents = base
+                material.normal.contents = normalMap
+                material.emission.contents = emissive
+                material.specular.contents = UIColor(white: 0.10, alpha: 1)
+                material.shininess = 0.35
+                material.isDoubleSided = false
             }
         }
     }
+
+    // Blue clay-slab dot background, baked once for the opaque scene.
+    static func backgroundImage() -> UIImage {
+        // Create a bitmap context using Core Graphics (available on watchOS)
+        let size = CGSize(width: 200, height: 244)
+        let width = Int(size.width)
+        let height = Int(size.height)
+        let bitsPerComponent = 8
+        let bytesPerPixel = 4
+        let bytesPerRow = width * bytesPerPixel
+
+        guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else {
+            return UIImage()
+        }
+
+        // Allocate pixel buffer
+        guard let data = calloc(height, bytesPerRow) else {
+            return UIImage()
+        }
+        defer { free(data) }
+
+        guard let ctx = CGContext(
+            data: data,
+            width: width,
+            height: height,
+            bitsPerComponent: bitsPerComponent,
+            bytesPerRow: bytesPerRow,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else {
+            return UIImage()
+        }
+
+        // Flip to match UIKit coordinate system for consistency
+        ctx.translateBy(x: 0, y: CGFloat(height))
+        ctx.scaleBy(x: 1, y: -1)
+
+        // Background fill (blue slab)
+        ctx.setFillColor(UIColor(red: 0.122, green: 0.420, blue: 1.0, alpha: 1).cgColor)
+        ctx.fill(CGRect(origin: .zero, size: size))
+
+        // Soft top highlight (radial gradient)
+        let gradColors = [
+            UIColor(red: 0.184, green: 0.482, blue: 1.0, alpha: 0.55).cgColor,
+            UIColor(red: 0.122, green: 0.420, blue: 1.0, alpha: 0.0).cgColor
+        ] as CFArray
+        let locations: [CGFloat] = [0.0, 1.0]
+        if let gradient = CGGradient(colorsSpace: colorSpace, colors: gradColors, locations: locations) {
+            let w = size.width, h = size.height
+            let center = CGPoint(x: w * 0.5, y: h * 0.30)
+            ctx.drawRadialGradient(
+                gradient,
+                startCenter: center,
+                startRadius: 0,
+                endCenter: center,
+                endRadius: h * 0.5,
+                options: []
+            )
+        }
+
+        // Pink clay stud dots on a 9pt grid
+        ctx.setFillColor(UIColor(red: 0.839, green: 0.063, blue: 0.424, alpha: 0.34).cgColor)
+        let step: CGFloat = 9
+        let dot: CGFloat = 1.2
+        var y: CGFloat = step / 2
+        while y < size.height {
+            var x: CGFloat = step / 2
+            while x < size.width {
+                let rect = CGRect(x: x - dot, y: y - dot, width: dot * 2, height: dot * 2)
+                ctx.fillEllipse(in: rect)
+                x += step
+            }
+            y += step
+        }
+
+        // Create image
+        guard let cgImage = ctx.makeImage() else { return UIImage() }
+        return UIImage(cgImage: cgImage, scale: WKInterfaceDevice.current().screenScale, orientation: .up)
+    }
+
+    // Simple clay-blue sphere if the model can't be decoded.
+    static func fallbackGlobe() -> SCNNode {
+        let sphere = SCNSphere(radius: 1.0)
+        sphere.segmentCount = 48
+        let mat = SCNMaterial()
+        mat.lightingModel = .blinn
+        mat.diffuse.contents = UIColor(red: 0.13, green: 0.45, blue: 0.86, alpha: 1)
+        sphere.materials = [mat]
+        return SCNNode(geometry: sphere)
+    }
 }
 
-// MARK: - Poplur logo mark (actual app icon, circle-clipped, no border)
-
-// MARK: - TV static overlay
-
-private struct StaticOverlay: View {
-    let seed: Int
-    @State private var pulse = false
-
-    var body: some View {
-        ZStack {
-            // Animated noise background
-            Canvas { ctx, size in
-                let block: CGFloat = 4
-                let cols = Int(size.width  / block) + 1
-                let rows = Int(size.height / block) + 1
-                var s = UInt64(bitPattern: Int64(seed &+ 1)) ^ 6_364_136_223_846_793_005
-                for row in 0..<rows {
-                    for col in 0..<cols {
-                        s = s &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
-                        let v = Double(s >> 33) / Double(UInt32.max)
-                        ctx.fill(
-                            Path(CGRect(x: CGFloat(col) * block,
-                                        y: CGFloat(row)  * block,
-                                        width: block, height: block)),
-                            with: .color(Color(white: v, opacity: 0.90))
-                        )
-                    }
-                }
+// Local center/scale helper (RuntimeGLBLoader lives in the phone target only).
+private enum RuntimeGlobe {
+    static func normalize(_ node: SCNNode, targetExtent: Float) {
+        let (minB, maxB) = node.boundingBox
+        var lo = minB, hi = maxB
+        node.enumerateChildNodes { child, _ in
+            guard child.geometry != nil else { return }
+            let b = child.boundingBox
+            let corners = [
+                SCNVector3(b.min.x, b.min.y, b.min.z), SCNVector3(b.max.x, b.max.y, b.max.z)
+            ]
+            for c in corners {
+                let p = child.convertPosition(c, to: node)
+                lo = SCNVector3(min(lo.x, p.x), min(lo.y, p.y), min(lo.z, p.z))
+                hi = SCNVector3(max(hi.x, p.x), max(hi.y, p.y), max(hi.z, p.z))
             }
-            .ignoresSafeArea()
+        }
+        let size = SCNVector3(hi.x - lo.x, hi.y - lo.y, hi.z - lo.z)
+        let maxDim = max(size.x, max(size.y, size.z))
+        guard maxDim.isFinite, maxDim > 0 else { return }
+        let center = SCNVector3((lo.x + hi.x) / 2, (lo.y + hi.y) / 2, (lo.z + hi.z) / 2)
+        let scale = targetExtent / maxDim
+        node.pivot = SCNMatrix4MakeTranslation(center.x, center.y, center.z)
+        node.scale = SCNVector3(scale, scale, scale)
+    }
+}
 
-            // Poplur logo centred, gently pulsing — clipped to circle, no border
-            Image("poplur_logo")
-                .resizable()
-                .scaledToFit()
-                .frame(width: 68, height: 68)
-                .clipShape(Circle())
-                .scaleEffect(pulse ? 1.06 : 0.94)
-                .animation(
-                    .easeInOut(duration: 0.55).repeatForever(autoreverses: true),
-                    value: pulse
+// MARK: - Blue clay-slab dot background
+
+private struct ClayBackground: View {
+    var body: some View {
+        Canvas { ctx, size in
+            let w = size.width, h = size.height
+            // Blue slab + soft top highlight
+            ctx.fill(Path(CGRect(origin: .zero, size: size)), with: .color(Color(Clay.slab)))
+            ctx.fill(
+                Path(ellipseIn: CGRect(x: w * 0.1, y: -h * 0.35, width: w * 0.8, height: h * 0.9)),
+                with: .radialGradient(
+                    Gradient(colors: [Color(Clay.slabHi).opacity(0.55), .clear]),
+                    center: CGPoint(x: w * 0.5, y: h * 0.34),
+                    startRadius: 0, endRadius: h * 0.55
                 )
-                .onAppear { pulse = true }
+            )
+            // Pink clay stud dots on a 9pt grid
+            let step: CGFloat = 9
+            let r: CGFloat = 1.2
+            var y: CGFloat = step / 2
+            while y < h {
+                var x: CGFloat = step / 2
+                while x < w {
+                    ctx.fill(Path(ellipseIn: CGRect(x: x - r, y: y - r, width: r * 2, height: r * 2)),
+                             with: .color(Color(Clay.dot)))
+                    x += step
+                }
+                y += step
+            }
         }
+        .ignoresSafeArea()
     }
 }
 
-// MARK: - LCD overlay
+// MARK: - Confetti (falling clay-color chips, phone auth-confetti feel)
 
-private struct LCDOverlay: View {
+private struct ConfettiChip {
+    let x0: CGFloat        // 0..1 horizontal start
+    let delay: Double
+    let dur: Double
+    let drift: CGFloat     // horizontal drift fraction
+    let size: CGFloat
+    let spin: Double
+    let color: Color
+}
+
+private struct ConfettiLayer: View {
+    let chips: [ConfettiChip]
+
+    init(count: Int = 16) {
+        // Deterministic pseudo-random from index — no per-frame allocation.
+        var out: [ConfettiChip] = []
+        var seed: UInt64 = 0x9E3779B97F4A7C15
+        func rnd() -> Double {
+            seed = seed &* 6364136223846793005 &+ 1442695040888963407
+            return Double(seed >> 33) / Double(UInt32.max)
+        }
+        for _ in 0..<count {
+            out.append(ConfettiChip(
+                x0: CGFloat(rnd()),
+                delay: rnd() * 3.2,
+                dur: 3.0 + rnd() * 2.2,
+                drift: CGFloat(rnd() - 0.5) * 0.28,
+                size: 4 + CGFloat(rnd()) * 4,
+                spin: (rnd() - 0.5) * 8,
+                color: Color(Clay.confetti[Int(rnd() * Double(Clay.confetti.count)) % Clay.confetti.count])
+            ))
+        }
+        chips = out
+    }
+
+    var body: some View {
+        TimelineView(.animation) { tl in
+            let t = tl.date.timeIntervalSinceReferenceDate
+            Canvas { ctx, size in
+                let w = size.width, h = size.height
+                for c in chips {
+                    let phase = ((t + c.delay).truncatingRemainder(dividingBy: c.dur)) / c.dur
+                    let y = CGFloat(phase) * (h + 30) - 15
+                    let x = c.x0 * w + CGFloat(sin(phase * .pi * 2)) * c.drift * w
+                    let alpha = phase < 0.85 ? 1.0 : (1.0 - (phase - 0.85) / 0.15)
+                    var chip = ctx
+                    chip.translateBy(x: x, y: y)
+                    chip.rotate(by: .radians(c.spin * phase * .pi))
+                    chip.opacity = alpha
+                    chip.fill(
+                        Path(roundedRect: CGRect(x: -c.size / 2, y: -c.size * 0.9,
+                                                 width: c.size, height: c.size * 1.8),
+                             cornerRadius: 1),
+                        with: .color(c.color)
+                    )
+                }
+            }
+        }
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
+    }
+}
+
+// MARK: - Clay-pink radius / posts readout
+
+private struct ClayReadout: View {
     @ObservedObject var store: WatchRadiusStore
-    let arrowPhase: Double
     let showKm: Bool
 
-    private let lcdGreen  = Color(red: 0.22, green: 1.00, blue: 0.15)
-    private let lcdOrange = Color(red: 1.00, green: 0.58, blue: 0.04)
-    private let lcdBlue   = Color(red: 0.24, green: 0.78, blue: 1.00)
-    private let divider   = Color(red: 0.10, green: 0.45, blue: 0.10)
+    private var pink: LinearGradient {
+        LinearGradient(colors: Clay.pink, startPoint: .top, endPoint: .bottom)
+    }
 
     var body: some View {
-        GeometryReader { geo in
-            let w = geo.size.width
-            let h = geo.size.height
-
-            ZStack(alignment: .topLeading) {
-                Color.black
-
-                VStack(spacing: 0) {
-                    header(w: w, h: h * 0.115)
-
-                    HStack(alignment: .top, spacing: 0) {
-                        GlobeTrendView(trend: store.trend,
-                                       arrowPhase: arrowPhase)
-                            .frame(width: w * 0.54, height: h * 0.635)
-
-                        dataColumn(w: w * 0.46, h: h * 0.635)
-                    }
-
-                    Spacer(minLength: 0)
-
-                    Rectangle().fill(divider).frame(height: 0.5)
-                    tabBar(w: w, h: h * 0.115)
-
-                    Rectangle().fill(divider).frame(height: 0.5)
-                    statsBar(w: w, h: h * 0.105)
-                }
-            }
-        }
-    }
-
-    // MARK: Header
-
-    @ViewBuilder private func header(w: CGFloat, h: CGFloat) -> some View {
         VStack(spacing: 1) {
-            Text("DATA BANK 50")
-                .font(.system(size: w * 0.095, weight: .semibold, design: .monospaced))
-                .foregroundColor(lcdOrange)
-                .lineLimit(1).minimumScaleFactor(0.6)
-            Text("WATER RESIST")
-                .font(.system(size: w * 0.070, weight: .regular, design: .monospaced))
-                .foregroundColor(lcdBlue)
-                .lineLimit(1).minimumScaleFactor(0.6)
-        }
-        .padding(.horizontal, 8)
-        .frame(width: w, height: h)
-    }
-
-    // MARK: Data column (world time + radius)
-
-    @ViewBuilder private func dataColumn(w: CGFloat, h: CGFloat) -> some View {
-        VStack(alignment: .trailing, spacing: 0) {
-            VStack(alignment: .trailing, spacing: 0) {
-                Text("WORLD TIME")
-                    .font(.system(size: w * 0.115, weight: .medium, design: .monospaced))
-                    .foregroundColor(lcdBlue)
-                    .lineLimit(1).minimumScaleFactor(0.5)
-
-                Text(currentTime())
-                    .font(.system(size: w * 0.280, weight: .bold, design: .monospaced))
-                    .foregroundColor(lcdGreen)
-                    .lineLimit(1).minimumScaleFactor(0.6)
-            }
-            .frame(width: w, height: h * 0.28, alignment: .trailing)
-            .padding(.trailing, 8)
-
-            Rectangle().fill(divider).frame(height: 0.5)
-
             Text("RADIUS")
-                .font(.system(size: w * 0.115, weight: .medium, design: .monospaced))
-                .foregroundColor(lcdBlue)
-                .frame(width: w, alignment: .trailing)
-                .padding(.trailing, 8)
-                .padding(.top, 2)
+                .font(.system(size: 10, weight: .heavy, design: .rounded))
+                .tracking(2)
+                .foregroundColor(Color(red: 0.87, green: 0.93, blue: 1.0))
 
-            Text(showKm ? store.displayValue(metric: true)
-                        : store.displayValue(metric: false))
-                .id("radius_\(showKm)")
-                .font(.system(size: w * 0.360, weight: .bold, design: .monospaced))
-                .foregroundColor(lcdGreen)
-                .lineLimit(1).minimumScaleFactor(0.5)
-                .frame(width: w, alignment: .trailing)
-                .padding(.trailing, 8)
-                .transition(.opacity)
+            HStack(alignment: .lastTextBaseline, spacing: 2) {
+                Text(store.displayValue(metric: showKm))
+                    .font(.system(size: 30, weight: .black, design: .rounded))
+                Text(showKm ? "km" : "mi")
+                    .font(.system(size: 13, weight: .heavy, design: .rounded))
+            }
+            .foregroundStyle(pink)
+            .shadow(color: Color(red: 0.47, green: 0.0, blue: 0.24).opacity(0.55), radius: 1, y: 1)
+            .id("radius_\(showKm)")
+            .transition(.opacity)
 
-            Text("\(store.postCount)")
-                .font(.system(size: w * 0.230, weight: .bold, design: .monospaced))
-                .foregroundColor(lcdGreen.opacity(0.75))
-                .frame(width: w, alignment: .trailing)
-                .padding(.trailing, 8)
-
-            Text(showKm ? "/6371" : "/3959")
-                .id("denom_\(showKm)")
-                .font(.system(size: w * 0.155, weight: .medium, design: .monospaced))
-                .foregroundColor(lcdGreen.opacity(0.85))
-                .frame(width: w, alignment: .trailing)
-                .padding(.trailing, 8)
-                .transition(.opacity)
-
-            Text(showKm ? "km" : "mi")
-                .id("unit_\(showKm)")
-                .font(.system(size: w * 0.120, weight: .regular, design: .monospaced))
-                .foregroundColor(lcdGreen.opacity(0.70))
-                .frame(width: w, alignment: .trailing)
-                .padding(.trailing, 8)
-                .transition(.opacity)
-
-            Spacer(minLength: 0)
+            HStack(spacing: 3) {
+                trendGlyph
+                Text("\(store.postCount) posts")
+                    .font(.system(size: 11, weight: .heavy, design: .rounded))
+                    .foregroundColor(Color(red: 0.92, green: 0.95, blue: 1.0))
+            }
         }
-        .frame(width: w, height: h)
+        .shadow(color: Color(red: 0.03, green: 0.07, blue: 0.31).opacity(0.55), radius: 3, y: 1)
         .animation(.easeInOut(duration: 0.35), value: showKm)
     }
 
-    // MARK: Tab bar
-
-    @ViewBuilder private func tabBar(w: CGFloat, h: CGFloat) -> some View {
-        HStack(spacing: 0) {
-            tabItem("SCH",        w: w / 3)
-            Rectangle().fill(divider).frame(width: 0.5, height: h * 0.7)
-            tabItem("WORLD TIME", w: w / 3)
-            Rectangle().fill(divider).frame(width: 0.5, height: h * 0.7)
-            tabItem("TEL",        w: w / 3)
+    @ViewBuilder private var trendGlyph: some View {
+        switch store.trend {
+        case .up:     Image(systemName: "triangle.fill").font(.system(size: 8, weight: .black)).foregroundColor(Clay.green)
+        case .down:   Image(systemName: "triangle.fill").rotationEffect(.degrees(180)).font(.system(size: 8, weight: .black)).foregroundColor(Clay.red)
+        case .stable: Rectangle().fill(Clay.green.opacity(0.8)).frame(width: 8, height: 2).cornerRadius(1)
         }
-        .frame(height: h)
-    }
-
-    @ViewBuilder private func tabItem(_ label: String, w: CGFloat) -> some View {
-        Text(label)
-            .font(.system(size: w * 0.165, weight: .medium, design: .monospaced))
-            .foregroundColor(lcdGreen)
-            .lineLimit(1).minimumScaleFactor(0.4)
-            .frame(width: w)
-    }
-
-    // MARK: Stats bar
-
-    @ViewBuilder private func statsBar(w: CGFloat, h: CGFloat) -> some View {
-        let battery = store.batteryPercent
-        let posts   = store.postCount
-        HStack(spacing: 0) {
-            statChip("↑\(posts)",      w: w * 0.28)
-            statChip("◾84°F",         w: w * 0.27)
-            statChip("🔋\(battery)%",  w: w * 0.25)
-            statChip("♥75",            w: w * 0.20)
-        }
-        .frame(height: h)
-    }
-
-    @ViewBuilder private func statChip(_ label: String, w: CGFloat) -> some View {
-        Text(label)
-            .font(.system(size: w * 0.220, weight: .regular, design: .monospaced))
-            .foregroundColor(lcdGreen.opacity(0.80))
-            .lineLimit(1).minimumScaleFactor(0.4)
-            .frame(width: w)
-    }
-
-    // MARK: Helpers
-
-    private func currentTime() -> String {
-        let f = DateFormatter()
-        f.dateFormat = "H:mm"
-        return f.string(from: Date())
     }
 }
 
@@ -442,64 +458,32 @@ private struct LCDOverlay: View {
 struct RadiusWatchView: View {
     @EnvironmentObject private var store: WatchRadiusStore
 
-    @State private var showKm         = true
-    @State private var isShowingStatic = false
-    @State private var staticPlayer:  AVAudioPlayer?
-
+    @State private var showKm = true
     private let switchTimer = Timer.publish(every: 4, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        TimelineView(.animation) { tl in
-            let t          = tl.date.timeIntervalSinceReferenceDate
-            let arrowPhase = (t / 1.4).truncatingRemainder(dividingBy: 1.0)
+        ZStack {
+            // The globe scene fills the face and carries the blue clay-dot slab as
+            // its baked background; confetti + readout overlay on top.
+            ClayGlobeSceneView()
+            ConfettiLayer()
 
-            ZStack {
-                LCDOverlay(store: store,
-                           arrowPhase: arrowPhase,
-                           showKm: showKm)
-
-                if isShowingStatic {
-                    StaticOverlay(seed: Int(t * 22) & 0x7FFF_FFFF)
-                }
+            VStack(spacing: 0) {
+                Spacer(minLength: 0)
+                ClayReadout(store: store, showKm: showKm)
+                    .padding(.bottom, 4)
             }
         }
         .ignoresSafeArea()
-        // Touch: show static + audio while held; toggle km/mi on release
-        .gesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { _ in
-                    if !isShowingStatic {
-                        isShowingStatic = true
-                        playStatic()
-                    }
-                }
-                .onEnded { _ in
-                    isShowingStatic = false
-                    staticPlayer?.stop()
-                    staticPlayer = nil
-                    withAnimation(.easeInOut(duration: 0.35)) { showKm.toggle() }
-                }
-        )
-        // Auto-switch km/mi every 4 s (separate from tap)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            withAnimation(.easeInOut(duration: 0.35)) { showKm.toggle() }
+        }
         .onReceive(switchTimer) { _ in
             withAnimation(.easeInOut(duration: 0.35)) { showKm.toggle() }
         }
         .persistentSystemOverlays(.hidden)
-        .accessibilityLabel("Poplur watch face — tap to toggle km/mi")
-    }
-
-    private func playStatic() {
-        let wavData = makeStaticWAV(duration: 0.65)
-        do {
-            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.mixWithOthers])
-            try AVAudioSession.sharedInstance().setActive(true)
-            let player = try AVAudioPlayer(data: wavData)
-            player.volume = 0.65
-            player.play()
-            staticPlayer = player
-        } catch {
-            // Silently continue — visual static still shows
-        }
+        .accessibilityLabel("Poplur watch — clay globe, tap to toggle km/mi")
     }
 }
 
@@ -588,10 +572,20 @@ final class WatchRadiusStore: NSObject, ObservableObject {
     }
 
     private static func int(_ key: String, _ p: [String: Any]) -> Int? {
+        func safeInt(from value: Double) -> Int? {
+            guard value.isFinite else { return nil }
+            if value >= Double(Int.max) { return Int.max }
+            if value <= Double(Int.min) { return Int.min }
+            return Int(value)
+        }
         if let v = p[key] as? Int      { return v }
-        if let v = p[key] as? Double   { return Int(v) }
         if let v = p[key] as? NSNumber { return v.intValue }
-        if let v = p[key] as? String   { return Int(v) }
+        if let v = p[key] as? Double   { return safeInt(from: v) }
+        if let v = p[key] as? String {
+            if let dv = Double(v) { return safeInt(from: dv) }
+            if let iv = Int(v) { return iv }
+            return nil
+        }
         return nil
     }
 }
