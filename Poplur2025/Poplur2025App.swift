@@ -356,19 +356,21 @@ struct Poplur2025App: App {
         .animation(.spring(response: 0.55, dampingFraction: 0.72), value: auth.isAuthenticated)
         .animation(.easeOut(duration: 0.3), value: auth.isResolvingAuthState)
         .animation(.easeOut(duration: 0.3), value: showAuthTransition)
-        // Returning users: no transition — skip straight to HomeView when auth resolves.
-        // Fire auth transition only when the user explicitly signs in or signs up.
+        // Explicit sign-IN and sign-UP both show the approved web Loading screen
+        // (clay globe) before the home reveals — the moments the user asked to
+        // cover. didSignUp is still cleared so it doesn't leak into later state.
         .onChange(of: auth.isAuthenticated) { oldValue, newValue in
             guard newValue && !oldValue && !auth.isResolvingAuthState else { return }
-            if auth.didSignUp {
-                // New sign-up: play stripe animation, reset flag.
-                auth.didSignUp = false
-                stripeCoordinator.trigger { }
-            } else {
-                // Explicit sign-in: show the approved web Loading screen before
-                // revealing the home.
-                triggerAuthTransition()
-            }
+            if auth.didSignUp { auth.didSignUp = false }
+            triggerAuthTransition()
+        }
+        // Cold launch as a RETURNING signed-in user: auth resolves from the
+        // restoring state straight to authenticated (no isAuthenticated edge), so
+        // cover the home/map warm-up (globe→city fly-in + 3D load) with the same
+        // Loading screen instead of dropping onto a half-booted map.
+        .onChange(of: auth.isResolvingAuthState) { _, resolving in
+            guard !resolving, auth.isAuthenticated, !showAuthTransition else { return }
+            triggerAuthTransition()
         }
     }
 

@@ -18,7 +18,7 @@
 //      welcome cube's POPLUR_WEBGL_OK fallback).
 // The screen's own DOM/CSS/JS is otherwise preserved EXACTLY.
 
-import { readFileSync, writeFileSync, mkdirSync, copyFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, copyFileSync, existsSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -28,13 +28,15 @@ const APP_ROOT = join(HERE, "..");                 // iOS worktree root
 const OUT = join(APP_ROOT, "PreloginWeb");         // shares the pre-login bundle root
 
 const FLOW_SRC = join(WORKSPACE, ".claude/artifacts/poplur-prelogin-flow.html");
-const COMPRESSED_DIR = join(WORKSPACE, ".codex/prelogin-assets-compressed/loading");
+// The UNCOMPRESSED 2MB lite globe is the known-good asset (memory: it "renders
+// smoothly"; the Draco variant is unverified and computeVertexNormals must NOT be
+// called on it). The 22MB wordmark is DROPPED — it was the load bottleneck and
+// "poplur" is already baked into the globe's clay texture.
+const MODELS_SRC_DIR = join(WORKSPACE, ".claude/artifacts/models");
 const PUBLIC_DIR = join(OUT, "poplur-clay-map/public");
 
-// Draco-compressed models (from gltf-transform optimize) → bundled public dir.
 const MODELS = [
   ["poplur-globe-lite.glb", "/poplur-clay-map/public/poplur-globe-lite.glb"],
-  ["poplur-wordmark.glb", "/poplur-clay-map/public/poplur-wordmark.glb"],
 ];
 
 const DRACO_DECODER_PATH = "/poplur-clay-map/node_modules/three/examples/jsm/libs/draco/";
@@ -48,10 +50,16 @@ function clean(html) {
   //    paths (/.claude/artifacts/models/…) which are not in the bundle.
   out = out.replace(/\s*<link rel="preload" as="fetch" href="\/\.claude\/artifacts\/models\/[^"]*">/g, "");
 
-  // 2. Rewrite the two model URLs to the bundled Draco-compressed copies.
-  out = out
-    .replace(/\/\.claude\/artifacts\/models\/poplur-globe-lite\.glb/g, MODELS[0][1])
-    .replace(/\/\.claude\/artifacts\/models\/poplur-wordmark\.glb/g, MODELS[1][1]);
+  // 2. Rewrite the globe URL to the bundled copy, and DROP the wordmark load
+  //    entirely (removed from the approved loading screen — bottleneck; "poplur"
+  //    is baked into the globe texture).
+  out = out.replace(/\/\.claude\/artifacts\/models\/poplur-globe-lite\.glb/g, MODELS[0][1]);
+  const wordmarkStripped = out.replace(
+    /loader\.load\("\/\.claude\/artifacts\/models\/poplur-wordmark\.glb"[\s\S]*?\}\);/,
+    "/* wordmark dropped: baked into the globe's clay texture */"
+  );
+  if (wordmarkStripped === out) throw new Error("wordmark load block not found to strip — flow changed");
+  out = wordmarkStripped;
 
   // 3. Inject DRACOLoader on the loading GLTFLoader (the second module script —
   //    uniquely identified by `const loadingCanvas=`). The compressed models are
@@ -90,6 +98,14 @@ function clean(html) {
     `  tick();\n  }catch(__glErr){console.warn("[loading] globe unavailable — 2D fallback",__glErr);}\n  // The Loading screen holds`
   );
 
+  // 6. Neutralize the live radio-station lookup (radio-browser.info) — a network
+  //    call that fires on load and would hang/fail offline. Resolve to an empty
+  //    station list so the ambient radio simply stays quiet on the loading screen.
+  out = out.replace(
+    /fetch\('https:\/\/[a-z0-9]+\.api\.radio-browser\.info\/[^']*'\)/g,
+    "Promise.resolve({ json: function () { return Promise.resolve([]) } })"
+  );
+
   return out;
 }
 
@@ -109,10 +125,12 @@ ensureDir(PUBLIC_DIR);
 writeFileSync(join(OUT, "loading.html"), cleaned);
 
 for (const [name] of MODELS) {
-  const src = join(COMPRESSED_DIR, name);
-  if (!existsSync(src)) throw new Error(`compressed model missing: ${src} (run gltf-transform optimize)`);
+  const src = join(MODELS_SRC_DIR, name);
+  if (!existsSync(src)) throw new Error(`model missing: ${src}`);
   copyFileSync(src, join(PUBLIC_DIR, name));
 }
+// The Draco-compressed wordmark from an earlier pass must not linger in the bundle.
+try { rmSync(join(PUBLIC_DIR, "poplur-wordmark.glb")); } catch {}
 
 // Sanity: the reused three.js + draco decoder must already be in the bundle.
 for (const rel of [

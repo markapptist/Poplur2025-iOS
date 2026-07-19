@@ -235,19 +235,24 @@ input.field::placeholder{color:var(--muted)}input.field:focus{border-color:var(-
 @keyframes permPopFloat{0%{transform:translateY(0) scale(1)}18%{transform:translateY(-6px) scale(1.02)}36%{transform:translateY(0) scale(1)}58%{transform:translateY(-6px) scale(1.02)}74%{transform:translateY(-3px) scale(1.14)}82%{transform:translateY(-1px) scale(.95)}90%{transform:translateY(-2px) scale(1.05)}100%{transform:translateY(0) scale(1)}}
 .permission-camera,.permission-location{animation:permPopFloat 3.4s ease-in-out infinite;transform-origin:center;will-change:transform}
 .permission-showcase{align-items:center;justify-content:center;overflow:hidden;padding:18px}
-.loading-showcase{position:absolute;inset:0;min-height:100%;align-items:center;justify-content:center;overflow:hidden;padding:0;background-color:#ff2d96;background-image:radial-gradient(circle at 50% 40%,rgba(255,130,195,0.20),transparent 64%);box-shadow:inset 0 0 70px rgba(120,0,60,0.4),inset 0 2px 0 rgba(255,255,255,0.22);animation:loadingBgFade 2.4s ease-in-out forwards}
+/* Loading frame is full-bleed: kill the phone-bezel inset so blue reaches every edge. */
+.screen:has(.loading-showcase),.lcdview:has(.loading-showcase),.sc:has(.loading-showcase){position:absolute!important;inset:0!important;width:100%!important;height:100%!important;transform:none!important;border-radius:0!important}
+.loading-showcase{position:absolute;inset:0;width:100%;height:100%;align-items:center;justify-content:center;overflow:hidden;padding:0;background-color:#ff2d96;background-image:radial-gradient(circle at 50% 40%,rgba(255,130,195,0.20),transparent 64%);box-shadow:inset 0 0 70px rgba(120,0,60,0.4),inset 0 2px 0 rgba(255,255,255,0.22);animation:loadingBgFade 2.4s ease-in-out forwards}
 @keyframes loadingBgFade{0%{background-color:#ff2d96}50%{background-color:#9a3ad4}100%{background-color:#1f6bff}}
 .loading-worldmap{position:absolute;inset:0;z-index:0;width:100%;height:100%;pointer-events:none;mix-blend-mode:screen}
+/* Confetti pops in FRONT of the globe; text + bar stay readable on top. */
+.loading-showcase .auth-particle-layer{z-index:2}
 /* Loading confetti = the welcome screen's clay sprinkles exactly: 13px rounded
    squares with the pressed-highlight clay shadow (same palette + physics). */
 .loading-showcase .authcf{width:13px!important;height:13px!important;border-radius:3px;opacity:.85;box-shadow:0 2px 3px rgba(110,4,54,.45),inset 0 1px 1px rgba(255,255,255,.55),inset 0 -1px 2px rgba(0,0,0,.18)}
 .sc:has(.loading-showcase) .sb{display:none}
 .loading-canvas{position:absolute;inset:0;width:100%;height:100%;display:block;z-index:1;filter:drop-shadow(0 14px 22px rgba(8,20,80,.5)) drop-shadow(0 4px 8px rgba(8,20,80,.35))}
-.loading-msg{position:absolute;left:50%;bottom:12.2%;transform:translateX(-50%);z-index:1;width:80%;max-width:230px;text-align:center;font-size:11.5px;font-weight:900;letter-spacing:.2px;line-height:1.3;background:linear-gradient(96deg,#ffffff,#d6e7ff,#fff2f8,#d6e7ff,#ffffff);background-size:220% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;filter:drop-shadow(0 1px 3px rgba(10,30,110,.7)) drop-shadow(0 0 10px rgba(10,30,110,.35));animation:sheen 2.4s linear infinite;transition:opacity .18s}
+.loading-msg{position:absolute;left:50%;bottom:12.2%;transform:translateX(-50%);z-index:3;width:80%;max-width:230px;text-align:center;font-size:11.5px;font-weight:900;letter-spacing:.2px;line-height:1.3;background:linear-gradient(96deg,#ffffff,#d6e7ff,#fff2f8,#d6e7ff,#ffffff);background-size:220% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;filter:drop-shadow(0 1px 3px rgba(10,30,110,.7)) drop-shadow(0 0 10px rgba(10,30,110,.35));animation:sheen 2.4s linear infinite;transition:opacity .18s}
 .loading-track{position:absolute;left:50%;bottom:9.4%;transform:translateX(-50%);z-index:1;width:64%;max-width:180px;height:9px;overflow:hidden;border:1px solid rgba(255,255,255,.42);border-radius:999px;background:rgba(120,8,54,.42);box-shadow:inset 0 2px 4px rgba(90,0,40,.5)}
-.loading-fill{position:absolute;inset:0 auto 0 0;width:0;border-radius:inherit;background-image:repeating-linear-gradient(45deg,#ffe1f1 0 15px,#ff86c4 15px 29px,#f53c99 29px 44px);background-size:62px 62px;box-shadow:inset 0 2px 2px rgba(255,255,255,.6),inset 0 -2px 4px rgba(140,18,74,.5),0 0 16px rgba(244,59,153,.32);animation:loadingFill 14s ease-out forwards,loadingBarber .7s linear infinite}
-@keyframes loadingFill{0%{width:6%}60%{width:62%}85%{width:84%}100%{width:96%}}
-@keyframes loadingBarber{from{background-position:0 0}to{background-position:-62px 0}}
+.loading-fill{position:absolute;inset:0 auto 0 0;width:0;border-radius:inherit;overflow:hidden;box-shadow:inset 0 2px 2px rgba(255,255,255,.6),inset 0 -2px 4px rgba(140,18,74,.5),0 0 16px rgba(244,59,153,.32);animation:loadingFill 4s ease-out infinite}
+.loading-fill::before{content:"";position:absolute;top:0;bottom:0;left:-62px;right:-62px;background-image:repeating-linear-gradient(45deg,#ffe1f1 0 15px,#ff86c4 15px 29px,#f53c99 29px 44px);background-size:62px 62px;animation:loadingBarber .7s linear infinite;will-change:transform;transform:translateZ(0)}
+@keyframes loadingFill{0%{width:4%}70%{width:90%}88%,100%{width:100%}}
+@keyframes loadingBarber{from{transform:translate3d(0,0,0)}to{transform:translate3d(62px,0,0)}}
 @media (prefers-reduced-motion:reduce){.loading-showcase{animation:none;background-color:#1f6bff}.loading-fill{animation:none;width:82%}.loading-msg{animation:none}}
 .loading-home{position:absolute;inset:0;width:100%;height:100%;border:0;z-index:2;opacity:0;pointer-events:none;transition:opacity .5s ease;background:#050305}
 .loading-home.show{opacity:1;pointer-events:auto}
@@ -669,15 +674,9 @@ if(loadingCanvas){
     scene.add(globe);
     renderer.render(scene,camera); // paint at least once so throttled previews still show the globe
   });
-  loader.load("/poplur-clay-map/public/poplur-wordmark.glb",g=>{
-    const word=g.scene;
-    const box=new THREE.Box3().setFromObject(word),c=box.getCenter(new THREE.Vector3()),s=box.getSize(new THREE.Vector3());
-    word.position.sub(c);
-    word.scale.setScalar(0.58/Math.max(s.x,s.y,.001));
-    word.position.set(0,-.05,2.0);
-    scene.add(word);
-    renderer.render(scene,camera);
-  });
+  // The floating 3D "poplur" wordmark loads async AFTER the 2MB globe (no
+  // blocking preload), so the globe paints first and the wordmark pops in.
+  /* wordmark dropped: baked into the globe's clay texture */
   resize();window.addEventListener("resize",resize,{passive:true});
   const tick=()=>{if(globe)globe.rotation.y+=0.03;renderer.render(scene,camera);requestAnimationFrame(tick);};
   tick();
@@ -773,15 +772,18 @@ if(loadingCanvas){
 }
 </script>
 <style>
-.clay-mute{position:fixed;top:14px;right:14px;z-index:9999;width:46px;height:46px;padding:0;border:none;border-radius:15px;cursor:pointer;display:grid;place-items:center;background:linear-gradient(180deg,#ff8ac6 0%,#f43b99 58%,#c92e7d 100%);box-shadow:0 0 0 3px #7a0d3a,0 6px 0 rgba(90,10,50,.55),inset 0 2px 3px rgba(255,255,255,.65),inset 0 -4px 7px rgba(120,10,60,.4);transition:transform .12s ease,box-shadow .12s ease}
-.clay-mute:active{transform:translateY(3px);box-shadow:0 0 0 3px #7a0d3a,0 2px 0 rgba(90,10,50,.55),inset 0 2px 3px rgba(255,255,255,.65)}
-.clay-mute svg{width:24px;height:24px;filter:drop-shadow(0 1px 1px rgba(90,10,50,.5))}
+/* Bare-glyph mute — identical to the welcome screen's: no pill, no background,
+   top-left safe area, soft clay drop-shadow. */
+.clay-mute{position:fixed;top:clamp(12px,3vw,20px);left:clamp(12px,3vw,20px);right:auto;z-index:9999;width:auto;height:auto;padding:6px;border:0;border-radius:0;cursor:pointer;display:block;line-height:0;background:none;box-shadow:none;filter:drop-shadow(0 2px 4px rgba(10,30,110,.5))}
+.clay-mute:active{transform:scale(.9);box-shadow:none}
+.clay-mute svg{width:26px;height:26px}
 </style>
 <script>
 (function(){
   var muted=(function(){try{return sessionStorage.getItem('poplurMuted')==='1'}catch(e){return false}})();
-  var ON='<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M16.5 8.5a5 5 0 0 1 0 7"/><path d="M19 6a8 8 0 0 1 0 12"/></svg>';
-  var OFF='<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M17 9l5 6M22 9l-5 6"/></svg>';
+  // Welcome screen's exact glyph: filled speaker + waves that hide + slash that shows.
+  var ON='<svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true"><path d="M6 12h4l6-5v18l-6-5H6z" fill="#fff2f8" stroke="rgba(10,30,110,.55)" stroke-width="1.3" stroke-linejoin="round"/><path d="M21 11.5a7 7 0 0 1 0 9" fill="none" stroke="#fff2f8" stroke-width="2.4" stroke-linecap="round"/><path d="M25 8.5a11.5 11.5 0 0 1 0 15" fill="none" stroke="#d6e7ff" stroke-width="2.4" stroke-linecap="round"/></svg>';
+  var OFF='<svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true"><path d="M6 12h4l6-5v18l-6-5H6z" fill="#fff2f8" stroke="rgba(10,30,110,.55)" stroke-width="1.3" stroke-linejoin="round"/><line x1="20" y1="26" x2="30" y2="6" stroke="#fff2f8" stroke-width="3" stroke-linecap="round"/></svg>';
   var btn=document.createElement('button');
   btn.className='clay-mute';btn.type='button';
   function apply(post){
@@ -799,5 +801,29 @@ if(loadingCanvas){
   btn.addEventListener('click',function(){muted=!muted;apply(true)});
   apply(false);
   (document.body||document.documentElement).appendChild(btn);
+
+  // ── Live radio, exactly like the welcome screen: cycle the nearest popular
+  // stations (Radio Browser, by clickcount) until one plays. Never any fuzz. ──
+  var live=document.createElement('audio');
+  live.crossOrigin='anonymous'; live.preload='none'; live.setAttribute('aria-hidden','true');
+  (document.body||document.documentElement).appendChild(live);
+  var stations=[], idx=0, tuned=false;
+  function isMuted(){try{return sessionStorage.getItem('poplurMuted')==='1'}catch(e){return false}}
+  function tryNext(){
+    if(tuned||idx>=stations.length)return;
+    var s=stations[idx++], url=(s&&(s.url_resolved||s.url))||'';
+    if(!/^https:/.test(url))return tryNext();
+    live.src=url;
+    var bail=setTimeout(function(){if(!tuned){try{live.pause()}catch(e){};tryNext()}},4000);
+    live.play().then(function(){tuned=true;clearTimeout(bail);live.volume=0.55;live.muted=isMuted();})
+      .catch(function(){clearTimeout(bail);tryNext()});
+  }
+  live.addEventListener('error',function(){if(!tuned)tryNext()});
+  function tune(){
+    Promise.resolve({ json: function () { return Promise.resolve([]) } })
+      .then(function(r){return r.json()}).then(function(list){stations=list||[];idx=0;tryNext()}).catch(function(){});
+  }
+  window.addEventListener('pointerdown',function once(){window.removeEventListener('pointerdown',once);tune();});
+  tune();
 })();
 </script>
