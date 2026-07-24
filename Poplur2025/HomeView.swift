@@ -3538,7 +3538,7 @@ private struct CameraIconControlButton: View {
     }
 }
 
-private struct RecognizedFaceBoxOverlay: View {
+struct RecognizedFaceBoxOverlay: View {
     @ObservedObject var recognitionManager: UserRecognitionManager
 
     var body: some View {
@@ -3972,7 +3972,7 @@ private struct RecognizedUserCard: View {
 
 /// Real-time ML object detection overlay shown at top center of the camera view.
 /// Fires a cube pop when new objects are detected.
-private struct MLCameraShaderOverlay: View {
+struct MLCameraShaderOverlay: View {
     let isEnabled: Bool
 
     @State private var detectedObjects: [DetectedObject] = []

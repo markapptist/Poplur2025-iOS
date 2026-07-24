@@ -36,12 +36,17 @@ enum PoplurWebHome {
 
 struct PostLoginHomeWebView: UIViewRepresentable {
     let onReady: () -> Void
+    /// Tap on bridge events the host cares about (tabChanged / cameraShutter /
+    /// cameraControl → the native web-home camera layer). Every message still
+    /// flows to the shared clay bridge afterwards.
+    let onWebEvent: ((String, [String: Any]) -> Void)?
 
-    init(onReady: @escaping () -> Void = {}) {
+    init(onReady: @escaping () -> Void = {}, onWebEvent: ((String, [String: Any]) -> Void)? = nil) {
         self.onReady = onReady
+        self.onWebEvent = onWebEvent
     }
 
-    func makeCoordinator() -> Coordinator { Coordinator(onReady: onReady) }
+    func makeCoordinator() -> Coordinator { Coordinator(onReady: onReady, onWebEvent: onWebEvent) }
 
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
@@ -66,9 +71,11 @@ struct PostLoginHomeWebView: UIViewRepresentable {
 
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.isOpaque = false
-        // Match the home twin's dark backdrop so there is no flash on the reveal.
-        webView.backgroundColor = UIColor(red: 5/255, green: 4/255, blue: 7/255, alpha: 1)
-        webView.scrollView.backgroundColor = webView.backgroundColor
+        // Fully transparent: the dark backdrop is painted natively by
+        // PostLoginHomeSurface, so the camera tab's punch-through hole
+        // (html.camera-live) reveals the REAL native camera behind the chrome.
+        webView.backgroundColor = .clear
+        webView.scrollView.backgroundColor = .clear
         webView.scrollView.isScrollEnabled = false
         webView.scrollView.bounces = false
         webView.scrollView.contentInsetAdjustmentBehavior = .never
@@ -116,10 +123,12 @@ struct PostLoginHomeWebView: UIViewRepresentable {
     final class Coordinator: NSObject, WKScriptMessageHandler {
         let bridge = PoplurClayMapView.Coordinator()
         var onReady: () -> Void
+        let onWebEvent: ((String, [String: Any]) -> Void)?
         private var didSignalReady = false
 
-        init(onReady: @escaping () -> Void) {
+        init(onReady: @escaping () -> Void, onWebEvent: ((String, [String: Any]) -> Void)? = nil) {
             self.onReady = onReady
+            self.onWebEvent = onWebEvent
         }
 
         func userContentController(
@@ -131,6 +140,11 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                 didSignalReady = true
                 DispatchQueue.main.async { [onReady] in onReady() }
                 return
+            }
+            if let onWebEvent,
+               let body = message.body as? [String: Any],
+               let type = body["type"] as? String {
+                DispatchQueue.main.async { onWebEvent(type, body) }
             }
             bridge.userContentController(userContentController, didReceive: message)
         }

@@ -302,7 +302,9 @@ struct Poplur2025App: App {
                         // power (camera/ML, live feed, notifications) is bridged in over
                         // later phases through the same `poplur` channel. Flag-reversible
                         // to HomeView via UserDefaults "poplur_web_home".
-                        PostLoginHomeWebView(onReady: markAuthenticatedHomeReady)
+                        // PostLoginHomeSurface = the web home PLUS the real native
+                        // ML camera mounted behind it on the camera tab (Phase 3.5).
+                        PostLoginHomeSurface(onReady: markAuthenticatedHomeReady)
                             .ignoresSafeArea()
                     } else {
                         HomeView()

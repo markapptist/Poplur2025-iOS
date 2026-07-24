@@ -1,0 +1,146 @@
+import SwiftUI
+import AVFoundation
+
+// MARK: - Web-home native camera (Phase 3.5 — first real tab bridge)
+//
+// The web home's camera (post) tab used to show the twin's SPOOFED viewfinder.
+// This reinstates the REAL camera from the previous native versions — the same
+// CameraKitController + ML pipeline HomeView's record tab used (AVCapture
+// preview, MLObjectDetectionManager detection, user recognition, AI announcer)
+// — rendered BEHIND the transparent WebView while the approved web chrome/icons
+// stay on top and drive it over the bridge:
+//
+//   web → native:  { type: "tabChanged", tab }        mount/unmount this layer
+//                  { type: "cameraShutter" }          cube tap = capture (as before)
+//                  { type: "cameraControl", control } "flash" | "flip"
+//
+// The web side punches the hole via html.camera-live (see poplur-clay-map
+// Camera.tsx / index.css); browser + Android keep the spoofed feed.
+
+@MainActor
+final class WebHomeCameraModel: ObservableObject {
+    /// Front-most web tab (map | feed | post | profile | holdmenu).
+    @Published var activeTab: String = "map"
+    @Published private(set) var recognitionManager: UserRecognitionManager?
+
+    private var controllerStorage: CameraKitController?
+    var isCameraTab: Bool { activeTab == "post" }
+
+    /// Lazy like HomeView's LazyHomeCameraControllerHolder: no capture session
+    /// exists until the camera tab is first opened.
+    func resolveController() -> CameraKitController {
+        if let controllerStorage { return controllerStorage }
+        let controller = CameraKitController()
+        controller.preparePreviewIfNeeded()
+        controllerStorage = controller
+        return controller
+    }
+
+    func handleWebEvent(type: String, body: [String: Any]) {
+        switch type {
+        case "tabChanged":
+            if let tab = body["tab"] as? String { activeTab = tab }
+        case "cameraShutter":
+            guard isCameraTab else { return }
+            controllerStorage?.triggerShutter()
+        case "cameraControl":
+            guard isCameraTab, let control = body["control"] as? String else { return }
+            switch control {
+            case "flash": controllerStorage?.toggleFlash()
+            case "flip":  controllerStorage?.flipCamera()
+            default: break
+            }
+        default:
+            break
+        }
+    }
+
+    /// Mirrors HomeView.recordTabContent.onAppear: resume the preview and wire
+    /// ML detection + user recognition (the previous versions' behavior).
+    func activateCamera() async {
+        let controller = resolveController()
+        let status = AVCaptureDevice.authorizationStatus(for: .video)
+        switch status {
+        case .authorized:
+            break
+        case .notDetermined:
+            let granted = await AVCaptureDevice.requestAccess(for: .video)
+            guard granted else { return }
+        default:
+            return
+        }
+        await controller.resumePreviewAfterInterruption()
+
+        let recognition = recognitionManager ?? UserRecognitionManager()
+        recognitionManager = recognition
+        controller.userRecognitionManager = recognition
+
+        if UserDefaults.standard.object(forKey: "CameraObjectDetectionEnabled") as? Bool ?? true {
+            controller.enableMLDetection()
+            controller.mlDetectionManager?.onFrameProcessed = { [weak recognition] pixelBuffer, objects in
+                CameraAIAnnouncer.shared.announceMLObjects(objects)
+                recognition?.processDetectedObjects(objects, from: pixelBuffer)
+            }
+        }
+        await recognition.startRecognitionSession()
+    }
+
+    /// Mirrors HomeView.recordTabContent.onDisappear.
+    func deactivateCamera() {
+        controllerStorage?.disableMLDetection()
+        controllerStorage?.userRecognitionManager = nil
+        recognitionManager?.clearRecognition()
+        CameraAIAnnouncer.shared.resetSession()
+    }
+}
+
+/// The real viewfinder + ML overlays, shown behind the transparent web chrome.
+struct WebHomeCameraLayer: View {
+    @ObservedObject var model: WebHomeCameraModel
+
+    var body: some View {
+        ZStack {
+            HomeCameraPreviewHost(controller: model.resolveController())
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .ignoresSafeArea()
+
+            if let recognitionManager = model.recognitionManager {
+                RecognizedFaceBoxOverlay(recognitionManager: recognitionManager)
+                    .allowsHitTesting(false)
+            }
+            MLCameraShaderOverlay(isEnabled: true)
+                .allowsHitTesting(false)
+        }
+        .task { await model.activateCamera() }
+        .onDisappear { model.deactivateCamera() }
+    }
+}
+
+/// The authenticated surface: dark backdrop → native camera (camera tab only)
+/// → the transparent web home on top. Drop-in replacement for a bare
+/// PostLoginHomeWebView.
+struct PostLoginHomeSurface: View {
+    let onReady: () -> Void
+    @StateObject private var camera = WebHomeCameraModel()
+
+    init(onReady: @escaping () -> Void = {}) {
+        self.onReady = onReady
+    }
+
+    var body: some View {
+        ZStack {
+            // The web home's own dark backdrop, now painted natively so the
+            // WebView itself can stay transparent for the camera punch-through.
+            Color(red: 5/255, green: 4/255, blue: 7/255).ignoresSafeArea()
+
+            if camera.isCameraTab {
+                WebHomeCameraLayer(model: camera)
+            }
+
+            PostLoginHomeWebView(onReady: onReady, onWebEvent: { [weak camera] type, body in
+                camera?.handleWebEvent(type: type, body: body)
+            })
+            .ignoresSafeArea()
+        }
+    }
+}

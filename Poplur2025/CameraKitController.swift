@@ -286,6 +286,13 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
         capturePhoto()
     }
 
+    /// Public shutter for the web-home bridge: the web cube tap on the camera
+    /// tab fires the same capture path as the native cube-tap capture.
+    @MainActor
+    func triggerShutter() {
+        capturePhoto()
+    }
+
     @MainActor
     private func capturePhoto() {
         sessionQueue.async { [weak self] in
