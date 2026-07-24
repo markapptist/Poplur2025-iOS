@@ -136,6 +136,9 @@ struct Poplur2025App: App {
     @StateObject private var deviceVolumeObserver = DeviceVolumeObserver()
     @StateObject private var preLoginMusic = PreLoginMusicPlayer()
     @State private var showAuthTransition = false
+    @State private var isAuthenticatedHomeReady = false
+    @State private var authTransitionMinimumElapsed = false
+    @State private var authTransitionToken = 0
     @State private var isWelcomePanelVisible = true
     @State private var showSplash: Bool
     @Environment(\.scenePhase) private var scenePhase
@@ -291,34 +294,45 @@ struct Poplur2025App: App {
                 // This is intentionally content-free: no unapproved loading screen is presented.
                 Color(red: 0.039, green: 0.027, blue: 0.035).ignoresSafeArea()
                     .transition(.opacity)
-            } else if showAuthTransition {
-                // Post-login: the APPROVED web Loading screen (clay globe + wordmark,
-                // Phase 3 web-embed) — the exact prototype screen, hosted in a
-                // WKWebView, replacing the old auth_transition.mp4.
-                PostLoginLoadingWebView()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .ignoresSafeArea()
-                    .transition(.opacity)
             } else if auth.isAuthenticated {
-                Group {
+                ZStack {
                     if PoplurWebHome.isEnabled {
                         // Phase 3: the APPROVED web home (poplur-clay-map ViewHarness
                         // home twin, ?view=home) replaces the native HomeView. Native
                         // power (camera/ML, live feed, notifications) is bridged in over
                         // later phases through the same `poplur` channel. Flag-reversible
                         // to HomeView via UserDefaults "poplur_web_home".
-                        PostLoginHomeWebView()
+                        PostLoginHomeWebView(onReady: markAuthenticatedHomeReady)
                             .ignoresSafeArea()
                     } else {
                         HomeView()
                             .environmentObject(auth)
+                            .onAppear {
+                                // Let native Home complete its first layout pass before
+                                // allowing the loading surface to reveal it.
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                                    markAuthenticatedHomeReady()
+                                }
+                            }
+                    }
+
+                    if showAuthTransition || !isAuthenticatedHomeReady {
+                        // Keep the approved loading surface fully opaque while Home is
+                        // created and laid out behind it. This prevents WebKit's startup
+                        // backing view and Home's intermediate layouts from ever becoming
+                        // visible during the handoff.
+                        PostLoginLoadingWebView()
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .background(Color(red: 0.039, green: 0.027, blue: 0.035))
+                            .ignoresSafeArea()
+                            .transition(.opacity)
+                            .zIndex(100)
                     }
                 }
                 .task(id: auth.currentUser?.uid) {
                     await PoplurNotificationCenter.shared.refreshDailyNotificationForCurrentUser()
                     WatchRadiusSync.shared.refreshAndSendRadius()
                 }
-                .transition(.scale(scale: 0.88, anchor: .bottom).combined(with: .opacity))
             } else if usePreloginWebEmbed {
                 // Phase 1/2: the approved web splash → welcome, hosted edge-to-edge
                 // in a WKWebView. Hands back to the post-login/home branch above
@@ -353,14 +367,20 @@ struct Poplur2025App: App {
                     .transition(.opacity)
             }
         }
-        .animation(.spring(response: 0.55, dampingFraction: 0.72), value: auth.isAuthenticated)
         .animation(.easeOut(duration: 0.3), value: auth.isResolvingAuthState)
         .animation(.easeOut(duration: 0.3), value: showAuthTransition)
         // Explicit sign-IN and sign-UP both show the approved web Loading screen
         // (clay globe) before the home reveals — the moments the user asked to
         // cover. didSignUp is still cleared so it doesn't leak into later state.
         .onChange(of: auth.isAuthenticated) { oldValue, newValue in
-            guard newValue && !oldValue && !auth.isResolvingAuthState else { return }
+            guard newValue else {
+                authTransitionToken += 1
+                showAuthTransition = false
+                isAuthenticatedHomeReady = false
+                authTransitionMinimumElapsed = false
+                return
+            }
+            guard !oldValue && !auth.isResolvingAuthState else { return }
             if auth.didSignUp { auth.didSignUp = false }
             triggerAuthTransition()
         }
@@ -375,13 +395,32 @@ struct Poplur2025App: App {
     }
 
     private func triggerAuthTransition() {
+        authTransitionToken += 1
+        let token = authTransitionToken
         showAuthTransition = true
+        isAuthenticatedHomeReady = false
+        authTransitionMinimumElapsed = false
         // Hold the approved Loading screen long enough for the clay globe to decode
-        // and a rotating clay message to read before the home reveal.
+        // and a rotating clay message to read. Home loads concurrently behind it.
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) {
-            withAnimation(.easeOut(duration: 0.5)) {
-                showAuthTransition = false
-            }
+            guard token == authTransitionToken else { return }
+            authTransitionMinimumElapsed = true
+            finishAuthTransitionIfReady()
+        }
+    }
+
+    private func markAuthenticatedHomeReady() {
+        guard auth.isAuthenticated else { return }
+        isAuthenticatedHomeReady = true
+        finishAuthTransitionIfReady()
+    }
+
+    private func finishAuthTransitionIfReady() {
+        guard showAuthTransition,
+              authTransitionMinimumElapsed,
+              isAuthenticatedHomeReady else { return }
+        withAnimation(.easeInOut(duration: 0.45)) {
+            showAuthTransition = false
         }
     }
 }

@@ -35,15 +35,27 @@ enum PoplurWebHome {
 }
 
 struct PostLoginHomeWebView: UIViewRepresentable {
-    /// Reuse the clay map's bridge coordinator (haptics + Swift→JS helpers); the
-    /// home speaks the same `poplur` channel.
-    func makeCoordinator() -> PoplurClayMapView.Coordinator { PoplurClayMapView.Coordinator() }
+    let onReady: () -> Void
+
+    init(onReady: @escaping () -> Void = {}) {
+        self.onReady = onReady
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(onReady: onReady) }
 
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
         config.allowsInlineMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
         config.userContentController.add(context.coordinator, name: "poplur")
+        config.userContentController.add(context.coordinator, name: "homeReady")
+        config.userContentController.addUserScript(
+            WKUserScript(
+                source: Self.readinessScript,
+                injectionTime: .atDocumentEnd,
+                forMainFrameOnly: true
+            )
+        )
 
         if let webRoot = PoplurClayMapView.bundledRootURL() {
             config.setURLSchemeHandler(
@@ -53,13 +65,15 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         }
 
         let webView = WKWebView(frame: .zero, configuration: config)
-        webView.isOpaque = true
+        webView.isOpaque = false
         // Match the home twin's dark backdrop so there is no flash on the reveal.
         webView.backgroundColor = UIColor(red: 5/255, green: 4/255, blue: 7/255, alpha: 1)
+        webView.scrollView.backgroundColor = webView.backgroundColor
         webView.scrollView.isScrollEnabled = false
         webView.scrollView.bounces = false
         webView.scrollView.contentInsetAdjustmentBehavior = .never
-        context.coordinator.webView = webView
+        webView.overrideUserInterfaceStyle = .dark
+        context.coordinator.bridge.webView = webView
 
         if PoplurClayMapView.bundledRootURL() != nil, let url = PoplurWebHome.homeURL {
             webView.load(URLRequest(url: url))
@@ -69,5 +83,56 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         return webView
     }
 
-    func updateUIView(_ uiView: WKWebView, context: Context) {}
+    func updateUIView(_ uiView: WKWebView, context: Context) {
+        context.coordinator.onReady = onReady
+    }
+
+    static func dismantleUIView(_ uiView: WKWebView, coordinator: Coordinator) {
+        uiView.configuration.userContentController.removeScriptMessageHandler(forName: "poplur")
+        uiView.configuration.userContentController.removeScriptMessageHandler(forName: "homeReady")
+    }
+
+    private static let readinessScript = #"""
+        (() => {
+          let sent = false;
+          const signalReady = () => {
+            if (sent) return;
+            sent = true;
+            window.webkit.messageHandlers.homeReady.postMessage({ type: "ready" });
+          };
+          const afterLoad = () => {
+            const fontsReady = document.fonts?.ready ?? Promise.resolve();
+            Promise.resolve(fontsReady).then(() => {
+              requestAnimationFrame(() => requestAnimationFrame(() => {
+                setTimeout(signalReady, 250);
+              }));
+            });
+          };
+          if (document.readyState === "complete") afterLoad();
+          else window.addEventListener("load", afterLoad, { once: true });
+        })();
+        """#
+
+    final class Coordinator: NSObject, WKScriptMessageHandler {
+        let bridge = PoplurClayMapView.Coordinator()
+        var onReady: () -> Void
+        private var didSignalReady = false
+
+        init(onReady: @escaping () -> Void) {
+            self.onReady = onReady
+        }
+
+        func userContentController(
+            _ userContentController: WKUserContentController,
+            didReceive message: WKScriptMessage
+        ) {
+            if message.name == "homeReady" {
+                guard !didSignalReady else { return }
+                didSignalReady = true
+                DispatchQueue.main.async { [onReady] in onReady() }
+                return
+            }
+            bridge.userContentController(userContentController, didReceive: message)
+        }
+    }
 }

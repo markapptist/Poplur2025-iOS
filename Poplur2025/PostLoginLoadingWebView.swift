@@ -33,10 +33,11 @@ struct PostLoginLoadingWebView: UIViewRepresentable {
         }
 
         let webView = WKWebView(frame: .zero, configuration: config)
-        webView.isOpaque = true
+        webView.isOpaque = false
         // The Loading screen paints its own clay-globe backdrop (#0a0709); match it
         // so there is no flash between the sign-in transition and the web loading.
         webView.backgroundColor = UIColor(red: 10/255, green: 7/255, blue: 9/255, alpha: 1)
+        webView.scrollView.backgroundColor = webView.backgroundColor
         webView.scrollView.isScrollEnabled = false
         webView.scrollView.bounces = false
         webView.scrollView.contentInsetAdjustmentBehavior = .never
