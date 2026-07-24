@@ -363,6 +363,14 @@ if (!POPLUR_WEBGL_OK) {
     "          if (btn.dataset.permission === 'allow') allowedAny = true\n          if (window.poplurBridge) poplurBridge.requestPermission('camera', { choice: btn.dataset.permission })\n          sessionStorage.setItem('poplurWelcomePerms', '1')"
   );
 
+  // 9g. Offline bundle: the welcome's live radio-station lookup can't reach the
+  //     network inside the WKWebView bundle, so reject the fetch — the existing
+  //     .catch keeps the radio graceful (silent), and no http ref remains.
+  out = out.replace(
+    /fetch\('https:\/\/de1\.api\.radio-browser\.info\/[^']*'\)/,
+    "Promise.reject(new Error('offline radio'))"
+  );
+
   return out;
 }
 

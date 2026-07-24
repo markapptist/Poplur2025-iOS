@@ -28,6 +28,7 @@ body.embed .head,body.embed .nav,body.embed .tray{display:none}
 body.embed .stage{width:100vw;height:100vh;overflow:hidden}
 body.embed .screen{padding:0;border-radius:0;background:#0a0709;box-shadow:none}
 body.embed .screen .notch{display:none}
+body.embed .sb{display:none}
 body.embed .lcdview{border-radius:0}
 body.embed.auth-twin{background:#ff2d96}body.embed.auth-twin .stage{background-color:#ff2d96;background-image:radial-gradient(circle at 50% 40%,rgba(255,130,195,0.20),transparent 64%),radial-gradient(rgba(214,16,108,0.38) 1.6px,transparent 2.2px);background-size:auto,10px 10px;box-shadow:inset 0 0 70px rgba(120,0,60,0.4),inset 0 2px 0 rgba(255,255,255,0.22)}
 body.embed.auth-twin .screen{background:transparent}
@@ -610,7 +611,7 @@ document.querySelectorAll(".auth-particle-layer").forEach(startAuthConfetti);
 const POOL=["Warming up the pinetrees", "Rolling out the clay roads", "Inflating the palm trees", "Teaching the pin to drop", "Buffing the city lights", "Sprinkling pink stars", "Kneading the little mountains", "Waking up the tugboat", "Charging the flip phone", "Tuning the clay TV", "Squishing fresh hearts", "Painting the dotted lines", "Polishing the big P", "Fluffing the clouds", "Measuring your radius", "Dusting off the globe", "Pinning the hotspots", "Baking a fresh batch of pins"];let pk=Math.floor(Math.random()*POOL.length);setInterval(()=>{const l=document.getElementById("splashmsg");if(!l)return;pk=(pk+1)%POOL.length;l.style.opacity=0;setTimeout(()=>{l.textContent=POOL[pk];l.style.opacity=1;},180);},850);
 function enableSplashAudio(){const v=document.getElementById("splashvid");if(v){v.muted=false;v.volume=1;v.currentTime=0;v.play().catch(()=>{});}window.removeEventListener("pointerdown",enableSplashAudio);window.removeEventListener("keydown",enableSplashAudio);}
 window.addEventListener("pointerdown",enableSplashAudio);window.addEventListener("keydown",enableSplashAudio);
-function fitEmbeddedAuth(){if(!document.body.classList.contains("embed"))return;const scale=Math.min(innerWidth/232,innerHeight/478);document.querySelector(".scaler").style.transform=`scale(${scale})`;}
+function fitEmbeddedAuth(){if(!document.body.classList.contains("embed"))return;const scale=Math.max(innerWidth/232,innerHeight/478);document.querySelector(".scaler").style.transform=`scale(${scale})`;}
 window.addEventListener("resize",fitEmbeddedAuth,{passive:true});
 go(embeddedName&&NAMES.includes(embeddedName)?idx(embeddedName):0);
 fitEmbeddedAuth();
