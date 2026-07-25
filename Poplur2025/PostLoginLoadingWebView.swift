@@ -20,7 +20,14 @@ extension PoplurPreloginWeb {
     static var loadingURL: URL? { URL(string: "\(scheme)://\(host)/loading.html?embed=Loading") }
 }
 
+/// Which cover the post-login transition shows (user rule): the approved globe
+/// LOADING only after an explicit sign-in/up; the SPLASH, looping with its clay
+/// progress bar, for an already-signed-in launch while the home warms up.
+enum PostLoginCoverPage { case loading, splash }
+
 struct PostLoginLoadingWebView: UIViewRepresentable {
+    var page: PostLoginCoverPage = .loading
+
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
         config.mediaTypesRequiringUserActionForPlayback = []
@@ -45,7 +52,8 @@ struct PostLoginLoadingWebView: UIViewRepresentable {
         // (same as welcome) — pin to dark regardless of device appearance.
         webView.overrideUserInterfaceStyle = .dark
 
-        if PreloginWebView.bundledRootURL() != nil, let url = PoplurPreloginWeb.loadingURL {
+        let pageURL = page == .loading ? PoplurPreloginWeb.loadingURL : PoplurPreloginWeb.splashURL
+        if PreloginWebView.bundledRootURL() != nil, let url = pageURL {
             webView.load(URLRequest(url: url))
         } else {
             print("[PostLoginLoadingWebView] PreloginWeb/loading.html missing — run scripts/build-loading-ios.mjs")
