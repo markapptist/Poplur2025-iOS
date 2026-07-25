@@ -79,7 +79,7 @@ struct PreloginWebView: UIViewRepresentable {
         webView.isOpaque = true
         // Matches the splash background (#0a0709) so there is no flash between
         // the auth-resolving frame and the web splash.
-        webView.backgroundColor = UIColor(red: 10/255, green: 7/255, blue: 9/255, alpha: 1)
+        webView.backgroundColor = .black
         webView.scrollView.isScrollEnabled = false
         webView.scrollView.bounces = false
         webView.scrollView.contentInsetAdjustmentBehavior = .never
@@ -98,9 +98,10 @@ struct PreloginWebView: UIViewRepresentable {
         webView.overrideUserInterfaceStyle = .dark
         context.coordinator.webView = webView
 
-        if webRoot != nil, let splashURL = PoplurPreloginWeb.splashURL {
-            webView.load(URLRequest(url: splashURL))
-            context.coordinator.scheduleWelcomeHandoff()
+        // The launch splash (logo + progress bar) is dropped by request: go
+        // straight to Welcome over a plain black screen while it loads.
+        if webRoot != nil, let welcomeURL = PoplurPreloginWeb.welcomeURL {
+            webView.load(URLRequest(url: welcomeURL))
         } else {
             print("[PreloginWebView] PreloginWeb bundle missing — run scripts/build-prelogin-ios.mjs")
         }

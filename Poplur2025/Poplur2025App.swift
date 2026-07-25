@@ -329,7 +329,10 @@ struct Poplur2025App: App {
                         // created and laid out behind it. This prevents WebKit's startup
                         // backing view and Home's intermediate layouts from ever becoming
                         // visible during the handoff.
-                        PostLoginLoadingWebView(page: .splash)
+                        // Plain black cover. The web splash letterboxed on device
+                        // (iOS wouldn't cover the video no matter how it was sized),
+                        // and a cover screen only needs to hide the home warming up.
+                        Color.black
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .background(Color(red: 0.039, green: 0.027, blue: 0.035))
                             .ignoresSafeArea()
