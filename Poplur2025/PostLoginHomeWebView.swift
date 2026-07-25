@@ -70,12 +70,14 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         }
 
         let webView = WKWebView(frame: .zero, configuration: config)
-        webView.isOpaque = false
-        // Fully transparent: the dark backdrop is painted natively by
-        // PostLoginHomeSurface, so the camera tab's punch-through hole
-        // (html.camera-live) reveals the REAL native camera behind the chrome.
-        webView.backgroundColor = .clear
-        webView.scrollView.backgroundColor = .clear
+        // OPAQUE by default. A transparent WKWebView made WebKit fail to
+        // composite media layers: the map iframe ran (audio playing) without
+        // ever being visible, and feed clips never started. Transparency is now
+        // switched on ONLY while the camera tab is front (see setCameraHole),
+        // which is the only surface that needs the punch-through.
+        webView.isOpaque = true
+        webView.backgroundColor = UIColor(red: 5/255, green: 4/255, blue: 7/255, alpha: 1)
+        webView.scrollView.backgroundColor = webView.backgroundColor
         webView.scrollView.isScrollEnabled = false
         webView.scrollView.bounces = false
         webView.scrollView.contentInsetAdjustmentBehavior = .never
@@ -120,6 +122,14 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         })();
         """#
 
+    /// Punch-through only for the camera tab (see the opacity note above).
+    static func setCameraHole(_ on: Bool, on webView: WKWebView) {
+        webView.isOpaque = !on
+        let opaqueBg = UIColor(red: 5/255, green: 4/255, blue: 7/255, alpha: 1)
+        webView.backgroundColor = on ? .clear : opaqueBg
+        webView.scrollView.backgroundColor = webView.backgroundColor
+    }
+
     final class Coordinator: NSObject, WKScriptMessageHandler {
         let bridge = PoplurClayMapView.Coordinator()
         var onReady: () -> Void
@@ -147,6 +157,12 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     // The web roll's Allow → real OS photo permission → recent
                     // photo thumbnails pushed back as data URIs.
                     DispatchQueue.main.async { WebCameraRollProvider.push(into: webView) }
+                }
+                if type == "tabChanged", let webView = bridge.webView {
+                    let isCamera = (body["tab"] as? String) == "post"
+                    DispatchQueue.main.async {
+                        PostLoginHomeWebView.setCameraHole(isCamera, on: webView)
+                    }
                 }
                 if let onWebEvent {
                     DispatchQueue.main.async { onWebEvent(type, body) }
