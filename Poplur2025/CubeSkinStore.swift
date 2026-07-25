@@ -226,15 +226,20 @@ public enum CubeSkin: String, CaseIterable, Identifiable, Codable {
 
     public var alternateAppIconName: String? {
         switch self {
+        // DISABLED: every alternate icon is still the OLD four-petal "P" art, and
+        // iOS shows the active app icon in notification banners — so switching
+        // cube skin put the old logo on the home screen and in notifications.
+        // Returning nil pins the primary clay-P icon for all skins. Restore the
+        // per-skin mapping once clay-P versions of the 8 icons exist.
         case .standard, .clay: return nil
-        case .rainbow:     return "AppIconRainbow"
-        case .sparklePink: return "AppIconSparklePink"
-        case .gold:        return "AppIconGold"
-        case .toy:         return "AppIconToy"
-        case .chocolate:   return "AppIconChocolate"
-        case .camo:        return "AppIconCamo"
-        case .rubber:      return "AppIconRubber"
-        case .ice:         return "AppIconIce"
+        case .rainbow:     return nil // "AppIconRainbow"
+        case .sparklePink: return nil // "AppIconSparklePink"
+        case .gold:        return nil // "AppIconGold"
+        case .toy:         return nil // "AppIconToy"
+        case .chocolate:   return nil // "AppIconChocolate"
+        case .camo:        return nil // "AppIconCamo"
+        case .rubber:      return nil // "AppIconRubber"
+        case .ice:         return nil // "AppIconIce"
         }
     }
 
