@@ -75,7 +75,10 @@ final class TVStaticLoopingUIView: UIView {
     init(isMuted: Bool = true, volume: Float = 1.0) {
         super.init(frame: .zero)
         backgroundColor = .black
-        guard let url = Bundle.main.url(forResource: "tv_static", withExtension: "mp4") else {
+        // Prefer the logo-free cut: the original tv_static.mp4 bursts a Poplur
+        // "P" mid-clip, which doubles up with the channel identity drawn over it.
+        guard let url = Bundle.main.url(forResource: "tv_static_clean", withExtension: "mp4")
+            ?? Bundle.main.url(forResource: "tv_static", withExtension: "mp4") else {
             print("[TVStaticLooping] tv_static.mp4 not found in bundle")
             return
         }
