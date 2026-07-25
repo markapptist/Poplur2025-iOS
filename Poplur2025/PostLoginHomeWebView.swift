@@ -1,5 +1,7 @@
 import SwiftUI
 import WebKit
+import FirebaseAuth
+import FirebaseFirestore
 
 // MARK: - Post-login HOME Web Embed (Phase 3)
 //
@@ -158,6 +160,9 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     // photo thumbnails pushed back as data URIs.
                     DispatchQueue.main.async { WebCameraRollProvider.push(into: webView) }
                 }
+                if type == "requestProfile", let webView = bridge.webView {
+                    DispatchQueue.main.async { Self.pushProfile(into: webView) }
+                }
                 if type == "tabChanged", let webView = bridge.webView {
                     let isCamera = (body["tab"] as? String) == "post"
                     DispatchQueue.main.async {
@@ -169,6 +174,32 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                 }
             }
             bridge.userContentController(userContentController, didReceive: message)
+        }
+
+        private static func pushProfile(into webView: WKWebView) {
+            guard let user = Auth.auth().currentUser else { return }
+            let fallback = user.displayName
+                ?? user.email?.split(separator: "@").first.map(String.init)
+                ?? "Poplur user"
+
+            func deliver(username: String, business: Bool) {
+                let payload: [String: Any] = ["username": username, "business": business]
+                guard let data = try? JSONSerialization.data(withJSONObject: payload),
+                      let json = String(data: data, encoding: .utf8) else { return }
+                webView.evaluateJavaScript("window.poplurProfile?.(\(json));")
+            }
+
+            Firestore.firestore().collection("users").document(user.uid).getDocument { snapshot, _ in
+                let data = snapshot?.data()
+                let username = (data?["username"] as? String)
+                    ?? (data?["displayName"] as? String)
+                    ?? fallback
+                let accountType = (data?["accountType"] as? String)?.lowercased()
+                let business = accountType == "business"
+                    || data?["isBusinessAccount"] as? Bool == true
+                    || data?["businessProfile"] != nil
+                DispatchQueue.main.async { deliver(username: username, business: business) }
+            }
         }
     }
 }
