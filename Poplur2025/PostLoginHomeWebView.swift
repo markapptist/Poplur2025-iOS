@@ -141,10 +141,16 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                 DispatchQueue.main.async { [onReady] in onReady() }
                 return
             }
-            if let onWebEvent,
-               let body = message.body as? [String: Any],
+            if let body = message.body as? [String: Any],
                let type = body["type"] as? String {
-                DispatchQueue.main.async { onWebEvent(type, body) }
+                if type == "requestCameraRoll", let webView = bridge.webView {
+                    // The web roll's Allow → real OS photo permission → recent
+                    // photo thumbnails pushed back as data URIs.
+                    DispatchQueue.main.async { WebCameraRollProvider.push(into: webView) }
+                }
+                if let onWebEvent {
+                    DispatchQueue.main.async { onWebEvent(type, body) }
+                }
             }
             bridge.userContentController(userContentController, didReceive: message)
         }
