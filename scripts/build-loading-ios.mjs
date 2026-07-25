@@ -33,10 +33,14 @@ const FLOW_SRC = join(WORKSPACE, ".claude/artifacts/poplur-prelogin-flow.html");
 // called on it). The 22MB wordmark is DROPPED — it was the load bottleneck and
 // "poplur" is already baked into the globe's clay texture.
 const MODELS_SRC_DIR = join(WORKSPACE, ".claude/artifacts/models");
+const COMPRESSED_DIR = join(WORKSPACE, ".codex/prelogin-assets-compressed/loading");
 const PUBLIC_DIR = join(OUT, "poplur-clay-map/public");
 
 const MODELS = [
   ["poplur-globe-lite.glb", "/poplur-clay-map/public/poplur-globe-lite.glb"],
+  // The "poplur" wordmark, Draco-compressed to 184KB (the 22MB original was the
+  // old bottleneck; the real offender was the 111MB MarkHead rig — see below).
+  ["poplur-wordmark.glb", "/poplur-clay-map/public/poplur-wordmark.glb"],
 ];
 
 const DRACO_DECODER_PATH = "/poplur-clay-map/node_modules/three/examples/jsm/libs/draco/";
@@ -54,12 +58,7 @@ function clean(html) {
   //    entirely (removed from the approved loading screen — bottleneck; "poplur"
   //    is baked into the globe texture).
   out = out.replace(/\/\.claude\/artifacts\/models\/poplur-globe-lite\.glb/g, MODELS[0][1]);
-  const wordmarkStripped = out.replace(
-    /loader\.load\("\/\.claude\/artifacts\/models\/poplur-wordmark\.glb"[\s\S]*?\}\);/,
-    "/* wordmark dropped: baked into the globe's clay texture */"
-  );
-  if (wordmarkStripped === out) throw new Error("wordmark load block not found to strip — flow changed");
-  out = wordmarkStripped;
+  out = out.replace(/\/\.claude\/artifacts\/models\/poplur-wordmark\.glb/g, MODELS[1][1]);
 
   // 3. Inject DRACOLoader on the loading GLTFLoader (the second module script —
   //    uniquely identified by `const loadingCanvas=`). The compressed models are
@@ -98,6 +97,14 @@ function clean(html) {
     `  tick();\n  }catch(__glErr){console.warn("[loading] globe unavailable — 2D fallback",__glErr);}\n  // The Loading screen holds`
   );
 
+  // 5b. Strip the OTHER screens' 3D assets. ?embed=Loading renders one screen,
+  //     but the flow's account-model loader still fetched every canvas it found:
+  //     MarkHead_TalkingRig.glb (111MB!) + zoom_buildings.glb (8.6MB). On device
+  //     that starved the WebView — the globe/wordmark never appeared and the
+  //     clay progress bar stalled. Renaming the attribute leaves the markup
+  //     untouched while the loader's querySelectorAll finds nothing.
+  out = out.replace(/data-account-model=/g, "data-account-model-off=");
+
   // 6. Neutralize the live radio-station lookup (radio-browser.info) — a network
   //    call that fires on load and would hang/fail offline. Resolve to an empty
   //    station list so the ambient radio simply stays quiet on the loading screen.
@@ -125,7 +132,8 @@ ensureDir(PUBLIC_DIR);
 writeFileSync(join(OUT, "loading.html"), cleaned);
 
 for (const [name] of MODELS) {
-  const src = join(MODELS_SRC_DIR, name);
+  const compressed = join(COMPRESSED_DIR, name);
+  const src = existsSync(compressed) ? compressed : join(MODELS_SRC_DIR, name);
   if (!existsSync(src)) throw new Error(`model missing: ${src}`);
   copyFileSync(src, join(PUBLIC_DIR, name));
 }

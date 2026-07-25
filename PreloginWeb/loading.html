@@ -316,8 +316,8 @@ input.field::placeholder{color:var(--muted)}input.field:focus{border-color:var(-
   <div class="signup-carousel-stage" data-signup-carousel><div class="signup-pagination"><div class="stepdots"><span class="on"></span><span class=""></span><span class=""></span><span class=""></span><span class=""></span></div><span class="step-count">1 / 5</span></div>
   <div class="signup-carousel-title">Choose account</div>
   <div class="signup-carousel-subtitle">Personal user account, or a verified business account.</div>
-  <button class="acct on" data-acct="personal"><span class="account-3d-icon profile" role="img" aria-label="Mark Head 3D profile icon"><canvas data-account-model="/Poplur2025-iOS/Poplur2025/MarkHead_TalkingRig.glb" data-model-kind="head"></canvas></span><div style="flex:1;text-align:left"><div class="account-choice-title" style="font-size:14px;font-weight:900">Personal</div><div style="font-size:10px;color:var(--muted);font-weight:600">Share moments on the map.</div></div><span class="tick">✓</span></button>
-  <button class="acct" data-acct="business"><span class="account-3d-icon building" role="img" aria-label="Poplur 3D building icon"><canvas data-account-model="/poplur-clay-map/public/zoom_buildings.glb" data-model-kind="building"></canvas></span><div style="flex:1;text-align:left"><div class="account-choice-title" style="font-size:14px;font-weight:900">Business</div><div style="font-size:10px;color:var(--muted);font-weight:600">Verified, submitted for review.</div></div><span class="tick">✓</span></button></div>
+  <button class="acct on" data-acct="personal"><span class="account-3d-icon profile" role="img" aria-label="Mark Head 3D profile icon"><canvas data-account-model-off="/Poplur2025-iOS/Poplur2025/MarkHead_TalkingRig.glb" data-model-kind="head"></canvas></span><div style="flex:1;text-align:left"><div class="account-choice-title" style="font-size:14px;font-weight:900">Personal</div><div style="font-size:10px;color:var(--muted);font-weight:600">Share moments on the map.</div></div><span class="tick">✓</span></button>
+  <button class="acct" data-acct="business"><span class="account-3d-icon building" role="img" aria-label="Poplur 3D building icon"><canvas data-account-model-off="/poplur-clay-map/public/zoom_buildings.glb" data-model-kind="building"></canvas></span><div style="flex:1;text-align:left"><div class="account-choice-title" style="font-size:14px;font-weight:900">Business</div><div style="font-size:10px;color:var(--muted);font-weight:600">Verified, submitted for review.</div></div><span class="tick">✓</span></button></div>
   <div class="signup-nav-cube-wrap" aria-label="Swipe between forward and back"><div class="signup-nav-cube" data-signup-nav-cube data-face="forward" role="button" tabindex="0" aria-label="Forward"><span class="login-cube-face front"></span><span class="login-cube-face right"></span><span class="login-cube-face back"></span><span class="login-cube-face left"></span><span class="login-cube-face top"></span><span class="login-cube-face bottom"></span></div></div></div><div class="toast"></div></div></div></div><div class="screen" data-i="5"><span class="notch"></span><div class="lcdview"><div class="sc"><div class="sb"><span>9:41</span><span>100%</span></div><div class="body" style="padding:0 20px"><div style="height:20px"></div>
   <div style="display:flex;align-items:center;justify-content:space-between"><div class="stepdots"><span class=""></span><span class="on"></span><span class=""></span><span class=""></span><span class=""></span></div><span style="font-size:9px;font-weight:900;color:var(--muted)">2 / 5</span></div>
   <div style="font-size:20px;font-weight:900;color:var(--ink);margin:14px 0 4px">Create login</div>
@@ -677,7 +677,15 @@ if(loadingCanvas){
   });
   // The floating 3D "poplur" wordmark loads async AFTER the 2MB globe (no
   // blocking preload), so the globe paints first and the wordmark pops in.
-  /* wordmark dropped: baked into the globe's clay texture */
+  loader.load("/poplur-clay-map/public/poplur-wordmark.glb",g=>{
+    const word=g.scene;
+    const box=new THREE.Box3().setFromObject(word),c=box.getCenter(new THREE.Vector3()),s=box.getSize(new THREE.Vector3());
+    word.position.sub(c);
+    word.scale.setScalar(0.58/Math.max(s.x,s.y,.001));
+    word.position.set(0,-.05,2.0);
+    scene.add(word);
+    renderer.render(scene,camera);
+  });
   resize();window.addEventListener("resize",resize,{passive:true});
   const tick=()=>{if(globe)globe.rotation.y+=0.03;renderer.render(scene,camera);requestAnimationFrame(tick);};
   tick();
