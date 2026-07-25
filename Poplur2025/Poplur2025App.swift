@@ -136,8 +136,11 @@ struct Poplur2025App: App {
     @StateObject private var deviceVolumeObserver = DeviceVolumeObserver()
     @StateObject private var preLoginMusic = PreLoginMusicPlayer()
     @State private var showAuthTransition = false
-    /// True when the current cover is for an already-signed-in launch (splash loops)
-    /// rather than an explicit sign-in/up (approved globe Loading). User rule.
+    /// Retained for the transition bookkeeping. The cover is now ALWAYS the splash:
+    /// the approved globe Loading needed three.js + WebGL + model decode just to
+    /// appear, which delayed the very wait it was meant to cover. The splash is a
+    /// single hardware-decoded video and carries the same clay progress bar.
+    /// The globe screen lives on as the approved GCL design (and for watch/wear).
     @State private var coldLaunchCover = false
     @State private var isAuthenticatedHomeReady = false
     @State private var authTransitionMinimumElapsed = false
@@ -326,7 +329,7 @@ struct Poplur2025App: App {
                         // created and laid out behind it. This prevents WebKit's startup
                         // backing view and Home's intermediate layouts from ever becoming
                         // visible during the handoff.
-                        PostLoginLoadingWebView(page: coldLaunchCover ? .splash : .loading)
+                        PostLoginLoadingWebView(page: .splash)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .background(Color(red: 0.039, green: 0.027, blue: 0.035))
                             .ignoresSafeArea()
