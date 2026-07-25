@@ -92,6 +92,15 @@ const ASSETS = [
 function ensureDir(p) { mkdirSync(dirname(p), { recursive: true }); }
 
 // ---- clean the welcome artifact ---------------------------------------------
+// iOS WKWebView can ignore `object-fit: cover` on <video>, letterboxing it
+// (black bars top/bottom) while Android honours it — hence "fine on Android".
+// Size the element to overflow and centre it instead, so cover behaviour never
+// depends on object-fit support.
+const coverVideoCss = html => html.replace(
+  'video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; z-index: 1; }',
+  'video { position: absolute; inset: 0; margin: auto; width: 100vw; height: 177.78vw; min-width: 56.25vh; min-height: 100vh; object-fit: cover; display: block; z-index: 1; }'
+)
+
 function cleanWelcome(html) {
   let out = html;
 
