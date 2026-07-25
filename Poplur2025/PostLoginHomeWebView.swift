@@ -30,7 +30,7 @@ enum PoplurWebHome {
     /// `tabs=1` shows the bottom tab pills; the scheme handler ignores the query
     /// and serves index.html, while App.tsx reads ?view / #view to pick the view.
     static var homeURL: URL? {
-        URL(string: "\(PoplurClayWebMap.scheme)://\(PoplurClayWebMap.host)/index.html?view=home&tabs=1")
+        URL(string: "\(PoplurClayWebMap.scheme)://\(PoplurClayWebMap.host)/index.html?view=home&tabs=1&v=\(PoplurPreloginWeb.buildStamp)")
     }
 }
 

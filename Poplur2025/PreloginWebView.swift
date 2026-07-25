@@ -41,8 +41,17 @@ enum PoplurPreloginWeb {
     /// The prototype's splash beat before handing off to Welcome.
     static let splashDurationSeconds: Double = 3.2
 
-    static var splashURL: URL? { URL(string: "\(scheme)://\(host)/splash.html") }
-    static var welcomeURL: URL? { URL(string: "\(scheme)://\(host)/welcome.html") }
+    /// Build stamp appended to every page URL. `devicectl install` replaces the
+    /// app bundle but KEEPS the data container, so WebKit happily served the
+    /// previous build's cached splash — the app looked "old" after a fresh
+    /// install. Busting on build version guarantees the new page loads.
+    static var buildStamp: String {
+        (Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0")
+            + "-" + (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0")
+    }
+
+    static var splashURL: URL? { URL(string: "\(scheme)://\(host)/splash.html?v=\(buildStamp)") }
+    static var welcomeURL: URL? { URL(string: "\(scheme)://\(host)/welcome.html?v=\(buildStamp)") }
 }
 
 struct PreloginWebView: UIViewRepresentable {
@@ -160,7 +169,8 @@ struct PreloginWebView: UIViewRepresentable {
                     "Content-Type": mime,
                     "Content-Length": "\(slice.count)",
                     "Content-Range": "bytes \(start)-\(upper)/\(data.count)",
-                    "Accept-Ranges": "bytes"
+                    "Accept-Ranges": "bytes",
+                    "Cache-Control": "no-store"
                 ]
                 if let response = HTTPURLResponse(url: url, statusCode: 206,
                                                   httpVersion: "HTTP/1.1", headerFields: headers) {
@@ -175,7 +185,8 @@ struct PreloginWebView: UIViewRepresentable {
             let headers = [
                 "Content-Type": mime,
                 "Content-Length": "\(data.count)",
-                "Accept-Ranges": "bytes"
+                "Accept-Ranges": "bytes",
+                    "Cache-Control": "no-store"
             ]
             if let response = HTTPURLResponse(url: url, statusCode: 200,
                                               httpVersion: "HTTP/1.1", headerFields: headers) {

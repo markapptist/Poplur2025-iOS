@@ -122,7 +122,8 @@ struct PoplurClayMapView: UIViewRepresentable {
                     "Content-Type": mime,
                     "Content-Length": "\(slice.count)",
                     "Content-Range": "bytes \(start)-\(upper)/\(data.count)",
-                    "Accept-Ranges": "bytes"
+                    "Accept-Ranges": "bytes",
+                    "Cache-Control": "no-store"
                 ]
                 if let response = HTTPURLResponse(url: url, statusCode: 206,
                                                   httpVersion: "HTTP/1.1", headerFields: headers) {
@@ -136,7 +137,8 @@ struct PoplurClayMapView: UIViewRepresentable {
             let headers = [
                 "Content-Type": mime,
                 "Content-Length": "\(data.count)",
-                "Accept-Ranges": "bytes"
+                "Accept-Ranges": "bytes",
+                    "Cache-Control": "no-store"
             ]
             if let response = HTTPURLResponse(url: url, statusCode: 200,
                                               httpVersion: "HTTP/1.1", headerFields: headers) {
