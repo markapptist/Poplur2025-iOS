@@ -2,11 +2,315 @@ import SwiftUI
 import WatchKit
 import SceneKit
 import UIKit
+import AVFoundation
+import CoreLocation
 @preconcurrency import WatchConnectivity
 
 // MARK: - Types
 
 enum RadiusTrend { case up, down, stable }
+
+// MARK: - Audio (radio bed + the press-and-hold static easter egg)
+
+/// TV static, synthesised rather than bundled — a short noise burst with a
+/// fade in/out envelope, wrapped as WAV bytes for AVAudioPlayer.
+private func makeStaticWAV(duration: TimeInterval) -> Data {
+    let sampleRate = 22_050
+    let product = Double(sampleRate) * duration
+    let sampleCount = max(1, Int(product.isFinite ? min(max(product, 1), 1_000_000) : 1))
+    var samples: [Int16] = []
+    samples.reserveCapacity(sampleCount)
+    for i in 0..<sampleCount {
+        let fadeIn  = min(1.0, Double(i) / 440.0)
+        let fadeOut = min(1.0, Double(sampleCount - i) / 880.0)
+        let noise   = Double.random(in: -1.0...1.0) * 0.62 * fadeIn * fadeOut
+        samples.append(Int16(min(Int(Int16.max), max(Int(Int16.min), Int(noise * Double(Int16.max))))))
+    }
+    var d = Data()
+    func u16(_ v: UInt16) { var b = v.littleEndian; withUnsafeBytes(of: &b) { d.append(contentsOf: $0) } }
+    func u32(_ v: UInt32) { var b = v.littleEndian; withUnsafeBytes(of: &b) { d.append(contentsOf: $0) } }
+    let ch: UInt16 = 1, bps: UInt16 = 16
+    let ds = UInt32(samples.count * 2)
+    d.append(contentsOf: "RIFF".utf8); u32(36 + ds)
+    d.append(contentsOf: "WAVE".utf8)
+    d.append(contentsOf: "fmt ".utf8); u32(16); u16(1); u16(ch)
+    u32(UInt32(sampleRate)); u32(UInt32(sampleRate) * UInt32(ch * bps / 8)); u16(ch * bps / 8); u16(bps)
+    d.append(contentsOf: "data".utf8); u32(ds)
+    for s in samples { var b = s.littleEndian; withUnsafeBytes(of: &b) { d.append(contentsOf: $0) } }
+    return d
+}
+
+/// The watch's own radio. It doesn't follow the phone: it takes the watch's
+/// location, works out where you are, and "tunes in" to a rotation of local
+/// channels — each introduced by the Poplur AI host voice (the same British
+/// radio voice the phone falls back to) over a looping music bed. Fully
+/// on-device, so it works with no network and no companion app.
+@MainActor
+final class WatchAudio: NSObject, CLLocationManagerDelegate, AVSpeechSynthesizerDelegate {
+    static let shared = WatchAudio()
+
+    private var radio: AVAudioPlayer?          // looping music bed
+    private var noise: AVAudioPlayer?          // static easter-egg noise
+    private let synth = AVSpeechSynthesizer()  // Poplur AI host voice
+    private let locationManager = CLLocationManager()
+    private let geocoder = CLGeocoder()
+
+    private var isRunning = false
+    private var isStatic  = false
+    private var didWelcome = false
+    private var areaName = "your area"
+    private var channels: [String] = []
+    private var channelIndex = 0
+    private var hostTimer: Timer?
+    private var watchdog: Timer?
+    private var didRequestFix = false
+
+    private let bedFull: Float = 0.5    // music bed at full
+    private let bedDuck: Float = 0.14   // ducked under the host voice
+
+    private override init() {
+        super.init()
+        synth.delegate = self
+        locationManager.delegate = self
+        locationManager.desiredAccuracy = kCLLocationAccuracyKilometer
+    }
+
+    private func activateSession() {
+        let session = AVAudioSession.sharedInstance()
+        try? session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+        try? session.setActive(true)
+    }
+
+    // MARK: Start / stop
+
+    func startRadio() {
+        guard !isRunning else { radio?.play(); return }
+        isRunning = true
+        activateSession()
+        startBed()
+        rebuildChannels(for: areaName)     // seed generic channels immediately
+        requestLocationFix()               // refine to the real area when it lands
+        // Open with the welcome, then keep tuning between channels.
+        scheduleTuneIn(after: 1.4)
+    }
+
+    func stopRadio() {
+        isRunning = false
+        hostTimer?.invalidate(); hostTimer = nil
+        watchdog?.invalidate(); watchdog = nil
+        synth.stopSpeaking(at: .immediate)
+        radio?.pause()
+    }
+
+    private func startBed() {
+        if let radio { radio.volume = bedFull; radio.play(); return }
+        guard let asset = NSDataAsset(name: "radio_bed") else { return }
+        radio = try? AVAudioPlayer(data: asset.data)
+        radio?.numberOfLoops = -1
+        radio?.volume = bedFull
+        radio?.play()
+    }
+
+    // MARK: Location → local area
+
+    private func requestLocationFix() {
+        guard !didRequestFix else { return }
+        didRequestFix = true
+        switch locationManager.authorizationStatus {
+        case .notDetermined:
+            locationManager.requestWhenInUseAuthorization()
+        case .authorizedWhenInUse, .authorizedAlways:
+            locationManager.requestLocation()
+        default:
+            break   // denied/restricted → keep broadcasting "your area"
+        }
+    }
+
+    nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        Task { @MainActor in
+            let status = manager.authorizationStatus
+            if status == .authorizedWhenInUse || status == .authorizedAlways {
+                manager.requestLocation()
+            }
+        }
+    }
+
+    nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        guard let loc = locations.last else { return }
+        Task { @MainActor in self.reverseGeocode(loc) }
+    }
+
+    nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        // Silent: the host keeps broadcasting from "your area".
+    }
+
+    private func reverseGeocode(_ loc: CLLocation) {
+        geocoder.reverseGeocodeLocation(loc) { [weak self] placemarks, _ in
+            Task { @MainActor in
+                guard let self else { return }
+                guard let p = placemarks?.first else { return }
+                let name = p.locality
+                    ?? p.subLocality
+                    ?? p.subAdministrativeArea
+                    ?? p.administrativeArea
+                    ?? p.name
+                if let name, !name.isEmpty {
+                    self.areaName = name
+                    self.rebuildChannels(for: name)
+                }
+            }
+        }
+    }
+
+    private func rebuildChannels(for area: String) {
+        channels = [
+            "Poplur \(area)",
+            "\(area) Live",
+            "\(area) After Dark",
+            "The \(area) Underground",
+            "Poplur Radio One"
+        ]
+    }
+
+    // MARK: The host cycle
+
+    private func scheduleTuneIn(after seconds: TimeInterval) {
+        hostTimer?.invalidate()
+        hostTimer = Timer.scheduledTimer(withTimeInterval: seconds, repeats: false) { [weak self] _ in
+            Task { @MainActor in self?.tuneIn() }
+        }
+    }
+
+    private func tuneIn() {
+        guard isRunning, !isStatic, !synth.isSpeaking else { return }
+        let channel = channels.isEmpty ? "Poplur Radio" : channels[channelIndex % channels.count]
+        let script: String
+        if !didWelcome {
+            didWelcome = true
+            script = "You're locked in to Poplur Radio, live and direct from \(areaName). Let's hear what's on the air near you."
+        } else {
+            script = Self.channelLine(channel: channel, area: areaName, index: channelIndex)
+        }
+        channelIndex += 1
+        speak(script)
+    }
+
+    private func speak(_ text: String) {
+        radio?.setVolume(bedDuck, fadeDuration: 0.3)   // duck the bed under the voice
+        let u = AVSpeechUtterance(string: text)
+        u.voice = Self.preferredRadioVoice()
+        u.rate = 0.49
+        u.pitchMultiplier = 0.98
+        u.volume = 1.0
+        u.preUtteranceDelay = 0.05
+        u.postUtteranceDelay = 0.10
+        synth.speak(u)
+        // Safety net: if the synthesizer never reports back (e.g. a missing voice
+        // asset), don't let the broadcast stall — resume after a length-based estimate.
+        watchdog?.invalidate()
+        let estimate = min(30.0, 3.5 + Double(text.count) * 0.09)
+        watchdog = Timer.scheduledTimer(withTimeInterval: estimate, repeats: false) { [weak self] _ in
+            Task { @MainActor in self?.resumeAfterSegment() }
+        }
+    }
+
+    /// Bring the bed back up and queue the next tune-in — called by either the
+    /// synthesizer finishing or the watchdog, whichever lands first.
+    private func resumeAfterSegment() {
+        watchdog?.invalidate(); watchdog = nil
+        guard isRunning, !isStatic else { return }
+        radio?.setVolume(bedFull, fadeDuration: 0.6)
+        scheduleTuneIn(after: 6.5)   // musical breather between segments
+    }
+
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
+                                       didFinish utterance: AVSpeechUtterance) {
+        Task { @MainActor in self.resumeAfterSegment() }
+    }
+
+    /// The Poplur AI host voice — a British radio voice, matching the phone's
+    /// on-device fallback (`PoplurMapRadioHost.preferredRadioVoice`).
+    static func preferredRadioVoice() -> AVSpeechSynthesisVoice? {
+        let voices = AVSpeechSynthesisVoice.speechVoices()
+        let british = voices.filter { $0.language == "en-GB" }
+        let preferredNames = ["serena", "daniel", "martha", "arthur", "kate"]
+        if let named = british.first(where: { v in
+            preferredNames.contains { v.name.lowercased().contains($0) }
+        }) { return named }
+        if let premium  = british.first(where: { $0.quality == .premium })  { return premium }
+        if let enhanced = british.first(where: { $0.quality == .enhanced }) { return enhanced }
+        if let anyPrem  = voices.first(where: { $0.language.hasPrefix("en") && $0.quality == .premium })  { return anyPrem }
+        if let anyEnh   = voices.first(where: { $0.language.hasPrefix("en") && $0.quality == .enhanced }) { return anyEnh }
+        return AVSpeechSynthesisVoice(language: "en-GB")
+    }
+
+    private static func channelLine(channel: String, area: String, index: Int) -> String {
+        let lines = [
+            "You're tuned to \(channel). The signal's strong here in \(area) tonight.",
+            "This is \(channel) — every post around \(area), straight to your wrist.",
+            "Picking up \(channel) now. \(area) is buzzing on the Poplur dial.",
+            "Coming through on \(channel), live from the streets of \(area).",
+            "Stay locked to \(channel). More from \(area) right after this.",
+            "\(channel) has the local frequency — \(area), you're on the air.",
+            "That's the sound of \(channel), broadcasting across \(area).",
+            "Poplur's got \(area) covered. You're listening to \(channel)."
+        ]
+        return lines[((index % lines.count) + lines.count) % lines.count]
+    }
+
+    // MARK: Easter egg — hold the face for TV static (picture + sound)
+
+    func startStatic() {
+        isStatic = true
+        activateSession()
+        synth.stopSpeaking(at: .immediate)     // cut the host while held
+        hostTimer?.invalidate(); hostTimer = nil
+        watchdog?.invalidate(); watchdog = nil
+        radio?.setVolume(0.05, fadeDuration: 0.1)
+        noise = try? AVAudioPlayer(data: makeStaticWAV(duration: 1.6))
+        noise?.numberOfLoops = -1
+        noise?.volume = 0.75
+        noise?.play()
+    }
+
+    func stopStatic() {
+        isStatic = false
+        noise?.stop()
+        noise = nil
+        radio?.setVolume(bedFull, fadeDuration: 0.4)
+        if isRunning { scheduleTuneIn(after: 2.0) }   // resume the broadcast
+    }
+}
+
+// MARK: - TV static overlay (press-and-hold easter egg)
+
+private struct StaticOverlay: View {
+    var body: some View {
+        TimelineView(.animation) { tl in
+            let seed = Int(tl.date.timeIntervalSinceReferenceDate * 24)
+            Canvas { ctx, size in
+                let block: CGFloat = 5
+                let cols = Int(size.width / block) + 1
+                let rows = Int(size.height / block) + 1
+                var s = UInt64(bitPattern: Int64(seed &+ 1)) ^ 6_364_136_223_846_793_005
+                for row in 0..<rows {
+                    for col in 0..<cols {
+                        s = s &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+                        let v = Double(s >> 33) / Double(1 << 31)
+                        ctx.fill(
+                            Path(CGRect(x: CGFloat(col) * block, y: CGFloat(row) * block,
+                                        width: block, height: block)),
+                            with: .color(Color(white: v, opacity: 0.92))
+                        )
+                    }
+                }
+            }
+        }
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
+        .transition(.opacity)
+    }
+}
 
 // MARK: - Clay palette (matches the phone welcome / loading aesthetic)
 
@@ -58,8 +362,8 @@ private struct ClayGlobeSceneView: WKInterfaceObjectRepresentable {
         scene.rootNode.addChildNode(backdrop)
 
         let globeNode = Self.loadClayGlobe() ?? Self.fallbackGlobe()
-        RuntimeGlobe.normalize(globeNode, targetExtent: 1.75)
-        globeNode.position = SCNVector3(0, 0.6, 0)          // sit in the upper area
+        RuntimeGlobe.normalize(globeNode, targetExtent: 1.62)
+        globeNode.position = SCNVector3(0, 0.30, 0)         // centred in the face
         globeNode.eulerAngles = SCNVector3(0, 0, Float(-15.0 * .pi / 180))  // gentle clay tilt
         scene.rootNode.addChildNode(globeNode)
 
@@ -71,7 +375,7 @@ private struct ClayGlobeSceneView: WKInterfaceObjectRepresentable {
         // (it holds still while the globe spins behind it).
         if let word = Self.loadWordmark() {
             RuntimeGlobe.normalize(word, targetExtent: 0.72)
-            word.position = SCNVector3(0, 0.55, 1.9)
+            word.position = SCNVector3(0, 0.26, 1.9)
             scene.rootNode.addChildNode(word)
         }
 
@@ -79,7 +383,7 @@ private struct ClayGlobeSceneView: WKInterfaceObjectRepresentable {
         let cameraNode = SCNNode()
         cameraNode.camera = SCNCamera()
         cameraNode.camera?.fieldOfView = 32
-        cameraNode.position = SCNVector3(0, 0.34, 3.5)
+        cameraNode.position = SCNVector3(0, 0.30, 3.5)   // level with the globe → centred
         scene.rootNode.addChildNode(cameraNode)
 
         // Warm key + cool fill + soft ambient — matches the phone's clay lighting.
@@ -161,9 +465,12 @@ private struct ClayGlobeSceneView: WKInterfaceObjectRepresentable {
     vec3 base = mix(vec3(0.122, 0.420, 1.0), vec3(0.184, 0.482, 1.0), hi * 0.5);
     vec2 grid = vec2(uv.x * 46.0, uv.y * 55.0);
     vec2 g = fract(grid) - 0.5;
-    float dotMask = 1.0 - smoothstep(0.12, 0.24, length(g));
-    float pulse = 0.5 + 0.5 * sin(u_time * 2.0 + (floor(grid.x) + floor(grid.y)) * 0.6);
-    float a = dotMask * (0.16 + 0.24 * pulse);
+    // Travelling wave across the grid so the studs visibly breathe (matches the
+    // phone's pulsing clay-dot field) — each dot also swells, not just brightens.
+    float phase = u_time * 2.4 - (floor(grid.x) * 0.45 + floor(grid.y) * 0.38);
+    float pulse = 0.5 + 0.5 * sin(phase);
+    float dotMask = 1.0 - smoothstep(0.10 + 0.06 * pulse, 0.26 + 0.06 * pulse, length(g));
+    float a = dotMask * (0.10 + 0.40 * pulse);
     _output.color.rgb = mix(base, vec3(0.839, 0.063, 0.424), a);
     _output.color.a = 1.0;
     """
@@ -355,23 +662,32 @@ private struct ConfettiChip {
 private struct ConfettiLayer: View {
     let chips: [ConfettiChip]
 
-    init(count: Int = 16) {
+    init(count: Int = 30) {
         // Deterministic pseudo-random from index — no per-frame allocation.
         var out: [ConfettiChip] = []
         var seed: UInt64 = 0x9E3779B97F4A7C15
         func rnd() -> Double {
             seed = seed &* 6364136223846793005 &+ 1442695040888963407
-            return Double(seed >> 33) / Double(UInt32.max)
+            // `seed >> 33` tops out at 2^31, so dividing by UInt32.max only ever
+            // reached 0.5 — which pinned every chip to the left half of the face.
+            return Double(seed >> 33) / Double(1 << 31)
         }
         for _ in 0..<count {
+            let palette = Clay.confetti
+            let chipColor: Color = {
+                guard !palette.isEmpty else { return .white }
+                let raw = rnd() * Double(palette.count)
+                let idx = max(0, min(palette.count - 1, Int(raw)))
+                return Color(palette[idx])
+            }()
             out.append(ConfettiChip(
                 x0: CGFloat(rnd()),
                 delay: rnd() * 3.2,
                 dur: 3.0 + rnd() * 2.2,
                 drift: CGFloat(rnd() - 0.5) * 0.28,
-                size: 4 + CGFloat(rnd()) * 4,
+                size: 6 + CGFloat(rnd()) * 5,
                 spin: (rnd() - 0.5) * 8,
-                color: Color(Clay.confetti[Int(rnd() * Double(Clay.confetti.count)) % Clay.confetti.count])
+                color: chipColor
             ))
         }
         chips = out
@@ -457,7 +773,9 @@ private struct ClayReadout: View {
 
 struct RadiusWatchView: View {
     @EnvironmentObject private var store: WatchRadiusStore
+    @Environment(\.scenePhase) private var scenePhase
 
+    @State private var showStatic = false
     @State private var showKm = true
     private let switchTimer = Timer.publish(every: 4, on: .main, in: .common).autoconnect()
 
@@ -473,17 +791,38 @@ struct RadiusWatchView: View {
                 ClayReadout(store: store, showKm: showKm)
                     .padding(.bottom, 4)
             }
+
+            // Easter egg: hold the face and it drops to TV static, picture + sound.
+            if showStatic { StaticOverlay() }
         }
         .ignoresSafeArea()
         .contentShape(Rectangle())
+        // Press-and-hold anywhere on the face → static while held, back on release.
+        // watchOS long-press: `perform` fires once the hold threshold is crossed,
+        // `onPressingChanged(false)` fires on release (also after a plain tap, where
+        // stopStatic() is a harmless no-op) — a quick tap still toggles km/mi.
+        .onLongPressGesture(minimumDuration: 0.3, maximumDistance: 60, perform: {
+            withAnimation(.easeIn(duration: 0.12)) { showStatic = true }
+            WatchAudio.shared.startStatic()
+        }, onPressingChanged: { pressing in
+            if !pressing {
+                withAnimation(.easeOut(duration: 0.22)) { showStatic = false }
+                WatchAudio.shared.stopStatic()
+            }
+        })
         .onTapGesture {
             withAnimation(.easeInOut(duration: 0.35)) { showKm.toggle() }
         }
         .onReceive(switchTimer) { _ in
             withAnimation(.easeInOut(duration: 0.35)) { showKm.toggle() }
         }
+        .onAppear { WatchAudio.shared.startRadio() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { WatchAudio.shared.startRadio() }
+            else { WatchAudio.shared.stopRadio(); WatchAudio.shared.stopStatic() }
+        }
         .persistentSystemOverlays(.hidden)
-        .accessibilityLabel("Poplur watch — clay globe, tap to toggle km/mi")
+        .accessibilityLabel("Poplur watch — clay globe. Tap to toggle km/mi, hold for static.")
     }
 }
 
@@ -572,17 +911,20 @@ final class WatchRadiusStore: NSObject, ObservableObject {
     }
 
     private static func int(_ key: String, _ p: [String: Any]) -> Int? {
-        func safeInt(from value: Double) -> Int? {
+        func clampToInt(_ value: Double) -> Int? {
             guard value.isFinite else { return nil }
             if value >= Double(Int.max) { return Int.max }
             if value <= Double(Int.min) { return Int.min }
             return Int(value)
         }
-        if let v = p[key] as? Int      { return v }
+
+        if let v = p[key] as? Int { return v }
         if let v = p[key] as? NSNumber { return v.intValue }
-        if let v = p[key] as? Double   { return safeInt(from: v) }
+        if let v = p[key] as? Double { return clampToInt(v) }
         if let v = p[key] as? String {
-            if let dv = Double(v) { return safeInt(from: dv) }
+            // Try Double first to handle very large magnitudes, then clamp
+            if let dv = Double(v) { return clampToInt(dv) }
+            // Fallback: if it's a normal-sized integer string, parse directly
             if let iv = Int(v) { return iv }
             return nil
         }
