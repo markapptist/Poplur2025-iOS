@@ -138,13 +138,53 @@ struct PreloginWebView: UIViewRepresentable {
             }
 
             let mime = Self.mimeType(forExtension: fileURL.pathExtension)
-            let response = URLResponse(
-                url: url,
-                mimeType: mime,
-                expectedContentLength: data.count,
-                textEncodingName: mime.hasPrefix("text/") || mime == "application/json" ? "utf-8" : nil
-            )
-            urlSchemeTask.didReceive(response)
+
+            // BYTE-RANGE support. WKWebView will not play a <video> served over a
+            // custom scheme unless the handler answers Range requests with a 206
+            // and Content-Range — without it the media element silently fails and
+            // the splash renders as black (Android's WebViewAssetLoader does this
+            // for us, which is why only iOS showed it).
+            if let rangeHeader = urlSchemeTask.request.value(forHTTPHeaderField: "Range"),
+               rangeHeader.hasPrefix("bytes="),
+               let spec = rangeHeader.split(separator: "=").last {
+                let bounds = spec.split(separator: "-", omittingEmptySubsequences: false)
+                let start = Int(bounds.first ?? "") ?? 0
+                let end = bounds.count > 1 ? (Int(bounds[1]) ?? data.count - 1) : data.count - 1
+                let upper = min(end, data.count - 1)
+                guard start <= upper else {
+                    urlSchemeTask.didFailWithError(URLError(.badServerResponse))
+                    return
+                }
+                let slice = data.subdata(in: start..<(upper + 1))
+                let headers = [
+                    "Content-Type": mime,
+                    "Content-Length": "\(slice.count)",
+                    "Content-Range": "bytes \(start)-\(upper)/\(data.count)",
+                    "Accept-Ranges": "bytes"
+                ]
+                if let response = HTTPURLResponse(url: url, statusCode: 206,
+                                                  httpVersion: "HTTP/1.1", headerFields: headers) {
+                    urlSchemeTask.didReceive(response)
+                    urlSchemeTask.didReceive(slice)
+                    urlSchemeTask.didFinish()
+                    return
+                }
+            }
+
+            // Full-body response, advertising range support so media can seek.
+            let headers = [
+                "Content-Type": mime,
+                "Content-Length": "\(data.count)",
+                "Accept-Ranges": "bytes"
+            ]
+            if let response = HTTPURLResponse(url: url, statusCode: 200,
+                                              httpVersion: "HTTP/1.1", headerFields: headers) {
+                urlSchemeTask.didReceive(response)
+            } else {
+                urlSchemeTask.didReceive(URLResponse(
+                    url: url, mimeType: mime, expectedContentLength: data.count,
+                    textEncodingName: mime.hasPrefix("text/") ? "utf-8" : nil))
+            }
             urlSchemeTask.didReceive(data)
             urlSchemeTask.didFinish()
         }
