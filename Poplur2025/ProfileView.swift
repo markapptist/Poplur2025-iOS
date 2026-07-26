@@ -399,6 +399,7 @@ struct ProfileView: View {
         let latitude: Double
         let longitude: Double
         let mediaURL: String
+        let posterURL: String?
         let radius: Int
         let viewCount: Int
         let userID: String
@@ -415,7 +416,7 @@ struct ProfileView: View {
         do {
             let data = try Data(contentsOf: url)
             let cached = try JSONDecoder().decode([CachedPost].self, from: data)
-            return cached.map { Post(id: $0.id, latitude: $0.latitude, longitude: $0.longitude, mediaURL: $0.mediaURL, radius: $0.radius, viewCount: $0.viewCount, userID: $0.userID, posterURL: nil) }
+            return cached.map { Post(id: $0.id, latitude: $0.latitude, longitude: $0.longitude, mediaURL: $0.mediaURL, radius: $0.radius, viewCount: $0.viewCount, userID: $0.userID, posterURL: $0.posterURL) }
         } catch {
             print("Profile cache: failed to read -> \(error.localizedDescription)")
             return nil
@@ -424,7 +425,7 @@ struct ProfileView: View {
 
     private func savePostsToCache(_ posts: [Post], for uid: String) {
         let url = cacheFileURL(for: uid)
-        let toCache = posts.map { CachedPost(id: $0.id, latitude: $0.latitude, longitude: $0.longitude, mediaURL: $0.mediaURL, radius: $0.radius, viewCount: $0.viewCount, userID: $0.userID) }
+        let toCache = posts.map { CachedPost(id: $0.id, latitude: $0.latitude, longitude: $0.longitude, mediaURL: $0.mediaURL, posterURL: $0.posterURL, radius: $0.radius, viewCount: $0.viewCount, userID: $0.userID) }
         do {
             let data = try JSONEncoder().encode(toCache)
             try data.write(to: url, options: .atomic)
@@ -2391,7 +2392,7 @@ struct ProfileView: View {
 
     private func prefetchImages(for posts: [Post]) async {
         await withTaskGroup(of: Void.self) { group in
-            for post in posts where loadedImages[post.id] == nil {
+            for post in posts where loadedImages[post.id] == nil && imageSource(for: post) != nil {
                 group.addTask {
                     await loadImageFor(post: post)
                 }
@@ -2399,8 +2400,42 @@ struct ProfileView: View {
         }
     }
 
+    private func imageSource(for post: Post) -> String? {
+        let lower = post.mediaURL.lowercased()
+        let isVideo = lower.contains(".mp4")
+            || lower.contains(".mov")
+            || lower.contains(".m4v")
+            || lower.contains(".m3u8")
+            || lower.contains("video")
+        if isVideo {
+            return post.posterURL?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                ? post.posterURL
+                : nil
+        }
+        return post.mediaURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : post.mediaURL
+    }
+
+    private func localImage(for source: String) -> UIImage? {
+        let assetPrefix = "asset://"
+        if source.hasPrefix(assetPrefix) {
+            let name = String(source.dropFirst(assetPrefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            return name.isEmpty ? nil : UIImage(named: name)
+        }
+        if let url = URL(string: source), url.isFileURL {
+            return UIImage(contentsOfFile: url.path)
+        }
+        return nil
+    }
+
     private func loadImageFor(post: Post) async {
-        guard let url = URL(string: post.mediaURL) else { return }
+        guard let source = imageSource(for: post) else { return }
+        if let image = localImage(for: source) {
+            await MainActor.run {
+                self.loadedImages[post.id] = image
+            }
+            return
+        }
+        guard let url = URL(string: source), ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return }
         let image = await CachedImageLoader.shared.load(url)
         if let image = image {
             await MainActor.run {
@@ -3350,6 +3385,7 @@ private struct RadiusStoreView: View {
 private struct ProfileGridTile: View {
     let post: Post
     let preloadedImage: UIImage?
+    @State private var loadedImage: UIImage?
     private let corner: CGFloat = 24
     private var isVideo: Bool {
         let lower = post.mediaURL.lowercased()
@@ -3360,17 +3396,45 @@ private struct ProfileGridTile: View {
             || lower.contains("video")
     }
 
+    private var imageSource: String? {
+        if isVideo {
+            let poster = post.posterURL?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return poster.isEmpty ? nil : poster
+        }
+        let media = post.mediaURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        return media.isEmpty ? nil : media
+    }
+
+    private var localImage: UIImage? {
+        guard let source = imageSource else { return nil }
+        let prefix = "asset://"
+        if source.hasPrefix(prefix) {
+            let name = String(source.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            return name.isEmpty ? nil : UIImage(named: name)
+        }
+        if let url = URL(string: source), url.isFileURL {
+            return UIImage(contentsOfFile: url.path)
+        }
+        return nil
+    }
+
     var body: some View {
         GeometryReader { proxy in
             ZStack {
-                if let preloadedImage, !isVideo {
-                    Image(uiImage: preloadedImage)
+                if let image = preloadedImage ?? loadedImage ?? localImage {
+                    Image(uiImage: image)
                         .resizable()
                         .scaledToFill()
                         .frame(width: proxy.size.width, height: proxy.size.height)
+                    if isVideo {
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 20, weight: .heavy))
+                            .foregroundStyle(.white)
+                            .shadow(color: .black.opacity(0.45), radius: 5)
+                    }
                 } else {
                     ZStack {
-                        Color.gray.opacity(0.26)
+                        Color.gray.opacity(0.22)
                         VStack(spacing: 8) {
                             Image(systemName: isVideo ? "play.fill" : "photo")
                                 .font(.system(size: isVideo ? 36 : 22, weight: .bold))
@@ -3410,6 +3474,17 @@ private struct ProfileGridTile: View {
             }
         }
         .aspectRatio(1, contentMode: .fit)
+        .task(id: imageSource ?? "") {
+            guard preloadedImage == nil, loadedImage == nil, let source = imageSource else { return }
+            if let localImage {
+                loadedImage = localImage
+                return
+            }
+            guard let url = URL(string: source), ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return }
+            if let image = await CachedImageLoader.shared.load(url) {
+                await MainActor.run { loadedImage = image }
+            }
+        }
     }
 }
 

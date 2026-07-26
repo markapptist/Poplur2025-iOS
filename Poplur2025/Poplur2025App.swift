@@ -136,14 +136,7 @@ struct Poplur2025App: App {
     @StateObject private var deviceVolumeObserver = DeviceVolumeObserver()
     @StateObject private var preLoginMusic = PreLoginMusicPlayer()
     @State private var showAuthTransition = false
-    /// Retained for the transition bookkeeping. The cover is now ALWAYS the splash:
-    /// the approved globe Loading needed three.js + WebGL + model decode just to
-    /// appear, which delayed the very wait it was meant to cover. The splash is a
-    /// single hardware-decoded video and carries the same clay progress bar.
-    /// The globe screen lives on as the approved GCL design (and for watch/wear).
-    @State private var coldLaunchCover = false
     @State private var isAuthenticatedHomeReady = false
-    @State private var authTransitionMinimumElapsed = false
     @State private var authTransitionToken = 0
     @State private var isWelcomePanelVisible = true
     @State private var showSplash: Bool
@@ -324,17 +317,11 @@ struct Poplur2025App: App {
                             }
                     }
 
-                    if showAuthTransition || !isAuthenticatedHomeReady {
-                        // Keep the approved loading surface fully opaque while Home is
-                        // created and laid out behind it. This prevents WebKit's startup
-                        // backing view and Home's intermediate layouts from ever becoming
-                        // visible during the handoff.
-                        // Plain black cover. The web splash letterboxed on device
-                        // (iOS wouldn't cover the video no matter how it was sized),
-                        // and a cover screen only needs to hide the home warming up.
-                        Color.black
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .background(Color(red: 0.039, green: 0.027, blue: 0.035))
+                    if showAuthTransition {
+                        // Only mount the approved clay barber-pole splash if the home
+                        // has not become ready after its brief fast-path window. A
+                        // cached feed should open directly without a loading screen.
+                        PostLoginLoadingWebView(page: .splash)
                             .ignoresSafeArea()
                             .transition(.opacity)
                             .zIndex(100)
@@ -388,12 +375,10 @@ struct Poplur2025App: App {
                 authTransitionToken += 1
                 showAuthTransition = false
                 isAuthenticatedHomeReady = false
-                authTransitionMinimumElapsed = false
                 return
             }
             guard !oldValue && !auth.isResolvingAuthState else { return }
             if auth.didSignUp { auth.didSignUp = false }
-            coldLaunchCover = false
             triggerAuthTransition()
         }
         // Cold launch as a RETURNING signed-in user: auth resolves from the
@@ -402,7 +387,6 @@ struct Poplur2025App: App {
         // Loading screen instead of dropping onto a half-booted map.
         .onChange(of: auth.isResolvingAuthState) { _, resolving in
             guard !resolving, auth.isAuthenticated, !showAuthTransition else { return }
-            coldLaunchCover = true
             triggerAuthTransition()
         }
     }
@@ -410,15 +394,16 @@ struct Poplur2025App: App {
     private func triggerAuthTransition() {
         authTransitionToken += 1
         let token = authTransitionToken
-        showAuthTransition = true
+        showAuthTransition = false
         isAuthenticatedHomeReady = false
-        authTransitionMinimumElapsed = false
-        // Hold the approved Loading screen long enough for the clay globe to decode
-        // and a rotating clay message to read. Home loads concurrently behind it.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) {
-            guard token == authTransitionToken else { return }
-            authTransitionMinimumElapsed = true
-            finishAuthTransitionIfReady()
+        // Give a warm/cached home a chance to reveal immediately. If it is still
+        // decoding the web bundle after this point, cover only that real wait with
+        // the approved clay barber-pole splash.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            guard token == authTransitionToken,
+                  !isAuthenticatedHomeReady,
+                  auth.isAuthenticated else { return }
+            showAuthTransition = true
         }
     }
 
@@ -429,9 +414,7 @@ struct Poplur2025App: App {
     }
 
     private func finishAuthTransitionIfReady() {
-        guard showAuthTransition,
-              authTransitionMinimumElapsed,
-              isAuthenticatedHomeReady else { return }
+        guard showAuthTransition, isAuthenticatedHomeReady else { return }
         withAnimation(.easeInOut(duration: 0.45)) {
             showAuthTransition = false
         }
