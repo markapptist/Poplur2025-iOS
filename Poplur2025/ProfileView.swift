@@ -530,9 +530,10 @@ struct ProfileView: View {
 
             // Notification bell
             Button {
-                withAnimation(.spring(response: 0.40, dampingFraction: 0.78)) {
-                    showNotificationBanner.toggle()
-                    if showNotificationBanner { hasUncheckedNotifications = false; notificationCenter.markAllRead() }
+                if showNotificationBanner {
+                    dismissNotificationBanner()
+                } else {
+                    presentNotificationBanner()
                 }
             } label: {
                 ZStack(alignment: .topTrailing) {
@@ -921,21 +922,24 @@ struct ProfileView: View {
             Color.black.opacity(0.001)
                 .ignoresSafeArea()
                 .onTapGesture {
-                    withAnimation(.spring(response: 0.40, dampingFraction: 0.78)) {
-                        showNotificationBanner = false
-                    }
+                    dismissNotificationBanner()
                 }
-                .zIndex(55)
+                .zIndex(9_999)
 
             VStack {
                 ProfileNotificationBanner(notifications: profileNotifications)
-                    .transition(.move(edge: .top).combined(with: .opacity))
-                    .zIndex(56)
+                    .transition(
+                        .asymmetric(
+                            insertion: .offset(y: -520).combined(with: .opacity),
+                            removal: .offset(y: -520).combined(with: .opacity)
+                        )
+                    )
+                    .zIndex(10_000)
                 Spacer()
             }
             .ignoresSafeArea(edges: .top)
             .allowsHitTesting(false)
-            .zIndex(56)
+            .zIndex(10_000)
         }
 
         if showRadiusStore {
@@ -1105,6 +1109,21 @@ struct ProfileView: View {
             expandedPostOverlay
             profileTransientOverlays
             profileRouteOverlays
+                .zIndex(showNotificationBanner ? 10_000 : 0)
+        }
+    }
+
+    private func presentNotificationBanner() {
+        withAnimation(.spring(duration: 1.06, bounce: 0.62)) {
+            showNotificationBanner = true
+            hasUncheckedNotifications = false
+            notificationCenter.markAllRead()
+        }
+    }
+
+    private func dismissNotificationBanner() {
+        withAnimation(.spring(duration: 0.84, bounce: 0.34)) {
+            showNotificationBanner = false
         }
     }
 
