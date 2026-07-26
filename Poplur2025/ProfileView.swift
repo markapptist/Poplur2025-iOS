@@ -2589,69 +2589,138 @@ private struct ProfileNotificationBanner: View {
     let notifications: [ProfileNotificationItem]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("Notifications")
-                .font(.system(size: 20, weight: .black, design: .rounded))
-                .foregroundColor(.white)
-                .padding(.horizontal, 20)
-                .padding(.top, 56)
-                .padding(.bottom, 14)
+        ZStack {
+            LinearGradient(
+                colors: [Color(red: 1.0, green: 0.45, blue: 0.73), Color(red: 0.96, green: 0.15, blue: 0.52)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            ProfileNotificationDotMap()
+                .blendMode(.screen)
+                .opacity(0.88)
 
-            if notifications.isEmpty {
-                Text("No notifications yet")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.72))
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Notifications")
+                    .font(.system(size: 20, weight: .black, design: .rounded))
+                    .foregroundColor(.white)
+                    .shadow(color: Color(red: 0.35, green: 0.0, blue: 0.17).opacity(0.4), radius: 2, y: 1)
                     .padding(.horizontal, 20)
-                    .padding(.bottom, 20)
-            } else {
-                ScrollView(.vertical, showsIndicators: false) {
-                    VStack(spacing: 10) {
-                        ForEach(notifications.prefix(8)) { item in
-                            HStack(alignment: .top, spacing: 12) {
-                                ZStack(alignment: .topTrailing) {
-                                    Circle()
-                                        .fill(item.kind.color.opacity(0.18))
-                                        .frame(width: 40, height: 40)
-                                        .overlay {
-                                            Image(systemName: item.kind.iconName)
-                                                .poplurIconShader()
-                                                .font(.system(size: 17, weight: .bold))
-                                                .foregroundColor(item.kind.color)
+                    .padding(.top, 56)
+                    .padding(.bottom, 14)
+
+                if notifications.isEmpty {
+                    Text("No notifications yet")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.82))
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 20)
+                } else {
+                    ScrollView(.vertical, showsIndicators: false) {
+                        VStack(spacing: 10) {
+                            ForEach(notifications.prefix(8)) { item in
+                                HStack(alignment: .top, spacing: 12) {
+                                    ZStack(alignment: .topTrailing) {
+                                        Circle()
+                                            .fill(Color.white.opacity(0.2))
+                                            .frame(width: 40, height: 40)
+                                            .overlay {
+                                                Image(systemName: item.kind.iconName)
+                                                    .poplurIconShader()
+                                                    .font(.system(size: 17, weight: .bold))
+                                                    .foregroundColor(.white)
+                                            }
+                                        if item.isUnchecked {
+                                            Circle().fill(Color(red: 1.0, green: 0.82, blue: 0.91)).frame(width: 9, height: 9)
                                         }
-                                    if item.isUnchecked {
-                                        Circle().fill(Color.red).frame(width: 9, height: 9)
                                     }
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(item.title)
+                                            .font(.system(size: 14, weight: .heavy, design: .rounded))
+                                            .foregroundColor(.white)
+                                        Text(item.detail)
+                                            .font(.system(size: 12, weight: .semibold))
+                                            .foregroundColor(.white.opacity(0.84))
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
+                                    Spacer(minLength: 0)
                                 }
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text(item.title)
-                                        .font(.system(size: 14, weight: .heavy, design: .rounded))
-                                        .foregroundColor(.black)
-                                    Text(item.detail)
-                                        .font(.system(size: 12, weight: .semibold))
-                                        .foregroundColor(.black.opacity(0.55))
-                                        .fixedSize(horizontal: false, vertical: true)
+                                .padding(14)
+                                .background(Color(red: 0.52, green: 0.01, blue: 0.26).opacity(0.3), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                        .stroke(Color.white.opacity(0.24), lineWidth: 1)
                                 }
-                                Spacer(minLength: 0)
                             }
-                            .padding(14)
-                            .background(Color.white, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                            .shadow(color: .black.opacity(0.07), radius: 4, y: 2)
                         }
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 20)
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 20)
+                    .frame(maxHeight: 340)
                 }
-                .frame(maxHeight: 340)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            Color(red: 1.0, green: 0.62, blue: 0.78)
-                .ignoresSafeArea(edges: .top)
-        )
         .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous)
             .offset(y: -28))
         .shadow(color: .black.opacity(0.18), radius: 16, y: 8)
+    }
+}
+
+private struct ProfileNotificationDotMap: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private let land: [[CGPoint]] = [
+        [CGPoint(x: 0.02, y: 0.13), CGPoint(x: 0.08, y: 0.08), CGPoint(x: 0.17, y: 0.07), CGPoint(x: 0.25, y: 0.12), CGPoint(x: 0.31, y: 0.20), CGPoint(x: 0.27, y: 0.27), CGPoint(x: 0.23, y: 0.30), CGPoint(x: 0.21, y: 0.38), CGPoint(x: 0.15, y: 0.43), CGPoint(x: 0.10, y: 0.37), CGPoint(x: 0.06, y: 0.34), CGPoint(x: 0.03, y: 0.27)],
+        [CGPoint(x: 0.20, y: 0.04), CGPoint(x: 0.27, y: 0.05), CGPoint(x: 0.30, y: 0.11), CGPoint(x: 0.27, y: 0.17), CGPoint(x: 0.22, y: 0.15), CGPoint(x: 0.18, y: 0.09)],
+        [CGPoint(x: 0.16, y: 0.39), CGPoint(x: 0.23, y: 0.40), CGPoint(x: 0.29, y: 0.47), CGPoint(x: 0.31, y: 0.57), CGPoint(x: 0.28, y: 0.68), CGPoint(x: 0.25, y: 0.79), CGPoint(x: 0.22, y: 0.91), CGPoint(x: 0.18, y: 0.82), CGPoint(x: 0.16, y: 0.70), CGPoint(x: 0.13, y: 0.56), CGPoint(x: 0.13, y: 0.46)],
+        [CGPoint(x: 0.39, y: 0.18), CGPoint(x: 0.45, y: 0.14), CGPoint(x: 0.53, y: 0.16), CGPoint(x: 0.56, y: 0.23), CGPoint(x: 0.52, y: 0.29), CGPoint(x: 0.46, y: 0.28), CGPoint(x: 0.40, y: 0.24)],
+        [CGPoint(x: 0.40, y: 0.28), CGPoint(x: 0.51, y: 0.27), CGPoint(x: 0.57, y: 0.36), CGPoint(x: 0.56, y: 0.49), CGPoint(x: 0.52, y: 0.62), CGPoint(x: 0.47, y: 0.72), CGPoint(x: 0.42, y: 0.62), CGPoint(x: 0.38, y: 0.47), CGPoint(x: 0.38, y: 0.35)],
+        [CGPoint(x: 0.51, y: 0.14), CGPoint(x: 0.63, y: 0.08), CGPoint(x: 0.76, y: 0.08), CGPoint(x: 0.89, y: 0.14), CGPoint(x: 0.98, y: 0.23), CGPoint(x: 0.95, y: 0.33), CGPoint(x: 0.87, y: 0.36), CGPoint(x: 0.82, y: 0.44), CGPoint(x: 0.73, y: 0.42), CGPoint(x: 0.68, y: 0.37), CGPoint(x: 0.60, y: 0.37), CGPoint(x: 0.54, y: 0.30), CGPoint(x: 0.51, y: 0.23)],
+        [CGPoint(x: 0.70, y: 0.65), CGPoint(x: 0.80, y: 0.60), CGPoint(x: 0.90, y: 0.64), CGPoint(x: 0.94, y: 0.74), CGPoint(x: 0.87, y: 0.83), CGPoint(x: 0.76, y: 0.81), CGPoint(x: 0.69, y: 0.73)],
+    ]
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 20.0)) { timeline in
+            Canvas { context, size in
+                let spacing = min(max(size.width / 52, 6.5), 10.0)
+                let time = timeline.date.timeIntervalSinceReferenceDate
+                for row in stride(from: 0, through: Int(size.height / spacing), by: 1) {
+                    for column in stride(from: 0, through: Int(size.width / spacing), by: 1) {
+                        let x = (CGFloat(column) + 0.5) * spacing
+                        let y = (CGFloat(row) + 0.5) * spacing
+                        guard land.contains(where: { contains(CGPoint(x: x / size.width, y: 0.04 + (y / size.height) * 0.88), polygon: $0) }) else { continue }
+                        let hash = abs(row * 73 + column * 151 + row * column * 19) % 41
+                        guard hash < 9 else { continue }
+                        let pulse = reduceMotion ? 0.62 : 0.5 + 0.5 * sin(time / 0.62 + Double(hash) * 0.77 + Double(row) * 0.19 + Double(column) * 0.31)
+                        let radius = max(1.55, spacing * 0.21) * (0.86 + CGFloat(pulse) * 0.28)
+                        drawDot(context: context, center: CGPoint(x: x, y: y), radius: radius, pulse: CGFloat(pulse))
+                    }
+                }
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
+    private func drawDot(context: GraphicsContext, center: CGPoint, radius: CGFloat, pulse: CGFloat) {
+        func ellipse(_ offset: CGSize, _ scale: CGFloat, _ color: Color) {
+            context.fill(Path(ellipseIn: CGRect(x: center.x + offset.width - radius * scale, y: center.y + offset.height - radius * scale, width: radius * scale * 2, height: radius * scale * 2)), with: .color(color))
+        }
+        ellipse(CGSize(width: 0, height: 1.3), 1, Color(red: 0.47, green: 0.02, blue: 0.24).opacity(0.3 + pulse * 0.22))
+        ellipse(CGSize(width: 0, height: -0.8), 1, Color(red: 1.0, green: 0.77, blue: 0.88).opacity(0.3 + pulse * 0.34))
+        ellipse(.zero, 0.94, Color(red: 1.0, green: 0.45, blue: 0.68).opacity(0.5 + pulse * 0.4))
+    }
+
+    private func contains(_ point: CGPoint, polygon: [CGPoint]) -> Bool {
+        guard polygon.count > 2 else { return false }
+        var hit = false
+        var previous = polygon[polygon.index(before: polygon.endIndex)]
+        for current in polygon {
+            if (current.y > point.y) != (previous.y > point.y), point.x < (previous.x - current.x) * (point.y - current.y) / ((previous.y - current.y) == 0 ? 0.000001 : (previous.y - current.y)) + current.x {
+                hit.toggle()
+            }
+            previous = current
+        }
+        return hit
     }
 }
 
