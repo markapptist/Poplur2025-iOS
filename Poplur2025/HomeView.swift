@@ -2126,37 +2126,6 @@ struct HomeView: View {
                 .allowsHitTesting(true)
             }
 
-            // Edge swipe navigation — left/right 60pt strips trigger tab rotation
-            GeometryReader { geo in
-                let edgeZone: CGFloat = 60
-                HStack(spacing: 0) {
-                    Color.clear
-                        .frame(width: edgeZone)
-                        .contentShape(Rectangle())
-                        .gesture(
-                            DragGesture(minimumDistance: 20, coordinateSpace: .local)
-                                .onEnded { value in
-                                    guard value.translation.width > 40 else { return }
-                                    rotateCube(to: previousTab(from: selectedTab), direction: .right)
-                                }
-                        )
-                    Spacer()
-                    Color.clear
-                        .frame(width: edgeZone)
-                        .contentShape(Rectangle())
-                        .gesture(
-                            DragGesture(minimumDistance: 20, coordinateSpace: .local)
-                                .onEnded { value in
-                                    guard value.translation.width < -40 else { return }
-                                    rotateCube(to: nextTab(from: selectedTab), direction: .left)
-                                }
-                        )
-                }
-                .frame(width: geo.size.width, height: geo.size.height)
-            }
-            .zIndex(8000)
-            .allowsHitTesting(true)
-
             PoplurAIAssistantOverlay(
                 controller: poplurAI,
                 accent: cubeSkinStore.current.appTheme.accent
