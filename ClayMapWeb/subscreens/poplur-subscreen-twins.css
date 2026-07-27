@@ -3061,3 +3061,8 @@ body.rcl-clay .ring {
     inset 0 10px 18px rgba(255, 255, 255, 0.34),
     0 18px 27px rgba(247, 38, 134, 0.19);
 }
+
+
+/* --- bundled copy: the phone is real, so it brings its own --- */
+body.embed .status,
+body.embed .island { display: none !important; }
