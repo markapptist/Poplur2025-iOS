@@ -21,6 +21,8 @@ import AVFoundation
 final class WebHomeCameraModel: ObservableObject {
     /// Front-most web tab (map | feed | post | profile | holdmenu).
     @Published var activeTab: String = "map"
+    /// The real Poplur AI chat, asked for by the web hold menu's CREATE tile.
+    @Published var presentsCreator = false
     @Published private(set) var recognitionManager: UserRecognitionManager?
 
     private var controllerStorage: CameraKitController?
@@ -50,6 +52,14 @@ final class WebHomeCameraModel: ObservableObject {
             case "flip":  controllerStorage?.flipCamera()
             default: break
             }
+        case "holdMenuNavigate":
+            // The web hold menu asks for a native destination. HomeView's
+            // router (handleHoldMenuNavigate) is NOT available here: with the
+            // web home enabled, HomeView is never mounted, so posting
+            // .HoldMenuNavigate would reach nobody. The surface presents the
+            // real screen itself.
+            guard let action = body["action"] as? String else { return }
+            if action == "create" { presentsCreator = true }
         default:
             break
         }
@@ -141,6 +151,16 @@ struct PostLoginHomeSurface: View {
                 camera?.handleWebEvent(type: type, body: body)
             })
             .ignoresSafeArea()
+        }
+        // CREATE in the web hold menu opens the REAL chat — PoplurAIChatView,
+        // the one backed by Google AI Studio through poplurAiApi — instead of
+        // the Rough Copy capture the browser falls back to.
+        .fullScreenCover(isPresented: $camera.presentsCreator) {
+            PoplurAIChatView(
+                initialImage: nil,
+                initialVideoURL: nil,
+                onDismiss: { camera.presentsCreator = false }
+            )
         }
     }
 }
