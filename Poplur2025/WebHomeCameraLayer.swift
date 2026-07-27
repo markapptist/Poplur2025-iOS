@@ -42,6 +42,9 @@ final class WebHomeCameraModel: ObservableObject {
         switch type {
         case "tabChanged":
             if let tab = body["tab"] as? String { activeTab = tab }
+        case "requestCameraPermission":
+            // The web alert was answered Allow — now the OS may ask.
+            Task { await activateCamera(askIfUndecided: true) }
         case "cameraShutter":
             guard isCameraTab else { return }
             controllerStorage?.triggerShutter()
@@ -67,13 +70,20 @@ final class WebHomeCameraModel: ObservableObject {
 
     /// Mirrors HomeView.recordTabContent.onAppear: resume the preview and wire
     /// ML detection + user recognition (the previous versions' behavior).
-    func activateCamera() async {
+    /// `askIfUndecided` is false for the automatic activation that happens when
+    /// the camera tab mounts, and true only when the web's own permission alert
+    /// has been answered with Allow. The OS prompt is one-shot per install, so
+    /// it must not be spent on someone who has not been told what it is for —
+    /// a reflexive Don't Allow against a bare system alert costs the camera
+    /// permanently. Poplur asks first; this fires only after a yes.
+    func activateCamera(askIfUndecided: Bool = false) async {
         let controller = resolveController()
         let status = AVCaptureDevice.authorizationStatus(for: .video)
         switch status {
         case .authorized:
             break
         case .notDetermined:
+            guard askIfUndecided else { return }
             let granted = await AVCaptureDevice.requestAccess(for: .video)
             guard granted else { return }
         default:
