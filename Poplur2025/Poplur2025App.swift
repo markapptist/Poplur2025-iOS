@@ -59,6 +59,11 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         // Always configure Firebase (needed for Auth).
         FirebaseBootstrap.configureIfNeeded()
 
+        // Listen for the capture flows' "upload this" notifications. Without this
+        // observer every capture route (native overlay, map post, web composer)
+        // showed an uploading banner and then dropped the media on the floor.
+        PostUploadService.shared.start()
+
         // Defer ad SDK init to after first frame — MobileAds.shared.start() is synchronous
         // and can block the main thread for 100–300 ms, delaying first render.
         DispatchQueue.main.async {

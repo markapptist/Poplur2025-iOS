@@ -207,6 +207,13 @@ struct PoplurClayMapView: UIViewRepresentable {
                   let payload = Self.decodeDataURL(dataUrl) else { return }
             let kind = body["kind"] as? String ?? "photo"
 
+            // Radius and caption cannot ride on the image-only upload
+            // notifications, so stage them for the upload that follows.
+            if let radiusKm = body["radiusKm"] as? Double {
+                PostUploadService.shared.nextRadiusMeters = Int(radiusKm * 1000)
+            }
+            PostUploadService.shared.nextCaption = body["caption"] as? String
+
             var userInfo: [String: Any] = [:]
             if kind == "video" {
                 // A recording has to become a file URL for the uploader.
