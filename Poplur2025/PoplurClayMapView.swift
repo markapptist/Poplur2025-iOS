@@ -188,9 +188,64 @@ struct PoplurClayMapView: UIViewRepresentable {
             case "poiTap":
                 // Phase 1.5: route body["id"] to the channel/post flow
                 break
+            case "publishPost":
+                // The web composer finished a post (capture → filter → channel).
+                // The account, Firebase Storage and the posts write all live on
+                // this side, so decode the media and hand it to the SAME upload
+                // path the native capture flow uses.
+                handlePublishPost(body)
             default:
                 break
             }
+        }
+
+        /// Decode a post finished in the web composer and hand it to the native
+        /// upload path. The web bundle has no account, so it sends the baked
+        /// media as a data: URL; everything authenticated happens here.
+        private func handlePublishPost(_ body: [String: Any]) {
+            guard let dataUrl = body["data"] as? String,
+                  let payload = Self.decodeDataURL(dataUrl) else { return }
+            let kind = body["kind"] as? String ?? "photo"
+
+            var userInfo: [String: Any] = [:]
+            if kind == "video" {
+                // A recording has to become a file URL for the uploader.
+                let url = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("poplur-post-\(UUID().uuidString).mp4")
+                guard (try? payload.write(to: url)) != nil else { return }
+                userInfo["videoURL"] = url
+            } else {
+                guard let image = UIImage(data: payload) else { return }
+                userInfo["image"] = image
+            }
+
+            // A post bound to a map spot carries its coordinate; a plain channel
+            // post uploads to wherever the user currently is.
+            if let latitude = body["latitude"] as? Double,
+               let longitude = body["longitude"] as? Double {
+                userInfo["latitude"] = latitude
+                userInfo["longitude"] = longitude
+                NotificationCenter.default.post(
+                    name: Notification.Name("UploadPostToCoordinate"),
+                    object: nil,
+                    userInfo: userInfo
+                )
+            } else if let image = userInfo["image"] as? UIImage {
+                NotificationCenter.default.post(
+                    name: Notification.Name("UploadImageToCurrentCoordinate"), object: image
+                )
+            } else if let videoURL = userInfo["videoURL"] as? URL {
+                NotificationCenter.default.post(
+                    name: Notification.Name("UploadVideoToCurrentCoordinate"), object: videoURL
+                )
+            }
+        }
+
+        /// `data:<mime>;base64,<payload>` → raw bytes.
+        private static func decodeDataURL(_ value: String) -> Data? {
+            guard let comma = value.firstIndex(of: ","), value.hasPrefix("data:") else { return nil }
+            let encoded = String(value[value.index(after: comma)...])
+            return Data(base64Encoded: encoded, options: .ignoreUnknownCharacters)
         }
 
         // MARK: Swift → JS
