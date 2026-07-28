@@ -389,7 +389,22 @@ if (!POPLUR_WEBGL_OK) {
 // resolve against the local scheme handler and warm the models for the welcome
 // hero cube + Choose-Account icons. Nothing to strip — kept verbatim.
 function cleanSplash(html) {
-  return html;
+  // Android WebView briefly paints a native video placeholder (a white card
+  // with a play triangle) while the clay clip is still decoding. That is not
+  // part of the approved splash and is especially visible on the A03. Keep
+  // the barber-pole loader and dark surface visible until the first real video
+  // frame is ready; if decoding fails, the loader remains the only surface.
+  return html
+    .replace(
+      "</style>",
+      "video:not(.ready) { visibility: hidden !important; }\n  </style>",
+    )
+    .replace(
+      '    const video = document.querySelector("video");',
+      '    const video = document.querySelector("video");\n' +
+        '    video?.addEventListener("canplay", () => video.classList.add("ready"), { once: true });\n' +
+        '    video?.addEventListener("error", () => video.classList.remove("ready"));',
+    );
 }
 
 // ---- run --------------------------------------------------------------------

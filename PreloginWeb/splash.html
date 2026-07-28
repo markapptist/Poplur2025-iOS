@@ -16,14 +16,7 @@
     * { box-sizing: border-box; }
     html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #0a0709; }
     body { position: relative; display: grid; place-items: center; font-family: ui-rounded, "SF Pro Rounded", system-ui, -apple-system, sans-serif; }
-    /* Anchored to the viewport, not computed from it. The old rule sized the
-       clip with vw/vh math (100vw wide, 177.78vw tall, floored by 56.25vh and
-       100vh) — correct arithmetic, but it only fills if vh resolves to the
-       full screen, and inside a WKWebView that is exactly what is not
-       guaranteed. Any shortfall showed as black bars. position:fixed + inset:0
-       IS the viewport, so the box cannot come up short, and object-fit:cover
-       crops the 9:16 clip to whatever shape the phone is. */
-    video { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; z-index: 1; background: #0a0709; }
+    video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; z-index: 1; }
     .fallback { position: absolute; width: 45%; max-width: 170px; filter: drop-shadow(0 15px 18px rgba(255,45,145,.3)); z-index: 0; }
     .splash-scrim {
       position: absolute;
@@ -92,6 +85,7 @@
       .loading-text { animation: none; }
       .fill { animation: none; width: 70%; }
     }
+  video:not(.ready) { visibility: hidden !important; }
   </style>
 </head>
 <body>
@@ -122,6 +116,8 @@
       "Fluffing the clouds"
     ];
     const video = document.querySelector("video");
+    video?.addEventListener("canplay", () => video.classList.add("ready"), { once: true });
+    video?.addEventListener("error", () => video.classList.remove("ready"));
     const message = document.querySelector(".loading-text");
     const popSfx = document.getElementById("popSfx");
     const radioBed = document.getElementById("radioBed");
