@@ -55,7 +55,16 @@ struct PoplurClayMapView: UIViewRepresentable {
         context.coordinator.webView = webView
 
         if webRoot != nil, let indexURL = PoplurClayWebMap.indexURL {
-            webView.load(URLRequest(url: indexURL))
+            var components = URLComponents(url: indexURL, resolvingAgainstBaseURL: false)
+            let use3D = SettingsStore.shared.use3DMap
+            components?.queryItems = [
+                URLQueryItem(name: "mapMode", value: use3D ? "3d" : "2d"),
+                URLQueryItem(
+                    name: "fallback2d",
+                    value: !use3D && SettingsStore.prefers2DMapForThisDevice ? "1" : "0"
+                )
+            ]
+            webView.load(URLRequest(url: components?.url ?? indexURL))
         } else {
             print("[PoplurClayMapView] ClayMapWeb bundle missing — run poplur-clay-map/scripts/sync-mobile.sh")
         }
@@ -213,6 +222,7 @@ struct PoplurClayMapView: UIViewRepresentable {
                 PostUploadService.shared.nextRadiusMeters = Int(radiusKm * 1000)
             }
             PostUploadService.shared.nextCaption = body["caption"] as? String
+            PostUploadService.shared.nextRequestID = body["requestId"] as? String
 
             var userInfo: [String: Any] = [:]
             if kind == "video" {

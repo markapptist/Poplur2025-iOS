@@ -131,6 +131,9 @@ final class SettingsStore: ObservableObject {
         if defaults.object(forKey: Keys.transitionStylePreference) == nil {
             defaults.set(TransitionStylePreference.twoD.rawValue, forKey: Keys.transitionStylePreference)
         }
+        if defaults.object(forKey: Keys.use3DMap) == nil {
+            defaults.set(!Self.prefers2DMapForThisDevice, forKey: Keys.use3DMap)
+        }
     }
 
     private enum Keys {
@@ -146,6 +149,7 @@ final class SettingsStore: ObservableObject {
         static let radiusUnitPreference = "settings.radiusUnitPreference"
         static let tiltControlEnabled = "settings.tiltControlEnabled"
         static let use3DLoadingScreen = "settings.use3DLoadingScreen"
+        static let use3DMap = "settings.use3DMap"
     }
 
     // MARK: - Video duration limit
@@ -200,6 +204,20 @@ final class SettingsStore: ObservableObject {
             objectWillChange.send()
             defaults.set(newValue, forKey: Keys.use3DLoadingScreen)
         }
+    }
+
+    /// All devices may choose either renderer. Phones with 3 GB RAM or less
+    /// start in 2D to avoid an unusable first map experience.
+    var use3DMap: Bool {
+        get { defaults.object(forKey: Keys.use3DMap) as? Bool ?? !Self.prefers2DMapForThisDevice }
+        set {
+            objectWillChange.send()
+            defaults.set(newValue, forKey: Keys.use3DMap)
+        }
+    }
+
+    static var prefers2DMapForThisDevice: Bool {
+        ProcessInfo.processInfo.physicalMemory <= 3 * 1024 * 1024 * 1024
     }
 
     // MARK: - Language and captions

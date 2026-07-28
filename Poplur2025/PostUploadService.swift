@@ -30,6 +30,10 @@ final class PostUploadService {
     /// before posting. They apply to the next upload only.
     var nextRadiusMeters: Int?
     var nextCaption: String?
+    /// Correlates the web composer's pending UI state with its native upload.
+    /// Native capture flows do not set this, so their existing notifications
+    /// remain unchanged.
+    var nextRequestID: String?
 
     private var pendingCoordinate: CLLocationCoordinate2D?
     private var started = false
@@ -55,22 +59,45 @@ final class PostUploadService {
             guard let image = note.object as? UIImage else { return }
             let radius = self?.takeRadius() ?? 5000
             let caption = self?.takeCaption()
+            let requestID = self?.takeRequestID()
             guard let coordinate = self?.resolveCoordinate() else {
-                Self.report(success: false, message: "No location for this post yet.")
+                Self.report(success: false, message: "No location for this post yet.", requestID: requestID)
                 return
             }
-            Task { await self?.upload(image: image, at: coordinate, radiusMeters: radius, caption: caption) }
+            Task { await self?.upload(image: image, at: coordinate, radiusMeters: radius, caption: caption, requestID: requestID) }
         }
 
         center.addObserver(forName: Notification.Name("UploadVideoToCurrentCoordinate"), object: nil, queue: nil) { [weak self] note in
             guard let url = note.object as? URL else { return }
             let radius = self?.takeRadius() ?? 5000
             let caption = self?.takeCaption()
+            let requestID = self?.takeRequestID()
             guard let coordinate = self?.resolveCoordinate() else {
-                Self.report(success: false, message: "No location for this post yet.")
+                Self.report(success: false, message: "No location for this post yet.", requestID: requestID)
                 return
             }
-            Task { await self?.upload(videoURL: url, at: coordinate, radiusMeters: radius, caption: caption) }
+            Task { await self?.upload(videoURL: url, at: coordinate, radiusMeters: radius, caption: caption, requestID: requestID) }
+        }
+
+        // A web-composer post can carry an explicit map coordinate. HomeView is
+        // not mounted while the web home is active, so the service must own this
+        // canonical route instead of relying on HomeView's old observer.
+        center.addObserver(forName: Notification.Name("UploadPostToCoordinate"), object: nil, queue: nil) { [weak self] note in
+            guard let self,
+                  let info = note.userInfo,
+                  let latitude = info["latitude"] as? Double,
+                  let longitude = info["longitude"] as? Double else { return }
+            let coordinate = CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+            let radius = self.takeRadius()
+            let caption = self.takeCaption()
+            let requestID = self.takeRequestID()
+            if let image = info["image"] as? UIImage {
+                Task { await self.upload(image: image, at: coordinate, radiusMeters: radius, caption: caption, requestID: requestID) }
+            } else if let videoURL = info["videoURL"] as? URL {
+                Task { await self.upload(videoURL: videoURL, at: coordinate, radiusMeters: radius, caption: caption, requestID: requestID) }
+            } else {
+                Self.report(success: false, message: "That post had no media to upload.", requestID: requestID)
+            }
         }
     }
 
@@ -86,6 +113,11 @@ final class PostUploadService {
         return nextCaption
     }
 
+    private func takeRequestID() -> String? {
+        defer { nextRequestID = nil }
+        return nextRequestID
+    }
+
     /// The coordinate the flow set, else the device's last known fix. A post
     /// with no location at all is refused rather than filed at (0, 0).
     private func resolveCoordinate() -> CLLocationCoordinate2D? {
@@ -95,9 +127,9 @@ final class PostUploadService {
 
     // MARK: - Upload
 
-    private func upload(image: UIImage, at coordinate: CLLocationCoordinate2D, radiusMeters: Int, caption: String?) async {
+    private func upload(image: UIImage, at coordinate: CLLocationCoordinate2D, radiusMeters: Int, caption: String?, requestID: String?) async {
         guard let data = image.jpegData(compressionQuality: 0.9) else {
-            Self.report(success: false, message: "That photo could not be prepared.")
+            Self.report(success: false, message: "That photo could not be prepared.", requestID: requestID)
             return
         }
         do {
@@ -105,13 +137,13 @@ final class PostUploadService {
             _ = try await reference.putDataAsync(data)
             let mediaURL = try await reference.downloadURL().absoluteString
             try await savePost(mediaURL: mediaURL, posterURL: nil, at: coordinate, radiusMeters: radiusMeters, caption: caption)
-            Self.report(success: true, message: nil)
+            Self.report(success: true, message: nil, requestID: requestID)
         } catch {
-            Self.report(success: false, message: error.localizedDescription)
+            Self.report(success: false, message: error.localizedDescription, requestID: requestID)
         }
     }
 
-    private func upload(videoURL: URL, at coordinate: CLLocationCoordinate2D, radiusMeters: Int, caption: String?) async {
+    private func upload(videoURL: URL, at coordinate: CLLocationCoordinate2D, radiusMeters: Int, caption: String?, requestID: String?) async {
         do {
             let reference = Storage.storage().reference().child("media/\(UUID().uuidString).mp4")
             _ = try await reference.putFileAsync(from: videoURL)
@@ -127,9 +159,9 @@ final class PostUploadService {
             }
 
             try await savePost(mediaURL: mediaURL, posterURL: posterURL, at: coordinate, radiusMeters: radiusMeters, caption: caption)
-            Self.report(success: true, message: nil)
+            Self.report(success: true, message: nil, requestID: requestID)
         } catch {
-            Self.report(success: false, message: error.localizedDescription)
+            Self.report(success: false, message: error.localizedDescription, requestID: requestID)
         }
     }
 
@@ -171,12 +203,15 @@ final class PostUploadService {
     /// `PostUploadSuccess` is already observed by HomeView, which dismisses the
     /// uploading banner. Failures get their own name so a silent drop can never
     /// look like a success again.
-    private static func report(success: Bool, message: String?) {
+    private static func report(success: Bool, message: String?, requestID: String? = nil) {
         DispatchQueue.main.async {
+            var userInfo: [String: Any] = [:]
+            if let message { userInfo["message"] = message }
+            if let requestID { userInfo["requestId"] = requestID }
             NotificationCenter.default.post(
                 name: Notification.Name(success ? "PostUploadSuccess" : "PostUploadFailed"),
                 object: nil,
-                userInfo: message.map { ["message": $0] }
+                userInfo: userInfo.isEmpty ? nil : userInfo
             )
         }
     }

@@ -93,6 +93,25 @@ struct AppSettingsView: View {
                         }
                     }
 
+                    section("MAP") {
+                        card {
+                            iconRow(
+                                icon: "settings_ic_cloud",
+                                title: "3D Poplur Map",
+                                subtitle: settings.use3DMap
+                                    ? "Full clay 3D map"
+                                    : "Faster clay 2D map"
+                            ) {
+                                Toggle("", isOn: Binding(
+                                    get: { settings.use3DMap },
+                                    set: { settings.use3DMap = $0 }
+                                ))
+                                .labelsHidden()
+                                .toggleStyle(SwitchToggleStyle(tint: SC.accent))
+                            }
+                        }
+                    }
+
                     section("SIMULATOR") {
                         card {
                             navRow(icon: "settings_ic_flask", title: "Seed NA (1000)") {

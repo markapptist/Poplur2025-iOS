@@ -1,5 +1,7 @@
 import SwiftUI
 import WebKit
+import CoreLocation
+import Photos
 
 // MARK: - Post-login HOME Web Embed (Phase 3)
 //
@@ -30,7 +32,62 @@ enum PoplurWebHome {
     /// `tabs=1` shows the bottom tab pills; the scheme handler ignores the query
     /// and serves index.html, while App.tsx reads ?view / #view to pick the view.
     static var homeURL: URL? {
-        URL(string: "\(PoplurClayWebMap.scheme)://\(PoplurClayWebMap.host)/index.html?view=home&tabs=1&v=\(PoplurPreloginWeb.buildStamp)")
+        var components = URLComponents()
+        components.scheme = PoplurClayWebMap.scheme
+        components.host = PoplurClayWebMap.host
+        components.path = "/index.html"
+        var queryItems = [
+            URLQueryItem(name: "view", value: "home"),
+            URLQueryItem(name: "tabs", value: "1"),
+            URLQueryItem(name: "v", value: PoplurPreloginWeb.buildStamp)
+        ]
+        queryItems.append(contentsOf: PoplurPermissionRouting.homePrimerQueryItems())
+        components.queryItems = queryItems
+        return components.url
+    }
+}
+
+/// Per-process routing between the signed-out and authenticated permission
+/// primers. A signed-out user answers the approved pre-login cards; that launch
+/// must not immediately show the same cards again while auth hands off to Home.
+/// The handoff marker resets naturally on a cold launch, while each answered
+/// permission persists in UserDefaults so a returning signed-in user receives
+/// Home's custom cards only for genuinely unanswered, still-undecided access.
+enum PoplurPermissionRouting {
+    enum Permission: String {
+        case location
+        case photos
+    }
+
+    private static var preloginHandledThisLaunch = false
+    private static let handledKeyPrefix = "poplur.permissionPrimer.handled."
+
+    static func markPreloginHandledThisLaunch(permission: Permission? = nil) {
+        preloginHandledThisLaunch = true
+        if let permission { markHandled(permission) }
+    }
+
+    static func markHandled(_ permission: Permission) {
+        UserDefaults.standard.set(true, forKey: handledKeyPrefix + permission.rawValue)
+    }
+
+    private static func wasHandled(_ permission: Permission) -> Bool {
+        UserDefaults.standard.bool(forKey: handledKeyPrefix + permission.rawValue)
+    }
+
+    static func homePrimerQueryItems() -> [URLQueryItem] {
+        guard !preloginHandledThisLaunch else { return [] }
+
+        var items: [URLQueryItem] = []
+        if CLLocationManager().authorizationStatus == .notDetermined,
+           !wasHandled(.location) {
+            items.append(URLQueryItem(name: "askLocation", value: "1"))
+        }
+        if PHPhotoLibrary.authorizationStatus(for: .readWrite) == .notDetermined,
+           !wasHandled(.photos) {
+            items.append(URLQueryItem(name: "askPhotos", value: "1"))
+        }
+        return items
     }
 }
 
@@ -130,15 +187,48 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         webView.scrollView.backgroundColor = webView.backgroundColor
     }
 
-    final class Coordinator: NSObject, WKScriptMessageHandler {
+    final class Coordinator: NSObject, WKScriptMessageHandler, CLLocationManagerDelegate {
         let bridge = PoplurClayMapView.Coordinator()
         var onReady: () -> Void
         let onWebEvent: ((String, [String: Any]) -> Void)?
         private var didSignalReady = false
+        private let locationRequester = CLLocationManager()
+        private var locationPermissionRequestInFlight = false
+        private var photoPermissionRequestInFlight = false
+        private var uploadResultObservers: [NSObjectProtocol] = []
 
         init(onReady: @escaping () -> Void, onWebEvent: ((String, [String: Any]) -> Void)? = nil) {
             self.onReady = onReady
             self.onWebEvent = onWebEvent
+            super.init()
+            locationRequester.delegate = self
+            locationRequester.desiredAccuracy = kCLLocationAccuracyHundredMeters
+            uploadResultObservers.append(NotificationCenter.default.addObserver(
+                forName: Notification.Name("PostUploadSuccess"), object: nil, queue: .main
+            ) { [weak self] note in
+                self?.deliverUploadResult(success: true, note: note)
+            })
+            uploadResultObservers.append(NotificationCenter.default.addObserver(
+                forName: Notification.Name("PostUploadFailed"), object: nil, queue: .main
+            ) { [weak self] note in
+                self?.deliverUploadResult(success: false, note: note)
+            })
+        }
+
+        deinit {
+            uploadResultObservers.forEach(NotificationCenter.default.removeObserver)
+        }
+
+        private func deliverUploadResult(success: Bool, note: Notification) {
+            guard let requestID = note.userInfo?["requestId"] as? String,
+                  let webView = bridge.webView else { return }
+            var result: [String: Any] = ["requestId": requestID, "ok": success]
+            if let message = note.userInfo?["message"] as? String { result["error"] = message }
+            guard let data = try? JSONSerialization.data(withJSONObject: result),
+                  let json = String(data: data, encoding: .utf8) else { return }
+            webView.evaluateJavaScript(
+                "window.dispatchEvent(new CustomEvent('poplur-upload-result', { detail: \(json) })); true;"
+            )
         }
 
         func userContentController(
@@ -153,10 +243,39 @@ struct PostLoginHomeWebView: UIViewRepresentable {
             }
             if let body = message.body as? [String: Any],
                let type = body["type"] as? String {
+                if type == "requestLocation" {
+                    // Home posts this only after its custom clay card's Allow.
+                    // Never raise an OS prompt from startup or view mounting.
+                    PoplurPermissionRouting.markHandled(.location)
+                    let status = locationRequester.authorizationStatus
+                    if status == .notDetermined {
+                        guard !locationPermissionRequestInFlight else { return }
+                        locationPermissionRequestInFlight = true
+                        locationRequester.requestWhenInUseAuthorization()
+                    } else if status == .authorizedWhenInUse || status == .authorizedAlways {
+                        locationRequester.requestLocation()
+                    } else {
+                        print("[PostLoginHomeWebView] location status already decided: \(status.rawValue)")
+                    }
+                }
                 if type == "requestCameraRoll", let webView = bridge.webView {
                     // The web roll's Allow → real OS photo permission → recent
                     // photo thumbnails pushed back as data URIs.
+                    PoplurPermissionRouting.markHandled(.photos)
+                    let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+                    if status == .notDetermined {
+                        guard !photoPermissionRequestInFlight else { return }
+                        photoPermissionRequestInFlight = true
+                    }
                     DispatchQueue.main.async { WebCameraRollProvider.push(into: webView) }
+                }
+                if type == "permissionHandled",
+                   let rawPermission = body["permission"] as? String,
+                   let permission = PoplurPermissionRouting.Permission(rawValue: rawPermission) {
+                    // A custom Don't Allow is a complete answer too. Persist it
+                    // without touching the one-shot OS prompt, so a later cold
+                    // authenticated launch does not repeat the primer.
+                    PoplurPermissionRouting.markHandled(permission)
                 }
                 if type == "tabChanged", let webView = bridge.webView {
                     let isCamera = (body["tab"] as? String) == "post"
@@ -169,6 +288,48 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                 }
             }
             bridge.userContentController(userContentController, didReceive: message)
+        }
+
+        func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+            let status = manager.authorizationStatus
+            guard status != .notDetermined else { return }
+            locationPermissionRequestInFlight = false
+            if status == .authorizedWhenInUse || status == .authorizedAlways {
+                manager.requestLocation()
+            } else {
+                print("[PostLoginHomeWebView] location permission not granted: \(status.rawValue)")
+            }
+        }
+
+        func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+            guard let location = locations.last, let webView = bridge.webView else { return }
+            let payload: [String: Any] = [
+                "type": "poplur-location",
+                "latitude": location.coordinate.latitude,
+                "longitude": location.coordinate.longitude,
+                "accuracy": location.horizontalAccuracy
+            ]
+            guard let data = try? JSONSerialization.data(withJSONObject: payload),
+                  let json = String(data: data, encoding: .utf8) else { return }
+            webView.evaluateJavaScript(
+                """
+                (function () {
+                  var location = \(json);
+                  window.__poplurNativeLocation = location;
+                  window.postMessage(location, '*');
+                  window.dispatchEvent(new CustomEvent('poplur-location', { detail: location }));
+                  window.dispatchEvent(new CustomEvent('poplur-native-location', { detail: location }));
+                  var frame = document.querySelector('iframe[title="Poplur clay map"]');
+                  if (frame && frame.contentWindow) frame.contentWindow.postMessage(location, '*');
+                })();
+                true;
+                """
+            )
+        }
+
+        func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+            locationPermissionRequestInFlight = false
+            print("[PostLoginHomeWebView] current-location request failed: \(error.localizedDescription)")
         }
     }
 }

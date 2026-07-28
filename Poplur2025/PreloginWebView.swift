@@ -2,6 +2,8 @@ import SwiftUI
 import WebKit
 import UniformTypeIdentifiers
 import FirebaseAuth
+import CoreLocation
+import Photos
 
 // MARK: - Pre-login Web Embed (Phase 1)
 //
@@ -27,7 +29,7 @@ import FirebaseAuth
 //     "signIn"            → AuthViewModel sign-in  (Phase-3 stub: log, no faked success)
 //     "signUp"            → AuthViewModel sign-up   (Phase-3 stub: log, no faked success)
 //     "requestPermission" → { permission: "camera" | "location", choice }
-//                           (Phase-3 stub: log; real OS prompt lands in Phase 3)
+//                           (`camera` is the legacy web key for camera roll/photos)
 //     "complete"          → flow finished → onComplete() handoff to post-login
 //     "pop"               → haptic tap (auxiliary)
 
@@ -226,6 +228,9 @@ struct PreloginWebView: UIViewRepresentable {
         private let auth: AuthViewModel
         private let onComplete: () -> Void
         private let popHaptic = UIImpactFeedbackGenerator(style: .medium)
+        private let locationRequester = CLLocationManager()
+        private var locationPermissionRequestInFlight = false
+        private var photoPermissionRequestInFlight = false
 
         init(auth: AuthViewModel, onComplete: @escaping () -> Void) {
             self.auth = auth
@@ -313,13 +318,65 @@ struct PreloginWebView: UIViewRepresentable {
                     }
                 }
             case "requestPermission":
-                // Phase-3 stub (unchanged): log only, do NOT fake a grant. The real
-                // OS prompt (AVCaptureDevice / CLLocationManager) lands in Phase 3.
-                let permission = body?["permission"] as? String ?? "<none>"
-                let choice = body?["choice"] as? String ?? "<none>"
-                print("[PreloginWebView] requestPermission bridge received (permission: \(permission), choice: \(choice)) — Phase 3 stub, OS prompt not wired yet")
+                // A permission is asked ONCE, wherever the user first meets it:
+                // signed out, that is here; signed in, the post-login home asks
+                // in the same clay alert. Both fire the real OS prompt, and the
+                // post-login side checks the resulting status before asking, so
+                // answering here means nobody asks again after sign-in.
+                //
+                // This used to be a log-only stub, which is why the pre-login
+                // alerts looked like permission prompts without being them.
+                let permission = body?["permission"] as? String ?? ""
+                let choice = body?["choice"] as? String ?? ""
+                switch permission {
+                case "camera":
+                    // The approved card says "camera roll". The bundled web still
+                    // uses its legacy `camera` bridge key, so map that key to
+                    // Photos — never to AVCaptureDevice.
+                    guard choice == "allow" || choice == "deny" else {
+                        print("[PreloginWebView] ignored unknown camera-roll choice: \(choice)")
+                        return
+                    }
+                    PoplurPermissionRouting.markPreloginHandledThisLaunch(permission: .photos)
+                    guard choice == "allow" else {
+                        print("[PreloginWebView] camera roll declined in-app — OS prompt not shown")
+                        return
+                    }
+                    let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+                    guard status == .notDetermined else {
+                        print("[PreloginWebView] camera-roll status already decided: \(status.rawValue)")
+                        return
+                    }
+                    guard !photoPermissionRequestInFlight else { return }
+                    photoPermissionRequestInFlight = true
+                    PHPhotoLibrary.requestAuthorization(for: .readWrite) { status in
+                        print("[PreloginWebView] camera-roll permission status: \(status.rawValue)")
+                    }
+                case "location":
+                    guard choice == "location-once"
+                            || choice == "location-allow"
+                            || choice == "location-deny" else {
+                        print("[PreloginWebView] ignored unknown location choice: \(choice)")
+                        return
+                    }
+                    PoplurPermissionRouting.markPreloginHandledThisLaunch(permission: .location)
+                    guard choice != "location-deny" else {
+                        print("[PreloginWebView] location declined in-app — OS prompt not shown")
+                        return
+                    }
+                    guard locationRequester.authorizationStatus == .notDetermined else {
+                        print("[PreloginWebView] location status already decided: \(locationRequester.authorizationStatus.rawValue)")
+                        return
+                    }
+                    guard !locationPermissionRequestInFlight else { return }
+                    locationPermissionRequestInFlight = true
+                    locationRequester.requestWhenInUseAuthorization()
+                default:
+                    print("[PreloginWebView] unhandled permission: \(permission)")
+                }
             case "complete":
                 // Flow finished → hand off to the existing post-login path.
+                PoplurPermissionRouting.markPreloginHandledThisLaunch()
                 onComplete()
             default:
                 print("[PreloginWebView] unhandled bridge action: \(action)")
