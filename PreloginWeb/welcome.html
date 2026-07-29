@@ -1,10 +1,10 @@
-<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,interactive-widget=resizes-content"><style>:root{color-scheme:dark}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}</style></head><body>
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,interactive-widget=overlays-content"><style>:root{color-scheme:dark}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}</style></head><body>
 <title>Poplur &#8212; Welcome</title>
 <!-- Canonical Claude artifact 4d731082, adapted only to remove artifact/phone chrome inside Good Copy. -->
 <style>
   html, body { background: #ff2d96 !important; }
-  html, body, .stage { width: 100%; height: 100%; min-height: 100%; overflow: hidden; }
-  .phoneWrap { position: fixed !important; inset: 0 !important; width: 100vw !important; height: 100vh !important; transform: none !important; }
+  html, body, .stage { width: 100%; height: var(--poplur-layout-height, 100%); min-height: var(--poplur-layout-height, 100%); overflow: hidden; }
+  .phoneWrap { position: fixed !important; inset: 0 !important; width: 100vw !important; height: var(--poplur-layout-height, 100vh) !important; transform: none !important; }
   .phone { width: 100% !important; height: 100% !important; }
   .phone { border-radius: 0 !important; box-shadow: none !important; background: transparent !important; }
   .worldDots { display: none !important; }
@@ -377,6 +377,8 @@
   /* Inside a stack, everything flows — absolute positioning is neutralized so
      elements can never overlap regardless of screen size. */
   .formStack .field, .formStack .cap-btn, .formStack .authLink { position: static; transform: none; }
+  .formStack > * { flex-shrink: 0; }
+  .formStack .field { min-height: 54px; }
   .formStack .acctCard { position: relative; left: auto; top: auto; transform: none; }
   .formStack .authLink { margin-top: 2px; }
   .formStack .acctCard { flex: 0 0 auto; }
@@ -703,11 +705,31 @@
       pop: function () { return post({ action: 'pop' }); }
     };
   })();
+  let stableViewportWidth = innerWidth
+  let stableViewportHeight = innerHeight
+  const keyboardEditorIsFocused = () => {
+    const active = document.activeElement
+    return active instanceof HTMLInputElement
+      || active instanceof HTMLTextAreaElement
+      || active instanceof HTMLSelectElement
+  }
   const fit = () => {
-    const s = Math.min(1, (innerHeight - 76) / 932, (innerWidth - 20) / 430)
+    const widthIsStable = Math.abs(innerWidth - stableViewportWidth) < 3
+    const keyboardResize = keyboardEditorIsFocused()
+      && widthIsStable
+      && innerHeight < stableViewportHeight - 80
+    if (!keyboardResize) {
+      stableViewportWidth = innerWidth
+      stableViewportHeight = innerHeight
+    }
+    window.__poplurKeyboardResize = keyboardResize
+    window.__poplurLayoutHeight = stableViewportHeight
+    document.documentElement.style.setProperty('--poplur-layout-height', stableViewportHeight + 'px')
+    const s = Math.min(1, (stableViewportHeight - 76) / 932, (innerWidth - 20) / 430)
     document.querySelector('.phoneWrap').style.transform = 'scale(' + s + ')'
   }
   addEventListener('resize', fit); addEventListener('load', fit)
+  addEventListener('focusout', function () { setTimeout(fit, 360) })
   fit(); setTimeout(fit, 60); setTimeout(fit, 400)
 
   ;(() => {
@@ -1013,7 +1035,7 @@
     var logoWrap = document.querySelector('.wLogoWrap')
     var btnsEl = document.querySelector('.btns')
     function computeLayout() {
-      var H = innerHeight
+      var H = window.__poplurLayoutHeight || innerHeight
       var short = H <= 760
       var logoB = logoWrap.getBoundingClientRect().bottom
       var cubeH = 184 * (short ? 0.56 : 0.72)
@@ -1035,7 +1057,11 @@
     window.__poplurComputeLayout = computeLayout
     computeLayout()
     var layoutTimer
-    addEventListener('resize', function () { clearTimeout(layoutTimer); layoutTimer = setTimeout(computeLayout, 120) })
+    addEventListener('resize', function () {
+      if (window.__poplurKeyboardResize) return
+      clearTimeout(layoutTimer)
+      layoutTimer = setTimeout(computeLayout, 120)
+    })
     setInterval(function () {
       aiIndex = (aiIndex + 1) % aiLines.length
       aiText.classList.remove('on')
