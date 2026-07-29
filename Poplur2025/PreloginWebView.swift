@@ -320,12 +320,13 @@ struct PreloginWebView: UIViewRepresentable {
             case "requestPermission":
                 // A permission is asked ONCE, wherever the user first meets it:
                 // signed out, that is here; signed in, the post-login home asks
-                // in the same clay alert. Both fire the real OS prompt, and the
-                // post-login side checks the resulting status before asking, so
-                // answering here means nobody asks again after sign-in.
+                // in the same clay alert. The answer is recorded here so the
+                // primer does not repeat; the system prompt is deferred until
+                // the user invokes the feature that needs that capability.
                 //
-                // This used to be a log-only stub, which is why the pre-login
-                // alerts looked like permission prompts without being them.
+                // The approved clay card is the only startup permission UI. Do
+                // not stack Apple's system alert on top of it; a real OS ask is
+                // reserved for the feature that actually needs the capability.
                 let permission = body?["permission"] as? String ?? ""
                 let choice = body?["choice"] as? String ?? ""
                 switch permission {
@@ -342,16 +343,7 @@ struct PreloginWebView: UIViewRepresentable {
                         print("[PreloginWebView] camera roll declined in-app — OS prompt not shown")
                         return
                     }
-                    let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
-                    guard status == .notDetermined else {
-                        print("[PreloginWebView] camera-roll status already decided: \(status.rawValue)")
-                        return
-                    }
-                    guard !photoPermissionRequestInFlight else { return }
-                    photoPermissionRequestInFlight = true
-                    PHPhotoLibrary.requestAuthorization(for: .readWrite) { status in
-                        print("[PreloginWebView] camera-roll permission status: \(status.rawValue)")
-                    }
+                    print("[PreloginWebView] camera-roll accepted in-app — system prompt deferred until Camera Roll is used")
                 case "location":
                     guard choice == "location-once"
                             || choice == "location-allow"
@@ -364,13 +356,7 @@ struct PreloginWebView: UIViewRepresentable {
                         print("[PreloginWebView] location declined in-app — OS prompt not shown")
                         return
                     }
-                    guard locationRequester.authorizationStatus == .notDetermined else {
-                        print("[PreloginWebView] location status already decided: \(locationRequester.authorizationStatus.rawValue)")
-                        return
-                    }
-                    guard !locationPermissionRequestInFlight else { return }
-                    locationPermissionRequestInFlight = true
-                    locationRequester.requestWhenInUseAuthorization()
+                    print("[PreloginWebView] location accepted in-app — system prompt deferred until a location feature is used")
                 default:
                     print("[PreloginWebView] unhandled permission: \(permission)")
                 }

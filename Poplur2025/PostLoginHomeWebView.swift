@@ -244,30 +244,29 @@ struct PostLoginHomeWebView: UIViewRepresentable {
             if let body = message.body as? [String: Any],
                let type = body["type"] as? String {
                 if type == "requestLocation" {
-                    // Home posts this only after its custom clay card's Allow.
-                    // Never raise an OS prompt from startup or view mounting.
+                    // Home posts this after its custom clay card's Allow. The
+                    // primer must not raise Apple's system prompt; use an
+                    // already-granted capability if one exists and defer the
+                    // real ask until a location feature is invoked.
                     PoplurPermissionRouting.markHandled(.location)
                     let status = locationRequester.authorizationStatus
-                    if status == .notDetermined {
-                        guard !locationPermissionRequestInFlight else { return }
-                        locationPermissionRequestInFlight = true
-                        locationRequester.requestWhenInUseAuthorization()
-                    } else if status == .authorizedWhenInUse || status == .authorizedAlways {
+                    if status == .authorizedWhenInUse || status == .authorizedAlways {
                         locationRequester.requestLocation()
                     } else {
-                        print("[PostLoginHomeWebView] location status already decided: \(status.rawValue)")
+                        print("[PostLoginHomeWebView] location primer accepted in-app; system prompt deferred (status: \(status.rawValue))")
                     }
                 }
                 if type == "requestCameraRoll", let webView = bridge.webView {
-                    // The web roll's Allow → real OS photo permission → recent
-                    // photo thumbnails pushed back as data URIs.
+                    // The web roll's primer Allow is not an OS permission ask.
+                    // Show existing authorized photos; the actual Camera Roll
+                    // action owns any later system request.
                     PoplurPermissionRouting.markHandled(.photos)
                     let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
-                    if status == .notDetermined {
-                        guard !photoPermissionRequestInFlight else { return }
-                        photoPermissionRequestInFlight = true
+                    guard status == .authorized || status == .limited else {
+                        print("[PostLoginHomeWebView] photo primer accepted in-app; system prompt deferred (status: \(status.rawValue))")
+                        return
                     }
-                    DispatchQueue.main.async { WebCameraRollProvider.push(into: webView) }
+                    DispatchQueue.main.async { WebCameraRollProvider.pushAuthorized(into: webView) }
                 }
                 if type == "permissionHandled",
                    let rawPermission = body["permission"] as? String,

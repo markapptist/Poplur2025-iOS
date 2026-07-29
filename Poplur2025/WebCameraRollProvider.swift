@@ -34,6 +34,17 @@ enum WebCameraRollProvider {
         }
     }
 
+    /// Deliver only when Photos is already authorized. The startup clay primer
+    /// uses this path so it never summons an Apple permission sheet.
+    static func pushAuthorized(into webView: WKWebView) {
+        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        guard status == .authorized || status == .limited else {
+            deliverDenied(into: webView)
+            return
+        }
+        fetchAndDeliver(into: webView)
+    }
+
     private static func fetchAndDeliver(into webView: WKWebView) {
         DispatchQueue.global(qos: .userInitiated).async {
             let options = PHFetchOptions()
