@@ -310,6 +310,11 @@ struct Poplur2025App: App {
                         // ML camera mounted behind it on the camera tab (Phase 3.5).
                         PostLoginHomeSurface(onReady: markAuthenticatedHomeReady)
                             .ignoresSafeArea()
+                            // The approved splash is visually non-interactive, so
+                            // block touches at the warmed Home surface too. Without
+                            // this guard, a splash tap can pass through and unlock
+                            // Feed audio underneath, exposing system media controls.
+                            .allowsHitTesting(!showAuthTransition)
                     } else {
                         HomeView()
                             .environmentObject(auth)

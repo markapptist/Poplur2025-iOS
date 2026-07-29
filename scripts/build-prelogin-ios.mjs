@@ -141,13 +141,18 @@ function cleanWelcome(html) {
   // 6a. Keyboard hardening (BUG-1). The pre-login is a fixed full-screen layout;
   //     when a field is focused iOS both (a) auto-zooms into sub-16px inputs and
   //     (b) scrolls the layout up to clear the keyboard — both displace the UI.
-  //     `interactive-widget=resizes-content` makes the visual viewport resize
-  //     under the keyboard instead of shifting the layout, and maximum-scale=1 /
-  //     user-scalable=no disable the focus auto-zoom. Native additionally clamps
-  //     the scrollView offset to zero, so the header/logo never fly off-screen.
+  //     `interactive-widget=overlays-content` leaves the approved layout viewport
+  //     at its pre-keyboard height instead of squeezing the form. The canonical
+  //     screen also freezes height-only focused-input resizes; maximum-scale=1 /
+  //     user-scalable=no disable focus auto-zoom. Native additionally clamps the
+  //     scrollView offset to zero, so the header/logo never flies off-screen.
   out = out.replace(
     'content="width=device-width,initial-scale=1"',
-    'content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,interactive-widget=resizes-content"'
+    'content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,interactive-widget=overlays-content"'
+  );
+  out = out.replace(
+    'interactive-widget=resizes-content',
+    'interactive-widget=overlays-content',
   );
 
   // 7. WebGL/GPU-less hardening. The hero cube (and the account-icon icons) build
@@ -261,7 +266,7 @@ if (!POPLUR_WEBGL_OK) {
   //    action set to the host. iOS: window.webkit.messageHandlers.poplur; Android
   //    parity: PoplurNative.onAction(action, payloadJson). No network ref.
   out = out.replace(
-    "<script>\n  const fit = () => {",
+    "<script>\n  let stableViewportWidth = innerWidth",
     `<script>
   // ── Native bridge (Phase-2 web-embed) ──────────────────────────────────────
   // Defined action set (identical on iOS + Android):
@@ -297,7 +302,7 @@ if (!POPLUR_WEBGL_OK) {
       pop: function () { return post({ action: 'pop' }); }
     };
   })();
-  const fit = () => {`
+  let stableViewportWidth = innerWidth`
   );
 
   // 9a. Sign-in (password) → post {email, password} to REAL native Firebase auth.
@@ -389,22 +394,10 @@ if (!POPLUR_WEBGL_OK) {
 // resolve against the local scheme handler and warm the models for the welcome
 // hero cube + Choose-Account icons. Nothing to strip — kept verbatim.
 function cleanSplash(html) {
-  // Android WebView briefly paints a native video placeholder (a white card
-  // with a play triangle) while the clay clip is still decoding. That is not
-  // part of the approved splash and is especially visible on the A03. Keep
-  // the barber-pole loader and dark surface visible until the first real video
-  // frame is ready; if decoding fails, the loader remains the only surface.
-  return html
-    .replace(
-      "</style>",
-      "video:not(.ready) { visibility: hidden !important; }\n  </style>",
-    )
-    .replace(
-      '    const video = document.querySelector("video");',
-      '    const video = document.querySelector("video");\n' +
-        '    video?.addEventListener("canplay", () => video.classList.add("ready"), { once: true });\n' +
-        '    video?.addEventListener("error", () => video.classList.remove("ready"));',
-    );
+  // The canonical splash owns first-painted-frame gating and explicitly disables
+  // native/PiP/remote controls. Keep this transform idempotent so generated
+  // targets never reintroduce the old canplay-only placeholder race.
+  return html;
 }
 
 // ---- run --------------------------------------------------------------------
