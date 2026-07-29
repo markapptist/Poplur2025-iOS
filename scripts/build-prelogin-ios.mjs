@@ -150,15 +150,11 @@ function cleanWelcome(html) {
     'content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,interactive-widget=resizes-content"'
   );
 
-  // 7. WebGL/GPU-less hardening. The hero cube (and the account-icon icons) build
-  //    a THREE.WebGLRenderer. On a software-GPU simulator or a context-starved
-  //    device, WebGL is unavailable and the constructor THROWS — and on WKWebView
-  //    an uncaught error blanks the ENTIRE web view (the reported black screen).
-  //    Detect WebGL once up front; if it is missing, skip every three.js renderer
-  //    and fire the intro-ready hook so the choreography still reveals the copy on
-  //    schedule (there is no CSS cube — the source says so — the stage just stays
-  //    empty, which is the approved GPU-less render). Also wrap each renderer
-  //    construction in try/catch as a belt-and-suspenders guard.
+  // 7. WebGL hardening. Account previews may be skipped on a GPU-less device,
+  //    but the approved login cube must never be replaced by the old generic
+  //    clay_cube.png fallback. The canonical source owns a recovery watchdog
+  //    that remounts the exact login GLB on constructor, load, or context-loss
+  //    failure until the device can provide a context.
   // 6b. Draco decoder wiring — IDEMPOTENT. The bundled models are Draco-compressed
   //     (KHR_draco_mesh_compression), so the GLTFLoader needs a DRACOLoader + the
   //     wasm decoder (bundled offline by ASSETS at libs/draco/). The approved Good
@@ -190,28 +186,16 @@ loader.setDRACOLoader(__poplurDraco);`
     "const loader = new GLTFLoader();",
     `const loader = new GLTFLoader();
 
-// Bundled-build hardening: WebGL may be unavailable (software-GPU simulator or a
-// context-starved device). Constructing THREE.WebGLRenderer would throw, and an
-// uncaught error blanks the whole WKWebView. Detect once; if missing, skip the
-// three.js cube entirely and reveal the intro on schedule (no CSS cube exists —
-// the stage stays empty, the approved GPU-less render).
+// Bundled-build hardening for one-shot account previews. The hero login cube
+// deliberately does not use this one-time decision: its canonical recovery
+// watchdog replaces the canvas and retries the real GLB when WebGL returns.
 const POPLUR_WEBGL_OK = (function () {
   try {
     var c = document.createElement('canvas');
     return !!(window.WebGLRenderingContext &&
       (c.getContext('webgl2') || c.getContext('webgl') || c.getContext('experimental-webgl')));
   } catch (e) { return false; }
-})();
-if (!POPLUR_WEBGL_OK) {
-  // Phase-2 2D cube fallback: no WebGL, so swap the (hidden) GL cube canvas for
-  // the bundled static clay_cube.png. The .flat class reveals #cubeFlat; the
-  // stage still runs its rise/shrink choreography, just with a flat cube.
-  try {
-    var __flatStage = document.getElementById('lcubeStage');
-    if (__flatStage) __flatStage.classList.add('flat');
-  } catch (e) {}
-  if (window.__poplurCubeGLReady) { try { window.__poplurCubeGLReady(); } catch (e) {} }
-}`
+})();`
   );
 
   // 7a. Only run the account-icon renderers when WebGL is present.
@@ -224,36 +208,6 @@ if (!POPLUR_WEBGL_OK) {
   out = out.replace(
     '  const renderer = new THREE.WebGLRenderer({canvas, alpha:true, antialias:true, powerPreference:"low-power", preserveDrawingBuffer:true});',
     '  let renderer; try { renderer = new THREE.WebGLRenderer({canvas, alpha:true, antialias:true, powerPreference:"low-power", preserveDrawingBuffer:true}); } catch (e) { canvas.closest(".account-3d-icon")?.classList.add("model-error"); return; }'
-  );
-
-  // 7c. Skip the hero-cube renderer when WebGL is absent.
-  out = out.replace(
-    "  if (!stage || !canvas) return;",
-    "  if (!stage || !canvas || !POPLUR_WEBGL_OK) return;"
-  );
-
-  // 7d. Non-fatal hero-cube renderer construction — fall back to the (empty)
-  //     stage and still fire the intro-ready hook instead of throwing.
-  out = out.replace(
-    "  const renderer = new THREE.WebGLRenderer({canvas, alpha:true, antialias:true});",
-    "  let renderer; try { renderer = new THREE.WebGLRenderer({canvas, alpha:true, antialias:true}); } catch (e) { if (window.__poplurCubeGLReady) { try { window.__poplurCubeGLReady(); } catch (e2) {} } return; }"
-  );
-
-  // 8. 2D cube fallback element. When WebGL is unavailable the GL cube canvas
-  //    (#cubeGL) never gets its `.gl` display:block, so nothing renders. Add a
-  //    bundled static clay cube image that the `.flat` class (set in the
-  //    WebGL-detect branch above) reveals in its place. No new network ref —
-  //    clay_cube.png is mirrored into the bundle by ASSETS.
-  out = out.replace(
-    '    <canvas id="cubeGL" aria-hidden="true"></canvas>',
-    '    <canvas id="cubeGL" aria-hidden="true"></canvas>\n    <img id="cubeFlat" src="/poplur-clay-map/public/clay_cube.png" alt="" aria-hidden="true">'
-  );
-  out = out.replace(
-    "  .cubeStage.gl #cubeGL { display: block; }",
-    "  .cubeStage.gl #cubeGL { display: block; }\n" +
-    "  /* Phase-2 2D cube fallback (no WebGL): static clay cube in place of the GL canvas. */\n" +
-    "  #cubeFlat { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: none; pointer-events: none; filter: drop-shadow(0 8px 16px rgba(90,20,60,.34)); }\n" +
-    "  .cubeStage.flat #cubeFlat { display: block; }"
   );
 
   // 9. Native bridge (Phase-2 web-embed). Define window.poplurBridge before any
