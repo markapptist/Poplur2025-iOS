@@ -12,7 +12,7 @@ import AVFoundation
 //
 //   web → native:  { type: "tabChanged", tab }        mount/unmount this layer
 //                  { type: "cameraShutter" }          cube tap = capture (as before)
-//                  { type: "cameraControl", control } "flash" | "flip"
+//                  { type: "cameraControl", control } "flash" | "flip" | "record"
 //
 // The web side punches the hole via html.camera-live (see poplur-clay-map
 // Camera.tsx / index.css); browser + Android keep the spoofed feed.
@@ -53,6 +53,31 @@ final class WebHomeCameraModel: ObservableObject {
             switch control {
             case "flash": controllerStorage?.toggleFlash()
             case "flip":  controllerStorage?.flipCamera()
+            case "record":
+                let controller = resolveController()
+                if controller.isRecording {
+                    controller.endRecording()
+                } else {
+                    controller.beginRecording()
+                }
+            case "detect":
+                // ML detection ships on — activateCamera turns it on every time
+                // the camera tab opens — but the DETECT toggle lives in the web
+                // hold menu and had no way to reach the native detector, so
+                // turning it off did nothing on a device. `on` is optional so a
+                // plain toggle still works.
+                let controller = resolveController()
+                let wantsOn = (body["on"] as? Bool) ?? (controller.mlDetectionManager == nil)
+                if wantsOn {
+                    controller.enableMLDetection()
+                    controller.mlDetectionManager?.onFrameProcessed = { [weak self] pixelBuffer, objects in
+                        CameraAIAnnouncer.shared.announceMLObjects(objects)
+                        self?.recognitionManager?.processDetectedObjects(objects, from: pixelBuffer)
+                    }
+                } else {
+                    controller.disableMLDetection()
+                }
+                UserDefaults.standard.set(wantsOn, forKey: "CameraObjectDetectionEnabled")
             default: break
             }
         case "holdMenuNavigate":
@@ -127,6 +152,24 @@ struct WebHomeCameraLayer: View {
             if let recognitionManager = model.recognitionManager {
                 RecognizedFaceBoxOverlay(recognitionManager: recognitionManager)
                     .allowsHitTesting(false)
+
+                if let user = recognitionManager.recognizedUser, user.isRecent {
+                    Text("@\(user.profile.username)")
+                        .font(.system(size: 18, weight: .black, design: .monospaced))
+                        .tracking(2)
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [.white, .cyan, .white],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .poplurTextShader(intensity: 1.0)
+                        .shadow(color: .cyan.opacity(0.75), radius: 9)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                        .padding(.top, 80)
+                        .allowsHitTesting(false)
+                }
             }
             MLCameraShaderOverlay(isEnabled: true)
                 .allowsHitTesting(false)
