@@ -171,7 +171,7 @@ const groups = {
       { id: 'camera-create', title: 'Create', detail: 'OpenCreatorRequested', icon: H.create, render: () => creatorScreen() },
       { id: 'camera-preview', title: 'Preview', detail: 'CapturePreviewOverlay', icon: H.tvGuide, render: () => cameraPreview() },
       { id: 'camera-live', title: 'Live', detail: 'LiveVideoStatusBadge', icon: H.tvGuide, render: () => cameraLive() },
-      { id: 'camera-chat', title: 'Chat', detail: 'OpenDMsRequested', icon: H.chat, render: () => messagesScreen('Camera') },
+      { id: 'camera-chat', title: 'Chat', detail: 'Direct messages', icon: H.chat, render: () => messagesScreen('Camera') },
       { id: 'camera-store', title: 'Store', detail: 'OpenPoplurStoreRequested', icon: H.store, render: () => storeScreen() },
     ],
   },
@@ -183,14 +183,14 @@ const groups = {
       { id: 'map-tour', title: 'Tour', detail: 'PoplurAISetTourActive', icon: H.tour, render: () => mapTour() },
       { id: 'map-search', title: 'Search', detail: 'PoplurMapSearchOverlay', icon: H.locate, render: () => mapSearch() },
       { id: 'map-claims', title: 'Claims', detail: 'Dominance and radius pins', icon: H.stats, render: () => mapClaims() },
-      { id: 'map-chat', title: 'Chat', detail: 'OpenDMsRequested', icon: H.chat, render: () => messagesScreen('Map') },
+      { id: 'map-chat', title: 'Chat', detail: 'Direct messages', icon: H.chat, render: () => messagesScreen('Map') },
     ],
   },
   profile: {
     label: 'Profile',
     screens: [
       { id: 'profile-messages', title: 'Messages', detail: 'MessagesRootView', icon: H.chat, render: () => messagesScreen('Profile') },
-      { id: 'profile-settings', title: 'Settings', detail: 'AppSettingsView', icon: H.settings, render: () => settingsScreen() },
+      { id: 'profile-settings', title: 'Settings', detail: 'App settings', icon: H.settings, render: () => settingsScreen() },
       { id: 'profile-stats', title: 'Stats', detail: 'ProfileStatsView', icon: H.stats, render: () => statsScreen() },
       { id: 'profile-alerts', title: 'Notifications', detail: 'ProfileNotificationBanner', icon: H.notifications, render: () => notificationsScreen() },
       { id: 'profile-store', title: 'Store', detail: 'RadiusStoreView', icon: H.store, render: () => storeScreen() },
@@ -1375,7 +1375,7 @@ function messagesScreen(from) {
     <div class="ios-screen messages profile-scroll-page">
       <div class="message-top">
         <img src="${H.chat}" alt="">
-        <div><h1>Chats</h1><span style="color:#777;font-weight:800">${esc(from)} route · OpenDMsRequested</span></div>
+        <div><h1>Chats</h1><span style="color:#777;font-weight:800">${esc(from)} · direct messages</span></div>
       </div>
       <div class="message-list">
         ${profileMailThreads.map(item => thread(item)).join('')}
@@ -1622,7 +1622,7 @@ function settingsScreen() {
 
   return `
     <div class="ios-screen settings-page profile-scroll-page">
-      <div class="settings-hero"><img src="${H.settings}" alt=""><div><h1>Settings</h1><span style="color:var(--subtle);font-weight:800">AppSettingsView</span></div></div>
+      <div class="settings-hero"><img src="${H.settings}" alt=""><div><h1>Settings</h1><span style="color:var(--subtle);font-weight:800">App settings</span></div></div>
       <div class="translation-card">
         <div>
           <strong>Translate captions to</strong>
