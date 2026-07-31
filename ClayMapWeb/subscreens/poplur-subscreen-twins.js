@@ -207,6 +207,136 @@ let phoneColorIndex = 0;
 let phoneMenuScreen = 'main';
 let phoneMenuIndex = 0;
 let phoneMode = 'menu';
+let profileMailThread = null;
+let profileStoreProduct = null;
+let profileStoreNotice = '';
+let profileCartCount = 0;
+let profileStat = null;
+let profileSettingsPanel = null;
+let profileSettingsNotice = '';
+
+const profileMailThreads = [
+  {
+    id: 'chat-a31f62',
+    initials: 'AL',
+    title: 'Chat a31f62',
+    preview: 'No messages yet',
+    unread: 2,
+    messages: [
+      { from: 'them', text: 'Hey — are you around the radius tonight?' },
+      { from: 'me', text: 'Yes. Send me the channel when it goes live.' },
+    ],
+  },
+  {
+    id: 'vi-xi-mmvi',
+    initials: 'VI',
+    title: 'vi.xi.mmvi',
+    preview: 'this is live right now',
+    unread: 0,
+    messages: [
+      { from: 'them', text: 'this is live right now' },
+      { from: 'me', text: 'I see it on channel 101.' },
+    ],
+  },
+  {
+    id: 'poplur-phone',
+    initials: 'PO',
+    title: 'Poplur Phone',
+    preview: 'Ready for a video call',
+    unread: 1,
+    messages: [
+      { from: 'them', text: 'Your Poplur Phone is ready for a video call.' },
+    ],
+  },
+  {
+    id: 'ai-host',
+    initials: 'AI',
+    title: 'AI host',
+    preview: 'Yonge-Dundas Square is popping',
+    unread: 0,
+    messages: [
+      { from: 'them', text: 'Yonge-Dundas Square is popping. Want a quick tour?' },
+    ],
+  },
+];
+
+const profileStoreProducts = [
+  {
+    id: 'world-card',
+    img: A.storeCard,
+    title: 'Poplur World Card',
+    price: '$24.99',
+    description: 'A clay World Service card for sharing your Poplur identity anywhere.',
+  },
+  {
+    id: 'cube-v2',
+    img: A.storeCube,
+    title: 'Poplur Cube V2',
+    price: '$39.99',
+    description: 'A tactile Poplur cube with the familiar camera and navigation faces.',
+  },
+  {
+    id: 'radius-5',
+    img: A.store5,
+    title: '5km Radius Boost',
+    price: '$4.99',
+    description: 'Extend one post by five kilometres and keep the local signal moving.',
+  },
+  {
+    id: 'radius-25',
+    img: A.store25,
+    title: '25km Radius Boost',
+    price: '$19.99',
+    description: 'A wider radius boost for launches, live events, and major moments.',
+  },
+];
+
+const profileStats = [
+  {
+    id: 'posts',
+    img: A.statsPosts,
+    value: '128',
+    label: 'Total Posts',
+    delta: '+18 this month',
+    description: 'Your publishing pace is above your recent four-week average.',
+    points: [34, 52, 46, 68, 74, 88, 96],
+  },
+  {
+    id: 'reach',
+    img: A.statsGoal,
+    value: '41.8 km',
+    label: 'Radius Reach',
+    delta: '+4.2 km today',
+    description: 'Harbourfront and downtown posts are extending your active radius.',
+    points: [28, 38, 51, 44, 63, 72, 84],
+  },
+  {
+    id: 'speed',
+    img: A.statsOrbit,
+    value: '8x',
+    label: 'Trending Speed',
+    delta: 'Top 12% nearby',
+    description: 'Your latest post is spreading eight times faster than your baseline.',
+    points: [18, 26, 44, 39, 58, 78, 92],
+  },
+  {
+    id: 'streak',
+    img: H.create,
+    value: '12',
+    label: 'Creator Streak',
+    delta: '12 days',
+    description: 'Keep posting daily to reach the next creator streak milestone.',
+    points: [22, 31, 42, 54, 66, 78, 90],
+  },
+];
+
+const profileSettingState = {
+  videoDuration: '10s',
+  captions: true,
+  notifications: true,
+  tvGuide: true,
+  language: 'English',
+};
 
 const params = new URLSearchParams(window.location.search);
 const embeddedScreen = params.get('embed');
@@ -334,6 +464,117 @@ screenEl.addEventListener('change', e => {
 });
 
 screenEl.addEventListener('click', e => {
+  const mailThread = e.target.closest('[data-mail-thread]');
+  if (mailThread) {
+    profileMailThread = mailThread.dataset.mailThread;
+    const threadItem = profileMailThreads.find(item => item.id === profileMailThread);
+    if (threadItem) threadItem.unread = 0;
+    renderScreen();
+    return;
+  }
+
+  if (e.target.closest('[data-mail-back]')) {
+    profileMailThread = null;
+    renderScreen();
+    return;
+  }
+
+  const storeProduct = e.target.closest('[data-store-product]');
+  if (storeProduct) {
+    profileStoreProduct = storeProduct.dataset.storeProduct;
+    profileStoreNotice = '';
+    renderScreen();
+    return;
+  }
+
+  if (e.target.closest('[data-store-back]')) {
+    profileStoreProduct = null;
+    profileStoreNotice = '';
+    renderScreen();
+    return;
+  }
+
+  const storeAction = e.target.closest('[data-store-action]');
+  if (storeAction) {
+    if (storeAction.dataset.storeAction === 'add') {
+      const productItem = profileStoreProducts.find(item => item.id === profileStoreProduct);
+      profileCartCount += 1;
+      profileStoreNotice = `${productItem?.title || 'Item'} added to your test cart.`;
+    } else {
+      profileStoreNotice = profileCartCount
+        ? `Test checkout is ready with ${profileCartCount} item${profileCartCount === 1 ? '' : 's'}.`
+        : 'Choose a product before opening the test checkout.';
+    }
+    renderScreen();
+    return;
+  }
+
+  const statCard = e.target.closest('[data-stat-key]');
+  if (statCard) {
+    profileStat = statCard.dataset.statKey;
+    renderScreen();
+    return;
+  }
+
+  if (e.target.closest('[data-stat-back]')) {
+    profileStat = null;
+    renderScreen();
+    return;
+  }
+
+  const settingToggle = e.target.closest('[data-setting-toggle]');
+  if (settingToggle) {
+    const key = settingToggle.dataset.settingToggle;
+    if (key in profileSettingState) profileSettingState[key] = !profileSettingState[key];
+    renderScreen();
+    return;
+  }
+
+  const settingLanguage = e.target.closest('[data-setting-language]');
+  if (settingLanguage) {
+    profileSettingState.language = settingLanguage.dataset.settingLanguage;
+    profileSettingsNotice = `Captions will translate to ${profileSettingState.language}.`;
+    renderScreen();
+    return;
+  }
+
+  const settingPanel = e.target.closest('[data-setting-panel]');
+  if (settingPanel) {
+    profileSettingsPanel = settingPanel.dataset.settingPanel;
+    profileSettingsNotice = '';
+    renderScreen();
+    return;
+  }
+
+  if (e.target.closest('[data-setting-back]')) {
+    profileSettingsPanel = null;
+    profileSettingsNotice = '';
+    renderScreen();
+    return;
+  }
+
+  const settingChoice = e.target.closest('[data-setting-choice]');
+  if (settingChoice) {
+    const key = settingChoice.dataset.settingChoice;
+    if (key in profileSettingState) profileSettingState[key] = settingChoice.dataset.settingValue;
+    profileSettingsNotice = `Video duration changed to ${profileSettingState.videoDuration}.`;
+    renderScreen();
+    return;
+  }
+
+  const settingAction = e.target.closest('[data-setting-action]');
+  if (settingAction) {
+    const messages = {
+      seed: 'Demo content controls opened for this test profile.',
+      repair: 'User ID repair test completed without changing account data.',
+      backup: 'A test backup is ready to export.',
+      signout: 'Sign-out confirmation works. Account state was preserved for testing.',
+    };
+    profileSettingsNotice = messages[settingAction.dataset.settingAction] || 'This settings route is ready.';
+    renderScreen();
+    return;
+  }
+
   const colorStep = e.target.closest('[data-phone-step]');
   if (colorStep) {
     stepPhoneColor(Number(colorStep.dataset.phoneStep));
@@ -344,6 +585,23 @@ screenEl.addEventListener('click', e => {
   if (key) {
     handlePhoneKey(key.dataset.phoneKey);
   }
+});
+
+screenEl.addEventListener('submit', e => {
+  const form = e.target.closest('[data-mail-compose]');
+  if (!form) return;
+  e.preventDefault();
+
+  const field = form.elements.message;
+  const text = field?.value?.trim();
+  const threadItem = profileMailThreads.find(item => item.id === profileMailThread);
+  if (!text || !threadItem) return;
+
+  threadItem.messages.push({ from: 'me', text });
+  threadItem.preview = text;
+  threadItem.unread = 0;
+  renderScreen();
+  window.setTimeout(() => screenEl.querySelector('[name="message"]')?.focus(), 0);
 });
 
 document.addEventListener('keydown', e => {
@@ -1087,41 +1345,91 @@ function creatorScreen() {
 }
 
 function messagesScreen(from) {
+  const selected = profileMailThreads.find(item => item.id === profileMailThread);
+  if (selected) {
+    return `
+      <div class="ios-screen messages profile-scroll-page">
+        <div class="profile-subscreen-toolbar">
+          <button type="button" class="profile-back" data-mail-back aria-label="Back to messages">‹</button>
+          <div class="avatar">${esc(selected.initials)}</div>
+          <div>
+            <h1>${esc(selected.title)}</h1>
+            <span>Active in your Poplur radius</span>
+          </div>
+        </div>
+        <div class="mail-conversation" aria-live="polite">
+          ${selected.messages.map(message => `
+            <div class="mail-bubble ${message.from === 'me' ? 'mine' : ''}">${esc(message.text)}</div>
+          `).join('')}
+        </div>
+        <form class="mail-compose" data-mail-compose>
+          <label class="sr-only" for="profileMailMessage">Message</label>
+          <input id="profileMailMessage" name="message" autocomplete="off" placeholder="Message ${esc(selected.title)}">
+          <button type="submit" class="profile-action compact">Send</button>
+        </form>
+      </div>
+    `;
+  }
+
   return `
-    <div class="ios-screen messages">
+    <div class="ios-screen messages profile-scroll-page">
       <div class="message-top">
         <img src="${H.chat}" alt="">
         <div><h1>Chats</h1><span style="color:#777;font-weight:800">${esc(from)} route · OpenDMsRequested</span></div>
       </div>
       <div class="message-list">
-        ${thread('AL', 'Chat a31f62', 'No messages yet', 2)}
-        ${thread('VI', 'vi.xi.mmvi', 'this is live right now', 0)}
-        ${thread('PO', 'Poplur Phone', 'Ready for a video call', 1)}
-        ${thread('AI', 'AI host', 'Yonge-Dundas Square is popping', 0)}
+        ${profileMailThreads.map(item => thread(item)).join('')}
       </div>
     </div>
   `;
 }
 
-function thread(initials, title, preview, unread) {
+function thread(item) {
   return `
-    <div class="thread">
-      <div class="avatar">${initials}</div>
-      <div><strong>${esc(title)}</strong><span>${esc(preview)}</span></div>
-      <div class="video-dot">${unread ? unread : '▶'}</div>
-    </div>
+    <button type="button" class="thread thread-button" data-mail-thread="${esc(item.id)}">
+      <div class="avatar">${esc(item.initials)}</div>
+      <div><strong>${esc(item.title)}</strong><span>${esc(item.preview)}</span></div>
+      <div class="video-dot">${item.unread ? item.unread : '›'}</div>
+    </button>
   `;
 }
 
 function storeScreen() {
+  const selected = profileStoreProducts.find(item => item.id === profileStoreProduct);
+  if (selected) {
+    return `
+      <div class="ios-screen store-page profile-scroll-page">
+        <div class="profile-subscreen-toolbar store-toolbar">
+          <button type="button" class="profile-back" data-store-back aria-label="Back to store">‹</button>
+          <div>
+            <h1>Product</h1>
+            <span>Poplur Store · ${profileCartCount} in cart</span>
+          </div>
+        </div>
+        <div class="store-detail">
+          <div class="store-detail-visual"><img src="${selected.img}" alt=""></div>
+          <span class="profile-kicker">FEATURED</span>
+          <h2>${esc(selected.title)}</h2>
+          <strong class="store-detail-price">${esc(selected.price)}</strong>
+          <p>${esc(selected.description)}</p>
+          <button type="button" class="profile-action wide" data-store-action="add">Add to test cart</button>
+          <button type="button" class="profile-secondary-action" data-store-action="checkout">
+            Open cart${profileCartCount ? ` (${profileCartCount})` : ''}
+          </button>
+          ${profileStoreNotice ? `<div class="profile-notice" role="status">${esc(profileStoreNotice)}</div>` : ''}
+        </div>
+      </div>
+    `;
+  }
+
   return `
-    <div class="ios-screen store-page">
+    <div class="ios-screen store-page profile-scroll-page">
       <div class="browser-bar">
         <strong>Poplur</strong>
         <span style="font-size:12px;color:#666;font-weight:800">Store</span>
         <span style="font-size:12px;color:#666;font-weight:800">Cards</span>
         <span style="font-size:12px;color:#666;font-weight:800">Radius</span>
-        <span style="margin-left:auto">⌂</span>
+        <button type="button" class="store-cart-button" data-store-action="checkout" aria-label="Open test cart">Bag ${profileCartCount}</button>
       </div>
       <div class="store-hero">
         <h1>Poplur Store</h1>
@@ -1131,18 +1439,22 @@ function storeScreen() {
       <div class="store-products">
         <div style="display:flex;align-items:center;gap:10px"><img src="${A.storeBag}" style="width:44px;height:44px;object-fit:contain" alt=""><h2 style="margin:0">Featured</h2></div>
         <div class="product-grid">
-          ${product(A.storeCard, 'Poplur World Card', '$24.99')}
-          ${product(A.storeCube, 'Poplur Cube V2', '$39.99')}
-          ${product(A.store5, '5km Radius Boost', '$4.99')}
-          ${product(A.store25, '25km Radius Boost', '$19.99')}
+          ${profileStoreProducts.map(product).join('')}
         </div>
+        ${profileStoreNotice ? `<div class="profile-notice" role="status">${esc(profileStoreNotice)}</div>` : ''}
       </div>
     </div>
   `;
 }
 
-function product(img, title, price) {
-  return `<div class="product-card"><img src="${img}" alt=""><strong>${esc(title)}</strong><span>${price}</span></div>`;
+function product(item) {
+  return `
+    <button type="button" class="product-card product-button" data-store-product="${esc(item.id)}">
+      <img src="${item.img}" alt="">
+      <strong>${esc(item.title)}</strong>
+      <span>${esc(item.price)} · View</span>
+    </button>
+  `;
 }
 
 function mapBase(extra, modeClass = '') {
@@ -1243,43 +1555,221 @@ function mapClaims() {
 }
 
 function settingsScreen() {
+  if (profileSettingsPanel) return settingsPanelScreen(profileSettingsPanel);
+
   const rows = [
-    [ios('settings_ic_film', 'settings_ic_film.png'), 'Video duration', 'Current limit: 10s'],
-    [ios('settings_ic_film', 'settings_ic_film.png'), 'Closed Captions', 'On'],
-    [ios('settings_ic_info', 'settings_ic_info.png'), 'Auto Translation', 'English'],
-    [ios('settings_ic_bell', 'settings_ic_bell.png'), 'Notifications', 'Daily Poplur alerts'],
-    [ios('settings_ic_flask', 'settings_ic_flask.png'), 'Seed NA (1000)', 'Demo content controls'],
-    [ios('settings_ic_play', 'settings_ic_play.png'), 'TV guide animation', 'Flip animation on'],
-    [ios('settings_ic_wrench', 'settings_ic_wrench.png'), 'Fix Empty UserIDs', 'Maintenance'],
-    [ios('settings_ic_cloud', 'settings_ic_cloud.png'), 'Back Up Data', 'Cloud export'],
-    [ios('settings_ic_info', 'settings_ic_info.png'), 'About Poplur', 'Version and credits'],
-    [ios('settings_ic_doc', 'settings_ic_doc.png'), 'Terms of Service', 'Legal'],
-  ].map(([img, title, sub]) => `
-    <div class="settings-row"><img src="${img}" alt=""><div><strong>${title}</strong><span>${sub}</span></div><b>›</b></div>
-  `).join('');
+    {
+      img: ios('settings_ic_film', 'settings_ic_film.png'),
+      title: 'Video duration',
+      sub: `Current limit: ${profileSettingState.videoDuration}`,
+      panel: 'video-duration',
+    },
+    {
+      img: ios('settings_ic_film', 'settings_ic_film.png'),
+      title: 'Closed Captions',
+      sub: profileSettingState.captions ? 'On' : 'Off',
+      toggle: 'captions',
+    },
+    {
+      img: ios('settings_ic_info', 'settings_ic_info.png'),
+      title: 'Auto Translation',
+      sub: profileSettingState.language,
+      panel: 'translation',
+    },
+    {
+      img: ios('settings_ic_bell', 'settings_ic_bell.png'),
+      title: 'Notifications',
+      sub: profileSettingState.notifications ? 'Daily Poplur alerts' : 'Off',
+      toggle: 'notifications',
+    },
+    {
+      img: ios('settings_ic_flask', 'settings_ic_flask.png'),
+      title: 'Seed NA (1000)',
+      sub: 'Demo content controls',
+      panel: 'seed',
+    },
+    {
+      img: ios('settings_ic_play', 'settings_ic_play.png'),
+      title: 'TV guide animation',
+      sub: profileSettingState.tvGuide ? 'Flip animation on' : 'Animation off',
+      toggle: 'tvGuide',
+    },
+    {
+      img: ios('settings_ic_wrench', 'settings_ic_wrench.png'),
+      title: 'Fix Empty UserIDs',
+      sub: 'Maintenance',
+      panel: 'repair',
+    },
+    {
+      img: ios('settings_ic_cloud', 'settings_ic_cloud.png'),
+      title: 'Back Up Data',
+      sub: 'Cloud export',
+      panel: 'backup',
+    },
+    {
+      img: ios('settings_ic_info', 'settings_ic_info.png'),
+      title: 'About Poplur',
+      sub: 'Version and credits',
+      panel: 'about',
+    },
+    {
+      img: ios('settings_ic_doc', 'settings_ic_doc.png'),
+      title: 'Terms of Service',
+      sub: 'Legal',
+      panel: 'terms',
+    },
+  ].map(settingsRow).join('');
+
   return `
-    <div class="ios-screen settings-page">
+    <div class="ios-screen settings-page profile-scroll-page">
       <div class="settings-hero"><img src="${H.settings}" alt=""><div><h1>Settings</h1><span style="color:var(--subtle);font-weight:800">AppSettingsView</span></div></div>
       <div class="translation-card">
         <div>
           <strong>Translate captions to</strong>
-          <span>Default language is English</span>
+          <span>Current language is ${esc(profileSettingState.language)}</span>
         </div>
         <div class="language-picker">
-          <span class="on">🇺🇸 English</span>
-          <span>🇫🇷 French</span>
-          <span>🇪🇸 Spanish</span>
+          ${[
+            ['🇺🇸', 'English'],
+            ['🇫🇷', 'French'],
+            ['🇪🇸', 'Spanish'],
+          ].map(([flag, language]) => `
+            <button type="button" class="${profileSettingState.language === language ? 'on' : ''}" data-setting-language="${language}">
+              ${flag} ${language}
+            </button>
+          `).join('')}
         </div>
       </div>
       <div class="settings-list">${rows}</div>
-      <div class="settings-row" style="margin-top:16px;background:#fff"><img src="${ios('settings_ic_signout', 'settings_ic_signout.png')}" alt=""><div><strong>Sign Out</strong><span>Account</span></div><b>›</b></div>
+      ${settingsRow({
+        img: ios('settings_ic_signout', 'settings_ic_signout.png'),
+        title: 'Sign Out',
+        sub: 'Account',
+        panel: 'signout',
+        className: 'settings-signout',
+      })}
+      ${profileSettingsNotice ? `<div class="profile-notice" role="status">${esc(profileSettingsNotice)}</div>` : ''}
+    </div>
+  `;
+}
+
+function settingsRow(item) {
+  const attr = item.toggle
+    ? `data-setting-toggle="${esc(item.toggle)}"`
+    : `data-setting-panel="${esc(item.panel)}"`;
+  const state = item.toggle
+    ? `<span class="settings-switch ${profileSettingState[item.toggle] ? 'on' : ''}" aria-hidden="true"><i></i></span>`
+    : '<b>›</b>';
+  return `
+    <button type="button" class="settings-row settings-button ${item.className || ''}" ${attr}>
+      <img src="${item.img}" alt="">
+      <div><strong>${esc(item.title)}</strong><span>${esc(item.sub)}</span></div>
+      ${state}
+    </button>
+  `;
+}
+
+function settingsPanelScreen(panel) {
+  const panels = {
+    'video-duration': {
+      title: 'Video duration',
+      detail: 'Choose how long a standard Poplur capture may run.',
+      choices: ['10s', '30s', '60s'],
+    },
+    translation: {
+      title: 'Auto Translation',
+      detail: `Captions currently translate to ${profileSettingState.language}. Use the language controls on the main Settings screen to change it.`,
+    },
+    seed: {
+      title: 'Seed NA',
+      detail: 'Preview the demo-content controls without modifying production data.',
+      action: ['seed', 'Open demo controls'],
+    },
+    repair: {
+      title: 'Fix Empty UserIDs',
+      detail: 'Run the safe test version of the account-maintenance check.',
+      action: ['repair', 'Run test repair'],
+    },
+    backup: {
+      title: 'Back Up Data',
+      detail: 'Prepare a test archive of profile, message, and post metadata.',
+      action: ['backup', 'Prepare test backup'],
+    },
+    about: {
+      title: 'About Poplur',
+      detail: 'Poplur Rough Copy interactive subscreens. Built for device-parity testing.',
+    },
+    terms: {
+      title: 'Terms of Service',
+      detail: 'This test route opens the legal surface without leaving the Profile flow.',
+    },
+    signout: {
+      title: 'Sign Out',
+      detail: 'Confirm that the sign-out route responds. Testing keeps your current account active.',
+      action: ['signout', 'Test sign-out confirmation'],
+    },
+  };
+  const item = panels[panel] || panels.about;
+  return `
+    <div class="ios-screen settings-page profile-scroll-page">
+      <div class="profile-subscreen-toolbar">
+        <button type="button" class="profile-back" data-setting-back aria-label="Back to settings">‹</button>
+        <div>
+          <h1>${esc(item.title)}</h1>
+          <span>Settings detail</span>
+        </div>
+      </div>
+      <div class="settings-detail-card">
+        <img src="${H.settings}" alt="">
+        <p>${esc(item.detail)}</p>
+        ${item.choices ? `
+          <div class="settings-choice-grid">
+            ${item.choices.map(value => `
+              <button type="button" class="${profileSettingState.videoDuration === value ? 'on' : ''}" data-setting-choice="videoDuration" data-setting-value="${value}">
+                ${value}
+              </button>
+            `).join('')}
+          </div>
+        ` : ''}
+        ${item.action ? `
+          <button type="button" class="profile-action wide" data-setting-action="${item.action[0]}">${esc(item.action[1])}</button>
+        ` : ''}
+        ${profileSettingsNotice ? `<div class="profile-notice" role="status">${esc(profileSettingsNotice)}</div>` : ''}
+      </div>
     </div>
   `;
 }
 
 function statsScreen() {
+  const selected = profileStats.find(item => item.id === profileStat);
+  if (selected) {
+    return `
+      <div class="ios-screen stats-page profile-scroll-page">
+        <div class="profile-subscreen-toolbar">
+          <button type="button" class="profile-back" data-stat-back aria-label="Back to stats">‹</button>
+          <img class="stats-detail-icon" src="${selected.img}" alt="">
+          <div>
+            <h1>${esc(selected.label)}</h1>
+            <span>Profile analytics</span>
+          </div>
+        </div>
+        <div class="stats-detail-card">
+          <span class="profile-kicker">LAST 7 DAYS</span>
+          <strong class="stats-detail-value">${esc(selected.value)}</strong>
+          <span class="stats-detail-delta">${esc(selected.delta)}</span>
+          <div class="stats-bars" aria-label="${esc(selected.label)} seven day trend">
+            ${selected.points.map((point, index) => `
+              <i style="height:${point}%" title="Day ${index + 1}: ${point}%"></i>
+            `).join('')}
+          </div>
+          <p>${esc(selected.description)}</p>
+        </div>
+      </div>
+    `;
+  }
+
   return `
-    <div class="ios-screen stats-page">
+    <div class="ios-screen stats-page profile-scroll-page">
       <div class="stats-header">
         <div>
           <div class="page-title"><img src="${H.stats}" alt=""><h1 style="font-size:36px">Stats</h1></div>
@@ -1289,10 +1779,13 @@ function statsScreen() {
       </div>
       <div class="ring"><div><div><strong>74%</strong><span>GOAL</span></div></div></div>
       <div class="stats-grid">
-        <div class="stat-card"><img src="${A.statsPosts}" alt=""><strong>128</strong><span>Total Posts</span></div>
-        <div class="stat-card"><img src="${A.statsGoal}" alt=""><strong>41.8 km</strong><span>Radius Reach</span></div>
-        <div class="stat-card"><img src="${A.statsOrbit}" alt=""><strong>8x</strong><span>Trending Speed</span></div>
-        <div class="stat-card"><img src="${H.create}" alt=""><strong>12</strong><span>Creator Streak</span></div>
+        ${profileStats.map(item => `
+          <button type="button" class="stat-card stat-button" data-stat-key="${esc(item.id)}">
+            <img src="${item.img}" alt="">
+            <strong>${esc(item.value)}</strong>
+            <span>${esc(item.label)} · View</span>
+          </button>
+        `).join('')}
       </div>
     </div>
   `;
