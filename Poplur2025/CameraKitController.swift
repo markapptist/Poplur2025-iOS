@@ -266,9 +266,14 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
     func setZoomFactor(_ factor: CGFloat) {
         sessionQueue.async { [weak self] in
             guard let self, let device = self.currentVideoInput?.device else { return }
-            let minimum = max(CGFloat(1), device.minAvailableVideoZoomFactor)
-            let maximum = min(CGFloat(4), device.maxAvailableVideoZoomFactor)
-            let next = min(maximum, max(minimum, factor))
+            // `factor` arrives in UI units (0.5× / 1× / 2×). Scale by the
+            // device's 1× baseline so a dual-wide virtual device lands on the
+            // right lens: UI 0.5× = factor 1.0 (ultra-wide), UI 1× = the
+            // switch-over factor (wide), and so on.
+            let baseline = Self.displayZoomBaseline(for: device)
+            let minimum = device.minAvailableVideoZoomFactor
+            let maximum = min(4 * baseline, device.maxAvailableVideoZoomFactor)
+            let next = min(maximum, max(minimum, factor * baseline))
             do {
                 try device.lockForConfiguration()
                 device.videoZoomFactor = next
@@ -375,6 +380,7 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
             captureSession.addInput(input)
             currentVideoInput = input
             currentCameraPosition = device.position
+            applyDefaultZoomOnQueue(to: device)
 
             if captureSession.canAddOutput(photoOutput) {
                 captureSession.addOutput(photoOutput)
@@ -397,9 +403,36 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
     }
 
     private func preferredVideoDevice(position: AVCaptureDevice.Position) -> AVCaptureDevice? {
-        AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: position)
+        // The dual-wide virtual device spans ultra-wide + wide, which is what
+        // makes the 0.5× preset real glass instead of a clamped no-op. Front
+        // cameras (and older hardware) fall through to the plain wide angle.
+        AVCaptureDevice.default(.builtInDualWideCamera, for: .video, position: position)
+            ?? AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: position)
             ?? AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)
             ?? AVCaptureDevice.default(for: .video)
+    }
+
+    /// The video zoom factor that shows as "1×" in the UI. On a virtual
+    /// dual-wide device the wide lens sits at the first switch-over factor
+    /// (factor 1.0 IS the ultra-wide, which the UI calls 0.5×); on a single
+    /// wide camera this is simply 1.
+    private static func displayZoomBaseline(for device: AVCaptureDevice) -> CGFloat {
+        device.virtualDeviceSwitchOverVideoZoomFactors.first
+            .map { CGFloat(truncating: $0) } ?? 1
+    }
+
+    /// Park a freshly configured device on UI 1× (the wide lens), not the
+    /// ultra-wide the dual-wide device would otherwise open on.
+    private func applyDefaultZoomOnQueue(to device: AVCaptureDevice) {
+        let baseline = Self.displayZoomBaseline(for: device)
+        guard baseline > 1 else { return }
+        do {
+            try device.lockForConfiguration()
+            device.videoZoomFactor = min(baseline, device.maxAvailableVideoZoomFactor)
+            device.unlockForConfiguration()
+        } catch {
+            print("❌ [CameraKitController] Failed to set default zoom: \(error)")
+        }
     }
 
     private func configureVideoConnection(_ connection: AVCaptureConnection) {
@@ -426,6 +459,7 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
                 captureSession.addInput(newInput)
                 currentVideoInput = newInput
                 currentCameraPosition = device.position
+                applyDefaultZoomOnQueue(to: device)
             } else if let oldInput = currentVideoInput, captureSession.canAddInput(oldInput) {
                 captureSession.addInput(oldInput)
             }
