@@ -46,9 +46,9 @@ final class FPSGameScene: SKScene {
     private var texUse: SKTexture?
     private var texWeapon: SKTexture?
 
-    /// The real Poplur cabinet artwork. In portrait it fills the screen and the live
-    /// game buffer is drawn into its CRT bezel; its painted joystick + buttons are the
-    /// touch targets. Coordinates below are fractions of the 1448x1086 artwork.
+    /// Retained for the attract artwork, but gameplay uses the full device viewport.
+    /// Aspect-fitting this landscape cabinet in portrait made the live game and its
+    /// painted touch targets too small to play.
     private var cabinetNode: SKSpriteNode!
     private enum Cab {
         static let bezel = CGRect(x: 0.2051, y: 0.2247, width: 0.5829, height: 0.5239)  // y-down
@@ -285,64 +285,36 @@ final class FPSGameScene: SKScene {
         let sw = size.width, sh = size.height
         portrait = sh > sw
 
-        if portrait, cabinetNode.texture != nil {
-            // ── Portrait: the real cabinet art fills the screen; the live game buffer
-            //    is drawn into its CRT bezel, and its painted controls are the buttons.
-            hideDrawnChrome()
-            cabinetNode.isHidden = false
+        // Fullscreen gameplay in both orientations. Stretching the fixed 640x360
+        // software framebuffer preserves every HUD/control edge on tall phones;
+        // the old aspect-fit cabinet reduced portrait gameplay to a tiny window.
+        cabinetNode.isHidden = true
+        framebuffer.isHidden = false
+        hideDrawnChrome()
+        startBtnR = 0
+        framebuffer.position = .zero
+        framebuffer.size = CGSize(width: sw, height: sh)
 
-            let tex = cabinetNode.texture!.size()
-            let s = min(sw / tex.width, sh / tex.height)
-            let cw = tex.width * s, ch = tex.height * s
-            cabinetNode.size = CGSize(width: cw, height: ch)
-            cabinetNode.position = CGPoint(x: sw / 2, y: sh / 2)
-            let cabX = sw / 2 - cw / 2, cabY = sh / 2 - ch / 2
+        let controlScale = min(sw, sh)
+        joyR = controlScale * 0.14
+        joyC = CGPoint(x: sw * (portrait ? 0.18 : 0.13), y: sh * (portrait ? 0.13 : 0.20))
+        fireR = controlScale * 0.12
+        fireC = CGPoint(x: sw * (portrait ? 0.84 : 0.90), y: sh * (portrait ? 0.13 : 0.18))
+        interactR = controlScale * 0.075
+        interactC = CGPoint(x: sw * (portrait ? 0.67 : 0.76), y: sh * (portrait ? 0.11 : 0.14))
 
-            // Artwork coords are y-down; the scene is y-up.
-            func px(_ fx: Double) -> CGFloat { cabX + CGFloat(fx) * cw }
-            func py(_ fy: Double) -> CGFloat { cabY + ch - CGFloat(fy) * ch }
+        positionButton(0, center: fireC, radius: fireR, color: UIColor(fpsHex: 0xff4db8), translucent: true)
+        positionButton(1, center: interactC, radius: interactR, color: UIColor(fpsHex: 0x4488ff), translucent: true)
 
-            let bw = CGFloat(Cab.bezel.width) * cw
-            let bh = CGFloat(Cab.bezel.height) * ch
-            framebuffer.position = CGPoint(x: px(Cab.bezel.minX),
-                                           y: py(Cab.bezel.minY) - bh)
-            framebuffer.size = CGSize(width: bw, height: bh)
-
-            // The cabinet art already paints its own attract screen on the CRT — reveal it
-            // instead of drawing our menu (which would nest a second bezel inside the glass).
-            framebuffer.isHidden = (game.state == .menu || game.state == .zoom)
-
-            joyC = CGPoint(x: px(Cab.joy.cx), y: py(Cab.joy.cy))
-            joyR = CGFloat(Cab.joy.r) * cw
-
-            let br = CGFloat(Cab.btnR) * cw
-            weaponCR = Cab.btnCX.map { (CGPoint(x: px($0), y: py(Cab.btnCY)), br) }
-            fireC = weaponCR[0].0; fireR = br            // green
-            interactC = weaponCR[1].0; interactR = br    // blue
-            startBtnC = CGPoint(x: px(Cab.startCX), y: py(Cab.btnCY))
-            startBtnR = br
-        } else {
-            // ── Landscape: fullscreen game with translucent floating controls.
-            cabinetNode.isHidden = true
-            framebuffer.isHidden = false
-            hideDrawnChrome()
-            startBtnR = 0
-
-            let scale = min(sw / 640, sh / 360)
-            let bw = 640 * scale, bh = 360 * scale
-            framebuffer.position = CGPoint(x: (sw - bw) / 2, y: (sh - bh) / 2)
-            framebuffer.size = CGSize(width: bw, height: bh)
-
-            joyR = sh * 0.14
-            joyC = CGPoint(x: sw * 0.13, y: sh * 0.20)
-            fireR = sh * 0.12; fireC = CGPoint(x: sw * 0.90, y: sh * 0.18)
-            interactR = sh * 0.075; interactC = CGPoint(x: sw * 0.76, y: sh * 0.14)
-            positionButton(0, center: fireC, radius: fireR, color: UIColor(fpsHex: 0xff4db8), translucent: true)
-            positionButton(1, center: interactC, radius: interactR, color: UIColor(fpsHex: 0x4488ff), translucent: true)
-            for i in 2..<5 { buttons[i].isHidden = true }
-            weaponCR = []
-            styleJoystick(translucent: true)
+        let weaponR = controlScale * 0.052
+        let weaponY = sh * (portrait ? 0.23 : 0.30)
+        let weaponXs: [CGFloat] = portrait ? [0.64, 0.76, 0.88] : [0.70, 0.79, 0.88]
+        weaponCR = weaponXs.enumerated().map { index, fraction in
+            let center = CGPoint(x: sw * fraction, y: weaponY)
+            positionWeaponButton(index + 2, center: center, radius: weaponR)
+            return (center, weaponR)
         }
+        styleJoystick(translucent: true)
     }
 
     /// Hides every piece of chrome the code used to draw itself.
@@ -405,6 +377,15 @@ final class FPSGameScene: SKScene {
         b.path = CGPath(ellipseIn: CGRect(x: -radius, y: -radius, width: radius * 2, height: radius * 2), transform: nil)
         b.position = center
         b.fillColor = translucent ? color.withAlphaComponent(0.38) : color
+    }
+
+    private func positionWeaponButton(_ i: Int, center: CGPoint, radius: CGFloat) {
+        positionButton(i, center: center, radius: radius, color: btnColors[i], translucent: true)
+        let label = panelLabels[i]
+        label.isHidden = false
+        label.text = "\(i - 1)"
+        label.fontSize = radius * 0.9
+        label.position = center
     }
 
     // MARK: Run loop
@@ -479,8 +460,14 @@ final class FPSGameScene: SKScene {
             if dist(p, interactC) <= interactR + 6 { interactPending = true; continue }
             if portrait {
                 var hitWeapon = false
-                for i in 2..<weaponCR.count {
-                    if dist(p, weaponCR[i].0) <= weaponCR[i].1 + 6 { weaponPending = i - 1; hitWeapon = true; break }
+                for (i, weapon) in weaponCR.enumerated() {
+                    if dist(p, weapon.0) <= weapon.1 + 6 { weaponPending = i + 1; hitWeapon = true; break }
+                }
+                if hitWeapon { continue }
+            } else {
+                var hitWeapon = false
+                for (i, weapon) in weaponCR.enumerated() {
+                    if dist(p, weapon.0) <= weapon.1 + 6 { weaponPending = i + 1; hitWeapon = true; break }
                 }
                 if hitWeapon { continue }
             }

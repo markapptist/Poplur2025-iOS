@@ -40,18 +40,20 @@ struct GamePickerView: View {
                 ScrollView {
                     VStack(spacing: 16) {
                         GameCard(
-                            title: "FPS Shooter",
-                            subtitle: "Raycasting first-person shooter",
-                            icon: "🔫",
-                            accentColor: Color(red: 0.20, green: 0.80, blue: 1.0)
-                        ) { showFPS = true }
-
-                        GameCard(
                             title: "Poplurgatchi",
                             subtitle: "Virtual pet — feed, play & grow",
-                            icon: "🥚",
+                            previewName: "poplurgatchi_game_preview",
+                            pixelated: false,
                             accentColor: Color(red: 1.0, green: 0.22, blue: 0.62)
                         ) { showPet = true }
+
+                        GameCard(
+                            title: "FPS Shooter",
+                            subtitle: "Raycasting first-person shooter",
+                            previewName: "fps_game_preview",
+                            pixelated: true,
+                            accentColor: Color(red: 0.20, green: 0.80, blue: 1.0)
+                        ) { showFPS = true }
                     }
                     .padding(.horizontal, 22)
                     .padding(.bottom, 32)
@@ -68,23 +70,26 @@ struct GamePickerView: View {
 private struct GameCard: View {
     let title:       String
     let subtitle:    String
-    let icon:        String
+    let previewName: String
+    let pixelated:   Bool
     let accentColor: Color
     let onTap:       () -> Void
 
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 18) {
-                // Icon bubble
-                ZStack {
-                    Circle()
-                        .fill(accentColor.opacity(0.18))
-                    Text(icon)
-                        .font(.system(size: 36))
-                }
-                .frame(width: 70, height: 70)
+                Image(previewName)
+                    .resizable()
+                    .interpolation(pixelated ? .none : .high)
+                    .scaledToFit()
+                    .frame(width: 70, height: 70)
+                    .background(accentColor.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .strokeBorder(accentColor.opacity(0.5), lineWidth: 1)
+                    )
 
-                // Text
                 VStack(alignment: .leading, spacing: 4) {
                     Text(title)
                         .font(.system(size: 20, weight: .bold, design: .rounded))

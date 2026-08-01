@@ -12,7 +12,7 @@ struct PoplurPetGameView: View {
     private let shellPink   = Color(red: 0.98, green: 0.22, blue: 0.62)
     private let shellDark   = Color(red: 0.05, green: 0.03, blue: 0.10)
     private let screenBorder = Color(red: 0.96, green: 0.30, blue: 0.68)
-    private let screenSize: CGFloat = 200
+    private let initialSceneSize: CGFloat = 200
 
     var body: some View {
         ZStack {
@@ -21,7 +21,7 @@ struct PoplurPetGameView: View {
 
             // Glitter oval device shell
             deviceShell
-                .frame(maxWidth: 360, maxHeight: .infinity)
+                .frame(maxWidth: 460, maxHeight: .infinity)
 
             // Close button (top-right)
             VStack {
@@ -51,6 +51,10 @@ struct PoplurPetGameView: View {
 
     private var deviceShell: some View {
         GeometryReader { geo in
+            // Keep the shell treatment, but let the playable area use the
+            // available device width instead of remaining fixed at 200 pt.
+            let playableSize = min(340, min(geo.size.width * 0.84, geo.size.height * 0.46))
+
             ZStack {
                 // ── Shell body ──────────────────────────────────────────────
                 EggShape()
@@ -105,7 +109,7 @@ struct PoplurPetGameView: View {
                                 .clipShape(RoundedRectangle(cornerRadius: 6))
                         }
                     }
-                    .frame(width: screenSize, height: screenSize)
+                    .frame(width: playableSize, height: playableSize)
                     .shadow(color: shellPink.opacity(0.55), radius: 8, x: 0, y: 2)
 
                     Spacer(minLength: geo.size.height * 0.03)
@@ -182,7 +186,10 @@ struct PoplurPetGameView: View {
         var state = PetSaveManager.load()
         PetSimulation.applyOfflineDecay(to: &state)
         PetSaveManager.save(state)
-        let s = PoplurPetScene(petState: state, size: CGSize(width: screenSize, height: screenSize))
+        let s = PoplurPetScene(
+            petState: state,
+            size: CGSize(width: initialSceneSize, height: initialSceneSize)
+        )
         scene = s
     }
 }
