@@ -224,8 +224,11 @@ struct PostLoginHomeSurface: View {
                         poplurAI?.requestPermissionAndStartCommand()
                     }
                 },
-                nativeVoiceCommandToken: poplurAI.commandToken,
-                nativeVoiceCommandJSON: Self.voiceCommandJSON(poplurAI.lastCommand)
+                nativeVoiceCommandToken: poplurAI.voiceFeedbackToken,
+                nativeVoiceCommandJSON: Self.voiceCommandJSON(
+                    poplurAI.lastCommand,
+                    feedback: poplurAI.voiceFeedback
+                )
             )
             .ignoresSafeArea()
 
@@ -258,9 +261,8 @@ struct PostLoginHomeSurface: View {
         }
     }
 
-    private static func voiceCommandJSON(_ command: PoplurAICommand?) -> String? {
-        guard let command else { return nil }
-        var detail: [String: String] = [:]
+    private static func voiceCommandJSON(_ command: PoplurAICommand?, feedback: String) -> String? {
+        var detail: [String: String] = ["feedback": feedback]
         switch command {
         case .openTab(let tab):
             switch tab {
@@ -281,8 +283,10 @@ struct PostLoginHomeSurface: View {
             detail["tab"] = "profile"
         case .openPage, .setTourActive, .logout, .unknown:
             break
+        case nil:
+            break
         }
-        guard !detail.isEmpty,
+        guard !feedback.isEmpty,
               let data = try? JSONSerialization.data(withJSONObject: detail),
               let json = String(data: data, encoding: .utf8) else { return nil }
         return json

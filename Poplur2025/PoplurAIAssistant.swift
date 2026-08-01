@@ -34,6 +34,11 @@ final class PoplurAIAssistantController: ObservableObject {
     @Published var transcript = ""
     @Published var statusText = "Say Hey Poplur"
     @Published private(set) var commandToken = 0
+    /// Every native TTS utterance, including conversational replies that do not
+    /// navigate. The web shell uses this to reserve its one audio owner while
+    /// AVSpeechSynthesizer is outside the WKWebView audio graph.
+    @Published private(set) var voiceFeedbackToken = 0
+    @Published private(set) var voiceFeedback = ""
 
     private(set) var lastCommand: PoplurAICommand?
     private let speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "en_US"))
@@ -513,6 +518,10 @@ final class PoplurAIAssistantController: ObservableObject {
         wakeTask?.cancel()
         claudeTask?.cancel()
         if case .unknown(let text) = command {
+            // Keep the conversational command associated with the eventual
+            // spoken response without incrementing commandToken (native Home
+            // must not try to navigate for a conversation).
+            lastCommand = command
             Task { @MainActor in await self.askClaude(text) }
             return
         }
@@ -591,6 +600,8 @@ final class PoplurAIAssistantController: ObservableObject {
 
     private func speak(_ text: String) {
         let shouldResumeListening = isEnabled
+        voiceFeedback = text
+        voiceFeedbackToken += 1
         stopRecognitionSession(cancelTask: true, finishRequest: false)
         speechSynth.stopSpeaking(at: .immediate)
         let utterance = AVSpeechUtterance(string: text)
