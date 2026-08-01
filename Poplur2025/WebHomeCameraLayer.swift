@@ -129,13 +129,15 @@ final class WebHomeCameraModel: ObservableObject {
         recognitionManager = recognition
         controller.userRecognitionManager = recognition
 
-        if UserDefaults.standard.object(forKey: "CameraObjectDetectionEnabled") as? Bool ?? true {
-            controller.enableMLDetection()
-            controller.mlDetectionManager?.onFrameProcessed = { [weak recognition] pixelBuffer, objects in
-                CameraAIAnnouncer.shared.announceMLObjects(objects)
-                recognition?.processDetectedObjects(objects, from: pixelBuffer)
-            }
+        // Camera always opens with detection enabled. DETECT OFF remains a
+        // session control, but an old persisted off value must not survive an
+        // update/reinstall and silently disable the default on the next visit.
+        controller.enableMLDetection()
+        controller.mlDetectionManager?.onFrameProcessed = { [weak recognition] pixelBuffer, objects in
+            CameraAIAnnouncer.shared.announceMLObjects(objects)
+            recognition?.processDetectedObjects(objects, from: pixelBuffer)
         }
+        UserDefaults.standard.set(true, forKey: "CameraObjectDetectionEnabled")
         await recognition.startRecognitionSession()
     }
 
