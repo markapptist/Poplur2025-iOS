@@ -44,6 +44,7 @@ final class PoplurAIAssistantController: ObservableObject {
     private var restartTask: Task<Void, Never>?
     private var isEnabled = false
     private var permissionRequested = false
+    private var activateCommandAfterPermission = false
     private var lastHandledText = ""
     private var lastHandledAt = Date.distantPast
     private var lastTranscriptUpdateAt = Date.distantPast
@@ -77,6 +78,23 @@ final class PoplurAIAssistantController: ObservableObject {
         installAudioSessionObservers()
         installEQSyncObserver()
         startWakeWatchdog()
+        // Home may arm Hey Poplur automatically only when both native
+        // permissions were granted previously. The approved custom primer must
+        // never be followed by an unsolicited Apple permission sheet.
+        beginListeningIfAuthorized()
+    }
+
+    /// Called only by the user's explicit HEY POPLUR tile action.
+    func requestPermissionAndStartCommand() {
+        start()
+        activateCommandAfterPermission = true
+        if SFSpeechRecognizer.authorizationStatus() == .authorized,
+           AVAudioSession.sharedInstance().recordPermission == .granted {
+            activateCommandAfterPermission = false
+            beginListeningIfAuthorized()
+            activateWake()
+            return
+        }
         requestPermissionsIfNeeded()
     }
 
@@ -92,6 +110,7 @@ final class PoplurAIAssistantController: ObservableObject {
         removeEQSyncObserver()
         stopRecognitionSession(cancelTask: true, finishRequest: false)
         lastHandledText = ""
+        activateCommandAfterPermission = false
         isPausedForAppAudio = false
         isIlluminated = false
         isListeningForCommand = false
@@ -137,7 +156,17 @@ final class PoplurAIAssistantController: ObservableObject {
 
     private func requestPermissionsIfNeeded() {
         guard !permissionRequested else {
-            beginListeningIfAuthorized()
+            if SFSpeechRecognizer.authorizationStatus() == .authorized,
+               AVAudioSession.sharedInstance().recordPermission == .granted {
+                beginListeningIfAuthorized()
+                if activateCommandAfterPermission {
+                    activateCommandAfterPermission = false
+                    activateWake()
+                }
+            } else {
+                activateCommandAfterPermission = false
+                setStatus("Enable microphone and speech access")
+            }
             return
         }
         permissionRequested = true
@@ -148,7 +177,12 @@ final class PoplurAIAssistantController: ObservableObject {
                     guard let self else { return }
                     if speechStatus == .authorized, micGranted {
                         self.beginListeningIfAuthorized()
+                        if self.activateCommandAfterPermission {
+                            self.activateCommandAfterPermission = false
+                            self.activateWake()
+                        }
                     } else {
+                        self.activateCommandAfterPermission = false
                         self.setStatus("Enable microphone and speech access")
                     }
                 }

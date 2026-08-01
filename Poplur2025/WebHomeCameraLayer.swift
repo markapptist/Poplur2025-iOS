@@ -51,8 +51,17 @@ final class WebHomeCameraModel: ObservableObject {
         case "cameraControl":
             guard isCameraTab, let control = body["control"] as? String else { return }
             switch control {
-            case "flash": controllerStorage?.toggleFlash()
+            case "flash":
+                let controller = resolveController()
+                if let enabled = body["on"] as? Bool {
+                    enabled ? controller.toggleTorchOn() : controller.toggleTorchOff()
+                } else {
+                    controller.toggleFlash()
+                }
             case "flip":  controllerStorage?.flipCamera()
+            case "zoom":
+                let value = (body["value"] as? NSNumber)?.doubleValue ?? 1
+                resolveController().setZoomFactor(CGFloat(value))
             case "record":
                 let controller = resolveController()
                 if controller.isRecording {
@@ -185,6 +194,8 @@ struct WebHomeCameraLayer: View {
 struct PostLoginHomeSurface: View {
     let onReady: () -> Void
     @StateObject private var camera = WebHomeCameraModel()
+    @StateObject private var poplurAI = PoplurAIAssistantController()
+    @Environment(\.scenePhase) private var scenePhase
 
     init(onReady: @escaping () -> Void = {}) {
         self.onReady = onReady
@@ -200,10 +211,38 @@ struct PostLoginHomeSurface: View {
                 WebHomeCameraLayer(model: camera)
             }
 
-            PostLoginHomeWebView(onReady: onReady, onWebEvent: { [weak camera] type, body in
-                camera?.handleWebEvent(type: type, body: body)
-            })
+            PostLoginHomeWebView(
+                onReady: onReady,
+                onWebEvent: { [weak camera, weak poplurAI] type, body in
+                    camera?.handleWebEvent(type: type, body: body)
+                    if type == "requestVoiceAssistant" {
+                        // This message can only come from the explicit HEY
+                        // POPLUR tile. It is therefore the native permission
+                        // ask point; mounting Home itself never opens a sheet.
+                        poplurAI?.requestPermissionAndStartCommand()
+                    }
+                },
+                nativeVoiceCommandToken: poplurAI.commandToken,
+                nativeVoiceCommandJSON: Self.voiceCommandJSON(poplurAI.lastCommand)
+            )
             .ignoresSafeArea()
+
+            PoplurAIAssistantOverlay(
+                controller: poplurAI,
+                accent: Color(red: 1.0, green: 0.31, blue: 0.64)
+            )
+            .allowsHitTesting(false)
+        }
+        .onAppear { poplurAI.start() }
+        .onDisappear { poplurAI.stop() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                poplurAI.start()
+            } else {
+                // "Always" means while the approved Home is foregrounded.
+                // Do not hold the microphone when Poplur is not on screen.
+                poplurAI.stop()
+            }
         }
         // CREATE in the web hold menu opens the REAL chat — PoplurAIChatView,
         // the one backed by Google AI Studio through poplurAiApi — instead of
@@ -215,5 +254,35 @@ struct PostLoginHomeSurface: View {
                 onDismiss: { camera.presentsCreator = false }
             )
         }
+    }
+
+    private static func voiceCommandJSON(_ command: PoplurAICommand?) -> String? {
+        guard let command else { return nil }
+        var detail: [String: String] = [:]
+        switch command {
+        case .openTab(let tab):
+            switch tab {
+            case .map: detail["tab"] = "map"
+            case .record: detail["tab"] = "post"
+            case .feed: detail["tab"] = "feed"
+            case .profile: detail["tab"] = "profile"
+            case .settings: break
+            }
+        case .camera:
+            detail["tab"] = "post"
+        case .goToChannel(let channel):
+            detail["tab"] = "feed"
+            detail["channel"] = channel
+        case .postToLocation:
+            detail["tab"] = "post"
+        case .sortPosts, .showAnalytics:
+            detail["tab"] = "profile"
+        case .openPage, .setTourActive, .logout, .unknown:
+            break
+        }
+        guard !detail.isEmpty,
+              let data = try? JSONSerialization.data(withJSONObject: detail),
+              let json = String(data: data, encoding: .utf8) else { return nil }
+        return json
     }
 }

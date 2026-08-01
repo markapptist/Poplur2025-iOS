@@ -2,10 +2,70 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>POPLUR FPS</title>
   <script type="module" crossorigin src="./assets/index-nHina4-z.js"></script>
   <link rel="stylesheet" crossorigin href="./assets/index-CUqS3QQW.css">
+  <style>
+    html, body, #app {
+      width: 100%;
+      height: 100%;
+      min-width: 100%;
+      min-height: 100%;
+      overflow: hidden;
+      overscroll-behavior: none;
+      touch-action: none;
+    }
+
+    /* The bundled game keeps a 640x360 logical render buffer, but its resize
+       helper aspect-fits that buffer with inline pixel dimensions. Override
+       those presentation dimensions so the actual game canvas covers the
+       device viewport instead of becoming a short letterboxed strip on a
+       portrait phone. The DOM touch controls remain uncropped above it. */
+    #game-canvas {
+      position: fixed !important;
+      inset: 0 !important;
+      width: 100vw !important;
+      width: 100dvw !important;
+      height: 100vh !important;
+      height: 100dvh !important;
+      max-width: none !important;
+      max-height: none !important;
+      object-fit: cover;
+    }
+
+    #mobile-controls {
+      bottom: max(18px, calc(env(safe-area-inset-bottom) + 14px)) !important;
+    }
+
+    /* The regular movement/fire/use controls appear once gameplay begins.
+       This one action stays available on the title screen, where touch devices
+       otherwise have no way to generate the keyboard input that starts it. */
+    #touch-start {
+      position: fixed;
+      left: 50%;
+      bottom: max(24px, calc(env(safe-area-inset-bottom) + 18px));
+      z-index: 30;
+      min-width: 176px;
+      min-height: 54px;
+      transform: translateX(-50%);
+      border: 2px solid rgba(255, 151, 210, 0.9);
+      border-radius: 999px;
+      padding: 0 24px;
+      background: linear-gradient(180deg, #ff63b8, #c20a67);
+      color: #fff;
+      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.62), 0 0 22px rgba(255, 47, 145, 0.55);
+      font: 900 15px/1 system-ui, -apple-system, sans-serif;
+      letter-spacing: 0.08em;
+      pointer-events: auto;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    #touch-start:active { transform: translateX(-50%) scale(0.96); }
+    #touch-start[hidden] { display: none; }
+    #mobile-controls { padding-bottom: env(safe-area-inset-bottom); }
+  </style>
 </head>
 <body>
   <div id="app">
@@ -18,6 +78,72 @@
         <button id="fire-btn" aria-label="Fire">FIRE</button>
       </div>
     </div>
+    <button id="touch-start" type="button" aria-label="Start or continue FPS game">START GAME</button>
   </div>
+  <script>
+    (() => {
+      const start = document.getElementById('touch-start')
+      const controls = document.getElementById('mobile-controls')
+      if (!start || !controls) return
+
+      let releaseTimer = 0
+      let statePoll = 0
+      let hasEnteredPlay = false
+
+      const releaseUse = () => {
+        window.dispatchEvent(new KeyboardEvent('keyup', {
+          code: 'KeyE', key: 'e', bubbles: true,
+        }))
+        if (releaseTimer) window.clearTimeout(releaseTimer)
+        releaseTimer = 0
+      }
+
+      const begin = (event) => {
+        event.preventDefault()
+        start.disabled = true
+        start.textContent = 'STARTING…'
+        window.dispatchEvent(new KeyboardEvent('keydown', {
+          code: 'KeyE', key: 'e', bubbles: true,
+        }))
+
+        // Keep USE held through asynchronous sprite loading. The game changes
+        // the controls row to flex on its first playable frame, which gives us
+        // a reliable signal to release without leaking input into gameplay.
+        if (statePoll) window.clearInterval(statePoll)
+        statePoll = window.setInterval(() => {
+          if (controls.style.display === 'flex') {
+            window.clearInterval(statePoll)
+            statePoll = 0
+            releaseUse()
+            start.hidden = true
+          }
+        }, 50)
+
+        if (releaseTimer) window.clearTimeout(releaseTimer)
+        releaseTimer = window.setTimeout(() => {
+          releaseUse()
+          start.disabled = false
+          start.textContent = 'START GAME'
+        }, 12000)
+      }
+
+      start.addEventListener('pointerdown', begin)
+
+      // Keyboard/gamepad starts should retire the touch affordance too.
+      new MutationObserver(() => {
+        if (controls.style.display === 'flex') {
+          hasEnteredPlay = true
+          releaseUse()
+          start.hidden = true
+        } else if (hasEnteredPlay && start.hidden) {
+          // Death/win screens also expect keyboard input. Put the same touch
+          // bridge back so a phone player can respawn or continue.
+          start.hidden = false
+          start.disabled = false
+          start.textContent = 'CONTINUE'
+        }
+      }).observe(controls, { attributes: true, attributeFilter: ['style'] })
+    })()
+  </script>
 </body>
 </html>
