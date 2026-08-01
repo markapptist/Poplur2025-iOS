@@ -22,7 +22,11 @@ public class SimplifiedMLDetectionManager {
     public var confidenceThreshold: Float = 0.15
     
     /// Process every Nth frame (higher = better performance, lower = more responsive)
-    public var frameSkipInterval: Int = 5
+    /// Process every Nth frame. VNClassifyImageRequest is a full-taxonomy
+    /// classifier and is expensive: every 5th frame of 30fps meant six of them
+    /// a second, forever, which the phone paid for in heat. Ten a second was
+    /// never needed to label what the camera is pointed at.
+    public var frameSkipInterval: Int = 15
     
     /// Maximum number of classifications to report
     public var maxResults: Int = 3
@@ -89,10 +93,14 @@ public class SimplifiedMLDetectionManager {
                 .prefix(self.maxResults)
                 .map { DetectedObject(identifier: $0.identifier, confidence: $0.confidence) }
             
-            if !detectedObjects.isEmpty {
-                DispatchQueue.main.async {
-                    self.onDetection?(Array(detectedObjects))
-                    // Also pass the pixel buffer for face recognition
+            // Always report, including an empty result. Delivering only
+            // non-empty results meant a scene where nothing cleared the
+            // confidence bar never produced a callback at all, so the overlay
+            // sat on its initial "Scanning..." indefinitely and read as hung.
+            // The overlay already fades itself out on an empty array.
+            DispatchQueue.main.async {
+                self.onDetection?(Array(detectedObjects))
+                if !detectedObjects.isEmpty {
                     self.onFrameProcessed?(pixelBuffer, Array(detectedObjects))
                 }
             }
