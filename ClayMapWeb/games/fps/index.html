@@ -17,26 +17,11 @@
       touch-action: none;
     }
 
-    /* The bundled game keeps a 640x360 logical render buffer, but its resize
-       helper aspect-fits that buffer with inline pixel dimensions. Override
-       those presentation dimensions so the actual game canvas covers the
-       device viewport instead of becoming a short letterboxed strip on a
-       portrait phone. The DOM touch controls remain uncropped above it. */
-    #game-canvas {
-      position: fixed !important;
-      inset: 0 !important;
-      width: 100vw !important;
-      width: 100dvw !important;
-      height: 100vh !important;
-      height: 100dvh !important;
-      max-width: none !important;
-      max-height: none !important;
-      object-fit: cover;
-    }
-
-    #mobile-controls {
-      bottom: max(18px, calc(env(safe-area-inset-bottom) + 14px)) !important;
-    }
+    /* The game owns canvas sizing and control placement. Its resize helper
+       aspect-fits the 640x360 render buffer and publishes
+       --game-control-bottom for the DOM controls. Do not override either with
+       viewport-sized !important rules: that stretches the portrait canvas and
+       detaches the controls from the rendered game. */
 
     /* The regular movement/fire/use controls appear once gameplay begins.
        This one action stays available on the title screen, where touch devices
