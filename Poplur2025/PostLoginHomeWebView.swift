@@ -3,6 +3,8 @@ import WebKit
 import CoreLocation
 import Photos
 import UIKit
+import FirebaseAuth
+import FirebaseFirestore
 
 enum PoplurWebCaptureStore {
     struct Item {
@@ -391,6 +393,30 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     let isCamera = (body["tab"] as? String) == "post"
                     DispatchQueue.main.async {
                         PostLoginHomeWebView.setCameraHole(isCamera, on: webView)
+                    }
+                }
+                if type == "requestProfile", let webView = bridge.webView {
+                    // The web ProfileTwin asks who is signed in; answer with the
+                    // Firestore user doc so it shows the real signup username
+                    // instead of the USERNAME placeholder.
+                    Task {
+                        guard let uid = Auth.auth().currentUser?.uid,
+                              let snapshot = try? await Firestore.firestore()
+                                  .collection("users").document(uid).getDocument(),
+                              let data = snapshot.data() else { return }
+                        var profile: [String: Any] = [
+                            "business": (data["accountType"] as? String) == PoplurAccountType.business.rawValue
+                        ]
+                        let username = (data["username"] as? String)?
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                        if let username, !username.isEmpty { profile["username"] = username }
+                        guard let json = try? JSONSerialization.data(withJSONObject: profile),
+                              let text = String(data: json, encoding: .utf8) else { return }
+                        await MainActor.run {
+                            webView.evaluateJavaScript(
+                                "window.poplurProfile && window.poplurProfile(\(text)); true;"
+                            )
+                        }
                     }
                 }
                 if let onWebEvent {

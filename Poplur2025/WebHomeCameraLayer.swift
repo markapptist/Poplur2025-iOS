@@ -164,6 +164,16 @@ struct WebHomeCameraLayer: View {
                 RecognizedFaceBoxOverlay(recognitionManager: recognitionManager)
                     .allowsHitTesting(false)
 
+                // The detected-object card ("Laptop · 87%"). Detection has
+                // been running in this layer all along — this is the missing
+                // readout that made it look switched off.
+                LiveMLDetectionOverlay(
+                    controller: model.resolveController(),
+                    userRecognitionManager: recognitionManager,
+                    showsRecognizedUser: false
+                )
+                .allowsHitTesting(false)
+
                 if let user = recognitionManager.recognizedUser, user.isRecent {
                     Text("@\(user.profile.username)")
                         .font(.system(size: 18, weight: .black, design: .monospaced))

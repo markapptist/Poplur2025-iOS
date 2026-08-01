@@ -3692,16 +3692,19 @@ private struct CameraInstructionsOverlay: View {
 // MARK: - Live ML Detection Overlay
 
 /// Displays live ML object detection results and recognized users at the top of the camera view
-private struct LiveMLDetectionOverlay: View {
+struct LiveMLDetectionOverlay: View {
     @ObservedObject var controller: CameraKitController
     @ObservedObject var userRecognitionManager: UserRecognitionManager
+    /// The web home draws its own @username shader text; it hands the
+    /// recognized-user card off and takes only the object detections.
+    var showsRecognizedUser = true
     @State private var detectedObjects: [DetectedObject] = []
     @State private var isDetecting: Bool = false
 
     var body: some View {
         VStack {
             // Show user recognition if available
-            if let recognizedUser = userRecognitionManager.recognizedUser, recognizedUser.isRecent {
+            if showsRecognizedUser, let recognizedUser = userRecognitionManager.recognizedUser, recognizedUser.isRecent {
                 RecognizedUserCard(user: recognizedUser)
                     .transition(.move(edge: .top).combined(with: .opacity))
                     .animation(.spring(response: 0.4, dampingFraction: 0.75), value: recognizedUser.id)
@@ -4004,7 +4007,10 @@ struct MLCameraShaderOverlay: View {
                 }
             }
         }
-        .padding(.top, 54)
+        // The web Poplur wordmark owns the top line. June's detector sat at 54,
+        // which now collides with the taller clay logo; keep the detected
+        // object directly underneath it.
+        .padding(.top, 80)
         .frame(maxWidth: .infinity)
     }
 }
