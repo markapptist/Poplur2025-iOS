@@ -101,16 +101,40 @@ struct PoplurClayMapView: UIViewRepresentable {
 
             var relativePath = url.path
             if relativePath.isEmpty || relativePath == "/" { relativePath = "/index.html" }
-            let fileURL = root.appendingPathComponent(String(relativePath.dropFirst())).standardizedFileURL
 
-            // Confine reads to the bundle directory (no `../` traversal).
-            guard fileURL.path.hasPrefix(root.path + "/") || fileURL.path == root.path,
-                  let data = try? Data(contentsOf: fileURL) else {
-                urlSchemeTask.didFailWithError(URLError(.fileDoesNotExist))
-                return
+            let data: Data
+            let mime: String
+            // Captures are the user's own media and can change under the same
+            // key, so they must never be cached. Everything else ships inside
+            // the app bundle and cannot change without a new build.
+            let cacheControl = relativePath.hasPrefix("/captures/")
+                ? "no-store"
+                : "public, max-age=31536000, immutable"
+            if relativePath.hasPrefix("/captures/") {
+                let key = String(relativePath.dropFirst("/captures/".count))
+                guard !key.contains("/"),
+                      let item = PoplurWebCaptureStore.item(for: key),
+                      let captureData = item.data ?? (item.fileURL.flatMap { try? Data(contentsOf: $0) }) else {
+                    urlSchemeTask.didFailWithError(URLError(.fileDoesNotExist))
+                    return
+                }
+                data = captureData
+                mime = item.mimeType
+            } else {
+                let fileURL = root.appendingPathComponent(String(relativePath.dropFirst())).standardizedFileURL
+
+                // Confine reads to the bundle directory (no `../` traversal).
+                guard fileURL.path.hasPrefix(root.path + "/") || fileURL.path == root.path,
+                      // .mappedIfSafe: the file is paged in as it is read rather
+                      // than copied whole into memory. A byte-range request for a
+                      // video used to load the entire clip just to slice it.
+                      let fileData = try? Data(contentsOf: fileURL, options: .mappedIfSafe) else {
+                    urlSchemeTask.didFailWithError(URLError(.fileDoesNotExist))
+                    return
+                }
+                data = fileData
+                mime = Self.mimeType(forExtension: fileURL.pathExtension)
             }
-
-            let mime = Self.mimeType(forExtension: fileURL.pathExtension)
 
             // BYTE-RANGE support — required for <video> over a custom scheme in
             // WKWebView (feed ad clips, splash); without a 206 + Content-Range the
@@ -132,7 +156,7 @@ struct PoplurClayMapView: UIViewRepresentable {
                     "Content-Length": "\(slice.count)",
                     "Content-Range": "bytes \(start)-\(upper)/\(data.count)",
                     "Accept-Ranges": "bytes",
-                    "Cache-Control": "no-store"
+                    "Cache-Control": cacheControl
                 ]
                 if let response = HTTPURLResponse(url: url, statusCode: 206,
                                                   httpVersion: "HTTP/1.1", headerFields: headers) {
@@ -147,7 +171,7 @@ struct PoplurClayMapView: UIViewRepresentable {
                 "Content-Type": mime,
                 "Content-Length": "\(data.count)",
                 "Accept-Ranges": "bytes",
-                    "Cache-Control": "no-store"
+                "Cache-Control": cacheControl
             ]
             if let response = HTTPURLResponse(url: url, statusCode: 200,
                                               httpVersion: "HTTP/1.1", headerFields: headers) {
