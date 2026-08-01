@@ -260,6 +260,25 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
         toggleTorch()
     }
 
+    /// Shared-web Camera zoom. The clay channel arrows and pinch gesture both
+    /// send an absolute factor so repeated events cannot drift out of sync.
+    @MainActor
+    func setZoomFactor(_ factor: CGFloat) {
+        sessionQueue.async { [weak self] in
+            guard let self, let device = self.currentVideoInput?.device else { return }
+            let minimum = max(CGFloat(1), device.minAvailableVideoZoomFactor)
+            let maximum = min(CGFloat(4), device.maxAvailableVideoZoomFactor)
+            let next = min(maximum, max(minimum, factor))
+            do {
+                try device.lockForConfiguration()
+                device.videoZoomFactor = next
+                device.unlockForConfiguration()
+            } catch {
+                print("❌ [CameraKitController] Failed to update zoom: \(error)")
+            }
+        }
+    }
+
     @MainActor
     @objc func flipCamera() {
         currentCameraPosition = currentCameraPosition == .front ? .back : .front
