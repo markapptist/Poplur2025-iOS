@@ -341,14 +341,19 @@ struct PostLoginHomeWebView: UIViewRepresentable {
             didReceive message: WKScriptMessage
         ) {
             if message.name == "homeReady" {
-                guard !didSignalReady else { return }
-                didSignalReady = true
-                flushPendingNativeVoiceCommand()
-                DispatchQueue.main.async { [onReady] in onReady() }
+                signalHomeReady()
                 return
             }
             if let body = message.body as? [String: Any],
                let type = body["type"] as? String {
+                // The shared Home reports its own first painted frame through
+                // the normal Poplur bridge. Prefer that concrete signal over
+                // the document-load fallback installed above: a warm Home can
+                // reveal immediately, while a genuinely cold bundle remains
+                // covered by the approved splash until React has painted.
+                if type == "homeReady" {
+                    signalHomeReady()
+                }
                 if type == "requestLocation" {
                     // Home posts this after its custom clay card's Allow. The
                     // primer must not raise Apple's system prompt; use an
@@ -393,6 +398,13 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                 }
             }
             bridge.userContentController(userContentController, didReceive: message)
+        }
+
+        private func signalHomeReady() {
+            guard !didSignalReady else { return }
+            didSignalReady = true
+            flushPendingNativeVoiceCommand()
+            DispatchQueue.main.async { [onReady] in onReady() }
         }
 
         func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {

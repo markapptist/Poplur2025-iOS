@@ -401,10 +401,12 @@ struct Poplur2025App: App {
         let token = authTransitionToken
         showAuthTransition = false
         isAuthenticatedHomeReady = false
-        // Give a warm/cached home a chance to reveal immediately. If it is still
-        // decoding the web bundle after this point, cover only that real wait with
-        // the approved clay barber-pole splash.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+        // Give a warm/cached Home one first-paint window to reveal immediately.
+        // If its local web bundle has not painted after that point, cover only
+        // that real wait with the approved clay barber-pole splash. The previous
+        // 350 ms window outlasted the generic readiness fallback, suppressing the
+        // splash even on physical-device cold loads.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
             guard token == authTransitionToken,
                   !isAuthenticatedHomeReady,
                   auth.isAuthenticated else { return }
