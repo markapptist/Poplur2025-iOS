@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>POPLUR FPS</title>
-  <script type="module" crossorigin src="./assets/index-nHina4-z.js"></script>
+  <script type="module" crossorigin src="./assets/index-DGixMH3R.js"></script>
   <link rel="stylesheet" crossorigin href="./assets/index-CUqS3QQW.css">
   <style>
     html, body, #app {
@@ -17,11 +17,13 @@
       touch-action: none;
     }
 
-    /* The game owns canvas sizing and control placement. Its resize helper
-       aspect-fits the 640x360 render buffer and publishes
-       --game-control-bottom for the DOM controls. Do not override either with
-       viewport-sized !important rules: that stretches the portrait canvas and
-       detaches the controls from the rendered game. */
+    /* The game owns canvas sizing and control placement. Its resize helper now
+       cuts the render buffer to the VIEWPORT's aspect (no more fixed 640x360),
+       so the canvas fills the screen with no letterbox and no distortion, and
+       it publishes --game-control-bottom for the DOM controls. Still do not
+       override either with viewport-sized !important rules: the buffer shape is
+       decided in setScreenSize(), and forcing it here only desynchronises the
+       controls from the rendered game. */
 
     /* The regular movement/fire/use controls appear once gameplay begins.
        This one action stays available on the title screen, where touch devices
