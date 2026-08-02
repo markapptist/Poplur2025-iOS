@@ -53,6 +53,8 @@ struct PoplurClayMapView: UIViewRepresentable {
         webView.scrollView.bounces = false
         webView.scrollView.contentInsetAdjustmentBehavior = .never
         context.coordinator.webView = webView
+        // Required for the delegate above to ever be consulted.
+        webView.uiDelegate = context.coordinator
 
         if webRoot != nil, let indexURL = PoplurClayWebMap.indexURL {
             var components = URLComponents(url: indexURL, resolvingAgainstBaseURL: false)
@@ -206,9 +208,22 @@ struct PoplurClayMapView: UIViewRepresentable {
         }
     }
 
-    final class Coordinator: NSObject, WKScriptMessageHandler {
+    final class Coordinator: NSObject, WKScriptMessageHandler, WKUIDelegate {
         weak var webView: WKWebView?
         private let popHaptic = UIImpactFeedbackGenerator(style: .medium)
+
+        // WKWebView refuses getUserMedia unless the host answers this. Without
+        // it the studio's RECORD button did nothing whatsoever: the promise
+        // never resolved, so no recording started and no error surfaced either.
+        // The app already holds the real system permission; this only forwards
+        // that decision to the web layer rather than granting anything new.
+        func webView(_ webView: WKWebView,
+                     requestMediaCapturePermissionFor origin: WKSecurityOrigin,
+                     initiatedByFrame frame: WKFrameInfo,
+                     type: WKMediaCaptureType,
+                     decisionHandler: @escaping (WKPermissionDecision) -> Void) {
+            decisionHandler(.grant)
+        }
 
         func userContentController(_ userContentController: WKUserContentController,
                                    didReceive message: WKScriptMessage) {
