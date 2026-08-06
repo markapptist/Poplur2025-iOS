@@ -59,6 +59,7 @@ final class PoplurAIAssistantController: ObservableObject {
     private var recognitionStartedAt = Date.distantPast
     private var listeningSuppressedUntil = Date.distantPast
     private var wakeWatchdogTask: Task<Void, Never>?
+    private var idleListenTask: Task<Void, Never>?
     private var audioSessionObserverTokens: [NSObjectProtocol] = []
     private var eqSyncObserverToken: NSObjectProtocol?
     private var isPausedForAppAudio = false
@@ -71,6 +72,22 @@ final class PoplurAIAssistantController: ObservableObject {
     private func setStatus(_ text: String) {
         if statusText != text { statusText = text }
     }
+
+    /// How long an invoked session keeps the mic open with nothing said.
+    ///
+    /// "Hey Poplur" is now ON DEMAND — armed from the PROFILE hold menu's HEY
+    /// POPLUR tile, never at mount. Always-on listening kept a live
+    /// AVAudioEngine, a continuous mic tap and a speech recognizer running for
+    /// the whole session; measured on device, turning it off took the feed video
+    /// from 0.52x real time / ~13fps to 1.0x / 28-38fps, and the phone stopped
+    /// overheating. It had also parked the audio session in `.measurement`,
+    /// which silenced all playback app-wide.
+    ///
+    /// So nothing calls `start()` on appear any more (see WebHomeCameraLayer).
+    /// `requestPermissionAndStartCommand()` — already wired to that tile — is the
+    /// only way in, and this timeout is the way out, so an armed session cannot
+    /// silently become the always-on listener again by another route.
+    static let idleListenTimeout: TimeInterval = 45
 
     func start() {
         guard !isEnabled else {
@@ -92,6 +109,7 @@ final class PoplurAIAssistantController: ObservableObject {
     /// Called only by the user's explicit HEY POPLUR tile action.
     func requestPermissionAndStartCommand() {
         start()
+        armIdleListenTimeout()
         activateCommandAfterPermission = true
         if SFSpeechRecognizer.authorizationStatus() == .authorized,
            AVAudioSession.sharedInstance().recordPermission == .granted {
@@ -103,7 +121,24 @@ final class PoplurAIAssistantController: ObservableObject {
         requestPermissionsIfNeeded()
     }
 
+    /// Close an armed session that nobody spoke to. Without this, tapping HEY
+    /// POPLUR once would hold the microphone and recognizer open indefinitely —
+    /// the always-on cost re-created one tap at a time.
+    private func armIdleListenTimeout() {
+        idleListenTask?.cancel()
+        idleListenTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(Self.idleListenTimeout * 1_000_000_000))
+            guard !Task.isCancelled, let self, self.isEnabled else { return }
+            // A command in flight means it is being used — leave it alone.
+            guard !self.isListeningForCommand else { self.armIdleListenTimeout(); return }
+            PoplurDiagLog.append("[PoplurAI] idle timeout — releasing microphone")
+            self.stop()
+        }
+    }
+
     func stop() {
+        idleListenTask?.cancel()
+        idleListenTask = nil
         isEnabled = false
         wakeTask?.cancel()
         wakeTask = nil

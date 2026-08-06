@@ -2,8 +2,30 @@ let ctx: AudioContext | null = null;
 
 function getCtx(): AudioContext {
   if (!ctx) ctx = new AudioContext();
-  if (ctx.state === 'suspended') ctx.resume();
+  if (ctx.state === 'suspended') void ctx.resume();
   return ctx;
+}
+
+/**
+ * Open the audio device from inside a real user gesture.
+ *
+ * WHY the game was silent on iPhone: every sound in here is triggered from the
+ * game loop, not from the event handler that caused it. Pressing FIRE only sets
+ * `state.fire = true`; the shot — and the first `new AudioContext()` with it —
+ * happens on the next animation frame. iOS gives an AudioContext created
+ * outside a user gesture the `suspended` state and refuses `resume()` there, so
+ * the very first sound the game ever tried to make created a context that could
+ * never start, and every later sound inherited it. There is no error for this;
+ * it is simply quiet forever.
+ *
+ * Calling this from the touch/key handlers themselves means the context is
+ * already running by the time the loop asks it for a sound.
+ */
+export function unlockAudio(): void {
+  try {
+    const ac = getCtx();
+    if (ac.state === 'suspended') void ac.resume();
+  } catch { /* no WebAudio here; the game stays playable, just silent */ }
 }
 
 function playTone(

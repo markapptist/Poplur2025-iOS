@@ -48,12 +48,27 @@ struct PoplurGameMakerView: View {
             PoplurGameLaunchView(presetConfig: g.config)
                 .environmentObject(DeviceVolumeObserver())
         }
-        .alert("Place on the Map",
-               isPresented: Binding(get: { placementInfo != nil }, set: { if !$0 { placementInfo = nil } })) {
-            Button("Got it", role: .cancel) { dismiss() }
-        } message: {
-            Text("Switch to the Map tab and tap the spot where you want \"\(placementInfo?.config.gameName ?? "your game")\" to appear.")
-        }
+        // Poplur's own alert, never the system one — see PoplurAlert.swift.
+        // Game Maker is a near-black surface, so this one takes the dark neon
+        // card; the light clay card reads as a hole punched in the screen here.
+        // The `presenting:` overload hands the saved game straight to the
+        // message builder, so the "your game" fallback is no longer reachable
+        // and no longer needed.
+        //
+        // "Got it" dismisses the whole Game Maker sheet. The alert starts its own
+        // exit on the tap and then runs this closure while the card is still on
+        // screen, so the sheet teardown never races a cover that has already been
+        // pulled out from under it.
+        .poplurAlert(
+            "Place on the Map",
+            presenting: $placementInfo,
+            icon: .symbol("mappin.and.ellipse"),
+            style: .neon,
+            message: { game in
+                "Switch to the Map tab and tap the spot where you want \"\(game.config.gameName)\" to appear."
+            },
+            buttons: { _ in [.cancel("Got it") { dismiss() }] }
+        )
     }
 
     // MARK: Maker input

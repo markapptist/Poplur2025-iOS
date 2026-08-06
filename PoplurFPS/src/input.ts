@@ -1,3 +1,5 @@
+import { unlockAudio } from './audio.ts';
+
 export interface InputState {
   w: boolean; s: boolean; a: boolean; d: boolean;
   left: boolean; right: boolean;
@@ -5,6 +7,9 @@ export interface InputState {
   weapon1: boolean; weapon2: boolean; weapon3: boolean; weapon4: boolean; weapon5: boolean;
   mouseDX: number;
   escape: boolean;
+  /** Analog stick, -1..1. Keyboard leaves these at 0 and uses the booleans. */
+  axisFwd: number;
+  axisStrafe: number;
 }
 
 const state: InputState = {
@@ -14,6 +19,8 @@ const state: InputState = {
   weapon1: false, weapon2: false, weapon3: false, weapon4: false, weapon5: false,
   mouseDX: 0,
   escape: false,
+  axisFwd: 0,
+  axisStrafe: 0,
 };
 
 let locked = false;
@@ -34,6 +41,7 @@ const KEY_MAP: Record<string, keyof InputState> = {
 
 export function initInput(canvas: HTMLCanvasElement): void {
   window.addEventListener('keydown', e => {
+    unlockAudio();
     const k = KEY_MAP[e.code];
     if (k) (state as unknown as Record<string, boolean>)[k] = true;
   });
@@ -43,7 +51,13 @@ export function initInput(canvas: HTMLCanvasElement): void {
   });
 
   canvas.addEventListener('click', () => {
-    if (!locked) canvas.requestPointerLock();
+    if (!locked) {
+      canvas.requestPointerLock();
+      // The cabinet is itself the start control. Keep the pulse alive long
+      // enough for the menu state to consume it before pointer lock settles.
+      state.interact = true;
+      window.setTimeout(() => { state.interact = false; }, 80);
+    }
   });
 
   document.addEventListener('pointerlockchange', () => {
@@ -61,48 +75,110 @@ export function initInput(canvas: HTMLCanvasElement): void {
     if (e.button === 0) state.fire = false;
   });
 
-  // Touch joystick
+  // ── touch controls ────────────────────────────────────────────────────────
+  // Left stick moves, right side of the screen looks. That split is what makes
+  // a shooter playable with thumbs, and its absence is what made this one feel
+  // wrong: the stick used to be a four-way DIGITAL pad (full speed or nothing,
+  // with a dead wedge on every diagonal), and its X axis TURNED the player
+  // rather than strafing — so aiming and walking fought over the same thumb and
+  // there was no way to look around at all.
   const joystick = document.getElementById('joystick-zone');
   const thumb = document.getElementById('joystick-thumb');
   if (joystick && thumb) {
-    let startX = 0, startY = 0, active = false;
-    joystick.addEventListener('touchstart', e => {
-      active = true;
-      startX = e.touches[0].clientX;
-      startY = e.touches[0].clientY;
-      e.preventDefault();
-    }, { passive: false });
-    joystick.addEventListener('touchmove', e => {
-      if (!active) return;
-      const dx = e.touches[0].clientX - startX;
-      const dy = e.touches[0].clientY - startY;
-      const max = 36;
-      const cx = Math.max(-max, Math.min(max, dx));
-      const cy = Math.max(-max, Math.min(max, dy));
+    let activePointer: number | null = null;
+    const updateJoystick = (e: PointerEvent) => {
+      if (e.pointerId !== activePointer) return;
+      const rect = joystick.getBoundingClientRect();
+      const dx = e.clientX - (rect.left + rect.width / 2);
+      const dy = e.clientY - (rect.top + rect.height / 2);
+      const max = rect.width * 0.34;
+      const length = Math.hypot(dx, dy);
+      const scale = length > max ? max / length : 1;
+      const cx = dx * scale;
+      const cy = dy * scale;
       (thumb as HTMLElement).style.transform = `translate(${cx}px,${cy}px)`;
-      state.w = cy < -10;
-      state.s = cy > 10;
-      state.a = cx < -10;
-      state.d = cx > 10;
+
+      // Analog, with a small dead zone so resting the thumb does not creep.
+      const DEAD = 0.16;
+      const norm = (v: number) => {
+        const n = Math.max(-1, Math.min(1, v / max));
+        if (Math.abs(n) < DEAD) return 0;
+        // Rescale past the dead zone so control starts at zero, not at 0.16.
+        return (n - Math.sign(n) * DEAD) / (1 - DEAD);
+      };
+      state.axisFwd = -norm(cy);
+      state.axisStrafe = norm(cx);
       e.preventDefault();
-    }, { passive: false });
-    joystick.addEventListener('touchend', () => {
-      active = false;
-      state.w = state.s = state.a = state.d = false;
+    };
+    const releaseJoystick = (e: PointerEvent) => {
+      if (e.pointerId !== activePointer) return;
+      activePointer = null;
+      state.axisFwd = 0;
+      state.axisStrafe = 0;
+      state.w = state.s = state.left = state.right = false;
       (thumb as HTMLElement).style.transform = '';
+    };
+    joystick.addEventListener('pointerdown', e => {
+      unlockAudio();
+      activePointer = e.pointerId;
+      joystick.setPointerCapture(e.pointerId);
+      updateJoystick(e);
     });
+    joystick.addEventListener('pointermove', updateJoystick);
+    joystick.addEventListener('pointerup', releaseJoystick);
+    joystick.addEventListener('pointercancel', releaseJoystick);
   }
 
-  const fireBtn = document.getElementById('fire-btn');
-  if (fireBtn) {
-    fireBtn.addEventListener('touchstart', e => { state.fire = true; e.preventDefault(); }, { passive: false });
-    fireBtn.addEventListener('touchend', () => { state.fire = false; });
+  // Drag anywhere on the view to look. Feeds the same mouseDX the mouse path
+  // uses, so turning behaves identically however you are playing.
+  {
+    let lookPointer: number | null = null;
+    let lastLookX = 0;
+    const TOUCH_LOOK_SENS = 2.1; // a thumb swipe covers far less than a mouse
+    canvas.addEventListener('pointerdown', e => {
+      unlockAudio();
+      if (e.pointerType === 'mouse') return; // mouse keeps pointer lock
+      lookPointer = e.pointerId;
+      lastLookX = e.clientX;
+    });
+    canvas.addEventListener('pointermove', e => {
+      if (e.pointerId !== lookPointer) return;
+      state.mouseDX += (e.clientX - lastLookX) * TOUCH_LOOK_SENS;
+      lastLookX = e.clientX;
+      e.preventDefault();
+    });
+    const endLook = (e: PointerEvent) => { if (e.pointerId === lookPointer) lookPointer = null; };
+    canvas.addEventListener('pointerup', endLook);
+    canvas.addEventListener('pointercancel', endLook);
   }
-  const interactBtn = document.getElementById('interact-btn');
-  if (interactBtn) {
-    interactBtn.addEventListener('touchstart', e => { state.interact = true; e.preventDefault(); }, { passive: false });
-    interactBtn.addEventListener('touchend', () => { state.interact = false; });
-  }
+
+  bindArcadeButton('fire-btn', 'fire');
+  bindArcadeButton('interact-btn', 'interact');
+}
+
+function bindArcadeButton(id: string, key: 'fire' | 'interact'): void {
+  const button = document.getElementById(id);
+  if (!button) return;
+  let releaseTimer: number | null = null;
+  const release = () => {
+    if (releaseTimer) window.clearTimeout(releaseTimer);
+    // Keep a quick tap alive long enough for at least one game frame.
+    releaseTimer = window.setTimeout(() => {
+      state[key] = false;
+      releaseTimer = null;
+    }, 80);
+  };
+  button.addEventListener('pointerdown', e => {
+    unlockAudio();
+    if (releaseTimer) window.clearTimeout(releaseTimer);
+    releaseTimer = null;
+    button.setPointerCapture(e.pointerId);
+    state[key] = true;
+    e.preventDefault();
+  });
+  button.addEventListener('pointerup', release);
+  button.addEventListener('pointercancel', release);
+  button.addEventListener('lostpointercapture', release);
 }
 
 export function getInput(): InputState { return state; }
@@ -115,7 +191,7 @@ export function consumeMouseDX(): number {
 
 export function isPointerLocked(): boolean { return locked; }
 
-export function showMobileControls(): void {
+export function showMobileControls(visible = true): void {
   const mc = document.getElementById('mobile-controls');
-  if (mc) mc.style.display = 'flex';
+  if (mc) mc.style.display = visible ? 'flex' : 'none';
 }

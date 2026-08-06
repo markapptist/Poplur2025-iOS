@@ -1,4 +1,4 @@
-import { SCREEN_W, SCREEN_H, TEX_SIZE, WALL_DOOR, WALL_LOCKED, WALL_PINK } from '../game/constants.ts';
+import { SCREEN_W, SCREEN_H, PROJ_H, TEX_SIZE, WALL_DOOR, WALL_LOCKED, WALL_PINK } from '../game/constants.ts';
 import type { Level } from '../game/Level.ts';
 import type { Player } from '../game/Player.ts';
 import type { Assets } from '../assets.ts';
@@ -116,7 +116,7 @@ export function renderScene(
     zBuffer[x] = perpWallDist;
 
     if (perpWallDist <= 0) continue;
-    const lineH  = Math.abs(H / perpWallDist) | 0;
+    const lineH  = Math.abs(PROJ_H / perpWallDist) | 0;
     const drawS  = Math.max(0, (H / 2 - lineH / 2) | 0);
     const drawE  = Math.min(H - 1, (H / 2 + lineH / 2) | 0);
     const drawH  = drawE - drawS;
@@ -186,7 +186,7 @@ function renderSprites(
     if (ty <= 0.05) continue;
 
     const scale = s.scale ?? 1;
-    const sprH = Math.abs((H / ty) * scale) | 0;
+    const sprH = Math.abs((PROJ_H / ty) * scale) | 0;
     const sprW = sprH; // assume 1:1 ratio; adjust if needed
     const scrX = ((W / 2) * (1 + tx / ty)) | 0;
 
@@ -220,12 +220,20 @@ function renderSprites(
 export function renderWeapon(
   ctx: CanvasRenderingContext2D,
   player: Player,
-  weaponImg: HTMLImageElement | null
+  weaponImg: HTMLImageElement | null,
+  frames = 1
 ): void {
   if (!weaponImg) return;
   const W = SCREEN_W, H = SCREEN_H;
-  const iw = weaponImg.naturalWidth, ih = weaponImg.naturalHeight;
-  const scale = (H * 0.62) / ih;
+  const frameCount = Math.max(1, frames);
+  const iw = weaponImg.naturalWidth / frameCount;
+  const ih = weaponImg.naturalHeight;
+  // Size the viewmodel from WIDTH, not buffer height. `H * 0.76` was fine when
+  // the buffer was always 640x360, but once the buffer follows a portrait
+  // screen H roughly doubles and the gun swallowed half the view. Width is what
+  // a held weapon should track — 0.76 * 360 / 640 reproduces the old size
+  // exactly at 16:9, so nothing changes on a landscape screen.
+  const scale = (W * 0.4275) / ih;
   const dw = iw * scale, dh = ih * scale;
 
   const bobY = Math.sin(player.bobPhase) * 6;
@@ -236,5 +244,8 @@ export function renderWeapon(
   const dy = H - dh + bobY + kickY + 8;
 
   ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(weaponImg, dx, dy, dw, dh);
+  // The middle Sentinel frame is edge-on and reads as a grey line. The
+  // supplied three-quarter frame keeps the actual gun body visible.
+  const frame = frameCount > 1 ? Math.min(1, frameCount - 1) : 0;
+  ctx.drawImage(weaponImg, frame * iw, 0, iw, ih, dx, dy, dw, dh);
 }

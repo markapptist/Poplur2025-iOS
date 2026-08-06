@@ -11,6 +11,9 @@ final class LocationManager: NSObject, ObservableObject {
         super.init()
         manager.delegate = self
         manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
+        // Without a distanceFilter, every movement delivers an update and the
+        // radio never rests. 50m matches the block-level use this class serves.
+        manager.distanceFilter = 50
         if CLLocationManager.locationServicesEnabled() {
             let status = manager.authorizationStatus
             if status == .authorizedAlways || status == .authorizedWhenInUse {

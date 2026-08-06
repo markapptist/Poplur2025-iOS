@@ -38,6 +38,40 @@ final class WebHomeCameraModel: ObservableObject {
         return controller
     }
 
+    /// Point the native filter pipeline at the filter the web rail selected.
+    ///
+    /// The Core Image pass runs on every frame, so it is installed lazily and
+    /// only while a filter is actually chosen — this app's camera is already a
+    /// heat source, and paying for a full-rate filter pass to render "None"
+    /// would be paying for nothing. Picking None hands the cheap hardware
+    /// preview layer back.
+    private func applyARFilter(id: String) {
+        let controller = resolveController()
+        let filter = ARFilterManager.ARFilter.allCases.first {
+            $0.rawValue.caseInsensitiveCompare(id) == .orderedSame
+        } ?? .none
+
+        if filter != .none && controller.arFilterManager == nil {
+            let manager = ARFilterManager()
+            let layer = (controller.previewViewController as? CameraPreviewViewController)?.getARDisplayLayer()
+            controller.setupARFilterSupport(filterManager: manager, displayLayer: layer)
+        }
+        controller.arFilterManager?.activeFilter = filter
+
+        // CameraPreviewViewController cross-fades between the hardware preview
+        // and the filtered display layer off these two notifications; it is the
+        // same pair the native selector posts, so both entry points drive the
+        // preview through one path.
+        NotificationCenter.default.post(
+            name: Notification.Name("ARFiltersStateChanged"), object: nil,
+            userInfo: ["isShown": filter != .none]
+        )
+        NotificationCenter.default.post(
+            name: Notification.Name("ARFilterChanged"), object: nil,
+            userInfo: ["filter": filter.rawValue]
+        )
+    }
+
     func handleWebEvent(type: String, body: [String: Any]) {
         switch type {
         case "tabChanged":
@@ -87,6 +121,19 @@ final class WebHomeCameraModel: ObservableObject {
                     controller.disableMLDetection()
                 }
                 UserDefaults.standard.set(wantsOn, forKey: "CameraObjectDetectionEnabled")
+            case "filter":
+                // AR filters were the SAME bug as ML detection, one layer along:
+                // a capability wired only on the old native path and missed when
+                // Home became a WebView.
+                //
+                // The web rail sets a CSS `filter` on its <video>. On iOS that
+                // element is never rendered at all — the preview is native behind
+                // a transparent WebView — so the rail was styling nothing. And
+                // even with a message to carry the choice there was no pipeline
+                // to receive it: the Core Image pass and the display layer are
+                // installed by setupARFilterSupport(), which only HomeView ever
+                // called. Selecting a filter changed a label and nothing else.
+                applyARFilter(id: (body["id"] as? String) ?? "none")
             default: break
             }
         case "holdMenuNavigate":
@@ -124,6 +171,9 @@ final class WebHomeCameraModel: ObservableObject {
             return
         }
         await controller.resumePreviewAfterInterruption()
+        // Pairs with the suspendCapture() in deactivateCamera(). Without this the
+        // camera would come back dead after the first time you leave the tab.
+        controller.resumeCapture()
 
         let recognition = recognitionManager ?? UserRecognitionManager()
         recognitionManager = recognition
@@ -133,6 +183,30 @@ final class WebHomeCameraModel: ObservableObject {
         // session control, but an old persisted off value must not survive an
         // update/reinstall and silently disable the default on the next visit.
         controller.enableMLDetection()
+        // enableMLDetection() only says detection is WANTED. Frames are what make
+        // it happen, and on this path nothing was attaching a video data output —
+        // that lived solely inside setupARFilterSupport(), which only HomeView
+        // called. So the classifier and face detector sat armed and idle: no
+        // green boxes, no announcements, and no error to say why.
+        controller.startVideoFrameDelivery()
+
+        // Real boxes for the web overlay. The web's own detector
+        // (poplur-clay-map/src/mlDetect.ts) is explicitly a SIMULATION — it
+        // clusters a frame-difference map and labels the blobs from a plausible
+        // list — and it cannot run here anyway, because on iOS the camera is
+        // native behind a transparent WebView so the page's <video> is empty.
+        // Vision's built-in detectors genuinely locate what they name, so the
+        // boxes on screen mean something.
+        let boxes = controller.visionBoxDetector ?? VisionBoxDetector()
+        controller.visionBoxDetector = boxes
+        boxes.onBoxes = { found in
+            let items = found.map { b in
+                let label = b.label.replacingOccurrences(of: "\"", with: "")
+                return "{\"id\":\"\(b.id)\",\"x\":\(b.x),\"y\":\(b.y),\"w\":\(b.w),\"h\":\(b.h)"
+                    + ",\"label\":\"\(label)\",\"confidence\":\(b.confidence)}"
+            }
+            PostLoginHomeWebView.sendDetections("[" + items.joined(separator: ",") + "]")
+        }
         controller.mlDetectionManager?.onFrameProcessed = { [weak recognition] pixelBuffer, objects in
             CameraAIAnnouncer.shared.announceMLObjects(objects)
             recognition?.processDetectedObjects(objects, from: pixelBuffer)
@@ -147,6 +221,34 @@ final class WebHomeCameraModel: ObservableObject {
         controllerStorage?.userRecognitionManager = nil
         recognitionManager?.clearRecognition()
         CameraAIAnnouncer.shared.resetSession()
+
+        // ACTUALLY STOP THE CAMERA.
+        //
+        // This used to only switch ML off, so the AVCaptureSession — sensor, ISP,
+        // `.high` preset, back dual-wide — kept running from the first time the
+        // camera tab was opened until the app was backgrounded or killed. Leaving
+        // the camera tab did nothing: the sensor stayed hot on Feed, Map and
+        // Profile. That is on the order of 400-900 mW sustained, and it is the
+        // largest remaining native contributor to the phone heating up.
+        //
+        // It survived because the controller lives in
+        // `WebHomeCameraModel.controllerStorage`, held by a @StateObject on
+        // PostLoginHomeSurface, so unmounting the camera layer never released it.
+        // `suspendCapture()`/`resumeCapture()` already existed and were already
+        // paired — only HomeView called them, and HomeView is not mounted when
+        // PoplurWebHome.isEnabled.
+        controllerStorage?.visionBoxDetector?.onBoxes = nil
+        controllerStorage?.visionBoxDetector = nil
+        // Clear any boxes left painted over a camera that is no longer running.
+        PostLoginHomeWebView.sendDetections("[]")
+        controllerStorage?.suspendCapture()
+
+        // And kill the torch. Nothing else clears it: flipCamera() only clears it
+        // when switching TO the front camera, and the implicit clear from stopping
+        // the session never happened because the session was never stopped. A
+        // forgotten LED is 1-3 W heating the camera bump directly, for as long as
+        // the app is open.
+        controllerStorage?.toggleTorchOff()
     }
 }
 
@@ -164,15 +266,11 @@ struct WebHomeCameraLayer: View {
                 RecognizedFaceBoxOverlay(recognitionManager: recognitionManager)
                     .allowsHitTesting(false)
 
-                // The detected-object card ("Laptop · 87%"). Detection has
-                // been running in this layer all along — this is the missing
-                // readout that made it look switched off.
-                LiveMLDetectionOverlay(
-                    controller: model.resolveController(),
-                    userRecognitionManager: recognitionManager,
-                    showsRecognizedUser: false
-                )
-                .allowsHitTesting(false)
+                // NO LiveMLDetectionOverlay here. It rendered a SECOND readout of
+                // the same detections — a primary card plus an "Also seeing"
+                // chip row — on top of MLCameraShaderOverlay's shader banner
+                // below, so every scan showed twice. The shader banner is the
+                // approved one; this one is the duplicate.
 
                 if let user = recognitionManager.recognizedUser, user.isRecent {
                     Text("@\(user.profile.username)")
@@ -248,16 +346,21 @@ struct PostLoginHomeSurface: View {
             )
             .allowsHitTesting(false)
         }
-        .onAppear { poplurAI.start() }
+        // NOT started on appear any more. Arming the recognizer just because Home
+        // mounted is what made "Hey Poplur" always-on, and always-on cost a live
+        // AVAudioEngine + a continuous mic tap + a speech recognizer for the
+        // entire session. Measured on device: turning it off took the feed video
+        // from 0.52x real time / ~13fps to 1.0x / 28-38fps and stopped the phone
+        // overheating. It had also parked the audio session in `.measurement`,
+        // silencing all playback.
+        //
+        // The way in is now the PROFILE hold menu's HEY POPLUR tile, which the web
+        // already bridges as `requestVoiceAssistant` -> requestPermissionAndStartCommand()
+        // (see onWebEvent above). Stopping is still unconditional: backgrounding or
+        // leaving Home must never leave the microphone open.
         .onDisappear { poplurAI.stop() }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active {
-                poplurAI.start()
-            } else {
-                // "Always" means while the approved Home is foregrounded.
-                // Do not hold the microphone when Poplur is not on screen.
-                poplurAI.stop()
-            }
+            if phase != .active { poplurAI.stop() }
         }
         // CREATE in the web hold menu opens the REAL chat — PoplurAIChatView,
         // the one backed by Google AI Studio through poplurAiApi — instead of

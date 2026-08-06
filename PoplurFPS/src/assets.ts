@@ -19,7 +19,8 @@ function loadImg(src: string): Promise<HTMLImageElement | null> {
 }
 
 function load(src: string): Promise<HTMLImageElement | null> {
-  return loadImg(`/sprites/${src}`);
+  const baseURL = (import.meta as ImportMeta & { env: { BASE_URL: string } }).env.BASE_URL;
+  return loadImg(`${baseURL}sprites/${src}`);
 }
 
 export async function loadAssets(
@@ -40,7 +41,7 @@ export async function loadAssets(
     ['door_locked', load('09_doors_panels/door_panel_02.png')],
     ['door_pink',   load('09_doors_panels/door_panel_03.png')],
     // weapons
-    ['pistol',   load('02_weapons/pistol.png')],
+    ['pistol',   load('02_weapons/sentinel_aim.png')],
     ['shotgun',  load('02_weapons/shotgun.png')],
     ['plasma',   load('02_weapons/plasma.png')],
     ['rocket',   load('02_weapons/rocket_launcher.png')],
@@ -70,7 +71,8 @@ export async function loadAssets(
     ['hud_ammo',   load('11_hud_ui/hud_ammo.png')],
     ['hud_slot',   load('11_hud_ui/hud_weapon_slot.png')],
     // menu
-    ['main_menu', load('01_title_screen/main_menu_screen.png')],
+    ['main_menu', load('01_title_screen/main_menu_crt.png')],
+    ['cabinet',   load('01_title_screen/cabinet.png')],
     // misc
     ['logo', load('13_misc/pixel_p_logo.png')],
     ['levelup_sign', load('10_decals_signs/level_up_sign.png')],
@@ -111,7 +113,7 @@ export async function loadAssets(
       face: get('hud_face'), health: get('hud_health'),
       armor: get('hud_armor'), ammo: get('hud_ammo'), slot: get('hud_slot'),
     },
-    menu: { main_menu: get('main_menu') },
+    menu: { main_menu: get('main_menu'), cabinet: get('cabinet') },
     misc: { logo: get('logo'), levelup_sign: get('levelup_sign') },
   };
 }

@@ -95,6 +95,29 @@ struct PoplurClayMapView: UIViewRepresentable {
             self.root = rootDirectory.standardizedFileURL
         }
 
+        // WKWebView does NOT apply HTTP caching to a custom scheme: the
+        // Cache-Control header on these responses is inert, so every asset was
+        // re-resolved, re-opened and re-wrapped in a response on every single
+        // use. This handler was the hottest app symbol in two separate device
+        // CPU profiles because of it. Hold the mapped bytes here instead —
+        // bundle assets cannot change without a new build, and the data is
+        // memory-mapped, so this costs virtual address space rather than RAM.
+        private static var assetCache: [String: (data: Data, mime: String)] = [:]
+        private static let assetCacheLock = NSLock()
+
+        private static func cachedAsset(_ key: String) -> (data: Data, mime: String)? {
+            assetCacheLock.lock(); defer { assetCacheLock.unlock() }
+            return assetCache[key]
+        }
+
+        private static func cacheAsset(_ key: String, data: Data, mime: String) {
+            assetCacheLock.lock(); defer { assetCacheLock.unlock() }
+            // Bounded so a long session cannot accumulate every capture-sized
+            // blob the page ever asked for.
+            if assetCache.count > 400 { assetCache.removeAll(keepingCapacity: true) }
+            assetCache[key] = (data, mime)
+        }
+
         func webView(_ webView: WKWebView, start urlSchemeTask: WKURLSchemeTask) {
             guard let url = urlSchemeTask.request.url else {
                 urlSchemeTask.didFailWithError(URLError(.badURL))
@@ -123,6 +146,13 @@ struct PoplurClayMapView: UIViewRepresentable {
                 data = captureData
                 mime = item.mimeType
             } else {
+                // Cache hit: reuse the mapped bytes but still fall through to
+                // the range/response logic below, so byte-range requests (video
+                // seeking) keep working exactly as they did.
+                if let hit = Self.cachedAsset(relativePath) {
+                    data = hit.data
+                    mime = hit.mime
+                } else {
                 let fileURL = root.appendingPathComponent(String(relativePath.dropFirst())).standardizedFileURL
 
                 // Confine reads to the bundle directory (no `../` traversal).
@@ -136,6 +166,8 @@ struct PoplurClayMapView: UIViewRepresentable {
                 }
                 data = fileData
                 mime = Self.mimeType(forExtension: fileURL.pathExtension)
+                Self.cacheAsset(relativePath, data: data, mime: mime)
+                }
             }
 
             // BYTE-RANGE support — required for <video> over a custom scheme in

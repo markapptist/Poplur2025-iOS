@@ -313,7 +313,7 @@ export class Game {
 
         // Weapon
         const wKey = WEAPON_KEYS[this.player.weapon];
-        renderWeapon(ctx, this.player, this.assets.weapons[wKey] ?? null);
+        renderWeapon(ctx, this.player, this.assets.weapons[wKey] ?? null, this.player.weapon === 0 ? 9 : 1);
 
         // HUD
         renderHUD(ctx, this.player, this.assets, this.level, this.score, this.kills, this.gameTime);

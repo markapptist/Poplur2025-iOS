@@ -130,6 +130,21 @@ enum PoplurPermissionRouting {
 }
 
 struct PostLoginHomeWebView: UIViewRepresentable {
+    /// The page currently hosting Home. The camera layer lives outside this
+    /// view's coordinator but must reach the same document to hand it detection
+    /// boxes, so the live web view is published here rather than threaded
+    /// through every intermediate type.
+    static weak var liveWebView: WKWebView?
+
+    /// Hand the web overlay real boxes. JSON matches `Detection` in
+    /// poplur-clay-map/src/mlDetect.ts: x/y/w/h normalised 0..1, top-left origin.
+    static func sendDetections(_ json: String) {
+        guard let webView = liveWebView else { return }
+        webView.evaluateJavaScript(
+            "window.dispatchEvent(new CustomEvent('poplur-native-detections', { detail: \(json) })); true;"
+        )
+    }
+
     let onReady: () -> Void
     /// Tap on bridge events the host cares about (tabChanged / cameraShutter /
     /// cameraControl → the native web-home camera layer). Every message still
@@ -190,6 +205,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         webView.scrollView.contentInsetAdjustmentBehavior = .never
         webView.overrideUserInterfaceStyle = .dark
         context.coordinator.bridge.webView = webView
+        Self.liveWebView = webView
 
         if PoplurClayMapView.bundledRootURL() != nil, let url = PoplurWebHome.homeURL {
             webView.load(URLRequest(url: url))
@@ -355,6 +371,14 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                 // covered by the approved splash until React has painted.
                 if type == "homeReady" {
                     signalHomeReady()
+                }
+                // The web layer's own heat probe. A WKWebView's console.log never
+                // reaches this process's stdout, so the probe hands its line to
+                // native and native prints it — that is what makes it readable
+                // with `devicectl device process launch --console`.
+                if type == "profile", let line = body["line"] as? String {
+                    print(line)
+                    PoplurDiagLog.append(line)
                 }
                 if type == "requestLocation" {
                     // Home posts this after its custom clay card's Allow. The

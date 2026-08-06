@@ -135,21 +135,46 @@ struct MediaPickerView: View {
                 startPreparation()
             }
         }
-        .alert("Camera Access Needed", isPresented: $showPermissionAlert, actions: {
-            Button("OK", role: .cancel) { }
-            Button("Open Settings") {
-                if let url = URL(string: UIApplication.openSettingsURLString) {
-                    UIApplication.shared.open(url, options: [:], completionHandler: nil)
+        // Poplur's own alert, never the system one — see PoplurAlert.swift.
+        //
+        // This is THE permission explainer, the direct native sibling of the web
+        // PermissionAlert, so it keeps the clay camera chip and the 194pt web
+        // width — it should read as the same dialog the pre-login welcome flow
+        // shows. Note this does not replace iOS's own permission
+        // sheet and does not try to: `AVCaptureDevice.requestAccess` below is
+        // untouched. This is only the app explaining itself either before that
+        // sheet appears or after the user has already said no.
+        //
+        // Two choices, so they sit side by side with the declining one on the
+        // left, matching iOS. The alert closes itself on the tap, before the
+        // button's own action runs, which is why "Open Settings" needs no
+        // teardown of its own.
+        .poplurAlert(
+            "Camera Access Needed",
+            isPresented: $showPermissionAlert,
+            message: permissionAlertMessage,
+            icon: .camera,
+            accessibilityLabel: "Camera permission",
+            buttons: [
+                .cancel("OK"),
+                .default("Open Settings") {
+                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(url, options: [:], completionHandler: nil)
+                    }
                 }
-            }
-        }, message: {
-            Text(permissionAlertMessage)
-        })
-        .alert("Error", isPresented: $showErrorAlert, actions: {
-            Button("OK", role: .cancel) { }
-        }, message: {
-            Text(errorMessage)
-        })
+            ]
+        )
+        // Free-form AVFoundation/Firebase error text arrives at whatever length
+        // it arrives at, so this one takes the wider card rather than squeeze
+        // a stack trace's worth of copy into 194pt.
+        .poplurAlert(
+            "Error",
+            isPresented: $showErrorAlert,
+            message: errorMessage,
+            icon: .symbol("exclamationmark.triangle.fill"),
+            width: .wide,
+            buttons: [.cancel("OK")]
+        )
         .onChange(of: selectedImage) {
             startPreparation()
         }

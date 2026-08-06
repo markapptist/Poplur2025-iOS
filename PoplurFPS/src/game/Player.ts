@@ -49,25 +49,35 @@ export class Player {
     const mdx = consumeMouseDX();
     if (mdx !== 0) this.rotate(mdx * MOUSE_SENS);
 
-    // Movement
+    // Movement.
+    //
+    // Keyboard keys are full-deflection axes; the touch stick supplies real
+    // analog values. Resolving both into one pair of axes means a thumb half
+    // way out walks at half speed and a diagonal is a genuine diagonal, rather
+    // than the four-way on/off pad this used to be — and it keeps one movement
+    // path for every input device instead of two that can drift apart.
+    const keyFwd = (input.w ? 1 : 0) + (input.s ? -1 : 0);
+    const keyStrafe = (input.d ? 1 : 0) + (input.a ? -1 : 0);
+    let axFwd = input.axisFwd !== 0 ? input.axisFwd : keyFwd;
+    let axStrafe = input.axisStrafe !== 0 ? input.axisStrafe : keyStrafe;
+
+    // Pushing the stick corner-to-corner must not be faster than straight on.
+    const mag = Math.hypot(axFwd, axStrafe);
+    if (mag > 1) { axFwd /= mag; axStrafe /= mag; }
+
     const speed = MOVE_SPEED * dt;
     const strafeSpeed = speed * 0.8;
     let moving = false;
 
-    if (input.w) {
-      this.tryMove(level, this.x + this.dirX * speed, this.y + this.dirY * speed);
+    if (axFwd !== 0) {
+      this.tryMove(level, this.x + this.dirX * speed * axFwd, this.y + this.dirY * speed * axFwd);
       moving = true;
     }
-    if (input.s) {
-      this.tryMove(level, this.x - this.dirX * speed, this.y - this.dirY * speed);
-      moving = true;
-    }
-    if (input.a) {
-      this.tryMove(level, this.x + this.dirY * strafeSpeed, this.y - this.dirX * strafeSpeed);
-      moving = true;
-    }
-    if (input.d) {
-      this.tryMove(level, this.x - this.dirY * strafeSpeed, this.y + this.dirX * strafeSpeed);
+    if (axStrafe !== 0) {
+      // +strafe is to the player's right.
+      this.tryMove(level,
+        this.x - this.dirY * strafeSpeed * axStrafe,
+        this.y + this.dirX * strafeSpeed * axStrafe);
       moving = true;
     }
 

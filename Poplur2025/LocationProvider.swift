@@ -17,10 +17,16 @@ final class LocationProvider: NSObject, ObservableObject {
     private let manager = CLLocationManager()
     private var didRequest = false
     private var isUpdating = false
+    private var hasPreciseFix = false
 
     override init() {
         super.init()
         manager.delegate = self
+        // Precise for the FIRST fix only. Continuous ten-metre GNSS keeps the
+        // radio in its hottest mode for the whole foreground session, and it is
+        // one of the big reasons the app heats the phone. After the first good
+        // fix lands, didUpdateLocations downshifts to hundred-metre / 50m
+        // filter — the radius product needs "which block", not "which metre".
         manager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
         manager.distanceFilter = 10
         // If app already has permission, optionally seed with last known location
@@ -99,6 +105,15 @@ extension LocationProvider: CLLocationManagerDelegate {
         guard let last = locations.last else { return }
         Task { @MainActor in
             self.coordinate = last.coordinate
+            // First usable fix delivered — drop the continuous stream to the
+            // cool tier. Anything that needs a precise moment (posting, a
+            // claim) should take its own one-shot requestLocation() rather
+            // than holding the whole session at ten metres.
+            if !self.hasPreciseFix {
+                self.hasPreciseFix = true
+                self.manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
+                self.manager.distanceFilter = 50
+            }
         }
     }
 

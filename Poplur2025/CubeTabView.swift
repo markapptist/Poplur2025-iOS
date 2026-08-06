@@ -2548,11 +2548,22 @@ private struct CubeOnlyPreview: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
-                    .alert("Export Complete", isPresented: $showExportAlert) {
-                        Button("OK") { }
-                    } message: {
-                        Text(exportMessage)
-                    }
+                    // Poplur's own alert, never the system one — see
+                    // PoplurAlert.swift. This modifier hangs off a VStack
+                    // nested inside a ScrollView, which is exactly why the
+                    // component presents through a window-level cover: an
+                    // overlay here would scroll away with the controls and get
+                    // clipped by the scroll view. The message carries hard
+                    // newlines and can be an error string, so it takes the
+                    // wider card and is allowed to grow rather than truncate.
+                    .poplurAlert(
+                        "Export Complete",
+                        isPresented: $showExportAlert,
+                        message: exportMessage,
+                        icon: .symbol("square.and.arrow.up"),
+                        width: .wide,
+                        buttons: [.cancel("OK")]
+                    )
 
                     Picker("Scale Mode", selection: $scaleMode) {
                         Text("Scale To").tag(ScaleMode.scaleTo)

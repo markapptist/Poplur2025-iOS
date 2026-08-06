@@ -1,26 +1,34 @@
-import { SCREEN_W, SCREEN_H } from './game/constants.ts';
+import { SCREEN_W, SCREEN_H, setScreenSize } from './game/constants.ts';
 import { initInput, showMobileControls } from './input.ts';
 import { loadAssets } from './assets.ts';
 import { Game } from './game/Game.ts';
 import { renderLoadingScreen } from './render/Menu.ts';
 
 const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
-canvas.width  = SCREEN_W;
-canvas.height = SCREEN_H;
 
-// Scale canvas to fill window, preserving aspect ratio
+// TRUE fullscreen: the buffer is cut to the viewport's shape, so there is
+// nothing left over to letterbox. The old version aspect-fitted a fixed 16:9
+// buffer, which on a portrait phone meant black bands over roughly a third of
+// the screen. Because the projection now scales from width (PROJ_H), the taller
+// buffer shows more of the room instead of a stretched copy of the same view.
 function resize(): void {
-  const winW = window.innerWidth;
-  const winH = window.innerHeight;
-  const scale = Math.min(winW / SCREEN_W, winH / SCREEN_H);
-  canvas.style.width  = `${SCREEN_W * scale}px`;
-  canvas.style.height = `${SCREEN_H * scale}px`;
+  const winW = Math.max(1, window.innerWidth);
+  const winH = Math.max(1, window.innerHeight);
+  setScreenSize(winW, winH);
+  canvas.width = SCREEN_W;
+  canvas.height = SCREEN_H;
+  // The buffer matches the viewport aspect, so filling it cannot distort.
+  canvas.style.width = `${winW}px`;
+  canvas.style.height = `${winH}px`;
+  // Nearest-neighbour has to be re-set: resizing a canvas resets its 2D state.
+  const c = canvas.getContext('2d');
+  if (c) c.imageSmoothingEnabled = false;
+  // Controls now sit against the real screen edge rather than a letterbox band.
+  document.documentElement.style.setProperty('--game-control-bottom', `${Math.max(18, winH * 0.055)}px`);
 }
 resize();
 window.addEventListener('resize', resize);
-
-// Show mobile controls on touch devices
-if ('ontouchstart' in window) showMobileControls();
+window.addEventListener('orientationchange', resize);
 
 const ctx = canvas.getContext('2d')!;
 ctx.imageSmoothingEnabled = false;
@@ -50,6 +58,7 @@ function tick(now: number): void {
   try {
     game.update(dt);
     game.render();
+    showMobileControls(game.state === 'playing');
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.stack ?? e.message : String(e);
     console.error('GAME_LOOP_ERROR', msg);

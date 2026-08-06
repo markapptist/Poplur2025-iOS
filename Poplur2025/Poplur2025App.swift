@@ -56,6 +56,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
             return true
         }
 
+        PoplurDiagLog.markLaunch()
+
         // Always configure Firebase (needed for Auth).
         FirebaseBootstrap.configureIfNeeded()
 
@@ -310,6 +312,21 @@ struct Poplur2025App: App {
                         // ML camera mounted behind it on the camera tab (Phase 3.5).
                         PostLoginHomeSurface(onReady: markAuthenticatedHomeReady)
                             .ignoresSafeArea()
+                            // The approved splash is visually non-interactive, so
+                            // block touches at the warmed Home surface too. Without
+                            // this guard, a splash tap can pass through and unlock
+                            // Feed audio underneath, exposing system media controls.
+                            .allowsHitTesting(!showAuthTransition)
+                            // The custom volume meter is NATIVE, and it moved out from
+                            // under us when the home became a web surface: HomeView
+                            // carried PoplurVolumeBars, and Phase 3 replaced HomeView
+                            // with this WebView. The web twin cannot stand in — a page
+                            // can neither read the iOS output volume nor suppress the
+                            // system HUD, so the bars simply vanished post-login while
+                            // pre-login (which kept this pair) still showed them.
+                            // Same treatment as the pre-login embed below.
+                            .overlay(SystemVolumeHUDSuppressor())
+                            .volumeBarsOverlay()
                     } else {
                         HomeView()
                             .environmentObject(auth)
@@ -355,12 +372,7 @@ struct Poplur2025App: App {
                     // deviceVolumeObserver env object is already injected app-level.
                     // The bridge sits behind the WebView (hidden); volumeBarsOverlay
                     // is a native overlay above the web content that ignores touches.
-                    .background(
-                        HiddenSystemVolumeBridge()
-                            .frame(width: 1, height: 1)
-                            .allowsHitTesting(false)
-                            .opacity(0.01)
-                    )
+                    .overlay(SystemVolumeHUDSuppressor())
                     .volumeBarsOverlay()
                     .transition(.opacity)
             } else {

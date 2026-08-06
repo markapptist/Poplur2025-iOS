@@ -36,6 +36,9 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
 
     // Video output and connection
     var videoDataOutput: AVCaptureVideoDataOutput?
+    /// Real bounding boxes from Vision's built-in detectors. Optional because
+    /// only the web home wants them; the native HomeView draws its own.
+    var visionBoxDetector: VisionBoxDetector?
     var previewConnection: AVCaptureConnection?
 
     // Display layer for rendering processed frames
@@ -571,6 +574,61 @@ extension CameraKitController: AVCapturePhotoCaptureDelegate, AVCaptureFileOutpu
 
 extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
     
+    /// Start delivering frames to `captureOutput`, with no AR-filter machinery.
+    ///
+    /// ML detection had no frames at all on the shipping path. The classifier,
+    /// the face detector and the green boxes were all wired up and waiting on
+    /// `captureOutput(_:didOutput:from:)`, which only fires when an
+    /// AVCaptureVideoDataOutput is attached — and the ONLY code that attached one
+    /// was `setupARFilterSupport`, called from exactly one place, `HomeView`.
+    /// `HomeView` is not mounted when `PoplurWebHome.isEnabled`, so the web home
+    /// ran a camera that never produced a single frame for Vision. Nothing
+    /// errored; detection simply never happened.
+    ///
+    /// Same shape as the AVCaptureSession that was never stopped: capability
+    /// wired only on the old native path and missed when Home became a WebView.
+    /// This is the AR-free half, so the web home can have detection without
+    /// pulling in a filter manager or a display layer it does not use.
+    func startVideoFrameDelivery() {
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            // setupARFilterSupport() would replace this output; if AR is already
+            // running, its output is already feeding the same delegate.
+            guard self.videoDataOutput == nil else { return }
+            self.attachVideoDataOutputOnQueue()
+        }
+    }
+
+    /// Shared by AR setup and the ML-only path. MUST run on `sessionQueue`.
+    private func attachVideoDataOutputOnQueue() {
+        let output = AVCaptureVideoDataOutput()
+        output.videoSettings = [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
+        ]
+        output.alwaysDiscardsLateVideoFrames = true
+        output.setSampleBufferDelegate(self, queue: videoOutputQueue)
+
+        captureSession.beginConfiguration()
+        if let existingOutput = videoDataOutput {
+            captureSession.removeOutput(existingOutput)
+        }
+        if captureSession.canAddOutput(output) {
+            captureSession.addOutput(output)
+            videoDataOutput = output
+            if let connection = output.connection(with: .video) {
+                connection.isEnabled = true
+                if connection.isVideoRotationAngleSupported(90) {
+                    connection.videoRotationAngle = 90
+                }
+                if connection.isVideoMirroringSupported {
+                    connection.isVideoMirrored = (currentCameraPosition == .front)
+                }
+                previewConnection = connection
+            }
+        }
+        captureSession.commitConfiguration()
+    }
+
     /// Setup AR filter video processing
     func setupARFilterSupport(filterManager: ARFilterManager, displayLayer: AVSampleBufferDisplayLayer?) {
         self.arFilterManager = filterManager
@@ -678,6 +736,12 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
             mlDetectionManager?.processFrame(sampleBuffer)
         }
         
+        // Real boxes (people, animals, screens, barcodes) for the web overlay.
+        if let boxes = visionBoxDetector,
+           let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) {
+            boxes.process(pixelBuffer: pixelBuffer)
+        }
+
         // Process user recognition (face detection for registered users)
         if let userRecognition = userRecognitionManager,
            let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) {

@@ -66,16 +66,20 @@ struct StreetViewButton: View {
                 }
             }
         }
-        .alert("Street View", isPresented: Binding(
-            get: { alertMessage != nil },
-            set: { isPresented in if !isPresented { alertMessage = nil } }
-        )) {
-            Button("OK", role: .cancel) {
-                alertMessage = nil
-                viewModel.reset()
-            }
-        } message: {
-            Text(alertMessage ?? "")
-        }
+        // Poplur's own alert, never the system one — see PoplurAlert.swift.
+        // The `presenting:` overload consumes the optional directly, which
+        // retires the hand-rolled Binding shim this site used to need and the
+        // `?? ""` fallback that came with it. The card is raised in a
+        // window-level cover, so it clears the map underneath it.
+        //
+        // The alert clears `alertMessage` itself as part of the tap, so the
+        // button only has to put the view model back to idle.
+        .poplurAlert(
+            "Street View",
+            presenting: $alertMessage,
+            icon: .symbol("binoculars.fill"),
+            message: { $0 },
+            buttons: { _ in [.cancel("OK") { viewModel.reset() }] }
+        )
     }
 }

@@ -58,6 +58,15 @@ export function renderMenuCabinet(
   const W = SCREEN_W, H = SCREEN_H;
   ctx.save();
 
+  // The supplied cabinet artwork is the approved intro. Keep the procedural
+  // renderer below only as a fallback for incomplete asset bundles.
+  const cabinet = assets.menu.cabinet;
+  if (cabinet) {
+    renderSuppliedCabinet(ctx, cabinet, t);
+    ctx.restore();
+    return;
+  }
+
   // Zoom interpolation — scale/translate to zoom into screen area
   const layout0 = cabinetLayout(0.55, 0, 0);   // initial position
 
@@ -289,6 +298,39 @@ export function renderMenuCabinet(
   ctx.textAlign = 'left';
 
   ctx.restore();
+}
+
+function renderSuppliedCabinet(
+  ctx: CanvasRenderingContext2D,
+  cabinet: HTMLImageElement,
+  progress: number
+): void {
+  const W = SCREEN_W;
+  const H = SCREEN_H;
+  const iw = cabinet.naturalWidth;
+  const ih = cabinet.naturalHeight;
+
+  // Coordinates of the CRT glass in the exact 1448x1086 cabinet artwork.
+  const bezel = { x: 0.2051, y: 0.2247, w: 0.5829, h: 0.5239 };
+  const baseScale = Math.min(W / iw, H / ih);
+  const baseX = (W - iw * baseScale) / 2;
+  const baseY = (H - ih * baseScale) / 2;
+
+  const targetScale = Math.max(W / (iw * bezel.w), H / (ih * bezel.h));
+  const targetX = W / 2 - iw * (bezel.x + bezel.w / 2) * targetScale;
+  const targetY = H / 2 - ih * (bezel.y + bezel.h / 2) * targetScale;
+
+  const t = Math.max(0, Math.min(1, progress));
+  const ease = t * t * (3 - 2 * t);
+  const scale = baseScale + (targetScale - baseScale) * ease;
+  const x = baseX + (targetX - baseX) * ease;
+  const y = baseY + (targetY - baseY) * ease;
+
+  ctx.fillStyle = '#020104';
+  ctx.fillRect(0, 0, W, H);
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(cabinet, x, y, iw * scale, ih * scale);
+  ctx.imageSmoothingEnabled = false;
 }
 
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {

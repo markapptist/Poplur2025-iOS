@@ -31,6 +31,9 @@ struct PostLoginLoadingWebView: UIViewRepresentable {
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
         config.mediaTypesRequiringUserActionForPlayback = []
+        config.allowsInlineMediaPlayback = true
+        config.allowsPictureInPictureMediaPlayback = false
+        config.allowsAirPlayForMediaPlayback = false
 
         if let webRoot = PreloginWebView.bundledRootURL() {
             config.setURLSchemeHandler(
@@ -40,6 +43,9 @@ struct PostLoginLoadingWebView: UIViewRepresentable {
         }
 
         let webView = WKWebView(frame: .zero, configuration: config)
+        // This is a non-interactive cover. Never let WebKit expose transport
+        // controls or promote its splash clip into a remote media session.
+        webView.isUserInteractionEnabled = false
         webView.isOpaque = false
         // The Loading screen paints its own clay-globe backdrop (#0a0709); match it
         // so there is no flash between the sign-in transition and the web loading.

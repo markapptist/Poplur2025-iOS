@@ -150,7 +150,27 @@ final class PoplurEQSync {
                 try session.setCategory(.playback, mode: .spokenAudio, options: [.mixWithOthers])
                 try session.setActive(true, options: [])
             case .wakeRecognition:
-                try session.setCategory(.playAndRecord, mode: .measurement, options: [.mixWithOthers, .defaultToSpeaker, .allowBluetoothHFP])
+                // Mode is `.default`, NOT `.measurement`.
+                //
+                // `.measurement` disables the system's output gain/DSP. That is
+                // fine for a session that only listens, but "Hey Poplur" is meant
+                // to listen AT ALL TIMES — so this role is effectively the app's
+                // permanent session, and it was silencing everything the app
+                // played. Confirmed on device: the session sat at
+                // `PlayAndRecord/Measurement`, volume 1.00, Speaker, not on
+                // silent — and there was no sound anywhere.
+                //
+                // The codebase already knew the mode kills output: the wake
+                // confirmation pop (PoplurAIAssistant.playWakeConfirmationPop)
+                // bumps to `.default` for 0.35s purely so that ONE cue can be
+                // heard. That workaround was treating the symptom for a single
+                // sound while every other sound in the app stayed muted.
+                //
+                // `.default` still recognises speech; `.measurement` only buys
+                // marginally cleaner input by turning off processing. A slightly
+                // lower wake-word accuracy is an obviously better trade than an
+                // app with no audio.
+                try session.setCategory(.playAndRecord, mode: .default, options: [.mixWithOthers, .defaultToSpeaker, .allowBluetoothHFP])
                 try session.setActive(true, options: .notifyOthersOnDeactivation)
             }
         } catch {
