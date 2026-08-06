@@ -116,19 +116,26 @@ enum PoplurPermissionRouting {
     }
 
     static func homePrimerQueryItems() -> [URLQueryItem] {
-        guard !preloginHandledThisLaunch else { return [] }
-
         var items: [URLQueryItem] = []
-        if CLLocationManager().authorizationStatus == .notDetermined,
-           !wasHandled(.location) {
-            items.append(URLQueryItem(name: "askLocation", value: "1"))
+
+        // Location and photos ARE asked by the signed-out pre-login cards, so a
+        // launch that just answered them must not be shown the same two again
+        // while auth hands off to Home.
+        if !preloginHandledThisLaunch {
+            if CLLocationManager().authorizationStatus == .notDetermined,
+               !wasHandled(.location) {
+                items.append(URLQueryItem(name: "askLocation", value: "1"))
+            }
+            if PHPhotoLibrary.authorizationStatus(for: .readWrite) == .notDetermined,
+               !wasHandled(.photos) {
+                items.append(URLQueryItem(name: "askPhotos", value: "1"))
+            }
         }
-        if PHPhotoLibrary.authorizationStatus(for: .readWrite) == .notDetermined,
-           !wasHandled(.photos) {
-            items.append(URLQueryItem(name: "askPhotos", value: "1"))
-        }
-        // Notification status is async-only, so it is sampled once per launch
-        // into `notificationsUndetermined` (see refreshNotificationStatus).
+
+        // Notifications are NOT part of the pre-login set, so the handoff guard
+        // must not suppress them — doing so meant a user who signed in on this
+        // launch was never offered the card at all. Status is async-only, so it
+        // is sampled once per launch (see refreshNotificationStatus).
         if notificationsUndetermined, !wasHandled(.notifications) {
             items.append(URLQueryItem(name: "askNotifications", value: "1"))
         }
