@@ -140,15 +140,23 @@ final class PoplurNotificationCenter: NSObject, ObservableObject, UNUserNotifica
     }
 
     func refreshDailyNotification(from posts: [PoplurNotificationPostSignal]) async {
+        // Do NOT ask here. This runs off a background refresh of the daily
+        // digest, so Apple's sheet used to appear with no Poplur card in front
+        // of it and no relationship to anything the user had just done. The ask
+        // belongs to the clay permission card (HomeTwin.tsx →
+        // PoplurPermissionRouting.requestNotificationsAfterPrimer).
+        //
+        // Still undecided means the in-app notification is built and stored,
+        // but nothing is scheduled with the OS — scheduling without
+        // authorization silently fails anyway.
         let settings = await UNUserNotificationCenter.current().notificationSettings()
-        if settings.authorizationStatus == .notDetermined {
-            _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound])
-        }
+        let authorized = settings.authorizationStatus == .authorized
+            || settings.authorizationStatus == .provisional
 
         let generated = makeNotification(from: posts)
         if shouldCreateDailyNotification() {
             addInAppNotification(generated)
-            await scheduleDeviceNotification(generated)
+            if authorized { await scheduleDeviceNotification(generated) }
             defaults.set(Date(), forKey: lastDailyKey)
         }
 

@@ -1204,7 +1204,11 @@ struct ProfileView: View {
     private func runInitialProfileTask() async {
         if !isRunningInPreviews {
             print("📊 [ProfileView] Initial .task running for userID: \(userID ?? "nil")")
-            _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound])
+            // NO bare requestAuthorization here. Opening Profile used to raise
+            // Apple's notification sheet cold, with no Poplur card in front of
+            // it — the one "outside" alert left in the app. The ask now belongs
+            // to the clay permission card in HomeTwin.tsx, which fires the
+            // system sheet through PoplurPermissionRouting only after Allow.
             if let uid = effectiveUserID {
                 await loadUserProfile(for: uid)
             }

@@ -73,11 +73,14 @@ class FakeChatStore: ObservableObject {
         ]
     }
     
-    private func requestNotificationAuthorization() {
-        notificationCenter.requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
-            // Handle errors or granted status if needed
-        }
-    }
+    /// Deliberately does NOT ask. Raising Apple's notification sheet from a
+    /// store's init meant a system alert with no Poplur card in front of it,
+    /// at whatever moment this happened to be constructed. The ask belongs to
+    /// the clay permission card (HomeTwin.tsx →
+    /// PoplurPermissionRouting.requestNotificationsAfterPrimer). Posting a
+    /// local notification without authorization simply no-ops, which is the
+    /// correct behaviour until the user has said yes.
+    private func requestNotificationAuthorization() {}
     
     func sendMessage(threadID: UUID, sender: FakeUser, content: String) {
         Task { @MainActor in

@@ -5,6 +5,7 @@ import Photos
 import UIKit
 import FirebaseAuth
 import FirebaseFirestore
+import UserNotifications
 
 enum PoplurWebCaptureStore {
     struct Item {
@@ -95,6 +96,7 @@ enum PoplurPermissionRouting {
     enum Permission: String {
         case location
         case photos
+        case notifications
     }
 
     private static var preloginHandledThisLaunch = false
@@ -125,7 +127,61 @@ enum PoplurPermissionRouting {
            !wasHandled(.photos) {
             items.append(URLQueryItem(name: "askPhotos", value: "1"))
         }
+        // Notification status is async-only, so it is sampled once per launch
+        // into `notificationsUndetermined` (see refreshNotificationStatus).
+        if notificationsUndetermined, !wasHandled(.notifications) {
+            items.append(URLQueryItem(name: "askNotifications", value: "1"))
+        }
         return items
+    }
+
+    /// UNUserNotificationCenter only reports status through a callback, but the
+    /// Home URL is built synchronously. Sample it at launch so the primer can
+    /// be queued without blocking, and treat "unknown yet" as "do not ask".
+    private(set) static var notificationsUndetermined = false
+
+    static func refreshNotificationStatus(_ done: (() -> Void)? = nil) {
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            let undetermined = settings.authorizationStatus == .notDetermined
+            DispatchQueue.main.async {
+                notificationsUndetermined = undetermined
+                done?()
+            }
+        }
+    }
+
+    /// Fired ONLY by the web card's Allow. Apple's sheet is one-shot per
+    /// install, so it must never appear cold — see the Poplur card in
+    /// HomeTwin.tsx.
+    static func requestNotificationsAfterPrimer() {
+        markHandled(.notifications)
+        UNUserNotificationCenter.current()
+            .requestAuthorization(options: [.alert, .badge, .sound]) { granted, _ in
+                guard granted else { return }
+                DispatchQueue.main.async { UIApplication.shared.registerForRemoteNotifications() }
+            }
+    }
+}
+
+/// One-shot cleanup of web caches left by builds that shared a cache key.
+enum PoplurWebCache {
+    private static var purged = false
+
+    static func purgeStaleOnce() {
+        guard !purged else { return }
+        purged = true
+        URLCache.shared.removeAllCachedResponses()
+        let types: Set<String> = [
+            WKWebsiteDataTypeDiskCache,
+            WKWebsiteDataTypeMemoryCache,
+            WKWebsiteDataTypeOfflineWebApplicationCache,
+        ]
+        WKWebsiteDataStore.default().removeData(
+            ofTypes: types,
+            modifiedSince: Date(timeIntervalSince1970: 0)
+        ) {
+            PoplurDiagLog.append("[PoplurWebCache] cleared stale web caches")
+        }
     }
 }
 
@@ -171,6 +227,17 @@ struct PostLoginHomeWebView: UIViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(onReady: onReady, onWebEvent: onWebEvent) }
 
     func makeUIView(context: Context) -> WKWebView {
+        // Drop anything WKWebView cached from a PREVIOUS build of the bundle.
+        //
+        // The `?v=` cache key was CFBundleVersion+ShortVersionString, which are
+        // `6` and `0.1` on every build — so the key never changed and the web
+        // view kept answering from cache no matter how many times the app was
+        // rebuilt and reinstalled. The visible result was two builds at once:
+        // stale CSS laid over new markup, counters printing through each other.
+        // buildStamp now tracks the build, but caches written under the OLD
+        // constant key are still on disk, so clear them once at startup.
+        PoplurWebCache.purgeStaleOnce()
+
         let config = WKWebViewConfiguration()
         config.allowsInlineMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
@@ -404,6 +471,11 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                         return
                     }
                     DispatchQueue.main.async { WebCameraRollProvider.pushAuthorized(into: webView) }
+                }
+                if type == "requestNotifications" {
+                    // The Poplur card's Allow is the ONLY thing that raises
+                    // Apple's notification sheet.
+                    PoplurPermissionRouting.requestNotificationsAfterPrimer()
                 }
                 if type == "permissionHandled",
                    let rawPermission = body["permission"] as? String,

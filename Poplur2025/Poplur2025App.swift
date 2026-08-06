@@ -57,6 +57,10 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         }
 
         PoplurDiagLog.markLaunch()
+        // Read the phone's own thermal state rather than asking whether it feels
+        // hot. Also enables battery reporting, which the probe includes.
+        UIDevice.current.isBatteryMonitoringEnabled = true
+        Task { @MainActor in PoplurThermalProbe.start() }
 
         // Always configure Firebase (needed for Auth).
         FirebaseBootstrap.configureIfNeeded()
@@ -249,6 +253,10 @@ struct Poplur2025App: App {
                 if isPreLoginVisible && !showSplash && !usePreloginWebEmbed {
                     preLoginMusic.start()
                 }
+                // Sample notification authorization early: the Home URL is
+                // built synchronously and needs to know whether to queue the
+                // Poplur notifications card.
+                PoplurPermissionRouting.refreshNotificationStatus()
                 let appearance = UITabBarAppearance()
                 appearance.configureWithTransparentBackground()
                 appearance.backgroundEffect = nil
