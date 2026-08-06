@@ -7,7 +7,7 @@
   <!-- The splash covers the welcome's booting: warm every heavy asset the
        welcome and sign-up need so they appear instantly composed. -->
   <link rel="preload" as="fetch" href="/poplur-clay-map/public/poplur_icon_cube.glb">
-  <link rel="preload" as="fetch" href="media/poplur-globe-lite.glb">
+  <link rel="preload" as="fetch" href="/.claude/artifacts/models/poplur-globe-lite.glb">
   <link rel="preload" as="fetch" href="/Poplur2025-iOS/Poplur2025/MarkHead_TalkingRig.glb">
   <link rel="preload" as="fetch" href="/poplur-clay-map/public/zoom_buildings.glb">
   <link rel="preload" as="audio" href="/poplur-clay-map/public/radio_bed.wav">
@@ -15,6 +15,23 @@
   <style>
     * { box-sizing: border-box; }
     html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #0a0709; }
+    /* No text selection outside real text entry. A long-press anywhere in the
+       native shell must not raise the blue selection highlight, the drag
+       handles or the iOS callout/magnifier — that chrome instantly breaks the
+       illusion that this is an app. Same base rule the post-login bundle uses
+       (poplur-clay-map/src/index.css); `user-select` inherits, so one
+       declaration on the root covers the whole screen. Text ENTRY is exempted
+       below so a caret and the callout still work inside a field. */
+    html, body {
+      -webkit-user-select: none;
+      user-select: none;
+      -webkit-touch-callout: none;
+    }
+    input, textarea, select, [contenteditable]:not([contenteditable='false']) {
+      -webkit-user-select: text;
+      user-select: text;
+      -webkit-touch-callout: default;
+    }
     body { position: relative; display: grid; place-items: center; font-family: ui-rounded, "SF Pro Rounded", system-ui, -apple-system, sans-serif; }
     video {
       position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;

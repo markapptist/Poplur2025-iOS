@@ -12,6 +12,24 @@
 </style>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
+  /* No text selection outside real text entry. A long-press anywhere in the
+     native shell must not raise the blue selection highlight, the drag handles
+     or the iOS callout/magnifier — that chrome instantly breaks the illusion
+     that this is an app. Same base rule the post-login bundle uses
+     (poplur-clay-map/src/index.css); `user-select` inherits, so one declaration
+     on the root covers every screen in the flow. The sign-in / sign-up fields
+     are exempted below: you must still be able to place a caret, select, and
+     use the callout inside a field you are typing in. */
+  html, body {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+  input, textarea, select, [contenteditable]:not([contenteditable='false']) {
+    -webkit-user-select: text;
+    user-select: text;
+    -webkit-touch-callout: default;
+  }
   :root {
     --ground: #17131a;
     --ground-glow: rgba(246, 59, 154, 0.16);
@@ -34,9 +52,14 @@
     position: relative; width: 430px; height: 932px; overflow: hidden;
     border-radius: 48px; background: #050407;
     box-shadow: 0 0 0 10px #101014, 0 0 0 12px #2a2a30, 0 34px 80px rgba(0,0,0,0.5);
-    /* Query container so type + controls scale to the actual device width
-       (cqw = 1% of the phone's width) rather than a fixed design size. */
-    container-type: inline-size;
+    /* Query container so type + controls scale to the actual device box
+       (cqw = 1% of width, cqh = 1% of height) rather than a fixed design size.
+       `size`, not `inline-size`: the screens position off the block axis too,
+       and inline-size establishes an inline-axis container only, so cqh would
+       silently fall back to the viewport. Safe here — .phone never sizes from
+       its contents (430x932 standalone, 100%/100% of the fixed .phoneWrap in
+       the shell adaptation above), so its box is definite in both contexts. */
+    container-type: size;
   }
   .island {
     position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
@@ -88,12 +111,12 @@
     /* Clay sprinkle: lifted off the slab with a pressed highlight */
     box-shadow: 0 2px 3px rgba(110, 4, 54, 0.45), inset 0 1px 1px rgba(255, 255, 255, 0.55), inset 0 -1px 2px rgba(0, 0, 0, 0.18);
   }
-  .wLogoWrap { position: absolute; top: clamp(58px, 8vh, 92px); left: 50%; transform: translateX(-50%); z-index: 10; }
-  .wLogo { width: clamp(132px, 15vw, 148px); filter: drop-shadow(4px 8px 10px rgba(0,0,0,0.28)); animation: drop 1s cubic-bezier(0.22, 1.4, 0.36, 1) both 0.3s; }
+  .wLogoWrap { position: absolute; top: clamp(58px, 8cqh, 92px); left: 50%; transform: translateX(-50%); z-index: 10; }
+  .wLogo { width: clamp(132px, 15cqw, 148px); filter: drop-shadow(4px 8px 10px rgba(0,0,0,0.28)); animation: drop 1s cubic-bezier(0.22, 1.4, 0.36, 1) both 0.3s; }
   @keyframes drop { from { transform: translateY(-320px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
   .cubeStage { position: absolute; top: calc(50% - 18px); left: 50%; transform: translate(-50%, -50%); width: 184px; height: 184px;
     perspective: 720px; z-index: 10; touch-action: none; cursor: grab; }
-  .btns { position: absolute; left: 50%; transform: translateX(-50%); bottom: clamp(88px, 12vh, 132px); display: flex; flex-direction: column; gap: 28px; z-index: 10; }
+  .btns { position: absolute; left: 50%; transform: translateX(-50%); bottom: clamp(88px, 12cqh, 132px); display: flex; flex-direction: column; gap: 28px; z-index: 10; }
   .cap-btn {
     width: 250px; height: 58px; border-radius: 999px;
     background:
@@ -151,13 +174,13 @@
      text never collides with the bottom-anchored buttons. Tall modern phones
      (>760px) keep the roomy default layout. */
   @media (max-height: 760px) {
-    .wLogoWrap { top: clamp(26px, 5vh, 56px); }
-    .wLogo { width: clamp(80px, 15vh, 116px); }
+    .wLogoWrap { top: clamp(26px, 5cqh, 56px); }
+    .wLogo { width: clamp(80px, 15cqh, 116px); }
     .cubeStage.risen { top: 33%; transform: translate(-50%, -50%) scale(0.56); }
     .clayHead { top: 46%; }
     .claySub { top: calc(46% + 34px); }
     .aiText { top: calc(46% + 86px); }
-    .btns { bottom: clamp(40px, 11vh, 84px); gap: 14px; }
+    .btns { bottom: clamp(40px, 11cqh, 84px); gap: 14px; }
     .cap-btn { height: 54px; }
     .fieldMail { top: 51%; }
     .fieldPass { top: 59%; }
