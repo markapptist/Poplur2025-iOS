@@ -136,8 +136,25 @@ enum PoplurPermissionRouting {
         // must not suppress them — doing so meant a user who signed in on this
         // launch was never offered the card at all. Status is async-only, so it
         // is sampled once per launch (see refreshNotificationStatus).
+        // NOT asked on launch any more.
+        //
+        // Apple's notification sheet cannot be replaced or restyled — requesting
+        // the permission always shows it — so the only thing an app controls is
+        // WHEN it asks. Queuing the card automatically on the first authenticated
+        // launch meant the system sheet arrived seconds after opening the app,
+        // unprompted, which reads as the app throwing an OS alert at you.
+        //
+        // The ask now belongs to an explicit action: `requestNotifications` from
+        // the web (the Settings control) still routes to
+        // requestNotificationsAfterPrimer(), so notifications remain available —
+        // they are opt-in rather than prompted.
+        //
+        // The STATUS is still reported, so the web knows whether tapping the
+        // NOTIFICATIONS tile should raise the clay card or do nothing. Without
+        // this the tile could not tell "never asked" from "already answered",
+        // and the OS prompt is one-shot — asking twice is not possible.
         if notificationsUndetermined, !wasHandled(.notifications) {
-            items.append(URLQueryItem(name: "askNotifications", value: "1"))
+            items.append(URLQueryItem(name: "notificationsUndetermined", value: "1"))
         }
         return items
     }
@@ -279,6 +296,11 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         webView.scrollView.contentInsetAdjustmentBehavior = .never
         webView.overrideUserInterfaceStyle = .dark
         context.coordinator.bridge.webView = webView
+        // Without a uiDelegate, WebKit shows its OWN permission sheets for
+        // geolocation and getUserMedia — separate from, and on top of, the OS
+        // permissions the app already holds. The shared clay bridge answers them
+        // by forwarding the decision the user already made.
+        webView.uiDelegate = context.coordinator.bridge
         Self.liveWebView = webView
 
         if PoplurClayMapView.bundledRootURL() != nil, let url = PoplurWebHome.homeURL {

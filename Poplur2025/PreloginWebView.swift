@@ -47,9 +47,28 @@ enum PoplurPreloginWeb {
     /// app bundle but KEEPS the data container, so WebKit happily served the
     /// previous build's cached splash — the app looked "old" after a fresh
     /// install. Busting on build version guarantees the new page loads.
+    /// Cache key for every web URL the app loads. It MUST change whenever the
+    /// web bundle changes, or WKWebView keeps serving the page it already has.
+    ///
+    /// This used to be CFBundleVersion + CFBundleShortVersionString alone — and
+    /// those are `6` and `0.1` on every build, so the stamp was the constant
+    /// "6-0.1" forever. The URL never varied, so the web view answered from cache
+    /// no matter how many times the app was rebuilt and reinstalled: the native
+    /// binary updated while the web layer stayed frozen on an old build. That is
+    /// exactly the "it's showing old builds" symptom, and it makes every web
+    /// change look like it silently failed to ship.
+    ///
+    /// The bundle's own modification time changes on every build without anyone
+    /// having to remember to bump a version, so the stamp now tracks the build
+    /// itself rather than a number nobody edits.
     static var buildStamp: String {
-        (Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0")
+        let version = (Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0")
             + "-" + (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0")
+        guard let executable = Bundle.main.executableURL,
+              let attributes = try? FileManager.default.attributesOfItem(atPath: executable.path),
+              let built = attributes[.modificationDate] as? Date
+        else { return version }
+        return version + "-" + String(Int(built.timeIntervalSince1970))
     }
 
     static var splashURL: URL? { URL(string: "\(scheme)://\(host)/splash.html?v=\(buildStamp)") }

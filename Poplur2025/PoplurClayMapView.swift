@@ -257,6 +257,23 @@ struct PoplurClayMapView: UIViewRepresentable {
             decisionHandler(.grant)
         }
 
+        // Same story for geolocation. WKWebView treats the embedded page as a
+        // WEBSITE and asks its own question — the sheet reads
+        // «"app" would like to use your current location», naming the custom
+        // scheme's host rather than Poplur, on top of the OS permission the app
+        // already holds. Two prompts for one decision, and the second one does
+        // not even look like it belongs to this app.
+        //
+        // Answering here forwards the decision the user already made to the OS.
+        // It grants nothing new: if the app lacks location permission, CoreLocation
+        // still returns nothing and the page gets nothing.
+        func webView(_ webView: WKWebView,
+                     requestGeolocationPermissionFor origin: WKSecurityOrigin,
+                     initiatedByFrame frame: WKFrameInfo,
+                     decisionHandler: @escaping (WKPermissionDecision) -> Void) {
+            decisionHandler(.grant)
+        }
+
         func userContentController(_ userContentController: WKUserContentController,
                                    didReceive message: WKScriptMessage) {
             guard message.name == "poplur",
@@ -268,6 +285,14 @@ struct PoplurClayMapView: UIViewRepresentable {
             case "poiTap":
                 // Phase 1.5: route body["id"] to the channel/post flow
                 break
+            case "profile":
+                // The web heat probe's report line. Same contract as the home
+                // webview: a WKWebView's console.log never reaches this
+                // process's stdout, so native prints it where
+                // `devicectl device process launch --console` can read it.
+                // Without this case the probe is mute on the map tab — the one
+                // surface the thermal work needs it on.
+                if let line = body["line"] as? String { print(line) }
             case "publishPost":
                 // The web composer finished a post (capture → filter → channel).
                 // The account, Firebase Storage and the posts write all live on
