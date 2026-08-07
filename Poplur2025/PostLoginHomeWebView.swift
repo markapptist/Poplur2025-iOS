@@ -501,6 +501,20 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     }
                     DispatchQueue.main.async { WebCameraRollProvider.pushAuthorized(into: webView) }
                 }
+                if type == "feedChannelChanged" {
+                    // The web feed reports channel changes; the shell owns the
+                    // AdMob gate and presentation, exactly as the native
+                    // FeedView did before the feed went web.
+                    let channel = (body["channelId"] as? String) ?? "unknown"
+                    let index = (body["index"] as? NSNumber)?.intValue ?? 0
+                    if FeedAdProbabilitySettings.shouldShowGoogleMobileAd(
+                        for: index, namespace: "web_\(channel)"
+                    ) {
+                        DispatchQueue.main.async {
+                            AdManager.shared.presentInterstitialOverKeyWindow()
+                        }
+                    }
+                }
                 if type == "requestNotifications" {
                     // The Poplur card's Allow is the ONLY thing that raises
                     // Apple's notification sheet.

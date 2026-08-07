@@ -44,6 +44,21 @@ final class AdManager: NSObject, FullScreenContentDelegate {
             loadInterstitial()
         }
     }
+
+    /// The web home has no view controller of its own to present from — find
+    /// the key window's root, the same one FeedView used to resolve by hand.
+    @MainActor
+    func presentInterstitialOverKeyWindow() {
+        guard let scene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .first(where: { $0.activationState == .foregroundActive }),
+              let window = scene.windows.first(where: { $0.isKeyWindow }),
+              let root = window.rootViewController else {
+            print("[Ads] No active window to present interstitial")
+            return
+        }
+        presentInterstitial(from: root)
+    }
     
     // MARK: - GADFullScreenContentDelegate
     
