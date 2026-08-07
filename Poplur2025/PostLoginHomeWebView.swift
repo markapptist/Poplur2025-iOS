@@ -476,6 +476,15 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     print(line)
                     PoplurDiagLog.append(line)
                 }
+                if type == "publishPost" {
+                    // The camera composer lives in THIS WebView, but the only
+                    // publishPost handler was on the old native map host — so a
+                    // post finished here never started an upload, and the
+                    // composer sat on "Uploading…" until its 90s timeout. The
+                    // upload path posts PostUploadSuccess/Failed, which this
+                    // class already forwards back as poplur-upload-result.
+                    WebPostPublisher.handle(body)
+                }
                 if type == "requestLocation" {
                     // Home posts this after its custom clay card's Allow. The
                     // primer must not raise Apple's system prompt; use an
