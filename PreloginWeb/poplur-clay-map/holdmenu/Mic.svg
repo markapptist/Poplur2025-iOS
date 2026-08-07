@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Functional clay-pink microphone glyph for the HEY POPLUR voice tile (matches
+       the NAV_ICON fallback style). Replace with a clay-rendered Mic.png later. -->
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ff8ac6"/>
+      <stop offset="1" stop-color="#f63b9a"/>
+    </linearGradient>
+  </defs>
+  <rect x="37" y="13" width="26" height="48" rx="13" fill="url(#g)" stroke="#16060f" stroke-width="4.5"/>
+  <path d="M27 46 a23 23 0 0 0 46 0" fill="none" stroke="#16060f" stroke-width="5.5" stroke-linecap="round"/>
+  <line x1="50" y1="69" x2="50" y2="83" stroke="#16060f" stroke-width="5.5" stroke-linecap="round"/>
+  <line x1="37" y1="85" x2="63" y2="85" stroke="#16060f" stroke-width="5.5" stroke-linecap="round"/>
+</svg>
