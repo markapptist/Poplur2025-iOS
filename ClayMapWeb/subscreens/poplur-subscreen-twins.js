@@ -171,7 +171,7 @@ const groups = {
       { id: 'camera-create', title: 'Create', detail: 'OpenCreatorRequested', icon: H.create, render: () => creatorScreen() },
       { id: 'camera-preview', title: 'Preview', detail: 'CapturePreviewOverlay', icon: H.tvGuide, render: () => cameraPreview() },
       { id: 'camera-live', title: 'Live', detail: 'LiveVideoStatusBadge', icon: H.tvGuide, render: () => cameraLive() },
-      { id: 'camera-chat', title: 'Chat', detail: 'Direct messages', icon: H.chat, render: () => messagesScreen('Camera') },
+      { id: 'camera-chat', title: 'Chat', detail: 'OpenDMsRequested', icon: H.chat, render: () => messagesScreen('Camera') },
       { id: 'camera-store', title: 'Store', detail: 'OpenPoplurStoreRequested', icon: H.store, render: () => storeScreen() },
     ],
   },
@@ -183,14 +183,14 @@ const groups = {
       { id: 'map-tour', title: 'Tour', detail: 'PoplurAISetTourActive', icon: H.tour, render: () => mapTour() },
       { id: 'map-search', title: 'Search', detail: 'PoplurMapSearchOverlay', icon: H.locate, render: () => mapSearch() },
       { id: 'map-claims', title: 'Claims', detail: 'Dominance and radius pins', icon: H.stats, render: () => mapClaims() },
-      { id: 'map-chat', title: 'Chat', detail: 'Direct messages', icon: H.chat, render: () => messagesScreen('Map') },
+      { id: 'map-chat', title: 'Chat', detail: 'OpenDMsRequested', icon: H.chat, render: () => messagesScreen('Map') },
     ],
   },
   profile: {
     label: 'Profile',
     screens: [
       { id: 'profile-messages', title: 'Messages', detail: 'MessagesRootView', icon: H.chat, render: () => messagesScreen('Profile') },
-      { id: 'profile-settings', title: 'Settings', detail: 'App settings', icon: H.settings, render: () => settingsScreen() },
+      { id: 'profile-settings', title: 'Settings', detail: 'AppSettingsView', icon: H.settings, render: () => settingsScreen() },
       { id: 'profile-stats', title: 'Stats', detail: 'ProfileStatsView', icon: H.stats, render: () => statsScreen() },
       { id: 'profile-alerts', title: 'Notifications', detail: 'ProfileNotificationBanner', icon: H.notifications, render: () => notificationsScreen() },
       { id: 'profile-store', title: 'Store', detail: 'RadiusStoreView', icon: H.store, render: () => storeScreen() },
@@ -336,7 +336,36 @@ const profileSettingState = {
   notifications: true,
   tvGuide: true,
   language: 'English',
+  // REAL setting, not a demo row: mirrors poplur.radio.background in the app.
+  // In the shell this document shares the app's origin (both served off the
+  // poplur-clay:// bundle) so localStorage IS the app's; on the dev workbench
+  // (twins on :8945, app on :5173) origins differ, so the value also travels
+  // by postMessage — mapRadio.ts answers the query and accepts the writes.
+  radioBackground: (() => {
+    try { return window.localStorage.getItem('poplur.radio.background') === '1'; } catch { return false; }
+  })(),
 };
+
+function persistRadioBackground(on) {
+  try { window.localStorage.setItem('poplur.radio.background', on ? '1' : '0'); } catch { /* embedded */ }
+  try {
+    if (window.parent !== window) window.parent.postMessage({ poplurRadioBackground: on }, '*');
+  } catch { /* parent gone */ }
+}
+
+if (window.parent !== window) {
+  // Embedded in the app: ask the app for the current value (covers the
+  // cross-origin dev case where our localStorage is not the app's), and adopt
+  // whatever it pushes back.
+  window.addEventListener('message', (e) => {
+    const d = e.data;
+    if (d && typeof d === 'object' && 'poplurRadioBackground' in d && !('poplurRadioBackgroundQuery' in d)) {
+      profileSettingState.radioBackground = !!d.poplurRadioBackground;
+      if (typeof renderScreen === 'function') renderScreen();
+    }
+  });
+  try { window.parent.postMessage({ poplurRadioBackgroundQuery: true }, '*'); } catch { /* solo */ }
+}
 
 const params = new URLSearchParams(window.location.search);
 const embeddedScreen = params.get('embed');
@@ -526,6 +555,8 @@ screenEl.addEventListener('click', e => {
   if (settingToggle) {
     const key = settingToggle.dataset.settingToggle;
     if (key in profileSettingState) profileSettingState[key] = !profileSettingState[key];
+    // Radio-in-background is live app state, not twin demo state.
+    if (key === 'radioBackground') persistRadioBackground(profileSettingState.radioBackground);
     renderScreen();
     return;
   }
@@ -1375,7 +1406,7 @@ function messagesScreen(from) {
     <div class="ios-screen messages profile-scroll-page">
       <div class="message-top">
         <img src="${H.chat}" alt="">
-        <div><h1>Chats</h1><span style="color:#777;font-weight:800">${esc(from)} · direct messages</span></div>
+        <div><h1>Chats</h1><span style="color:#777;font-weight:800">${esc(from)} route · OpenDMsRequested</span></div>
       </div>
       <div class="message-list">
         ${profileMailThreads.map(item => thread(item)).join('')}
@@ -1595,6 +1626,14 @@ function settingsScreen() {
       toggle: 'tvGuide',
     },
     {
+      img: ios('settings_ic_play', 'settings_ic_play.png'),
+      title: 'Radio in background',
+      sub: profileSettingState.radioBackground
+        ? 'Keeps playing when you leave the radio'
+        : 'Plays only on the radio screen',
+      toggle: 'radioBackground',
+    },
+    {
       img: ios('settings_ic_wrench', 'settings_ic_wrench.png'),
       title: 'Fix Empty UserIDs',
       sub: 'Maintenance',
@@ -1622,7 +1661,7 @@ function settingsScreen() {
 
   return `
     <div class="ios-screen settings-page profile-scroll-page">
-      <div class="settings-hero"><img src="${H.settings}" alt=""><div><h1>Settings</h1><span style="color:var(--subtle);font-weight:800">App settings</span></div></div>
+      <div class="settings-hero"><img src="${H.settings}" alt=""><div><h1>Settings</h1><span style="color:var(--subtle);font-weight:800">AppSettingsView</span></div></div>
       <div class="translation-card">
         <div>
           <strong>Translate captions to</strong>
