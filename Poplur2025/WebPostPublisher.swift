@@ -20,8 +20,12 @@ enum WebPostPublisher {
     /// data: URL; everything authenticated happens on this side.
     static func handle(_ body: [String: Any]) {
         guard let dataUrl = body["data"] as? String,
-              let payload = decodeDataURL(dataUrl) else { return }
+              let payload = decodeDataURL(dataUrl) else {
+            print("[WebPostPublisher] publishPost REJECTED: media missing or undecodable")
+            return
+        }
         let kind = body["kind"] as? String ?? "photo"
+        print("[WebPostPublisher] publishPost received: kind=\(kind) bytes=\(payload.count) requestId=\(body["requestId"] as? String ?? "-") coord=\(body["latitude"] != nil)")
 
         // Radius and caption cannot ride on the image-only upload
         // notifications, so stage them for the upload that follows.
@@ -49,16 +53,19 @@ enum WebPostPublisher {
            let longitude = body["longitude"] as? Double {
             userInfo["latitude"] = latitude
             userInfo["longitude"] = longitude
+            print("[WebPostPublisher] dispatch → UploadPostToCoordinate")
             NotificationCenter.default.post(
                 name: Notification.Name("UploadPostToCoordinate"),
                 object: nil,
                 userInfo: userInfo
             )
         } else if let image = userInfo["image"] as? UIImage {
+            print("[WebPostPublisher] dispatch → UploadImageToCurrentCoordinate")
             NotificationCenter.default.post(
                 name: Notification.Name("UploadImageToCurrentCoordinate"), object: image
             )
         } else if let videoURL = userInfo["videoURL"] as? URL {
+            print("[WebPostPublisher] dispatch → UploadVideoToCurrentCoordinate")
             NotificationCenter.default.post(
                 name: Notification.Name("UploadVideoToCurrentCoordinate"), object: videoURL
             )

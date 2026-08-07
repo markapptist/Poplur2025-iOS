@@ -1,3 +1,4 @@
+import AVFoundation
 import SwiftUI
 import WebKit
 import CoreLocation
@@ -225,6 +226,30 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         )
     }
 
+    /// The web layer's spoken voice. WKWebView's own speechSynthesis is
+    /// unreliable on device (lines are silently dropped without a fresh user
+    /// gesture), which is why the map's AI host was mute on iOS while working
+    /// in every desktop browser. The web asks; native speaks.
+    final class PoplurWebSpeech {
+        static let shared = PoplurWebSpeech()
+        private let synth = AVSpeechSynthesizer()
+        func speak(_ text: String, rate: Double?, pitch: Double?) {
+            guard !text.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+            synth.stopSpeaking(at: .immediate)
+            let utterance = AVSpeechUtterance(string: text)
+            utterance.voice = AVSpeechSynthesisVoice(language: "en-CA")
+                ?? AVSpeechSynthesisVoice(language: "en-US")
+            // The web sends SpeechSynthesis-style values (~1.0 = normal); AV's
+            // scale is 0..1 with ~0.5 as natural speech. Map around that.
+            utterance.rate = Float(0.52 * (rate ?? 1.0))
+            utterance.pitchMultiplier = Float(pitch ?? 1.0)
+            utterance.volume = 0.92
+            PoplurEQSync.shared.configureAudioSession(for: .voicePrompt)
+            synth.speak(utterance)
+        }
+        func cancel() { synth.stopSpeaking(at: .immediate) }
+    }
+
     let onReady: () -> Void
     /// Tap on bridge events the host cares about (tabChanged / cameraShutter /
     /// cameraControl → the native web-home camera layer). Every message still
@@ -415,7 +440,11 @@ struct PostLoginHomeWebView: UIViewRepresentable {
 
         private func deliverUploadResult(success: Bool, note: Notification) {
             guard let requestID = note.userInfo?["requestId"] as? String,
-                  let webView = bridge.webView else { return }
+                  let webView = bridge.webView else {
+                print("[PostLoginHomeWebView] upload result DROPPED (requestId or webView missing) success=\(success)")
+                return
+            }
+            print("[PostLoginHomeWebView] upload result → web: success=\(success) requestId=\(requestID)")
             var result: [String: Any] = ["requestId": requestID, "ok": success]
             if let message = note.userInfo?["message"] as? String { result["error"] = message }
             guard let data = try? JSONSerialization.data(withJSONObject: result),
@@ -484,6 +513,18 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     // upload path posts PostUploadSuccess/Failed, which this
                     // class already forwards back as poplur-upload-result.
                     WebPostPublisher.handle(body)
+                }
+                if type == "speak", let text = body["text"] as? String {
+                    PoplurWebSpeech.shared.speak(
+                        text,
+                        rate: body["rate"] as? Double,
+                        pitch: body["pitch"] as? Double
+                    )
+                    return
+                }
+                if type == "cancelSpeak" {
+                    PoplurWebSpeech.shared.cancel()
+                    return
                 }
                 if type == "requestLocation" {
                     // Home posts this after its custom clay card's Allow. The
