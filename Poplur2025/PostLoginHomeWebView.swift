@@ -1,5 +1,4 @@
 import AVFoundation
-import SafariServices
 import SwiftUI
 import WebKit
 import CoreLocation
@@ -17,15 +16,44 @@ enum PoplurWebCaptureStore {
     }
 
     private static var items: [String: Item] = [:]
+    private static var transientCameraRollKey: String?
     private static let lock = NSLock()
 
     static func register(image: UIImage) -> String? {
         guard let data = image.jpegData(compressionQuality: 0.9) else { return nil }
-        let key = "\(UUID().uuidString).jpg"
+        return register(data: data, mimeType: "image/jpeg")
+    }
+
+    /// Register already-encoded capture data without another lossy round trip.
+    /// Camera Roll uses this for its orientation-correct, 4K-bounded JPEG, then
+    /// hands WebKit a small custom-scheme URL instead of a multi-megabyte JS string.
+    static func register(data: Data, mimeType: String) -> String {
+        let key = "\(UUID().uuidString).\(fileExtension(for: mimeType))"
         lock.lock()
-        items[key] = Item(data: data, fileURL: nil, mimeType: "image/jpeg")
+        items[key] = Item(data: data, fileURL: nil, mimeType: mimeType)
         lock.unlock()
         return key
+    }
+
+    /// Camera Roll selections can each be several megabytes. Keep the current
+    /// one alive for its composer URL, but replace the previous roll-only item
+    /// on the next selection so browsing does not grow resident memory forever.
+    static func registerCameraRollAsset(data: Data, mimeType: String) -> String {
+        let key = "roll-\(UUID().uuidString).\(fileExtension(for: mimeType))"
+        lock.lock()
+        if let previous = transientCameraRollKey { items.removeValue(forKey: previous) }
+        items[key] = Item(data: data, fileURL: nil, mimeType: mimeType)
+        transientCameraRollKey = key
+        lock.unlock()
+        return key
+    }
+
+    private static func fileExtension(for mimeType: String) -> String {
+        switch mimeType.lowercased() {
+        case "image/png": return "png"
+        case "image/heic", "image/heif": return "heic"
+        default: return "jpg"
+        }
     }
 
     static func register(videoURL: URL) -> String {
@@ -569,6 +597,21 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     }
                     DispatchQueue.main.async { WebCameraRollProvider.pushAuthorized(into: webView) }
                 }
+                if type == "requestCameraRollAsset", let webView = bridge.webView {
+                    guard let requestId = body["requestId"] as? String,
+                          let assetId = body["assetId"] as? String else {
+                        print("[PostLoginHomeWebView] camera-roll source request missing identifiers")
+                        return
+                    }
+                    let maxPixelSize = (body["maxPixelSize"] as? NSNumber)?.intValue
+                    WebCameraRollProvider.pushAsset(
+                        requestId: requestId,
+                        assetId: assetId,
+                        maxPixelSize: maxPixelSize,
+                        into: webView
+                    )
+                    return
+                }
                 if type == "feedChannelChanged" {
                     // The web feed reports channel changes; the shell owns the
                     // AdMob gate and presentation, exactly as the native
@@ -642,17 +685,15 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     print("[PostLoginHomeWebView] no active view controller for in-app browser")
                     return
                 }
-                guard !(presenter is SFSafariViewController) else { return }
+                // Poplur's own browser, not Safari's. SFSafariViewController
+                // wears Safari's chrome and offers "Open in the <app>" banners,
+                // so a click-through read as leaving Poplur — while the web
+                // layer's ad window was telling the user the page had stayed
+                // inside it. See PoplurInAppBrowser for why it builds its own
+                // WKWebView configuration rather than reusing the app's.
+                guard !(presenter is PoplurInAppBrowserViewController) else { return }
 
-                let configuration = SFSafariViewController.Configuration()
-                configuration.entersReaderIfAvailable = false
-                configuration.barCollapsingEnabled = true
-
-                let safari = SFSafariViewController(url: url, configuration: configuration)
-                safari.dismissButtonStyle = .close
-                safari.preferredBarTintColor = UIColor(red: 20/255, green: 14/255, blue: 24/255, alpha: 1)
-                safari.preferredControlTintColor = UIColor(red: 1, green: 72/255, blue: 154/255, alpha: 1)
-                presenter.present(safari, animated: true)
+                presenter.present(PoplurInAppBrowserViewController(url: url), animated: true)
             }
         }
 
