@@ -47,10 +47,33 @@ private struct GoodCopySplashWebView: UIViewRepresentable {
             return webView
         }
 
-        var runtimeSource = approvedSource.replacingOccurrences(
-            of: "/Poplur2025-iOS/Poplur2025/poplur_splash.mp4",
-            with: "poplur_splash.mp4"
-        )
+        // The clay-world video is INLINED, not referenced by filename.
+        //
+        // `loadHTMLString(_:baseURL:)` with a file:// baseURL does not grant the
+        // loaded document read access to other files in that directory — WebKit
+        // sandboxes it — so a relative "poplur_splash.mp4" could never load on
+        // device. The splash therefore sat on the black backdrop showing only
+        // the logo fallback, which is precisely what the fallback exists to
+        // avoid being seen for long. The approved Good Copy markup is correct
+        // and untouched; only the way the bytes reach it changes here, and it
+        // is the same base64 substitution this function already does for the
+        // logo below. ~350KB, read once while the splash is on screen.
+        var runtimeSource = approvedSource
+        if let videoURL = Bundle.main.url(forResource: "poplur_splash", withExtension: "mp4"),
+           let videoData = try? Data(contentsOf: videoURL) {
+            runtimeSource = runtimeSource.replacingOccurrences(
+                of: "/Poplur2025-iOS/Poplur2025/poplur_splash.mp4",
+                with: "data:video/mp4;base64,\(videoData.base64EncodedString())"
+            )
+        } else {
+            // Video missing from the bundle: leave a relative path so the
+            // markup stays valid, and let the logo fallback carry the screen.
+            assertionFailure("Approved Good Copy Splash video is missing")
+            runtimeSource = runtimeSource.replacingOccurrences(
+                of: "/Poplur2025-iOS/Poplur2025/poplur_splash.mp4",
+                with: "poplur_splash.mp4"
+            )
+        }
         if let fallback = UIImage(named: "logo")?.pngData()?.base64EncodedString() {
             runtimeSource = runtimeSource.replacingOccurrences(
                 of: "/Poplur2025-iOS/Poplur2025/Assets.xcassets/logo.imageset/logo1.png",
