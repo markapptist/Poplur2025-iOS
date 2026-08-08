@@ -17,6 +17,7 @@ final class SettingsStore: ObservableObject {
         static let maxVideoDurationSeconds = "settings.maxVideoDurationSeconds"
         static let isPrivateAccount = "settings.isPrivateAccount"
         static let notificationsEnabled = "settings.notificationsEnabled"
+        static let radioPlaybackMode = "settings.radioPlaybackMode"
     }
 
     // MARK: - Video duration limit
@@ -44,5 +45,41 @@ final class SettingsStore: ObservableObject {
     var notificationsEnabled: Bool {
         get { defaults.object(forKey: Keys.notificationsEnabled) as? Bool ?? true }
         set { defaults.set(newValue, forKey: Keys.notificationsEnabled) }
+    }
+
+    var radioPlaybackMode: RadioPlaybackMode {
+        get {
+            let raw = defaults.string(forKey: Keys.radioPlaybackMode)
+            return raw.flatMap(RadioPlaybackMode.init(rawValue:)) ?? .screenOnly
+        }
+        set {
+            defaults.set(newValue.rawValue, forKey: Keys.radioPlaybackMode)
+            DispatchQueue.main.async { self.objectWillChange.send() }
+            RadioPlaybackController.shared.applyMode(newValue)
+        }
+    }
+}
+
+enum RadioPlaybackMode: String, CaseIterable, Identifiable {
+    case screenOnly
+    case inApp
+    case outsideApp
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .screenOnly: return "Radio screen only"
+        case .inApp: return "Across app"
+        case .outsideApp: return "Outside app"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .screenOnly: return "Stops when you leave radio."
+        case .inApp: return "Keeps playing while you use Poplur."
+        case .outsideApp: return "Uses background audio so it can keep playing after leaving Poplur."
+        }
     }
 }

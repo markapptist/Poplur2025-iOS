@@ -1,57 +1,73 @@
 import UIKit
+
+#if canImport(GoogleMobileAds)
 import GoogleMobileAds
 
 final class AdManager: NSObject, FullScreenContentDelegate {
     static let shared = AdManager()
-    
+
+    private let samplePublisherID = "ca-app-pub-3940256099942544"
     private var interstitial: InterstitialAd?
-    private let interstitialUnitID = "ca-app-pub-3940256099942544/4411468910" // AdMob test interstitial
-    
     private var hasStarted = false
-    
+
+    private var interstitialUnitID: String? {
+        let value = Bundle.main.object(forInfoDictionaryKey: "ADMOB_INTERSTITIAL_UNIT_ID") as? String
+        return value?.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     private override init() {
         super.init()
-        loadInterstitial()
     }
-    
+
     func start() {
         guard !hasStarted else { return }
-        // Start the Google Mobile Ads SDK. Current API does not require a nil completion.
         MobileAds.shared.start(completionHandler: nil)
         hasStarted = true
+        loadInterstitial()
     }
-    
+
     func loadInterstitial() {
-        let request = Request()
-        InterstitialAd.load(with: interstitialUnitID, request: request) { [weak self] ad, error in
-            guard let self = self else { return }
-            if let error = error {
-                // Optionally log the error
-                self.interstitial = nil
-                return
-            }
+        guard let interstitialUnitID, isProductionAdUnit(interstitialUnitID) else {
+            interstitial = nil
+            return
+        }
+
+        InterstitialAd.load(with: interstitialUnitID, request: Request()) { [weak self] ad, _ in
+            guard let self else { return }
             self.interstitial = ad
             self.interstitial?.fullScreenContentDelegate = self
         }
     }
-    
+
     func presentInterstitial(from root: UIViewController) {
-        if let ad = interstitial {
-            ad.present(from: root)
+        guard interstitialUnitID.map(isProductionAdUnit) == true else { return }
+        if let interstitial {
+            interstitial.present(from: root)
         } else {
             loadInterstitial()
         }
     }
-    
-    // MARK: - GADFullScreenContentDelegate
-    
+
     func adDidDismissFullScreenContent(_ ad: FullScreenPresentingAd) {
         interstitial = nil
         loadInterstitial()
     }
-    
+
     func ad(_ ad: FullScreenPresentingAd, didFailToPresentFullScreenContentWithError error: Error) {
         interstitial = nil
         loadInterstitial()
     }
+
+    private func isProductionAdUnit(_ id: String) -> Bool {
+        !id.isEmpty && !id.contains(samplePublisherID)
+    }
 }
+#else
+final class AdManager {
+    static let shared = AdManager()
+    private init() {}
+    func start() {}
+    func loadInterstitial() {}
+    func presentInterstitial(from root: UIViewController) {}
+}
+#endif
