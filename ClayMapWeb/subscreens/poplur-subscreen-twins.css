@@ -907,7 +907,7 @@ body.embed .phone {
 
 .newspaper-meta {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
   align-items: center;
   padding: 22px 26px 0;
@@ -1917,6 +1917,48 @@ body.embed .phone {
   margin-top: 18px;
 }
 
+.settings-section {
+  margin-top: 22px;
+}
+
+.settings-section-heading {
+  display: grid;
+  gap: 3px;
+  padding: 0 4px 8px;
+}
+
+.settings-section-heading strong {
+  color: #261620;
+  font-size: 13px;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.settings-section-heading span {
+  color: var(--subtle);
+  font-size: 12px;
+  font-weight: 720;
+  line-height: 1.3;
+}
+
+.settings-section .settings-list {
+  gap: 1px;
+  margin-top: 0;
+  overflow: hidden;
+  border-radius: 8px;
+  background: rgba(136, 96, 113, 0.18);
+}
+
+.settings-section .settings-row {
+  width: 100%;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.settings-section .settings-signout {
+  margin-top: 0;
+}
+
 .translation-card {
   display: grid;
   gap: 12px;
@@ -2550,14 +2592,38 @@ body.embed .phone {
   color: white;
   padding: 0;
   text-align: left;
+  overflow: hidden;
+}
+
+.phone-page::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  pointer-events: none;
+  background: white;
+  opacity: 0;
+}
+
+.phone-page.phone-led-flash::before {
+  animation: phoneLedFlash 720ms ease-out both;
+}
+
+@keyframes phoneLedFlash {
+  0%, 100% { opacity: 0; }
+  9% { opacity: 0.42; }
+  20% { opacity: 0; }
+  38% { opacity: 0.3; }
+  52% { opacity: 0; }
 }
 
 .popular-phone-device {
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 622px;
-  height: 933px;
+  width: max(100vw, calc(100dvh * 0.666667));
+  height: auto;
+  aspect-ratio: 2 / 3;
   transform: translate(-50%, -50%);
   filter: drop-shadow(0 26px 32px rgba(0, 0, 0, 0.64));
 }
@@ -2599,7 +2665,7 @@ body.embed .phone {
   left: 24.5%;
   top: 18.0%;
   width: 51.2%;
-  height: 18.2%;
+  height: 25.2%;
   overflow: hidden;
   border-radius: 2.5%;
   background: #eff100;
@@ -2713,7 +2779,7 @@ body.embed .phone {
 
 .lcd-menu-row em {
   margin-top: 2px;
-  font-size: 8px;
+  font-size: 7px;
   line-height: 1;
   font-style: normal;
   font-weight: 850;
@@ -2939,6 +3005,201 @@ body.embed .phone {
   font-size: 12px;
   font-weight: 800;
 }
+
+/* Store refresh: quiet Apple Store structure with real tabs and a moving rail. */
+.store-page.store-new {
+  padding: 0;
+  background: #f5f5f7;
+  color: #161617;
+}
+
+.store-nav {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  min-height: 64px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: max(12px, env(safe-area-inset-top)) 14px 10px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  background: rgba(255, 255, 255, 0.88);
+  backdrop-filter: saturate(160%) blur(18px);
+}
+
+.store-logo {
+  grid-column: 1;
+  grid-row: 1;
+  width: 78px;
+  height: 30px;
+  object-fit: contain;
+}
+
+.store-tabs {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  min-width: 0;
+  display: flex;
+  gap: 2px;
+  justify-content: space-between;
+  overflow-x: visible;
+  scrollbar-width: none;
+}
+
+.store-tabs::-webkit-scrollbar { display: none; }
+
+.store-tabs button {
+  flex: 1 1 0;
+  min-height: 34px;
+  padding: 0 9px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: #6d6d72;
+  font: 750 12px/1 system-ui, sans-serif;
+  letter-spacing: 0;
+}
+
+.store-tabs button.on {
+  border-bottom-color: #161617;
+  color: #161617;
+}
+
+.store-new .store-cart-button {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 54px;
+  min-height: 34px;
+  margin: 0;
+  border-radius: 8px;
+  background: #f72686;
+  font-size: 11px;
+}
+
+.store-heading {
+  padding: 26px 20px 18px;
+}
+
+.store-heading h1 {
+  margin: 0;
+  font: 800 34px/1.02 system-ui, sans-serif;
+  letter-spacing: 0;
+}
+
+.store-heading p {
+  max-width: 330px;
+  margin: 9px 0 0;
+  color: #6d6d72;
+  font: 650 16px/1.28 system-ui, sans-serif;
+}
+
+.store-carousel {
+  position: relative;
+  width: 100%;
+  min-height: 286px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.store-carousel-track {
+  height: 286px;
+  display: flex;
+  transition: transform 650ms cubic-bezier(.22, .72, .22, 1);
+  will-change: transform;
+}
+
+.store-promo {
+  flex: 0 0 100%;
+  min-width: 100%;
+  height: 286px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 46%;
+  align-items: center;
+  gap: 4px;
+  padding: 24px 16px 32px 22px;
+  border: 0;
+  color: #fff;
+  text-align: left;
+  overflow: hidden;
+}
+
+.store-promo.ink { background: #1d1d1f; }
+.store-promo.pink { background: #d82277; }
+.store-promo.blue { background: #146b8e; }
+
+.store-promo-copy { position: relative; z-index: 2; min-width: 0; }
+.store-promo-copy small { display: block; margin-bottom: 8px; font: 850 10px/1 system-ui, sans-serif; letter-spacing: 0; opacity: .72; }
+.store-promo-copy strong { display: block; font: 800 27px/1.02 system-ui, sans-serif; letter-spacing: 0; }
+.store-promo-copy em { display: block; margin-top: 10px; font: 650 14px/1.25 system-ui, sans-serif; font-style: normal; opacity: .82; }
+
+.store-promo img {
+  width: 100%;
+  height: 220px;
+  object-fit: contain;
+  filter: drop-shadow(0 18px 20px rgba(0, 0, 0, .24));
+}
+
+.store-carousel-dots {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 13px;
+  display: flex;
+  justify-content: center;
+  gap: 7px;
+}
+
+.store-carousel-dots button {
+  width: 7px;
+  height: 7px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, .42);
+}
+
+.store-carousel-dots button.on { background: #fff; transform: scale(1.28); }
+
+.store-new .store-products {
+  padding: 28px 16px calc(210px + env(safe-area-inset-bottom));
+  background: #f5f5f7;
+}
+
+.store-section-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.store-section-title img { width: 40px; height: 40px; object-fit: contain; }
+.store-section-title small { color: #6d6d72; font: 800 10px/1 system-ui, sans-serif; }
+.store-section-title h2 { margin: 2px 0 0; font: 800 24px/1 system-ui, sans-serif; letter-spacing: 0; }
+
+.store-new .product-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 16px;
+  filter: none;
+}
+
+.store-new .product-card {
+  min-height: 220px;
+  padding: 12px;
+  border: 1px solid rgba(0, 0, 0, .06);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, .06);
+}
+
+.store-new .product-card img {
+  width: 100%;
+  height: 142px;
+  object-fit: contain;
+}
+
+.store-new .product-card strong { font-size: 14px; line-height: 1.15; }
+.store-new .product-card span { margin-top: 7px; }
 
 /* Map */
 .map {
@@ -3581,6 +3842,38 @@ body.rcl-clay .stat-button:hover,
 body.rcl-clay .settings-button:hover,
 body.rcl-clay .thread-button:hover {
   filter: brightness(1.025) saturate(1.04);
+}
+
+/* Profile > Settings > Subscreens. These body-level modes deliberately wrap
+   every Feed, Camera, Map, and Profile twin rendered by this document. */
+body.subscreens-reduced-motion .screen *,
+body.subscreens-reduced-motion .screen *::before,
+body.subscreens-reduced-motion .screen *::after {
+  scroll-behavior: auto !important;
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+}
+
+body.subscreens-large-controls .ios-screen button:not([data-store-slide]) {
+  min-block-size: 44px;
+}
+
+body.subscreens-large-controls .settings-row,
+body.subscreens-large-controls .thread,
+body.subscreens-large-controls .result-row {
+  min-height: 72px;
+}
+
+body.subscreens-high-contrast .ios-screen {
+  filter: contrast(1.14) saturate(1.06);
+}
+
+body.subscreens-tv-guide-static .guide-row,
+body.subscreens-tv-guide-static .pip-video,
+body.subscreens-tv-guide-static .pip-band {
+  animation: none !important;
+  transition: none !important;
 }
 
 
