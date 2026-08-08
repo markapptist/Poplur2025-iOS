@@ -26,7 +26,16 @@ final class WebHomeCameraModel: ObservableObject {
     @Published private(set) var recognitionManager: UserRecognitionManager?
 
     private var controllerStorage: CameraKitController?
+    private var latestVisionBoxes: [VisionBoxDetector.Box] = []
+    private var latestClassifications: [DetectedObject] = []
     var isCameraTab: Bool { activeTab == "post" }
+
+    private static let peopleClassificationTerms: Set<String> = [
+        "adult", "adults", "baby", "babies", "body", "boy", "boys",
+        "child", "children", "crowd", "face", "faces", "girl", "girls",
+        "human", "humans", "man", "men", "people", "person", "portrait",
+        "selfie", "user", "users", "woman", "women"
+    ]
 
     /// Lazy like HomeView's LazyHomeCameraControllerHolder: no capture session
     /// exists until the camera tab is first opened.
@@ -72,6 +81,83 @@ final class WebHomeCameraModel: ObservableObject {
         )
     }
 
+    /// Keep the native banner/AI callbacks intact while also handing the web
+    /// the real labels emitted by VNClassifyImageRequest. Classifications are
+    /// whole-frame observations, so their bounds are the full frame; attaching
+    /// them to an arbitrary Vision box would falsely claim object localisation.
+    private func enableClassificationBridge(on controller: CameraKitController) {
+        controller.enableMLDetection { [weak self] objects in
+            NotificationCenter.default.post(
+                name: NSNotification.Name("MLObjectsDetected"),
+                object: nil,
+                userInfo: ["objects": objects]
+            )
+            self?.receiveClassifications(objects)
+        }
+        controller.mlDetectionManager?.onFrameProcessed = { [weak self] pixelBuffer, objects in
+            CameraAIAnnouncer.shared.announceMLObjects(objects)
+            self?.recognitionManager?.processDetectedObjects(objects, from: pixelBuffer)
+        }
+    }
+
+    private func receiveClassifications(_ objects: [DetectedObject]) {
+        latestClassifications = objects.filter { object in
+            let label = object.identifier.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !label.isEmpty else { return false }
+            let terms = label.lowercased().split(whereSeparator: { !$0.isLetter }).map(String.init)
+            return terms.allSatisfy { !Self.peopleClassificationTerms.contains($0) }
+        }
+        publishCombinedDetections()
+    }
+
+    private func receiveVisionBoxes(_ boxes: [VisionBoxDetector.Box]) {
+        latestVisionBoxes = boxes
+        publishCombinedDetections()
+    }
+
+    private func publishCombinedDetections() {
+        var payload: [[String: Any]] = latestVisionBoxes.map { box in
+            [
+                "id": box.id,
+                "x": Double(box.x),
+                "y": Double(box.y),
+                "w": Double(box.w),
+                "h": Double(box.h),
+                "label": box.label,
+                "confidence": Double(box.confidence)
+            ]
+        }
+        var emittedLabels = Set(latestVisionBoxes.map { $0.label.lowercased() })
+
+        for (index, object) in latestClassifications.enumerated() {
+            let label = object.identifier.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard emittedLabels.insert(label.lowercased()).inserted else { continue }
+            payload.append([
+                "id": "classification-\(index)",
+                "x": 0.0,
+                "y": 0.0,
+                "w": 1.0,
+                "h": 1.0,
+                "label": label,
+                "confidence": Double(object.confidence)
+            ])
+        }
+
+        guard JSONSerialization.isValidJSONObject(payload),
+              let data = try? JSONSerialization.data(withJSONObject: payload),
+              let json = String(data: data, encoding: .utf8) else {
+            print("[WebHomeCameraModel] failed to encode native detections")
+            return
+        }
+        PostLoginHomeWebView.sendDetections(json)
+    }
+
+    private func clearWebDetections() {
+        latestVisionBoxes = []
+        latestClassifications = []
+        PostLoginHomeWebView.sendDetections("[]")
+    }
+
     func handleWebEvent(type: String, body: [String: Any]) {
         switch type {
         case "tabChanged":
@@ -112,13 +198,12 @@ final class WebHomeCameraModel: ObservableObject {
                 let controller = resolveController()
                 let wantsOn = (body["on"] as? Bool) ?? (controller.mlDetectionManager == nil)
                 if wantsOn {
-                    controller.enableMLDetection()
-                    controller.mlDetectionManager?.onFrameProcessed = { [weak self] pixelBuffer, objects in
-                        CameraAIAnnouncer.shared.announceMLObjects(objects)
-                        self?.recognitionManager?.processDetectedObjects(objects, from: pixelBuffer)
-                    }
+                    latestClassifications = []
+                    enableClassificationBridge(on: controller)
                 } else {
                     controller.disableMLDetection()
+                    latestClassifications = []
+                    publishCombinedDetections()
                 }
                 UserDefaults.standard.set(wantsOn, forKey: "CameraObjectDetectionEnabled")
             case "filter":
@@ -182,7 +267,7 @@ final class WebHomeCameraModel: ObservableObject {
         // Camera always opens with detection enabled. DETECT OFF remains a
         // session control, but an old persisted off value must not survive an
         // update/reinstall and silently disable the default on the next visit.
-        controller.enableMLDetection()
+        enableClassificationBridge(on: controller)
         // enableMLDetection() only says detection is WANTED. Frames are what make
         // it happen, and on this path nothing was attaching a video data output —
         // that lived solely inside setupARFilterSupport(), which only HomeView
@@ -199,18 +284,7 @@ final class WebHomeCameraModel: ObservableObject {
         // boxes on screen mean something.
         let boxes = controller.visionBoxDetector ?? VisionBoxDetector()
         controller.visionBoxDetector = boxes
-        boxes.onBoxes = { found in
-            let items = found.map { b in
-                let label = b.label.replacingOccurrences(of: "\"", with: "")
-                return "{\"id\":\"\(b.id)\",\"x\":\(b.x),\"y\":\(b.y),\"w\":\(b.w),\"h\":\(b.h)"
-                    + ",\"label\":\"\(label)\",\"confidence\":\(b.confidence)}"
-            }
-            PostLoginHomeWebView.sendDetections("[" + items.joined(separator: ",") + "]")
-        }
-        controller.mlDetectionManager?.onFrameProcessed = { [weak recognition] pixelBuffer, objects in
-            CameraAIAnnouncer.shared.announceMLObjects(objects)
-            recognition?.processDetectedObjects(objects, from: pixelBuffer)
-        }
+        boxes.onBoxes = { [weak self] found in self?.receiveVisionBoxes(found) }
         UserDefaults.standard.set(true, forKey: "CameraObjectDetectionEnabled")
         await recognition.startRecognitionSession()
     }
@@ -240,7 +314,7 @@ final class WebHomeCameraModel: ObservableObject {
         controllerStorage?.visionBoxDetector?.onBoxes = nil
         controllerStorage?.visionBoxDetector = nil
         // Clear any boxes left painted over a camera that is no longer running.
-        PostLoginHomeWebView.sendDetections("[]")
+        clearWebDetections()
         controllerStorage?.suspendCapture()
 
         // And kill the torch. Nothing else clears it: flipCamera() only clears it
@@ -302,13 +376,24 @@ struct WebHomeCameraLayer: View {
 /// → the transparent web home on top. Drop-in replacement for a bare
 /// PostLoginHomeWebView.
 struct PostLoginHomeSurface: View {
+    let initialTab: AppTab
     let onReady: () -> Void
     @StateObject private var camera = WebHomeCameraModel()
     @StateObject private var poplurAI = PoplurAIAssistantController()
     @Environment(\.scenePhase) private var scenePhase
 
-    init(onReady: @escaping () -> Void = {}) {
+    init(initialTab: AppTab = .feed, onReady: @escaping () -> Void = {}) {
+        self.initialTab = initialTab
         self.onReady = onReady
+    }
+
+    private var initialWebView: String {
+        switch initialTab {
+        case .map: return "map"
+        case .record: return "camera"
+        case .profile: return "profile"
+        case .feed, .settings: return "home"
+        }
     }
 
     var body: some View {
@@ -322,6 +407,7 @@ struct PostLoginHomeSurface: View {
             }
 
             PostLoginHomeWebView(
+                initialView: initialWebView,
                 onReady: onReady,
                 onWebEvent: { [weak camera, weak poplurAI] type, body in
                     camera?.handleWebEvent(type: type, body: body)

@@ -1,4 +1,5 @@
 import AVFoundation
+import SafariServices
 import SwiftUI
 import WebKit
 import CoreLocation
@@ -71,13 +72,15 @@ enum PoplurWebHome {
     /// The approved home twin: the shared clay bundle opened on its home tab.
     /// `tabs=1` shows the bottom tab pills; the scheme handler ignores the query
     /// and serves index.html, while App.tsx reads ?view / #view to pick the view.
-    static var homeURL: URL? {
+    static var homeURL: URL? { url(for: "home") }
+
+    static func url(for view: String) -> URL? {
         var components = URLComponents()
         components.scheme = PoplurClayWebMap.scheme
         components.host = PoplurClayWebMap.host
         components.path = "/index.html"
         var queryItems = [
-            URLQueryItem(name: "view", value: "home"),
+            URLQueryItem(name: "view", value: view),
             URLQueryItem(name: "tabs", value: "1"),
             URLQueryItem(name: "v", value: PoplurPreloginWeb.buildStamp)
         ]
@@ -250,6 +253,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         func cancel() { synth.stopSpeaking(at: .immediate) }
     }
 
+    let initialView: String
     let onReady: () -> Void
     /// Tap on bridge events the host cares about (tabChanged / cameraShutter /
     /// cameraControl → the native web-home camera layer). Every message still
@@ -262,11 +266,13 @@ struct PostLoginHomeWebView: UIViewRepresentable {
     let nativeVoiceCommandJSON: String?
 
     init(
+        initialView: String = "home",
         onReady: @escaping () -> Void = {},
         onWebEvent: ((String, [String: Any]) -> Void)? = nil,
         nativeVoiceCommandToken: Int = 0,
         nativeVoiceCommandJSON: String? = nil
     ) {
+        self.initialView = initialView
         self.onReady = onReady
         self.onWebEvent = onWebEvent
         self.nativeVoiceCommandToken = nativeVoiceCommandToken
@@ -328,7 +334,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         webView.uiDelegate = context.coordinator.bridge
         Self.liveWebView = webView
 
-        if PoplurClayMapView.bundledRootURL() != nil, let url = PoplurWebHome.homeURL {
+        if PoplurClayMapView.bundledRootURL() != nil, let url = PoplurWebHome.url(for: initialView) {
             webView.load(URLRequest(url: url))
         } else {
             print("[PostLoginHomeWebView] ClayMapWeb bundle missing — run poplur-clay-map/scripts/sync-mobile.sh")
@@ -526,6 +532,18 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     PoplurWebSpeech.shared.cancel()
                     return
                 }
+                if type == "openInAppBrowser" {
+                    guard let rawURL = body["url"] as? String,
+                          let components = URLComponents(string: rawURL),
+                          components.scheme?.lowercased() == "https",
+                          components.host?.isEmpty == false,
+                          let url = components.url else {
+                        print("[PostLoginHomeWebView] blocked invalid in-app browser URL")
+                        return
+                    }
+                    presentInAppBrowser(url)
+                    return
+                }
                 if type == "requestLocation" {
                     // Home posts this after its custom clay card's Allow. The
                     // primer must not raise Apple's system prompt; use an
@@ -615,9 +633,62 @@ struct PostLoginHomeWebView: UIViewRepresentable {
             bridge.userContentController(userContentController, didReceive: message)
         }
 
+        /// Opens commerce links in Apple's isolated in-app browser. The remote
+        /// page never enters the Poplur WKWebView, so it cannot access the
+        /// `poplur` script-message channel or any app-injected JavaScript.
+        private func presentInAppBrowser(_ url: URL) {
+            DispatchQueue.main.async {
+                guard let presenter = Self.activePresenter() else {
+                    print("[PostLoginHomeWebView] no active view controller for in-app browser")
+                    return
+                }
+                guard !(presenter is SFSafariViewController) else { return }
+
+                let configuration = SFSafariViewController.Configuration()
+                configuration.entersReaderIfAvailable = false
+                configuration.barCollapsingEnabled = true
+
+                let safari = SFSafariViewController(url: url, configuration: configuration)
+                safari.dismissButtonStyle = .close
+                safari.preferredBarTintColor = UIColor(red: 20/255, green: 14/255, blue: 24/255, alpha: 1)
+                safari.preferredControlTintColor = UIColor(red: 1, green: 72/255, blue: 154/255, alpha: 1)
+                presenter.present(safari, animated: true)
+            }
+        }
+
+        private static func activePresenter() -> UIViewController? {
+            guard let scene = UIApplication.shared.connectedScenes
+                .compactMap({ $0 as? UIWindowScene })
+                .first(where: { $0.activationState == .foregroundActive }),
+                  let window = scene.windows.first(where: { $0.isKeyWindow })
+                    ?? scene.windows.first(where: { !$0.isHidden }),
+                  let root = window.rootViewController else {
+                return nil
+            }
+            return topViewController(from: root)
+        }
+
+        private static func topViewController(from controller: UIViewController) -> UIViewController {
+            if let presented = controller.presentedViewController {
+                return topViewController(from: presented)
+            }
+            if let navigation = controller as? UINavigationController,
+               let visible = navigation.visibleViewController {
+                return topViewController(from: visible)
+            }
+            if let tabs = controller as? UITabBarController,
+               let selected = tabs.selectedViewController {
+                return topViewController(from: selected)
+            }
+            return controller
+        }
+
         private func signalHomeReady() {
             guard !didSignalReady else { return }
             didSignalReady = true
+            if let webView = bridge.webView {
+                PoplurThermalProbe.sendCurrent(to: webView)
+            }
             flushPendingNativeVoiceCommand()
             DispatchQueue.main.async { [onReady] in onReady() }
         }

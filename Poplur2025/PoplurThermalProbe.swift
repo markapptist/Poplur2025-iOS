@@ -1,5 +1,6 @@
 import Foundation
 import UIKit
+import WebKit
 
 /// Reads the phone's own thermal state instead of asking whether it feels hot.
 ///
@@ -53,6 +54,28 @@ enum PoplurThermalProbe {
         }
     }
 
+    /// Give each newly-created Home/Map document the current ceiling. Thermal
+    /// transitions can happen before WKWebView finishes loading, so relying on
+    /// the change notification alone leaves a fresh map assuming full quality
+    /// while the OS is already throttling it.
+    static func sendCurrent(to webView: WKWebView) {
+        sendToWeb(ProcessInfo.processInfo.thermalState, webView: webView)
+    }
+
+    private static func sendToWeb(_ state: ProcessInfo.ThermalState, webView: WKWebView) {
+        let value: String
+        switch state {
+        case .nominal: value = "nominal"
+        case .fair: value = "fair"
+        case .serious: value = "serious"
+        case .critical: value = "critical"
+        @unknown default: value = "unknown"
+        }
+        webView.evaluateJavaScript(
+            "window.dispatchEvent(new CustomEvent('poplur-native-thermal', { detail: { state: '\(value)' } })); true;"
+        )
+    }
+
     private static func report(reason: String) {
         let info = ProcessInfo.processInfo
         let state = info.thermalState
@@ -70,5 +93,8 @@ enum PoplurThermalProbe {
             + " uptime=\(Int(info.systemUptime))s reason=\(reason)"
         print(line)
         PoplurDiagLog.append(line)
+        if let webView = PostLoginHomeWebView.liveWebView {
+            sendToWeb(state, webView: webView)
+        }
     }
 }

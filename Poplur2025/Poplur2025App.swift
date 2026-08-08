@@ -185,11 +185,19 @@ struct Poplur2025App: App {
                     // Launch straight into the native SpriteKit game (bypasses login) for verification.
                     PoplurFPSGameSheet()
                 } else if let verificationTab = PoplurVerificationLaunch.tab {
-                    HomeView(initialTab: verificationTab)
-                        .environmentObject(AuthViewModel(previewAuthenticated: true))
-                        .environment(\.layoutPreviewMode, true)
-                        .environment(\.homeViewIsPreviewRuntime, true)
-                        .environment(\.previewSelectedTab, PoplurVerificationLaunch.previewTab(for: verificationTab))
+                    if PoplurWebHome.isEnabled {
+                        // Physical verification must exercise the same approved
+                        // web Home surface customers receive. The old path
+                        // mounted native HomeView in preview mode, which drew a
+                        // complete legacy chrome layer over the current Home.
+                        PostLoginHomeSurface(initialTab: verificationTab)
+                    } else {
+                        HomeView(initialTab: verificationTab)
+                            .environmentObject(AuthViewModel(previewAuthenticated: true))
+                            .environment(\.layoutPreviewMode, true)
+                            .environment(\.homeViewIsPreviewRuntime, true)
+                            .environment(\.previewSelectedTab, PoplurVerificationLaunch.previewTab(for: verificationTab))
+                    }
                 } else {
                     authenticatedContent
                 }

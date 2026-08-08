@@ -22,6 +22,7 @@ enum PoplurDiagLog {
     /// Allocating a formatter per line is wasteful in a loop that runs forever.
     private static let stamp: ISO8601DateFormatter = ISO8601DateFormatter()
     private static let maxBytes = 512 * 1024
+    private static let trimTargetBytes = maxBytes / 2
 
     private static var url: URL? {
         FileManager.default
@@ -46,13 +47,42 @@ enum PoplurDiagLog {
                 try? data.write(to: url)
             }
 
-            // Keep it bounded: a log that fills the container is its own bug.
-            if let size = try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int,
-               size > maxBytes,
-               let text = try? String(contentsOf: url, encoding: .utf8) {
-                let kept = text.split(separator: "\n").suffix(1500).joined(separator: "\n")
-                try? (kept + "\n").data(using: .utf8)?.write(to: url)
+            trimIfNeeded(url)
+        }
+    }
+
+    /// Keep the log bounded without repeatedly allocating and splitting the
+    /// entire file. The previous line-count trim could retain more than the
+    /// 512 KB cap, so every later profile report re-read and rewrote the whole
+    /// log. Retaining a fixed-size byte tail makes trimming infrequent and
+    /// gives the allocator room to settle between diagnostic samples.
+    private static func trimIfNeeded(_ url: URL) {
+        guard
+            let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+            let size = (attributes[.size] as? NSNumber)?.intValue,
+            size > maxBytes,
+            let handle = try? FileHandle(forReadingFrom: url)
+        else { return }
+
+        defer { try? handle.close() }
+
+        let bytesToKeep = min(trimTargetBytes, size)
+        do {
+            try handle.seek(toOffset: UInt64(size - bytesToKeep))
+            guard var tail = try handle.readToEnd(), !tail.isEmpty else { return }
+
+            // The byte window can begin in the middle of a UTF-8 log line.
+            // Discard that fragment so the retained diagnostic file stays
+            // valid text without decoding or splitting its full contents.
+            if let firstNewline = tail.firstIndex(of: 0x0A) {
+                tail.removeSubrange(tail.startIndex...firstNewline)
             }
+
+            var bounded = Data("=== TRIMMED ===\n".utf8)
+            bounded.append(tail)
+            try bounded.write(to: url, options: .atomic)
+        } catch {
+            // Diagnostics must never affect app behavior.
         }
     }
 
