@@ -33,6 +33,10 @@ class ARFilterManager: NSObject, ObservableObject {
     private var sceneView: ARSCNView?
     private var currentFaceNode: SCNNode?
     private let ciContext = CIContext()
+    /// Reuses the Vision pass already required by the native filter pipeline to
+    /// anchor the transparent WebGL accessory layer. No second face detector.
+    var onFaceTrack: ((CGRect?, Float, CGFloat, CGFloat) -> Void)?
+    private var lastFaceTrackPublishTime: TimeInterval = 0
     
     // Filter intensity (0.0 - 1.0)
     private var filterIntensity: Float = 0.7
@@ -196,11 +200,19 @@ class ARFilterManager: NSObject, ObservableObject {
             filtered: outputImage.cropped(to: image.extent),
             faceObservation: faceObservation
         )
-        return applyTrackedFaceArtwork(
-            filter: activeFilter,
-            to: faceComposite,
-            faceObservation: faceObservation
-        )
+        switch activeFilter {
+        case .beautyFilter, .warmth:
+            return applyTrackedFaceArtwork(
+                filter: activeFilter,
+                to: faceComposite,
+                faceObservation: faceObservation
+            )
+        default:
+            // Ring light, halo, visor, crown and glasses are real 3D meshes in
+            // the transparent shared layer. Drawing these outlines too would
+            // leave the old flat sticker underneath the model.
+            return faceComposite
+        }
     }
     
     /// Set filter intensity
@@ -287,6 +299,7 @@ class ARFilterManager: NSObject, ObservableObject {
             
             // Access main actor isolated methods safely
             Task { @MainActor in
+                self.publishFaceTrack(faceObservation)
                 // Apply filter with face observation
                 guard let filteredImage = self.applyFilter(to: ciImage, faceObservation: faceObservation) else {
                     print("❌ [ARFilter] Failed to apply filter")
@@ -338,6 +351,18 @@ class ARFilterManager: NSObject, ObservableObject {
                 completion(sampleBuffer)
             }
         }
+    }
+
+    private func publishFaceTrack(_ observation: VNFaceObservation?) {
+        let now = ProcessInfo.processInfo.systemUptime
+        guard now - lastFaceTrackPublishTime >= 1.0 / 12.0 else { return }
+        lastFaceTrackPublishTime = now
+        onFaceTrack?(
+            observation?.boundingBox,
+            observation?.confidence ?? 0,
+            CGFloat(observation?.roll?.doubleValue ?? 0),
+            CGFloat(observation?.yaw?.doubleValue ?? 0)
+        )
     }
     
     /// Create a pixel buffer from CIImage
@@ -584,8 +609,6 @@ class ARFilterManager: NSObject, ObservableObject {
                 softDot(center: CGPoint(x: face.maxX - face.width * 0.25, y: face.minY + face.height * 0.42), radius: cheekSize, color: CIColor(red: 1, green: 0.18, blue: 0.48, alpha: 0.30), extent: image.extent),
                 output
             )
-            output = addSparkles(to: output, around: face)
-
         case .brightening:
             output = addRoundedOutline(
                 rect: face.insetBy(dx: -face.width * 0.08, dy: -face.height * 0.08),

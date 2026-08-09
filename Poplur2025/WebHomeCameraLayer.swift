@@ -33,6 +33,7 @@ final class WebHomeCameraModel: ObservableObject {
     private var webReportsLiveCamera = false
     private var latestVisionBoxes: [VisionBoxDetector.Box] = []
     private var latestClassifications: [DetectedObject] = []
+    private var latestARFace: (bounds: CGRect, confidence: Float, roll: CGFloat, yaw: CGFloat)?
     var isCameraTab: Bool { activeTab == "post" && liveCameraVisible }
 
     init() {
@@ -77,7 +78,20 @@ final class WebHomeCameraModel: ObservableObject {
             let layer = (controller.previewViewController as? CameraPreviewViewController)?.getARDisplayLayer()
             controller.setupARFilterSupport(filterManager: manager, displayLayer: layer)
         }
+        controller.arFilterManager?.onFaceTrack = { [weak self] bounds, confidence, roll, yaw in
+            guard let self else { return }
+            if let bounds {
+                self.latestARFace = (bounds, confidence, roll, yaw)
+            } else {
+                self.latestARFace = nil
+            }
+            self.publishCombinedDetections()
+        }
         controller.arFilterManager?.activeFilter = filter
+        if filter == .none {
+            latestARFace = nil
+            publishCombinedDetections()
+        }
 
         // CameraPreviewViewController cross-fades between the hardware preview
         // and the filtered display layer off these two notifications; it is the
@@ -136,7 +150,21 @@ final class WebHomeCameraModel: ObservableObject {
     }
 
     private func publishCombinedDetections() {
-        var payload: [[String: Any]] = latestVisionBoxes.map { box in
+        var payload: [[String: Any]] = []
+        if let face = latestARFace {
+            payload.append([
+                "id": "face",
+                "x": Double(face.bounds.minX),
+                "y": Double(1 - face.bounds.minY - face.bounds.height),
+                "w": Double(face.bounds.width),
+                "h": Double(face.bounds.height),
+                "label": "face",
+                "confidence": Double(face.confidence),
+                "roll": Double(face.roll),
+                "yaw": Double(face.yaw)
+            ])
+        }
+        payload.append(contentsOf: latestVisionBoxes.map { box in
             [
                 "id": box.id,
                 "x": Double(box.x),
@@ -146,7 +174,7 @@ final class WebHomeCameraModel: ObservableObject {
                 "label": box.label,
                 "confidence": Double(box.confidence)
             ]
-        }
+        })
         var emittedLabels = Set(latestVisionBoxes.map { $0.label.lowercased() })
 
         for (index, object) in latestClassifications.enumerated() {
@@ -180,6 +208,7 @@ final class WebHomeCameraModel: ObservableObject {
     }
 
     private func clearWebDetections() {
+        latestARFace = nil
         latestVisionBoxes = []
         latestClassifications = []
         PostLoginHomeWebView.sendDetections("[]")
