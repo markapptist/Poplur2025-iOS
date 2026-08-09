@@ -51,16 +51,39 @@ class ARFilterManager: NSObject, ObservableObject {
         case vintage = "Vintage"
         
         var id: String { rawValue }
-        
+
+        /// What the rail calls it.
+        ///
+        /// SEPARATE FROM `rawValue` on purpose. Every one of these draws a
+        /// costume on the face further down this file — `.sharpen` is the cyan
+        /// visor at `case .sharpen` in the effect pass — so naming them after
+        /// the colour grade told you nothing about what you were picking. But
+        /// `rawValue` is also the wire value: it goes out in the
+        /// `["filter": ...]` notification payload, so renaming the cases would
+        /// change a contract to fix a caption. The label moves; the id does not.
+        var displayName: String {
+            switch self {
+            case .none: return "None"
+            case .faceSmoothing: return "Smooth"   // genuinely just a grade
+            case .beautyFilter: return "Blush"
+            case .brightening: return "Ring Light"
+            case .glowingSkin: return "Halo"
+            case .sharpen: return "Visor"
+            case .warmth: return "Freckles"
+            case .cool: return "Ice Crown"
+            case .vintage: return "Round Specs"
+            }
+        }
+
         var icon: String {
             switch self {
             case .none: return "xmark.circle"
             case .faceSmoothing: return "sparkles"
             case .beautyFilter: return "face.smiling"
-            case .brightening: return "sun.max"
-            case .glowingSkin: return "glow"
-            case .sharpen: return "square.grid.3x3"
-            case .warmth: return "flame"
+            case .brightening: return "circle.dashed"
+            case .glowingSkin: return "sun.max"
+            case .sharpen: return "eyeglasses"
+            case .warmth: return "circle.grid.3x3.fill"
             case .cool: return "snowflake"
             case .vintage: return "camera.aperture"
             }
@@ -82,15 +105,16 @@ class ARFilterManager: NSObject, ObservableObject {
         
         var description: String {
             switch self {
+            // Lead with the costume, then the grade that comes with it.
             case .none: return "No Filter"
             case .faceSmoothing: return "Smooth skin, reduce wrinkles"
-            case .beautyFilter: return "All-in-one beauty enhancement"
-            case .brightening: return "Brighten face"
-            case .glowingSkin: return "Glowing, radiant skin"
-            case .sharpen: return "Sharpen details"
-            case .warmth: return "Warm tone"
-            case .cool: return "Cool tone"
-            case .vintage: return "Vintage look"
+            case .beautyFilter: return "Rosy cheeks and sparkles"
+            case .brightening: return "A ring of light around your face"
+            case .glowingSkin: return "A golden halo overhead"
+            case .sharpen: return "A cyan visor across your eyes"
+            case .warmth: return "Freckles and a warm tone"
+            case .cool: return "A crown of ice, on a cool tone"
+            case .vintage: return "Round specs, on a vintage wash"
             }
         }
     }

@@ -137,8 +137,9 @@ private struct FilterButtonSnapchat: View {
                         .shadow(color: isSelected ? .white.opacity(0.5) : .clear, radius: 8)
                 }
                 
-                // Filter name
-                Text(filter.rawValue)
+                // Filter name — displayName, not rawValue: the raw value is the
+                // wire id and still says "Sharpen" for the visor.
+                Text(filter.displayName)
                     .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
                     .foregroundColor(.white)
                     .shadow(color: .black.opacity(0.5), radius: 2)
@@ -249,7 +250,7 @@ private struct FilterButton: View {
                         )
                 }
                 
-                Text(filter.rawValue)
+                Text(filter.displayName)
                     .font(.caption)
                     .fontWeight(isSelected ? .semibold : .regular)
                     .foregroundColor(.white)

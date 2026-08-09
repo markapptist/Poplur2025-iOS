@@ -89,7 +89,7 @@ struct InAppVideoCallView: View {
                         VStack {
                             Spacer()
                             HStack {
-                                Text(activeFilter == .none ? "You" : activeFilter.rawValue)
+                                Text(activeFilter == .none ? "You" : activeFilter.displayName)
                                     .font(.system(size: 10, weight: .bold))
                                     .foregroundStyle(.white)
                                     .padding(.horizontal, 8)
@@ -200,7 +200,7 @@ struct InAppVideoCallView: View {
                                         in: Circle()
                                     )
                                     .foregroundStyle(activeFilter == filter ? Color.black : Color.white)
-                                Text(filter.rawValue)
+                                Text(filter.displayName)
                                     .font(.system(size: 10, weight: .medium))
                                     .foregroundStyle(.white.opacity(0.8))
                             }
