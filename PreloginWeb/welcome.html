@@ -130,28 +130,45 @@
      merely sharing a `top`. */
   html.poplur-colorlab .hueWheel {
     display: block; width: 26px; height: 26px; border-radius: 50%;
+    /* A BALL, not a disc, and no outline doing the work. What separates the
+       two is that the shading is lit from one direction: a tight specular
+       near the top-left, an even falloff into shadow at the lower-right, and
+       a contact shadow underneath to sit it above the page. The map's version
+       leans on a hard 3px rim to hold its edge; here the terminator does it,
+       which is what actually reads as round.
+       Layers top-down: specular, sphere shading, hub, hue ring — and the hub
+       fades into the ring rather than being fenced off by a dark stop, so the
+       whole thing is one object. */
     background:
-      radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0) 44%),
+      /* specular — small and hot; a wide soft one just fogs the hues */
+      radial-gradient(circle at 31% 25%,
+        rgba(255, 255, 255, 1) 0 5%,
+        rgba(255, 255, 255, 0.55) 11%,
+        rgba(255, 255, 255, 0) 24%),
+      /* rim-light on the SHADOW side: the second light cue, and the one that
+         makes this read as lit rather than merely darkened at the bottom */
+      radial-gradient(circle at 72% 76%,
+        rgba(255, 255, 255, 0.30) 0 6%,
+        rgba(255, 255, 255, 0) 22%),
+      /* body shading. The white here is deliberately weak (0.08): at 0.28 it
+         washed the hue ring to pastel and the thing stopped looking like a
+         colour picker at all. Depth comes from the dark terminator instead. */
+      radial-gradient(circle at 36% 31%,
+        rgba(255, 255, 255, 0.08) 0 20%,
+        rgba(0, 0, 0, 0) 46%,
+        rgba(0, 0, 0, 0.48) 84%,
+        rgba(0, 0, 0, 0.72) 100%),
       radial-gradient(circle at 50% 50%,
-        var(--hueFace, #ff2d96) 0 33%,
-        rgba(5, 2, 9, 0.55) 33% 38%,
-        transparent 38.5%),
+        var(--hueFace, #ff2d96) 0 36%,
+        rgba(255, 255, 255, 0) 50%),
       conic-gradient(from 90deg,
         #ff2d55, #ff7a00, #ffcc00, #46d33a, #00c7be,
         #1f9dff, #4b4bff, #a24bff, #ff3ba7, #ff2d55);
     box-shadow:
-      inset 0 2px 2px rgba(255, 255, 255, 0.5),
-      inset 0 -3px 5px rgba(0, 0, 0, 0.38),
-      0 0 0 3px rgba(5, 2, 9, 0.85),
-      0 4px 0 rgba(5, 2, 9, 0.55),
-      0 8px 14px rgba(0, 0, 0, 0.45); }
-  /* The hex of what you are looking at — a colour explorer you cannot read a
-     value out of is only half a tool. */
-  html.poplur-colorlab .hueHex {
-    position: absolute; top: calc(clamp(12px, 3cqw, 20px) + 34px); right: clamp(12px, 3cqw, 20px);
-    z-index: 60; font: 700 10px/1 ui-monospace, "SF Mono", Menlo, monospace;
-    color: rgba(255, 255, 255, 0.92); letter-spacing: 0.04em; text-align: right;
-    text-shadow: 0 1px 3px rgba(90, 0, 40, 0.75); pointer-events: none; }
+      inset 0 3px 4px rgba(255, 255, 255, 0.4),
+      inset 0 -5px 7px rgba(0, 0, 0, 0.5),
+      0 2px 3px rgba(0, 0, 0, 0.34),
+      0 7px 12px rgba(0, 0, 0, 0.46); }
   .cf {
     position: absolute; left: 0; top: 0; width: 13px; height: 13px; border-radius: 3px;
     opacity: 0.85; will-change: transform, opacity;
@@ -586,7 +603,6 @@
   <button class="hueBtn" id="hueBtn" type="button" aria-label="Randomise background colour">
     <span class="hueWheel" id="hueWheel" aria-hidden="true"></span>
   </button>
-  <div class="hueHex" id="hueHex" aria-hidden="true"></div>
   <button class="muteBtn" id="muteBtn" type="button" aria-label="Mute sound" aria-pressed="false">
     <svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true">
       <path d="M6 12h4l6-5v18l-6-5H6z" fill="#fff2f8" stroke="rgba(120,4,60,.55)" stroke-width="1.3" stroke-linejoin="round"/>
@@ -1852,10 +1868,11 @@ if (POPLUR_WEBGL_OK) document.querySelectorAll("canvas[data-account-model]").for
       // takeover picker shows the colour it is currently painting with.
       var wheel = document.getElementById('hueWheel')
       if (wheel) wheel.style.setProperty('--hueFace', hex)
+      // No on-screen label: the hex lives on the button's title, in
+      // window.__poplurHue and in the console line below, so the value is
+      // still recoverable without printing chrome over the design.
       var swatch = document.getElementById('hueBtn')
       if (swatch) swatch.setAttribute('title', hex)
-      var out = document.getElementById('hueHex')
-      if (out) out.textContent = hex
       window.__poplurHue = hex
     }
 
