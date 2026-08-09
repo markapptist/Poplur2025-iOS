@@ -10,6 +10,8 @@ export interface InputState {
   /** Analog stick, -1..1. Keyboard leaves these at 0 and uses the booleans. */
   axisFwd: number;
   axisStrafe: number;
+  axisTurn: number;
+  weaponNext: boolean;
 }
 
 const state: InputState = {
@@ -21,9 +23,14 @@ const state: InputState = {
   escape: false,
   axisFwd: 0,
   axisStrafe: 0,
+  axisTurn: 0,
+  weaponNext: false,
 };
 
 let locked = false;
+let externalInteractCommands = 0;
+let externalPauseCommands = 0;
+let externalWeaponCommands = 0;
 
 const KEY_MAP: Record<string, keyof InputState> = {
   KeyW: 'w', ArrowUp: 'w',
@@ -40,6 +47,58 @@ const KEY_MAP: Record<string, keyof InputState> = {
 };
 
 export function initInput(canvas: HTMLCanvasElement): void {
+  // Poplur wraps the FPS in a supplied 3D controller. Messages are used rather
+  // than synthetic KeyboardEvents so analog sticks stay analog and WebKit does
+  // not discard events created in the parent WebView.
+  window.addEventListener('message', event => {
+    if (window.parent !== window && event.source !== window.parent) return;
+    const message = event.data as {
+      type?: string;
+      control?: string;
+      x?: number;
+      y?: number;
+      pressed?: boolean;
+    } | null;
+    if (!message || message.type !== 'poplur-fps-control') return;
+    unlockAudio();
+    const clampAxis = (value: unknown) => Math.max(-1, Math.min(1, typeof value === 'number' ? value : 0));
+    switch (message.control) {
+      case 'move':
+        state.axisStrafe = clampAxis(message.x);
+        state.axisFwd = clampAxis(message.y);
+        break;
+      case 'look':
+        state.axisTurn = clampAxis(message.x);
+        break;
+      case 'fire':
+        state.fire = message.pressed === true;
+        break;
+      case 'interact':
+        if (message.pressed === true) externalInteractCommands++;
+        break;
+      case 'pause':
+        if (message.pressed === true) externalPauseCommands++;
+        break;
+      case 'weaponNext':
+        if (message.pressed === true) externalWeaponCommands++;
+        break;
+    }
+  });
+
+  const releaseExternalControls = () => {
+    state.axisFwd = 0;
+    state.axisStrafe = 0;
+    state.axisTurn = 0;
+    state.fire = false;
+    state.interact = false;
+    state.escape = false;
+    state.weaponNext = false;
+  };
+  window.addEventListener('blur', releaseExternalControls);
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) releaseExternalControls();
+  });
+
   window.addEventListener('keydown', e => {
     unlockAudio();
     const k = KEY_MAP[e.code];
@@ -187,6 +246,27 @@ export function consumeMouseDX(): number {
   const v = state.mouseDX;
   state.mouseDX = 0;
   return v;
+}
+
+/** Button commands are queued until a game frame consumes them. A WebView can
+    briefly suspend requestAnimationFrame while compositing or screenshotting;
+    a conventional 100ms key pulse can begin and end entirely inside that gap. */
+export function consumeInteractCommand(): boolean {
+  if (externalInteractCommands <= 0) return false;
+  externalInteractCommands--;
+  return true;
+}
+
+export function consumePauseCommand(): boolean {
+  if (externalPauseCommands <= 0) return false;
+  externalPauseCommands--;
+  return true;
+}
+
+export function consumeWeaponNextCommand(): boolean {
+  if (externalWeaponCommands <= 0) return false;
+  externalWeaponCommands--;
+  return true;
 }
 
 export function isPointerLocked(): boolean { return locked; }

@@ -5,6 +5,11 @@ import { Game } from './game/Game.ts';
 import { renderLoadingScreen } from './render/Menu.ts';
 
 const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
+const externalController = new URLSearchParams(window.location.search).get('externalController') === '1';
+
+function notifyParent(message: Record<string, unknown>): void {
+  if (window.parent !== window) window.parent.postMessage(message, '*');
+}
 
 // TRUE fullscreen: the buffer is cut to the viewport's shape, so there is
 // nothing left over to letterbox. The old version aspect-fitted a fixed 16:9
@@ -39,18 +44,21 @@ initInput(canvas);
 // Initial loading screen while assets load
 renderLoadingScreen(ctx, 0);
 
-const game = new Game(ctx);
+const game = new Game(ctx, externalController);
 
 loadAssets(pct => {
   game.loadProgress = pct;
   renderLoadingScreen(ctx, pct);
 }).then(assets => {
   game.init(assets);
+  notifyParent({ type: 'poplur-fps-ready' });
+  notifyParent({ type: 'poplur-fps-state', state: game.state });
   startLoop();
 });
 
 let lastTime = performance.now();
 let loopRunning = false;
+let reportedState = game.state;
 
 function tick(now: number): void {
   const dt = Math.min((now - lastTime) / 1000, 0.05);
@@ -59,7 +67,11 @@ function tick(now: number): void {
   try {
     game.update(dt);
     game.render();
-    showMobileControls(game.state === 'playing');
+    showMobileControls(game.state === 'playing' && !externalController);
+    if (reportedState !== game.state) {
+      reportedState = game.state;
+      notifyParent({ type: 'poplur-fps-state', state: game.state });
+    }
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.stack ?? e.message : String(e);
     console.error('GAME_LOOP_ERROR', msg);

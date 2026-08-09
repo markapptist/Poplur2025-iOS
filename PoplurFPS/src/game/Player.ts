@@ -1,7 +1,7 @@
 import { MOVE_SPEED, ROT_SPEED, MOUSE_SENS, PLANE_LEN, PLAYER_R, INTERACT_D, WEAPONS } from './constants.ts';
 import type { Level } from './Level.ts';
 import type { InputState } from '../input.ts';
-import { consumeMouseDX } from '../input.ts';
+import { consumeMouseDX, consumeWeaponNextCommand } from '../input.ts';
 
 export class Player {
   // Begin at the first arcade door rather than at the back of an empty hall.
@@ -27,6 +27,7 @@ export class Player {
 
   fireCooldown = 0;
   interactCooldown = 0;
+  private weaponNextPressed = false;
 
   dead = false;
   deadTimer = 0;
@@ -47,6 +48,10 @@ export class Player {
       const turn = (input.right ? 1 : -1) * ROT_SPEED * dt;
       this.rotate(turn);
     }
+
+    // The right stick on the supplied PoplurStation controller is a held axis,
+    // unlike mouse movement (a one-frame delta), so rotation must include dt.
+    if (input.axisTurn !== 0) this.rotate(input.axisTurn * ROT_SPEED * dt);
 
     // Rotation — mouse
     const mdx = consumeMouseDX();
@@ -101,6 +106,16 @@ export class Player {
     if (input.weapon3) this.weapon = 2;
     if (input.weapon4) this.weapon = 3;
     if (input.weapon5) this.weapon = 4;
+    if (consumeWeaponNextCommand() || (input.weaponNext && !this.weaponNextPressed)) {
+      for (let offset = 1; offset <= WEAPONS.length; offset++) {
+        const candidate = (this.weapon + offset) % WEAPONS.length;
+        if (this.ammo[WEAPONS[candidate].ammoType] >= WEAPONS[candidate].ammoPerShot) {
+          this.weapon = candidate;
+          break;
+        }
+      }
+    }
+    this.weaponNextPressed = input.weaponNext;
 
     // Interact
     if (input.interact && this.interactCooldown <= 0) {

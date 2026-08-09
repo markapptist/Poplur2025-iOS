@@ -177,7 +177,10 @@ final class WebHomeCameraModel: ObservableObject {
         })
         var emittedLabels = Set(latestVisionBoxes.map { $0.label.lowercased() })
 
-        for (index, object) in latestClassifications.enumerated() {
+        // The web view owns the single shader readout. Publish only the best
+        // whole-frame answer; sending the classifier's runners-up made native
+        // and web layers compete with three different labels for one frame.
+        for (index, object) in latestClassifications.prefix(1).enumerated() {
             let label = object.identifier.trimmingCharacters(in: .whitespacesAndNewlines)
             guard emittedLabels.insert(label.lowercased()).inserted else { continue }
             payload.append([
@@ -485,8 +488,9 @@ struct WebHomeCameraLayer: View {
                         .allowsHitTesting(false)
                 }
             }
-            MLCameraShaderOverlay(isEnabled: true)
-                .allowsHitTesting(false)
+            // Detection text is rendered once by Camera.tsx. Mounting the
+            // native MLCameraShaderOverlay here as well produced a second
+            // shader label plus its runner-up chips over the same live frame.
         }
         .task { await model.activateCamera() }
         .onDisappear { model.deactivateCamera() }

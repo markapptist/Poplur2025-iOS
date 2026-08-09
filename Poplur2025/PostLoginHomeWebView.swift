@@ -6,6 +6,7 @@ import Photos
 import UIKit
 import FirebaseAuth
 import FirebaseFirestore
+import FirebaseStorage
 import UserNotifications
 
 enum PoplurWebCaptureStore {
@@ -673,28 +674,45 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     // shell does and answers on window.poplurProductImage.
                     PoplurProductImage.handle(urlString: target, webView: webView)
                 }
+                if type == "saveProfilePhoto", let rawPhoto = body["photo"] as? String {
+                    persistProfilePhoto(rawPhoto)
+                    return
+                }
                 if type == "requestProfile", let webView = bridge.webView {
-                    // The web ProfileTwin asks who is signed in; answer with the
-                    // Firestore user doc so it shows the real signup username
-                    // instead of the USERNAME placeholder.
+                    // Answer immediately from Auth/local disk, then refresh from
+                    // Firestore. A single network-dependent callback used to
+                    // leave USERNAME on screen whenever auth or Firestore was
+                    // briefly late during the profile tab transition.
+                    let authUser = Auth.auth().currentUser
+                    var localProfile: [String: Any] = ["business": false]
+                    if let fallbackName = Self.authUsername(authUser) {
+                        localProfile["username"] = fallbackName
+                    }
+                    if let localPhoto = Self.persistedProfilePhotoDataURI() {
+                        localProfile["photo"] = localPhoto
+                    } else if let remotePhoto = authUser?.photoURL?.absoluteString {
+                        localProfile["photo"] = remotePhoto
+                    }
+                    pushProfile(localProfile, into: webView)
+
                     Task {
-                        guard let uid = Auth.auth().currentUser?.uid,
+                        guard let uid = authUser?.uid,
                               let snapshot = try? await Firestore.firestore()
                                   .collection("users").document(uid).getDocument(),
                               let data = snapshot.data() else { return }
-                        var profile: [String: Any] = [
-                            "business": (data["accountType"] as? String) == PoplurAccountType.business.rawValue
-                        ]
+                        var profile = localProfile
+                        profile["business"] =
+                            (data["accountType"] as? String) == PoplurAccountType.business.rawValue
+
                         let username = (data["username"] as? String)?
                             .trimmingCharacters(in: .whitespacesAndNewlines)
                         if let username, !username.isEmpty { profile["username"] = username }
-                        guard let json = try? JSONSerialization.data(withJSONObject: profile),
-                              let text = String(data: json, encoding: .utf8) else { return }
-                        await MainActor.run {
-                            webView.evaluateJavaScript(
-                                "window.poplurProfile && window.poplurProfile(\(text)); true;"
-                            )
+                        if profile["photo"] == nil,
+                           let remotePhoto = data["profilePictureURL"] as? String,
+                           !remotePhoto.isEmpty {
+                            profile["photo"] = remotePhoto
                         }
+                        await MainActor.run { self.pushProfile(profile, into: webView) }
                     }
                 }
                 if let onWebEvent {
@@ -750,6 +768,70 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                 return topViewController(from: selected)
             }
             return controller
+        }
+
+        private static func profilePhotoFileURL() -> URL {
+            FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("profile.jpg")
+        }
+
+        private static func persistedProfilePhotoDataURI() -> String? {
+            guard let data = try? Data(contentsOf: profilePhotoFileURL()), !data.isEmpty else { return nil }
+            return "data:image/jpeg;base64,\(data.base64EncodedString())"
+        }
+
+        private static func authUsername(_ user: FirebaseAuth.User?) -> String? {
+            if let displayName = user?.displayName?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !displayName.isEmpty {
+                return displayName
+            }
+            if let emailName = user?.email?.components(separatedBy: "@").first?
+                .trimmingCharacters(in: .whitespacesAndNewlines), !emailName.isEmpty {
+                return emailName
+            }
+            return nil
+        }
+
+        private func pushProfile(_ profile: [String: Any], into webView: WKWebView) {
+            guard let json = try? JSONSerialization.data(withJSONObject: profile),
+                  let text = String(data: json, encoding: .utf8) else { return }
+            webView.evaluateJavaScript(
+                "window.poplurProfile && window.poplurProfile(\(text)); " +
+                "window.dispatchEvent(new CustomEvent('poplur-native-profile', {detail: \(text)})); true;"
+            )
+        }
+
+        private func persistProfilePhoto(_ dataURI: String) {
+            guard let comma = dataURI.firstIndex(of: ","),
+                  dataURI[..<comma].lowercased().contains("image/jpeg"),
+                  let data = Data(base64Encoded: String(dataURI[dataURI.index(after: comma)...])),
+                  !data.isEmpty, data.count <= 2_000_000,
+                  UIImage(data: data) != nil else {
+                print("[PostLoginHomeWebView] rejected invalid profile photo")
+                return
+            }
+            do {
+                try data.write(to: Self.profilePhotoFileURL(), options: .atomic)
+                NotificationCenter.default.post(name: Notification.Name("ProfilePhotoUpdated"), object: UIImage(data: data))
+            } catch {
+                print("[PostLoginHomeWebView] failed to persist profile photo: \(error.localizedDescription)")
+                return
+            }
+
+            guard let uid = Auth.auth().currentUser?.uid else { return }
+            Task {
+                do {
+                    let reference = Storage.storage().reference().child("profile_pictures/\(uid).jpg")
+                    _ = try await reference.putDataAsync(data)
+                    let downloadURL = try await reference.downloadURL()
+                    try await Firestore.firestore().collection("users").document(uid).setData(
+                        ["profilePictureURL": downloadURL.absoluteString],
+                        merge: true
+                    )
+                } catch {
+                    print("[PostLoginHomeWebView] profile photo cloud sync failed: \(error.localizedDescription)")
+                }
+            }
         }
 
         private func signalHomeReady() {

@@ -6,7 +6,7 @@ import { Pickup, isEnemy, isPickup, isProp, spriteAssetKey } from './Pickups.ts'
 import { renderScene, renderWeapon, type RenderSprite } from '../render/Raycaster.ts';
 import { renderHUD, renderDeathScreen, renderPauseScreen, renderWinScreen } from '../render/HUD.ts';
 import { renderMenuCabinet, renderLoadingScreen, type MenuSelection } from '../render/Menu.ts';
-import { getInput } from '../input.ts';
+import { consumeInteractCommand, consumePauseCommand, getInput } from '../input.ts';
 import { Audio } from '../audio.ts';
 import type { Assets } from '../assets.ts';
 
@@ -41,8 +41,15 @@ export class Game {
 
   private muzzleFlash = 0;
   private torchPhase  = 0;
+  private hitMarker = 0;
+  private eliminationBanner = 0;
+  private missionBanner = 0;
+  private emptyWeaponBanner = 0;
+  private readonly totalEnemies: number;
 
-  constructor(public ctx: CanvasRenderingContext2D) {}
+  constructor(public ctx: CanvasRenderingContext2D, private externalController = false) {
+    this.totalEnemies = ENTITY_SPAWNS.filter(spawn => isEnemy(spawn.type)).length;
+  }
 
   init(assets: Assets): void {
     this.assets = assets;
@@ -70,15 +77,19 @@ export class Game {
     this.level = new Level();
     this.player = new Player();
     this.score = 0; this.kills = 0; this.gameTime = 0;
+    this.hitMarker = 0;
+    this.eliminationBanner = 0;
+    this.missionBanner = 3.6;
+    this.emptyWeaponBanner = 0;
     this.spawnEntities();
   }
 
   update(dt: number): void {
-    const input = getInput();
+    const rawInput = getInput();
+    const input = consumeInteractCommand() ? { ...rawInput, interact: true } : rawInput;
+    const pauseCommand = consumePauseCommand();
 
     const escNow   = input.escape;
-    const enterNow = input.weapon1 ? false : false; // capture enter separately
-
     switch (this.state) {
       case 'loading':
         break;
@@ -115,11 +126,15 @@ export class Game {
         this.gameTime += dt;
         this.muzzleFlash = Math.max(0, this.muzzleFlash - dt * 12);
         this.torchPhase += dt * 3;
+        this.hitMarker = Math.max(0, this.hitMarker - dt * 7);
+        this.eliminationBanner = Math.max(0, this.eliminationBanner - dt);
+        this.missionBanner = Math.max(0, this.missionBanner - dt);
+        this.emptyWeaponBanner = Math.max(0, this.emptyWeaponBanner - dt);
 
         // Pause
-        if (input.escape && !this.escPressed) {
+        if (pauseCommand || (input.escape && !this.escPressed)) {
           this.state = 'paused';
-          this.escPressed = true;
+          this.escPressed = input.escape;
           break;
         }
         this.escPressed = input.escape;
@@ -131,6 +146,8 @@ export class Game {
         // Shoot
         if (input.fire && this.player.canFire()) {
           this.doShoot();
+        } else if (input.fire && this.player.ammo[WEAPONS[this.player.weapon].ammoType] <= 0) {
+          this.emptyWeaponBanner = 0.9;
         }
 
         // Enemy updates
@@ -169,7 +186,7 @@ export class Game {
       }
 
       case 'paused':
-        if (input.escape && !this.escPressed) {
+        if (pauseCommand || (input.escape && !this.escPressed)) {
           this.state = 'playing';
         }
         this.escPressed = input.escape;
@@ -178,10 +195,7 @@ export class Game {
       case 'dead':
         if (this.player.deadTimer > 2.0 && input.interact) {
           this.state = 'playing';
-          this.player.dead = false;
-          this.player.health = 50;
-          this.player.deadTimer = 0;
-          this.player.flashAlpha = 0;
+          this.resetGame();
         }
         break;
 
@@ -241,12 +255,14 @@ export class Game {
       if (hitEnemy) {
         const totalDmg = w.damage + (Math.random() * w.damage * 0.4 - w.damage * 0.2) | 0;
         hitEnemy.hit(totalDmg);
+        this.hitMarker = 1;
         Audio.hit();
         if (hitEnemy.dead) {
           Audio.enemyDie();
           this.kills++;
           this.score += hitEnemy.def.score;
           this.player.score = this.score;
+          this.eliminationBanner = 1.15;
         }
       }
     }
@@ -316,7 +332,20 @@ export class Game {
         renderWeapon(ctx, this.player, this.assets.weapons[wKey] ?? null, this.player.weapon === 0 ? 9 : 1);
 
         // HUD
-        renderHUD(ctx, this.player, this.assets, this.level, this.score, this.kills, this.gameTime);
+        const boss = this.enemies.find(enemy => enemy.type === SPR_BOSS);
+        renderHUD(ctx, this.player, this.assets, this.level, this.score, this.kills, this.gameTime, {
+          objective: this.objectiveText(),
+          remainingEnemies: this.enemies.filter(enemy => !enemy.dead).length,
+          totalEnemies: this.totalEnemies,
+          hitMarker: this.hitMarker,
+          eliminationBanner: this.eliminationBanner,
+          missionBanner: this.missionBanner,
+          emptyWeaponBanner: this.emptyWeaponBanner,
+          externalController: this.externalController,
+          bossHealth: boss && !boss.dead && this.player.y > 13
+            ? { current: boss.hp, max: boss.maxHp }
+            : null,
+        });
 
         if (this.state === 'paused') renderPauseScreen(ctx);
         if (this.state === 'dead')   renderDeathScreen(ctx, Math.min(1, this.player.deadTimer / 1.5));
@@ -324,6 +353,15 @@ export class Game {
         break;
       }
     }
+  }
+
+  private objectiveText(): string {
+    const boss = this.enemies.find(enemy => enemy.type === SPR_BOSS);
+    if (this.player.x < 8 && this.player.y < 6) return 'BREACH THE FIRST DOOR';
+    if (!this.player.hasKey['gold']) return 'FIND THE GOLD KEY';
+    if (this.player.y < 14) return 'UNLOCK THE LOWER SECTOR';
+    if (boss && !boss.dead) return 'DEFEAT THE ARCADE OVERLORD';
+    return 'MISSION COMPLETE';
   }
 }
 

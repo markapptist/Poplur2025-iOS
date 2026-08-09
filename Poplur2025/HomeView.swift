@@ -3970,8 +3970,8 @@ struct MLCameraShaderOverlay: View {
                 return
             }
             guard let objects = note.userInfo?["objects"] as? [DetectedObject] else { return }
-            detectedObjects = objects
-            let key = objects.prefix(3).map(\.identifier).joined(separator: ",")
+            detectedObjects = Array(objects.prefix(1))
+            let key = objects.first?.identifier ?? ""
             if key != lastDetectionKey, !objects.isEmpty {
                 let now = Date()
                 if now.timeIntervalSince(lastPopTime) >= popCooldown {
@@ -3998,13 +3998,6 @@ struct MLCameraShaderOverlay: View {
         VStack(spacing: 8) {
             if let primary = detectedObjects.first {
                 MLShaderLabel(text: primary.identifier.uppercased())
-            }
-            if detectedObjects.count > 1 {
-                HStack(spacing: 7) {
-                    ForEach(Array(detectedObjects.dropFirst().prefix(3).enumerated()), id: \.offset) { idx, obj in
-                        MLFloat3DChip(text: obj.identifier.capitalized, delay: Double(idx) * 0.2)
-                    }
-                }
             }
         }
         // The web Poplur wordmark owns the top line. June's detector sat at 54,

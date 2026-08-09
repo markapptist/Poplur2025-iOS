@@ -64,7 +64,7 @@ final class CameraAIAnnouncer: NSObject, AVSpeechSynthesizerDelegate {
                 else { return }
                 partial.append(label)
             }
-            .prefix(2)
+            .prefix(1)
 
         announceMLLabels(Array(labels))
     }

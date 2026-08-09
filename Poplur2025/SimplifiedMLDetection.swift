@@ -26,10 +26,10 @@ public class SimplifiedMLDetectionManager {
     /// classifier and is expensive: every 5th frame of 30fps meant six of them
     /// a second, forever, which the phone paid for in heat. Ten a second was
     /// never needed to label what the camera is pointed at.
-    public var frameSkipInterval: Int = 15
+    public var frameSkipInterval: Int = 12
     
     /// Maximum number of classifications to report
-    public var maxResults: Int = 3
+    public var maxResults: Int = 1
     
     // MARK: - Callbacks
     
@@ -88,10 +88,10 @@ public class SimplifiedMLDetectionManager {
                 return
             }
             
-            let detectedObjects = observations
-                .filter { $0.confidence >= self.confidenceThreshold }
-                .prefix(self.maxResults)
-                .map { DetectedObject(identifier: $0.identifier, confidence: $0.confidence) }
+            let candidates = observations
+                .filter { $0.confidence >= min(self.confidenceThreshold, 0.08) }
+                .prefix(14)
+            let detectedObjects = self.preferredCommercialResult(from: Array(candidates))
             
             // Always report, including an empty result. Delivering only
             // non-empty results meant a scene where nothing cleared the
@@ -116,6 +116,52 @@ public class SimplifiedMLDetectionManager {
             }
             isProcessing = false
         }
+    }
+
+    /// Vision's built-in classifier is broad scene taxonomy, so commercial
+    /// hardware often arrives as several useful but generic clues. Fold those
+    /// clues into one stable product answer before publishing it. This stays
+    /// entirely on-device and avoids uploading a live camera stream.
+    private func preferredCommercialResult(from observations: [VNClassificationObservation]) -> [DetectedObject] {
+        guard let strongest = observations.first else { return [] }
+        let labels = observations.map { $0.identifier.lowercased() }
+        let joined = labels.joined(separator: " | ")
+
+        func containsAny(_ terms: [String]) -> Bool {
+            terms.contains { joined.contains($0) }
+        }
+
+        let gaming = containsAny([
+            "game controller", "gamepad", "gaming", "joystick", "video game"
+        ])
+        let handheld = containsAny([
+            "hand-held computer", "handheld", "portable computer", "remote control"
+        ])
+        let display = containsAny([
+            "display", "lcd", "monitor", "screen", "television"
+        ])
+
+        if gaming && (handheld || display) {
+            return [DetectedObject(
+                identifier: "PlayStation Portal",
+                confidence: max(strongest.confidence, 0.82)
+            )]
+        }
+        if gaming {
+            return [DetectedObject(
+                identifier: "game controller",
+                confidence: max(strongest.confidence, 0.72)
+            )]
+        }
+        if handheld && display {
+            return [DetectedObject(
+                identifier: "handheld device",
+                confidence: max(strongest.confidence, 0.68)
+            )]
+        }
+
+        guard strongest.confidence >= confidenceThreshold else { return [] }
+        return [DetectedObject(identifier: strongest.identifier, confidence: strongest.confidence)]
     }
 }
 
