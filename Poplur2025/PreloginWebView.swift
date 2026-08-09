@@ -305,10 +305,19 @@ struct PreloginWebView: UIViewRepresentable {
         /// native pre-login player did on `.inactive`.
         @objc private func suspendWebMedia() {
             webView?.setAllMediaPlaybackSuspended(true, completionHandler: nil)
+            // That call covers HTMLMediaElement and nothing else. The pre-login AI
+            // host is NOT an <audio> tag — `speakAI` in welcome.html speaks through
+            // the Web Speech API, and at 0.85 volume it is the loudest thing on the
+            // screen. Suspending media alone left it talking to a phone that had
+            // already been put away, so it is cancelled explicitly.
+            webView?.evaluateJavaScript("window.speechSynthesis && window.speechSynthesis.cancel()")
         }
 
         /// Lifts the suspension only. Elements the person muted or paused through
         /// the web UI stay muted or paused — WebKit resumes just what it silenced.
+        /// The AI greeting is deliberately NOT re-spoken: it is a one-time welcome,
+        /// and resuming it half a sentence in on every app switch would be worse
+        /// than losing the tail of it.
         @objc private func resumeWebMedia() {
             webView?.setAllMediaPlaybackSuspended(false, completionHandler: nil)
         }
