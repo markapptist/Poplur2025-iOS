@@ -19,9 +19,33 @@ enum WebPostPublisher {
     /// The web bundle has no account, so it sends the baked media as a
     /// data: URL; everything authenticated happens on this side.
     static func handle(_ body: [String: Any]) {
-        guard let dataUrl = body["data"] as? String,
-              let payload = decodeDataURL(dataUrl) else {
-            print("[WebPostPublisher] publishPost REJECTED: media missing or undecodable")
+        let requestID = body["requestId"] as? String
+
+        /// Every failure in here must ANSWER the web composer.
+        ///
+        /// This used to `return` on each bad path without posting anything. The
+        /// composer waits for `poplur-upload-result` and has no other way to
+        /// learn what happened, so a post that failed to decode looked exactly
+        /// like one still in flight: "Uploading…" frozen for the full 90s
+        /// timeout, then a generic message, with the real reason visible only
+        /// to whoever happened to be reading the device console. A silent
+        /// failure path on the far side of a bridge is indistinguishable from a
+        /// hang — so there are no bare returns below.
+        func fail(_ message: String) {
+            print("[WebPostPublisher] publishPost FAILED: \(message) requestId=\(requestID ?? "-")")
+            var info: [String: Any] = ["message": message]
+            if let requestID { info["requestId"] = requestID }
+            NotificationCenter.default.post(
+                name: Notification.Name("PostUploadFailed"), object: nil, userInfo: info
+            )
+        }
+
+        guard let dataUrl = body["data"] as? String else {
+            fail("The capture never reached the app.")
+            return
+        }
+        guard let payload = decodeDataURL(dataUrl) else {
+            fail("That capture could not be decoded for upload.")
             return
         }
         let kind = body["kind"] as? String ?? "photo"
@@ -40,10 +64,18 @@ enum WebPostPublisher {
             // A recording has to become a file URL for the uploader.
             let url = FileManager.default.temporaryDirectory
                 .appendingPathComponent("poplur-post-\(UUID().uuidString).mp4")
-            guard (try? payload.write(to: url)) != nil else { return }
+            do {
+                try payload.write(to: url)
+            } catch {
+                fail("The recording could not be staged for upload: \(error.localizedDescription)")
+                return
+            }
             userInfo["videoURL"] = url
         } else {
-            guard let image = UIImage(data: payload) else { return }
+            guard let image = UIImage(data: payload) else {
+                fail("That photo could not be read for upload.")
+                return
+            }
             userInfo["image"] = image
         }
 
@@ -69,6 +101,11 @@ enum WebPostPublisher {
             NotificationCenter.default.post(
                 name: Notification.Name("UploadVideoToCurrentCoordinate"), object: videoURL
             )
+        } else {
+            // Unreachable given the guards above, and it stays answered anyway:
+            // the one thing this function must never do is end without either
+            // dispatching an upload or reporting why it didn't.
+            fail("The post had no media to upload.")
         }
     }
 
