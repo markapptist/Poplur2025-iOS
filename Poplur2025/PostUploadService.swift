@@ -128,7 +128,7 @@ final class PostUploadService {
     // MARK: - Upload
 
     private func upload(image: UIImage, at coordinate: CLLocationCoordinate2D, radiusMeters: Int, caption: String?, requestID: String?) async {
-        guard let data = image.jpegData(compressionQuality: 0.9) else {
+        guard let data = image.poplur4KJPEGData() else {
             Self.report(success: false, message: "That photo could not be prepared.", requestID: requestID)
             return
         }

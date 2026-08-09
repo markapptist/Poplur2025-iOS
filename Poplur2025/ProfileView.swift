@@ -2470,7 +2470,7 @@ struct ProfileView: View {
     @discardableResult
     private func saveProfileImage(_ image: UIImage) throws -> URL {
         let url = profileImageFileURL()
-        guard let data = image.jpegData(compressionQuality: 0.9) else {
+        guard let data = image.poplur4KJPEGData() else {
             throw NSError(domain: "ProfileImage", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to get JPEG data"]) }
         try data.write(to: url, options: .atomic)
         return url
@@ -2562,7 +2562,7 @@ struct ProfileView: View {
         let url = faceRecognitionImageURL()
         
         // Save full resolution image for better ML accuracy
-        guard let data = image.jpegData(compressionQuality: 0.95) else {
+        guard let data = image.poplur4KJPEGData() else {
             print("❌ Failed to convert face image to JPEG data")
             return
         }

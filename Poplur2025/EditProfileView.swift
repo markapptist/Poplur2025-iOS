@@ -314,7 +314,7 @@ struct EditProfileView: View {
         let storageRef = Storage.storage().reference()
         let profilePicRef = storageRef.child("profile_pictures/\(UUID().uuidString).jpg")
 
-        if let imageData = image.jpegData(compressionQuality: 0.75) {
+        if let imageData = image.poplur4KJPEGData() {
             profilePicRef.putData(imageData, metadata: nil) { metadata, error in
                 if let error = error {
                     print("Error uploading profile picture: \(error.localizedDescription)")

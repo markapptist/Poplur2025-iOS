@@ -272,6 +272,45 @@ struct PreloginWebView: UIViewRepresentable {
         init(auth: AuthViewModel, onComplete: @escaping () -> Void) {
             self.auth = auth
             self.onComplete = onComplete
+            super.init()
+            observeAppLifecycle()
+        }
+
+        // MARK: - Background audio
+
+        /// Minimizing the app must silence the pre-login radio, and it did not.
+        ///
+        /// The radio bed plays from an `<audio>` element INSIDE this WebView, and
+        /// nothing native reached it: `Poplur2025App`'s scenePhase handler stops
+        /// `PreLoginMusicPlayer` (already inert behind `usePreloginWebEmbed`) and
+        /// posts `.StopMapAudio`, whose only observer is native `MapView`. With
+        /// `UIBackgroundModes = [audio]` declared in Info.plist, WebKit was free to
+        /// keep the bed playing after the app went away.
+        ///
+        /// Post-login does not have this bug because the clay map pauses itself on
+        /// `visibilitychange`/`pagehide`. The pre-login pages carry no such handler
+        /// and are GENERATED from the protected Good Copy sources by
+        /// `scripts/build-prelogin-ios.mjs`, so the pause is owned here instead of
+        /// being patched into the bundle.
+        private func observeAppLifecycle() {
+            let center = NotificationCenter.default
+            center.addObserver(self, selector: #selector(suspendWebMedia),
+                               name: UIApplication.willResignActiveNotification, object: nil)
+            center.addObserver(self, selector: #selector(resumeWebMedia),
+                               name: UIApplication.didBecomeActiveNotification, object: nil)
+        }
+
+        /// `willResignActive` rather than `didEnterBackground` so the app switcher,
+        /// Control Center and incoming calls go quiet too — matching what the
+        /// native pre-login player did on `.inactive`.
+        @objc private func suspendWebMedia() {
+            webView?.setAllMediaPlaybackSuspended(true, completionHandler: nil)
+        }
+
+        /// Lifts the suspension only. Elements the person muted or paused through
+        /// the web UI stay muted or paused — WebKit resumes just what it silenced.
+        @objc private func resumeWebMedia() {
+            webView?.setAllMediaPlaybackSuspended(false, completionHandler: nil)
         }
 
         // BUG-1 fix: keep the fixed full-screen pre-login pinned. Any attempt by

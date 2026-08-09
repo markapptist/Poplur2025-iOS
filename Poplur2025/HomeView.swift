@@ -4030,7 +4030,8 @@ private struct MLShaderLabel: View {
                 .foregroundStyle(Color.white.opacity(0.4))
                 .poplurTextShader(intensity: 0.75)
                 .blur(radius: 5)
-            // Animated shimmer gradient
+            // Blue shader text with a hard navy outline, matching the web
+            // camera label and staying legible over bright commercial items.
             Text(text)
                 .font(.system(size: 19, weight: .black, design: .monospaced))
                 .tracking(3)
@@ -4038,9 +4039,10 @@ private struct MLShaderLabel: View {
                     LinearGradient(
                         colors: [
                             .white,
-                            Color.cyan.opacity(0.9),
-                            Color.white.opacity(0.55 + sin(glowPhase) * 0.45),
-                            Color.cyan,
+                            Color(red: 0.38, green: 0.77, blue: 1.0),
+                            Color(red: 0.10, green: 0.49, blue: 1.0)
+                                .opacity(0.62 + sin(glowPhase) * 0.28),
+                            Color(red: 0.48, green: 0.9, blue: 1.0),
                             .white
                         ],
                         startPoint: .leading,
@@ -4048,8 +4050,12 @@ private struct MLShaderLabel: View {
                     )
                 )
                 .poplurTextShader(intensity: 1.15)
+                .shadow(color: Color(red: 0.01, green: 0.05, blue: 0.18), radius: 0, x: 1.5, y: 0)
+                .shadow(color: Color(red: 0.01, green: 0.05, blue: 0.18), radius: 0, x: -1.5, y: 0)
+                .shadow(color: Color(red: 0.01, green: 0.05, blue: 0.18), radius: 0, x: 0, y: 1.5)
+                .shadow(color: Color(red: 0.01, green: 0.05, blue: 0.18), radius: 0, x: 0, y: -1.5)
         }
-        .shadow(color: .cyan.opacity(0.75), radius: 10)
+        .shadow(color: Color(red: 0.18, green: 0.62, blue: 1.0).opacity(0.78), radius: 10)
         .shadow(color: .white.opacity(0.35), radius: 4)
         .onAppear {
             withAnimation(.linear(duration: 1.8).repeatForever(autoreverses: true)) {

@@ -258,7 +258,7 @@ struct MediaPickerView: View {
 
         if let image = selectedImage {
             // Create preview and upload-sized JPEG off-main
-            let targetUploadMaxDimension: CGFloat = 1600   // good balance quality/size
+            let targetUploadMaxDimension: CGFloat = 4096   // retain 4K camera-roll detail
             let previewMaxDimension: CGFloat = 600         // light for UI
 
             let (preview, uploadData) = await withCheckedContinuation { (continuation: CheckedContinuation<(UIImage?, Data?), Never>) in
@@ -273,7 +273,7 @@ struct MediaPickerView: View {
                         return
                     }
                     let uploadImage = image.resized(maxDimension: targetUploadMaxDimension)
-                    let data = uploadImage?.jpegData(compressionQuality: 0.75)
+                    let data = uploadImage?.poplur4KJPEGData()
                     continuation.resume(returning: (preview, data))
                 }
             }
