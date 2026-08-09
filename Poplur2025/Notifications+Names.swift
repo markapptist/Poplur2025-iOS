@@ -16,6 +16,11 @@ extension Notification.Name {
     static let ResetTabToTop = Notification.Name("ResetTabToTop")
     static let RecordTabBecameActive = Notification.Name("RecordTabBecameActive")
     static let StopMapAudio = Notification.Name("StopMapAudio")
+
+    /// Web Settings asking the shell to end the session. The WebView
+    /// coordinator has no handle on AuthViewModel, and the app owns it, so the
+    /// request travels as a notification rather than a reference.
+    static let PoplurSignOutRequested = Notification.Name("PoplurSignOutRequested")
     static let ShowUserProfile = Notification.Name("ShowUserProfile")
     
     // Cube interactions

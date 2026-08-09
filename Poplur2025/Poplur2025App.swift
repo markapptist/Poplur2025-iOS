@@ -232,6 +232,12 @@ struct Poplur2025App: App {
             .onReceive(NotificationCenter.default.publisher(for: .poplurWelcomePanelVisibilityChanged)) { note in
                 isWelcomePanelVisible = (note.object as? Bool) ?? true
             }
+            // Web Settings asked to end the session. The app owns AuthViewModel,
+            // so the sign-out happens here; the auth state listener then flips
+            // isAuthenticated and the pre-login surface comes back on its own.
+            .onReceive(NotificationCenter.default.publisher(for: .PoplurSignOutRequested)) { _ in
+                auth.signOut()
+            }
             .onChange(of: isPreLoginVisible) { _, isVisible in
                 if isVisible && !showSplash && !usePreloginWebEmbed {
                     preLoginMusic.start()

@@ -8,6 +8,7 @@ import FirebaseAuth
 import FirebaseFirestore
 import FirebaseStorage
 import UserNotifications
+import ImageIO
 
 enum PoplurWebCaptureStore {
     struct Item {
@@ -540,6 +541,19 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     print(line)
                     PoplurDiagLog.append(line)
                 }
+                // SIGN OUT. Phase 3 put this web surface in front of native
+                // Home, which left AppSettingsView — and with it the only
+                // sign-out in the product — under a ProfileView that no longer
+                // mounts. A signed-in build therefore had no route back to
+                // pre-login short of deleting the app. Web Settings now asks,
+                // and the session is ended here because the shell owns it:
+                // AuthViewModel's state listener flips isAuthenticated and
+                // Poplur2025App swaps back to the pre-login surface on its own.
+                if type == "signOut" {
+                    NotificationCenter.default.post(name: .StopMapAudio, object: nil)
+                    NotificationCenter.default.post(name: .PoplurSignOutRequested, object: nil)
+                    return
+                }
                 if type == "publishPost" {
                     // The camera composer lives in THIS WebView, but the only
                     // publishPost handler was on the old native map host — so a
@@ -619,6 +633,14 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     }
                     DispatchQueue.main.async { WebCameraRollProvider.pushAuthorized(into: webView) }
                 }
+                if type == "requestProfileCameraRoll", let webView = bridge.webView {
+                    // This comes from an explicit channel-button switch inside
+                    // profile photo capture, so it is the right user gesture to
+                    // request Photos access when authorization is undecided.
+                    PoplurPermissionRouting.markHandled(.photos)
+                    DispatchQueue.main.async { WebCameraRollProvider.push(into: webView) }
+                    return
+                }
                 if type == "requestCameraRollAsset", let webView = bridge.webView {
                     guard let requestId = body["requestId"] as? String,
                           let assetId = body["assetId"] as? String else {
@@ -676,6 +698,20 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                 }
                 if type == "saveProfilePhoto", let rawPhoto = body["photo"] as? String {
                     persistProfilePhoto(rawPhoto)
+                    return
+                }
+                if type == "saveProfilePhotoAsset", let rawSource = body["src"] as? String {
+                    guard let sourceURL = URL(string: rawSource),
+                          sourceURL.scheme == PoplurClayWebMap.scheme,
+                          sourceURL.host == PoplurClayWebMap.host,
+                          sourceURL.pathComponents.contains("captures"),
+                          let item = PoplurWebCaptureStore.item(for: sourceURL.lastPathComponent),
+                          item.mimeType.lowercased().hasPrefix("image/"),
+                          let data = item.data else {
+                        print("[PostLoginHomeWebView] rejected invalid profile photo asset")
+                        return
+                    }
+                    persistProfilePhotoData(data)
                     return
                 }
                 if type == "requestProfile", let webView = bridge.webView {
@@ -777,7 +813,23 @@ struct PostLoginHomeWebView: UIViewRepresentable {
 
         private static func persistedProfilePhotoDataURI() -> String? {
             guard let data = try? Data(contentsOf: profilePhotoFileURL()), !data.isEmpty else { return nil }
-            return "data:image/jpeg;base64,\(data.base64EncodedString())"
+            let preview = profilePhotoPreviewData(from: data) ?? data
+            return "data:image/jpeg;base64,\(preview.base64EncodedString())"
+        }
+
+        private static func profilePhotoPreviewData(from data: Data) -> Data? {
+            guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+            let options: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: 1_280,
+                kCGImageSourceShouldCacheImmediately: true,
+            ]
+            guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+                return nil
+            }
+            return UIImage(cgImage: image, scale: 1, orientation: .up)
+                .jpegData(compressionQuality: 0.9)
         }
 
         private static func authUsername(_ user: FirebaseAuth.User?) -> String? {
@@ -805,9 +857,18 @@ struct PostLoginHomeWebView: UIViewRepresentable {
             guard let comma = dataURI.firstIndex(of: ","),
                   dataURI[..<comma].lowercased().contains("image/jpeg"),
                   let data = Data(base64Encoded: String(dataURI[dataURI.index(after: comma)...])),
-                  !data.isEmpty, data.count <= 2_000_000,
-                  UIImage(data: data) != nil else {
+                  !data.isEmpty else {
                 print("[PostLoginHomeWebView] rejected invalid profile photo")
+                return
+            }
+            persistProfilePhotoData(data)
+        }
+
+        private func persistProfilePhotoData(_ data: Data) {
+            guard !data.isEmpty,
+                  data.count <= 25_000_000,
+                  UIImage(data: data) != nil else {
+                print("[PostLoginHomeWebView] rejected invalid profile photo data")
                 return
             }
             do {
