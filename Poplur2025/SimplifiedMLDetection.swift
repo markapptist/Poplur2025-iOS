@@ -5,6 +5,7 @@
 
 import Foundation
 import Vision
+import CoreML
 import AVFoundation
 import UIKit
 import ObjectiveC
@@ -47,6 +48,26 @@ public class SimplifiedMLDetectionManager {
     private var frameCount: Int = 0
     private let detectionQueue = DispatchQueue(label: "com.app.ml-detection", qos: .userInitiated)
     private var isProcessing: Bool = false
+    private var portalHitStreak: Int = 0
+    private lazy var productClassifier: VNCoreMLModel? = {
+        guard let modelURL = Bundle.main.url(
+            forResource: "PoplurProductClassifier",
+            withExtension: "mlmodelc"
+        ) else {
+            print("Poplur product classifier is not bundled; using Vision fallback")
+            return nil
+        }
+
+        let configuration = MLModelConfiguration()
+        configuration.computeUnits = .all
+        do {
+            let model = try MLModel(contentsOf: modelURL, configuration: configuration)
+            return try VNCoreMLModel(for: model)
+        } catch {
+            print("Unable to load Poplur product classifier: \(error)")
+            return nil
+        }
+    }()
     
     // MARK: - Public Methods
     
@@ -72,49 +93,73 @@ public class SimplifiedMLDetectionManager {
     // MARK: - Private Methods
     
     private func performDetection(on pixelBuffer: CVPixelBuffer) {
-        let request = VNClassifyImageRequest { [weak self] request, error in
-            guard let self = self else { return }
-            
-            defer { self.isProcessing = false }
-            
-            if let error = error {
-                DispatchQueue.main.async {
-                    self.onError?(error)
-                }
-                return
-            }
-            
-            guard let observations = request.results as? [VNClassificationObservation] else {
-                return
-            }
-            
-            let candidates = observations
-                .filter { $0.confidence >= min(self.confidenceThreshold, 0.08) }
-                .prefix(14)
-            let detectedObjects = self.preferredCommercialResult(from: Array(candidates))
-            
-            // Always report, including an empty result. Delivering only
-            // non-empty results meant a scene where nothing cleared the
-            // confidence bar never produced a callback at all, so the overlay
-            // sat on its initial "Scanning..." indefinitely and read as hung.
-            // The overlay already fades itself out on an empty array.
-            DispatchQueue.main.async {
-                self.onDetection?(Array(detectedObjects))
-                if !detectedObjects.isEmpty {
-                    self.onFrameProcessed?(pixelBuffer, Array(detectedObjects))
-                }
-            }
+        defer { isProcessing = false }
+
+        if let portalResult = classifyCommercialProduct(on: pixelBuffer) {
+            publish(portalResult, for: pixelBuffer)
+            return
         }
-        
+
+        let request = VNClassifyImageRequest()
         let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .up, options: [:])
-        
         do {
             try handler.perform([request])
+            let observations = (request.results ?? [])
+                .filter { $0.confidence >= min(confidenceThreshold, 0.08) }
+                .prefix(14)
+            publish(preferredCommercialResult(from: Array(observations)), for: pixelBuffer)
         } catch {
             DispatchQueue.main.async {
                 self.onError?(error)
             }
-            isProcessing = false
+        }
+    }
+
+    /// The bundled classifier is deliberately narrow: it identifies a
+    /// PlayStation Portal and rejects visually similar commercial hardware.
+    /// A very strong first frame is immediate; borderline hits need temporal
+    /// agreement so an unrelated widescreen device cannot flash the name.
+    private func classifyCommercialProduct(on pixelBuffer: CVPixelBuffer) -> [DetectedObject]? {
+        guard let productClassifier else { return nil }
+
+        let request = VNCoreMLRequest(model: productClassifier)
+        request.imageCropAndScaleOption = .centerCrop
+        let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .up, options: [:])
+
+        do {
+            try handler.perform([request])
+        } catch {
+            print("Poplur product classification failed: \(error)")
+            portalHitStreak = 0
+            return nil
+        }
+
+        guard let observations = request.results as? [VNClassificationObservation],
+              let portal = observations.first(where: { $0.identifier == "PlayStation_Portal" }) else {
+            portalHitStreak = 0
+            return nil
+        }
+
+        if portal.confidence >= 0.90 {
+            portalHitStreak = 2
+        } else if portal.confidence >= 0.72 {
+            portalHitStreak += 1
+        } else {
+            portalHitStreak = 0
+        }
+
+        guard portalHitStreak >= 2 else { return nil }
+        return [DetectedObject(identifier: "PlayStation Portal", confidence: portal.confidence)]
+    }
+
+    private func publish(_ detectedObjects: [DetectedObject], for pixelBuffer: CVPixelBuffer) {
+        // Always report, including an empty result. The overlay uses an empty
+        // update to clear a stale label after the camera moves away.
+        DispatchQueue.main.async {
+            self.onDetection?(detectedObjects)
+            if !detectedObjects.isEmpty {
+                self.onFrameProcessed?(pixelBuffer, detectedObjects)
+            }
         }
     }
 
@@ -124,8 +169,19 @@ public class SimplifiedMLDetectionManager {
     /// entirely on-device and avoids uploading a live camera stream.
     private func preferredCommercialResult(from observations: [VNClassificationObservation]) -> [DetectedObject] {
         guard let strongest = observations.first else { return [] }
-        let labels = observations.map { $0.identifier.lowercased() }
-        let joined = labels.joined(separator: " | ")
+        // Only the LEADING labels may steer the answer.
+        //
+        // This used to search all fourteen observations — including ones kept
+        // at 0.08 confidence purely as context — so a single weak "screen" or
+        // "remote control" anywhere in the bag routed the whole frame into a
+        // gaming/handheld bucket. Point the camera at a chair in a room with a
+        // monitor in it and the answer came back "handheld device"; everything
+        // that was not gaming hardware either got mislabelled or fell through
+        // to nothing. The refinement below is genuinely useful when the frame
+        // really is a console handheld, so it stays — it just has to earn it
+        // from the top of the list rather than from the tail.
+        let leading = observations.prefix(3).map { $0.identifier.lowercased() }
+        let joined = leading.joined(separator: " | ")
 
         func containsAny(_ terms: [String]) -> Bool {
             terms.contains { joined.contains($0) }
@@ -143,8 +199,8 @@ public class SimplifiedMLDetectionManager {
 
         if gaming && (handheld || display) {
             return [DetectedObject(
-                identifier: "PlayStation Portal",
-                confidence: max(strongest.confidence, 0.82)
+                identifier: "gaming handheld",
+                confidence: max(strongest.confidence, 0.76)
             )]
         }
         if gaming {
@@ -161,7 +217,20 @@ public class SimplifiedMLDetectionManager {
         }
 
         guard strongest.confidence >= confidenceThreshold else { return [] }
-        return [DetectedObject(identifier: strongest.identifier, confidence: strongest.confidence)]
+        return [DetectedObject(
+            identifier: Self.readableLabel(strongest.identifier),
+            confidence: strongest.confidence
+        )]
+    }
+
+    /// Vision's taxonomy identifiers are machine-shaped ("coffee_mug",
+    /// "chair, seat"). The overlay and the shopping card both show this string
+    /// to a person, so hand them the plain-English head of it.
+    static func readableLabel(_ identifier: String) -> String {
+        let head = identifier.split(separator: ",").first.map(String.init) ?? identifier
+        return head
+            .replacingOccurrences(of: "_", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 
