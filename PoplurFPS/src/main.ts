@@ -24,7 +24,8 @@ function resize(): void {
   const c = canvas.getContext('2d');
   if (c) c.imageSmoothingEnabled = false;
   // Controls now sit against the real screen edge rather than a letterbox band.
-  document.documentElement.style.setProperty('--game-control-bottom', `${Math.max(18, winH * 0.055)}px`);
+  const portraitHomeChrome = winH > winW * 1.25 ? Math.max(176, winH * 0.095) : 18;
+  document.documentElement.style.setProperty('--game-control-bottom', `${portraitHomeChrome}px`);
 }
 resize();
 window.addEventListener('resize', resize);

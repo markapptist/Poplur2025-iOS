@@ -548,6 +548,17 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     // class already forwards back as poplur-upload-result.
                     WebPostPublisher.handle(body)
                 }
+                // Settings → CAMERA. Mirrored into UserDefaults because the
+                // native announcer and the capture session read them from
+                // outside the WebView, where localStorage does not exist.
+                if type == "cameraAiVoice", let on = body["enabled"] as? Bool {
+                    UserDefaults.standard.set(on ? "1" : "0", forKey: "poplur.cameraAiVoice")
+                    return
+                }
+                if type == "cameraDetectDefault", let on = body["enabled"] as? Bool {
+                    UserDefaults.standard.set(on ? "1" : "0", forKey: "poplur.cameraDetectDefault")
+                    return
+                }
                 if type == "speak", let text = body["text"] as? String {
                     PoplurWebSpeech.shared.speak(
                         text,

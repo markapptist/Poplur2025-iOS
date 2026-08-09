@@ -35,6 +35,20 @@ export function renderScene(
   ctx.fillStyle = floorGrad;
   ctx.fillRect(0, H / 2, W, H / 2);
 
+  // Perspective bands give the tall portrait view depth even before the first
+  // wall fills the frame. They are deliberately sparse and pixel-sharp.
+  ctx.fillStyle = 'rgba(255, 60, 184, 0.09)';
+  for (let band = 1; band <= 8; band += 1) {
+    const t = band / 8;
+    const offset = Math.pow(t, 2.2) * (H / 2);
+    ctx.fillRect(0, Math.floor(H / 2 + offset), W, Math.max(1, Math.floor(H / 240)));
+  }
+  ctx.fillStyle = 'rgba(96, 88, 255, 0.08)';
+  for (let band = 1; band <= 5; band += 1) {
+    const y = Math.floor((H / 2) * (band / 6));
+    ctx.fillRect(0, y, W, Math.max(1, Math.floor(H / 320)));
+  }
+
   // — Walls (DDA raycasting) —
   const zBuffer = new Float64Array(W);
   const posX = player.x, posY = player.y;

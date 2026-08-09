@@ -129,6 +129,23 @@ export function renderHUD(
   ctx.fillStyle = '#aaffdd';
   ctx.fillText(`KILLS: ${kills}`, W - 90, 15);
 
+  ctx.font = 'bold 9px monospace';
+  ctx.fillStyle = 'rgba(255,255,255,0.78)';
+  ctx.fillText('MISSION 01  //  CLEAR THE ARCADE', 8, 34);
+
+  const ahead = level.getCell(player.x + player.dirX * 1.15, player.y + player.dirY * 1.15);
+  if (ahead === 7 || ahead === 8 || ahead === 9) {
+    const prompt = ahead === 7 ? 'ACT  OPEN DOOR' : 'ACT  KEY REQUIRED';
+    ctx.font = 'bold 12px monospace';
+    const promptWidth = ctx.measureText(prompt).width + 20;
+    ctx.fillStyle = 'rgba(10,0,20,0.82)';
+    ctx.fillRect(W / 2 - promptWidth / 2, H * 0.62, promptWidth, 24);
+    ctx.strokeStyle = PINK;
+    ctx.strokeRect(W / 2 - promptWidth / 2, H * 0.62, promptWidth, 24);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(prompt, W / 2 - promptWidth / 2 + 10, H * 0.62 + 16);
+  }
+
   // — Minimap —
   renderMinimap(ctx, player, level, W, H);
 

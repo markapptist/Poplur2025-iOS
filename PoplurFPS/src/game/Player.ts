@@ -4,7 +4,10 @@ import type { InputState } from '../input.ts';
 import { consumeMouseDX } from '../input.ts';
 
 export class Player {
-  x = 2.5; y = 2.5;
+  // Begin at the first arcade door rather than at the back of an empty hall.
+  // The opening frame now gives the player a clear objective and a useful ACT
+  // button immediately, especially on a tall phone screen.
+  x = 6.45; y = 3.5;
   dirX = 1; dirY = 0;
   planeX = 0; planeY = PLANE_LEN;
 

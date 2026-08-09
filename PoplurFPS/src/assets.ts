@@ -71,8 +71,8 @@ export async function loadAssets(
     ['hud_ammo',   load('11_hud_ui/hud_ammo.png')],
     ['hud_slot',   load('11_hud_ui/hud_weapon_slot.png')],
     // menu
-    ['main_menu', load('01_title_screen/main_menu_crt.png')],
-    ['cabinet',   load('01_title_screen/cabinet.png')],
+    ['main_menu', load('01_title_screen/main_menu_screen.png')],
+    ['cabinet',   load('../reference/approved-arcade.webp')],
     // misc
     ['logo', load('13_misc/pixel_p_logo.png')],
     ['levelup_sign', load('10_decals_signs/level_up_sign.png')],

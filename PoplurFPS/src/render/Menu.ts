@@ -62,7 +62,7 @@ export function renderMenuCabinet(
   // renderer below only as a fallback for incomplete asset bundles.
   const cabinet = assets.menu.cabinet;
   if (cabinet) {
-    renderSuppliedCabinet(ctx, cabinet, t);
+    renderSuppliedCabinet(ctx, cabinet, assets.menu.main_menu, t, tickTime);
     ctx.restore();
     return;
   }
@@ -303,16 +303,24 @@ export function renderMenuCabinet(
 function renderSuppliedCabinet(
   ctx: CanvasRenderingContext2D,
   cabinet: HTMLImageElement,
-  progress: number
+  mainMenu: HTMLImageElement | null,
+  progress: number,
+  tickTime: number
 ): void {
   const W = SCREEN_W;
   const H = SCREEN_H;
   const iw = cabinet.naturalWidth;
   const ih = cabinet.naturalHeight;
 
+  const portrait = H > W * 1.2;
+  if (portrait && mainMenu) {
+    renderPortraitCabinet(ctx, cabinet, mainMenu, progress, tickTime);
+    return;
+  }
+
   // Coordinates of the CRT glass in the exact 1448x1086 cabinet artwork.
   const bezel = { x: 0.2051, y: 0.2247, w: 0.5829, h: 0.5239 };
-  const baseScale = Math.min(W / iw, H / ih);
+  const baseScale = Math.max(W / iw, H / ih);
   const baseX = (W - iw * baseScale) / 2;
   const baseY = (H - ih * baseScale) / 2;
 
@@ -326,11 +334,130 @@ function renderSuppliedCabinet(
   const x = baseX + (targetX - baseX) * ease;
   const y = baseY + (targetY - baseY) * ease;
 
-  ctx.fillStyle = '#020104';
+  const room = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, H * 0.72);
+  room.addColorStop(0, '#26002e');
+  room.addColorStop(0.58, '#0c0312');
+  room.addColorStop(1, '#020104');
+  ctx.fillStyle = room;
   ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = 'rgba(255, 37, 143, 0.16)';
+  ctx.fillRect(0, Math.max(0, y - 3), W, 3);
+  ctx.fillRect(0, Math.min(H - 3, y + ih * scale), W, 3);
   ctx.imageSmoothingEnabled = true;
   ctx.drawImage(cabinet, x, y, iw * scale, ih * scale);
   ctx.imageSmoothingEnabled = false;
+}
+
+function renderPortraitCabinet(
+  ctx: CanvasRenderingContext2D,
+  cabinet: HTMLImageElement,
+  mainMenu: HTMLImageElement,
+  progress: number,
+  tickTime: number
+): void {
+  const W = SCREEN_W;
+  const H = SCREEN_H;
+  const iw = cabinet.naturalWidth;
+  const ih = cabinet.naturalHeight;
+  const t = Math.max(0, Math.min(1, progress));
+  const ease = t * t * (3 - 2 * t);
+
+  // Continue the supplied arcade room through the full portrait viewport.
+  // The actual title art is then composed intact inside a tall cabinet, so its
+  // logo and START GAME prompt never get sacrificed to a cover crop.
+  const bgScale = Math.max(W / iw, H / ih);
+  ctx.save();
+  ctx.filter = 'blur(5px) brightness(0.42) saturate(1.25)';
+  ctx.drawImage(
+    cabinet,
+    (W - iw * bgScale) / 2,
+    (H - ih * bgScale) / 2,
+    iw * bgScale,
+    ih * bgScale
+  );
+  ctx.restore();
+
+  const shade = ctx.createLinearGradient(0, 0, 0, H);
+  shade.addColorStop(0, 'rgba(5, 0, 12, 0.18)');
+  shade.addColorStop(0.5, 'rgba(8, 0, 18, 0.38)');
+  shade.addColorStop(1, 'rgba(3, 0, 8, 0.74)');
+  ctx.fillStyle = shade;
+  ctx.fillRect(0, 0, W, H);
+
+  const shellAlpha = Math.max(0, 1 - ease * 1.35);
+  const side = Math.max(6, W * 0.022);
+  const screenX0 = side * 1.7;
+  const screenW0 = W - screenX0 * 2;
+  const screenH0 = screenW0 * (mainMenu.naturalHeight / mainMenu.naturalWidth);
+  const screenY0 = H * 0.205;
+
+  ctx.save();
+  ctx.globalAlpha = shellAlpha;
+  const shell = ctx.createLinearGradient(0, H * 0.04, W, H * 0.76);
+  shell.addColorStop(0, '#6f123e');
+  shell.addColorStop(0.22, '#f43191');
+  shell.addColorStop(0.55, '#9b1457');
+  shell.addColorStop(0.8, '#ff55ad');
+  shell.addColorStop(1, '#54102f');
+  ctx.fillStyle = shell;
+  roundRect(ctx, side, H * 0.045, W - side * 2, H * 0.715, side * 1.4);
+  ctx.fill();
+  ctx.strokeStyle = '#ffb6dd';
+  ctx.lineWidth = Math.max(2, W * 0.009);
+  ctx.stroke();
+
+  // Reuse the approved marquee and control deck as real cabinet material.
+  ctx.save();
+  roundRect(ctx, side * 1.55, H * 0.068, W - side * 3.1, H * 0.105, side);
+  ctx.clip();
+  ctx.drawImage(cabinet, 155, 0, 1138, 198, side * 1.55, H * 0.068, W - side * 3.1, H * 0.105);
+  ctx.restore();
+
+  ctx.fillStyle = '#07000d';
+  roundRect(ctx, screenX0 - side, screenY0 - side, screenW0 + side * 2, screenH0 + side * 2, side);
+  ctx.fill();
+  ctx.strokeStyle = '#ff79bd';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  const deckY = screenY0 + screenH0 + H * 0.04;
+  const deckH = H * 0.145;
+  ctx.save();
+  roundRect(ctx, side * 1.2, deckY, W - side * 2.4, deckH, side);
+  ctx.clip();
+  ctx.drawImage(cabinet, 105, 760, 1238, 312, side * 1.2, deckY, W - side * 2.4, deckH);
+  ctx.restore();
+
+  ctx.textAlign = 'center';
+  ctx.font = `bold ${Math.max(11, W * 0.045)}px monospace`;
+  ctx.fillStyle = Math.floor(tickTime * 2) % 2 === 0 ? '#fff2a8' : '#ff62b4';
+  ctx.shadowColor = '#ff2f99';
+  ctx.shadowBlur = 10;
+  ctx.fillText('TAP TO START', W / 2, H * 0.705);
+  ctx.shadowBlur = 0;
+  ctx.font = `bold ${Math.max(7, W * 0.025)}px monospace`;
+  ctx.fillStyle = 'rgba(255,255,255,0.72)';
+  ctx.fillText('POPLUR STRIKE // MISSION 01', W / 2, H * 0.737);
+  ctx.textAlign = 'left';
+  ctx.restore();
+
+  // Starting the game zooms through the CRT instead of cutting to black.
+  const sx = screenX0 * (1 - ease);
+  const sy = screenY0 * (1 - ease);
+  const sw = screenW0 + (W - screenW0) * ease;
+  const sh = screenH0 + (H - screenH0) * ease;
+  ctx.save();
+  if (ease < 0.98) {
+    roundRect(ctx, sx, sy, sw, sh, side * (1 - ease));
+    ctx.clip();
+  }
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(mainMenu, sx, sy, sw, sh);
+  if (ease < 0.2 && Math.floor(tickTime * 3) % 2 === 0) {
+    ctx.fillStyle = 'rgba(255,255,255,0.05)';
+    ctx.fillRect(sx, sy + sh * 0.54, sw, sh * 0.18);
+  }
+  ctx.restore();
 }
 
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {

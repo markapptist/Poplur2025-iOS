@@ -1,5 +1,6 @@
 import SwiftUI
 import AVFoundation
+import UIKit
 
 // MARK: - Web-home native camera (Phase 3.5 — first real tab bridge)
 //
@@ -21,14 +22,25 @@ import AVFoundation
 final class WebHomeCameraModel: ObservableObject {
     /// Front-most web tab (map | feed | post | profile | holdmenu).
     @Published var activeTab: String = "map"
+    /// The camera tab contains several full-screen pages. Only the actual live
+    /// viewfinder may own capture, Vision processing, or ML speech.
+    @Published private(set) var liveCameraVisible = false
     /// The real Poplur AI chat, asked for by the web hold menu's CREATE tile.
     @Published var presentsCreator = false
     @Published private(set) var recognitionManager: UserRecognitionManager?
 
     private var controllerStorage: CameraKitController?
+    private var webReportsLiveCamera = false
     private var latestVisionBoxes: [VisionBoxDetector.Box] = []
     private var latestClassifications: [DetectedObject] = []
-    var isCameraTab: Bool { activeTab == "post" }
+    var isCameraTab: Bool { activeTab == "post" && liveCameraVisible }
+
+    init() {
+        // The approved Home starts on Map/Feed, not on a live lens. Close the
+        // singleton announcer immediately so a late result from another camera
+        // session cannot speak over this surface.
+        CameraAIAnnouncer.shared.setLiveCameraActive(false)
+    }
 
     private static let peopleClassificationTerms: Set<String> = [
         "adult", "adults", "baby", "babies", "body", "boy", "boys",
@@ -87,16 +99,23 @@ final class WebHomeCameraModel: ObservableObject {
     /// them to an arbitrary Vision box would falsely claim object localisation.
     private func enableClassificationBridge(on controller: CameraKitController) {
         controller.enableMLDetection { [weak self] objects in
+            guard let self, self.isCameraTab else { return }
             NotificationCenter.default.post(
                 name: NSNotification.Name("MLObjectsDetected"),
                 object: nil,
                 userInfo: ["objects": objects]
             )
-            self?.receiveClassifications(objects)
+            self.receiveClassifications(objects)
         }
         controller.mlDetectionManager?.onFrameProcessed = { [weak self] pixelBuffer, objects in
-            CameraAIAnnouncer.shared.announceMLObjects(objects)
-            self?.recognitionManager?.processDetectedObjects(objects, from: pixelBuffer)
+            guard let self, self.isCameraTab else { return }
+            // Settings → CAMERA → "AI voice". The announcer is the only thing
+            // in the app that talks unprompted, so it needs a switch; the
+            // readout and the boxes are unaffected.
+            if UserDefaults.standard.object(forKey: "poplur.cameraAiVoice") as? String != "0" {
+                CameraAIAnnouncer.shared.announceMLObjects(objects)
+            }
+            self.recognitionManager?.processDetectedObjects(objects, from: pixelBuffer)
         }
     }
 
@@ -111,6 +130,7 @@ final class WebHomeCameraModel: ObservableObject {
     }
 
     private func receiveVisionBoxes(_ boxes: [VisionBoxDetector.Box]) {
+        guard isCameraTab else { return }
         latestVisionBoxes = boxes
         publishCombinedDetections()
     }
@@ -134,10 +154,17 @@ final class WebHomeCameraModel: ObservableObject {
             guard emittedLabels.insert(label.lowercased()).inserted else { continue }
             payload.append([
                 "id": "classification-\(index)",
+                // Whole-frame bounds, because a classification has NO location
+                // — VNClassifyImageRequest answers "what is in this picture",
+                // not "where". The `whole` flag says so explicitly, so the web
+                // draws these as the READOUT and never as a box: full-frame
+                // rectangles were rendering as label pills across the top,
+                // which is why three answers were on screen at once.
                 "x": 0.0,
                 "y": 0.0,
                 "w": 1.0,
                 "h": 1.0,
+                "whole": true,
                 "label": label,
                 "confidence": Double(object.confidence)
             ])
@@ -158,12 +185,69 @@ final class WebHomeCameraModel: ObservableObject {
         PostLoginHomeWebView.sendDetections("[]")
     }
 
+    private var phoneBootHaptics: Task<Void, Never>?
+
+    private func runPhoneBootEffects() {
+        phoneBootHaptics?.cancel()
+        phoneBootHaptics = Task { @MainActor in
+            let beats: [(UIImpactFeedbackGenerator.FeedbackStyle, UInt64, CGFloat)] = [
+                (.heavy, 80_000_000, 1), (.heavy, 130_000_000, 1),
+                (.medium, 220_000_000, 0.72), (.medium, 220_000_000, 0.72),
+                (.medium, 220_000_000, 0.72), (.light, 0, 0.5)
+            ]
+            for (style, delay, intensity) in beats {
+                guard !Task.isCancelled else { return }
+                let generator = UIImpactFeedbackGenerator(style: style)
+                generator.prepare()
+                generator.impactOccurred(intensity: intensity)
+                if delay > 0 { try? await Task.sleep(nanoseconds: delay) }
+            }
+        }
+
+        guard let device = AVCaptureDevice.default(for: .video),
+              device.hasTorch, device.isTorchAvailable else { return }
+        Task.detached(priority: .userInitiated) {
+            let pulses: [(on: UInt64, off: UInt64)] = [
+                (90_000_000, 130_000_000),
+                (70_000_000, 0)
+            ]
+            for (index, pulse) in pulses.enumerated() {
+                try? device.lockForConfiguration()
+                try? device.setTorchModeOn(level: 1)
+                device.unlockForConfiguration()
+                try? await Task.sleep(nanoseconds: pulse.on)
+                try? device.lockForConfiguration()
+                device.torchMode = .off
+                device.unlockForConfiguration()
+                if index < pulses.count - 1 { try? await Task.sleep(nanoseconds: pulse.off) }
+            }
+        }
+    }
+
     func handleWebEvent(type: String, body: [String: Any]) {
         switch type {
+        case "phoneBootEffects":
+            runPhoneBootEffects()
         case "tabChanged":
-            if let tab = body["tab"] as? String { activeTab = tab }
+            if let tab = body["tab"] as? String {
+                activeTab = tab
+                liveCameraVisible = tab == "post" && webReportsLiveCamera
+                if !liveCameraVisible {
+                    if tab != "post" { webReportsLiveCamera = false }
+                    CameraAIAnnouncer.shared.setLiveCameraActive(false)
+                }
+            }
+        case "cameraLiveVisibilityChanged":
+            webReportsLiveCamera = (body["visible"] as? Bool) == true
+            liveCameraVisible = webReportsLiveCamera && activeTab == "post"
+            if !liveCameraVisible {
+                // Do not wait for SwiftUI's removal transaction before stopping
+                // speech; Camera Roll/composer must be silent immediately.
+                CameraAIAnnouncer.shared.setLiveCameraActive(false)
+            }
         case "requestCameraPermission":
             // The web alert was answered Allow — now the OS may ask.
+            guard isCameraTab else { return }
             Task { await activateCamera(askIfUndecided: true) }
         case "cameraShutter":
             guard isCameraTab else { return }
@@ -243,6 +327,7 @@ final class WebHomeCameraModel: ObservableObject {
     /// a reflexive Don't Allow against a bare system alert costs the camera
     /// permanently. Poplur asks first; this fires only after a yes.
     func activateCamera(askIfUndecided: Bool = false) async {
+        guard isCameraTab else { return }
         let controller = resolveController()
         let status = AVCaptureDevice.authorizationStatus(for: .video)
         switch status {
@@ -255,7 +340,13 @@ final class WebHomeCameraModel: ObservableObject {
         default:
             return
         }
+        // Permission may have put up an OS sheet while the user/page moved on.
+        guard isCameraTab else { return }
         await controller.resumePreviewAfterInterruption()
+        guard isCameraTab else {
+            controller.suspendCapture()
+            return
+        }
         // Pairs with the suspendCapture() in deactivateCamera(). Without this the
         // camera would come back dead after the first time you leave the tab.
         controller.resumeCapture()
@@ -263,6 +354,7 @@ final class WebHomeCameraModel: ObservableObject {
         let recognition = recognitionManager ?? UserRecognitionManager()
         recognitionManager = recognition
         controller.userRecognitionManager = recognition
+        CameraAIAnnouncer.shared.setLiveCameraActive(true)
 
         // Camera always opens with detection enabled. DETECT OFF remains a
         // session control, but an old persisted off value must not survive an
@@ -291,10 +383,10 @@ final class WebHomeCameraModel: ObservableObject {
 
     /// Mirrors HomeView.recordTabContent.onDisappear.
     func deactivateCamera() {
+        CameraAIAnnouncer.shared.setLiveCameraActive(false)
         controllerStorage?.disableMLDetection()
         controllerStorage?.userRecognitionManager = nil
         recognitionManager?.clearRecognition()
-        CameraAIAnnouncer.shared.resetSession()
 
         // ACTUALLY STOP THE CAMERA.
         //

@@ -10,8 +10,11 @@ struct FeedAdProbabilityConfig: Equatable, Sendable {
     var poplurAdPercent: Double
     var googleMobileAdPercent: Double
 
-    static let defaultPoplurAdPercent: Double = 12
-    static let defaultGoogleMobileAdPercent: Double = 6
+    // Match Android and the current ads-first feed: Poplur creative remains the
+    // majority, while Google inventory is common enough to actually appear in
+    // a normal channel session instead of being effectively invisible.
+    static let defaultPoplurAdPercent: Double = 70
+    static let defaultGoogleMobileAdPercent: Double = 30
     static let sharedDefaults = FeedAdProbabilityConfig(
         poplurAdPercent: defaultPoplurAdPercent,
         googleMobileAdPercent: defaultGoogleMobileAdPercent
@@ -41,10 +44,14 @@ final class FeedAdProbabilitySettings: ObservableObject {
     private enum Keys {
         static let poplurAdPercent = "settings.feedAds.poplurAdPercent"
         static let googleMobileAdPercent = "settings.feedAds.googleMobileAdPercent"
+        static let mixVersion = "settings.feedAds.mixVersion"
     }
+
+    private static let currentMixVersion = 2
 
     private init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        Self.migrateLegacyDefaultsIfNeeded(defaults)
         if defaults.object(forKey: Keys.poplurAdPercent) == nil {
             defaults.set(FeedAdProbabilityConfig.defaultPoplurAdPercent, forKey: Keys.poplurAdPercent)
         }
@@ -78,6 +85,7 @@ final class FeedAdProbabilitySettings: ObservableObject {
     }
 
     nonisolated static func currentConfig(defaults: UserDefaults = .standard) -> FeedAdProbabilityConfig {
+        migrateLegacyDefaultsIfNeeded(defaults)
         let fallback = FeedAdProbabilityConfig.sharedDefaults
         let poplur = defaults.object(forKey: Keys.poplurAdPercent) as? Double ?? fallback.poplurAdPercent
         let google = defaults.object(forKey: Keys.googleMobileAdPercent) as? Double ?? fallback.googleMobileAdPercent
@@ -136,6 +144,20 @@ final class FeedAdProbabilitySettings: ObservableObject {
             hash &*= 1_099_511_628_211
         }
         return Double(hash % 10_000) / 100.0
+    }
+
+    /// Existing installs were seeded with the old 12/6 mix. Migrate only that
+    /// exact untouched pair; a person who changed either setting keeps their
+    /// explicit choice.
+    nonisolated private static func migrateLegacyDefaultsIfNeeded(_ defaults: UserDefaults) {
+        guard defaults.integer(forKey: Keys.mixVersion) < currentMixVersion else { return }
+        let poplur = defaults.object(forKey: Keys.poplurAdPercent) as? Double
+        let google = defaults.object(forKey: Keys.googleMobileAdPercent) as? Double
+        if (poplur == nil && google == nil) || (poplur == 12 && google == 6) {
+            defaults.set(FeedAdProbabilityConfig.defaultPoplurAdPercent, forKey: Keys.poplurAdPercent)
+            defaults.set(FeedAdProbabilityConfig.defaultGoogleMobileAdPercent, forKey: Keys.googleMobileAdPercent)
+        }
+        defaults.set(currentMixVersion, forKey: Keys.mixVersion)
     }
 }
 

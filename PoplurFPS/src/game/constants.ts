@@ -50,7 +50,7 @@ export function setScreenSize(viewW: number, viewH: number): void {
   // giving a portrait screen a wall that fills about 72% of the height. There
   // is mild vertical compression on very tall screens; it reads as a normal
   // shooter, which the honest version did not.
-  PROJ_H = Math.max(w * 0.5625, h * 0.72);
+  PROJ_H = Math.max(w * 0.5625, h * 0.84);
 }
 export const MAP_W       = 30;
 export const MAP_H       = 30;
