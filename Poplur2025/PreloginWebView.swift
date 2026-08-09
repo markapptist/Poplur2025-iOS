@@ -99,8 +99,12 @@ struct PreloginWebView: UIViewRepresentable {
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.isOpaque = true
         // Matches the splash background (#0a0709) so there is no flash between
-        // the auth-resolving frame and the web splash.
-        webView.backgroundColor = .black
+        // the auth-resolving frame and the web splash. This is the SAME colour
+        // as LaunchScreen.storyboard's backdrop, so the storyboard, this view
+        // and the splash page are one continuous tone rather than three
+        // near-blacks stepping into each other. It was `.black` (#000000),
+        // which is a visible step against #0a0709.
+        webView.backgroundColor = UIColor(red: 10 / 255, green: 7 / 255, blue: 9 / 255, alpha: 1)
         webView.scrollView.isScrollEnabled = false
         webView.scrollView.bounces = false
         webView.scrollView.contentInsetAdjustmentBehavior = .never
@@ -119,9 +123,23 @@ struct PreloginWebView: UIViewRepresentable {
         webView.overrideUserInterfaceStyle = .dark
         context.coordinator.webView = webView
 
-        // The launch splash (logo + progress bar) is dropped by request: go
-        // straight to Welcome over a plain black screen while it loads.
-        if webRoot != nil, let welcomeURL = PoplurPreloginWeb.welcomeURL {
+        // Launch shows the SPLASH, always.
+        //
+        // This used to load Welcome directly. Welcome is ~285KB of HTML plus its
+        // hero cube and account-icon models, so "straight to Welcome" meant
+        // staring at an empty black WebView for the whole of that parse — the
+        // black screen on launch. The splash is ~10KB and self-contained, so it
+        // paints almost immediately and then covers the Welcome load with the
+        // clay world instead of with nothing.
+        //
+        // The handoff is a fixed 3.2s timer, NOT a signal from the page, so a
+        // splash that somehow fails to render still hands off on schedule and
+        // can never strand anyone on the intro.
+        if webRoot != nil, let splashURL = PoplurPreloginWeb.splashURL {
+            webView.load(URLRequest(url: splashURL))
+            context.coordinator.scheduleWelcomeHandoff()
+        } else if webRoot != nil, let welcomeURL = PoplurPreloginWeb.welcomeURL {
+            // Splash URL unavailable: Welcome is still better than nothing.
             webView.load(URLRequest(url: welcomeURL))
         } else {
             print("[PreloginWebView] PreloginWeb bundle missing — run scripts/build-prelogin-ios.mjs")

@@ -87,6 +87,12 @@ const ASSETS = [
    "Poplur2025-iOS/Poplur2025/pop.mp3"],
   [join(WORKSPACE, "Poplur2025-iOS/Poplur2025/Assets.xcassets/logo.imageset/logo1.png"),
    "Poplur2025-iOS/Poplur2025/Assets.xcassets/logo.imageset/logo1.png"],
+  // The splash preloads the loading globe so the post-login Loading screen has
+  // it warm. It was the last 404 in the bundle: the hint is absolute
+  // (/.claude/artifacts/models/...) and nothing mirrored that path, so the
+  // preload failed and the globe was fetched cold later.
+  [join(WORKSPACE, ".claude/artifacts/models/poplur-globe-lite.glb"),
+   ".claude/artifacts/models/poplur-globe-lite.glb"],
 ];
 
 function ensureDir(p) { mkdirSync(dirname(p), { recursive: true }); }
