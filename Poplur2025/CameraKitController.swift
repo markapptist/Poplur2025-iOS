@@ -21,6 +21,8 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
     // Core capture components
     let captureSession: AVCaptureSession = AVCaptureSession()
     private let photoOutput = AVCapturePhotoOutput()
+    private let arFrameLock = NSLock()
+    private var arFrameInFlight = false
     private let movieOutput = AVCaptureMovieFileOutput()
     private lazy var cameraPreviewViewController: CameraPreviewViewController = {
         let controller = CameraPreviewViewController()
@@ -782,15 +784,27 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
             return
         }
         
+        // Vision + Core Image may take longer than a camera frame. Process at
+        // most one frame at a time; otherwise asynchronous requests accumulate
+        // and the filtered preview starts flashing or goes black under load.
+        arFrameLock.lock()
+        guard !arFrameInFlight else {
+            arFrameLock.unlock()
+            return
+        }
+        arFrameInFlight = true
+        arFrameLock.unlock()
+
         // Track filter processing start time for performance monitoring
         let processingStartTime = CFAbsoluteTimeGetCurrent()
         
         // Process frame with AR filter (the method is nonisolated so it's safe to call from background thread)
         filterManager.applyFilterToVideoFrame(sampleBuffer) { [weak self] filteredBuffer in
-            guard let self = self,
-                  let displayLayer = self.displayLayer else {
-                return
-            }
+            guard let self else { return }
+            self.arFrameLock.lock()
+            self.arFrameInFlight = false
+            self.arFrameLock.unlock()
+            guard let displayLayer = self.displayLayer else { return }
             
             // Calculate processing time
             let processingTime = (CFAbsoluteTimeGetCurrent() - processingStartTime) * 1000 // ms
