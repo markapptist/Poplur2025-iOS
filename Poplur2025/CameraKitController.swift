@@ -692,16 +692,17 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
     }
     
     // Centralized safe enqueue to suppress spurious errors and respect backpressure
-    private func safelyEnqueueSampleBuffer(_ sampleBuffer: CMSampleBuffer, to displayLayer: AVSampleBufferDisplayLayer) {
+    @discardableResult
+    private func safelyEnqueueSampleBuffer(_ sampleBuffer: CMSampleBuffer, to displayLayer: AVSampleBufferDisplayLayer) -> Bool {
         // Validate buffer
-        if !CMSampleBufferIsValid(sampleBuffer) { return }
-        if !CMSampleBufferDataIsReady(sampleBuffer) { return }
+        if !CMSampleBufferIsValid(sampleBuffer) { return false }
+        if !CMSampleBufferDataIsReady(sampleBuffer) { return false }
 
         // Validate layer status
         let status = displayLayer.status
         if status == .failed {
             displayLayer.flushAndRemoveImage()
-            return
+            return false
         }
         if status == .unknown {
             // `.unknown` is also the initial state. Flush stale contents, then allow
@@ -710,10 +711,11 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
         }
 
         // Respect backpressure; drop frame if not ready
-        if !displayLayer.isReadyForMoreMediaData { return }
+        if !displayLayer.isReadyForMoreMediaData { return false }
 
         // Optionally ensure presentation time is monotonic
         displayLayer.enqueue(sampleBuffer)
+        return true
     }
     
     // Broadcast radius updates for registered user recognition
@@ -815,7 +817,9 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
                     displayLayer.flushAndRemoveImage()
                 }
                 
-                self.safelyEnqueueSampleBuffer(bufferToDisplay, to: displayLayer)
+                if self.safelyEnqueueSampleBuffer(bufferToDisplay, to: displayLayer) {
+                    self.cameraPreviewViewController.markFilteredFrameReady()
+                }
             }
         }
     }

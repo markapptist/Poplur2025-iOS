@@ -559,6 +559,16 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     UserDefaults.standard.set(on ? "1" : "0", forKey: "poplur.cameraDetectDefault")
                     return
                 }
+                if type == "radioScope", let scope = body["scope"] as? String,
+                   ["screen", "app", "outside"].contains(scope) {
+                    UserDefaults.standard.set(scope, forKey: "poplur.radio.scope")
+                    if scope == "outside" {
+                        let session = AVAudioSession.sharedInstance()
+                        try? session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+                        try? session.setActive(true)
+                    }
+                    return
+                }
                 if type == "speak", let text = body["text"] as? String {
                     PoplurWebSpeech.shared.speak(
                         text,

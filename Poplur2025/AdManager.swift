@@ -5,7 +5,10 @@ final class AdManager: NSObject, FullScreenContentDelegate {
     static let shared = AdManager()
     
     private var interstitial: InterstitialAd?
-    private let interstitialUnitID = "ca-app-pub-3940256099942544/4411468910" // AdMob test interstitial
+    private var interstitialUnitID: String {
+        Bundle.main.object(forInfoDictionaryKey: "PoplurAdMobInterstitialUnitID") as? String
+            ?? "ca-app-pub-2086359936541081/6696033455"
+    }
     
     private var hasStarted = false
     

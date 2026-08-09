@@ -9,6 +9,8 @@ final class CameraPreviewViewController: UIViewController {
     private var singleTapRecognizer: UITapGestureRecognizer?
     private var isARFilterTrayVisible = false
     private var activeARFilterRawValue = "None"
+    private var wantsFilteredPreview = false
+    private var hasFilteredFrame = false
 
     /// Expose the AR display layer for external configuration (e.g., CameraKitController)
     public func getARDisplayLayer() -> AVSampleBufferDisplayLayer? {
@@ -173,7 +175,12 @@ final class CameraPreviewViewController: UIViewController {
     }
 
     @objc private func handleARFilterChanged(_ notification: Notification) {
-        activeARFilterRawValue = (notification.userInfo?["filter"] as? String) ?? "None"
+        let nextFilter = (notification.userInfo?["filter"] as? String) ?? "None"
+        if nextFilter != activeARFilterRawValue {
+            hasFilteredFrame = false
+            displayLayer?.flushAndRemoveImage()
+        }
+        activeARFilterRawValue = nextFilter
         updateFilteredPreviewVisibility()
     }
 
@@ -183,10 +190,26 @@ final class CameraPreviewViewController: UIViewController {
     }
 
     private func setFilteredPreviewVisible(_ visible: Bool) {
+        wantsFilteredPreview = visible
+        if !visible {
+            hasFilteredFrame = false
+            displayLayer?.flushAndRemoveImage()
+        }
+        applyPreviewLayerVisibility()
+    }
+
+    public func markFilteredFrameReady() {
+        guard wantsFilteredPreview else { return }
+        hasFilteredFrame = true
+        applyPreviewLayerVisibility()
+    }
+
+    private func applyPreviewLayerVisibility() {
+        let showFiltered = wantsFilteredPreview && hasFilteredFrame
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        previewLayer?.opacity = visible ? 0.0 : 1.0
-        displayLayer?.opacity = visible ? 1.0 : 0.0
+        previewLayer?.opacity = showFiltered ? 0.0 : 1.0
+        displayLayer?.opacity = showFiltered ? 1.0 : 0.0
         CATransaction.commit()
     }
 

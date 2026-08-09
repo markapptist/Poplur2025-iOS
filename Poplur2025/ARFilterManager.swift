@@ -65,6 +65,20 @@ class ARFilterManager: NSObject, ObservableObject {
             case .vintage: return "camera.aperture"
             }
         }
+
+        var thumbnailAsset: String {
+            switch self {
+            case .none: return "ar_filter_none"
+            case .faceSmoothing: return "ar_filter_smooth"
+            case .beautyFilter: return "ar_filter_beauty"
+            case .brightening: return "ar_filter_brighten"
+            case .glowingSkin: return "ar_filter_glow"
+            case .sharpen: return "ar_filter_sharpen"
+            case .warmth: return "ar_filter_warm"
+            case .cool: return "ar_filter_cool"
+            case .vintage: return "ar_filter_vintage"
+            }
+        }
         
         var description: String {
             switch self {
@@ -117,7 +131,7 @@ class ARFilterManager: NSObject, ObservableObject {
     /// Apply filter to image
     func applyFilter(to image: CIImage, faceObservation: VNFaceObservation?) -> CIImage? {
         guard activeFilter != .none else { return image }
-        // Whole-view mode: if no faceObservation or mask, filters apply to entire frame.
+        guard let faceObservation else { return image }
         
         var outputImage = image
         
@@ -126,16 +140,16 @@ class ARFilterManager: NSObject, ObservableObject {
             return image
             
         case .faceSmoothing:
-            outputImage = applySmoothingFilter(to: outputImage, faceObservation: faceObservation)
+            outputImage = applySmoothingFilter(to: outputImage)
             
         case .beautyFilter:
             // Combine multiple filters for beauty effect
-            outputImage = applySmoothingFilter(to: outputImage, faceObservation: faceObservation)
-            outputImage = applyBrighteningFilter(to: outputImage, faceObservation: faceObservation)
+            outputImage = applySmoothingFilter(to: outputImage)
+            outputImage = applyBrighteningFilter(to: outputImage)
             outputImage = applyGlowFilter(to: outputImage)
             
         case .brightening:
-            outputImage = applyBrighteningFilter(to: outputImage, faceObservation: faceObservation)
+            outputImage = applyBrighteningFilter(to: outputImage)
             
         case .glowingSkin:
             outputImage = applyGlowFilter(to: outputImage)
@@ -153,7 +167,11 @@ class ARFilterManager: NSObject, ObservableObject {
             outputImage = applyVintageFilter(to: outputImage)
         }
         
-        return outputImage
+        return compositeFaceEffect(
+            original: image,
+            filtered: outputImage.cropped(to: image.extent),
+            faceObservation: faceObservation
+        )
     }
     
     /// Set filter intensity
@@ -215,7 +233,7 @@ class ARFilterManager: NSObject, ObservableObject {
                             print("   Bounds: \(face.boundingBox), confidence: \(face.confidence)")
                         } else {
                             print("⚠️ [ARFilter] No face detected - User: \(username) (UID: \(uid))")
-                            print("   Filter will apply to entire image")
+                            print("   Frame will remain unchanged")
                         }
                     } else {
                         if let face = faceObservation {
@@ -229,7 +247,7 @@ class ARFilterManager: NSObject, ObservableObject {
                     if let face = faceObservation {
                         print("✅ [ARFilter] Face detected! Bounds: \(face.boundingBox), confidence: \(face.confidence)")
                     } else {
-                        print("⚠️ [ARFilter] No face detected in frame - applying filter to entire image")
+                        print("⚠️ [ARFilter] No face detected in frame - leaving frame unchanged")
                     }
                     #endif
                 }
@@ -339,7 +357,7 @@ class ARFilterManager: NSObject, ObservableObject {
     // MARK: - Filter Implementations
     
     /// Smoothing filter to reduce wrinkles and imperfections
-    private func applySmoothingFilter(to image: CIImage, faceObservation: VNFaceObservation?) -> CIImage {
+    private func applySmoothingFilter(to image: CIImage) -> CIImage {
         // Use bilateral filter for edge-preserving smoothing
         guard let smoothingFilter = CIFilter(name: "CIMedianFilter") else {
             return image
@@ -351,30 +369,11 @@ class ARFilterManager: NSObject, ObservableObject {
             return image
         }
         
-        // Blend original and smoothed based on intensity
-        guard let blendFilter = CIFilter(name: "CIBlendWithMask") else {
-            return smoothed
-        }
-        
-        // Create a mask - if we have face observation, apply smoothing only to face area
-        let mask: CIImage
-        if let faceObservation = faceObservation {
-            mask = createFaceMask(from: faceObservation, imageSize: image.extent.size)
-        } else {
-            // Apply to entire image with reduced intensity
-            mask = CIImage(color: CIColor(red: CGFloat(filterIntensity * 0.5), green: 0, blue: 0, alpha: 1))
-                .cropped(to: image.extent)
-        }
-        
-        blendFilter.setValue(image, forKey: kCIInputImageKey)
-        blendFilter.setValue(smoothed, forKey: kCIInputBackgroundImageKey)
-        blendFilter.setValue(mask, forKey: kCIInputMaskImageKey)
-        
-        return blendFilter.outputImage ?? image
+        return smoothed
     }
     
     /// Brightening filter for face
-    private func applyBrighteningFilter(to image: CIImage, faceObservation: VNFaceObservation?) -> CIImage {
+    private func applyBrighteningFilter(to image: CIImage) -> CIImage {
         guard let filter = CIFilter(name: "CIColorControls") else {
             return image
         }
@@ -476,25 +475,43 @@ class ARFilterManager: NSObject, ObservableObject {
     
     // MARK: - Helper Methods
     
-    /// Create a mask for the face region
-    private func createFaceMask(from observation: VNFaceObservation, imageSize: CGSize) -> CIImage {
+    private func compositeFaceEffect(
+        original: CIImage,
+        filtered: CIImage,
+        faceObservation: VNFaceObservation
+    ) -> CIImage {
+        guard let blendFilter = CIFilter(name: "CIBlendWithMask") else { return original }
+
+        blendFilter.setValue(filtered, forKey: kCIInputImageKey)
+        blendFilter.setValue(original, forKey: kCIInputBackgroundImageKey)
+        blendFilter.setValue(
+            createFaceMask(from: faceObservation, imageExtent: original.extent),
+            forKey: kCIInputMaskImageKey
+        )
+
+        return (blendFilter.outputImage ?? original).cropped(to: original.extent)
+    }
+
+    /// Create a soft mask around the detected face region.
+    private func createFaceMask(from observation: VNFaceObservation, imageExtent: CGRect) -> CIImage {
         let bounds = observation.boundingBox
         
-        // Convert normalized coordinates to image coordinates
-        let x = bounds.origin.x * imageSize.width
-        let y = (1 - bounds.origin.y - bounds.height) * imageSize.height
-        let width = bounds.width * imageSize.width
-        let height = bounds.height * imageSize.height
+        // Vision and Core Image both use lower-left image coordinates.
+        let x = imageExtent.minX + bounds.origin.x * imageExtent.width
+        let y = imageExtent.minY + bounds.origin.y * imageExtent.height
+        let width = bounds.width * imageExtent.width
+        let height = bounds.height * imageExtent.height
         
         let faceRect = CGRect(x: x, y: y, width: width, height: height)
+            .insetBy(dx: -width * 0.18, dy: -height * 0.22)
         
         // Create a radial gradient mask centered on face
         let centerX = faceRect.midX
         let centerY = faceRect.midY
-        let radius = max(width, height) / 2
+        let radius = max(faceRect.width, faceRect.height) * 0.58
         
         guard let gradientFilter = CIFilter(name: "CIRadialGradient") else {
-            return CIImage(color: CIColor.white).cropped(to: CGRect(origin: .zero, size: imageSize))
+            return CIImage(color: CIColor.clear).cropped(to: imageExtent)
         }
         
         gradientFilter.setValue(CIVector(x: centerX, y: centerY), forKey: "inputCenter")
@@ -503,8 +520,8 @@ class ARFilterManager: NSObject, ObservableObject {
         gradientFilter.setValue(CIColor.white, forKey: "inputColor0")
         gradientFilter.setValue(CIColor.black, forKey: "inputColor1")
         
-        let mask = gradientFilter.outputImage?.cropped(to: CGRect(origin: .zero, size: imageSize))
-        return mask ?? CIImage(color: CIColor.white).cropped(to: CGRect(origin: .zero, size: imageSize))
+        let mask = gradientFilter.outputImage?.cropped(to: imageExtent)
+        return mask ?? CIImage(color: CIColor.clear).cropped(to: imageExtent)
     }
     
     // MARK: - Additional Public Methods

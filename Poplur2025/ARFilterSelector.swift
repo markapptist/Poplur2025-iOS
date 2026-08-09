@@ -125,31 +125,15 @@ private struct FilterButtonSnapchat: View {
                             .frame(width: 66, height: 66)
                     }
                     
-                    Circle()
-                        .fill(
-                            isSelected
-                                ? LinearGradient(
-                                    colors: [Color.blue.opacity(0.8), Color.purple.opacity(0.6)],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                                : LinearGradient(
-                                    colors: [Color.white.opacity(0.25), Color.white.opacity(0.15)],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                        )
+                    Image(filter.thumbnailAsset)
+                        .resizable()
+                        .scaledToFill()
                         .frame(width: 60, height: 60)
+                        .clipShape(Circle())
                         .overlay(
                             Circle()
                                 .strokeBorder(Color.white.opacity(0.3), lineWidth: 1)
                         )
-                    
-                    // Icon with glow effect when selected
-                    Image(systemName: filter.icon)
-                        .poplurIconShader()
-                        .font(.system(size: 26, weight: isSelected ? .semibold : .medium))
-                        .foregroundColor(.white)
                         .shadow(color: isSelected ? .white.opacity(0.5) : .clear, radius: 8)
                 }
                 
@@ -254,14 +238,15 @@ private struct FilterButton: View {
         Button(action: action) {
             VStack(spacing: 8) {
                 ZStack {
-                    Circle()
-                        .fill(isSelected ? Color.blue : Color.white.opacity(0.2))
+                    Image(filter.thumbnailAsset)
+                        .resizable()
+                        .scaledToFill()
                         .frame(width: 60, height: 60)
-                    
-                    Image(systemName: filter.icon)
-                        .poplurIconShader()
-                        .font(.system(size: 24, weight: .medium))
-                        .foregroundColor(.white)
+                        .clipShape(Circle())
+                        .overlay(
+                            Circle()
+                                .strokeBorder(isSelected ? Color.white : Color.white.opacity(0.25), lineWidth: 2)
+                        )
                 }
                 
                 Text(filter.rawValue)
