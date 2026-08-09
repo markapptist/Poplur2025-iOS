@@ -167,9 +167,14 @@ class ARFilterManager: NSObject, ObservableObject {
             outputImage = applyVintageFilter(to: outputImage)
         }
         
-        return compositeFaceEffect(
+        let faceComposite = compositeFaceEffect(
             original: image,
             filtered: outputImage.cropped(to: image.extent),
+            faceObservation: faceObservation
+        )
+        return applyTrackedFaceArtwork(
+            filter: activeFilter,
+            to: faceComposite,
             faceObservation: faceObservation
         )
     }
@@ -211,7 +216,10 @@ class ARFilterManager: NSObject, ObservableObject {
         let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
         
         // Detect face in frame for better filter application
-        let request = VNDetectFaceRectanglesRequest { request, error in
+        // Landmarks give the renderer stable eye positions. Bounding-box-only
+        // effects looked like screen stickers and drifted whenever the user
+        // turned their head.
+        let request = VNDetectFaceLandmarksRequest { request, error in
             if let error = error {
                 print("❌ [ARFilter] Face detection error: \(error.localizedDescription)")
             }
@@ -522,6 +530,202 @@ class ARFilterManager: NSObject, ObservableObject {
         
         let mask = gradientFilter.outputImage?.cropped(to: imageExtent)
         return mask ?? CIImage(color: CIColor.clear).cropped(to: imageExtent)
+    }
+
+    // MARK: - Face-anchored AR artwork
+
+    private func applyTrackedFaceArtwork(
+        filter: ARFilter,
+        to image: CIImage,
+        faceObservation: VNFaceObservation
+    ) -> CIImage {
+        guard filter != .none && filter != .faceSmoothing else { return image }
+
+        let face = faceRect(for: faceObservation, imageExtent: image.extent)
+        guard face.width > 1, face.height > 1 else { return image }
+        let eyeLine = trackedEyeLine(for: faceObservation, faceRect: face)
+        var output = image
+
+        switch filter {
+        case .none, .faceSmoothing:
+            break
+
+        case .beautyFilter:
+            let cheekSize = face.width * 0.16
+            output = sourceOver(
+                softDot(center: CGPoint(x: face.minX + face.width * 0.25, y: face.minY + face.height * 0.42), radius: cheekSize, color: CIColor(red: 1, green: 0.18, blue: 0.48, alpha: 0.30), extent: image.extent),
+                output
+            )
+            output = sourceOver(
+                softDot(center: CGPoint(x: face.maxX - face.width * 0.25, y: face.minY + face.height * 0.42), radius: cheekSize, color: CIColor(red: 1, green: 0.18, blue: 0.48, alpha: 0.30), extent: image.extent),
+                output
+            )
+            output = addSparkles(to: output, around: face)
+
+        case .brightening:
+            output = addRoundedOutline(
+                rect: face.insetBy(dx: -face.width * 0.08, dy: -face.height * 0.08),
+                width: max(3, face.width * 0.018),
+                color: CIColor(red: 1, green: 0.93, blue: 0.55, alpha: 0.86),
+                to: output
+            )
+
+        case .glowingSkin:
+            let halo = CGRect(
+                x: face.minX + face.width * 0.12,
+                y: face.maxY + face.height * 0.08,
+                width: face.width * 0.76,
+                height: face.height * 0.13
+            )
+            output = addRoundedOutline(
+                rect: halo,
+                width: max(4, face.width * 0.025),
+                color: CIColor(red: 1, green: 0.77, blue: 0.18, alpha: 0.95),
+                to: output
+            )
+            output = addSparkles(to: output, around: face)
+
+        case .sharpen:
+            let visor = CGRect(
+                x: face.minX - face.width * 0.03,
+                y: eyeLine.y - face.height * 0.11,
+                width: face.width * 1.06,
+                height: face.height * 0.24
+            )
+            output = sourceOver(
+                roundedRect(visor, radius: visor.height * 0.34, color: CIColor(red: 0.05, green: 0.85, blue: 1, alpha: 0.30), extent: image.extent),
+                output
+            )
+            output = addRoundedOutline(
+                rect: visor,
+                width: max(3, face.width * 0.018),
+                color: CIColor(red: 0.23, green: 0.95, blue: 1, alpha: 0.95),
+                to: output
+            )
+            let bridge = CGRect(x: eyeLine.x - face.width * 0.012, y: visor.minY, width: face.width * 0.024, height: visor.height)
+            output = sourceOver(roundedRect(bridge, radius: bridge.width * 0.5, color: CIColor(red: 0.8, green: 1, blue: 1, alpha: 0.8), extent: image.extent), output)
+
+        case .warmth:
+            let y = face.minY + face.height * 0.48
+            for index in 0..<7 {
+                let offset = CGFloat(index - 3) * face.width * 0.055
+                let stagger = CGFloat(abs(index - 3)) * face.height * 0.012
+                let center = CGPoint(x: face.midX + offset, y: y - stagger)
+                output = sourceOver(
+                    softDot(center: center, radius: face.width * 0.013, color: CIColor(red: 0.42, green: 0.16, blue: 0.06, alpha: 0.84), extent: image.extent),
+                    output
+                )
+            }
+
+        case .cool:
+            let baseY = face.maxY + face.height * 0.01
+            let heights: [CGFloat] = [0.16, 0.23, 0.31, 0.23, 0.16]
+            for (index, heightScale) in heights.enumerated() {
+                let crystalWidth = face.width * 0.12
+                let crystalHeight = face.height * heightScale
+                let crystal = CGRect(
+                    x: face.minX + face.width * (0.16 + CGFloat(index) * 0.13),
+                    y: baseY,
+                    width: crystalWidth,
+                    height: crystalHeight
+                )
+                output = sourceOver(
+                    roundedRect(crystal, radius: crystalWidth * 0.28, color: CIColor(red: 0.35, green: 0.82, blue: 1, alpha: 0.86), extent: image.extent),
+                    output
+                )
+            }
+
+        case .vintage:
+            let lensSize = CGSize(width: face.width * 0.42, height: face.height * 0.25)
+            let left = CGRect(x: eyeLine.left.x - lensSize.width * 0.5, y: eyeLine.left.y - lensSize.height * 0.5, width: lensSize.width, height: lensSize.height)
+            let right = CGRect(x: eyeLine.right.x - lensSize.width * 0.5, y: eyeLine.right.y - lensSize.height * 0.5, width: lensSize.width, height: lensSize.height)
+            let frameColor = CIColor(red: 0.08, green: 0.035, blue: 0.02, alpha: 0.96)
+            output = addRoundedOutline(rect: left, width: max(5, face.width * 0.035), color: frameColor, to: output)
+            output = addRoundedOutline(rect: right, width: max(5, face.width * 0.035), color: frameColor, to: output)
+            let bridge = CGRect(x: left.maxX, y: eyeLine.y - face.height * 0.015, width: max(1, right.minX - left.maxX), height: max(5, face.height * 0.03))
+            output = sourceOver(roundedRect(bridge, radius: bridge.height * 0.5, color: frameColor, extent: image.extent), output)
+        }
+
+        return output.cropped(to: image.extent)
+    }
+
+    private func faceRect(for observation: VNFaceObservation, imageExtent: CGRect) -> CGRect {
+        CGRect(
+            x: imageExtent.minX + observation.boundingBox.minX * imageExtent.width,
+            y: imageExtent.minY + observation.boundingBox.minY * imageExtent.height,
+            width: observation.boundingBox.width * imageExtent.width,
+            height: observation.boundingBox.height * imageExtent.height
+        )
+    }
+
+    private func trackedEyeLine(for observation: VNFaceObservation, faceRect: CGRect) -> (left: CGPoint, right: CGPoint, x: CGFloat, y: CGFloat) {
+        func center(_ region: VNFaceLandmarkRegion2D?) -> CGPoint? {
+            guard let region, !region.normalizedPoints.isEmpty else { return nil }
+            let average = region.normalizedPoints.reduce(CGPoint.zero) { partial, point in
+                CGPoint(x: partial.x + point.x, y: partial.y + point.y)
+            }
+            let count = CGFloat(region.normalizedPoints.count)
+            return CGPoint(
+                x: faceRect.minX + average.x / count * faceRect.width,
+                y: faceRect.minY + average.y / count * faceRect.height
+            )
+        }
+
+        let left = center(observation.landmarks?.leftEye)
+            ?? CGPoint(x: faceRect.minX + faceRect.width * 0.32, y: faceRect.minY + faceRect.height * 0.62)
+        let right = center(observation.landmarks?.rightEye)
+            ?? CGPoint(x: faceRect.minX + faceRect.width * 0.68, y: faceRect.minY + faceRect.height * 0.62)
+        return (left, right, (left.x + right.x) * 0.5, (left.y + right.y) * 0.5)
+    }
+
+    private func sourceOver(_ overlay: CIImage, _ background: CIImage) -> CIImage {
+        overlay.composited(over: background)
+    }
+
+    private func roundedRect(_ rect: CGRect, radius: CGFloat, color: CIColor, extent: CGRect) -> CIImage {
+        guard let generator = CIFilter(name: "CIRoundedRectangleGenerator") else {
+            return CIImage(color: color).cropped(to: rect)
+        }
+        generator.setValue(CIVector(cgRect: rect), forKey: "inputExtent")
+        generator.setValue(radius, forKey: "inputRadius")
+        generator.setValue(color, forKey: "inputColor")
+        return (generator.outputImage ?? CIImage(color: color).cropped(to: rect)).cropped(to: extent)
+    }
+
+    private func addRoundedOutline(rect: CGRect, width: CGFloat, color: CIColor, to image: CIImage) -> CIImage {
+        let outer = roundedRect(rect, radius: min(rect.width, rect.height) * 0.48, color: color, extent: image.extent)
+        let withOuter = sourceOver(outer, image)
+        let innerRect = rect.insetBy(dx: width, dy: width)
+        guard innerRect.width > 0, innerRect.height > 0 else { return withOuter }
+        return sourceOver(image.cropped(to: innerRect), withOuter)
+    }
+
+    private func softDot(center: CGPoint, radius: CGFloat, color: CIColor, extent: CGRect) -> CIImage {
+        guard let gradient = CIFilter(name: "CIRadialGradient") else {
+            return CIImage(color: color).cropped(to: CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2))
+        }
+        gradient.setValue(CIVector(cgPoint: center), forKey: "inputCenter")
+        gradient.setValue(radius * 0.35, forKey: "inputRadius0")
+        gradient.setValue(radius, forKey: "inputRadius1")
+        gradient.setValue(color, forKey: "inputColor0")
+        gradient.setValue(CIColor(red: color.red, green: color.green, blue: color.blue, alpha: 0), forKey: "inputColor1")
+        return (gradient.outputImage ?? CIImage.empty()).cropped(to: extent)
+    }
+
+    private func addSparkles(to image: CIImage, around face: CGRect) -> CIImage {
+        let points = [
+            CGPoint(x: face.minX - face.width * 0.03, y: face.maxY - face.height * 0.18),
+            CGPoint(x: face.maxX + face.width * 0.03, y: face.minY + face.height * 0.58),
+            CGPoint(x: face.minX + face.width * 0.12, y: face.minY + face.height * 0.12)
+        ]
+        return points.reduce(image) { output, point in
+            let size = face.width * 0.045
+            let vertical = CGRect(x: point.x - size * 0.18, y: point.y - size, width: size * 0.36, height: size * 2)
+            let horizontal = CGRect(x: point.x - size, y: point.y - size * 0.18, width: size * 2, height: size * 0.36)
+            let color = CIColor(red: 1, green: 0.95, blue: 1, alpha: 0.94)
+            let first = sourceOver(roundedRect(vertical, radius: size * 0.18, color: color, extent: image.extent), output)
+            return sourceOver(roundedRect(horizontal, radius: size * 0.18, color: color, extent: image.extent), first)
+        }
     }
     
     // MARK: - Additional Public Methods

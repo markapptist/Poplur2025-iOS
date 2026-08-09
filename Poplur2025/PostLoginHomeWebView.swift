@@ -666,6 +666,13 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                         PostLoginHomeWebView.setCameraHole(isCamera, on: webView)
                     }
                 }
+                if type == "fetchProductImage", let webView = bridge.webView,
+                   let target = body["url"] as? String {
+                    // The commerce card wants the advertiser's own artwork. The
+                    // WebView cannot fetch it (CORS on a custom scheme), so the
+                    // shell does and answers on window.poplurProductImage.
+                    PoplurProductImage.handle(urlString: target, webView: webView)
+                }
                 if type == "requestProfile", let webView = bridge.webView {
                     // The web ProfileTwin asks who is signed in; answer with the
                     // Firestore user doc so it shows the real signup username
