@@ -574,6 +574,51 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     UserDefaults.standard.set(on ? "1" : "0", forKey: "poplur.cameraDetectDefault")
                     return
                 }
+                // The clay permission card was answered. Nothing native listened
+                // for this before, which is why the primer and the real dialog
+                // were unsequenced: the map asked iOS directly on load and the
+                // bare alert arrived on its own. Native now takes its cue from
+                // here — a yes on the card is what fires the ONE system prompt.
+                if type == "permissionHandled", let permission = body["permission"] as? String {
+                    let granted = (body["granted"] as? Bool) ?? false
+                    NotificationCenter.default.post(
+                        name: Notification.Name("PoplurPermissionHandled"),
+                        object: nil,
+                        userInfo: ["permission": permission, "granted": granted]
+                    )
+                    return
+                }
+                // Feed hold menu → SHARE. The share sheet is a system surface,
+                // so the web can only ask for it; presenting it is native's job.
+                if type == "sharePost" {
+                    let title = (body["title"] as? String) ?? "poplur"
+                    let user = (body["user"] as? String) ?? ""
+                    let line = user.isEmpty ? title : "\(title) — \(user)"
+                    var items: [Any] = [line]
+                    if let postId = body["postId"] as? String, !postId.isEmpty,
+                       let url = URL(string: "https://poplur.com/p/\(postId)") {
+                        items.append(url)
+                    }
+                    DispatchQueue.main.async {
+                        guard let scene = UIApplication.shared.connectedScenes
+                                .compactMap({ $0 as? UIWindowScene })
+                                .first(where: { $0.activationState == .foregroundActive }),
+                              let root = scene.windows.first(where: { $0.isKeyWindow })?.rootViewController
+                        else { return }
+                        var presenter = root
+                        while let next = presenter.presentedViewController { presenter = next }
+                        let sheet = UIActivityViewController(activityItems: items, applicationActivities: nil)
+                        // iPad has no modal share sheet — without an anchor this
+                        // is a crash, not a layout problem.
+                        sheet.popoverPresentationController?.sourceView = presenter.view
+                        sheet.popoverPresentationController?.sourceRect = CGRect(
+                            x: presenter.view.bounds.midX, y: presenter.view.bounds.maxY - 40,
+                            width: 0, height: 0
+                        )
+                        presenter.present(sheet, animated: true)
+                    }
+                    return
+                }
                 if type == "radioScope", let scope = body["scope"] as? String,
                    ["screen", "app", "outside"].contains(scope) {
                     UserDefaults.standard.set(scope, forKey: "poplur.radio.scope")

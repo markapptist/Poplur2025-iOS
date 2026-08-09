@@ -29,6 +29,17 @@ final class LocationProvider: NSObject, ObservableObject {
         // filter — the radius product needs "which block", not "which metre".
         manager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
         manager.distanceFilter = 10
+        // A yes on the web's clay location card is the ONE thing allowed to
+        // raise the real iOS dialog. See requestIfAlreadyAuthorized().
+        NotificationCenter.default.addObserver(
+            forName: Notification.Name("PoplurPermissionHandled"),
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            guard (note.userInfo?["permission"] as? String) == "location",
+                  (note.userInfo?["granted"] as? Bool) == true else { return }
+            Task { @MainActor in self?.request() }
+        }
         // If app already has permission, optionally seed with last known location
         if let loc = manager.location?.coordinate {
             self.coordinate = loc
@@ -45,6 +56,28 @@ final class LocationProvider: NSObject, ObservableObject {
     func centerOnUser(_ camera: Binding<MapCameraPosition>) {
         guard let coord = coordinate else { return }
         camera.wrappedValue = .camera(MapCamera(centerCoordinate: coord, distance: 300, heading: 0, pitch: 60))
+    }
+
+    /// Start location WITHOUT ever showing the system dialog.
+    ///
+    /// The map used to call `request()` the moment the tab loaded, which fired
+    /// `requestWhenInUseAuthorization()` directly — so the bare iOS alert landed
+    /// over the map and the app's own clay primer never got to go first. That
+    /// ordering is the whole point of the primer: the system prompt is one-shot
+    /// per install, so a reflexive "Don't Allow" on a bare alert costs the
+    /// permission permanently, while declining the clay card costs nothing.
+    ///
+    /// Anything that merely WANTS location (map load, a passive fix) calls this.
+    /// Only an explicit yes on the primer — or a user action that is itself the
+    /// ask — is allowed to call `request()`.
+    func requestIfAlreadyAuthorized() {
+        switch manager.authorizationStatus {
+        case .authorizedWhenInUse, .authorizedAlways:
+            didRequest = true
+            startUpdatesIfAuthorized()
+        default:
+            break
+        }
     }
 
     func request() {

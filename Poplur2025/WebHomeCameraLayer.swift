@@ -177,10 +177,14 @@ final class WebHomeCameraModel: ObservableObject {
         })
         var emittedLabels = Set(latestVisionBoxes.map { $0.label.lowercased() })
 
-        // The web view owns the single shader readout. Publish only the best
-        // whole-frame answer; sending the classifier's runners-up made native
-        // and web layers compete with three different labels for one frame.
-        for (index, object) in latestClassifications.prefix(1).enumerated() {
+        // The web view owns the single shader readout, and it picks its own
+        // winner (most confident `whole`), so the runners-up no longer compete
+        // for the line — DetectionOverlay filters `whole` out entirely, so they
+        // cannot draw pills either. That was the reason for the old prefix(1),
+        // and it cost more than the readout: the web grows the scan radius from
+        // the labels it RECEIVES, so capping this at one meant a frame with six
+        // recognised things scored the same as a frame with one.
+        for (index, object) in latestClassifications.prefix(6).enumerated() {
             let label = object.identifier.trimmingCharacters(in: .whitespacesAndNewlines)
             guard emittedLabels.insert(label.lowercased()).inserted else { continue }
             payload.append([

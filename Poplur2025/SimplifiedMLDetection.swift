@@ -21,7 +21,14 @@ public class SimplifiedMLDetectionManager {
     
     /// Minimum confidence threshold (0.0 - 1.0)
     public var confidenceThreshold: Float = 0.15
-    
+
+    /// How many things one frame may name. The camera used to publish exactly
+    /// ONE object per frame — the single strongest observation — so a room full
+    /// of recognisable things reported a single label, and the narrow product
+    /// model's one subject hid the rest of the frame behind it. Vision hands
+    /// back a ranked bag; report the bag.
+    public var maxReportedObjects: Int = 6
+
     /// Process every Nth frame (higher = better performance, lower = more responsive)
     /// Process every Nth frame. VNClassifyImageRequest is a full-taxonomy
     /// classifier and is expensive: every 5th frame of 30fps meant six of them
@@ -95,10 +102,11 @@ public class SimplifiedMLDetectionManager {
     private func performDetection(on pixelBuffer: CVPixelBuffer) {
         defer { isProcessing = false }
 
-        if let portalResult = classifyCommercialProduct(on: pixelBuffer) {
-            publish(portalResult, for: pixelBuffer)
-            return
-        }
+        // The bundled product classifier knows exactly one subject, so it is a
+        // BONUS label, never a gate. It used to `return` the moment it saw its
+        // one product, which is why the camera looked blind everywhere except
+        // at that product: a hit suppressed the full-taxonomy pass entirely.
+        let product = classifyCommercialProduct(on: pixelBuffer) ?? []
 
         let request = VNClassifyImageRequest()
         let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .up, options: [:])
@@ -107,12 +115,30 @@ public class SimplifiedMLDetectionManager {
             let observations = (request.results ?? [])
                 .filter { $0.confidence >= min(confidenceThreshold, 0.08) }
                 .prefix(14)
-            publish(preferredCommercialResult(from: Array(observations)), for: pixelBuffer)
+            let scene = preferredCommercialResult(from: Array(observations))
+            publish(Self.merged(product, scene), for: pixelBuffer)
         } catch {
+            // The scene pass failed — still report whatever the product model
+            // saw rather than dropping the frame's only answer.
+            publish(product, for: pixelBuffer)
             DispatchQueue.main.async {
                 self.onError?(error)
             }
         }
+    }
+
+    /// Product hits lead (they are the specific answer), then the scene labels,
+    /// with duplicates by name collapsed to their most confident reading.
+    private static func merged(_ lists: [DetectedObject]...) -> [DetectedObject] {
+        var seen = Set<String>()
+        var out: [DetectedObject] = []
+        for object in lists.flatMap({ $0 }) {
+            let key = object.identifier.lowercased()
+            guard !seen.contains(key) else { continue }
+            seen.insert(key)
+            out.append(object)
+        }
+        return out
     }
 
     /// The bundled classifier is deliberately narrow: it identifies a
@@ -197,30 +223,44 @@ public class SimplifiedMLDetectionManager {
             "display", "lcd", "monitor", "screen", "television"
         ])
 
+        // The refinement, when it fires, is the most SPECIFIC thing we can say
+        // about the frame, so it leads. It no longer *replaces* the frame's
+        // other contents — returning only this meant pointing the camera at a
+        // desk with a controller on it reported "game controller" and nothing
+        // else in the shot.
+        var refined: DetectedObject?
         if gaming && (handheld || display) {
-            return [DetectedObject(
+            refined = DetectedObject(
                 identifier: "gaming handheld",
                 confidence: max(strongest.confidence, 0.76)
-            )]
-        }
-        if gaming {
-            return [DetectedObject(
+            )
+        } else if gaming {
+            refined = DetectedObject(
                 identifier: "game controller",
                 confidence: max(strongest.confidence, 0.72)
-            )]
-        }
-        if handheld && display {
-            return [DetectedObject(
+            )
+        } else if handheld && display {
+            refined = DetectedObject(
                 identifier: "handheld device",
                 confidence: max(strongest.confidence, 0.68)
-            )]
+            )
         }
 
-        guard strongest.confidence >= confidenceThreshold else { return [] }
-        return [DetectedObject(
-            identifier: Self.readableLabel(strongest.identifier),
-            confidence: strongest.confidence
-        )]
+        // Everything else the frame actually contains, in Vision's own ranking.
+        // This is the line that makes the camera see a room instead of a single
+        // subject: one answer per frame was never a confidence problem, it was
+        // this function throwing thirteen live observations away.
+        let named = observations
+            .filter { $0.confidence >= confidenceThreshold }
+            .prefix(maxReportedObjects)
+            .map {
+                DetectedObject(
+                    identifier: Self.readableLabel($0.identifier),
+                    confidence: $0.confidence
+                )
+            }
+
+        return Self.merged(refined.map { [$0] } ?? [], Array(named))
     }
 
     /// Vision's taxonomy identifiers are machine-shaped ("coffee_mug",

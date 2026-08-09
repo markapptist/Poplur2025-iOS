@@ -818,7 +818,11 @@ struct HomeView: View {
                         await MainActor.run {
                             didTriggerMapInitialLoad = true
                             NotificationCenter.default.post(name: .LoadMapNow, object: nil)
-                            locationProvider.request()
+                            // Loading the map is not consent. If the permission
+                            // is already granted this picks the fix straight up;
+                            // if it is not, the web's clay primer asks first and
+                            // PoplurPermissionHandled brings us back here.
+                            locationProvider.requestIfAlreadyAuthorized()
                         }
                     }
                 }
