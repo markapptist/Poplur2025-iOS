@@ -2,7 +2,19 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <!-- maximum-scale/user-scalable are NOT cosmetic here: without them, tapping
+         the pop composer's message field permanently breaks the map's layout.
+         iOS WebKit auto-zooms the page whenever a text field with a computed
+         font-size UNDER 16px takes focus, and `.composeMessage` is a 10px
+         textarea. WebKit does not undo that zoom on blur, so the whole UI stays
+         scaled up with its right-hand side — "Post here", the radius total —
+         clipped off the screen until the app is relaunched. Pinning the scale is
+         the only lever that covers every such field at once, and it costs
+         nothing the app wants: Mapbox drives pinch-zoom from its own touch
+         handlers, not from page scale, so the map still zooms normally.
+         WKWebView honours this because `ignoresViewportScaleLimits` is left at
+         its default of false — if that is ever set true, this bug comes back. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <!-- The base background of a document — what WebKit paints BEFORE any author
          CSS applies — is white unless the document declares a dark colour scheme.
          This meta is honoured while the head is still parsing, earlier than the
@@ -18,8 +30,8 @@
       html { color-scheme: dark; }
       html, body, #root { width: 100%; height: 100%; overflow: hidden; background: #050407; }
     </style>
-    <script type="module" crossorigin src="./index-CKrSJFoy.js"></script>
-    <link rel="stylesheet" crossorigin href="./index-Djtxkl8V.css">
+    <script type="module" crossorigin src="./index-BwkjvXBx.js"></script>
+    <link rel="stylesheet" crossorigin href="./index-Da5lIS0L.css">
   </head>
   <body>
     <div id="root"></div>
