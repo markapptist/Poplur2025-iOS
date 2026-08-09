@@ -232,7 +232,7 @@
      viewports and push the text onto the buttons); only font-size scales. */
   .clayHead { top: 51%; width: 92%; font-size: clamp(22px, 7.4cqw, 34px); font-weight: 900; letter-spacing: 0.4px; }
   .claySub { top: calc(51% + 40px); width: 82%; font-size: clamp(13px, 4.3cqw, 18.5px); font-weight: 800; line-height: 1.5; }
-  .aiText { top: calc(51% + 104px); width: 84%; font-size: clamp(11px, 3.2cqw, 14px); font-weight: 800; opacity: 0; }
+  .aiText { white-space: nowrap; overflow: hidden; top: calc(51% + 104px); width: 84%; font-size: clamp(11px, 3.2cqw, 14px); font-weight: 800; opacity: 0; }
 
   /* Short screens (older/compact phones): compress the vertical rhythm so the
      text never collides with the bottom-anchored buttons. Tall modern phones
@@ -427,6 +427,34 @@
     transition: transform 0.25s cubic-bezier(0.22, 0.9, 0.3, 1.4);
   }
   .acctCard.on::after { transform: translateY(-50%) scale(1); }
+  /* The AI line runs longer than the column on plenty of phrases. It used to
+     be clipped mid-word; now the inner span slides left far enough to show the
+     tail, holds, and slides back — distance and duration are set from the
+     actual overflow, so short lines never move at all. */
+  #aiScroll { display: inline-block; will-change: transform; }
+  #aiScroll.scrolling { animation: aiScrollLeft var(--aiDur, 4s) ease-in-out both; }
+  @keyframes aiScrollLeft {
+    0%, 16% { transform: translateX(0); }
+    62%, 82% { transform: translateX(var(--aiShift, 0px)); }
+    100% { transform: translateX(0); }
+  }
+  /* ── Account-type explainer ──
+     What you are signing up for, before you are asked for anything. The art is
+     the same object as the card you just picked — the Mark head for personal,
+     the building for business — so the step reads as a continuation of that
+     choice rather than a new subject. */
+  .introArt { width: 96px; height: 96px; margin: 0 auto 2px; position: relative; }
+  .introArt canvas { width: 100%; height: 100%; display: block; }
+  .introList { display: flex; flex-direction: column; gap: 9px; width: min(268px, 82cqw);
+    margin: 2px auto 0; text-align: left; }
+  .introItem { display: flex; gap: 9px; align-items: flex-start;
+    font-size: clamp(10.5px, 3.1cqw, 12.5px); font-weight: 800; line-height: 1.34;
+    color: #fff2f8; text-shadow: 0 1px 3px rgba(104, 2, 48, 0.5); }
+  /* A clay pop rather than a bullet character: the dot is the product's own
+     mark, and it keeps the list left edge optically straight. */
+  .introItem::before { content: ""; flex: 0 0 auto; width: 9px; height: 9px; margin-top: 4px;
+    border-radius: 50%; background: radial-gradient(circle at 34% 30%, #ffd2e8, #ff2d96 62%, #b1004f);
+    box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.8), 0 1px 2px rgba(104, 2, 48, 0.5); }
   .acctCard.on {
     opacity: 1; scale: 1;
     box-shadow:
@@ -621,7 +649,7 @@
     </div>
     <p class="clayText clayHead" id="clayHead">Welcome to Poplur!</p>
     <p class="clayText claySub" id="claySub">Post. Explore. Connect.<br>Expand your world.</p>
-    <p class="clayText aiText" id="aiText" aria-live="polite">Poplur AI is shaping tonight&#8217;s map for you&#8230;</p>
+    <p class="clayText aiText" id="aiText" aria-live="polite"><span id="aiScroll">Poplur AI is shaping tonight&#8217;s map for you&#8230;</span></p>
   </div>
   <div class="pane" id="paneSignIn" aria-label="Sign in">
     <div class="formStack">
@@ -635,6 +663,18 @@
       </div>
       <button class="cap-btn paneBtn" type="button"><span class="shader-text">Sign In</span></button>
       <button class="authLink" type="button" data-goto="2">New here? <u>Create an account</u></button>
+    </div>
+  </div>
+  <div class="pane" id="paneAccountIntro" aria-label="What this account does">
+    <div class="formStack">
+      <div class="introArt">
+        <span class="account-3d-icon profile" id="introArtPersonal" role="img" aria-label="Mark Head 3D profile icon"><canvas data-account-model="/Poplur2025-iOS/Poplur2025/MarkHead_TalkingRig.glb" data-model-kind="head"></canvas></span>
+        <span class="account-3d-icon building" id="introArtBusiness" role="img" aria-label="Poplur 3D building icon" hidden><canvas data-account-model="/poplur-clay-map/public/zoom_buildings.glb" data-model-kind="building"></canvas></span>
+      </div>
+      <p class="clayText paneTitle stackTitle" id="introTitle">Personal</p>
+      <p class="stackSub" id="introSub">What a personal account does.</p>
+      <div class="introList" id="introList"></div>
+      <button class="cap-btn paneBtn" type="button" id="introNext"><span class="shader-text">Next</span></button>
     </div>
   </div>
   <div class="pane" id="paneSignUp" aria-label="Sign up">
@@ -1071,8 +1111,37 @@
       'Poplur AI is shaping tonight’s map for you…',
       'Three friends are already out near King West.',
       'Your neighbourhood radio is warming up.',
-      'Confetti forecast: 100% chance of pink.'
+      'Confetti forecast: 100% chance of pink.',
+      'Someone just claimed the block behind you.',
+      'Your radius grows every time you post.',
+      'The map is quieter east of here. For now.',
+      'Two streets away, something is happening.',
+      'Radius decays when you go quiet. Keep talking.',
+      'Tonight’s loudest corner is four minutes north.',
+      'A pop from this morning is still travelling.',
+      'You are inside seven other people’s circles.',
+      'The world is 6,371 km. You have some way to go.',
+      'Nearby: one lost dog, one free coffee.',
+      'Your last post reached further than you think.',
+      'Every pop you drop paints ground you keep.'
     ]
+    // Shuffled bag rather than a fixed cycle: a rotation of four was
+    // recognisable within one loop, and order is most of what makes repetition
+    // feel repetitive. Refilled when empty, and never repeats across a refill.
+    var aiBag = []
+    function nextAiLine () {
+      if (!aiBag.length) {
+        aiBag = aiLines.slice()
+        for (var i = aiBag.length - 1; i > 0; i--) {
+          var j = Math.floor(Math.random() * (i + 1))
+          var t = aiBag[i]; aiBag[i] = aiBag[j]; aiBag[j] = t
+        }
+        if (aiBag[aiBag.length - 1] === aiText.textContent && aiBag.length > 1) {
+          aiBag.unshift(aiBag.pop())
+        }
+      }
+      return aiBag.pop()
+    }
     var aiIndex = 0
     // Intro choreography, strictly ordered: logo pops in (CSS drop), buttons
     // rise (CSS btnIn), then the cube pops in once its model is ready, rises
@@ -1148,15 +1217,34 @@
       clearTimeout(layoutTimer)
       layoutTimer = setTimeout(computeLayout, 120)
     })
+    var aiScroll = document.getElementById('aiScroll')
+    // Measure after paint: a line only scrolls if it genuinely overflows, and
+    // the shift is exactly the overflow so it stops with the last word flush.
+    function fitAiLine () {
+      if (!aiScroll) return
+      aiScroll.classList.remove('scrolling')
+      aiScroll.style.removeProperty('--aiShift')
+      aiScroll.style.removeProperty('--aiDur')
+      var over = aiScroll.scrollWidth - aiText.clientWidth
+      if (over > 2) {
+        aiScroll.style.setProperty('--aiShift', (-over) + 'px')
+        aiScroll.style.setProperty('--aiDur', Math.min(6.5, 2.2 + over / 42) + 's')
+        void aiScroll.offsetWidth
+        aiScroll.classList.add('scrolling')
+      }
+    }
+    fitAiLine()
     setInterval(function () {
-      aiIndex = (aiIndex + 1) % aiLines.length
+      var line = nextAiLine()
       aiText.classList.remove('on')
       setTimeout(function () {
-        aiText.textContent = aiLines[aiIndex]
+        if (aiScroll) aiScroll.textContent = line
+        else aiText.textContent = line
         aiText.classList.add('on')
-        if (window.__poplurSpeakAI) window.__poplurSpeakAI(aiLines[aiIndex])
+        fitAiLine()
+        if (window.__poplurSpeakAI) window.__poplurSpeakAI(line)
       }, 450)
-    }, 4600)
+    }, 5200)
 
     // ── Radio bed — starts on the GCL audio grant or first touch, and keeps
     // playing across carousel slides so it is never cut off or restarted ──
@@ -1290,8 +1378,7 @@
       document.getElementById('paneBusinessProfile'),
       document.getElementById('paneVerify'),
       document.getElementById('paneReview'),
-      document.getElementById('paneProfilePhoto')
-    ]
+      document.getElementById('paneProfilePhoto'), document.getElementById('paneAccountIntro') ]
     var paneIndex = 0
     function setPane(index) {
       paneIndex = index
@@ -1304,7 +1391,7 @@
     }
     // Cube = back button. Each sign-up step goes back one logical page; the
     // personal photo pane (7) returns to Create login (3).
-    var BACK_FROM = { 1: 0, 2: 0, 3: 2, 4: 3, 5: 4, 6: 5, 7: 3 }
+    var BACK_FROM = { 1: 0, 2: 0, 3: 8, 4: 3, 5: 4, 6: 5, 7: 3, 8: 2 }
     function goBack() { setPane(BACK_FROM[paneIndex] != null ? BACK_FROM[paneIndex] : 0) }
     if (window.__poplurCubeOnBack) window.__poplurCubeOnBack(goBack)
     setPane(0)
@@ -1371,7 +1458,55 @@
       else { signupError((res && res.error) || 'Something went wrong. Please try again.') }
     }
     // Choose Account → Create login
-    document.querySelector('#paneSignUp .paneBtn').addEventListener('click', function () { setPane(3) })
+    document.querySelector('#paneSignUp .paneBtn').addEventListener('click', function () {
+      renderAccountIntro()
+      setPane(8)
+    })
+
+    // ── What you are signing up for, before you are asked for anything ──
+    // The two account types are not tiers of one product; they behave
+    // differently, so the copy is about behaviour rather than features.
+    var INTRO = {
+      personal: {
+        title: 'Personal',
+        sub: 'What a personal account does.',
+        points: [
+          'Your radius follows you. Everything you post radiates out from wherever you were standing.',
+          'Radius decays. Keep posting and it grows; go quiet and it shrinks back.',
+          'Take over ground on the map, one pop at a time — the goal is a radius the size of the world.',
+          'You are discovered by interception: people inside your circle see you, and you see theirs.'
+        ]
+      },
+      business: {
+        title: 'Business',
+        sub: 'What a business account does.',
+        points: [
+          'Your radius is anchored to your address, not your phone — it stays where your door is.',
+          'Your doorstep stays covered even on a quiet week, so people outside can always find you.',
+          'Reach locals actually within range, and post offers and bookings straight from your spot.',
+          'You see who you reached as numbers, never as individuals.'
+        ]
+      }
+    }
+
+    function renderAccountIntro () {
+      var biz = isBusiness()
+      var copy = biz ? INTRO.business : INTRO.personal
+      document.getElementById('introTitle').textContent = copy.title
+      document.getElementById('introSub').textContent = copy.sub
+      document.getElementById('introArtPersonal').hidden = biz
+      document.getElementById('introArtBusiness').hidden = !biz
+      var list = document.getElementById('introList')
+      list.textContent = ''
+      copy.points.forEach(function (text) {
+        var row = document.createElement('div')
+        row.className = 'introItem'
+        row.textContent = text
+        list.appendChild(row)
+      })
+    }
+
+    document.getElementById('introNext').addEventListener('click', function () { setPane(3) })
     // Create login → validated → Business profile (business) or done (personal)
     document.querySelector('#paneCreateLogin [data-signup-next]').addEventListener('click', function () {
       var email = document.querySelector('#paneCreateLogin input[type="email"]').value.trim()
@@ -1864,6 +1999,11 @@ if (POPLUR_WEBGL_OK) document.querySelectorAll("canvas[data-account-model]").for
       // has to win on priority, not just specificity.
       document.documentElement.style.setProperty('background', hex, 'important')
       if (document.body) document.body.style.setProperty('background', hex, 'important')
+      // .stage is the element the page actually paints pink; html/body are
+      // only visible at the safe-area edges. Missing this is why pressing the
+      // orb appeared to do nothing at all.
+      var stageEl = document.querySelector('.stage')
+      if (stageEl) stageEl.style.setProperty('background', hex, 'important')
       // The hub of the wheel IS the current colour, exactly as the map's
       // takeover picker shows the colour it is currently painting with.
       var wheel = document.getElementById('hueWheel')
@@ -1894,6 +2034,8 @@ if (POPLUR_WEBGL_OK) document.querySelectorAll("canvas[data-account-model]").for
         store(PICK, null)
         document.documentElement.style.removeProperty('background')
         if (document.body) document.body.style.removeProperty('background')
+        var st = document.querySelector('.stage')
+        if (st) st.style.removeProperty('background')
       }
       return !!on
     }
