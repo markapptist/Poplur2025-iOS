@@ -3231,97 +3231,6 @@ private struct MapRadioSearchChecklistView: View {
     }
 }
 
-private struct AddressSearchView: View {
-    @Binding var query: String
-    @Binding var results: [MKMapItem]
-    @Binding var isSearching: Bool
-    let onSelect: (MKMapItem) -> Void
-    
-    var body: some View {
-        NavigationStack {
-            VStack(spacing: 12) {
-                HStack {
-                    TextField("Search for a place or address", text: $query)
-                        .textFieldStyle(.roundedBorder)
-                        .disableAutocorrection(true)
-                        .textInputAutocapitalization(.never)
-                        .onSubmit {
-                            performSearch()
-                        }
-                    
-                    if isSearching {
-                        ProgressView()
-                            .padding(.leading, 4)
-                    }
-                    
-                    Button("Search") {
-                        performSearch()
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(query.trimmingCharacters(in: .whitespaces).isEmpty)
-                }
-                .padding()
-                
-                if results.isEmpty && !query.isEmpty && !isSearching {
-                    VStack(spacing: 12) {
-                        Image(systemName: "magnifyingglass")
-                            .poplurIconShader()
-                            .font(.largeTitle)
-                            .foregroundStyle(.secondary)
-                        Text("No results found")
-                            .font(.headline)
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if results.isEmpty {
-                    VStack(spacing: 12) {
-                        Image(systemName: "map")
-                            .poplurIconShader()
-                            .font(.largeTitle)
-                            .foregroundStyle(.secondary)
-                        Text("Search for any address or place")
-                            .font(.headline)
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    List(results, id: \.self) { item in
-                        Button(action: {
-                            onSelect(item)
-                        }) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(item.name ?? "Unknown")
-                                    .font(.headline)
-                                    .foregroundStyle(.primary)
-                                if let title = item.placemark.title {
-                                    Text(title)
-                                        .font(.subheadline)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            .navigationTitle("Search Address")
-            .navigationBarTitleDisplayMode(.inline)
-        }
-    }
-    
-    private func performSearch() {
-        guard !query.trimmingCharacters(in: .whitespaces).isEmpty else { return }
-        isSearching = true
-        results = []
-        
-        let request = MKLocalSearch.Request()
-        request.naturalLanguageQuery = query
-        let search = MKLocalSearch(request: request)
-        search.start { response, _ in
-            self.results = response?.mapItems ?? []
-            self.isSearching = false
-        }
-    }
-}
 
 // MARK: - SceneKit Rotating Bar View (replaces Earth globe)
 
@@ -3764,6 +3673,111 @@ private struct RotatingEarthGlobePreview: View {
 }
 
 #endif // End of DEBUG preview views
+
+// MARK: - Address Search (Available in all builds)
+
+// This lives OUT here, not in the DEBUG block above, and must stay out.
+//
+// It is the address search UI, and `locationSearchSheet` renders it
+// unconditionally for the live map. Defining it inside `#if DEBUG` compiled
+// fine in Debug and broke EVERY Release build with "cannot find
+// AddressSearchView in scope": Release does not define DEBUG, so the
+// definition vanished while the reference stayed. That shipped broken from
+// 2026-06-13 (cb61632) until it was caught by a release build on 2026-08-09.
+//
+// The block above is SwiftUI preview tooling. Nothing a shipping view
+// renders may be defined inside it.
+private struct AddressSearchView: View {
+    @Binding var query: String
+    @Binding var results: [MKMapItem]
+    @Binding var isSearching: Bool
+    let onSelect: (MKMapItem) -> Void
+    
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 12) {
+                HStack {
+                    TextField("Search for a place or address", text: $query)
+                        .textFieldStyle(.roundedBorder)
+                        .disableAutocorrection(true)
+                        .textInputAutocapitalization(.never)
+                        .onSubmit {
+                            performSearch()
+                        }
+                    
+                    if isSearching {
+                        ProgressView()
+                            .padding(.leading, 4)
+                    }
+                    
+                    Button("Search") {
+                        performSearch()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(query.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+                .padding()
+                
+                if results.isEmpty && !query.isEmpty && !isSearching {
+                    VStack(spacing: 12) {
+                        Image(systemName: "magnifyingglass")
+                            .poplurIconShader()
+                            .font(.largeTitle)
+                            .foregroundStyle(.secondary)
+                        Text("No results found")
+                            .font(.headline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if results.isEmpty {
+                    VStack(spacing: 12) {
+                        Image(systemName: "map")
+                            .poplurIconShader()
+                            .font(.largeTitle)
+                            .foregroundStyle(.secondary)
+                        Text("Search for any address or place")
+                            .font(.headline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List(results, id: \.self) { item in
+                        Button(action: {
+                            onSelect(item)
+                        }) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(item.name ?? "Unknown")
+                                    .font(.headline)
+                                    .foregroundStyle(.primary)
+                                if let title = item.placemark.title {
+                                    Text(title)
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Search Address")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+    
+    private func performSearch() {
+        guard !query.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        isSearching = true
+        results = []
+        
+        let request = MKLocalSearch.Request()
+        request.naturalLanguageQuery = query
+        let search = MKLocalSearch(request: request)
+        search.start { response, _ in
+            self.results = response?.mapItems ?? []
+            self.isSearching = false
+        }
+    }
+}
 
 // MARK: - Cube Hold Search Overlay (Available in all builds)
 
