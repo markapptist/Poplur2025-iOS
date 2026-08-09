@@ -106,9 +106,11 @@
     filter: drop-shadow(0 2px 4px rgba(90, 0, 40, 0.5)); }
   .muteBtn:active { transform: scale(0.9); }
 
-  /* ── Colour lab (DEV ONLY) ───────────────────────────────────────────────
-     Hidden unless explicitly switched on: ?colorlab=1 once, or
-     __poplurColorLab(true) from a console. Customers never see it.
+  /* ── Colour orb ──────────────────────────────────────────────────────────
+     Ships to customers: pressing it randomises the background within the
+     brand's pink range. `?colorlab=0` (or __poplurColorLab(false)) is kept as
+     a kill switch, so the .poplur-colorlab class below is now present by
+     default instead of only on an explicit opt-in.
      Geometry is a deliberate mirror of .muteBtn — same top, same padding,
      same z-index, same shadow, `right` swapped for `left` — so the two read
      as one pair across the top of the screen rather than two near-matches. */
@@ -1964,12 +1966,14 @@ if (POPLUR_WEBGL_OK) document.querySelectorAll("canvas[data-account-model]").for
 </script>
 
 <script>
-  // ── Pre-login colour lab (DEV ONLY) ────────────────────────────────────────
-  // Off by default and gated twice over, because this page ships to iOS,
-  // Android and React Native: the button is display:none until <html> carries
-  // .poplur-colorlab, and that class is only added on an explicit opt-in.
-  //   ?colorlab=1        turn on (remembered on this device)
+  // ── Pre-login colour orb ───────────────────────────────────────────────────
+  // ON by default: this is a customer-facing control on iOS, Android and React
+  // Native. The CSS still keys off the .poplur-colorlab class on <html>; boot()
+  // now adds it unless the person has explicitly opted out, which is why the
+  // styling above did not have to change at all.
+  //   ?colorlab=0        turn off (remembered on this device)
   //   __poplurColorLab(false)  turn off
+  //   ?colorlab=1 / __poplurColorLab(true)  turn back on
   //
   // Colours stay on-brand: the page background is #ff2d96 = hsl(330 100% 59%),
   // so the lab roams H 315-345, S 70-100%, L 45-68% — tone and saturation vary,
@@ -1980,7 +1984,7 @@ if (POPLUR_WEBGL_OK) document.querySelectorAll("canvas[data-account-model]").for
     function store (k, v) { try { v === null ? localStorage.removeItem(k) : localStorage.setItem(k, v) } catch (e) {} }
 
     if (/[?&]colorlab=1/.test(location.search)) store(KEY, '1')
-    if (/[?&]colorlab=0/.test(location.search)) store(KEY, null)
+    if (/[?&]colorlab=0/.test(location.search)) store(KEY, '0')
 
     function hslToHex (h, s, l) {
       s /= 100; l /= 100
@@ -2029,7 +2033,9 @@ if (POPLUR_WEBGL_OK) document.querySelectorAll("canvas[data-account-model]").for
 
     function enable (on) {
       document.documentElement.classList.toggle('poplur-colorlab', !!on)
-      store(KEY, on ? '1' : null)
+      // '0' rather than removing the key: absence now means "on" (the default),
+      // so an opt-out has to be recorded explicitly or it would not survive.
+      store(KEY, on ? '1' : '0')
       if (!on) {
         store(PICK, null)
         document.documentElement.style.removeProperty('background')
@@ -2044,7 +2050,7 @@ if (POPLUR_WEBGL_OK) document.querySelectorAll("canvas[data-account-model]").for
     window.__poplurColorRoll = roll
 
     function boot () {
-      if (stored(KEY) !== '1') return
+      if (stored(KEY) === '0') return
       enable(true)
       // Re-apply across the splash -> welcome handoff so a colour you are
       // judging does not reset itself halfway through the flow.

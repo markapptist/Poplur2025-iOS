@@ -193,7 +193,13 @@
     function resumeRadio() {
       try { radioBed.currentTime = parseFloat(sessionStorage.getItem("poplurRadio.t") || "0") || 0; } catch {}
       radioBed.muted = false;
-      if (radioBed.volume === 1) radioBed.volume = 0.55;
+      // Fuzz bed silenced permanently; kept only as a clock — the element still
+      // runs so it can hand `poplurRadio.t` to Welcome, but nobody hears it.
+      // radio_bed.wav is mono 11 kHz on a 12s loop: audible, it is just a buzz.
+      // Welcome already does this (`radio.volume = 0`) and so does the map
+      // (mapRadio.ts `fallbackAudio.volume = 0`); the splash was the last
+      // surface still playing it out loud, at 0.55.
+      radioBed.volume = 0;
       radioBed.play().catch(() => {});
     }
     setInterval(() => {
