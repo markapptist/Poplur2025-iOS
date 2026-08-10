@@ -231,6 +231,7 @@ const POPLUR_WEBGL_OK = (function () {
   // ── Native bridge (Phase-2 web-embed) ──────────────────────────────────────
   // Defined action set (identical on iOS + Android):
   //   signIn | signUp | requestPermission(permission: camera|location) | complete | pop
+  //   radioStations({callbackId}) -> window.__poplurStationsResult(callbackId, list)
   // iOS delivery:     window.webkit.messageHandlers.poplur.postMessage({action, ...})
   // Android delivery: window.PoplurNative.onAction(action, JSON.stringify(rest))
   // Auth + OS permission prompts stay Phase-3 stubs on the native side (log, no
@@ -259,9 +260,40 @@ const POPLUR_WEBGL_OK = (function () {
       signUp: function (d) { return post(assign({ action: 'signUp' }, d)); },
       requestPermission: function (permission, d) { return post(assign({ action: 'requestPermission', permission: permission }, d)); },
       complete: function (d) { return post(assign({ action: 'complete' }, d)); },
-      pop: function () { return post({ action: 'pop' }); }
+      pop: function () { return post({ action: 'pop' }); },
+      stations: function (d) { return post(assign({ action: 'radioStations' }, d)); }
     };
   })();
+
+  // ── Live radio lookup, through the bridge ──────────────────────────────────
+  // The page's own station lookup is a raw fetch that cannot run inside an
+  // offline bundle, so native makes the call and hands the list back. The
+  // resolved object is shaped like a fetch Response purely so the page's
+  // existing .then(function (r) { return r.json() }) chain is left untouched.
+  window.__poplurStationsPending = {};
+  window.__poplurStationsResult = function (id, list) {
+    var fn = window.__poplurStationsPending[id];
+    if (fn) fn(list);
+  };
+  window.__poplurTuneStations = function () {
+    return new Promise(function (resolve) {
+      var id = 'st' + Date.now() + Math.random().toString(36).slice(2, 8);
+      var settled = false;
+      function finish(list) {
+        if (settled) return;
+        settled = true;
+        delete window.__poplurStationsPending[id];
+        resolve({ json: function () { return Promise.resolve(list || []); } });
+      }
+      window.__poplurStationsPending[id] = finish;
+      // An empty list is the graceful outcome: tryNext() simply never tunes and
+      // pre-login stays silent, exactly as it did before this existed. The
+      // promise must never be left hanging — an unresolved lookup is what
+      // stranded the clay map offline, and this flow gates a launch screen.
+      setTimeout(function () { finish([]); }, 6000);
+      if (!window.poplurBridge || !window.poplurBridge.stations({ callbackId: id })) finish([]);
+    });
+  };
   let stableViewportWidth = innerWidth`
   );
 
@@ -337,12 +369,17 @@ const POPLUR_WEBGL_OK = (function () {
     "          if (btn.dataset.permission === 'allow') allowedAny = true\n          if (window.poplurBridge) poplurBridge.requestPermission('camera', { choice: btn.dataset.permission })\n          sessionStorage.setItem('poplurWelcomePerms', '1')"
   );
 
-  // 9g. Offline bundle: the welcome's live radio-station lookup can't reach the
-  //     network inside the WKWebView bundle, so reject the fetch — the existing
-  //     .catch keeps the radio graceful (silent), and no http ref remains.
+  // 9g. Live radio: the welcome's station lookup is a raw fetch to
+  //     radio-browser, which cannot run inside an offline bundle — and an
+  //     unreachable host is precisely the hang the clay map's Mapbox call used
+  //     to cause. It used to be rejected outright, which is why pre-login never
+  //     tuned anything while the map tuned a real local station. Route it
+  //     through the bridge instead: no http ref remains in the bundle, the URL
+  //     lives on the native side, and native can use the device's real location
+  //     rather than the coordinates hardcoded in the approved source.
   out = out.replace(
     /fetch\('https:\/\/de1\.api\.radio-browser\.info\/[^']*'\)/,
-    "Promise.reject(new Error('offline radio'))"
+    "window.__poplurTuneStations()"
   );
 
   return out;

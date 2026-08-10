@@ -802,6 +802,7 @@
   // ── Native bridge (Phase-2 web-embed) ──────────────────────────────────────
   // Defined action set (identical on iOS + Android):
   //   signIn | signUp | requestPermission(permission: camera|location) | complete | pop
+  //   radioStations({callbackId}) -> window.__poplurStationsResult(callbackId, list)
   // iOS delivery:     window.webkit.messageHandlers.poplur.postMessage({action, ...})
   // Android delivery: window.PoplurNative.onAction(action, JSON.stringify(rest))
   // Auth + OS permission prompts stay Phase-3 stubs on the native side (log, no
@@ -830,9 +831,40 @@
       signUp: function (d) { return post(assign({ action: 'signUp' }, d)); },
       requestPermission: function (permission, d) { return post(assign({ action: 'requestPermission', permission: permission }, d)); },
       complete: function (d) { return post(assign({ action: 'complete' }, d)); },
-      pop: function () { return post({ action: 'pop' }); }
+      pop: function () { return post({ action: 'pop' }); },
+      stations: function (d) { return post(assign({ action: 'radioStations' }, d)); }
     };
   })();
+
+  // ── Live radio lookup, through the bridge ──────────────────────────────────
+  // The page's own station lookup is a raw fetch that cannot run inside an
+  // offline bundle, so native makes the call and hands the list back. The
+  // resolved object is shaped like a fetch Response purely so the page's
+  // existing .then(function (r) { return r.json() }) chain is left untouched.
+  window.__poplurStationsPending = {};
+  window.__poplurStationsResult = function (id, list) {
+    var fn = window.__poplurStationsPending[id];
+    if (fn) fn(list);
+  };
+  window.__poplurTuneStations = function () {
+    return new Promise(function (resolve) {
+      var id = 'st' + Date.now() + Math.random().toString(36).slice(2, 8);
+      var settled = false;
+      function finish(list) {
+        if (settled) return;
+        settled = true;
+        delete window.__poplurStationsPending[id];
+        resolve({ json: function () { return Promise.resolve(list || []); } });
+      }
+      window.__poplurStationsPending[id] = finish;
+      // An empty list is the graceful outcome: tryNext() simply never tunes and
+      // pre-login stays silent, exactly as it did before this existed. The
+      // promise must never be left hanging — an unresolved lookup is what
+      // stranded the clay map offline, and this flow gates a launch screen.
+      setTimeout(function () { finish([]); }, 6000);
+      if (!window.poplurBridge || !window.poplurBridge.stations({ callbackId: id })) finish([]);
+    });
+  };
   let stableViewportWidth = innerWidth
   let stableViewportHeight = innerHeight
   const keyboardEditorIsFocused = () => {
@@ -1341,7 +1373,7 @@
       live.addEventListener('error', function () { if (!tuned) tryNext() })
       live.addEventListener('stalled', function () { if (!tuned) tryNext() })
       function tune () {
-        Promise.reject(new Error('offline radio'))
+        window.__poplurTuneStations()
           .then(function (r) { return r.json() })
           .then(function (list) { stations = list || []; idx = 0; tryNext() })
           .catch(function () {})

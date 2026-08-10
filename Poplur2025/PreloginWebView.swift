@@ -445,12 +445,85 @@ struct PreloginWebView: UIViewRepresentable {
                 default:
                     print("[PreloginWebView] unhandled permission: \(permission)")
                 }
+            case "radioStations":
+                // Live radio, the way the map already does it. The page's own
+                // lookup is a raw fetch that the offline bundle strips, so the
+                // call is made here and the list handed back.
+                //
+                // No permission is asked for. Pre-login deliberately defers every
+                // OS prompt until the feature that needs it is used, and a radio
+                // bed is not worth a location dialog on a launch screen — so this
+                // uses a location the person has ALREADY granted, and otherwise
+                // falls back to the coordinates the approved source hardcodes.
+                let callbackId = body?["callbackId"] as? String ?? ""
+                let status = locationRequester.authorizationStatus
+                let authorized = (status == .authorizedWhenInUse || status == .authorizedAlways)
+                let coordinate = authorized ? locationRequester.location?.coordinate : nil
+                fetchRadioStations(
+                    latitude: coordinate?.latitude ?? Self.fallbackRadioLatitude,
+                    longitude: coordinate?.longitude ?? Self.fallbackRadioLongitude,
+                    callbackId: callbackId
+                )
             case "complete":
                 // Flow finished → hand off to the existing post-login path.
                 PoplurPermissionRouting.markPreloginHandledThisLaunch()
                 onComplete()
             default:
                 print("[PreloginWebView] unhandled bridge action: \(action)")
+            }
+        }
+
+        // MARK: - Live radio
+
+        /// Same coordinates the approved Welcome source hardcodes, used whenever
+        /// the person has not already granted location.
+        private static let fallbackRadioLatitude = 43.6532
+        private static let fallbackRadioLongitude = -79.3832
+
+        private func fetchRadioStations(latitude: Double, longitude: Double, callbackId: String) {
+            var components = URLComponents(string: "https://de1.api.radio-browser.info/json/stations/search")
+            components?.queryItems = [
+                URLQueryItem(name: "geo_lat", value: String(latitude)),
+                URLQueryItem(name: "geo_long", value: String(longitude)),
+                URLQueryItem(name: "geo_distance", value: "90000"),
+                URLQueryItem(name: "hidebroken", value: "true"),
+                URLQueryItem(name: "order", value: "clickcount"),
+                URLQueryItem(name: "reverse", value: "true"),
+                URLQueryItem(name: "limit", value: "16")
+            ]
+            guard let url = components?.url else {
+                postRadioStations("[]", callbackId: callbackId)
+                return
+            }
+            var request = URLRequest(url: url)
+            // A launch screen must never wait on a third party. The web side gives
+            // up after 6s; this gives up sooner so an empty list is a decision
+            // rather than a timeout racing another timeout.
+            request.timeoutInterval = 4
+            URLSession.shared.dataTask(with: request) { [weak self] data, _, _ in
+                // Only well-formed JSON is handed to evaluateJavaScript. The
+                // response is third-party text being placed in an expression
+                // position, so parsing it first is what keeps it a value and not
+                // a script.
+                guard let data,
+                      (try? JSONSerialization.jsonObject(with: data)) != nil,
+                      let json = String(data: data, encoding: .utf8) else {
+                    self?.postRadioStations("[]", callbackId: callbackId)
+                    return
+                }
+                self?.postRadioStations(json, callbackId: callbackId)
+            }.resume()
+        }
+
+        private func postRadioStations(_ json: String, callbackId: String) {
+            // The id is generated web-side as 'st' + digits + base36, so stripping
+            // it to alphanumerics cannot change a legitimate value and cannot let
+            // a crafted one close the quote.
+            let safeId = callbackId.filter { $0.isLetter || $0.isNumber }
+            DispatchQueue.main.async { [weak self] in
+                self?.webView?.evaluateJavaScript(
+                    "window.__poplurStationsResult && window.__poplurStationsResult('\(safeId)', \(json))"
+                )
             }
         }
 
