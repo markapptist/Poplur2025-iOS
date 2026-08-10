@@ -487,6 +487,10 @@ struct PreloginWebView: UIViewRepresentable {
                 URLQueryItem(name: "geo_long", value: String(longitude)),
                 URLQueryItem(name: "geo_distance", value: "90000"),
                 URLQueryItem(name: "hidebroken", value: "true"),
+                // Nearest-by-popularity happily returns 32kbps mono streams, and
+                // a heavily compressed stream behind the music is indistinguishable
+                // from a fault in the app. Ask for something worth listening to.
+                URLQueryItem(name: "bitrateMin", value: "96"),
                 URLQueryItem(name: "order", value: "clickcount"),
                 URLQueryItem(name: "reverse", value: "true"),
                 URLQueryItem(name: "limit", value: "16")

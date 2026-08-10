@@ -221,6 +221,15 @@
   /* ── Cube rise + clay copy ── */
   .cubeStage { transition: top 0.95s cubic-bezier(0.22, 0.9, 0.32, 1), transform 0.95s cubic-bezier(0.22, 0.9, 0.32, 1); }
   .cubeStage.risen { top: 37.4%; transform: translate(-50%, -50%) scale(0.72); }
+  /* The explainer is the tallest pane in the flow — art, title, sub, four
+     paragraphs and a button — and at the risen size the Next button fell off
+     the bottom of the screen. Here the cube shrinks further and rises further,
+     and the stack comes up to meet it. It inherits .cubeStage's transition, so
+     stepping onto the pane interpolates rather than jumping.
+     flex-start rather than centred: the stack scrolls, and a centred overflow
+     clips at BOTH ends, which is what was eating the button. */
+  .phone.introPane .cubeStage.risen { top: 26.5%; transform: translate(-50%, -50%) scale(0.5); }
+  .phone.introPane #paneAccountIntro .formStack { top: 33%; justify-content: flex-start; }
 
   /* Cream extruded clay type — chunky rounded letterforms, soft top light,
      pressed pink under-shadow */
@@ -632,6 +641,11 @@
   /* Sign-up account icons — same live 3D icons as the approved flow */
   .account-3d-icon{position:relative;flex:0 0 42px;width:42px;height:42px;display:block;overflow:hidden;border-radius:13px;background:radial-gradient(circle at 36% 22%,#fff 0,#fcecf5 44%,#e6cade 100%);box-shadow:inset 2px 2px 3px rgba(255,255,255,.85),inset -2px -3px 4px rgba(148,84,118,.34),0 4px 8px rgba(90,20,60,.25)}
   .account-3d-icon canvas{display:block;width:100%;height:100%;filter:drop-shadow(0 3px 2px rgba(65,0,35,.25))}
+  /* `hidden` is only a user-agent style, and the display:block above outranks
+     it — which is why the explainer showed the personal AND the business
+     picture stacked on top of each other. The renderer also swaps the canvas
+     for an <img>, so this has to sit on the holder, not the canvas. */
+  .account-3d-icon[hidden]{display:none}
   </style>
 
 
@@ -1316,7 +1330,11 @@
     var audioOn = false
     var synth = window.speechSynthesis
     function speakAI(text) {
-      if (!audioOn || !synth) return
+      // The mute control has to hold the AI down too. applyMute() cancels
+      // whatever is mid-sentence, but without this check the NEXT line simply
+      // started talking again at full volume — which from the outside is
+      // exactly "the volume does not control the AI voice".
+      if (!audioOn || !synth || window.__poplurMuted) return
       try {
         synth.cancel()
         synth.resume && synth.resume()
@@ -1452,6 +1470,10 @@
       // The cube is the back button on sub screens: it turns to its back-icon
       // face and pops; tapping it returns to the welcome pane.
       if (window.__poplurCubeMode) window.__poplurCubeMode(index > 0 ? 'back' : 'spin')
+      // The explainer needs more vertical room than any other pane. The class
+      // drives both halves of that — a smaller, higher cube and a stack that
+      // comes up with it — so the two move as one.
+      document.querySelector('.phone')?.classList.toggle('introPane', index === 8)
     }
     // Cube = back button. Each sign-up step goes back one logical page; the
     // personal photo pane (7) returns to Create login (3).
