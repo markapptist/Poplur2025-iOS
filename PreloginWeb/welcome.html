@@ -1,4 +1,4 @@
-<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,interactive-widget=overlays-content"><style>:root{color-scheme:dark}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}</style></head><body>
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,interactive-widget=overlays-content,viewport-fit=cover"><style>:root{color-scheme:dark}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}</style></head><body>
 <title>Poplur &#8212; Welcome</title>
 <!-- Canonical Claude artifact 4d731082, adapted only to remove artifact/phone chrome inside Good Copy. -->
 <style>
@@ -101,7 +101,14 @@
   .worldMapMotion { position: absolute; inset: 0; z-index: 2; width: 100%; height: 100%; pointer-events: none; mix-blend-mode: screen; }
   .confetti { position: absolute; inset: 0; z-index: 4; overflow: hidden; pointer-events: none; }
   /* Mute toggle: bare glyph in the top-left safe area — no pill, no background */
-  .muteBtn { position: absolute; top: clamp(12px, 3cqw, 20px); left: clamp(12px, 3cqw, 20px); z-index: 60;
+  /* The insets are why this needs viewport-fit=cover above. On a phone the page
+     is full-bleed (.phone is forced to 100%/100% and the WebView ignores the
+     safe area), so 12-20px from the top put this glyph under the Dynamic
+     Island. In the desktop prototype frame the insets resolve to 0, so the
+     composition there is unchanged. */
+  .muteBtn { position: absolute;
+    top: calc(env(safe-area-inset-top, 0px) + clamp(12px, 3cqw, 20px));
+    left: calc(env(safe-area-inset-left, 0px) + clamp(12px, 3cqw, 20px)); z-index: 60;
     appearance: none; background: none; border: 0; padding: 6px; cursor: pointer; line-height: 0;
     filter: drop-shadow(0 2px 4px rgba(90, 0, 40, 0.5)); }
   .muteBtn:active { transform: scale(0.9); }
@@ -117,7 +124,9 @@
   .hueBtn { display: none; }
   html.poplur-colorlab .hueBtn {
     display: block;
-    position: absolute; top: clamp(12px, 3cqw, 20px); right: clamp(12px, 3cqw, 20px); z-index: 60;
+    position: absolute;
+    top: calc(env(safe-area-inset-top, 0px) + clamp(12px, 3cqw, 20px));
+    right: calc(env(safe-area-inset-right, 0px) + clamp(12px, 3cqw, 20px)); z-index: 60;
     appearance: none; background: none; border: 0; padding: 6px; cursor: pointer; line-height: 0; }
   html.poplur-colorlab .hueBtn:active { transform: scale(0.9); }
   /* The map's takeover picker, brought over so the two colour controls in the
