@@ -1056,8 +1056,18 @@
     var mode = 'spin', movedFar = false, arrivalPopped = false
     // Face yaws measured against the icon cube GLB: CHECK 0° (front),
     // FORWARD 90° (right), ERROR 180° (rear), BACK 270° (left).
-    var FACE_YAW = { check: 0, forward: 90, error: 180, back: 270 }
+    // The cube carries exactly ONE arrow and it points RIGHT (yaw 90). Rendering
+    // all six faces showed there is nothing left-pointing to rest on: yaw 270 is
+    // a hook, and yaw 180 — long labelled 'error' — is a SECOND checkmark, so a
+    // failed sign-in used to answer with a tick. BACK is therefore that same
+    // right arrow rolled 180 degrees in the screen plane: upside down, which
+    // reads as pointing back. Failure no longer turns to a face at all — it
+    // shakes where it stands. An unknown name falls through to BACK.
+    var FACE_YAW = { check: 0, forward: 90, back: 90 }
+    var FACE_ROLL = { check: 0, forward: 0, back: 180 }
     var restYaw = FACE_YAW.back
+    var restRoll = 0
+    var roll = 0
     var onCubeBack = null
     function nearestFace() {
       var quarter = ((Math.round(yaw / 90) * 90) % 360 + 360) % 360
@@ -1067,7 +1077,8 @@
     window.__poplurCubeMode = function (next) {
       mode = next === 'back' ? 'face' : next
       arrivalPopped = false
-      if (mode === 'face') restYaw = FACE_YAW.back
+      if (mode === 'face') { restYaw = FACE_YAW.back; restRoll = FACE_ROLL.back }
+      else restRoll = 0
       stage.setAttribute('aria-label', mode === 'face' ? 'Back to welcome' : 'Poplur cube')
       if (mode === 'face') stage.setAttribute('role', 'button')
       else stage.removeAttribute('role')
@@ -1076,6 +1087,7 @@
     window.__poplurCubeFace = function (name, shake) {
       if (mode !== 'face') return
       restYaw = FACE_YAW[name] != null ? FACE_YAW[name] : FACE_YAW.back
+      restRoll = FACE_ROLL[name] != null ? FACE_ROLL[name] : FACE_ROLL.back
       arrivalPopped = false
       if (shake) { stage.classList.remove('shake'); void stage.offsetWidth; stage.classList.add('shake') }
     }
@@ -1109,6 +1121,7 @@
       } else {
         // Free drag to inspect faces, then re-settle on BACK ready to go back.
         restYaw = FACE_YAW.back
+        restRoll = FACE_ROLL.back
         arrivalPopped = false
       }
     }
@@ -1137,6 +1150,10 @@
       }
       // The GL cube reads this yaw each frame; there is no CSS cube any more.
       window.__poplurCubeYaw = yaw
+      // The roll eases on the same curve as the yaw, so turning upside down is
+      // part of one movement rather than a flip bolted on after it arrives.
+      roll += (restRoll - roll) * Math.min(1, dt * 6)
+      window.__poplurCubeRoll = roll
     }
     requestAnimationFrame(loop)
   })()
@@ -1449,13 +1466,13 @@
       window.__poplurCubeFace('check')
       setTimeout(function () { window.__poplurCubeFace('back') }, 1300)
     }
-    // Validation failure: cube shakes onto ERROR, a permission-style alert
-    // explains what's missing, then the cube returns to BACK so the user can
-    // still go backwards.
+    // Validation failure: the cube SHAKES where it stands and a permission-style
+    // alert explains what is missing. It used to turn to FACE_YAW.error, which is
+    // a checkmark on this model — so getting your password wrong answered with a
+    // tick. Staying on the back arrow also means the way out never moves.
     function signupError(message) {
-      if (window.__poplurCubeFace) window.__poplurCubeFace('error', true)
+      if (window.__poplurCubeFace) window.__poplurCubeFace('back', true)
       if (window.__poplurShowAlert) window.__poplurShowAlert(message, 'Hold on!')
-      setTimeout(function () { if (window.__poplurCubeFace) window.__poplurCubeFace('back') }, 1600)
     }
     // Login outcome drives the cube: valid details → success gesture; a bad
     // login shakes it onto the ERROR face and raises the alert.
@@ -1945,9 +1962,14 @@ if (POPLUR_WEBGL_OK) document.querySelectorAll("canvas[data-account-model]").for
     scene.add(new THREE.HemisphereLight(0xffffff, 0x7b2456, 2.1));
     const key = new THREE.DirectionalLight(0xffffff, 2.9); key.position.set(3, 5, 4); scene.add(key);
     const fill = new THREE.DirectionalLight(0xff82bc, 1.3); fill.position.set(-4, 1, 2); scene.add(fill);
+    // Two groups, not one. The roll has to happen in the SCREEN plane, after the
+    // tilt and the yaw — rolled inside the model's own frame, "upside down" would
+    // swing the arrow out of view instead of flipping it over.
+    const rollGroup = new THREE.Group();
+    scene.add(rollGroup);
     const group = new THREE.Group();
     group.rotation.x = 14 * Math.PI / 180;
-    scene.add(group);
+    rollGroup.add(group);
 
     const onContextLost = event => {
       event.preventDefault();
@@ -1958,8 +1980,10 @@ if (POPLUR_WEBGL_OK) document.querySelectorAll("canvas[data-account-model]").for
     canvas.addEventListener("webglcontextlost", onContextLost, false);
     runtime = { renderer, canvas, onContextLost, frame: 0 };
 
-    // Face map: top P·poplur, front CHECK, right FORWARD, left BACK,
-    // rear ERROR, bottom globe. Offset aligns the GLB front to CHECK.
+    // Face map, verified by rendering all six: front CHECK, right FORWARD, rear
+    // a SECOND CHECK, left a hook, top and bottom Poplur badges. There is no
+    // back arrow and no error mark on this model, so BACK reuses the right arrow
+    // rolled 180 degrees and failure shakes rather than turning to a face.
     loader.load("/poplur-clay-map/public/poplur_icon_cube.glb", gltf => {
       if (!runtime || runtime.renderer !== renderer) return;
       const model = gltf.scene;
@@ -1976,6 +2000,11 @@ if (POPLUR_WEBGL_OK) document.querySelectorAll("canvas[data-account-model]").for
         if (!runtime || runtime.renderer !== renderer) return;
         runtime.frame = requestAnimationFrame(draw);
         group.rotation.y = (window.__poplurCubeYaw || 0) * Math.PI / 180;
+        const rollRad = (window.__poplurCubeRoll || 0) * Math.PI / 180;
+        rollGroup.rotation.z = rollRad;
+        // Counter the tilt as it rolls, so the cube keeps leaning toward the
+        // viewer instead of appearing to lean away once it is upside down.
+        group.rotation.x = (14 * Math.PI / 180) * Math.cos(rollRad);
         renderer.render(scene, camera);
       };
       draw();
