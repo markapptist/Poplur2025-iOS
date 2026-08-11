@@ -327,10 +327,8 @@ private struct CameraRollPickerRepresentable: UIViewControllerRepresentable {
                     .appendingPathExtension(fileExtension)
 
                 do {
-                    if FileManager.default.fileExists(atPath: destination.path) {
-                        try FileManager.default.removeItem(at: destination)
-                    }
                     try FileManager.default.copyItem(at: url, to: destination)
+                    PoplurTemporaryFileOwnership.claim(destination)
                     DispatchQueue.main.async {
                         onVideoSelected(destination)
                     }
@@ -361,7 +359,11 @@ private enum CameraRollSelectionDispatcher {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
             NotificationCenter.default.post(
                 name: Notification.Name("ShowCapturePreviewOverlay"),
-                object: videoURL
+                object: videoURL,
+                userInfo: [
+                    PoplurTemporaryFileOwnership.notificationKey:
+                        PoplurTemporaryFileOwnership.isOwned(videoURL)
+                ]
             )
         }
     }

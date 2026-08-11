@@ -7,141 +7,194 @@ struct CachedUserProfile: Sendable {
     let photoURL: URL?
 }
 
+/// A bounded, expiring profile cache. A single entry owns both the name and
+/// photo so the two caches cannot independently grow for the lifetime of the
+/// process.
 actor UsernameCache {
     static let shared = UsernameCache()
 
-    private var cache: [String: String] = [:]          // uid -> username
-    private var photoCache: [String: URL] = [:]            // uid -> photoURL
-    private var inFlight: [String: Task<String?, Never>] = [:]
-    private var profileInFlight: [String: Task<CachedUserProfile?, Never>] = [:]
+    private struct CacheEntry {
+        let profile: CachedUserProfile?
+        let expiresAt: Date
+        var lastAccess: UInt64
+    }
+
+    private struct InFlightRequest {
+        let id: UUID
+        let startedAt: UInt64
+        let cacheGeneration: UInt64
+        let task: Task<CachedUserProfile?, Never>
+    }
+
+    private static let maximumEntryCount = 256
+    private static let maximumConcurrentRequests = 6
+    private static let entryLifetime: TimeInterval = 30 * 60
+    private static let failedLookupLifetime: TimeInterval = 60
+
+    private var entries: [String: CacheEntry] = [:]
+    private var inFlight: [String: InFlightRequest] = [:]
+    private var accessCounter: UInt64 = 0
+    private var requestCounter: UInt64 = 0
+    private var cacheGeneration: UInt64 = 0
+    private var earliestExpiration = Date.distantFuture
 
     func username(for uid: String) async -> String? {
-        // Guard against empty UIDs
-        guard !uid.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            print("UsernameCache: attempted to fetch username for empty UID")
-            return nil
-        }
-        
-        if let cached = cache[uid] { return cached }
-        
-        if let task = inFlight[uid] {
-            return await task.value
-        }
+        await profile(for: uid)?.displayName
+    }
 
-        let task = Task<String?, Never> {
-            defer { Task { self.clearInFlight(for: uid) } }
-            do {
-                let snap = try await Firestore.firestore().collection("users").document(uid).getDocument()
-                guard let data = snap.data() else { return nil }
-                // Prefer displayName; fall back to username
-                let displayName = (data["displayName"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-                let username = (data["username"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-                let name = (displayName?.isEmpty == false ? displayName : (username?.isEmpty == false ? username : nil))
-                if let name {
-                    store(username: name, for: uid)
-                }
-                // Also cache photoURL if present
-                if let photoString = data["photoURL"] as? String, let url = URL(string: photoString) {
-                    store(photoURL: url, for: uid)
-                }
-                return name
-            } catch {
-                print("UsernameCache: fetch failed for \(uid): \(error.localizedDescription)")
-                return nil
-            }
-        }
-        inFlight[uid] = task
-        return await task.value
-    }
-    
-    /// Prefetch usernames for an array of UIDs (call this when posts load)
-    func prefetch(uids: [String]) async {
-        // Filter out already cached and empty UIDs
-        let uncached = uids.filter { uid in
-            !uid.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && cache[uid] == nil
-        }
-        
-        guard !uncached.isEmpty else { return }
-        
-        // Fetch all uncached usernames concurrently
-        await withTaskGroup(of: Void.self) { group in
-            for uid in uncached {
-                group.addTask {
-                    _ = await self.username(for: uid)
-                }
-            }
-        }
-    }
-    
     func profile(for uid: String) async -> CachedUserProfile? {
-        // Guard against empty UIDs
-        guard !uid.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        let normalizedUID = uid.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedUID.isEmpty else {
             print("UsernameCache: attempted to fetch profile for empty UID")
             return nil
         }
 
-        // Return from caches if available
-        let cachedName = cache[uid]
-        let cachedPhoto = photoCache[uid]
-        if cachedName != nil || cachedPhoto != nil {
-            return CachedUserProfile(uid: uid, displayName: cachedName, photoURL: cachedPhoto)
-        }
+        while true {
+            let now = Date()
+            removeExpiredEntries(at: now)
 
-        if let task = profileInFlight[uid] {
-            return await task.value
-        }
-
-        let task = Task<CachedUserProfile?, Never> {
-            defer { Task { self.clearProfileInFlight(for: uid) } }
-            do {
-                let snap = try await Firestore.firestore().collection("users").document(uid).getDocument()
-                guard let data = snap.data() else { return nil }
-                let displayName = (data["displayName"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-                let username = (data["username"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-                let name = (displayName?.isEmpty == false ? displayName : (username?.isEmpty == false ? username : nil))
-                let photoURL: URL? = {
-                    if let photoString = data["photoURL"] as? String, let url = URL(string: photoString) { return url }
-                    return nil
-                }()
-                if let name { store(username: name, for: uid) }
-                if let photoURL { store(photoURL: photoURL, for: uid) }
-                return CachedUserProfile(uid: uid, displayName: name, photoURL: photoURL)
-            } catch {
-                print("UsernameCache: profile fetch failed for \(uid): \(error.localizedDescription)")
-                return nil
+            if var entry = entries[normalizedUID] {
+                entry.lastAccess = nextAccessOrdinal()
+                entries[normalizedUID] = entry
+                return entry.profile
             }
+
+            if let request = inFlight[normalizedUID] {
+                let result = await request.task.value
+                finish(request, for: normalizedUID, result: result)
+                guard request.cacheGeneration == cacheGeneration else { continue }
+                return result
+            }
+
+            if inFlight.count < Self.maximumConcurrentRequests {
+                let request = makeRequest(for: normalizedUID)
+                inFlight[normalizedUID] = request
+
+                let result = await request.task.value
+                finish(request, for: normalizedUID, result: result)
+                guard request.cacheGeneration == cacheGeneration else { continue }
+                return result
+            }
+
+            // Help retire the oldest request instead of allocating an
+            // unbounded waiter queue. Actor reentrancy lets other completions
+            // make progress while this await is suspended.
+            guard let oldest = inFlight.min(by: { $0.value.startedAt < $1.value.startedAt }) else {
+                continue
+            }
+            let result = await oldest.value.task.value
+            finish(oldest.value, for: oldest.key, result: result)
         }
-        profileInFlight[uid] = task
-        return await task.value
     }
-    
+
+    /// Prefetches with a bounded task group. The actor also enforces the same
+    /// hard Firestore concurrency ceiling for direct callers.
+    func prefetch(uids: [String]) async {
+        await prefetchProfiles(uids: uids)
+    }
+
     func prefetchProfiles(uids: [String]) async {
-        let uncached = uids.filter { uid in
-            !uid.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && (cache[uid] == nil || photoCache[uid] == nil)
-        }
-        guard !uncached.isEmpty else { return }
         await withTaskGroup(of: Void.self) { group in
-            for uid in uncached {
-                group.addTask {
-                    _ = await self.profile(for: uid)
+            var activeTasks = 0
+            for rawUID in uids {
+                let uid = rawUID.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !uid.isEmpty else { continue }
+                removeExpiredEntries(at: Date())
+                guard entries[uid] == nil else { continue }
+
+                if activeTasks == Self.maximumConcurrentRequests {
+                    _ = await group.next()
+                    activeTasks -= 1
                 }
+                group.addTask { _ = await self.profile(for: uid) }
+                activeTasks += 1
+            }
+
+            while activeTasks > 0 {
+                _ = await group.next()
+                activeTasks -= 1
             }
         }
     }
 
-    private func store(username: String, for uid: String) {
-        cache[uid] = username
+    /// Releases all retained profiles and prevents requests that were already
+    /// running from repopulating the cache after the purge.
+    func purge() {
+        entries.removeAll(keepingCapacity: false)
+        earliestExpiration = .distantFuture
+        cacheGeneration &+= 1
+        // Keep canceled requests registered until their await completes. This
+        // guarantees a purge cannot temporarily exceed the hard request cap.
+        inFlight.values.forEach { $0.task.cancel() }
     }
 
-    private func store(photoURL: URL, for uid: String) {
-        photoCache[uid] = photoURL
+    private func makeRequest(for uid: String) -> InFlightRequest {
+        requestCounter &+= 1
+        let task = Task<CachedUserProfile?, Never> {
+            await Self.fetchProfileFromFirestore(uid: uid)
+        }
+        return InFlightRequest(
+            id: UUID(),
+            startedAt: requestCounter,
+            cacheGeneration: cacheGeneration,
+            task: task
+        )
     }
 
-    private func clearInFlight(for uid: String) {
+    private func finish(
+        _ request: InFlightRequest,
+        for uid: String,
+        result: CachedUserProfile?
+    ) {
+        guard inFlight[uid]?.id == request.id else { return }
         inFlight.removeValue(forKey: uid)
+        guard request.cacheGeneration == cacheGeneration else { return }
+        store(result, for: uid)
     }
 
-    private func clearProfileInFlight(for uid: String) {
-        profileInFlight.removeValue(forKey: uid)
+    private func store(_ profile: CachedUserProfile?, for uid: String) {
+        removeExpiredEntries(at: Date())
+        if entries[uid] == nil, entries.count >= Self.maximumEntryCount,
+           let leastRecent = entries.min(by: { $0.value.lastAccess < $1.value.lastAccess })?.key {
+            entries.removeValue(forKey: leastRecent)
+        }
+        let expiresAt = Date().addingTimeInterval(
+            profile == nil ? Self.failedLookupLifetime : Self.entryLifetime
+        )
+        entries[uid] = CacheEntry(
+            profile: profile,
+            expiresAt: expiresAt,
+            lastAccess: nextAccessOrdinal()
+        )
+        earliestExpiration = min(earliestExpiration, expiresAt)
+    }
+
+    private func removeExpiredEntries(at date: Date) {
+        guard date >= earliestExpiration else { return }
+        entries = entries.filter { $0.value.expiresAt > date }
+        earliestExpiration = entries.values.map(\.expiresAt).min() ?? .distantFuture
+    }
+
+    private func nextAccessOrdinal() -> UInt64 {
+        accessCounter &+= 1
+        return accessCounter
+    }
+
+    nonisolated private static func fetchProfileFromFirestore(uid: String) async -> CachedUserProfile? {
+        do {
+            let snapshot = try await Firestore.firestore().collection("users").document(uid).getDocument()
+            guard let data = snapshot.data() else { return nil }
+
+            let displayName = (data["displayName"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let username = (data["username"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let name = displayName?.isEmpty == false
+                ? displayName
+                : (username?.isEmpty == false ? username : nil)
+            let photoURL = (data["photoURL"] as? String).flatMap(URL.init(string:))
+            return CachedUserProfile(uid: uid, displayName: name, photoURL: photoURL)
+        } catch {
+            print("UsernameCache: profile fetch failed for \(uid): \(error.localizedDescription)")
+            return nil
+        }
     }
 }

@@ -463,7 +463,7 @@ struct HomeView: View {
     @State private var cameraDetectedPostCount: Int? = nil
 
     // Location only when needed
-    @StateObject private var locationProvider = LocationProvider()
+    @ObservedObject private var locationProvider = LocationProvider.shared
 
     @StateObject private var cameraControllerHolder = LazyHomeCameraControllerHolder()
 
@@ -818,11 +818,8 @@ struct HomeView: View {
                         await MainActor.run {
                             didTriggerMapInitialLoad = true
                             NotificationCenter.default.post(name: .LoadMapNow, object: nil)
-                            // Loading the map is not consent. If the permission
-                            // is already granted this picks the fix straight up;
-                            // if it is not, the web's clay primer asks first and
-                            // PoplurPermissionHandled brings us back here.
-                            locationProvider.requestIfAlreadyAuthorized()
+                            // MapViewProduction owns the single shared location
+                            // lease and requests its bounded fix on appearance.
                         }
                     }
                 }
@@ -1325,6 +1322,7 @@ struct HomeView: View {
 
     @MainActor
     private func closeLiveLocationPicker() {
+        locationProvider.stop()
         withAnimation(.spring(response: 0.28, dampingFraction: 0.84)) {
             showLiveLocationPicker = false
         }

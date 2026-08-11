@@ -125,6 +125,7 @@ struct FeedStylePostView: View {
     var onDismiss: () -> Void
     
     @State private var player: AVPlayer?
+    @State private var videoEndObserver: NSObjectProtocol?
     
     private var isVideo: Bool {
         let url = post.mediaURL.lowercased()
@@ -363,8 +364,7 @@ struct FeedStylePostView: View {
             }
         }
         .onDisappear {
-            player?.pause()
-            player = nil
+            teardownVideoPlayer()
         }
         .onTapGesture {
             onDismiss()
@@ -373,20 +373,30 @@ struct FeedStylePostView: View {
     
     private func setupVideoPlayer() {
         guard let url = URL(string: post.mediaURL) else { return }
+        teardownVideoPlayer()
         let player = AVPlayer(url: url)
         player.isMuted = true
         self.player = player
         player.play()
         
         // Loop video
-        NotificationCenter.default.addObserver(
+        videoEndObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,
             object: player.currentItem,
             queue: .main
-        ) { _ in
-            player.seek(to: .zero)
-            player.play()
+        ) { [weak player] _ in
+            player?.seek(to: .zero)
+            player?.play()
         }
+    }
+
+    private func teardownVideoPlayer() {
+        if let videoEndObserver {
+            NotificationCenter.default.removeObserver(videoEndObserver)
+            self.videoEndObserver = nil
+        }
+        player?.pause()
+        player = nil
     }
     
     private func formatRadiusCount(_ radius: Double) -> String {

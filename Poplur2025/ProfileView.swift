@@ -125,12 +125,14 @@ struct ProfileView: View {
     
     // Track if we're viewing own profile or another user's
     private var myPostsTotalRadiusKM: Double {
-        Double(myPosts.reduce(0) { $0 + $1.radius }) / 1000.0
+        Double(evictedPostRadius + myPosts.reduce(0) { $0 + $1.radius }) / 1000.0
     }
 
     private var profileTotalRadiusMeters: Int {
-        myPosts.reduce(0) { $0 + $1.radius }
+        evictedPostRadius + myPosts.reduce(0) { $0 + $1.radius }
     }
+
+    private var loadedPostCount: Int { evictedPostCount + myPosts.count }
 
     private var isOwnProfile: Bool {
         let targetUserID = effectiveUserID
@@ -164,7 +166,11 @@ struct ProfileView: View {
     @AppStorage("poplur.profile.heyPoplurTutorialSeen.v1") private var hasSeenHeyPoplurProfileTutorial = false
     @State private var showHeyPoplurProfileTutorial = false
     @State private var myPosts: [Post] = []
+    // Preview-only images. Production tiles load lazily through the global,
+    // byte-bounded ImageCache instead of retaining every decoded profile image.
     @State private var loadedImages: [String: UIImage] = [:]
+    @State private var evictedPostRadius = 0
+    @State private var evictedPostCount = 0
     @State private var isLoading = false
     @State private var hasLoadedOnce = false
     @State private var expandedPost: Post? = nil
@@ -200,6 +206,9 @@ struct ProfileView: View {
     @State private var canLoadMore = true
     @State private var lastDocument: QueryDocumentSnapshot? = nil
     private let pageSize = 18
+    private static let maximumRetainedPostCount = 108
+    private static let maximumProfileCacheFileCount = 12
+    private static let maximumProfileCacheFileBytes = 2_000_000
 
     private enum ProfileSubmenuRoute {
         case mail
@@ -414,9 +423,17 @@ struct ProfileView: View {
         let url = cacheFileURL(for: uid)
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
         do {
+            let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+            if let fileSize = attributes[.size] as? NSNumber,
+               fileSize.intValue > Self.maximumProfileCacheFileBytes {
+                try? FileManager.default.removeItem(at: url)
+                return nil
+            }
             let data = try Data(contentsOf: url)
             let cached = try JSONDecoder().decode([CachedPost].self, from: data)
-            return cached.map { Post(id: $0.id, latitude: $0.latitude, longitude: $0.longitude, mediaURL: $0.mediaURL, radius: $0.radius, viewCount: $0.viewCount, userID: $0.userID, posterURL: $0.posterURL) }
+            return cached.prefix(Self.maximumRetainedPostCount).map {
+                Post(id: $0.id, latitude: $0.latitude, longitude: $0.longitude, mediaURL: $0.mediaURL, radius: $0.radius, viewCount: $0.viewCount, userID: $0.userID, posterURL: $0.posterURL)
+            }
         } catch {
             print("Profile cache: failed to read -> \(error.localizedDescription)")
             return nil
@@ -425,12 +442,38 @@ struct ProfileView: View {
 
     private func savePostsToCache(_ posts: [Post], for uid: String) {
         let url = cacheFileURL(for: uid)
-        let toCache = posts.map { CachedPost(id: $0.id, latitude: $0.latitude, longitude: $0.longitude, mediaURL: $0.mediaURL, posterURL: $0.posterURL, radius: $0.radius, viewCount: $0.viewCount, userID: $0.userID) }
+        let toCache = posts.prefix(Self.maximumRetainedPostCount).map {
+            CachedPost(id: $0.id, latitude: $0.latitude, longitude: $0.longitude, mediaURL: $0.mediaURL, posterURL: $0.posterURL, radius: $0.radius, viewCount: $0.viewCount, userID: $0.userID)
+        }
         do {
             let data = try JSONEncoder().encode(toCache)
             try data.write(to: url, options: .atomic)
+            pruneProfilePostCacheFiles()
         } catch {
             print("Profile cache: failed to write -> \(error.localizedDescription)")
+        }
+    }
+
+    private func pruneProfilePostCacheFiles() {
+        let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let keys: Set<URLResourceKey> = [.contentModificationDateKey, .isRegularFileKey]
+        guard let urls = try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: Array(keys),
+            options: [.skipsHiddenFiles]
+        ) else { return }
+
+        let cacheFiles = urls.filter {
+            $0.lastPathComponent.hasPrefix("profile_posts_") && $0.pathExtension == "json"
+        }.sorted {
+            let lhs = (try? $0.resourceValues(forKeys: keys).contentModificationDate) ?? .distantPast
+            let rhs = (try? $1.resourceValues(forKeys: keys).contentModificationDate) ?? .distantPast
+            if lhs != rhs { return lhs > rhs }
+            return $0.lastPathComponent < $1.lastPathComponent
+        }
+
+        for staleURL in cacheFiles.dropFirst(Self.maximumProfileCacheFileCount) {
+            try? FileManager.default.removeItem(at: staleURL)
         }
     }
 
@@ -1304,11 +1347,46 @@ struct ProfileView: View {
         userProfile = nil
         profileImage = nil
         profileImageURL = nil
-        myPosts = []
-        loadedImages = [:]
+        replaceRetainedPosts(with: [])
         hasLoadedOnce = false
         averageRadius = 0
         animateRadius(to: 0, duration: 0.3)
+    }
+
+    private func replaceRetainedPosts(with posts: [Post]) {
+        myPosts = Array(posts.prefix(Self.maximumRetainedPostCount))
+        let evicted = posts.dropFirst(Self.maximumRetainedPostCount)
+        evictedPostRadius = evicted.reduce(0) { $0 + $1.radius }
+        evictedPostCount = evicted.count
+        let retainedIDs = Set(myPosts.map(\.id))
+        loadedImages = loadedImages.filter { retainedIDs.contains($0.key) }
+    }
+
+    private func appendRetainedPage(_ posts: [Post]) {
+        let retainedIDs = Set(myPosts.map(\.id))
+        myPosts.append(contentsOf: posts.filter { !retainedIDs.contains($0.id) })
+        let overflow = myPosts.count - Self.maximumRetainedPostCount
+        if overflow > 0 {
+            let evicted = myPosts.prefix(overflow)
+            evictedPostCount += evicted.count
+            evictedPostRadius += evicted.reduce(0) { $0 + $1.radius }
+            let evictedIDs = Set(evicted.map(\.id))
+            myPosts.removeFirst(overflow)
+            loadedImages = loadedImages.filter { !evictedIDs.contains($0.key) }
+        }
+    }
+
+    private func insertNewestRetainedPost(_ post: Post) {
+        myPosts.insert(post, at: 0)
+        let overflow = myPosts.count - Self.maximumRetainedPostCount
+        if overflow > 0 {
+            let evicted = myPosts.suffix(overflow)
+            evictedPostCount += evicted.count
+            evictedPostRadius += evicted.reduce(0) { $0 + $1.radius }
+            let evictedIDs = Set(evicted.map(\.id))
+            myPosts.removeLast(overflow)
+            loadedImages = loadedImages.filter { !evictedIDs.contains($0.key) }
+        }
     }
 
     private func handleOpenUserDetailForUser(_ notification: Notification) {
@@ -1430,9 +1508,8 @@ struct ProfileView: View {
             posterURL: nil
         )
         if myPosts.contains(where: { $0.id == id }) { return }
-        myPosts.insert(newPost, at: 0)
+        insertNewestRetainedPost(newPost)
         savePostsToCache(myPosts, for: uid)
-        Task.detached { await prefetchImages(for: [newPost]) }
         averageRadius = Double(averagePostRadius())
         animateRadius(to: averageRadius, duration: 0.8)
         refreshDailyNotificationsFromCurrentPosts()
@@ -1634,7 +1711,7 @@ struct ProfileView: View {
                     profileImage: profileImage,
                     profileImageURL: profileImageURL ?? userProfile?.profilePictureURL,
                     totalRadiusKM: myPostsTotalRadiusKM,
-                    postCount: myPosts.count,
+                    postCount: loadedPostCount,
                     size: size,
                     skin: cubeSkinStore.current
                 )
@@ -1775,7 +1852,7 @@ struct ProfileView: View {
             )
             profileStatChip(
                 title: "Posts",
-                value: "\(myPosts.count)",
+                value: "\(loadedPostCount)",
                 systemImage: "square.grid.3x3.fill"
             )
         }
@@ -1908,7 +1985,7 @@ struct ProfileView: View {
                 userID: "preview-user"
             )
         }
-        myPosts = previewPosts
+        replaceRetainedPosts(with: previewPosts)
         loadedImages = Dictionary(uniqueKeysWithValues: previewPosts.map { post in
             (post.id, previewProfileImage(seed: post.id.hashValue))
         })
@@ -1963,8 +2040,7 @@ struct ProfileView: View {
         } else {
             print("❌ [ProfileView] No user ID available - not logged in?")
             await MainActor.run {
-                myPosts = []
-                loadedImages = [:]
+                replaceRetainedPosts(with: [])
                 hasLoadedOnce = true
                 canLoadMore = false
                 lastDocument = nil
@@ -2003,7 +2079,7 @@ struct ProfileView: View {
             }
             
             await MainActor.run {
-                self.myPosts = convertedPosts
+                self.replaceRetainedPosts(with: convertedPosts)
                 self.hasLoadedOnce = true
                 self.canLoadMore = false
                 self.averageRadius = Double(self.averagePostRadius())
@@ -2011,20 +2087,17 @@ struct ProfileView: View {
                 self.refreshDailyNotificationsFromCurrentPosts()
             }
             
-            Task.detached { await prefetchImages(for: convertedPosts) }
             return
         }
         
         // Try to show cached posts immediately for better perceived performance
         if let cached = loadPostsFromCache(for: targetUID), !cached.isEmpty {
             await MainActor.run {
-                self.myPosts = cached
+                self.replaceRetainedPosts(with: cached)
                 self.hasLoadedOnce = true
                 self.averageRadius = Double(self.averagePostRadius())
                 self.refreshDailyNotificationsFromCurrentPosts()
             }
-            // Prefetch images for cached posts
-            Task.detached { await prefetchImages(for: cached) }
         } else {
             await MainActor.run {
                 self.averageRadius = 0
@@ -2036,15 +2109,14 @@ struct ProfileView: View {
             isLoading = true
             canLoadMore = true
             lastDocument = nil
-            myPosts = []
-            loadedImages = [:]
+            replaceRetainedPosts(with: [])
         }
         defer { Task { @MainActor in isLoading = false } }
 
         do {
             let page = try await fetchPostsPage(for: targetUID, after: nil, limit: pageSize)
             await MainActor.run {
-                self.myPosts = page.posts
+                self.replaceRetainedPosts(with: page.posts)
                 self.lastDocument = page.lastDoc
                 self.canLoadMore = page.posts.count >= pageSize && page.lastDoc != nil
                 self.averageRadius = Double(self.averagePostRadius())
@@ -2053,7 +2125,6 @@ struct ProfileView: View {
             }
             // Persist latest posts to cache
             savePostsToCache(page.posts, for: targetUID)
-            Task.detached { await prefetchImages(for: page.posts) }
             
             if page.posts.isEmpty {
                 await MainActor.run {
@@ -2066,17 +2137,14 @@ struct ProfileView: View {
             // Fall back to cache if available
             if let cached = loadPostsFromCache(for: targetUID), !cached.isEmpty {
                 await MainActor.run {
-                    self.myPosts = cached
-                    self.loadedImages = [:]
+                    self.replaceRetainedPosts(with: cached)
                     self.hasLoadedOnce = true
                     self.canLoadMore = false
                     self.averageRadius = Double(self.averagePostRadius())
                 }
-                Task.detached { await prefetchImages(for: cached) }
             } else {
                 await MainActor.run {
-                    self.myPosts = []
-                    self.loadedImages = [:]
+                    self.replaceRetainedPosts(with: [])
                     self.hasLoadedOnce = true
                     self.canLoadMore = false
                     self.averageRadius = 0
@@ -2096,26 +2164,24 @@ struct ProfileView: View {
                 Post(id: feedPost.id, latitude: feedPost.latitude, longitude: feedPost.longitude, mediaURL: feedPost.mediaURL, radius: Int(feedPost.radius), viewCount: feedPost.viewCount, userID: feedPost.userID, posterURL: nil)
             }
             await MainActor.run {
-                self.myPosts = converted
+                self.replaceRetainedPosts(with: converted)
                 self.hasLoadedOnce = true
                 self.canLoadMore = false
                 self.averageRadius = Double(self.averagePostRadius())
                 self.isLoading = false
                 self.refreshDailyNotificationsFromCurrentPosts()
             }
-            Task.detached { await prefetchImages(for: converted) }
             return
         }
 
         // Cached posts first
         if let cached = loadPostsFromCache(for: uid), !cached.isEmpty {
             await MainActor.run {
-                self.myPosts = cached
+                self.replaceRetainedPosts(with: cached)
                 self.hasLoadedOnce = true
                 self.averageRadius = Double(self.averagePostRadius())
                 self.refreshDailyNotificationsFromCurrentPosts()
             }
-            Task.detached { await prefetchImages(for: cached) }
         } else {
             await MainActor.run {
                 self.averageRadius = 0
@@ -2127,15 +2193,14 @@ struct ProfileView: View {
             isLoading = true
             canLoadMore = true
             lastDocument = nil
-            myPosts = []
-            loadedImages = [:]
+            replaceRetainedPosts(with: [])
         }
         defer { Task { @MainActor in isLoading = false } }
 
         do {
             let page = try await fetchPostsPage(for: uid, after: nil, limit: pageSize)
             await MainActor.run {
-                self.myPosts = page.posts
+                self.replaceRetainedPosts(with: page.posts)
                 self.lastDocument = page.lastDoc
                 self.canLoadMore = page.posts.count >= pageSize && page.lastDoc != nil
                 self.averageRadius = Double(self.averagePostRadius())
@@ -2143,7 +2208,6 @@ struct ProfileView: View {
                 self.refreshDailyNotificationsFromCurrentPosts()
             }
             savePostsToCache(page.posts, for: uid)
-            Task.detached { await prefetchImages(for: page.posts) }
             
             if page.posts.isEmpty {
                 await MainActor.run {
@@ -2155,18 +2219,15 @@ struct ProfileView: View {
             print("Profile: forced load failed -> \(error.localizedDescription)")
             if let cached = loadPostsFromCache(for: uid), !cached.isEmpty {
                 await MainActor.run {
-                    self.myPosts = cached
-                    self.loadedImages = [:]
+                    self.replaceRetainedPosts(with: cached)
                     self.hasLoadedOnce = true
                     self.canLoadMore = false
                     self.averageRadius = Double(self.averagePostRadius())
                     self.refreshDailyNotificationsFromCurrentPosts()
                 }
-                Task.detached { await prefetchImages(for: cached) }
             } else {
                 await MainActor.run {
-                    self.myPosts = []
-                    self.loadedImages = [:]
+                    self.replaceRetainedPosts(with: [])
                     self.hasLoadedOnce = true
                     self.canLoadMore = false
                     self.averageRadius = 0
@@ -2199,14 +2260,13 @@ struct ProfileView: View {
         do {
             let page = try await fetchPostsPage(for: targetUID, after: lastDocument, limit: pageSize)
             await MainActor.run {
-                self.myPosts.append(contentsOf: page.posts)
+                self.appendRetainedPage(page.posts)
                 self.lastDocument = page.lastDoc
                 self.canLoadMore = page.posts.count >= pageSize && page.lastDoc != nil
                 self.averageRadius = Double(self.averagePostRadius())
             }
             // Update cache with appended posts
             savePostsToCache(self.myPosts, for: targetUID)
-            Task.detached { await prefetchImages(for: page.posts) }
         } catch {
             print("Profile: failed to load more -> \(error.localizedDescription)")
             await MainActor.run { self.canLoadMore = false }
@@ -2414,60 +2474,6 @@ struct ProfileView: View {
         }
     }
 
-    private func prefetchImages(for posts: [Post]) async {
-        await withTaskGroup(of: Void.self) { group in
-            for post in posts where loadedImages[post.id] == nil && imageSource(for: post) != nil {
-                group.addTask {
-                    await loadImageFor(post: post)
-                }
-            }
-        }
-    }
-
-    private func imageSource(for post: Post) -> String? {
-        let lower = post.mediaURL.lowercased()
-        let isVideo = lower.contains(".mp4")
-            || lower.contains(".mov")
-            || lower.contains(".m4v")
-            || lower.contains(".m3u8")
-            || lower.contains("video")
-        if isVideo {
-            return post.posterURL?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-                ? post.posterURL
-                : nil
-        }
-        return post.mediaURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : post.mediaURL
-    }
-
-    private func localImage(for source: String) -> UIImage? {
-        let assetPrefix = "asset://"
-        if source.hasPrefix(assetPrefix) {
-            let name = String(source.dropFirst(assetPrefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
-            return name.isEmpty ? nil : UIImage(named: name)
-        }
-        if let url = URL(string: source), url.isFileURL {
-            return UIImage(contentsOfFile: url.path)
-        }
-        return nil
-    }
-
-    private func loadImageFor(post: Post) async {
-        guard let source = imageSource(for: post) else { return }
-        if let image = localImage(for: source) {
-            await MainActor.run {
-                self.loadedImages[post.id] = image
-            }
-            return
-        }
-        guard let url = URL(string: source), ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return }
-        let image = await CachedImageLoader.shared.load(url)
-        if let image = image {
-            await MainActor.run {
-                self.loadedImages[post.id] = image
-            }
-        }
-    }
-
     @discardableResult
     private func saveProfileImage(_ image: UIImage) throws -> URL {
         let url = profileImageFileURL()
@@ -2489,9 +2495,9 @@ struct ProfileView: View {
     }
     
     private func averagePostRadius() -> Int {
-        if myPosts.isEmpty { return 0 }
+        if myPosts.isEmpty && evictedPostCount == 0 { return 0 }
         // Changed to total accumulated radius instead of average
-        let total = myPosts.reduce(0) { $0 + $1.radius }
+        let total = evictedPostRadius + myPosts.reduce(0) { $0 + $1.radius }
         return total
     }
 
@@ -3507,6 +3513,11 @@ private struct ProfileGridTile: View {
             guard let url = URL(string: source), ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return }
             if let image = await CachedImageLoader.shared.load(url) {
                 await MainActor.run { loadedImage = image }
+            }
+        }
+        .onDisappear {
+            if preloadedImage == nil {
+                loadedImage = nil
             }
         }
     }

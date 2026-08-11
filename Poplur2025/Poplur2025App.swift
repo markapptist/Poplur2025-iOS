@@ -473,6 +473,17 @@ struct Poplur2025App: App {
                   auth.isAuthenticated else { return }
             showAuthTransition = true
         }
+        // Absolute native escape hatch. Neither the managed JavaScript clock,
+        // WebKit navigation callbacks nor a renderer lease is allowed to own
+        // the lifetime of this cover. A warm-device thermal tripwire can park
+        // all three; without this independent deadline the splash WebView (and
+        // its media process) could remain mounted forever. Home may continue
+        // recovering behind it, but the cover itself is always dismantled.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+            guard token == authTransitionToken, auth.isAuthenticated else { return }
+            isAuthenticatedHomeReady = true
+            finishAuthTransitionIfReady()
+        }
     }
 
     private func markAuthenticatedHomeReady() {

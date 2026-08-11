@@ -1,5 +1,6 @@
 import AVFoundation
 import Combine
+import CoreImage
 import CoreLocation
 import CoreMedia
 import CoreVideo
@@ -10,10 +11,68 @@ private enum CameraAnalysisPipeline: Int {
     case faceRecognition
     case classification
     case objectBoxes
+    case arFilter
 
     var next: CameraAnalysisPipeline {
-        CameraAnalysisPipeline(rawValue: (rawValue + 1) % 3) ?? .faceRecognition
+        CameraAnalysisPipeline(rawValue: (rawValue + 1) % 4) ?? .faceRecognition
     }
+
+    var diagnosticName: String {
+        switch self {
+        case .faceRecognition: return "face"
+        case .classification: return "classification"
+        case .objectBoxes: return "boxes"
+        case .arFilter: return "arFilter"
+        }
+    }
+}
+
+private struct CameraAnalysisClaim {
+    let id: UInt64
+    let generation: UInt64
+    let pipeline: CameraAnalysisPipeline
+}
+
+enum CameraColdBudgetState: String, Codable, Sendable {
+    case running
+    case parked
+    case recording
+}
+
+enum CameraColdBudgetReason: String, Codable, Sendable {
+    case entry
+    case explicitResume
+    case windowExpired
+    case recordingStarted
+    case recordingFinished
+    case thermal
+    case leftCamera
+    case unavailable
+}
+
+struct CameraColdBudgetUpdate: Sendable {
+    let state: CameraColdBudgetState
+    let reason: CameraColdBudgetReason
+    let canResume: Bool
+    let windowMilliseconds: Int
+}
+
+private struct CameraColdBudgetRecord: Codable, Sendable {
+    let timestamp: Date
+    let state: CameraColdBudgetState
+    let reason: CameraColdBudgetReason
+    let canResume: Bool
+    let activeWindowDurationSeconds: Double
+    let thermalState: String
+    let performanceMode: String
+    let applicationLifecycle: String
+    let analysisFamilyInFlight: String?
+    let lastAnalysisTimeoutFamily: String?
+    let cameraPosition: String
+    let wasRecording: Bool
+    let mlEnabled: Bool
+    let arEnabled: Bool
+    let torchEnabled: Bool
 }
 
 final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewControllerProviding, RecordPreviewViewProviding, PreviewViewControllerProviding, PreviewViewProviding {
@@ -38,6 +97,11 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
     private lazy var cameraPreviewViewController: CameraPreviewViewController = {
         let controller = CameraPreviewViewController()
         controller.setCaptureSession(captureSession)
+        controller.onParkedPreviewTap = { [weak self] in
+            Task { @MainActor [weak self] in
+                await self?.resumePreviewFromUserGesture()
+            }
+        }
         return controller
     }()
     private var currentVideoInput: AVCaptureDeviceInput?
@@ -46,9 +110,14 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
     // Queues
     let sessionQueue: DispatchQueue = DispatchQueue(label: "com.poplur.camerakit.session")
     let videoOutputQueue: DispatchQueue = DispatchQueue(label: "com.poplur.camerakit.videoOutput")
+    private let coldBudgetDeadlineQueue = DispatchQueue(label: "com.poplur.camerakit.coldBudgetDeadline")
 
     // Video output and connection
     var videoDataOutput: AVCaptureVideoDataOutput?
+    /// Capability survives a hard park so an explicit resume can rebuild the
+    /// frame-output path without relying on the web layer to mount again.
+    private var wantsVideoFrameDelivery = false
+    private var isVideoFrameDelegateAttached = false
     /// Real bounding boxes from Vision's built-in detectors. Optional because
     /// only the web home wants them; the native HomeView draws its own.
     var visionBoxDetector: VisionBoxDetector?
@@ -58,15 +127,115 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
     var displayLayer: AVSampleBufferDisplayLayer?
     private var liveTimer: Timer?
     private var performanceRegistration: PoplurPerformanceRegistration?
+    private var thermalTripwireCancellable: AnyCancellable?
     private var performanceWantsCapture = false
+    private var recordingDeadlineTask: DispatchWorkItem?
+    private var photoAtomicDeadlineTask: DispatchWorkItem?
+    private var previewWindowStartedAt: Date?
+    private var isPreviewWindowActive = false
+    private var isColdBudgetParked = false
+    private var preserveLastPreviewFrame = false
+    private var photoCaptureInFlight = false
+    private var activePhotoSettingsUniqueID: Int64?
+    private var photoOpenedItsOwnWindow = false
+    private var parkAfterPhotoCapture = false
+    private var pendingPhotoParkReason: CameraColdBudgetReason = .windowExpired
+    private var pendingPhotoCanResume = true
+    private var pendingPhotoPreserveLastFrame = true
+    private var recordingStopRequested = false
+    private var activeRecordingID: UUID?
+    private var activeRecordingOutputURL: URL?
+    private var recordingTerminalReason: CameraColdBudgetReason = .recordingFinished
+    private var recordingCanResume = true
+    private var recordingSuspendedARFilter: ARFilterManager.ARFilter?
+    private var latestColdBudgetUpdate = CameraColdBudgetUpdate(
+        state: .parked,
+        reason: .unavailable,
+        canResume: false,
+        windowMilliseconds: 0
+    )
+    var onColdBudgetStateChange: ((CameraColdBudgetUpdate) -> Void)? {
+        didSet {
+            onColdBudgetStateChange?(latestColdBudgetUpdate)
+            let shouldShowNativeAffordance = onColdBudgetStateChange == nil
+                && latestColdBudgetUpdate.state == .parked
+                && latestColdBudgetUpdate.canResume
+            DispatchQueue.main.async { [weak self] in
+                self?.cameraPreviewViewController.setColdBudgetResumeAffordanceVisible(
+                    shouldShowNativeAffordance
+                )
+            }
+        }
+    }
+
+    // Preview stays live while Camera is genuinely front-most. Hidden surfaces
+    // and any non-nominal thermal state still hard-park immediately; an
+    // arbitrary visible ten-second cutoff made the camera feel broken.
+    private static let recordingMaximumDuration: TimeInterval = 10
+    private static let recordingStopAcknowledgementDuration: TimeInterval = 1
+    private static let photoAtomicMaximumDuration: TimeInterval = 3
+    private static let previewFrameRate = 24
+    private static let recordingFrameRateLimit = 24
+    private static let coldBudgetRecordLimit = 16
+    private static let coldBudgetDefaultsKey = "CameraKitController.coldBudget.v2"
+
+    /// Deadline ownership is read on the capture-session queue and mutated on
+    /// the main actor. A tiny lock lets a cancelled, already-fired work item
+    /// prove that it still owns the same preview/capture before stopping the
+    /// sensor, so an old deadline cannot stop a newly resumed camera.
+    private let hardDeadlineStateLock = NSLock()
+    private var hardDeadlinePhotoSettingsUniqueID: Int64?
+    private var hardDeadlineRecordingID: UUID?
+
+    /// Every queued start/stop proves it still owns the current desired state.
+    /// This prevents an old configure/start closure from reopening the sensor
+    /// after a newer hard park has already won the race.
+    private let captureLeaseStateLock = NSLock()
+    private var captureLeaseGeneration: UInt64 = 0
+    private var captureDesiredOn = false
+
+    /// Retain only the latest sampled preview frame while capture is live. Hard park turns
+    /// it into one UIImage, releases the pixel buffer, then removes every
+    /// AVCapture input/output so the sensor and ISP have no remaining owner.
+    private let retainedPreviewLock = NSLock()
+    private var retainedPreviewPixelBuffer: CVPixelBuffer?
+
     private let frameProcessingLock = NSLock()
     private var frameProcessingAllowed = false
+    private let analysisFrameGateLock = NSLock()
+    private var analysisFrameGateOpen = false
+    private var nextAnalysisSampleWorkItem: DispatchWorkItem?
     /// Camera analysis is useful at human-response speed, not video frame rate.
     /// Start at face recognition so the classifier callback cannot immediately
     /// launch a duplicate face request on the first camera frame.
     private var nextAnalysisPipeline: CameraAnalysisPipeline = .faceRecognition
     private var nextAnalysisDispatchUptime: TimeInterval = 0
-    private let minimumAnalysisDispatchSpacing: TimeInterval = 0.34
+    private var lastAnalysisDispatchUptime: [CameraAnalysisPipeline: TimeInterval] = [:]
+    private let analysisStateLock = NSLock()
+    private var analysisInFlight = false
+    private var activeAnalysisPipeline: CameraAnalysisPipeline?
+    private var analysisClaimID: UInt64 = 0
+    /// A park invalidates result delivery without pretending an already-running
+    /// Vision/Core ML request was cancelled. Its claim remains quarantined until
+    /// the real callback arrives, so resume cannot overlap expensive families.
+    private var analysisDeliveryGeneration: UInt64 = 0
+    private var analysisDeliveryEnabled = false
+    private var analysisClaimTimeoutTask: Task<Void, Never>?
+    private var analysisTimedOutForCurrentWindow = false
+    private var quarantinedAnalysisClaimID: UInt64?
+    private var quarantinedAnalysisPipeline: CameraAnalysisPipeline?
+    private var lastAnalysisTimeoutFamily: String?
+    private var pendingMLDetectionHandler: (([DetectedObject]) -> Void)?
+    private var faceRecognitionCompletion: AnyCancellable?
+    private let arFilterStateLock = NSLock()
+    private var arFilterProcessingWanted = false
+    private var arFilterSelectionCancellable: AnyCancellable?
+    /// At 0.67 seconds between families and two seconds between uses of the
+    /// same family, face/classification/boxes each run no faster than ~0.5 Hz.
+    private let minimumAnalysisDispatchSpacing: TimeInterval = 0.67
+    private let minimumPerFamilyAnalysisSpacing: TimeInterval = 2.0
+    private let maximumAnalysisClaimDuration: TimeInterval = 4.0
+    private let analysisFrameSampleInterval: TimeInterval = 1.5
 
     // Camera position tracking
     var currentCameraPosition: AVCaptureDevice.Position = .back
@@ -97,9 +266,47 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
         liveTimer?.invalidate()
         videoDataOutput?.setSampleBufferDelegate(nil, queue: nil)
         let session = captureSession
+        let temporaryRecordingURLs = [activeRecordingOutputURL, lastVideoURL].compactMap { $0 }
         sessionQueue.async {
             if session.isRunning { session.stopRunning() }
+            temporaryRecordingURLs.forEach(PoplurTemporaryFileOwnership.deleteIfOwned)
         }
+    }
+
+    @discardableResult
+    private func setCaptureDesired(_ desired: Bool) -> UInt64 {
+        captureLeaseStateLock.lock()
+        if captureDesiredOn != desired {
+            captureDesiredOn = desired
+            captureLeaseGeneration &+= 1
+        }
+        let generation = captureLeaseGeneration
+        captureLeaseStateLock.unlock()
+        return generation
+    }
+
+    private func captureLeaseMatches(generation: UInt64, desired: Bool) -> Bool {
+        captureLeaseStateLock.lock()
+        let matches = captureLeaseGeneration == generation && captureDesiredOn == desired
+        captureLeaseStateLock.unlock()
+        return matches
+    }
+
+    private func isCaptureDesired() -> Bool {
+        captureLeaseStateLock.lock()
+        let desired = captureDesiredOn
+        captureLeaseStateLock.unlock()
+        return desired
+    }
+
+    /// Safe for result bridges on any queue. A late callback may finish its own
+    /// bookkeeping after park, but only a currently-owned processing lease may
+    /// publish boxes, labels, filtered frames, or speech/UI side effects.
+    var acceptsAnalysisResults: Bool {
+        frameProcessingLock.lock()
+        let processingAllowed = frameProcessingAllowed
+        frameProcessingLock.unlock()
+        return processingAllowed && isCaptureDesired()
     }
 
     @MainActor
@@ -110,7 +317,10 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
     @MainActor
     func startPreview() async {
         await configureSessionIfNeeded()
-        guard isReady else { return }
+        guard isReady else {
+            publishColdBudgetState(state: .parked, reason: .unavailable, canResume: false)
+            return
+        }
         resumeCapture()
     }
 
@@ -124,56 +334,663 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
         await startPreview()
     }
 
-    /// Suspends the capture stream without tearing down session config.
-    /// Call on tab-hide; pair with resumeCapture() on tab-show.
+    /// Hard-parks capture whenever Camera is covered or leaves the foreground.
+    /// Returning to a genuinely visible Camera surface may configure it again;
+    /// hidden overlays and background lifecycle can never retain the sensor.
     @MainActor
-    func suspendCapture() {
-        performanceWantsCapture = false
-        performanceRegistration?.setVisible(false)
-        applyCapturePerformance(policy: PoplurPerformanceManager.shared.policy, granted: false)
-        mlDetectionManager?.isEnabled = false
+    func suspendCapture(resetEntryBudget: Bool = true) {
+        if photoCaptureInFlight,
+           !PoplurPerformanceManager.shared.isThermalTripwireActive {
+            isPreviewWindowActive = false
+            parkAfterPhotoCapture = true
+            pendingPhotoParkReason = .leftCamera
+            pendingPhotoCanResume = !resetEntryBudget
+            pendingPhotoPreserveLastFrame = !resetEntryBudget
+            frameProcessingLock.lock()
+            frameProcessingAllowed = false
+            frameProcessingLock.unlock()
+            invalidateAnalysisDeliveryForPark()
+            CameraAIAnnouncer.shared.setLiveCameraActive(false)
+            mlDetectionManager?.isEnabled = false
+            toggleTorchOff()
+            return
+        }
+        parkCamera(
+            reason: .leftCamera,
+            canResume: !resetEntryBudget,
+            preserveLastFrame: !resetEntryBudget
+        )
     }
 
-    /// Resumes the capture stream after suspendCapture().
-    /// Does nothing if the session was never configured.
+    /// Opens preview on genuine Camera entry.
     @MainActor
     func resumeCapture() {
-        guard isReady else { return }
-        performanceWantsCapture = true
-        let registration = ensurePerformanceRegistration()
-        registration.setVisible(true)
+        beginPreviewWindow(reason: .entry, explicitUserResume: false)
+    }
+
+    /// Reopens a thermally parked preview from a deliberate tap after policy
+    /// recovery. Ordinary menu/composer visibility uses startPreview().
+    @MainActor
+    func resumePreviewFromUserGesture() async {
+        guard !photoCaptureInFlight, !isRecording else { return }
+        await configureSessionIfNeeded()
+        guard isReady else {
+            publishColdBudgetState(state: .parked, reason: .unavailable, canResume: false)
+            return
+        }
+        beginPreviewWindow(reason: .explicitResume, explicitUserResume: true)
     }
 
     @MainActor
-    func stop() {
-        performanceWantsCapture = false
-        performanceRegistration?.setVisible(false)
-        isReady = false
-        isRecording = false
-        stopLiveVideo()
-        sessionQueue.async { [weak self] in
+    private func schedulePhotoHardDeadline(settingsUniqueID: Int64) {
+        photoAtomicDeadlineTask?.cancel()
+        hardDeadlineStateLock.lock()
+        hardDeadlinePhotoSettingsUniqueID = settingsUniqueID
+        hardDeadlineStateLock.unlock()
+
+        let deadline = DispatchWorkItem { [weak self] in
             guard let self else { return }
+            self.sessionQueue.async { [weak self] in
+                guard let self else { return }
+                self.hardDeadlineStateLock.lock()
+                let stillOwnsPhoto = self.hardDeadlinePhotoSettingsUniqueID == settingsUniqueID
+                if stillOwnsPhoto {
+                    self.hardDeadlinePhotoSettingsUniqueID = nil
+                }
+                self.hardDeadlineStateLock.unlock()
+                guard stillOwnsPhoto else { return }
+
+                self.forceHardwareTorchOffOnQueue()
+                if self.captureSession.isRunning {
+                    self.captureSession.stopRunning()
+                }
+                DispatchQueue.main.async { [weak self] in
+                    self?.expirePhotoCapture(settingsUniqueID: settingsUniqueID)
+                }
+            }
+        }
+        photoAtomicDeadlineTask = deadline
+        coldBudgetDeadlineQueue.asyncAfter(
+            deadline: .now() + Self.photoAtomicMaximumDuration,
+            execute: deadline
+        )
+    }
+
+    @MainActor
+    private func cancelPhotoHardDeadline(settingsUniqueID: Int64?) {
+        photoAtomicDeadlineTask?.cancel()
+        photoAtomicDeadlineTask = nil
+        hardDeadlineStateLock.lock()
+        if settingsUniqueID == nil || hardDeadlinePhotoSettingsUniqueID == settingsUniqueID {
+            hardDeadlinePhotoSettingsUniqueID = nil
+        }
+        hardDeadlineStateLock.unlock()
+    }
+
+    @MainActor
+    private func expirePhotoCapture(settingsUniqueID: Int64) {
+        guard photoCaptureInFlight,
+              activePhotoSettingsUniqueID == settingsUniqueID else { return }
+        parkAfterPhotoCapture = true
+        pendingPhotoParkReason = .unavailable
+        pendingPhotoCanResume = true
+        pendingPhotoPreserveLastFrame = true
+        // Invalidate the request before any late delegate callback can race a
+        // later shutter press. The session and physical torch are already off.
+        finishPhotoBudget()
+    }
+
+    @MainActor
+    private func beginPreviewWindow(
+        reason: CameraColdBudgetReason,
+        explicitUserResume: Bool
+    ) {
+        guard isReady else {
+            publishColdBudgetState(state: .parked, reason: .unavailable, canResume: false)
+            return
+        }
+        let registration = ensurePerformanceRegistration()
+        guard !PoplurPerformanceManager.shared.isThermalTripwireActive else {
+            parkCamera(reason: .thermal, canResume: false, preserveLastFrame: true)
+            return
+        }
+        guard !isPreviewWindowActive else { return }
+        // Visibility is now the preview lease. Returning from Camera Roll,
+        // composer or Hold legitimately resumes; only a thermal tripwire or a
+        // hidden/background surface keeps the sensor parked.
+        isPreviewWindowActive = true
+        isColdBudgetParked = false
+        preserveLastPreviewFrame = false
+        cameraPreviewViewController.setParkedPreviewImage(nil)
+        previewWindowStartedAt = Date()
+        performanceWantsCapture = true
+        CameraAIAnnouncer.shared.setLiveCameraActive(true)
+        analysisStateLock.lock()
+        analysisDeliveryEnabled = true
+        analysisTimedOutForCurrentWindow = false
+        lastAnalysisTimeoutFamily = nil
+        analysisStateLock.unlock()
+        restoreCameraFeaturesAfterRecordingIfNeeded()
+
+        registration.setVisible(true)
+        guard registration.isGrantedRendering else {
+            parkCamera(reason: .unavailable, canResume: true, preserveLastFrame: true)
+            return
+        }
+
+        applyCapturePerformance(policy: PoplurPerformanceManager.shared.policy, granted: true)
+        publishColdBudgetState(state: .running, reason: reason, canResume: false)
+        // There is deliberately no wall-clock preview cutoff. The OS thermal
+        // tripwire, lifecycle/visibility and explicit media budgets are the
+        // limits; normal Camera use must remain smooth and uninterrupted.
+    }
+
+    private func retainedPreviewImageOnQueue() -> UIImage? {
+        retainedPreviewLock.lock()
+        let pixelBuffer = retainedPreviewPixelBuffer
+        retainedPreviewPixelBuffer = nil
+        retainedPreviewLock.unlock()
+        guard let pixelBuffer else { return nil }
+
+        // One local context performs one conversion and is immediately
+        // released; unlike a retained CIContext it cannot keep GPU caches warm
+        // while the camera is parked.
+        let image = CIImage(cvPixelBuffer: pixelBuffer)
+        let context = CIContext(options: [.cacheIntermediates: false])
+        guard let cgImage = context.createCGImage(image, from: image.extent) else { return nil }
+        // The AVCaptureVideoDataOutput connection already rotates portrait
+        // buffers by 90 degrees and mirrors the front camera. Tagging this
+        // image `.right`/`.rightMirrored` would apply both transforms twice.
+        return UIImage(cgImage: cgImage, scale: 1, orientation: .up)
+    }
+
+    /// Close the delivery generation immediately when capture is parked. Vision,
+    /// Core ML and AR requests already executing are not synchronously
+    /// cancellable; keep their claim quarantined until its real callback arrives,
+    /// while making every result from the old generation ineligible for UI,
+    /// speech, or display-layer delivery.
+    private func invalidateAnalysisDeliveryForPark() {
+        analysisStateLock.lock()
+        analysisDeliveryEnabled = false
+        analysisDeliveryGeneration &+= 1
+        if analysisInFlight {
+            quarantinedAnalysisClaimID = analysisClaimID
+            quarantinedAnalysisPipeline = activeAnalysisPipeline
+        } else if quarantinedAnalysisClaimID == nil {
+            activeAnalysisPipeline = nil
+        }
+        analysisInFlight = false
+        analysisClaimTimeoutTask?.cancel()
+        analysisClaimTimeoutTask = nil
+        analysisStateLock.unlock()
+    }
+
+    /// The cold-budget acknowledgement. This runs entirely on the serial
+    /// capture queue, stops the physical session synchronously, releases every
+    /// input/output and only then publishes `parked` back on the main actor.
+    private func hardParkCapture(
+        reason: CameraColdBudgetReason,
+        canResume: Bool,
+        preserveLastFrame: Bool
+    ) {
+        let generation = setCaptureDesired(false)
+        sessionQueue.async { [weak self] in
+            guard let self,
+                  self.captureLeaseMatches(generation: generation, desired: false) else { return }
+
+            self.setVideoFrameDeliveryActiveOnQueue(false)
+            self.forceHardwareTorchOffOnQueue()
             if self.captureSession.isRunning {
                 self.captureSession.stopRunning()
+            }
+
+            self.hardDeadlineStateLock.lock()
+            let captureDelegateOwnsOutputs = self.hardDeadlinePhotoSettingsUniqueID != nil
+                || self.hardDeadlineRecordingID != nil
+            self.hardDeadlineStateLock.unlock()
+            guard !captureDelegateOwnsOutputs,
+                  self.captureLeaseMatches(generation: generation, desired: false) else { return }
+
+            if self.isSessionConfigured || !self.captureSession.inputs.isEmpty || !self.captureSession.outputs.isEmpty {
+                self.captureSession.beginConfiguration()
+                self.captureSession.inputs.forEach(self.captureSession.removeInput)
+                self.captureSession.outputs.forEach(self.captureSession.removeOutput)
+                self.captureSession.commitConfiguration()
+            }
+            self.currentVideoInput = nil
+            self.videoDataOutput = nil
+            self.previewConnection = nil
+            self.isSessionConfigured = false
+
+            let retainedImage = preserveLastFrame ? self.retainedPreviewImageOnQueue() : nil
+            if !preserveLastFrame {
+                self.retainedPreviewLock.lock()
+                self.retainedPreviewPixelBuffer = nil
+                self.retainedPreviewLock.unlock()
+            }
+            let stopped = !self.captureSession.isRunning
+                && self.captureSession.inputs.isEmpty
+                && self.captureSession.outputs.isEmpty
+
+            DispatchQueue.main.async { [weak self] in
+                guard let self,
+                      self.captureLeaseMatches(generation: generation, desired: false),
+                      self.isColdBudgetParked else { return }
+                self.isReady = false
+                self.cameraPreviewViewController.setParkedPreviewImage(retainedImage)
+                self.displayLayer?.flushAndRemoveImage()
+                self.publishColdBudgetState(state: .parked, reason: reason, canResume: canResume)
+                self.previewWindowStartedAt = nil
+                #if DEBUG
+                print(
+                    "[CameraColdBudget] stopAck running=\(self.captureSession.isRunning) "
+                        + "inputs=\(self.captureSession.inputs.count) outputs=\(self.captureSession.outputs.count) "
+                        + "delegate=\(self.isVideoFrameDelegateAttached) complete=\(stopped) "
+                        + "generation=\(generation)"
+                )
+                #endif
             }
         }
     }
 
     @MainActor
+    private func parkCamera(
+        reason: CameraColdBudgetReason,
+        canResume: Bool,
+        preserveLastFrame: Bool
+    ) {
+        isPreviewWindowActive = false
+        isColdBudgetParked = true
+        preserveLastPreviewFrame = preserveLastFrame
+        invalidateAnalysisDeliveryForPark()
+        CameraAIAnnouncer.shared.setLiveCameraActive(false)
+        if photoCaptureInFlight {
+            parkAfterPhotoCapture = true
+            pendingPhotoParkReason = reason
+            pendingPhotoCanResume = canResume
+            pendingPhotoPreserveLastFrame = preserveLastFrame
+        }
+
+        if isRecording {
+            requestRecordingStop(reason: reason, canResume: canResume)
+        }
+        performanceWantsCapture = false
+        toggleTorchOff()
+        mlDetectionManager?.isEnabled = false
+        performanceRegistration?.setVisible(false)
+        applyCapturePerformance(policy: PoplurPerformanceManager.shared.policy, granted: false)
+        arFilterManager?.stopARSession()
+
+        // Photo/recording delegates own their outputs until their bounded
+        // completion/watchdog. Their finish paths call parkCamera again; only
+        // then is it safe to remove the entire capture graph.
+        guard !photoCaptureInFlight, !isRecording else { return }
+        hardParkCapture(
+            reason: reason,
+            canResume: canResume,
+            preserveLastFrame: preserveLastFrame
+        )
+    }
+
+    @MainActor
+    private func suspendExpensiveCameraFeaturesForRecording() {
+        frameProcessingLock.lock()
+        frameProcessingAllowed = false
+        frameProcessingLock.unlock()
+        // A Vision/Core ML request launched by the live preview can finish after
+        // recording has taken exclusive ownership of the capture graph. Close
+        // that preview generation now so its late callback cannot paint, speak,
+        // or enqueue a filtered frame over the recording UI.
+        invalidateAnalysisDeliveryForPark()
+        CameraAIAnnouncer.shared.setLiveCameraActive(false)
+        mlDetectionManager?.isEnabled = false
+
+        if let manager = arFilterManager, manager.activeFilter != .none {
+            recordingSuspendedARFilter = manager.activeFilter
+            manager.activeFilter = .none
+            manager.stopARSession()
+            NotificationCenter.default.post(
+                name: Notification.Name("ARFiltersStateChanged"),
+                object: nil,
+                userInfo: ["isShown": false]
+            )
+        }
+    }
+
+    @MainActor
+    private func restoreCameraFeaturesAfterRecordingIfNeeded() {
+        guard let filter = recordingSuspendedARFilter else { return }
+        recordingSuspendedARFilter = nil
+        arFilterManager?.activeFilter = filter
+        NotificationCenter.default.post(
+            name: Notification.Name("ARFiltersStateChanged"),
+            object: nil,
+            userInfo: ["isShown": true]
+        )
+        NotificationCenter.default.post(
+            name: Notification.Name("ARFilterChanged"),
+            object: nil,
+            userInfo: ["filter": filter.rawValue]
+        )
+    }
+
+    @MainActor
+    private func scheduleRecordingHardDeadline(recordingID: UUID) {
+        recordingDeadlineTask?.cancel()
+        hardDeadlineStateLock.lock()
+        hardDeadlineRecordingID = recordingID
+        hardDeadlineStateLock.unlock()
+
+        let deadline = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.sessionQueue.async { [weak self] in
+                guard let self else { return }
+                self.hardDeadlineStateLock.lock()
+                let stillOwnsRecording = self.hardDeadlineRecordingID == recordingID
+                self.hardDeadlineStateLock.unlock()
+                guard stillOwnsRecording else { return }
+
+                // End the movie at the monotonic ten-second deadline on the
+                // capture queue. The delegate gets a short bounded interval to
+                // finalize the file before the emergency watchdog tears down
+                // the whole session and settles UI state.
+                self.forceHardwareTorchOffOnQueue()
+                if self.movieOutput.isRecording {
+                    self.movieOutput.stopRecording()
+                }
+                // `maxRecordedDuration` may have already made isRecording
+                // false while its successful delegate is merely queued. Wait
+                // the same bounded acknowledgement interval in both cases so
+                // that legitimate ten-second output is not invalidated.
+                self.scheduleRecordingStopWatchdog(
+                    recordingID: recordingID,
+                    reason: .recordingFinished,
+                    canResume: true
+                )
+                DispatchQueue.main.async { [weak self] in
+                    self?.recordingDeadlineDidFire(recordingID: recordingID)
+                }
+            }
+        }
+        recordingDeadlineTask = deadline
+        coldBudgetDeadlineQueue.asyncAfter(
+            deadline: .now() + Self.recordingMaximumDuration,
+            execute: deadline
+        )
+    }
+
+    @MainActor
+    private func recordingDeadlineDidFire(recordingID: UUID) {
+        guard activeRecordingID == recordingID, isRecording else { return }
+        recordingDeadlineTask = nil
+        recordingStopRequested = true
+        recordingTerminalReason = .recordingFinished
+        recordingCanResume = true
+        // Physical torch shutdown already happened on the capture queue. Keep
+        // published UI state consistent without waiting for another queue hop.
+        isTorchOn = false
+        isScreenFlashOn = false
+        NotificationCenter.default.post(name: Notification.Name("ScreenFlashOff"), object: nil)
+    }
+
+    @MainActor
+    private func cancelRecordingHardDeadline(clearOwnership: Bool) {
+        recordingDeadlineTask?.cancel()
+        recordingDeadlineTask = nil
+        guard clearOwnership else { return }
+        let recordingID = activeRecordingID
+        hardDeadlineStateLock.lock()
+        if recordingID == nil || hardDeadlineRecordingID == recordingID {
+            hardDeadlineRecordingID = nil
+        }
+        hardDeadlineStateLock.unlock()
+    }
+
+    private func scheduleRecordingStopWatchdog(
+        recordingID: UUID,
+        reason: CameraColdBudgetReason,
+        canResume: Bool
+    ) {
+        coldBudgetDeadlineQueue.asyncAfter(
+            deadline: .now() + Self.recordingStopAcknowledgementDuration
+        ) { [weak self] in
+            guard let self else { return }
+            self.sessionQueue.async { [weak self] in
+                guard let self else { return }
+                self.hardDeadlineStateLock.lock()
+                let stillOwnsRecording = self.hardDeadlineRecordingID == recordingID
+                self.hardDeadlineStateLock.unlock()
+                guard stillOwnsRecording else { return }
+
+                if self.movieOutput.isRecording {
+                    self.movieOutput.stopRecording()
+                }
+                self.forceHardwareTorchOffOnQueue()
+                if self.captureSession.isRunning {
+                    self.captureSession.stopRunning()
+                }
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, self.activeRecordingID == recordingID else { return }
+                    #if DEBUG
+                    print("[CameraColdBudget] recording delegate watchdog forced session stop")
+                    #endif
+                    self.finishRecordingBudget(reason: reason, canResume: canResume)
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func finishRecordingBudget(
+        reason: CameraColdBudgetReason,
+        canResume: Bool,
+        preserveOutput: Bool = false
+    ) {
+        let unfinishedOutputURL = activeRecordingOutputURL
+        cancelRecordingHardDeadline(clearOwnership: true)
+        recordingStopRequested = true
+        isRecording = false
+        activeRecordingID = nil
+        activeRecordingOutputURL = nil
+        if !preserveOutput, let unfinishedOutputURL {
+            PoplurTemporaryFileOwnership.deleteIfOwned(unfinishedOutputURL)
+        }
+        parkCamera(reason: reason, canResume: canResume, preserveLastFrame: true)
+        recordingStopRequested = false
+    }
+
+    @MainActor
+    private func finishPhotoBudget(reason: CameraColdBudgetReason? = nil) {
+        let settingsUniqueID = activePhotoSettingsUniqueID
+        cancelPhotoHardDeadline(settingsUniqueID: settingsUniqueID)
+        let hadPendingPark = parkAfterPhotoCapture
+        let shouldPark = photoOpenedItsOwnWindow || hadPendingPark || reason != nil
+        let finalReason = hadPendingPark ? pendingPhotoParkReason : (reason ?? pendingPhotoParkReason)
+        let finalCanResume = hadPendingPark ? pendingPhotoCanResume : true
+        let finalPreserveLastFrame = hadPendingPark ? pendingPhotoPreserveLastFrame : true
+        photoCaptureInFlight = false
+        activePhotoSettingsUniqueID = nil
+        photoOpenedItsOwnWindow = false
+        parkAfterPhotoCapture = false
+        if shouldPark {
+            parkCamera(
+                reason: finalReason,
+                canResume: finalCanResume,
+                preserveLastFrame: finalPreserveLastFrame
+            )
+        }
+    }
+
+    @MainActor
+    private func publishColdBudgetState(
+        state: CameraColdBudgetState,
+        reason: CameraColdBudgetReason,
+        canResume: Bool
+    ) {
+        let update = CameraColdBudgetUpdate(
+            state: state,
+            reason: reason,
+            canResume: canResume,
+            windowMilliseconds: 0
+        )
+        guard latestColdBudgetUpdate.state != update.state
+                || latestColdBudgetUpdate.reason != update.reason
+                || latestColdBudgetUpdate.canResume != update.canResume else { return }
+
+        let now = Date()
+        let activeDuration = previewWindowStartedAt.map { max(0, now.timeIntervalSince($0)) } ?? 0
+        analysisStateLock.lock()
+        let analysisFamily = activeAnalysisPipeline?.diagnosticName
+        let timedOutAnalysisFamily = lastAnalysisTimeoutFamily
+        analysisStateLock.unlock()
+        let performanceManager = PoplurPerformanceManager.shared
+        let record = CameraColdBudgetRecord(
+            timestamp: now,
+            state: state,
+            reason: reason,
+            canResume: canResume,
+            activeWindowDurationSeconds: activeDuration,
+            thermalState: Self.thermalName(ProcessInfo.processInfo.thermalState),
+            performanceMode: performanceManager.mode.diagnosticName,
+            applicationLifecycle: performanceManager.applicationLifecycle.rawValue,
+            analysisFamilyInFlight: analysisFamily,
+            lastAnalysisTimeoutFamily: timedOutAnalysisFamily,
+            cameraPosition: currentCameraPosition == .front ? "front" : "back",
+            wasRecording: isRecording,
+            mlEnabled: mlDetectionManager?.isEnabled == true,
+            arEnabled: arFilterManager?.activeFilter != .none,
+            torchEnabled: isTorchOn || isScreenFlashOn
+        )
+        var records = Self.loadColdBudgetRecords()
+        records.append(record)
+        records = Array(records.suffix(Self.coldBudgetRecordLimit))
+        if let data = try? JSONEncoder().encode(records) {
+            UserDefaults.standard.set(data, forKey: Self.coldBudgetDefaultsKey)
+        }
+
+        latestColdBudgetUpdate = update
+        cameraPreviewViewController.setColdBudgetResumeAffordanceVisible(
+            onColdBudgetStateChange == nil && state == .parked && canResume
+        )
+        onColdBudgetStateChange?(update)
+        #if DEBUG
+        print(
+            "[CameraColdBudget] state=\(state.rawValue) reason=\(reason.rawValue) "
+            + "active=\(String(format: "%.2f", activeDuration))s thermal=\(record.thermalState) "
+            + "mode=\(record.performanceMode) lifecycle=\(record.applicationLifecycle) "
+            + "analysis=\(record.analysisFamilyInFlight ?? "none") recording=\(record.wasRecording) "
+            + "analysisTimeout=\(record.lastAnalysisTimeoutFamily ?? "none") "
+            + "ml=\(record.mlEnabled) ar=\(record.arEnabled) torch=\(record.torchEnabled)"
+        )
+        #endif
+    }
+
+    @MainActor
+    func cameraColdBudgetDiagnosticsSummary(limit: Int = 8) -> String {
+        Self.persistedColdBudgetDiagnosticsSummary(limit: limit)
+    }
+
+    static func persistedColdBudgetDiagnosticsSummary(limit: Int = 8) -> String {
+        let records = Self.loadColdBudgetRecords().suffix(max(0, min(limit, Self.coldBudgetRecordLimit)))
+        guard !records.isEmpty else { return "Camera cold budget: no transitions recorded" }
+        let formatter = ISO8601DateFormatter()
+        return records.map { record in
+            "\(formatter.string(from: record.timestamp)) \(record.state.rawValue)/\(record.reason.rawValue) "
+                + "duration=\(String(format: "%.2f", record.activeWindowDurationSeconds))s "
+                + "thermal=\(record.thermalState) mode=\(record.performanceMode) "
+                + "lifecycle=\(record.applicationLifecycle) analysis=\(record.analysisFamilyInFlight ?? "none") "
+                + "analysisTimeout=\(record.lastAnalysisTimeoutFamily ?? "none") "
+                + "camera=\(record.cameraPosition) recording=\(record.wasRecording) "
+                + "ml=\(record.mlEnabled) ar=\(record.arEnabled) torch=\(record.torchEnabled)"
+        }.joined(separator: "\n")
+    }
+
+    private static func loadColdBudgetRecords() -> [CameraColdBudgetRecord] {
+        guard let data = UserDefaults.standard.data(forKey: coldBudgetDefaultsKey),
+              let decoded = try? JSONDecoder().decode([CameraColdBudgetRecord].self, from: data) else {
+            return []
+        }
+        return Array(decoded.suffix(coldBudgetRecordLimit))
+    }
+
+    private static func thermalName(_ state: ProcessInfo.ThermalState) -> String {
+        switch state {
+        case .nominal: return "nominal"
+        case .fair: return "fair"
+        case .serious: return "serious"
+        case .critical: return "critical"
+        @unknown default: return "unknown"
+        }
+    }
+
+    @MainActor
+    func stop() {
+        cancelRecordingHardDeadline(clearOwnership: !isRecording)
+        if photoCaptureInFlight {
+            finishPhotoBudget(reason: .leftCamera)
+        } else {
+            cancelPhotoHardDeadline(settingsUniqueID: activePhotoSettingsUniqueID)
+        }
+        parkCamera(reason: .leftCamera, canResume: false, preserveLastFrame: false)
+        isReady = false
+        stopLiveVideo()
+    }
+
+    @MainActor
     func beginRecording() {
-        resumeCapture()
-        guard performanceRegistration?.isGrantedRendering == true else { return }
-        isRecording = true
-        lastVideoURL = nil
+        guard !isRecording, !photoCaptureInFlight else { return }
+        beginPreviewWindow(reason: .recordingStarted, explicitUserResume: true)
+        guard performanceRegistration?.isGrantedRendering == true,
+              !PoplurPerformanceManager.shared.isThermalTripwireActive else {
+            parkCamera(reason: .thermal, canResume: false, preserveLastFrame: true)
+            return
+        }
+
+        isPreviewWindowActive = false
+        previewWindowStartedAt = Date()
+        let recordingID = UUID()
         let outputURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("poplur-recording-\(UUID().uuidString)")
+            .appendingPathComponent("poplur-recording-\(recordingID.uuidString)")
             .appendingPathExtension("mov")
+        PoplurTemporaryFileOwnership.claim(outputURL)
+        recordingStopRequested = false
+        activeRecordingID = recordingID
+        activeRecordingOutputURL = outputURL
+        recordingTerminalReason = .recordingFinished
+        recordingCanResume = true
+        isRecording = true
+        replaceLastVideoURL(with: nil)
+        suspendExpensiveCameraFeaturesForRecording()
+        publishColdBudgetState(state: .recording, reason: .recordingStarted, canResume: false)
+        applyCapturePerformance(
+            policy: PoplurPerformanceManager.shared.policy,
+            granted: performanceRegistration?.isGrantedRendering == true
+        )
+
+        scheduleRecordingHardDeadline(recordingID: recordingID)
 
         sessionQueue.async { [weak self] in
             guard let self else { return }
+            self.hardDeadlineStateLock.lock()
+            let stillOwnsRecording = self.hardDeadlineRecordingID == recordingID
+            self.hardDeadlineStateLock.unlock()
+            guard stillOwnsRecording else {
+                PoplurTemporaryFileOwnership.deleteIfOwned(outputURL)
+                return
+            }
+            guard self.isCaptureDesired() else {
+                DispatchQueue.main.async {
+                    guard self.activeRecordingID == recordingID else { return }
+                    self.finishRecordingBudget(reason: .leftCamera, canResume: false)
+                }
+                return
+            }
             guard self.configureSessionIfNeededOnQueue(),
                   self.captureSession.outputs.contains(where: { $0 === self.movieOutput }) else {
-                DispatchQueue.main.async { self.isRecording = false }
+                DispatchQueue.main.async {
+                    guard self.activeRecordingID == recordingID else { return }
+                    self.finishRecordingBudget(reason: .unavailable, canResume: false)
+                }
                 return
             }
 
@@ -185,20 +1002,55 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
                 self.configureVideoConnection(connection)
             }
 
-            guard !self.movieOutput.isRecording else { return }
+            guard !self.movieOutput.isRecording else {
+                DispatchQueue.main.async {
+                    guard self.activeRecordingID == recordingID else { return }
+                    self.finishRecordingBudget(reason: .unavailable, canResume: false)
+                }
+                return
+            }
+            self.movieOutput.maxRecordedDuration = CMTime(
+                seconds: Self.recordingMaximumDuration,
+                preferredTimescale: 600
+            )
             self.movieOutput.startRecording(to: outputURL, recordingDelegate: self)
         }
     }
 
     @MainActor
     func endRecording() {
+        requestRecordingStop(reason: .recordingFinished, canResume: true)
+    }
+
+    @MainActor
+    private func requestRecordingStop(reason: CameraColdBudgetReason, canResume: Bool) {
+        guard isRecording, !recordingStopRequested else { return }
+        guard let recordingID = activeRecordingID else {
+            finishRecordingBudget(reason: reason, canResume: canResume)
+            return
+        }
+        recordingStopRequested = true
+        recordingTerminalReason = reason
+        recordingCanResume = canResume
+        cancelRecordingHardDeadline(clearOwnership: false)
+        toggleTorchOff()
         sessionQueue.async { [weak self] in
             guard let self else { return }
+            self.hardDeadlineStateLock.lock()
+            let stillOwnsRecording = self.hardDeadlineRecordingID == recordingID
+            self.hardDeadlineStateLock.unlock()
+            guard stillOwnsRecording else { return }
             if self.movieOutput.isRecording {
                 self.movieOutput.stopRecording()
-            } else {
-                DispatchQueue.main.async { self.isRecording = false }
             }
+            // False can mean AVFoundation has stopped the movie but has not
+            // delivered its final delegate yet. Preserve ownership until that
+            // callback or the bounded watchdog, rather than dropping output.
+            self.scheduleRecordingStopWatchdog(
+                recordingID: recordingID,
+                reason: reason,
+                canResume: canResume
+            )
         }
     }
 
@@ -267,6 +1119,12 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
 
     @MainActor
     @objc func toggleTorchOn() {
+        guard (isPreviewWindowActive || isRecording),
+              performanceRegistration?.isGrantedRendering == true,
+              !PoplurPerformanceManager.shared.isThermalTripwireActive else {
+            toggleTorchOff()
+            return
+        }
         if currentCameraPosition == .front {
             isScreenFlashOn = true
             NotificationCenter.default.post(name: Notification.Name("ScreenFlashOn"), object: nil)
@@ -336,6 +1194,9 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
 
     @MainActor
     @objc private func handleCubeTapCapture() {
+        guard isPreviewWindowActive,
+              !isColdBudgetParked,
+              performanceWantsCapture else { return }
         capturePhoto()
     }
 
@@ -343,17 +1204,50 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
     /// tab fires the same capture path as the native cube-tap capture.
     @MainActor
     func triggerShutter() {
+        guard isPreviewWindowActive,
+              !isColdBudgetParked,
+              performanceWantsCapture else { return }
         capturePhoto()
     }
 
     @MainActor
     private func capturePhoto() {
-        resumeCapture()
-        guard performanceRegistration?.isGrantedRendering == true else { return }
+        guard !photoCaptureInFlight,
+              !isRecording,
+              isPreviewWindowActive,
+              !isColdBudgetParked,
+              performanceWantsCapture else { return }
+        let alreadyRunning = isPreviewWindowActive
+        beginPreviewWindow(reason: .explicitResume, explicitUserResume: true)
+        guard performanceRegistration?.isGrantedRendering == true,
+              !PoplurPerformanceManager.shared.isThermalTripwireActive else {
+            parkCamera(reason: .thermal, canResume: false, preserveLastFrame: true)
+            return
+        }
+
+        let photoSettings = AVCapturePhotoSettings()
+        photoCaptureInFlight = true
+        activePhotoSettingsUniqueID = photoSettings.uniqueID
+        photoOpenedItsOwnWindow = !alreadyRunning
+        parkAfterPhotoCapture = false
+        pendingPhotoParkReason = .windowExpired
+        pendingPhotoCanResume = true
+        pendingPhotoPreserveLastFrame = true
+        schedulePhotoHardDeadline(settingsUniqueID: photoSettings.uniqueID)
+
         sessionQueue.async { [weak self] in
             guard let self else { return }
-            guard self.configureSessionIfNeededOnQueue(),
+            self.hardDeadlineStateLock.lock()
+            let stillOwnsPhoto = self.hardDeadlinePhotoSettingsUniqueID == photoSettings.uniqueID
+            self.hardDeadlineStateLock.unlock()
+            guard stillOwnsPhoto else { return }
+            guard self.isCaptureDesired(),
+                  self.configureSessionIfNeededOnQueue(),
                   self.captureSession.outputs.contains(where: { $0 === self.photoOutput }) else {
+                DispatchQueue.main.async {
+                    guard self.activePhotoSettingsUniqueID == photoSettings.uniqueID else { return }
+                    self.finishPhotoBudget(reason: .unavailable)
+                }
                 return
             }
 
@@ -365,7 +1259,7 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
                 self.configureVideoConnection(connection)
             }
 
-            self.photoOutput.capturePhoto(with: AVCapturePhotoSettings(), delegate: self)
+            self.photoOutput.capturePhoto(with: photoSettings, delegate: self)
         }
     }
 
@@ -403,11 +1297,13 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
             captureSession.beginConfiguration()
             defer { captureSession.commitConfiguration() }
 
-            // The preview, web overlay, Vision requests and in-app recording all
-            // fit comfortably in 720p. `.high` can select 1080p/4K depending on
-            // the device, making the sensor, ISP and BGRA frame output process
-            // substantially more pixels without improving the phone-sized UI.
-            if captureSession.canSetSessionPreset(.hd1280x720) {
+            // Use an explicit 1080p ceiling for a sharp full-screen preview;
+            // `.high` can silently select 4K on newer phones. Expensive BGRA
+            // analysis is sampled separately rather than processing all 24
+            // preview frames.
+            if captureSession.canSetSessionPreset(.hd1920x1080) {
+                captureSession.sessionPreset = .hd1920x1080
+            } else if captureSession.canSetSessionPreset(.hd1280x720) {
                 captureSession.sessionPreset = .hd1280x720
             } else if captureSession.canSetSessionPreset(.high) {
                 captureSession.sessionPreset = .high
@@ -493,59 +1389,124 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
                 self?.applyCapturePerformance(policy: policy, granted: granted)
             },
             onPurgeInactiveResources: { [weak self] in
-                self?.displayLayer?.flushAndRemoveImage()
-                self?.arFilterManager?.stopARSession()
+                self?.purgeInactiveCameraResources()
             }
         )
         performanceRegistration = registration
+        thermalTripwireCancellable = PoplurPerformanceManager.shared.$isThermalTripwireActive
+            .removeDuplicates()
+            .sink { [weak self] isActive in
+                guard let self else { return }
+                if isActive, self.performanceWantsCapture, !self.isColdBudgetParked {
+                    self.parkCamera(reason: .thermal, canResume: false, preserveLastFrame: true)
+                } else if !isActive,
+                          self.isColdBudgetParked,
+                          self.latestColdBudgetUpdate.reason == .thermal {
+                    // Recovery only restores the explicit affordance. It never
+                    // reopens the sensor or grants a fresh automatic window.
+                    self.publishColdBudgetState(state: .parked, reason: .thermal, canResume: true)
+                }
+            }
         return registration
     }
 
     @MainActor
     private func applyCapturePerformance(policy: PoplurPerformancePolicy, granted: Bool) {
-        let shouldRun = granted && performanceWantsCapture
-        frameProcessingLock.lock()
-        frameProcessingAllowed = shouldRun
-        frameProcessingLock.unlock()
-        mlDetectionManager?.isEnabled = shouldRun && isMLDetectionEnabled && policy.mode != .emergency
+        if !granted,
+           performanceWantsCapture,
+           PoplurPerformanceManager.shared.isThermalTripwireActive,
+           !isColdBudgetParked {
+            parkCamera(reason: .thermal, canResume: false, preserveLastFrame: true)
+            return
+        }
 
-        let requestedFPS = max(10, min(30, policy.targetFPS(for: .interactive)))
+        let shouldRun = granted && performanceWantsCapture
+        let dataProcessingAllowed = shouldRun && !isRecording
+        frameProcessingLock.lock()
+        frameProcessingAllowed = dataProcessingAllowed
+        frameProcessingLock.unlock()
+        mlDetectionManager?.isEnabled = dataProcessingAllowed
+            && isMLDetectionEnabled
+            && policy.mode != .emergency
+
+        let requestedFPS = isRecording
+            ? max(1, min(Self.recordingFrameRateLimit, policy.targetFPS(for: .interactive)))
+            : max(1, min(Self.previewFrameRate, policy.targetFPS(for: .interactive)))
+        let captureGeneration = setCaptureDesired(shouldRun)
         sessionQueue.async { [weak self] in
             guard let self else { return }
-            self.videoDataOutput?.connection(with: .video)?.isEnabled = shouldRun
             if shouldRun {
-                self.applyCameraFrameRateOnQueue(requestedFPS)
+                guard self.captureLeaseMatches(
+                    generation: captureGeneration,
+                    desired: true
+                ) else { return }
+                if self.wantsVideoFrameDelivery && self.videoDataOutput == nil {
+                    self.attachVideoDataOutputOnQueue()
+                }
+                self.setVideoFrameDeliveryActiveOnQueue(dataProcessingAllowed)
+                guard self.applyCameraFrameRateOnQueue(requestedFPS) else {
+                    DispatchQueue.main.async { [weak self] in
+                        self?.parkCamera(reason: .unavailable, canResume: true, preserveLastFrame: true)
+                    }
+                    return
+                }
+                guard self.captureLeaseMatches(
+                    generation: captureGeneration,
+                    desired: true
+                ) else { return }
                 if !self.captureSession.isRunning { self.captureSession.startRunning() }
-            } else if self.captureSession.isRunning {
-                self.captureSession.stopRunning()
+            } else if self.movieOutput.isRecording {
+                self.setVideoFrameDeliveryActiveOnQueue(false)
+                self.movieOutput.stopRecording()
+            } else {
+                self.setVideoFrameDeliveryActiveOnQueue(false)
+                if self.captureSession.isRunning {
+                    self.captureSession.stopRunning()
+                }
             }
         }
 
         if !shouldRun {
-            displayLayer?.flushAndRemoveImage()
+            if !preserveLastPreviewFrame {
+                displayLayer?.flushAndRemoveImage()
+            }
             arFrameLock.lock()
             arFrameInFlight = false
             arFrameLock.unlock()
         }
     }
 
-    private func applyCameraFrameRateOnQueue(_ requestedFPS: Int) {
-        guard let device = currentVideoInput?.device else { return }
+    @discardableResult
+    private func applyCameraFrameRateOnQueue(_ requestedFPS: Int) -> Bool {
+        guard let device = currentVideoInput?.device else { return false }
         let fps = Double(requestedFPS)
         guard device.activeFormat.videoSupportedFrameRateRanges.contains(where: {
             $0.minFrameRate <= fps && fps <= $0.maxFrameRate
-        }) else { return }
+        }) else { return false }
         do {
             try device.lockForConfiguration()
             let duration = CMTime(value: 1, timescale: CMTimeScale(requestedFPS))
             device.activeVideoMinFrameDuration = duration
             device.activeVideoMaxFrameDuration = duration
             device.unlockForConfiguration()
+            return true
         } catch {
             #if DEBUG
             print("[PoplurPerformance] Camera FPS update failed: \(error.localizedDescription)")
             #endif
+            return false
         }
+    }
+
+    @MainActor
+    private func purgeInactiveCameraResources() {
+        if !preserveLastPreviewFrame {
+            displayLayer?.flushAndRemoveImage()
+        }
+        arFilterManager?.stopARSession()
+        arFrameLock.lock()
+        arFrameInFlight = false
+        arFrameLock.unlock()
     }
 
     private func switchCameraOnQueue() {
@@ -574,6 +1535,13 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
 
             captureSession.commitConfiguration()
 
+            let fpsLimit = isRecording ? Self.recordingFrameRateLimit : Self.previewFrameRate
+            if !applyCameraFrameRateOnQueue(fpsLimit) {
+                DispatchQueue.main.async { [weak self] in
+                    self?.parkCamera(reason: .unavailable, canResume: true, preserveLastFrame: true)
+                }
+            }
+
             DispatchQueue.main.async {
                 self.cameraPreviewViewController.setCaptureSession(self.captureSession)
                 if self.currentCameraPosition == .front {
@@ -589,22 +1557,38 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
 
     private func setHardwareTorch(enabled: Bool) {
         sessionQueue.async { [weak self] in
-            guard let self,
+            guard let self else { return }
+            if !enabled {
+                self.forceHardwareTorchOffOnQueue()
+                return
+            }
+            guard
                   self.currentCameraPosition != .front,
                   let device = self.currentVideoInput?.device,
                   device.hasTorch else { return }
 
             do {
                 try device.lockForConfiguration()
-                if enabled, device.isTorchModeSupported(.on) {
+                if device.isTorchModeSupported(.on) {
                     try device.setTorchModeOn(level: AVCaptureDevice.maxAvailableTorchLevel)
-                } else {
-                    device.torchMode = .off
                 }
                 device.unlockForConfiguration()
             } catch {
                 print("❌ [CameraKitController] Failed to update torch: \(error)")
             }
+        }
+    }
+
+    /// Runs only on `sessionQueue`; hard deadlines use it before waiting for a
+    /// main-actor state update so physical torch heat cannot outlive the cap.
+    private func forceHardwareTorchOffOnQueue() {
+        guard let device = currentVideoInput?.device, device.hasTorch else { return }
+        do {
+            try device.lockForConfiguration()
+            device.torchMode = .off
+            device.unlockForConfiguration()
+        } catch {
+            print("❌ [CameraKitController] Failed to force torch off: \(error)")
         }
     }
 
@@ -620,33 +1604,58 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
 
     @MainActor
     private func completeVideoCapture(_ url: URL) {
-        isRecording = false
-        lastVideoURL = url
+        replaceLastVideoURL(with: url)
         NotificationCenter.default.post(
             name: Notification.Name("RecordingOutputReady"),
             object: nil,
-            userInfo: ["url": url]
+            userInfo: [
+                "url": url,
+                PoplurTemporaryFileOwnership.notificationKey: true
+            ]
         )
         NotificationCenter.default.post(
             name: Notification.Name("CaptureComplete"),
             object: nil,
-            userInfo: ["videoURL": url]
+            userInfo: [
+                "videoURL": url,
+                PoplurTemporaryFileOwnership.notificationKey: true
+            ]
         )
+    }
+
+    @MainActor
+    private func replaceLastVideoURL(with replacement: URL?) {
+        if let previous = lastVideoURL,
+           previous.standardizedFileURL != replacement?.standardizedFileURL {
+            PoplurTemporaryFileOwnership.deleteIfOwned(previous)
+        }
+        lastVideoURL = replacement
     }
 }
 
 extension CameraKitController: AVCapturePhotoCaptureDelegate, AVCaptureFileOutputRecordingDelegate {
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
-        if let error {
-            print("❌ [CameraKitController] Photo capture failed: \(error)")
-            return
-        }
-
-        guard let data = photo.fileDataRepresentation(),
-              let image = UIImage(data: data) else { return }
-
+        let settingsUniqueID = photo.resolvedSettings.uniqueID
         Task { @MainActor in
+            guard self.photoCaptureInFlight,
+                  self.activePhotoSettingsUniqueID == settingsUniqueID else {
+                return
+            }
+
+            if let error {
+                print("❌ [CameraKitController] Photo capture failed: \(error)")
+                self.finishPhotoBudget(reason: .unavailable)
+                return
+            }
+
+            guard let data = photo.fileDataRepresentation(),
+                  let image = UIImage(data: data) else {
+                self.finishPhotoBudget(reason: .unavailable)
+                return
+            }
+
             self.completePhotoCapture(image)
+            self.finishPhotoBudget()
         }
     }
 
@@ -660,13 +1669,23 @@ extension CameraKitController: AVCapturePhotoCaptureDelegate, AVCaptureFileOutpu
             print("❌ [CameraKitController] Video recording finished with error: \(error)")
         }
 
-        guard FileManager.default.fileExists(atPath: outputFileURL.path) else {
-            Task { @MainActor in self.isRecording = false }
-            return
-        }
-
         Task { @MainActor in
-            self.completeVideoCapture(outputFileURL)
+            guard self.isRecording,
+                  self.activeRecordingOutputURL == outputFileURL else {
+                PoplurTemporaryFileOwnership.deleteIfOwned(outputFileURL)
+                return
+            }
+            let reason = self.recordingTerminalReason
+            let canResume = self.recordingCanResume
+            let hasOutput = FileManager.default.fileExists(atPath: outputFileURL.path)
+            self.finishRecordingBudget(
+                reason: reason,
+                canResume: canResume,
+                preserveOutput: hasOutput
+            )
+            if hasOutput {
+                self.completeVideoCapture(outputFileURL)
+            }
         }
     }
 }
@@ -693,10 +1712,71 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
     func startVideoFrameDelivery() {
         sessionQueue.async { [weak self] in
             guard let self else { return }
+            self.wantsVideoFrameDelivery = true
             // setupARFilterSupport() would replace this output; if AR is already
             // running, its output is already feeding the same delegate.
-            guard self.videoDataOutput == nil else { return }
-            self.attachVideoDataOutputOnQueue()
+            if self.videoDataOutput == nil {
+                self.attachVideoDataOutputOnQueue()
+            } else {
+                self.frameProcessingLock.lock()
+                let active = self.frameProcessingAllowed && self.isCaptureDesired()
+                self.frameProcessingLock.unlock()
+                self.setVideoFrameDeliveryActiveOnQueue(active)
+            }
+        }
+    }
+
+    /// Runs on sessionQueue. Hardware preview remains a smooth 24 FPS, while
+    /// the costly BGRA/Vision/AR path opens for one frame every 1.5 seconds.
+    /// AR never changes ownership of the full-rate sensor preview.
+    private func setVideoFrameDeliveryActiveOnQueue(_ active: Bool) {
+        nextAnalysisSampleWorkItem?.cancel()
+        nextAnalysisSampleWorkItem = nil
+        guard let output = videoDataOutput else { return }
+        let connection = output.connection(with: .video)
+
+        guard active else {
+            analysisFrameGateLock.lock()
+            analysisFrameGateOpen = false
+            analysisFrameGateLock.unlock()
+            connection?.isEnabled = false
+            output.setSampleBufferDelegate(nil, queue: nil)
+            isVideoFrameDelegateAttached = false
+            return
+        }
+
+        if !isVideoFrameDelegateAttached {
+            output.setSampleBufferDelegate(self, queue: videoOutputQueue)
+            isVideoFrameDelegateAttached = true
+        }
+        analysisFrameGateLock.lock()
+        analysisFrameGateOpen = true
+        analysisFrameGateLock.unlock()
+        connection?.isEnabled = true
+    }
+
+    private func closeSampleGateAndScheduleNextFrame() {
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            self.videoDataOutput?.connection(with: .video)?.isEnabled = false
+            self.nextAnalysisSampleWorkItem?.cancel()
+            let work = DispatchWorkItem { [weak self] in
+                guard let self,
+                      self.isCaptureDesired() else { return }
+                self.frameProcessingLock.lock()
+                let allowed = self.frameProcessingAllowed
+                self.frameProcessingLock.unlock()
+                guard allowed, self.isVideoFrameDelegateAttached else { return }
+                self.analysisFrameGateLock.lock()
+                self.analysisFrameGateOpen = true
+                self.analysisFrameGateLock.unlock()
+                self.videoDataOutput?.connection(with: .video)?.isEnabled = true
+            }
+            self.nextAnalysisSampleWorkItem = work
+            self.sessionQueue.asyncAfter(
+                deadline: .now() + self.analysisFrameSampleInterval,
+                execute: work
+            )
         }
     }
 
@@ -707,7 +1787,6 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
         ]
         output.alwaysDiscardsLateVideoFrames = true
-        output.setSampleBufferDelegate(self, queue: videoOutputQueue)
 
         captureSession.beginConfiguration()
         if let existingOutput = videoDataOutput {
@@ -717,7 +1796,7 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
             captureSession.addOutput(output)
             videoDataOutput = output
             if let connection = output.connection(with: .video) {
-                connection.isEnabled = true
+                connection.isEnabled = false
                 if connection.isVideoRotationAngleSupported(90) {
                     connection.videoRotationAngle = 90
                 }
@@ -728,6 +1807,16 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
             }
         }
         captureSession.commitConfiguration()
+        frameProcessingLock.lock()
+        let shouldDeliver = frameProcessingAllowed && isCaptureDesired()
+        frameProcessingLock.unlock()
+        setVideoFrameDeliveryActiveOnQueue(shouldDeliver)
+        let fpsLimit = isRecording ? Self.recordingFrameRateLimit : Self.previewFrameRate
+        if !applyCameraFrameRateOnQueue(fpsLimit) {
+            DispatchQueue.main.async { [weak self] in
+                self?.parkCamera(reason: .unavailable, canResume: true, preserveLastFrame: true)
+            }
+        }
     }
 
     /// Setup AR filter video processing
@@ -735,13 +1824,22 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
         self.arFilterManager = filterManager
         self.displayLayer = displayLayer
         
-        // Enable default filter immediately on main actor
-        Task { @MainActor in
-            filterManager.activeFilter = .none
+        // Mirror the selected filter into a tiny lock-protected flag read by
+        // the video queue. The hardware preview stays smooth at its governed
+        // frame rate while both `.none` and active filters sample BGRA frames
+        // without violating ARFilterManager's main-actor isolation.
+        Task { @MainActor [weak self, weak filterManager] in
+            guard let self, let filterManager else { return }
+            self.arFilterSelectionCancellable = filterManager.$activeFilter
+                .removeDuplicates()
+                .sink { [weak self] filter in
+                    self?.setARFilterProcessingWanted(filter != .none)
+                }
         }
         
         sessionQueue.async { [weak self] in
             guard let self = self else { return }
+            self.wantsVideoFrameDelivery = true
             
             // Create video data output
             let output = AVCaptureVideoDataOutput()
@@ -749,8 +1847,6 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
                 kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
             ]
             output.alwaysDiscardsLateVideoFrames = true
-            output.setSampleBufferDelegate(self, queue: self.videoOutputQueue)
-            
             // Add to session
             self.captureSession.beginConfiguration()
             
@@ -766,7 +1862,7 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
                 
                 // Configure video orientation
                 if let connection = output.connection(with: .video) {
-                    connection.isEnabled = true
+                    connection.isEnabled = false
                     if connection.isVideoRotationAngleSupported(90) {
                         connection.videoRotationAngle = 90
                     }
@@ -778,6 +1874,16 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
             }
             
             self.captureSession.commitConfiguration()
+            self.frameProcessingLock.lock()
+            let shouldDeliver = self.frameProcessingAllowed && self.isCaptureDesired()
+            self.frameProcessingLock.unlock()
+            self.setVideoFrameDeliveryActiveOnQueue(shouldDeliver)
+            let fpsLimit = self.isRecording ? Self.recordingFrameRateLimit : Self.previewFrameRate
+            if !self.applyCameraFrameRateOnQueue(fpsLimit) {
+                DispatchQueue.main.async { [weak self] in
+                    self?.parkCamera(reason: .unavailable, canResume: true, preserveLastFrame: true)
+                }
+            }
             
             // Setup displayLayer videoGravity and transform
             DispatchQueue.main.async {
@@ -839,7 +1945,17 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
         frameProcessingLock.unlock()
         guard mayProcessFrame else { return }
 
+        analysisFrameGateLock.lock()
+        let ownsSample = analysisFrameGateOpen
+        analysisFrameGateOpen = false
+        analysisFrameGateLock.unlock()
+        guard ownsSample else { return }
+        closeSampleGateAndScheduleNextFrame()
+
         if let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) {
+            retainedPreviewLock.lock()
+            retainedPreviewPixelBuffer = pixelBuffer
+            retainedPreviewLock.unlock()
             dispatchNextAnalysisPipeline(
                 sampleBuffer: sampleBuffer,
                 pixelBuffer: pixelBuffer
@@ -850,79 +1966,186 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
         // Example:
         // if let radius = userRecognition.currentRegisteredUserRadius { Task { @MainActor in self.publishRegisteredUserRadius(radius) } }
         
-        // Process AR filters and display frames
-        guard let displayLayer = displayLayer else {
-            // No display layer setup - AR filters not configured
-            return
-        }
-        
-        // Check if we have a filter manager
-        guard let filterManager = arFilterManager else {
-            // No filter manager - just display raw frames
-            DispatchQueue.main.async {
-                // Ensure displayLayer transform is correct for front / back
-                if self.currentCameraPosition == .front {
-                    self.displayLayer?.setAffineTransform(CGAffineTransform(scaleX: -1, y: 1))
-                } else {
-                    self.displayLayer?.setAffineTransform(.identity)
-                }
-                // Recover display layer if it has failed or is unknown
-                let status = displayLayer.status
-                if status == .failed {
-                    displayLayer.flushAndRemoveImage()
-                }
-                self.safelyEnqueueSampleBuffer(sampleBuffer, to: displayLayer)
+        // Once an AR manager exists, filtered frames are scheduled as one of
+        // the serialized sampled families below. Running its landmark request
+        // on every 24 FPS hardware-preview frame was the camera's largest
+        // avoidable spike.
+        guard let displayLayer, !isARFilterProcessingWanted() else { return }
+        DispatchQueue.main.async {
+            if self.currentCameraPosition == .front {
+                self.displayLayer?.setAffineTransform(CGAffineTransform(scaleX: -1, y: 1))
+            } else {
+                self.displayLayer?.setAffineTransform(.identity)
             }
-            return
+            let status = displayLayer.status
+            if status == .failed {
+                displayLayer.flushAndRemoveImage()
+            }
+            self.safelyEnqueueSampleBuffer(sampleBuffer, to: displayLayer)
         }
-        
-        // Vision + Core Image may take longer than a camera frame. Process at
-        // most one frame at a time; otherwise asynchronous requests accumulate
-        // and the filtered preview starts flashing or goes black under load.
-        arFrameLock.lock()
-        guard !arFrameInFlight else {
-            arFrameLock.unlock()
-            return
-        }
-        arFrameInFlight = true
-        arFrameLock.unlock()
+    }
 
-        // Track filter processing start time for performance monitoring
-        let processingStartTime = CFAbsoluteTimeGetCurrent()
-        
-        // Process frame with AR filter (the method is nonisolated so it's safe to call from background thread)
-        filterManager.applyFilterToVideoFrame(sampleBuffer) { [weak self] filteredBuffer in
-            guard let self else { return }
-            self.arFrameLock.lock()
-            self.arFrameInFlight = false
-            self.arFrameLock.unlock()
-            guard let displayLayer = self.displayLayer else { return }
-            
-            // Calculate processing time
-            let processingTime = (CFAbsoluteTimeGetCurrent() - processingStartTime) * 1000 // ms
-            
-            // Log performance if it takes longer than expected (>33ms for 30fps)
-            if processingTime > 33 {
+    /// Claim one expensive camera-analysis family at a time. A claim is held
+    /// until that family's actual asynchronous completion callback, not merely
+    /// until it has enqueued work. This prevents Vision, Core ML and AR
+    /// landmark requests from overlapping on CPU/GPU/Neural Engine.
+    private func claimNextAnalysisPipeline(at now: TimeInterval) -> CameraAnalysisClaim? {
+        analysisStateLock.lock()
+        defer { analysisStateLock.unlock() }
+        guard analysisDeliveryEnabled,
+              !analysisInFlight,
+              quarantinedAnalysisClaimID == nil,
+              !analysisTimedOutForCurrentWindow,
+              now >= nextAnalysisDispatchUptime else { return nil }
+
+        var candidate = nextAnalysisPipeline
+        for _ in 0..<4 {
+            let lastDispatch = lastAnalysisDispatchUptime[candidate] ?? -.greatestFiniteMagnitude
+            let familyIsDue = now - lastDispatch >= minimumPerFamilyAnalysisSpacing
+            let familyIsAvailable: Bool
+            switch candidate {
+            case .faceRecognition:
+                familyIsAvailable = userRecognitionManager != nil
+            case .classification:
+                familyIsAvailable = isMLDetectionEnabled && mlDetectionManager != nil
+            case .objectBoxes:
+                familyIsAvailable = visionBoxDetector != nil
+            case .arFilter:
+                familyIsAvailable = isARFilterProcessingWanted()
+                    && arFilterManager != nil
+                    && displayLayer != nil
             }
-            
-            // Display the filtered (or original if filtering failed) frame
+
+            nextAnalysisPipeline = candidate.next
+            if familyIsDue && familyIsAvailable {
+                analysisInFlight = true
+                activeAnalysisPipeline = candidate
+                analysisClaimID &+= 1
+                let claim = CameraAnalysisClaim(
+                    id: analysisClaimID,
+                    generation: analysisDeliveryGeneration,
+                    pipeline: candidate
+                )
+                lastAnalysisDispatchUptime[candidate] = now
+                nextAnalysisDispatchUptime = now + minimumAnalysisDispatchSpacing
+                analysisClaimTimeoutTask?.cancel()
+                analysisClaimTimeoutTask = Task { [weak self] in
+                    try? await Task.sleep(for: .seconds(self?.maximumAnalysisClaimDuration ?? 4))
+                    guard !Task.isCancelled else { return }
+                    self?.expireAnalysisClaim(claim.id)
+                }
+                return claim
+            }
+            candidate = candidate.next
+        }
+        return nil
+    }
+
+    private func finishAnalysisPipeline(claimID: UInt64) {
+        analysisStateLock.lock()
+        guard analysisClaimID == claimID,
+              analysisInFlight || quarantinedAnalysisClaimID == claimID else {
+            analysisStateLock.unlock()
+            return
+        }
+        analysisInFlight = false
+        activeAnalysisPipeline = nil
+        if quarantinedAnalysisClaimID == claimID {
+            quarantinedAnalysisClaimID = nil
+            quarantinedAnalysisPipeline = nil
+        }
+        analysisClaimTimeoutTask?.cancel()
+        analysisClaimTimeoutTask = nil
+        analysisStateLock.unlock()
+    }
+
+    private func isAnalysisClaimCurrent(_ claim: CameraAnalysisClaim) -> Bool {
+        analysisStateLock.lock()
+        let isCurrent = analysisDeliveryEnabled
+            && analysisInFlight
+            && analysisClaimID == claim.id
+            && analysisDeliveryGeneration == claim.generation
+        analysisStateLock.unlock()
+        return isCurrent && acceptsAnalysisResults
+    }
+
+    private func expireAnalysisClaim(_ claimID: UInt64) {
+        analysisStateLock.lock()
+        guard analysisInFlight, analysisClaimID == claimID else {
+            analysisStateLock.unlock()
+            return
+        }
+        let family = activeAnalysisPipeline?.diagnosticName ?? "unknown"
+        quarantinedAnalysisPipeline = activeAnalysisPipeline
+        analysisInFlight = false
+        activeAnalysisPipeline = nil
+        // The bookkeeping latch is released so UI/capture cannot wedge, but
+        // the timed-out Vision/CoreML/AR operation may still be executing and
+        // is not safely cancellable. Quarantine its claim until its real late
+        // completion arrives; explicit resume can show raw preview meanwhile
+        // but can never overlap it with another expensive family.
+        quarantinedAnalysisClaimID = claimID
+        analysisTimedOutForCurrentWindow = true
+        lastAnalysisTimeoutFamily = family
+        analysisClaimTimeoutTask = nil
+        analysisStateLock.unlock()
+        #if DEBUG
+        print("[CameraColdBudget] analysis timeout family=\(family); analysis parked for this preview window")
+        #endif
+        Task { @MainActor [weak self] in
+            guard let self, self.performanceWantsCapture else { return }
+            // A stuck AR request retains either its last completed filtered
+            // frame or the still-visible hardware preview. Parking here emits
+            // the explicit resume affordance and prevents a black auto-loop.
+            self.parkCamera(reason: .unavailable, canResume: true, preserveLastFrame: true)
+        }
+    }
+
+    private func isARFilterProcessingWanted() -> Bool {
+        arFilterStateLock.lock()
+        let wanted = arFilterProcessingWanted
+        arFilterStateLock.unlock()
+        return wanted
+    }
+
+    private func setARFilterProcessingWanted(_ wanted: Bool) {
+        arFilterStateLock.lock()
+        arFilterProcessingWanted = wanted
+        arFilterStateLock.unlock()
+        sessionQueue.async { [weak self] in
+            guard let self, self.isCaptureDesired() else { return }
+            self.frameProcessingLock.lock()
+            let allowed = self.frameProcessingAllowed
+            self.frameProcessingLock.unlock()
+            self.setVideoFrameDeliveryActiveOnQueue(allowed)
+        }
+    }
+
+    private func runARAnalysis(
+        manager: ARFilterManager,
+        sampleBuffer: CMSampleBuffer,
+        claim: CameraAnalysisClaim
+    ) {
+        guard let displayLayer else {
+            finishAnalysisPipeline(claimID: claim.id)
+            return
+        }
+        manager.applyFilterToVideoFrame(sampleBuffer) { [weak self, weak displayLayer] filteredBuffer in
+            guard let self else { return }
+            defer { self.finishAnalysisPipeline(claimID: claim.id) }
+            guard self.isAnalysisClaimCurrent(claim) else { return }
+            guard let displayLayer else { return }
             let bufferToDisplay = filteredBuffer ?? sampleBuffer
-            
-            // Enqueue on main thread as CALayer operations must be on main thread
             DispatchQueue.main.async {
-                // Ensure displayLayer transform is correct for front / back
                 if self.currentCameraPosition == .front {
                     self.displayLayer?.setAffineTransform(CGAffineTransform(scaleX: -1, y: 1))
                 } else {
                     self.displayLayer?.setAffineTransform(.identity)
                 }
-                
-                // Recover display layer if it has failed or is unknown
                 let status = displayLayer.status
                 if status == .failed {
                     displayLayer.flushAndRemoveImage()
                 }
-                
                 if self.safelyEnqueueSampleBuffer(bufferToDisplay, to: displayLayer) {
                     self.cameraPreviewViewController.markFilteredFrameReady()
                 }
@@ -930,39 +2153,122 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
         }
     }
 
-    /// Run at most one expensive Vision/Core ML family per scheduled camera
-    /// frame. The old path handed the same buffer to classification, four box
-    /// detectors and face recognition together. Their private queues then
-    /// competed for CPU/GPU/Neural Engine time even though each result changes
-    /// slowly. Round-robin dispatch keeps every feature live at roughly 1 Hz
-    /// while leaving clear recovery time between pipelines.
+    /// Run no family faster than once every two seconds, and retain the shared
+    /// claim until its asynchronous work finishes. The old path launched AR
+    /// landmarks on every frame while classification, four box requests and
+    /// face recognition competed on private queues.
     private func dispatchNextAnalysisPipeline(
         sampleBuffer: CMSampleBuffer,
         pixelBuffer: CVPixelBuffer
     ) {
         let now = ProcessInfo.processInfo.systemUptime
-        guard now >= nextAnalysisDispatchUptime else { return }
-        nextAnalysisDispatchUptime = now + minimumAnalysisDispatchSpacing
+        guard let claim = claimNextAnalysisPipeline(at: now) else { return }
 
-        let pipeline = nextAnalysisPipeline
-        nextAnalysisPipeline = pipeline.next
-
-        switch pipeline {
+        switch claim.pipeline {
         case .faceRecognition:
-            if let userRecognition = userRecognitionManager {
-                // UserRecognitionManager publishes UI-observable state. Keep
-                // its entry point on the main actor as before; only the Vision
-                // request itself moves to its background queue.
-                Task { @MainActor in
-                    userRecognition.detectFaces(in: pixelBuffer)
+            guard let userRecognition = userRecognitionManager else {
+                finishAnalysisPipeline(claimID: claim.id)
+                return
+            }
+            Task { @MainActor [weak self, weak userRecognition] in
+                guard let self else { return }
+                guard let userRecognition else {
+                    self.finishAnalysisPipeline(claimID: claim.id)
+                    return
+                }
+                guard !userRecognition.isRecognizing else {
+                    self.finishAnalysisPipeline(claimID: claim.id)
+                    return
+                }
+                self.faceRecognitionCompletion?.cancel()
+                self.faceRecognitionCompletion = userRecognition.$isRecognizing
+                    .dropFirst()
+                    .filter { !$0 }
+                    .prefix(1)
+                    .sink { [weak self, weak userRecognition] _ in
+                        if let self,
+                           !self.isAnalysisClaimCurrent(claim) {
+                            // UserRecognitionManager owns its Vision request and
+                            // may have published just before isRecognizing fell.
+                            // Remove that stale UI state; speech was gated off
+                            // synchronously at parkCamera().
+                            userRecognition?.clearRecognition()
+                        }
+                        self?.faceRecognitionCompletion = nil
+                        self?.finishAnalysisPipeline(claimID: claim.id)
+                    }
+                userRecognition.detectFaces(in: pixelBuffer)
+                if !userRecognition.isRecognizing {
+                    self.faceRecognitionCompletion?.cancel()
+                    self.faceRecognitionCompletion = nil
+                    self.finishAnalysisPipeline(claimID: claim.id)
                 }
             }
         case .classification:
-            if isMLDetectionEnabled {
-                mlDetectionManager?.processFrame(sampleBuffer)
+            guard let manager = mlDetectionManager, isMLDetectionEnabled else {
+                finishAnalysisPipeline(claimID: claim.id)
+                return
             }
+            let downstreamDetection = manager.onDetection
+            let downstreamError = manager.onError
+            manager.onDetection = { [weak self, weak manager] objects in
+                guard let self else {
+                    manager?.onDetection = downstreamDetection
+                    manager?.onError = downstreamError
+                    return
+                }
+                if self.isAnalysisClaimCurrent(claim) {
+                    downstreamDetection?(objects)
+                }
+                self.analysisStateLock.lock()
+                let pendingHandler = self.pendingMLDetectionHandler
+                self.pendingMLDetectionHandler = nil
+                self.analysisStateLock.unlock()
+                manager?.onDetection = pendingHandler ?? downstreamDetection
+                manager?.onError = downstreamError
+                self.finishAnalysisPipeline(claimID: claim.id)
+            }
+            manager.onError = { [weak self, weak manager] error in
+                guard let self else {
+                    manager?.onDetection = downstreamDetection
+                    manager?.onError = downstreamError
+                    return
+                }
+                if self.isAnalysisClaimCurrent(claim) {
+                    downstreamError?(error)
+                }
+                self.analysisStateLock.lock()
+                let pendingHandler = self.pendingMLDetectionHandler
+                self.pendingMLDetectionHandler = nil
+                self.analysisStateLock.unlock()
+                manager?.onDetection = pendingHandler ?? downstreamDetection
+                manager?.onError = downstreamError
+                self.finishAnalysisPipeline(claimID: claim.id)
+            }
+            manager.processFrame(sampleBuffer)
         case .objectBoxes:
-            visionBoxDetector?.process(pixelBuffer: pixelBuffer)
+            guard let detector = visionBoxDetector else {
+                finishAnalysisPipeline(claimID: claim.id)
+                return
+            }
+            let downstream = detector.onBoxes
+            detector.onBoxes = { [weak self, weak detector] boxes in
+                if self?.isAnalysisClaimCurrent(claim) == true {
+                    downstream?(boxes)
+                }
+                detector?.onBoxes = downstream
+                self?.finishAnalysisPipeline(claimID: claim.id)
+            }
+            if !detector.process(pixelBuffer: pixelBuffer) {
+                detector.onBoxes = downstream
+                finishAnalysisPipeline(claimID: claim.id)
+            }
+        case .arFilter:
+            guard let manager = arFilterManager else {
+                finishAnalysisPipeline(claimID: claim.id)
+                return
+            }
+            runARAnalysis(manager: manager, sampleBuffer: sampleBuffer, claim: claim)
         }
     }
     
@@ -979,13 +2285,23 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
         // schedulers and make classification update only every ~12 seconds.
         mlDetectionManager?.frameSkipInterval = 1
         mlDetectionManager?.isEnabled = true
-        mlDetectionManager?.onDetection = onDetection ?? { objects in
+        let handler = onDetection ?? { objects in
             NotificationCenter.default.post(
                 name: NSNotification.Name("MLObjectsDetected"),
                 object: nil,
                 userInfo: ["objects": objects]
             )
         }
+        analysisStateLock.lock()
+        if activeAnalysisPipeline == .classification
+            || quarantinedAnalysisPipeline == .classification {
+            // Do not overwrite the completion wrapper while a request is in
+            // flight; install the new consumer atomically when it finishes.
+            pendingMLDetectionHandler = handler
+        } else {
+            mlDetectionManager?.onDetection = handler
+        }
+        analysisStateLock.unlock()
         isMLDetectionEnabled = true
     }
     

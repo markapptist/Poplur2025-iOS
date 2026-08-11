@@ -101,9 +101,6 @@ final class MapStateManager: ObservableObject {
 
     @Published private(set) var isMapTabActive: Bool = false
     
-    var lastInteractionTime: Date = Date()
-    private var idleTimerTask: Task<Void, Never>?
-    
     // MARK: - Pending Navigation
     
     /// Stores a coordinate that should be shown when MapView appears
@@ -125,9 +122,6 @@ final class MapStateManager: ObservableObject {
 
     // MARK: - Configuration
 
-    /// How long to wait before starting auto-tour (30 seconds)
-    let tourIdleThreshold: TimeInterval = 30.0
-    
     /// Minimum time between tour start attempts
     let tourCooldown: TimeInterval = 5.0
     
@@ -141,21 +135,11 @@ final class MapStateManager: ObservableObject {
     
     /// Call this whenever user interacts with the map
     func noteUserInteraction() {
-        let now = Date()
-        let timeSinceLastNote = now.timeIntervalSince(lastInteractionTime)
-        lastInteractionTime = now
-
         // Stop tour if it's running
         if case .autoTour = mode {
             print("🗺️ [MapState] User interaction detected - stopping tour")
             mode = .browsing
         }
-
-        // Restart the idle timer, but only if enough time has passed.
-        // This prevents recreating the Task on every drag frame (60fps), which
-        // caused the map to jitter due to @StateObject re-renders.
-        guard timeSinceLastNote > 0.3 || idleTimerTask == nil else { return }
-        restartIdleTimer()
     }
 
     /// Keep automatic map-tour behavior scoped to the actual Map tab.
@@ -164,11 +148,7 @@ final class MapStateManager: ObservableObject {
         isMapTabActive = isActive
         print("🗺️ [MapState] Map tab active: \(isActive)")
 
-        if isActive {
-            lastInteractionTime = Date()
-            restartIdleTimer()
-        } else {
-            cancelIdleTimer()
+        if !isActive {
             if case .autoTour = mode {
                 print("🗺️ [MapState] Leaving map tab - stopping tour")
                 mode = .browsing
@@ -180,21 +160,18 @@ final class MapStateManager: ObservableObject {
     func selectCoordinate(_ coordinate: CLLocationCoordinate2D) {
         print("🗺️ [MapState] Coordinate selected: \(coordinate.latitude), \(coordinate.longitude)")
         mode = .coordinateSelected(coordinate: coordinate)
-        cancelIdleTimer() // Don't start tour while selecting
     }
     
     /// Enter post location selection mode (Camera → Map flow)
     func enterPostLocationSelectionMode() {
         print("🗺️ [MapState] Entering post location selection mode")
         mode = .selectingPostLocation
-        cancelIdleTimer() // Don't start tour while selecting
     }
     
     /// Navigate to show a specific post location
     func showPostLocation(_ coordinate: CLLocationCoordinate2D) {
         print("🗺️ [MapState] Showing post location: \(coordinate.latitude), \(coordinate.longitude)")
         mode = .showingPostLocation(coordinate: coordinate)
-        cancelIdleTimer() // Don't start tour while showing post
     }
     
     /// Set a pending post location to navigate to (used when MapView isn't loaded yet)
@@ -251,7 +228,6 @@ final class MapStateManager: ObservableObject {
         print("🗺️ [MapState] Starting auto-tour")
         mode = .autoTour
         lastTourStartTime = Date()
-        cancelIdleTimer() // Tour manages its own timing
     }
     
     /// Stop tour and return to browsing
@@ -259,26 +235,12 @@ final class MapStateManager: ObservableObject {
         guard case .autoTour = mode else { return }
         print("🗺️ [MapState] Stopping tour")
         mode = .browsing
-        restartIdleTimer()
     }
     
     /// Cancel current operation and return to browsing
     func cancelCurrentOperation() {
         print("🗺️ [MapState] Canceling current operation")
         mode = .browsing
-        restartIdleTimer()
-    }
-    
-    /// Check if enough time has passed to start tour
-    func checkIdleTimeout() {
-        guard isMapTabActive else { return }
-        guard mode.allowsTourToStart else { return }
-        
-        let idleTime = Date().timeIntervalSince(lastInteractionTime)
-        if idleTime >= tourIdleThreshold {
-            print("🗺️ [MapState] Idle timeout reached (\(idleTime)s) - starting tour")
-            startTour()
-        }
     }
     
     // MARK: - Private Methods
@@ -301,31 +263,6 @@ final class MapStateManager: ObservableObject {
         default:
             break
         }
-    }
-    
-    private func restartIdleTimer() {
-        cancelIdleTimer()
-        
-        guard isMapTabActive else { return }
-        guard mode.allowsTourToStart else { return }
-        
-        idleTimerTask = Task { @MainActor in
-            print("🗺️ [MapState] Idle timer started - will check in \(tourIdleThreshold)s")
-            
-            try? await Task.sleep(nanoseconds: UInt64(tourIdleThreshold * 1_000_000_000))
-            
-            guard !Task.isCancelled else {
-                print("🗺️ [MapState] Idle timer cancelled")
-                return
-            }
-            
-            checkIdleTimeout()
-        }
-    }
-    
-    private func cancelIdleTimer() {
-        idleTimerTask?.cancel()
-        idleTimerTask = nil
     }
     
     // MARK: - Convenience Getters

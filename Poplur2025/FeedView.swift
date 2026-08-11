@@ -35,7 +35,7 @@ struct FeedView: View {
 
     @ObservedObject private var settings = SettingsStore.shared
     @ObservedObject private var cubeSkinStore = CubeSkinStore.shared
-    @StateObject private var fallbackLocationProvider = LocationProvider()
+    @ObservedObject private var fallbackLocationProvider = LocationProvider.shared
     @StateObject private var poleModel = PolePositionModel()
     private var activeLocationProvider: LocationProvider { fallbackLocationProvider }
 
@@ -53,9 +53,13 @@ struct FeedView: View {
 
     // Pagination
     private let pageSize = 5
+    private let feedWindowLimit = 25
     @State private var lastDocument: DocumentSnapshot?
     @State private var isLoadingMore = false
     @State private var reachedEnd = false
+    @State private var nextGenerationOffset = 0
+    @State private var paginationTask: Task<Void, Never>?
+    @State private var paginationTaskID: UUID?
 
     // Current page
     @State private var currentIndex: Int = 0
@@ -426,7 +430,7 @@ struct FeedView: View {
                         start: 0,
                         count: pageSize
                     )
-                    posts = newPosts
+                    replaceFeedWindow(with: newPosts, hasReachedEnd: newPosts.isEmpty)
                     isFeedReady = !newPosts.isEmpty
                     hideInitialLoadingScreen()
                     if newPosts.first != nil {
@@ -467,6 +471,7 @@ struct FeedView: View {
                 tvGuideActivePlayer = notification.object as? AVPlayer
             }
             .onDisappear {
+                cancelPagination()
                 feedEntryLogoTask?.cancel()
                 feedEntryLogoTask = nil
                 showFeedEntryLogo = false
@@ -485,6 +490,7 @@ struct FeedView: View {
         notifHaptics.prepare()
         seedPostsForActiveSelectionIfNeeded()
         presentBumperForCurrentPostIfNeeded()
+        maybeLoadMoreIfNeeded(appearingIndex: currentIndex)
 
         if !posts.isEmpty && !isFeedReady {
             print("[Feed] onAppear - restoring feed ready state")
@@ -513,7 +519,7 @@ struct FeedView: View {
             start: 0,
             count: pageSize
         )
-        posts = newPosts
+        replaceFeedWindow(with: newPosts, hasReachedEnd: newPosts.isEmpty)
         isFeedReady = !newPosts.isEmpty
         hideInitialLoadingScreen()
         if newPosts.first != nil {
@@ -564,6 +570,48 @@ struct FeedView: View {
         }
     }
 
+    /// A feed can run indefinitely, but only this sliding window is retained by
+    /// the view. `nextGenerationOffset` remains independent of `posts.count` so
+    /// evicting the head never causes generated pages to repeat.
+    private func replaceFeedWindow(with newPosts: [FeedPost], hasReachedEnd: Bool) {
+        cancelPagination()
+        posts = Array(newPosts.prefix(feedWindowLimit))
+        currentIndex = 0
+        nextGenerationOffset = posts.count
+        reachedEnd = hasReachedEnd || posts.isEmpty
+        pruneEvictedFeedState()
+    }
+
+    private func appendToFeedWindow(_ newPage: [FeedPost], generatedFrom offset: Int) {
+        nextGenerationOffset = offset + newPage.count
+        reachedEnd = newPage.isEmpty
+        guard !newPage.isEmpty else { return }
+
+        posts.append(contentsOf: newPage)
+        let overflow = max(0, posts.count - feedWindowLimit)
+        if overflow > 0 {
+            posts.removeFirst(overflow)
+            currentIndex = max(0, currentIndex - overflow)
+        }
+        pruneEvictedFeedState()
+    }
+
+    private func pruneEvictedFeedState() {
+        let retainedPostIDs = Set(posts.map(\.id))
+        localLikeBoosts = localLikeBoosts.filter { retainedPostIDs.contains($0.key) }
+
+        let retainedUserIDs = Set(posts.map(\.userID))
+        usernames = usernames.filter { retainedUserIDs.contains($0.key) }
+        usernameLoadsInProgress.formIntersection(retainedUserIDs)
+    }
+
+    private func cancelPagination() {
+        paginationTask?.cancel()
+        paginationTask = nil
+        paginationTaskID = nil
+        isLoadingMore = false
+    }
+
     // MARK: - Strict bootstrap sequence
     @MainActor
     private func runStrictBootstrap() async {
@@ -584,9 +632,8 @@ struct FeedView: View {
         )
 
         // Update UI SYNCHRONOUSLY - no await needed
-        posts = newPosts
+        replaceFeedWindow(with: newPosts, hasReachedEnd: newPosts.isEmpty)
         isFeedReady = !posts.isEmpty
-        currentIndex = 0
         isVideoLoading = false
         poleModel.position = PolePosition(x: 0.5, y: 0.5)
         // Note: hideInitialLoadingScreen() is called by the .task after a minimum display time
@@ -1401,17 +1448,15 @@ struct FeedView: View {
                 countryFlag: "🇨🇦"
             )
         ]
-        posts = previewPosts
+        replaceFeedWindow(with: previewPosts, hasReachedEnd: true)
         usernames = [
             "preview_creator_0": "PREVIEW CREATOR",
             "preview_creator_1": "CITY CREATOR"
         ]
-        currentIndex = 0
         didBootstrap = true
         isFeedReady = true
         isLoading = false
         isVideoLoading = false
-        reachedEnd = true
     }
 
     private func maybeResolveUsername(for uid: String) {
@@ -1428,10 +1473,13 @@ struct FeedView: View {
         Task {
             let name = await UsernameCache.shared.username(for: uid)
             await MainActor.run {
-                if let name, !name.isEmpty {
+                let isStillRetained = posts.contains { $0.userID == uid }
+                if isStillRetained, let name, !name.isEmpty {
                     usernames[uid] = name
                 }
-                usernameLoadsInProgress.remove(uid)
+                if isStillRetained {
+                    usernameLoadsInProgress.remove(uid)
+                }
             }
         }
     }
@@ -1450,6 +1498,7 @@ struct FeedView: View {
                 let name = await UsernameCache.shared.username(for: uid)
                 if let name {
                     await MainActor.run {
+                        guard self.posts.contains(where: { $0.userID == uid }) else { return }
                         self.usernames[uid] = name
                     }
                 }
@@ -1582,10 +1631,8 @@ struct FeedView: View {
 
         // Update UI immediately (no await needed)
         isLoading = false
-        reachedEnd = false
         lastDocument = nil
-        posts = newPosts
-        currentIndex = 0
+        replaceFeedWindow(with: newPosts, hasReachedEnd: newPosts.isEmpty)
         isFeedReady = !posts.isEmpty
         hideInitialLoadingScreen()
         
@@ -1615,12 +1662,10 @@ struct FeedView: View {
         )
 
         // Update UI immediately (no await needed)
-        posts = newPosts
+        replaceFeedWindow(with: newPosts, hasReachedEnd: newPosts.isEmpty)
         isLoading = false
         isVideoLoading = false
-        reachedEnd = newPosts.isEmpty
         isFeedReady = !newPosts.isEmpty
-        currentIndex = 0
         hideInitialLoadingScreen()
         
         if newPosts.first != nil {
@@ -1644,12 +1689,10 @@ struct FeedView: View {
         )
 
         // Update UI immediately (no await needed)
-        posts = newPosts
+        replaceFeedWindow(with: newPosts, hasReachedEnd: newPosts.isEmpty)
         isLoading = false
         isVideoLoading = false
-        reachedEnd = newPosts.isEmpty
         isFeedReady = !newPosts.isEmpty
-        currentIndex = 0
         hideInitialLoadingScreen()
         
         if newPosts.first != nil {
@@ -1674,27 +1717,41 @@ struct FeedView: View {
 
     private func maybeLoadMoreIfNeeded(appearingIndex idx: Int) {
         // Trigger pagination when the user is within 1 item of the end.
-        guard !isLoadingMore, !reachedEnd else { return }
+        guard paginationTask == nil, !isLoadingMore, !reachedEnd else { return }
         let thresholdIndex = max(0, posts.count - 3)
         guard idx >= thresholdIndex else { return }
 
+        let taskID = UUID()
+        let generationOffset = nextGenerationOffset
+        let countryCode = countries[selectedCountryIndex].code
+        let channelID = channels[selectedChannelIndex].id
+        paginationTaskID = taskID
         isLoadingMore = true
-        Task {
-            // Simulate network delay
-            try? await Task.sleep(nanoseconds: 250_000_000)
+        paginationTask = Task { @MainActor in
+            defer {
+                if paginationTaskID == taskID {
+                    paginationTask = nil
+                    paginationTaskID = nil
+                    isLoadingMore = false
+                }
+            }
+
+            do {
+                // Simulate network delay
+                try await Task.sleep(nanoseconds: 250_000_000)
+            } catch {
+                return
+            }
+            guard !Task.isCancelled, paginationTaskID == taskID else { return }
 
             let newPage = Self.generateDemoPostsForCountryAndChannel(
-                country: countries[selectedCountryIndex].code,
-                channel: channels[selectedChannelIndex].id,
-                start: posts.count,
+                country: countryCode,
+                channel: channelID,
+                start: generationOffset,
                 count: pageSize
             )
-
-            await MainActor.run {
-                posts.append(contentsOf: newPage)
-                isLoadingMore = false
-                reachedEnd = newPage.isEmpty
-            }
+            guard !Task.isCancelled, paginationTaskID == taskID else { return }
+            appendToFeedWindow(newPage, generatedFrom: generationOffset)
         }
     }
 

@@ -158,8 +158,20 @@ struct PoplurClayMapView: UIViewRepresentable {
             if relativePath.hasPrefix("/captures/") {
                 let key = String(relativePath.dropFirst("/captures/".count))
                 guard !key.contains("/"),
-                      let item = PoplurWebCaptureStore.item(for: key),
-                      let captureData = item.data ?? (item.fileURL.flatMap { try? Data(contentsOf: $0) }) else {
+                      let item = PoplurWebCaptureStore.item(for: key) else {
+                    urlSchemeTask.didFailWithError(URLError(.fileDoesNotExist))
+                    return
+                }
+                if let fileURL = item.fileURL {
+                    serveCaptureFile(
+                        fileURL,
+                        mime: item.mimeType,
+                        request: urlSchemeTask.request,
+                        task: urlSchemeTask
+                    )
+                    return
+                }
+                guard let captureData = item.data else {
                     urlSchemeTask.didFailWithError(URLError(.fileDoesNotExist))
                     return
                 }
@@ -240,6 +252,112 @@ struct PoplurClayMapView: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, stop urlSchemeTask: WKURLSchemeTask) {}
+
+        /// File-backed captures (especially recorded video) must not become a
+        /// second full-size `Data` allocation merely to satisfy a small WebKit
+        /// byte-range request. Send bounded chunks directly from FileHandle.
+        private func serveCaptureFile(
+            _ fileURL: URL,
+            mime: String,
+            request: URLRequest,
+            task: WKURLSchemeTask
+        ) {
+            guard let responseURL = request.url,
+                  let values = try? fileURL.resourceValues(forKeys: [.fileSizeKey]),
+                  let fileSize = values.fileSize,
+                  fileSize >= 0,
+                  let handle = try? FileHandle(forReadingFrom: fileURL) else {
+                task.didFailWithError(URLError(.fileDoesNotExist))
+                return
+            }
+            defer { try? handle.close() }
+
+            let total = Int64(fileSize)
+            let rangeHeader = request.value(forHTTPHeaderField: "Range")
+            let byteRange: ClosedRange<Int64>
+            let isPartial: Bool
+            if let rangeHeader {
+                guard let parsed = Self.byteRange(from: rangeHeader, totalLength: total) else {
+                    task.didFailWithError(URLError(.badServerResponse))
+                    return
+                }
+                byteRange = parsed
+                isPartial = true
+            } else if total > 0 {
+                byteRange = 0...(total - 1)
+                isPartial = false
+            } else {
+                byteRange = 0...0
+                isPartial = false
+            }
+
+            let contentLength = total == 0 ? 0 : byteRange.upperBound - byteRange.lowerBound + 1
+            var headers = [
+                "Content-Type": mime,
+                "Content-Length": "\(contentLength)",
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "no-store"
+            ]
+            if isPartial {
+                headers["Content-Range"] =
+                    "bytes \(byteRange.lowerBound)-\(byteRange.upperBound)/\(total)"
+            }
+            guard let response = HTTPURLResponse(
+                url: responseURL,
+                statusCode: isPartial ? 206 : 200,
+                httpVersion: "HTTP/1.1",
+                headerFields: headers
+            ) else {
+                task.didFailWithError(URLError(.badServerResponse))
+                return
+            }
+            task.didReceive(response)
+            guard contentLength > 0 else {
+                task.didFinish()
+                return
+            }
+
+            do {
+                try handle.seek(toOffset: UInt64(byteRange.lowerBound))
+                var remaining = contentLength
+                let chunkLimit: Int64 = 256 * 1_024
+                while remaining > 0 {
+                    let requestedCount = Int(min(chunkLimit, remaining))
+                    guard let chunk = try handle.read(upToCount: requestedCount),
+                          !chunk.isEmpty else {
+                        throw URLError(.cannotDecodeContentData)
+                    }
+                    task.didReceive(chunk)
+                    remaining -= Int64(chunk.count)
+                }
+                task.didFinish()
+            } catch {
+                task.didFailWithError(error)
+            }
+        }
+
+        private static func byteRange(
+            from header: String,
+            totalLength: Int64
+        ) -> ClosedRange<Int64>? {
+            guard totalLength > 0,
+                  header.hasPrefix("bytes="),
+                  !header.contains(",") else { return nil }
+            let spec = header.dropFirst("bytes=".count)
+            let bounds = spec.split(separator: "-", omittingEmptySubsequences: false)
+            guard bounds.count == 2 else { return nil }
+
+            if bounds[0].isEmpty {
+                guard let suffixLength = Int64(bounds[1]), suffixLength > 0 else { return nil }
+                let start = max(0, totalLength - suffixLength)
+                return start...(totalLength - 1)
+            }
+
+            guard let start = Int64(bounds[0]), start >= 0, start < totalLength else { return nil }
+            let requestedEnd = bounds[1].isEmpty ? totalLength - 1 : Int64(bounds[1])
+            guard let requestedEnd, requestedEnd >= start else { return nil }
+            return start...min(requestedEnd, totalLength - 1)
+        }
 
         private static func mimeType(forExtension ext: String) -> String {
             switch ext.lowercased() {

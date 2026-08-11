@@ -76,6 +76,24 @@ class ConfettiScene: SKScene {
         emitter.particleBirthRate = CGFloat(30 * safeIntensity) // Continuous emission
         addChild(emitter)
         emitters[id] = emitter
+
+        // A "continuous" map accent must still have a hard lifetime. Leaving
+        // this emitter alive until a future trend update kept SpriteKit drawing
+        // indefinitely when a pin's last state remained trending.
+        let stopBirth = SKAction.run { [weak emitter] in
+            emitter?.particleBirthRate = 0
+        }
+        let release = SKAction.run { [weak self, weak emitter] in
+            guard let self, let emitter, self.emitters[id] === emitter else { return }
+            self.emitters.removeValue(forKey: id)
+        }
+        emitter.run(.sequence([
+            .wait(forDuration: 2.0),
+            stopBirth,
+            .wait(forDuration: 3.5),
+            release,
+            .removeFromParent()
+        ]))
     }
     
     /// Stop continuous emission for a pin
@@ -86,6 +104,16 @@ class ConfettiScene: SKScene {
             emitter.run(SKAction.sequence([fadeOut, remove]))
             emitters.removeValue(forKey: id)
         }
+    }
+
+    func tearDown() {
+        emitters.values.forEach {
+            $0.removeAllActions()
+            $0.removeFromParent()
+        }
+        emitters.removeAll(keepingCapacity: false)
+        removeAllActions()
+        removeAllChildren()
     }
     
     /// Create a confetti emitter node
@@ -231,6 +259,16 @@ struct ConfettiOverlay: UIViewRepresentable {
     func makeCoordinator() -> Coordinator {
         Coordinator()
     }
+
+    static func dismantleUIView(_ uiView: SKView, coordinator: Coordinator) {
+        coordinator.confettiScene?.tearDown()
+        coordinator.activePins.removeAll(keepingCapacity: false)
+        if let managed = uiView as? PoplurManagedSKView {
+            managed.poplurTearDown()
+        } else {
+            uiView.presentScene(nil)
+        }
+    }
     
     class Coordinator {
         weak var confettiScene: ConfettiScene?
@@ -247,6 +285,8 @@ class PinTrendingTracker: ObservableObject {
     
     private var pinHistory: [UUID: [PinSnapshot]] = [:]
     private let historyWindow: TimeInterval = 60 // Track last 60 seconds
+    private let maximumTrackedPinCount = 128
+    private let maximumSnapshotsPerPin = 12
     
     struct PinSnapshot {
         let timestamp: Date
@@ -257,12 +297,17 @@ class PinTrendingTracker: ObservableObject {
     /// Update a pin's status and determine if it's trending
     func updatePin(id: UUID, coordinate: CLLocationCoordinate2D, radius: Double, activityCount: Int = 0) {
         let snapshot = PinSnapshot(timestamp: Date(), radius: radius, activityCount: activityCount)
+
+        makeRoomForPinIfNeeded(id)
         
         // Add to history
         if pinHistory[id] == nil {
             pinHistory[id] = []
         }
         pinHistory[id]?.append(snapshot)
+        if let count = pinHistory[id]?.count, count > maximumSnapshotsPerPin {
+            pinHistory[id]?.removeFirst(count - maximumSnapshotsPerPin)
+        }
         
         // Clean old history
         cleanOldHistory(for: id)
@@ -297,6 +342,7 @@ class PinTrendingTracker: ObservableObject {
 
     /// Immediately mark a coordinate as trending so visual bursts can happen without waiting for history.
     func forceTrendingBurst(id: UUID = UUID(), coordinate: CLLocationCoordinate2D, intensity: Double = 1.0) {
+        makeRoomForPinIfNeeded(id)
         let previousRadius = 80.0
         let radius = previousRadius * (1.0 + max(0.2, intensity))
         let pin = TrendingPin(
@@ -356,13 +402,35 @@ class PinTrendingTracker: ObservableObject {
     private func cleanOldHistory(for id: UUID) {
         let cutoffDate = Date().addingTimeInterval(-historyWindow)
         pinHistory[id]?.removeAll { $0.timestamp < cutoffDate }
+        if pinHistory[id]?.isEmpty == true {
+            removePin(id: id)
+        }
     }
     
     /// Clean all old history
     func cleanAllOldHistory() {
         let cutoffDate = Date().addingTimeInterval(-historyWindow)
-        for (id, _) in pinHistory {
+        for id in Array(pinHistory.keys) {
             pinHistory[id]?.removeAll { $0.timestamp < cutoffDate }
+            if pinHistory[id]?.isEmpty == true {
+                removePin(id: id)
+            }
+        }
+    }
+
+    private func makeRoomForPinIfNeeded(_ id: UUID) {
+        guard pinHistory[id] == nil,
+              !trendingPins.contains(where: { $0.id == id }),
+              max(pinHistory.count, trendingPins.count) >= maximumTrackedPinCount
+        else { return }
+
+        let oldestTrackedID = pinHistory.min { lhs, rhs in
+            (lhs.value.last?.timestamp ?? .distantPast) < (rhs.value.last?.timestamp ?? .distantPast)
+        }?.key
+        if let oldestTrackedID {
+            removePin(id: oldestTrackedID)
+        } else if let oldestVisibleID = trendingPins.first?.id {
+            removePin(id: oldestVisibleID)
         }
     }
 }

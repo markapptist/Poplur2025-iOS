@@ -341,6 +341,13 @@ class ComprehensiveMLIntegration {
     private let locationContext = SmartLocationContext()
     private let sceneRecognition = SceneBasedRecommendations()
     private let cameraHints = SmartCameraHints()
+    private var recommendationObserver: NSObjectProtocol?
+
+    deinit {
+        if let recommendationObserver {
+            NotificationCenter.default.removeObserver(recommendationObserver)
+        }
+    }
     
     func setupAllFeatures() {
         // Setup auto-tagging
@@ -360,7 +367,10 @@ class ComprehensiveMLIntegration {
         }
         
         // Listen for recommendations
-        NotificationCenter.default.addObserver(
+        if let recommendationObserver {
+            NotificationCenter.default.removeObserver(recommendationObserver)
+        }
+        recommendationObserver = NotificationCenter.default.addObserver(
             forName: NSNotification.Name("UpdateAIRecommendation"),
             object: nil,
             queue: .main

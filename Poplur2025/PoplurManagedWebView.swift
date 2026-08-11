@@ -31,6 +31,8 @@ final class PoplurManagedWebView: WKWebView {
     private var latestPolicy = PoplurPerformanceManager.shared.policy
     private var latestGrant = false
     private var isLightweightOverlayMode = false
+    private var isLightweightOverlayRuntimeSuspended = false
+    private var isHostOccluded = false
 
     init(
         performanceName: String,
@@ -91,8 +93,39 @@ final class PoplurManagedWebView: WKWebView {
     /// that lightweight, interactive HUD alive; otherwise the WebView's higher
     /// priority deterministically prevents NativeCamera from ever starting.
     func setLightweightOverlayMode(_ enabled: Bool) {
-        guard isLightweightOverlayMode != enabled else { return }
+        if !enabled {
+            // A parked Camera HUD must never leave Feed/Map suspended after
+            // the transparent camera hole closes.
+            isLightweightOverlayRuntimeSuspended = false
+        }
+        guard isLightweightOverlayMode != enabled else {
+            applyLatestPolicyToDocument()
+            return
+        }
         isLightweightOverlayMode = enabled
+        if window != nil { ensurePerformanceRegistration() }
+        updatePerformanceVisibility()
+        applyLatestPolicyToDocument()
+    }
+
+    /// Pauses the transparent Camera HUD's governed rAF/timers/CSS/media while
+    /// leaving the WKWebView visible and interactive. The parked preview's
+    /// synchronous tap handler can therefore still ask native to restart the
+    /// camera after policy recovery without an idle web runtime burning power.
+    func setLightweightOverlayRuntimeSuspended(_ suspended: Bool) {
+        guard isLightweightOverlayMode,
+              isLightweightOverlayRuntimeSuspended != suspended else { return }
+        isLightweightOverlayRuntimeSuspended = suspended
+        applyLatestPolicyToDocument()
+    }
+
+    /// UIKit does not remove the presenting view when SwiftUI raises a
+    /// full-screen cover, so window/hidden/alpha remain deceptively "visible".
+    /// The host explicitly closes both the native lease and document runtime
+    /// while another full-screen surface owns the display.
+    func setHostOccluded(_ occluded: Bool) {
+        guard isHostOccluded != occluded else { return }
+        isHostOccluded = occluded
         if window != nil { ensurePerformanceRegistration() }
         updatePerformanceVisibility()
         applyLatestPolicyToDocument()
@@ -118,7 +151,11 @@ final class PoplurManagedWebView: WKWebView {
 
     private func updatePerformanceVisibility() {
         performanceRegistration?.setVisible(
-            window != nil && !isHidden && alpha > 0.01 && !isLightweightOverlayMode
+            window != nil
+                && !isHidden
+                && alpha > 0.01
+                && !isLightweightOverlayMode
+                && !isHostOccluded
         )
     }
 
@@ -136,10 +173,14 @@ final class PoplurManagedWebView: WKWebView {
     }
 
     private func applyLatestPolicyToDocument() {
-        let active = (latestGrant || isLightweightOverlayMode)
+        let active = (
+            latestGrant
+                || (isLightweightOverlayMode && !isLightweightOverlayRuntimeSuspended)
+        )
             && window != nil
             && !isHidden
             && alpha > 0.01
+            && !isHostOccluded
             && UIApplication.shared.applicationState == .active
         setAllMediaPlaybackSuspended(!active, completionHandler: nil)
         evaluateJavaScript(PoplurWebPerformance.updateScript(policy: latestPolicy, active: active))

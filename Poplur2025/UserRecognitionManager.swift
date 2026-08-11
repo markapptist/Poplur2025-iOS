@@ -33,6 +33,7 @@ class UserRecognitionManager: ObservableObject {
     private var lastRecognitionTime: Date = .distantPast
     private var savedFaceImage: UIImage?
     private var savedFaceObservation: VNFaceObservation?
+    private var faceImageObserver: NSObjectProtocol?
     
     // Minimum time between recognition attempts. CameraKitController offers a
     // dedicated face slot at roughly 1 Hz; this guard also protects callers
@@ -45,6 +46,12 @@ class UserRecognitionManager: ObservableObject {
         setupFaceDetection()
         loadSavedFaceImage()
         setupNotificationObserver()
+    }
+
+    deinit {
+        if let faceImageObserver {
+            NotificationCenter.default.removeObserver(faceImageObserver)
+        }
     }
     
     // MARK: - Setup
@@ -72,7 +79,10 @@ class UserRecognitionManager: ObservableObject {
     }
     
     private func setupNotificationObserver() {
-        NotificationCenter.default.addObserver(
+        if let faceImageObserver {
+            NotificationCenter.default.removeObserver(faceImageObserver)
+        }
+        faceImageObserver = NotificationCenter.default.addObserver(
             forName: Notification.Name("FaceImageUpdatedForML"),
             object: nil,
             queue: .main

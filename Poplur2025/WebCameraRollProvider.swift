@@ -174,10 +174,18 @@ enum WebCameraRollProvider {
                 return
             }
 
-            let key = PoplurWebCaptureStore.registerCameraRollAsset(
+            guard let key = PoplurWebCaptureStore.registerCameraRollAsset(
                 data: rendered.data,
                 mimeType: "image/jpeg"
-            )
+            ) else {
+                deliverAssetError(
+                    requestId: requestId,
+                    assetId: assetId,
+                    message: "asset_too_large",
+                    into: webView
+                )
+                return
+            }
             let source = "\(PoplurClayWebMap.scheme)://\(PoplurClayWebMap.host)/captures/\(key)"
             let payload: [String: Any] = [
                 "requestId": requestId,

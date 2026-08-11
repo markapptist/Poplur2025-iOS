@@ -13,9 +13,18 @@ final class WatchRadiusSync: NSObject {
     private var didStart = false
     private var observerTokens: [NSObjectProtocol] = []
     private let db = Firestore.firestore()
+    private let pageSize = 100
+    private var refreshTask: Task<Void, Never>?
+    private var refreshToken: UUID?
+    private var refreshRequested = false
 
     private override init() {
         super.init()
+    }
+
+    deinit {
+        observerTokens.forEach { NotificationCenter.default.removeObserver($0) }
+        refreshTask?.cancel()
     }
 
     func start() {
@@ -28,29 +37,74 @@ final class WatchRadiusSync: NSObject {
     }
 
     func refreshAndSendRadius() {
+        refreshRequested = true
+        guard refreshTask == nil else { return }
+        let token = UUID()
+        refreshToken = token
+        refreshTask = Task { @MainActor [weak self] in
+            await self?.drainRefreshRequests(token: token)
+        }
+    }
+
+    /// Collapse launch/auth/post-change/foreground bursts into one active query
+    /// and, at most, one trailing refresh. The old callback path could retain
+    /// several complete post collections at the same time.
+    private func drainRefreshRequests(token: UUID) async {
+        while refreshRequested, !Task.isCancelled {
+            refreshRequested = false
+            await fetchAndSendRadiusPaged()
+        }
+        if refreshToken == token {
+            refreshTask = nil
+            refreshToken = nil
+        }
+    }
+
+    /// Walk the user's posts a page at a time. This preserves the exact total
+    /// without retaining an unbounded Firestore snapshot or grouping copy.
+    private func fetchAndSendRadiusPaged() async {
         guard let userID = Auth.auth().currentUser?.uid, !userID.isEmpty else {
             send(radiusMeters: 0, postCount: 0)
             return
         }
 
-        db.collection("posts")
-            .whereField("userID", isEqualTo: userID)
-            .getDocuments { [weak self] snapshot, error in
-                if let error {
-                    print("[WatchRadiusSync] Could not fetch radius: \(error.localizedDescription)")
-                    return
+        do {
+            var lastDocument: QueryDocumentSnapshot?
+            var totalRadius = 0
+            var postCount = 0
+
+            while !Task.isCancelled {
+                var query: Query = db.collection("posts")
+                    .whereField("userID", isEqualTo: userID)
+                    .limit(to: pageSize)
+                if let lastDocument {
+                    query = query.start(afterDocument: lastDocument)
                 }
 
-                let uniqueDocuments = Dictionary(grouping: snapshot?.documents ?? [], by: \.documentID)
-                    .compactMap { $0.value.first }
-                let totalRadius = uniqueDocuments.reduce(0) { partial, document in
-                    partial + Self.radiusValue(from: document.data())
+                let snapshot = try await query.getDocuments()
+                try Task.checkCancellation()
+                for document in snapshot.documents {
+                    totalRadius += Self.radiusValue(from: document.data())
+                    postCount += 1
                 }
 
-                Task { @MainActor in
-                    self?.send(radiusMeters: totalRadius, postCount: uniqueDocuments.count)
-                }
+                guard snapshot.documents.count == pageSize,
+                      let last = snapshot.documents.last else { break }
+                lastDocument = last
+                await Task.yield()
             }
+
+            try Task.checkCancellation()
+            guard Auth.auth().currentUser?.uid == userID else {
+                refreshRequested = true
+                return
+            }
+            send(radiusMeters: totalRadius, postCount: postCount)
+        } catch is CancellationError {
+            return
+        } catch {
+            print("[WatchRadiusSync] Could not fetch radius: \(error.localizedDescription)")
+        }
     }
 
     private func configureWatchConnectivity() {
@@ -88,6 +142,20 @@ final class WatchRadiusSync: NSObject {
             }
         }
         observerTokens.append(activeToken)
+
+        let backgroundToken = NotificationCenter.default.addObserver(
+            forName: UIApplication.didEnterBackgroundNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.refreshTask?.cancel()
+                self?.refreshTask = nil
+                self?.refreshToken = nil
+                self?.refreshRequested = false
+            }
+        }
+        observerTokens.append(backgroundToken)
         #endif
     }
 

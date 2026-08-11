@@ -1967,12 +1967,14 @@ private final class RainAmbientAudioService: ObservableObject {
 
     init() {
         eqObserver = NotificationCenter.default.addObserver(forName: .poplurEQSyncChanged, object: nil, queue: .main) { [weak self] _ in
-            guard let self else { return }
-            if let player = self.player {
-                self.applyVolume(self.outputVolume(for: self.targetVolume), to: player, fadeDuration: PoplurAudioMix.rainVoiceDuckDuration)
-            }
-            if let tp = self.thunderPlayer {
-                self.applyVolume(self.outputThunderVolume(), to: tp, fadeDuration: PoplurAudioMix.rainVoiceDuckDuration, last: &self.lastAppliedThunderVolume)
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if let player = self.player {
+                    self.applyVolume(self.outputVolume(for: self.targetVolume), to: player, fadeDuration: PoplurAudioMix.rainVoiceDuckDuration)
+                }
+                if let tp = self.thunderPlayer {
+                    self.applyVolume(self.outputThunderVolume(), to: tp, fadeDuration: PoplurAudioMix.rainVoiceDuckDuration, last: &self.lastAppliedThunderVolume)
+                }
             }
         }
     }
@@ -1981,6 +1983,8 @@ private final class RainAmbientAudioService: ObservableObject {
         if let eqObserver {
             NotificationCenter.default.removeObserver(eqObserver)
         }
+        player?.stop()
+        thunderPlayer?.stop()
     }
 
     func update(for weatherState: WeatherVisualizationState) {
@@ -2086,10 +2090,13 @@ private final class RainAmbientAudioService: ObservableObject {
 
     func stop() {
         targetVolume = 0
+        isDuckedForVoice = false
+        isThunderstorm = false
         lastAppliedVolume = -1
         let stoppingPlayer = player
         stoppingPlayer?.fadeOutAndStop(duration: 0.65)
         player = nil
+        stopThunder()
         PoplurEQSync.shared.end(.rainAmbient)
     }
 
@@ -2195,6 +2202,8 @@ private final class CityTourMusicPlayerService: ObservableObject {
     private var chartTrackCache: [String: [CityMusicTrack]] = [:]
     private var radioTrackCache: [String: [CityMusicTrack]] = [:]
     private var sportsRadioTrackCache: [String: [CityMusicTrack]] = [:]
+    private var trackCacheCityOrder: [String] = []
+    private static let maximumCachedCityCount = 12
     private var loadTask: Task<Void, Never>?
     private var volumeFadeTask: Task<Void, Never>?
     private var lastPlayerVolume: Float = PoplurAudioMix.musicFullVolume
@@ -2484,25 +2493,49 @@ private final class CityTourMusicPlayerService: ObservableObject {
     }
 
     private func cachedChartTracks(for stop: PoplurTourStop) async -> [CityMusicTrack] {
-        if let cached = chartTrackCache[stop.cityName] { return cached }
+        if let cached = chartTrackCache[stop.cityName] {
+            touchTrackCacheCity(stop.cityName)
+            return cached
+        }
         let tracks = (try? await resolveTopCountryMusicTracks(stop: stop))
             ?? [FallbackCityMusicTracks[stop.cityName] ?? DefaultFallbackCityMusicTrack]
         chartTrackCache[stop.cityName] = tracks
+        touchTrackCacheCity(stop.cityName)
         return tracks
     }
 
     private func cachedRadioTracks(for stop: PoplurTourStop) async -> [CityMusicTrack] {
-        if let cached = radioTrackCache[stop.cityName] { return cached }
+        if let cached = radioTrackCache[stop.cityName] {
+            touchTrackCacheCity(stop.cityName)
+            return cached
+        }
         let tracks = (try? await resolveTopCityRadioTracks(stop: stop)) ?? FallbackCityRadioTracks[stop.cityName] ?? []
         radioTrackCache[stop.cityName] = tracks
+        touchTrackCacheCity(stop.cityName)
         return tracks
     }
 
     private func cachedSportsTracks(for stop: PoplurTourStop) async -> [CityMusicTrack] {
-        if let cached = sportsRadioTrackCache[stop.cityName] { return cached }
+        if let cached = sportsRadioTrackCache[stop.cityName] {
+            touchTrackCacheCity(stop.cityName)
+            return cached
+        }
         let tracks = (try? await resolveTopCitySportsRadioTracks(stop: stop)) ?? FallbackCitySportsRadioTracks[stop.cityName] ?? []
         sportsRadioTrackCache[stop.cityName] = tracks
+        touchTrackCacheCity(stop.cityName)
         return tracks
+    }
+
+    private func touchTrackCacheCity(_ cityName: String) {
+        trackCacheCityOrder.removeAll { $0 == cityName }
+        trackCacheCityOrder.append(cityName)
+
+        while trackCacheCityOrder.count > Self.maximumCachedCityCount {
+            let evictedCity = trackCacheCityOrder.removeFirst()
+            chartTrackCache.removeValue(forKey: evictedCity)
+            radioTrackCache.removeValue(forKey: evictedCity)
+            sportsRadioTrackCache.removeValue(forKey: evictedCity)
+        }
     }
 }
 
@@ -3979,7 +4012,7 @@ private struct CubeHoldSearchOverlay_UNUSED: View {
 struct MapViewProduction: View {
     @Environment(\.layoutPreviewMode) private var layoutPreviewMode
 
-    @StateObject private var locationManager = LocationProvider()
+    @ObservedObject private var locationManager = LocationProvider.shared
     @StateObject private var flowManager = CaptureFlowManager.shared
     @StateObject private var mapState = MapStateManager.shared
     @StateObject private var musicPlayer: CityTourMusicPlayerService
@@ -4055,6 +4088,7 @@ struct MapViewProduction: View {
     @State private var locationContextTask: Task<Void, Never>? = nil
     @State private var tourLoopTask: Task<Void, Never>? = nil
     @State private var tourSubtitleTask: Task<Void, Never>? = nil
+    @State private var musicWaveTask: Task<Void, Never>? = nil
     @State private var liveUserCoordinate: CLLocationCoordinate2D? = nil
     @State private var lastUserCenterRequestAt: Date = .distantPast
     @State private var lastContextRefreshLocation: CLLocation? = nil
@@ -4942,15 +4976,140 @@ struct MapViewProduction: View {
 
     @MainActor
     private func startTourBackgroundTasks() {
+        guard mapState.isMapTabActive, mapState.isInTourMode else { return }
         if tourLoopTask == nil {
             tourLoopTask = Task {
                 await runTourLoop()
             }
         }
-        if tourSubtitleTask == nil {
+        updateMapAnimationTasks()
+    }
+
+    @MainActor
+    private func updateMapAnimationTasks() {
+        let isVisible = mapState.isMapTabActive
+        let hasAudibleTrack = musicPlayer.currentTrackTitle != nil
+
+        if isVisible, hasAudibleTrack, musicWaveTask == nil {
+            musicWaveTask = Task { @MainActor in
+                while !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: 180_000_000)
+                    guard !Task.isCancelled else { return }
+                    guard mapState.isMapTabActive, musicPlayer.currentTrackTitle != nil else { return }
+                    musicWaveFrame = (musicWaveFrame + 1) % 4
+                }
+            }
+        } else if !isVisible || !hasAudibleTrack {
+            musicWaveTask?.cancel()
+            musicWaveTask = nil
+        }
+
+        let needsSubtitleCycle = isVisible && (mapState.isInTourMode || hasAudibleTrack)
+        if needsSubtitleCycle, tourSubtitleTask == nil {
             tourSubtitleTask = Task {
                 await runTourSubtitleLoop()
             }
+        } else if !needsSubtitleCycle {
+            tourSubtitleTask?.cancel()
+            tourSubtitleTask = nil
+        }
+    }
+
+    @MainActor
+    private func handleMapTourStartedEvent() {
+        guard !layoutPreviewMode else { return }
+        rainAmbientAudio.update(for: weatherState)
+        startTourBackgroundTasks()
+    }
+
+    @MainActor
+    private func handleMapTourStoppedEvent() {
+        guard !layoutPreviewMode else { return }
+        tourLoopTask?.cancel()
+        tourLoopTask = nil
+        rainAmbientAudio.stop()
+        updateMapAnimationTasks()
+    }
+
+    @MainActor
+    private func handleMusicTrackChanged() {
+        guard !layoutPreviewMode else { return }
+        updateMapAnimationTasks()
+    }
+
+    @MainActor
+    private func handleLegacyMapAppear() {
+        guard !layoutPreviewMode else { return }
+        handleOnAppear()
+        if mapState.isInTourMode {
+            startTourBackgroundTasks()
+        } else {
+            updateMapAnimationTasks()
+        }
+    }
+
+    @MainActor
+    private func handleLegacyMapDisappear() {
+        locationManager.stop()
+        stopTourBackgroundTasks()
+        resetMapCubeFaceOverride()
+        regionChangeDebouncer.cancel()
+        cancelMapAsyncWork()
+        if !mapState.hasRunFirstLaunchSequence {
+            isInitialMapLaunchPreparing = true
+        }
+        isInitialMapLaunchActive = false
+        isCameraTransitionInProgress = false
+        mapRadioHost.stop()
+        musicPlayer.stop()
+        currentLocationMusicStopID = nil
+        rainAmbientAudio.stop()
+    }
+
+    @MainActor
+    private func handleStopMapAudioEvent() {
+        mapRadioHost.stop()
+        musicPlayer.stop()
+        currentLocationMusicStopID = nil
+        rainAmbientAudio.stop()
+    }
+
+    @MainActor
+    private func handleLegacyLocationChange(_ location: CLLocation?) {
+        guard !layoutPreviewMode else { return }
+        handleLocationChange(location)
+    }
+
+    @MainActor
+    private func handleLegacyWeatherChange() {
+        guard !layoutPreviewMode else { return }
+        if isInitialMapLaunchActive || mapState.isInTourMode {
+            rainAmbientAudio.update(for: weatherState)
+        } else {
+            rainAmbientAudio.stop()
+        }
+    }
+
+    @MainActor
+    private func handleMapCubeMenuVisibility(_ isOnScreen: Bool) {
+        guard !layoutPreviewMode else { return }
+        if !isOnScreen {
+            searchQuery = ""
+            searchResults = []
+        }
+    }
+
+    @MainActor
+    private func handleLegacyMapDimensionChange(_ is2D: Bool) {
+        guard !layoutPreviewMode else { return }
+        guard let coordinate = camera.camera?.centerCoordinate else { return }
+        withAnimation(.easeInOut(duration: 0.5)) {
+            camera = .camera(MapCamera(
+                centerCoordinate: coordinate,
+                distance: fixedDistanceAlt,
+                heading: camera.camera?.heading ?? 0,
+                pitch: is2D ? 0 : fixedPitchAlt
+            ))
         }
     }
 
@@ -4960,6 +5119,8 @@ struct MapViewProduction: View {
         tourLoopTask = nil
         tourSubtitleTask?.cancel()
         tourSubtitleTask = nil
+        musicWaveTask?.cancel()
+        musicWaveTask = nil
     }
     
     private func runExtendedTourStop(_ stop: PoplurTourStop) async {
@@ -5453,74 +5614,7 @@ struct MapViewProduction: View {
                     }
             )
                 
-            if !isCameraTransitionInProgress {
-                WeatherParticleOverlay(weatherState: $weatherState)
-                    .allowsHitTesting(false)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                PoplurThemeParticleOverlay(skin: cubeSkinStore.current)
-                    .allowsHitTesting(false)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .opacity(weatherState.kind == .rain || weatherState.kind == .thunderstorms || weatherState.kind == .snow ? 0 : 1)
-            }
-            
-            // Particle burst at the user's current location using Spark.sks / Bokeh.sks
-            GeometryReader { geoProxy in
-                let userCoord = liveUserCoordinate ?? locationManager.location?.coordinate
-                let screenPos: CGPoint? = userCoord.flatMap { coord -> CGPoint? in
-                    guard let cam = camera.camera else { return nil }
-                    let latDelta = coord.latitude - cam.centerCoordinate.latitude
-                    let lonDelta = coord.longitude - cam.centerCoordinate.longitude
-                    let pxPerDeg = geoProxy.size.width / 0.5
-                    let x = geoProxy.size.width / 2 + CGFloat(lonDelta) * pxPerDeg
-                    let y = geoProxy.size.height / 2 - CGFloat(latDelta) * pxPerDeg
-                    guard x >= -40, x <= geoProxy.size.width + 40,
-                          y >= -40, y <= geoProxy.size.height + 40 else { return nil }
-                    return CGPoint(x: x, y: y)
-                }
-                UserLocationParticleBurst(
-                    screenPosition: screenPos,
-                    tintColor: UIColor(cubeSkinStore.current.mapMarkerColor(role: .user))
-                )
-                .allowsHitTesting(false)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-            .zIndex(50)
-
-            // Confetti overlay for trending pins
-            if showConfetti {
-                GeometryReader { geometry in
-                    ConfettiOverlay(
-                        trendingPins: $trendingTracker.trendingPins,
-                        coordinateConverter: { coordinate -> CGPoint? in
-                            // Convert map coordinate to screen point
-                            // Note: MapReader doesn't provide direct coordinate->point conversion
-                            // We need to implement this based on current camera position
-                            guard let camera = camera.camera else { return nil }
-                            
-                            // Use MKMapView's conversion (approximation for demo)
-                            // In production, you'd want a more precise conversion
-                            let centerCoord = camera.centerCoordinate
-                            let latDelta = coordinate.latitude - centerCoord.latitude
-                            let lonDelta = coordinate.longitude - centerCoord.longitude
-                            
-                            // Rough pixel conversion (will vary with zoom)
-                            let pixelsPerDegree = geometry.size.width / 0.5 // Approximate
-                            let x = geometry.size.width / 2 + CGFloat(lonDelta) * pixelsPerDegree
-                            let y = geometry.size.height / 2 - CGFloat(latDelta) * pixelsPerDegree
-                            
-                            // Check if point is within bounds
-                            guard x >= 0, x <= geometry.size.width,
-                                  y >= 0, y <= geometry.size.height else {
-                                return nil
-                            }
-                            
-                            return CGPoint(x: x, y: y)
-                        }
-                    )
-                    .allowsHitTesting(false) // Let touches pass through
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-            }
+            performanceManagedParticleOverlays
             
             // 3D SceneKit Overlay Layer - Floating beacons over map
             // Note: This layer is separate from the Map to avoid gesture conflicts
@@ -5596,6 +5690,75 @@ struct MapViewProduction: View {
             }
         } // End ZStack
         } // End MapReader
+    }
+
+    // Kept outside the already-large MapBuilder expression so Swift can type-check
+    // the legacy map deterministically. These renderers remain absent during idle
+    // browsing and are mounted only for explicit, finite visual work.
+    @ViewBuilder
+    private var performanceManagedParticleOverlays: some View {
+        if mapState.isInTourMode && !isCameraTransitionInProgress {
+            WeatherParticleOverlay(weatherState: $weatherState)
+                .allowsHitTesting(false)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            if weatherState.kind != .rain,
+               weatherState.kind != .thunderstorms,
+               weatherState.kind != .snow {
+                PoplurThemeParticleOverlay(skin: cubeSkinStore.current)
+                    .allowsHitTesting(false)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+
+        if mapState.isInTourMode || isCameraTransitionInProgress {
+            GeometryReader { geometry in
+                UserLocationParticleBurst(
+                    screenPosition: userParticleScreenPosition(in: geometry.size),
+                    tintColor: UIColor(cubeSkinStore.current.mapMarkerColor(role: .user))
+                )
+                .allowsHitTesting(false)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .zIndex(50)
+        }
+
+        if showConfetti && trendingTracker.trendingPins.contains(where: { $0.isTrendingUp }) {
+            GeometryReader { geometry in
+                ConfettiOverlay(
+                    trendingPins: $trendingTracker.trendingPins,
+                    coordinateConverter: { coordinate in
+                        confettiScreenPosition(for: coordinate, in: geometry.size)
+                    }
+                )
+                .allowsHitTesting(false)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+    }
+
+    private func userParticleScreenPosition(in size: CGSize) -> CGPoint? {
+        guard let coordinate = liveUserCoordinate ?? locationManager.location?.coordinate,
+              let mapCamera = camera.camera else { return nil }
+        let pixelsPerDegree = size.width / 0.5
+        let x = size.width / 2 + CGFloat(coordinate.longitude - mapCamera.centerCoordinate.longitude) * pixelsPerDegree
+        let y = size.height / 2 - CGFloat(coordinate.latitude - mapCamera.centerCoordinate.latitude) * pixelsPerDegree
+        guard x >= -40, x <= size.width + 40,
+              y >= -40, y <= size.height + 40 else { return nil }
+        return CGPoint(x: x, y: y)
+    }
+
+    private func confettiScreenPosition(
+        for coordinate: CLLocationCoordinate2D,
+        in size: CGSize
+    ) -> CGPoint? {
+        guard let mapCamera = camera.camera else { return nil }
+        let pixelsPerDegree = size.width / 0.5
+        let x = size.width / 2 + CGFloat(coordinate.longitude - mapCamera.centerCoordinate.longitude) * pixelsPerDegree
+        let y = size.height / 2 - CGFloat(coordinate.latitude - mapCamera.centerCoordinate.latitude) * pixelsPerDegree
+        guard x >= 0, x <= size.width,
+              y >= 0, y <= size.height else { return nil }
+        return CGPoint(x: x, y: y)
     }
     
     // MARK: - Body Components (broken down to help compiler)
@@ -5984,7 +6147,9 @@ struct MapViewProduction: View {
                 lightningFrequency: lightFreq,
                 temperatureFahrenheit: Int(temp.rounded())
             )
-            rainAmbientAudio.update(for: weatherState)
+            if isInitialMapLaunchActive || mapState.isInTourMode {
+                rainAmbientAudio.update(for: weatherState)
+            }
         } catch {
             // Network unavailable — keep current state; rain audio state unchanged
         }
@@ -6247,65 +6412,63 @@ struct MapViewProduction: View {
         )
     }
 
-    private var erasedLegacyMapBody: some View {
+    // Break lifecycle and notification modifiers into small erased groups. The
+    // legacy surface predates SwiftUI's current type checker and otherwise forms
+    // one enormous generic type that can take minutes before failing inference.
+    private var legacyVisibilityChain: AnyView {
+        AnyView(
         legacyChainHead
             .onAppear {
-                guard !layoutPreviewMode else { return }
-                handleOnAppear()
-                startTourBackgroundTasks()
+                handleLegacyMapAppear()
             }
             .onDisappear {
-                stopTourBackgroundTasks()
-                resetMapCubeFaceOverride()
-                regionChangeDebouncer.cancel()
-                cancelMapAsyncWork()
-                if !mapState.hasRunFirstLaunchSequence {
-                    isInitialMapLaunchPreparing = true
-                }
-                isInitialMapLaunchActive = false
-                isCameraTransitionInProgress = false
-                mapRadioHost.stop()
-                musicPlayer.stop()
-                currentLocationMusicStopID = nil
-                rainAmbientAudio.stop()
+                handleLegacyMapDisappear()
+            }
+        )
+    }
+
+    private var legacyTourAudioChain: AnyView {
+        AnyView(
+        legacyVisibilityChain
+            .onReceive(NotificationCenter.default.publisher(for: .mapTourStarted)) { _ in
+                handleMapTourStartedEvent()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .mapTourStopped)) { _ in
+                handleMapTourStoppedEvent()
+            }
+            .onChange(of: musicPlayer.currentTrackTitle) { _, _ in
+                handleMusicTrackChanged()
             }
             .onReceive(NotificationCenter.default.publisher(for: .StopMapAudio)) { _ in
-                mapRadioHost.stop()
-                musicPlayer.stop()
-                currentLocationMusicStopID = nil
-                rainAmbientAudio.stop()
+                handleStopMapAudioEvent()
             }
+        )
+    }
+
+    private var lifecycleManagedLegacyChain: AnyView {
+        AnyView(
+        legacyTourAudioChain
             .onChange(of: locationManager.location) { _, newLocation in
-                guard !layoutPreviewMode else { return }
-                handleLocationChange(newLocation)
+                handleLegacyLocationChange(newLocation)
             }
             .onChange(of: weatherState.kind) { _, _ in
-                guard !layoutPreviewMode else { return }
-                rainAmbientAudio.update(for: weatherState)
+                handleLegacyWeatherChange()
             }
             .onChange(of: weatherState.intensity) { _, _ in
-                guard !layoutPreviewMode else { return }
-                rainAmbientAudio.update(for: weatherState)
+                handleLegacyWeatherChange()
             }
             .onChange(of: mapCubeMenuWheel.isOnScreen) { _, isOnScreen in
-                guard !layoutPreviewMode else { return }
-                if !isOnScreen {
-                    searchQuery = ""
-                    searchResults = []
-                }
+                handleMapCubeMenuVisibility(isOnScreen)
             }
             .onChange(of: use2DMap) { _, is2D in
-                guard !layoutPreviewMode else { return }
-                guard let coord = camera.camera?.centerCoordinate else { return }
-                withAnimation(.easeInOut(duration: 0.5)) {
-                    camera = .camera(MapCamera(
-                        centerCoordinate: coord,
-                        distance: fixedDistanceAlt,
-                        heading: camera.camera?.heading ?? 0,
-                        pitch: is2D ? 0 : fixedPitchAlt
-                    ))
-                }
+                handleLegacyMapDimensionChange(is2D)
             }
+        )
+    }
+
+    private var legacyCubeInputChain: AnyView {
+        AnyView(
+        lifecycleManagedLegacyChain
             .onReceive(NotificationCenter.default.publisher(for: .CubeGlobalTap)) { _ in
                 guard !layoutPreviewMode else { return }
                 if mapCubeMenuWheel.isOnScreen {
@@ -6343,6 +6506,12 @@ struct MapViewProduction: View {
                 mapCubeMenuWheel.endHold(activateSelected: true)
                 resetMapCubeFaceOverride()
             }
+        )
+    }
+
+    private var legacyTabNavigationChain: AnyView {
+        AnyView(
+        legacyCubeInputChain
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("SwitchToMapTab"))) { _ in
                 guard !layoutPreviewMode else { return }
                 print("🔔 [MapView] SwitchToMapTab notification received!")
@@ -6530,6 +6699,12 @@ struct MapViewProduction: View {
                     clearTourEffects()
                 }
             }
+        )
+    }
+
+    private var legacyPostLocationChain: AnyView {
+        AnyView(
+        legacyTabNavigationChain
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ShowLocationOnMap"))) { notification in
                 guard !layoutPreviewMode else { return }
                 print("🔔 [MapView] ShowLocationOnMap notification received!")
@@ -6700,6 +6875,12 @@ struct MapViewProduction: View {
                     delayedNavigationTask = nil
                 }
             }
+        )
+    }
+
+    private var legacyCaptureNotificationChain: AnyView {
+        AnyView(
+        legacyPostLocationChain
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("SetCameraCoordinate"))) { notification in
                 guard !layoutPreviewMode else { return }
                 guard let userInfo = notification.userInfo,
@@ -6794,6 +6975,11 @@ struct MapViewProduction: View {
                     aiRecommendation = "Choose a filter, trim if needed, then pick a channel"
                 }
             }
+        )
+    }
+
+    private var erasedLegacyMapBody: some View {
+        legacyCaptureNotificationChain
             .onChange(of: mapRadioHost.isLive) { _, isLive in
                 guard !layoutPreviewMode else { return }
                 if isLive {
@@ -7071,6 +7257,9 @@ struct MapViewProduction: View {
             isInitialMapLaunchActive = false
             isCameraTransitionInProgress = false
             rainAmbientAudio.setVoiceDucked(false)
+            if !mapState.isInTourMode {
+                rainAmbientAudio.stop()
+            }
         }
 
         fixedDistanceAlt = focusedLocationDistance
@@ -7145,6 +7334,9 @@ struct MapViewProduction: View {
             }
         }
         rainAmbientAudio.setVoiceDucked(false)
+        if !mapState.isInTourMode {
+            rainAmbientAudio.stop()
+        }
 
         try? await Task.sleep(nanoseconds: 650_000_000)
         guard !Task.isCancelled, !mapState.isInTourMode else { return }
@@ -7177,8 +7369,10 @@ struct MapViewProduction: View {
         // Fetch real weather immediately every time the map becomes visible
         scheduleWeatherFetch()
 
-        if mapState.hasRunFirstLaunchSequence {
+        if mapState.hasRunFirstLaunchSequence, mapState.isInTourMode {
             rainAmbientAudio.update(for: weatherState)
+        } else {
+            rainAmbientAudio.stop()
         }
 
         if let location = locationManager.location {
@@ -7372,41 +7566,27 @@ struct MapViewProduction: View {
     }
 
     private func runTourLoop() async {
-        // Note initial user interaction - this starts the idle timer internally
-        await MainActor.run {
-            mapState.noteUserInteraction()
-        }
-        
-        var waveTask: Task<Void, Never>?
-        waveTask = Task { @MainActor in
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 180_000_000)
-                musicWaveFrame = (musicWaveFrame + 1) % 4
-            }
-        }
-        defer { waveTask?.cancel() }
-
-        // Extended tour loop - mirrors Android's globe scan, fly-in, music/radio, and pop burst.
+        // This loop exists only for an explicitly active tour. Normal map
+        // browsing is fully event-driven and performs no periodic mutations.
         while !Task.isCancelled {
-            if mapState.isInTourMode {
-                let stop = PoplurTourStops[currentTourIndex % PoplurTourStops.count]
-                await runExtendedTourStop(stop)
-                let shouldAdvance = await MainActor.run { mapState.isInTourMode }
-                if shouldAdvance {
-                    await MainActor.run {
-                        currentTourIndex = (currentTourIndex + 1) % PoplurTourStops.count
-                    }
-                }
-            } else {
-                await MainActor.run {
-                    clearTourEffects(stopAudio: false)
-                    isZoomedOut = false
-                }
-                // If tour is not active, wait a bit before checking again
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            let shouldContinue = await MainActor.run {
+                mapState.isMapTabActive && mapState.isInTourMode
             }
-            
-            // Update trending pins periodically
+            guard shouldContinue else { return }
+
+            let stop = await MainActor.run {
+                PoplurTourStops[currentTourIndex % PoplurTourStops.count]
+            }
+            await runExtendedTourStop(stop)
+            guard !Task.isCancelled else { return }
+
+            let shouldAdvance = await MainActor.run { mapState.isInTourMode }
+            guard shouldAdvance else { return }
+            await MainActor.run {
+                currentTourIndex = (currentTourIndex + 1) % PoplurTourStops.count
+            }
+
+            // Trend simulation belongs to the active tour cadence only.
             await updateTrendingPins()
         }
     }

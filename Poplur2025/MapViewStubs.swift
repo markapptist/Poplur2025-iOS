@@ -656,6 +656,7 @@ struct MapView: View {
             scheduleIdleCheck()
         }
         .onDisappear {
+            locationManager.stop()
             stopDominanceTour()
             idleTask?.cancel()
             idleTask = nil
@@ -954,5 +955,4 @@ enum MockAIRecommender {
     MapViewStub()
 }
 #endif
-
 

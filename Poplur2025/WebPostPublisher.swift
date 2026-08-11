@@ -18,6 +18,7 @@ enum WebPostPublisher {
     /// Stage and dispatch an upload described by the web composer's message.
     /// The web bundle has no account, so it sends the baked media as a
     /// data: URL; everything authenticated happens on this side.
+    @MainActor
     static func handle(_ body: [String: Any]) {
         let requestID = body["requestId"] as? String
 
@@ -64,13 +65,16 @@ enum WebPostPublisher {
             // A recording has to become a file URL for the uploader.
             let url = FileManager.default.temporaryDirectory
                 .appendingPathComponent("poplur-post-\(UUID().uuidString).mp4")
+            PoplurTemporaryFileOwnership.claim(url)
             do {
-                try payload.write(to: url)
+                try payload.write(to: url, options: .atomic)
             } catch {
+                PoplurTemporaryFileOwnership.deleteIfOwned(url)
                 fail("The recording could not be staged for upload: \(error.localizedDescription)")
                 return
             }
             userInfo["videoURL"] = url
+            userInfo[PoplurTemporaryFileOwnership.notificationKey] = true
         } else {
             guard let image = UIImage(data: payload) else {
                 fail("That photo could not be read for upload.")
@@ -99,7 +103,12 @@ enum WebPostPublisher {
         } else if let videoURL = userInfo["videoURL"] as? URL {
             print("[WebPostPublisher] dispatch → UploadVideoToCurrentCoordinate")
             NotificationCenter.default.post(
-                name: Notification.Name("UploadVideoToCurrentCoordinate"), object: videoURL
+                name: Notification.Name("UploadVideoToCurrentCoordinate"),
+                object: videoURL,
+                userInfo: [
+                    PoplurTemporaryFileOwnership.notificationKey:
+                        PoplurTemporaryFileOwnership.isOwned(videoURL)
+                ]
             )
         } else {
             // Unreachable given the guards above, and it stays answered anyway:

@@ -14,12 +14,15 @@ final class CityTourMusicPlayerService: ObservableObject {
     
     private var player: AVPlayer?
     private var timeObserverToken: Any?
+    private var timeObserverPlayer: AVPlayer?
     
     func play(track: CityMusicTrack) {
         guard let url = track.previewURL else {
             print("No preview URL available for track \(track.trackName)")
             return
         }
+        removePeriodicTimeObserver()
+        player?.pause()
         let playerItem = AVPlayerItem(url: url)
         player = AVPlayer(playerItem: playerItem)
         addPeriodicTimeObserver()
@@ -34,38 +37,44 @@ final class CityTourMusicPlayerService: ObservableObject {
     }
     
     func stop() {
+        removePeriodicTimeObserver()
         player?.pause()
         player = nil
         isPlaying = false
         playbackProgress = 0
         currentTrack = nil
-        removePeriodicTimeObserver()
     }
     
     private func addPeriodicTimeObserver() {
         guard let player = player else { return }
+        removePeriodicTimeObserver()
+        timeObserverPlayer = player
         
         // Notify every 0.5 seconds
-        timeObserverToken = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: CMTimeScale(NSEC_PER_SEC)), queue: .main) { [weak self] time in
-            guard let self = self, let currentItem = player.currentItem else { return }
+        timeObserverToken = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: CMTimeScale(NSEC_PER_SEC)), queue: .main) { [weak self, weak player] time in
+            guard let currentItem = player?.currentItem else { return }
             let duration = currentItem.duration.seconds
-            if duration.isFinite && duration > 0 {
-                self.playbackProgress = time.seconds / duration
-            } else {
-                self.playbackProgress = 0
+            let progress = duration.isFinite && duration > 0 ? time.seconds / duration : 0
+            Task { @MainActor [weak self] in
+                self?.playbackProgress = progress
             }
         }
     }
     
     private func removePeriodicTimeObserver() {
-        if let token = timeObserverToken {
-            player?.removeTimeObserver(token)
-            timeObserverToken = nil
+        guard let token = timeObserverToken else {
+            timeObserverPlayer = nil
+            return
         }
+        timeObserverPlayer?.removeTimeObserver(token)
+        timeObserverToken = nil
+        timeObserverPlayer = nil
     }
     
     deinit {
-        removePeriodicTimeObserver()
+        if let token = timeObserverToken {
+            timeObserverPlayer?.removeTimeObserver(token)
+        }
     }
 }
 

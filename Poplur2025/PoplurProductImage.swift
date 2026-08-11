@@ -21,6 +21,9 @@ enum PoplurProductImage {
     /// caches too; this covers the same page being asked for by several cards
     /// before any of them has stored an answer.
     private static var inFlight: Set<String> = []
+    private static let maximumConcurrentRequests = 4
+    private static let maximumPageByteCount = 512_000
+    private static let maximumImageByteCount = 3_000_000
 
     /// Refuse anything that is not a plain https product page. The URL comes
     /// from our own offer table today, but this is the boundary where a fetch
@@ -31,6 +34,7 @@ enum PoplurProductImage {
         return true
     }
 
+    @MainActor
     static func handle(urlString: String, webView: WKWebView) {
         guard let url = URL(string: urlString), permitted(url) else {
             deliver(urlString: urlString, dataURI: nil, webView: webView)
@@ -44,6 +48,10 @@ enum PoplurProductImage {
             return
         }
         guard !inFlight.contains(urlString) else { return }
+        guard inFlight.count < maximumConcurrentRequests else {
+            deliver(urlString: urlString, dataURI: nil, webView: webView)
+            return
+        }
         inFlight.insert(urlString)
 
         Task.detached(priority: .utility) {
@@ -68,7 +76,7 @@ enum PoplurProductImage {
         //    and some of these are multi-megabyte documents.
         var request = URLRequest(url: page, timeoutInterval: 8)
         request.setValue("Poplur/1.0", forHTTPHeaderField: "User-Agent")
-        guard let (html, _) = try? await URLSession.shared.data(for: request),
+        guard let html = try? await cappedData(for: request, maximumByteCount: maximumPageByteCount),
               let text = String(data: html.prefix(400_000), encoding: .utf8),
               let imageURL = ogImage(in: text, relativeTo: page)
         else { return nil }
@@ -78,13 +86,32 @@ enum PoplurProductImage {
         //    megabytes of main-thread string for no visible gain.
         var imageRequest = URLRequest(url: imageURL, timeoutInterval: 8)
         imageRequest.setValue("Poplur/1.0", forHTTPHeaderField: "User-Agent")
-        guard let (bytes, _) = try? await URLSession.shared.data(for: imageRequest),
+        guard let bytes = try? await cappedData(for: imageRequest, maximumByteCount: maximumImageByteCount),
               let source = UIImage(data: bytes),
               let shrunk = downscaled(source, maxEdge: 720),
               let jpeg = shrunk.jpegData(compressionQuality: 0.82)
         else { return nil }
 
         return "data:image/jpeg;base64," + jpeg.base64EncodedString()
+    }
+
+    private static func cappedData(for request: URLRequest, maximumByteCount: Int) async throws -> Data {
+        let (bytes, response) = try await URLSession.shared.bytes(for: request)
+        if response.expectedContentLength > Int64(maximumByteCount) {
+            throw URLError(.dataLengthExceedsMaximum)
+        }
+
+        var data = Data()
+        if response.expectedContentLength > 0 {
+            data.reserveCapacity(min(maximumByteCount, Int(response.expectedContentLength)))
+        }
+        for try await byte in bytes {
+            guard data.count < maximumByteCount else {
+                throw URLError(.dataLengthExceedsMaximum)
+            }
+            data.append(byte)
+        }
+        return data
     }
 
     /// `og:image` first, then Twitter's equivalent. Deliberately a regex over

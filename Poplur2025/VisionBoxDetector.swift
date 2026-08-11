@@ -50,17 +50,23 @@ final class VisionBoxDetector {
     /// Called on the main actor with the current boxes (possibly empty).
     var onBoxes: (([Box]) -> Void)?
 
-    func process(pixelBuffer: CVPixelBuffer) {
+    /// Returns false when this frame was not accepted. An accepted request
+    /// always delivers `onBoxes` exactly once, including Vision failures, so a
+    /// caller can safely use that callback as completion ownership.
+    @discardableResult
+    func process(pixelBuffer: CVPixelBuffer) -> Bool {
         frameCount += 1
-        guard frameCount % frameSkipInterval == 0 else { return }
-        guard !isProcessing else { return }
+        guard frameCount % frameSkipInterval == 0 else { return false }
+        guard !isProcessing else { return false }
         isProcessing = true
 
         queue.async { [weak self] in
             guard let self else { return }
             defer { self.isProcessing = false }
 
-            let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .right, options: [:])
+            // CameraKitController rotates the AVCaptureVideoDataOutput
+            // connection into portrait before this buffer is emitted.
+            let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .up, options: [:])
             let humans = VNDetectHumanRectanglesRequest()
             let animals = VNRecognizeAnimalsRequest()
             let rectangles = VNDetectRectanglesRequest()
@@ -71,6 +77,7 @@ final class VisionBoxDetector {
             do {
                 try handler.perform([humans, animals, rectangles, barcodes])
             } catch {
+                DispatchQueue.main.async { self.onBoxes?([]) }
                 return
             }
 
@@ -111,5 +118,6 @@ final class VisionBoxDetector {
             let result = boxes
             DispatchQueue.main.async { self.onBoxes?(result) }
         }
+        return true
     }
 }

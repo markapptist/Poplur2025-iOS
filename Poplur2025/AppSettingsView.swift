@@ -440,12 +440,7 @@ struct AppSettingsView: View {
 
     private func clearCache() {
         URLCache.shared.removeAllCachedResponses()
-        if let tmp = try? FileManager.default.contentsOfDirectory(
-            at: FileManager.default.temporaryDirectory,
-            includingPropertiesForKeys: nil
-        ) {
-            for url in tmp { try? FileManager.default.removeItem(at: url) }
-        }
+        PoplurTemporaryFileOwnership.deleteAllOwned()
         refreshCacheSize()
         UINotificationFeedbackGenerator().notificationOccurred(.success)
     }

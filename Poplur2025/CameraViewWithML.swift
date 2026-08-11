@@ -40,6 +40,7 @@ struct CameraViewWithML: View {
     @State private var lastDetectedName: String? = nil
     @State private var isCubeEnabled: Bool = true
     @State private var scannedUserName: String? = nil
+    @State private var notificationObservers: [NSObjectProtocol] = []
     
     // MARK: - Initializer
     
@@ -109,19 +110,21 @@ struct CameraViewWithML: View {
             if mlDetectionEnabled {
                 setupMLDetection()
             }
-            NotificationCenter.default.addObserver(forName: Notification.Name("CubeInteractionDisabled"), object: nil, queue: .main) { _ in
+            removeNotificationObservers()
+            notificationObservers.append(NotificationCenter.default.addObserver(forName: Notification.Name("CubeInteractionDisabled"), object: nil, queue: .main) { _ in
                 isCubeEnabled = false
-            }
-            NotificationCenter.default.addObserver(forName: Notification.Name("CubeInteractionEnabled"), object: nil, queue: .main) { _ in
+            })
+            notificationObservers.append(NotificationCenter.default.addObserver(forName: Notification.Name("CubeInteractionEnabled"), object: nil, queue: .main) { _ in
                 isCubeEnabled = true
-            }
-            NotificationCenter.default.addObserver(forName: Notification.Name("RegisteredUserNameUpdated"), object: nil, queue: .main) { note in
+            })
+            notificationObservers.append(NotificationCenter.default.addObserver(forName: Notification.Name("RegisteredUserNameUpdated"), object: nil, queue: .main) { note in
                 if let name = note.userInfo?["name"] as? String {
                     scannedUserName = name
                 }
-            }
+            })
         }
         .onDisappear {
+            removeNotificationObservers()
             controller.disableMLDetection()
             detectedObjects = []
         }
@@ -161,6 +164,11 @@ struct CameraViewWithML: View {
                 lastDetectedName = nil
             }
         }
+    }
+
+    private func removeNotificationObservers() {
+        notificationObservers.forEach(NotificationCenter.default.removeObserver)
+        notificationObservers.removeAll(keepingCapacity: false)
     }
 }
 

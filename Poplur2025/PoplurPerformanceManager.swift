@@ -278,6 +278,9 @@ final class PoplurPerformanceManager: ObservableObject {
     func setApplicationLifecycle(_ lifecycle: PoplurApplicationLifecycle) {
         guard applicationLifecycle != lifecycle else { return }
         applicationLifecycle = lifecycle
+        // Recompute first so every renderer receives granted=false before any
+        // teardown callback is asked to destroy the resources it was using.
+        recomputeMode(reason: "App \(lifecycle.rawValue)")
         if lifecycle != .active {
             // Inactive is already off-screen from the person's perspective
             // (Control Centre, app switcher, calls). Do not wait for the later
@@ -286,7 +289,6 @@ final class PoplurPerformanceManager: ObservableObject {
             purgeInactiveRendererResources()
             releaseReusableRendererAssets()
         }
-        recomputeMode(reason: "App \(lifecycle.rawValue)")
     }
 
     func targetFPS(for rateClass: PoplurFrameRateClass) -> Int {
@@ -319,6 +321,7 @@ final class PoplurPerformanceManager: ObservableObject {
 
     func purgeCaches() {
         _ = assetCache.purge(reason: .manual)
+        PoplurWebCaptureStore.purge()
         purgeInactiveRendererResources()
         logDiagnostics(reason: "Manual purge")
     }
@@ -431,9 +434,10 @@ final class PoplurPerformanceManager: ObservableObject {
     private func handleMemoryWarning() {
         memoryWarningCount += 1
         memoryPressureActive = true
-        _ = assetCache.purge(reason: .memoryPressure)
-        purgeInactiveRendererResources()
         recomputeMode(reason: "Memory pressure")
+        _ = assetCache.purge(reason: .memoryPressure)
+        PoplurWebCaptureStore.purge()
+        purgeInactiveRendererResources()
 
         memoryRecoveryTask?.cancel()
         memoryRecoveryTask = Task { @MainActor [weak self] in
@@ -468,6 +472,14 @@ final class PoplurPerformanceManager: ObservableObject {
             assetCache.removeAll(category: .decodedImage)
         }
 
+        if previous != nextMode {
+            debugLog("Mode changed \(previous.diagnosticName) -> \(nextMode.diagnosticName). Reason: \(reason)")
+        }
+        // Lease revocation/policy downgrade must precede resource destruction.
+        // Teardown callbacks can otherwise race a renderer that still believes
+        // it owns its textures, session, or player graph.
+        reconcileRenderers()
+
         if nextMode > previous {
             purgeInactiveRendererResources()
             releaseReusableRendererAssets()
@@ -478,11 +490,6 @@ final class PoplurPerformanceManager: ObservableObject {
                 _ = assetCache.purge(reason: .thermalPressure)
             }
         }
-
-        if previous != nextMode {
-            debugLog("Mode changed \(previous.diagnosticName) -> \(nextMode.diagnosticName). Reason: \(reason)")
-        }
-        reconcileRenderers()
         logDiagnostics(reason: reason)
     }
 
@@ -696,8 +703,8 @@ final class PoplurPerformanceManager: ObservableObject {
         case .full:
             return PoplurPerformancePolicy(
                 mode: mode,
-                targetFPS: 30,
-                interactiveTargetFPS: 60,
+                targetFPS: 12,
+                interactiveTargetFPS: 24,
                 particlesAllowed: true,
                 particleDensityMultiplier: 0.15,
                 dynamicShadowsAllowed: false,
@@ -712,8 +719,8 @@ final class PoplurPerformanceManager: ObservableObject {
         case .reduced:
             return PoplurPerformancePolicy(
                 mode: mode,
-                targetFPS: 24,
-                interactiveTargetFPS: 30,
+                targetFPS: 8,
+                interactiveTargetFPS: 15,
                 particlesAllowed: true,
                 particleDensityMultiplier: 0.05,
                 dynamicShadowsAllowed: false,
@@ -728,8 +735,8 @@ final class PoplurPerformanceManager: ObservableObject {
         case .lowPower:
             return PoplurPerformancePolicy(
                 mode: mode,
-                targetFPS: 15,
-                interactiveTargetFPS: 24,
+                targetFPS: 4,
+                interactiveTargetFPS: 10,
                 particlesAllowed: false,
                 particleDensityMultiplier: 0,
                 dynamicShadowsAllowed: false,
@@ -744,8 +751,8 @@ final class PoplurPerformanceManager: ObservableObject {
         case .emergency:
             return PoplurPerformancePolicy(
                 mode: mode,
-                targetFPS: 5,
-                interactiveTargetFPS: 10,
+                targetFPS: 1,
+                interactiveTargetFPS: 5,
                 particlesAllowed: false,
                 particleDensityMultiplier: 0,
                 dynamicShadowsAllowed: false,
@@ -792,7 +799,7 @@ class PoplurManagedSCNView: SCNView {
     init(
         performanceName: String,
         classification: PoplurRendererClassification = .decorative,
-        rateClass: PoplurFrameRateClass = .interactive,
+        rateClass: PoplurFrameRateClass = .decorative,
         frame: CGRect = .zero,
         options: [String: Any]? = nil
     ) {
@@ -805,7 +812,7 @@ class PoplurManagedSCNView: SCNView {
     required init?(coder: NSCoder) {
         performanceName = "SceneKit"
         classification = .decorative
-        rateClass = .interactive
+        rateClass = .decorative
         super.init(coder: coder)
     }
 

@@ -11,6 +11,12 @@ final class CameraPreviewViewController: UIViewController {
     private var activeARFilterRawValue = "None"
     private var wantsFilteredPreview = false
     private var hasFilteredFrame = false
+    private var filteredFramePresentationGeneration: UInt64 = 0
+    private var parkedPreviewCanResume = false
+    private var parkedPreviewImageView: UIImageView?
+    private var resumePreviewButton: UIButton?
+    private var notificationObservers: [NSObjectProtocol] = []
+    var onParkedPreviewTap: (() -> Void)?
 
     /// Expose the AR display layer for external configuration (e.g., CameraKitController)
     public func getARDisplayLayer() -> AVSampleBufferDisplayLayer? {
@@ -95,14 +101,16 @@ final class CameraPreviewViewController: UIViewController {
         // Keep the raw camera layer visible until an AR filter is actively selected.
         displayLayer?.opacity = 0.0
 
+        installParkedPreviewImageView()
+        installColdBudgetResumeAffordance()
         installCameraGestures()
         
-        NotificationCenter.default.addObserver(forName: Notification.Name("CubeInteractionDisabled"), object: nil, queue: .main) { [weak self] _ in
+        notificationObservers.append(NotificationCenter.default.addObserver(forName: Notification.Name("CubeInteractionDisabled"), object: nil, queue: .main) { [weak self] _ in
             self?.singleTapRecognizer?.isEnabled = false
-        }
-        NotificationCenter.default.addObserver(forName: Notification.Name("CubeInteractionEnabled"), object: nil, queue: .main) { [weak self] _ in
+        })
+        notificationObservers.append(NotificationCenter.default.addObserver(forName: Notification.Name("CubeInteractionEnabled"), object: nil, queue: .main) { [weak self] _ in
             self?.singleTapRecognizer?.isEnabled = true
-        }
+        })
 
         NotificationCenter.default.addObserver(
             self,
@@ -137,6 +145,7 @@ final class CameraPreviewViewController: UIViewController {
     }
 
     deinit {
+        notificationObservers.forEach(NotificationCenter.default.removeObserver)
         NotificationCenter.default.removeObserver(self)
     }
 
@@ -177,6 +186,7 @@ final class CameraPreviewViewController: UIViewController {
     @objc private func handleARFilterChanged(_ notification: Notification) {
         let nextFilter = (notification.userInfo?["filter"] as? String) ?? "None"
         if nextFilter != activeARFilterRawValue {
+            filteredFramePresentationGeneration &+= 1
             hasFilteredFrame = false
             displayLayer?.flushAndRemoveImage()
         }
@@ -192,6 +202,7 @@ final class CameraPreviewViewController: UIViewController {
     private func setFilteredPreviewVisible(_ visible: Bool) {
         wantsFilteredPreview = visible
         if !visible {
+            filteredFramePresentationGeneration &+= 1
             hasFilteredFrame = false
             displayLayer?.flushAndRemoveImage()
         }
@@ -200,8 +211,21 @@ final class CameraPreviewViewController: UIViewController {
 
     public func markFilteredFrameReady() {
         guard wantsFilteredPreview else { return }
+        filteredFramePresentationGeneration &+= 1
+        let generation = filteredFramePresentationGeneration
         hasFilteredFrame = true
         applyPreviewLayerVisibility()
+        // Filter work is deliberately sampled. Never leave its last processed
+        // buffer covering the continuously moving hardware preview, which
+        // looks like a frozen/laggy camera between samples.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) { [weak self] in
+            guard let self,
+                  self.filteredFramePresentationGeneration == generation,
+                  self.wantsFilteredPreview else { return }
+            self.hasFilteredFrame = false
+            self.displayLayer?.flushAndRemoveImage()
+            self.applyPreviewLayerVisibility()
+        }
     }
 
     private func applyPreviewLayerVisibility() {
@@ -240,6 +264,62 @@ final class CameraPreviewViewController: UIViewController {
         return view.bounds.union(windowBoundsInView)
     }
 
+    public func setColdBudgetResumeAffordanceVisible(_ visible: Bool) {
+        loadViewIfNeeded()
+        parkedPreviewCanResume = visible
+        resumePreviewButton?.isHidden = !visible
+    }
+
+    /// A single retained frame replaces the live AVCapture preview after the
+    /// hard camera budget expires. It lets the session release every input and
+    /// output without turning the Camera surface into an unexplained black box.
+    public func setParkedPreviewImage(_ image: UIImage?) {
+        loadViewIfNeeded()
+        parkedPreviewImageView?.image = image
+        parkedPreviewImageView?.isHidden = (image == nil)
+    }
+
+    private func installParkedPreviewImageView() {
+        guard parkedPreviewImageView == nil else { return }
+        let imageView = UIImageView()
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        imageView.contentMode = .scaleAspectFill
+        imageView.clipsToBounds = true
+        imageView.isUserInteractionEnabled = false
+        imageView.isHidden = true
+        view.addSubview(imageView)
+        NSLayoutConstraint.activate([
+            imageView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            imageView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            imageView.topAnchor.constraint(equalTo: view.topAnchor),
+            imageView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
+        parkedPreviewImageView = imageView
+    }
+
+    private func installColdBudgetResumeAffordance() {
+        let button = UIButton(type: .system)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.setTitle("Tap to resume camera", for: .normal)
+        button.setTitleColor(.white, for: .normal)
+        button.titleLabel?.font = .systemFont(ofSize: 16, weight: .semibold)
+        button.layer.shadowColor = UIColor.black.cgColor
+        button.layer.shadowOpacity = 0.8
+        button.layer.shadowRadius = 3
+        button.layer.shadowOffset = .zero
+        button.backgroundColor = .clear
+        button.isHidden = true
+        button.accessibilityHint = "Restarts the camera after it was paused"
+        button.addTarget(self, action: #selector(handleParkedPreviewTap), for: .touchUpInside)
+        view.addSubview(button)
+        NSLayoutConstraint.activate([
+            button.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            button.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            button.heightAnchor.constraint(greaterThanOrEqualToConstant: 44)
+        ])
+        resumePreviewButton = button
+    }
+
     // MARK: - Gesture recognizers for camera controls
     private func installCameraGestures() {
         // Swipe up: Torch ON
@@ -259,6 +339,12 @@ final class CameraPreviewViewController: UIViewController {
         doubleTap.numberOfTapsRequired = 2
         doubleTap.cancelsTouchesInView = false
         view.addGestureRecognizer(doubleTap)
+
+        let singleTap = UITapGestureRecognizer(target: self, action: #selector(handleSingleTap(_:)))
+        singleTap.cancelsTouchesInView = false
+        singleTap.require(toFail: doubleTap)
+        view.addGestureRecognizer(singleTap)
+        singleTapRecognizer = singleTap
 
         // Long press: Toggle AR filters
         let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
@@ -291,7 +377,13 @@ final class CameraPreviewViewController: UIViewController {
     }
 
     @objc private func handleSingleTap(_ gesture: UITapGestureRecognizer) {
-        NotificationCenter.default.post(name: Notification.Name("cameraCubeTabViewTapped"), object: nil)
+        guard parkedPreviewCanResume else { return }
+        onParkedPreviewTap?()
+    }
+
+    @objc private func handleParkedPreviewTap() {
+        guard parkedPreviewCanResume else { return }
+        onParkedPreviewTap?()
     }
 
     /// Minimal protocol to satisfy `currentCameraPosition` usage. Replace with your real controller if available.

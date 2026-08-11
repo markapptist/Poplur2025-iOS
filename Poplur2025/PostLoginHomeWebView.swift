@@ -17,8 +17,22 @@ enum PoplurWebCaptureStore {
         let mimeType: String
     }
 
-    private static var items: [String: Item] = [:]
+    private struct Entry {
+        let item: Item
+        let memoryCost: Int
+        let ownsTemporaryFile: Bool
+        var accessSequence: UInt64
+    }
+
+    /// Captures are short-lived hand-offs into the web composer, not a media
+    /// library. Keep their resident bytes and openable URLs strictly bounded.
+    private static let itemLimit = 6
+    private static let memoryByteLimit = 32 * 1_024 * 1_024
+    private static var items: [String: Entry] = [:]
+    private static var memoryByteCount = 0
+    private static var accessSequence: UInt64 = 0
     private static var transientCameraRollKey: String?
+    private static var transientVideoKey: String?
     private static let lock = NSLock()
 
     static func register(image: UIImage) -> String? {
@@ -29,10 +43,16 @@ enum PoplurWebCaptureStore {
     /// Register already-encoded capture data without another lossy round trip.
     /// Camera Roll uses this for its orientation-correct, 4K-bounded JPEG, then
     /// hands WebKit a small custom-scheme URL instead of a multi-megabyte JS string.
-    static func register(data: Data, mimeType: String) -> String {
+    static func register(data: Data, mimeType: String) -> String? {
+        guard data.count <= memoryByteLimit else { return nil }
         let key = "\(UUID().uuidString).\(fileExtension(for: mimeType))"
         lock.lock()
-        items[key] = Item(data: data, fileURL: nil, mimeType: mimeType)
+        insertLocked(
+            Item(data: data, fileURL: nil, mimeType: mimeType),
+            for: key,
+            memoryCost: data.count,
+            ownsTemporaryFile: false
+        )
         lock.unlock()
         return key
     }
@@ -40,11 +60,17 @@ enum PoplurWebCaptureStore {
     /// Camera Roll selections can each be several megabytes. Keep the current
     /// one alive for its composer URL, but replace the previous roll-only item
     /// on the next selection so browsing does not grow resident memory forever.
-    static func registerCameraRollAsset(data: Data, mimeType: String) -> String {
+    static func registerCameraRollAsset(data: Data, mimeType: String) -> String? {
+        guard data.count <= memoryByteLimit else { return nil }
         let key = "roll-\(UUID().uuidString).\(fileExtension(for: mimeType))"
         lock.lock()
-        if let previous = transientCameraRollKey { items.removeValue(forKey: previous) }
-        items[key] = Item(data: data, fileURL: nil, mimeType: mimeType)
+        if let previous = transientCameraRollKey { removeLocked(previous) }
+        insertLocked(
+            Item(data: data, fileURL: nil, mimeType: mimeType),
+            for: key,
+            memoryCost: data.count,
+            ownsTemporaryFile: false
+        )
         transientCameraRollKey = key
         lock.unlock()
         return key
@@ -61,8 +87,16 @@ enum PoplurWebCaptureStore {
     static func register(videoURL: URL) -> String {
         let ext = videoURL.pathExtension.isEmpty ? "mov" : videoURL.pathExtension
         let key = "\(UUID().uuidString).\(ext)"
+        let mimeType = ext.lowercased() == "mp4" ? "video/mp4" : "video/quicktime"
         lock.lock()
-        items[key] = Item(data: nil, fileURL: videoURL, mimeType: "video/quicktime")
+        if let previous = transientVideoKey { removeLocked(previous) }
+        insertLocked(
+            Item(data: nil, fileURL: videoURL, mimeType: mimeType),
+            for: key,
+            memoryCost: 0,
+            ownsTemporaryFile: PoplurTemporaryFileOwnership.isOwned(videoURL)
+        )
+        transientVideoKey = key
         lock.unlock()
         return key
     }
@@ -70,7 +104,62 @@ enum PoplurWebCaptureStore {
     static func item(for key: String) -> Item? {
         lock.lock()
         defer { lock.unlock() }
-        return items[key]
+        guard var entry = items[key] else { return nil }
+        accessSequence &+= 1
+        entry.accessSequence = accessSequence
+        items[key] = entry
+        return entry.item
+    }
+
+    static func remove(_ key: String) {
+        lock.lock()
+        removeLocked(key)
+        lock.unlock()
+    }
+
+    static func purge() {
+        lock.lock()
+        for key in Array(items.keys) {
+            removeLocked(key)
+        }
+        memoryByteCount = 0
+        transientCameraRollKey = nil
+        transientVideoKey = nil
+        lock.unlock()
+    }
+
+    private static func insertLocked(
+        _ item: Item,
+        for key: String,
+        memoryCost: Int,
+        ownsTemporaryFile: Bool
+    ) {
+        removeLocked(key)
+        accessSequence &+= 1
+        items[key] = Entry(
+            item: item,
+            memoryCost: memoryCost,
+            ownsTemporaryFile: ownsTemporaryFile,
+            accessSequence: accessSequence
+        )
+        memoryByteCount += memoryCost
+
+        while items.count > itemLimit || memoryByteCount > memoryByteLimit {
+            guard let oldestKey = items.min(by: {
+                $0.value.accessSequence < $1.value.accessSequence
+            })?.key else { break }
+            removeLocked(oldestKey)
+        }
+    }
+
+    private static func removeLocked(_ key: String) {
+        guard let removed = items.removeValue(forKey: key) else { return }
+        memoryByteCount = max(0, memoryByteCount - removed.memoryCost)
+        if transientCameraRollKey == key { transientCameraRollKey = nil }
+        if transientVideoKey == key { transientVideoKey = nil }
+        if removed.ownsTemporaryFile, let fileURL = removed.item.fileURL {
+            PoplurTemporaryFileOwnership.deleteIfOwned(fileURL)
+        }
     }
 }
 
@@ -221,13 +310,25 @@ enum PoplurPermissionRouting {
     }
 }
 
-/// One-shot cleanup of web caches left by builds that shared a cache key.
+/// Build-stamped cleanup of web caches left by an older embedded bundle. The
+/// first navigation waits for the one required migration, and subsequent app
+/// launches with the same bundle never churn WebKit's disk or memory caches.
+@MainActor
 enum PoplurWebCache {
-    private static var purged = false
+    private static let completedBuildKey = "poplur.webCache.completedBuild.v2"
+    private static var migrationInFlight = false
+    private static var waiters: [() -> Void] = []
 
-    static func purgeStaleOnce() {
-        guard !purged else { return }
-        purged = true
+    static func prepareForCurrentBuild(completion: @escaping () -> Void) {
+        let buildStamp = PoplurPreloginWeb.buildStamp
+        if UserDefaults.standard.string(forKey: completedBuildKey) == buildStamp {
+            completion()
+            return
+        }
+
+        waiters.append(completion)
+        guard !migrationInFlight else { return }
+        migrationInFlight = true
         URLCache.shared.removeAllCachedResponses()
         let types: Set<String> = [
             WKWebsiteDataTypeDiskCache,
@@ -238,7 +339,14 @@ enum PoplurWebCache {
             ofTypes: types,
             modifiedSince: Date(timeIntervalSince1970: 0)
         ) {
-            PoplurDiagLog.append("[PoplurWebCache] cleared stale web caches")
+            Task { @MainActor in
+                UserDefaults.standard.set(buildStamp, forKey: completedBuildKey)
+                migrationInFlight = false
+                let pending = waiters
+                waiters.removeAll(keepingCapacity: false)
+                PoplurDiagLog.append("[PoplurWebCache] migrated caches for \(buildStamp)")
+                pending.forEach { $0() }
+            }
         }
     }
 }
@@ -249,6 +357,10 @@ struct PostLoginHomeWebView: UIViewRepresentable {
     /// boxes, so the live web view is published here rather than threaded
     /// through every intermediate type.
     static weak var liveWebView: WKWebView?
+    /// `evaluateJavaScript` completions are asynchronous. A parked delivery
+    /// must not suspend the HUD after a newer running delivery has already
+    /// reopened it, so every state handoff owns a monotonically newer token.
+    @MainActor private static var cameraBudgetStateToken: UInt64 = 0
 
     /// Hand the web overlay real boxes. JSON matches `Detection` in
     /// poplur-clay-map/src/mlDetect.ts: x/y/w/h normalised 0..1, top-left origin.
@@ -257,6 +369,44 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         webView.evaluateJavaScript(
             "window.dispatchEvent(new CustomEvent('poplur-native-detections', { detail: \(json) })); true;"
         )
+    }
+
+    /// Native is the source of truth for the physical sensor lease. The web
+    /// keeps only a small state object so a thermally parked camera can show
+    /// its retained frame and require an explicit tap before restarting.
+    @MainActor
+    static func sendCameraBudgetState(_ update: CameraColdBudgetUpdate) {
+        guard let webView = liveWebView else { return }
+        cameraBudgetStateToken &+= 1
+        let deliveryToken = cameraBudgetStateToken
+        let managedWebView = webView as? PoplurManagedWebView
+        if update.state != .parked {
+            // Wake the HUD before telling React that capture is live so its
+            // bounded indicators can paint immediately.
+            managedWebView?.setLightweightOverlayRuntimeSuspended(false)
+        }
+        let payload: [String: Any] = [
+            "state": update.state.rawValue,
+            "reason": update.reason.rawValue,
+            "canResume": update.canResume,
+            "windowMs": update.windowMilliseconds
+        ]
+        guard JSONSerialization.isValidJSONObject(payload),
+              let data = try? JSONSerialization.data(withJSONObject: payload),
+              let json = String(data: data, encoding: .utf8) else { return }
+        webView.evaluateJavaScript(
+            "window.dispatchEvent(new CustomEvent('poplur-camera-budget', { detail: \(json) })); true;"
+        ) { _, _ in
+            guard update.state == .parked else { return }
+            // Deliver the parked state first so React paints the retained-frame
+            // resume affordance, then stop all governed HUD work. DOM pointer
+            // events and the native message bridge remain available.
+            DispatchQueue.main.async {
+                guard Self.cameraBudgetStateToken == deliveryToken,
+                      Self.liveWebView === webView else { return }
+                managedWebView?.setLightweightOverlayRuntimeSuspended(true)
+            }
+        }
     }
 
     /// The web layer's spoken voice. WKWebView's own speechSynthesis is
@@ -309,20 +459,15 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         self.nativeVoiceCommandJSON = nativeVoiceCommandJSON
     }
 
-    func makeCoordinator() -> Coordinator { Coordinator(onReady: onReady, onWebEvent: onWebEvent) }
+    func makeCoordinator() -> Coordinator {
+        Coordinator(
+            initialWebTab: initialView == "camera" ? "post" : initialView,
+            onReady: onReady,
+            onWebEvent: onWebEvent
+        )
+    }
 
     func makeUIView(context: Context) -> WKWebView {
-        // Drop anything WKWebView cached from a PREVIOUS build of the bundle.
-        //
-        // The `?v=` cache key was CFBundleVersion+ShortVersionString, which are
-        // `6` and `0.1` on every build — so the key never changed and the web
-        // view kept answering from cache no matter how many times the app was
-        // rebuilt and reinstalled. The visible result was two builds at once:
-        // stale CSS laid over new markup, counters printing through each other.
-        // buildStamp now tracks the build, but caches written under the OLD
-        // constant key are still on disk, so clear them once at startup.
-        PoplurWebCache.purgeStaleOnce()
-
         let config = WKWebViewConfiguration()
         config.allowsInlineMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
@@ -366,10 +511,23 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         // permissions the app already holds. The shared clay bridge answers them
         // by forwarding the decision the user already made.
         webView.uiDelegate = context.coordinator.bridge
+        // Readiness must not depend exclusively on a JavaScript timer. When
+        // the device enters the thermal tripwire during launch, the managed
+        // scheduler intentionally parks page timers; waiting on one of those
+        // timers left the approved splash on screen forever. A completed main
+        // navigation starts a short native backstop that cannot be suspended
+        // by the web performance policy.
+        webView.navigationDelegate = context.coordinator
         Self.liveWebView = webView
 
         if PoplurClayMapView.bundledRootURL() != nil, let url = PoplurWebHome.url(for: initialView) {
-            webView.load(URLRequest(url: url))
+            // A cache migration is rare (only when the embedded build stamp
+            // changes), but navigation must wait for it. Starting both at once
+            // lets WebKit delete bytes underneath the first document load.
+            PoplurWebCache.prepareForCurrentBuild { [weak webView] in
+                guard let webView, Self.liveWebView === webView else { return }
+                webView.load(URLRequest(url: url))
+            }
         } else {
             print("[PostLoginHomeWebView] ClayMapWeb bundle missing — run poplur-clay-map/scripts/sync-mobile.sh")
         }
@@ -389,6 +547,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         uiView.configuration.userContentController.removeScriptMessageHandler(forName: "poplur")
         uiView.configuration.userContentController.removeScriptMessageHandler(forName: "homeReady")
         if liveWebView === uiView { liveWebView = nil }
+        PoplurWebCaptureStore.purge()
     }
 
     private static let readinessScript = #"""
@@ -430,7 +589,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         webView.scrollView.backgroundColor = webView.backgroundColor
     }
 
-    final class Coordinator: NSObject, WKScriptMessageHandler, CLLocationManagerDelegate {
+    final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate, CLLocationManagerDelegate {
         let bridge = PoplurClayMapView.Coordinator()
         var onReady: () -> Void
         let onWebEvent: ((String, [String: Any]) -> Void)?
@@ -441,8 +600,15 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         private var locationPermissionRequestInFlight = false
         private var photoPermissionRequestInFlight = false
         private var notificationObservers: [NSObjectProtocol] = []
+        private var currentWebTab: String
+        private var webReportsLiveCamera = false
 
-        init(onReady: @escaping () -> Void, onWebEvent: ((String, [String: Any]) -> Void)? = nil) {
+        init(
+            initialWebTab: String,
+            onReady: @escaping () -> Void,
+            onWebEvent: ((String, [String: Any]) -> Void)? = nil
+        ) {
+            currentWebTab = initialWebTab
             self.onReady = onReady
             self.onWebEvent = onWebEvent
             super.init()
@@ -566,6 +732,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                 // AuthViewModel's state listener flips isAuthenticated and
                 // Poplur2025App swaps back to the pre-login surface on its own.
                 if type == "signOut" {
+                    PoplurWebCaptureStore.purge()
                     NotificationCenter.default.post(name: .StopMapAudio, object: nil)
                     NotificationCenter.default.post(name: .PoplurSignOutRequested, object: nil)
                     return
@@ -744,11 +911,14 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     // authenticated launch does not repeat the primer.
                     PoplurPermissionRouting.markHandled(permission)
                 }
-                if type == "tabChanged", let webView = bridge.webView {
-                    let isCamera = (body["tab"] as? String) == "post"
-                    DispatchQueue.main.async {
-                        PostLoginHomeWebView.setCameraHole(isCamera, on: webView)
-                    }
+                if type == "tabChanged", let tab = body["tab"] as? String {
+                    currentWebTab = tab
+                    if tab != "post" { webReportsLiveCamera = false }
+                    updateCameraHole()
+                }
+                if type == "cameraLiveVisibilityChanged" {
+                    webReportsLiveCamera = (body["visible"] as? Bool) == true
+                    updateCameraHole()
                 }
                 if type == "fetchProductImage", let webView = bridge.webView,
                    let target = body["url"] as? String {
@@ -773,6 +943,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                         return
                     }
                     persistProfilePhotoData(data)
+                    PoplurWebCaptureStore.remove(sourceURL.lastPathComponent)
                     return
                 }
                 if type == "requestProfile", let webView = bridge.webView {
@@ -817,6 +988,14 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                 }
             }
             bridge.userContentController(userContentController, didReceive: message)
+        }
+
+        private func updateCameraHole() {
+            guard let webView = bridge.webView else { return }
+            let shouldRevealLiveCamera = currentWebTab == "post" && webReportsLiveCamera
+            DispatchQueue.main.async {
+                PostLoginHomeWebView.setCameraHole(shouldRevealLiveCamera, on: webView)
+            }
         }
 
         /// Opens commerce links in Apple's isolated in-app browser. The remote
@@ -964,6 +1143,16 @@ struct PostLoginHomeWebView: UIViewRepresentable {
             }
             flushPendingNativeVoiceCommand()
             DispatchQueue.main.async { [onReady] in onReady() }
+        }
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            // Let WebKit commit one compositor turn, then release the native
+            // cover even if the document's governed rAF/timer queue is parked.
+            // `signalHomeReady` is idempotent, so the concrete web first-paint
+            // signal still wins whenever it arrives earlier.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) { [weak self] in
+                self?.signalHomeReady()
+            }
         }
 
         func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {

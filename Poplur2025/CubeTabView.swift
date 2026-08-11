@@ -1477,6 +1477,7 @@ private struct CubeSceneView: UIViewRepresentable {
         private var holdObservers: [NSObjectProtocol] = []
         private var profileIconOverrideObserver: NSObjectProtocol?
         private var faceOverrideObserver: NSObjectProtocol?
+        private var notificationObservers: [NSObjectProtocol] = []
         private var profileIconOverride: (title: String, systemImage: String)?
         private var faceOverrides: [Int: (title: String, systemImage: String)] = [:]
         private var tvGuideObservers: [NSObjectProtocol] = []
@@ -1641,24 +1642,24 @@ private struct CubeSceneView: UIViewRepresentable {
                 }
             }
             let previewMaximumFPS = PoplurPerformanceManager.shared.targetFPS(for: .interactive)
-            NotificationCenter.default.addObserver(forName: Notification.Name("CubePreviewSetFPS"), object: nil, queue: .main) { [weak self] notif in
+            notificationObservers.append(NotificationCenter.default.addObserver(forName: Notification.Name("CubePreviewSetFPS"), object: nil, queue: .main) { [weak self] notif in
                 guard let self = self, let scnView = self.view else { return }
                 let requestedFPS = (notif.userInfo?["fps"] as? Int) ?? previewMaximumFPS
                 scnView.preferredFramesPerSecond = min(requestedFPS, previewMaximumFPS)
-            }
+            })
             
             // Flash/torch notifications - illuminate cube when flashlight is ON
-            NotificationCenter.default.addObserver(forName: Notification.Name("CubeStartFlashing"), object: nil, queue: .main) { [weak self] _ in
+            notificationObservers.append(NotificationCenter.default.addObserver(forName: Notification.Name("CubeStartFlashing"), object: nil, queue: .main) { [weak self] _ in
                 guard let self = self else { return }
                 print("💡 [CubeTabView] Flash ON - illuminating cube")
                 self.startFlashing()
-            }
+            })
             
-            NotificationCenter.default.addObserver(forName: Notification.Name("CubeStopFlashing"), object: nil, queue: .main) { [weak self] _ in
+            notificationObservers.append(NotificationCenter.default.addObserver(forName: Notification.Name("CubeStopFlashing"), object: nil, queue: .main) { [weak self] _ in
                 guard let self = self else { return }
                 print("🔦 [CubeTabView] Flash OFF - stopping cube illumination")
                 self.stopFlashing()
-            }
+            })
 
             profileIconOverrideObserver = NotificationCenter.default.addObserver(forName: .CubeProfileIconOverrideChanged, object: nil, queue: .main) { [weak self] notification in
                 guard let self = self else { return }
@@ -1702,19 +1703,19 @@ private struct CubeSceneView: UIViewRepresentable {
                 self?.endBlink()
                 self?.stopFlashing()
             }
-            NotificationCenter.default.addObserver(forName: Notification.Name("RecordingStarted"), object: nil, queue: .main) { [weak self] _ in
+            notificationObservers.append(NotificationCenter.default.addObserver(forName: Notification.Name("RecordingStarted"), object: nil, queue: .main) { [weak self] _ in
                 self?.view?.rendersContinuously = false
-            }
-            NotificationCenter.default.addObserver(forName: Notification.Name("RecordingStopped"), object: nil, queue: .main) { [weak self] _ in
+            })
+            notificationObservers.append(NotificationCenter.default.addObserver(forName: Notification.Name("RecordingStopped"), object: nil, queue: .main) { [weak self] _ in
                 self?.restoreRendererMode()
-            }
+            })
             // ML object detection → one-shot pop when camera finds something new
-            NotificationCenter.default.addObserver(forName: Notification.Name("MLCubePopTrigger"), object: nil, queue: .main) { [weak self] _ in
+            notificationObservers.append(NotificationCenter.default.addObserver(forName: Notification.Name("MLCubePopTrigger"), object: nil, queue: .main) { [weak self] _ in
                 self?.triggerPreviewPop()
-            }
-            NotificationCenter.default.addObserver(forName: CubeBrightness.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            })
+            notificationObservers.append(NotificationCenter.default.addObserver(forName: CubeBrightness.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
                 CubeBrightness.apply(to: self?.view?.scene, isPreview: isRunningInPreviews)
-            }
+            })
         }
 
         deinit {
@@ -1746,6 +1747,8 @@ private struct CubeSceneView: UIViewRepresentable {
             }
             tvGuideObservers.forEach { NotificationCenter.default.removeObserver($0) }
             tvGuideObservers = []
+            notificationObservers.forEach(NotificationCenter.default.removeObserver)
+            notificationObservers.removeAll(keepingCapacity: false)
             stopObservingMotion()
             stopObservingHold()
             stopAccelerometerSimulation()

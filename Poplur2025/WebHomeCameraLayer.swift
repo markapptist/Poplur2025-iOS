@@ -13,7 +13,8 @@ import UIKit
 //
 //   web → native:  { type: "tabChanged", tab }        mount/unmount this layer
 //                  { type: "cameraShutter" }          cube tap = capture (as before)
-//                  { type: "cameraControl", control } "flash" | "flip" | "record"
+//                  { type: "cameraControl", control } "flash" | "flip" |
+//                                                    "recordStart" | "recordStop"
 //
 // The web side punches the hole via html.camera-live (see poplur-clay-map
 // Camera.tsx / index.css); browser + Android keep the spoofed feed.
@@ -30,6 +31,10 @@ final class WebHomeCameraModel: ObservableObject {
     @Published private(set) var recognitionManager: UserRecognitionManager?
 
     private var controllerStorage: CameraKitController?
+    /// Invalidates an activation that is suspended in an async permission,
+    /// capture-configuration, or recognition preload when Camera leaves the
+    /// foreground. A stale task may finish, but it can never reclaim capture.
+    private var cameraActivationGeneration: UInt64 = 0
     private var webReportsLiveCamera = false
     private var latestVisionBoxes: [VisionBoxDetector.Box] = []
     private var latestClassifications: [DetectedObject] = []
@@ -55,6 +60,20 @@ final class WebHomeCameraModel: ObservableObject {
     func resolveController() -> CameraKitController {
         if let controllerStorage { return controllerStorage }
         let controller = CameraKitController()
+        controller.onColdBudgetStateChange = { [weak self] update in
+            PostLoginHomeWebView.sendCameraBudgetState(update)
+            if update.state == .running, self?.isCameraTab == true {
+                CameraAIAnnouncer.shared.setLiveCameraActive(true)
+            } else {
+                // A face request that was already inside Vision may complete
+                // after capture parks. Keep that result silent and clear any
+                // recognition it managed to publish before its completion edge.
+                CameraAIAnnouncer.shared.setLiveCameraActive(false)
+                if update.state == .parked {
+                    self?.recognitionManager?.clearRecognition()
+                }
+            }
+        }
         controller.preparePreviewIfNeeded()
         controllerStorage = controller
         return controller
@@ -78,8 +97,8 @@ final class WebHomeCameraModel: ObservableObject {
             let layer = (controller.previewViewController as? CameraPreviewViewController)?.getARDisplayLayer()
             controller.setupARFilterSupport(filterManager: manager, displayLayer: layer)
         }
-        controller.arFilterManager?.onFaceTrack = { [weak self] bounds, confidence, roll, yaw in
-            guard let self else { return }
+        controller.arFilterManager?.onFaceTrack = { [weak self, weak controller] bounds, confidence, roll, yaw in
+            guard let self, controller?.acceptsAnalysisResults == true else { return }
             if let bounds {
                 self.latestARFace = (bounds, confidence, roll, yaw)
             } else {
@@ -112,8 +131,10 @@ final class WebHomeCameraModel: ObservableObject {
     /// whole-frame observations, so their bounds are the full frame; attaching
     /// them to an arbitrary Vision box would falsely claim object localisation.
     private func enableClassificationBridge(on controller: CameraKitController) {
-        controller.enableMLDetection { [weak self] objects in
-            guard let self, self.isCameraTab else { return }
+        controller.enableMLDetection { [weak self, weak controller] objects in
+            guard let self,
+                  self.isCameraTab,
+                  controller?.acceptsAnalysisResults == true else { return }
             NotificationCenter.default.post(
                 name: NSNotification.Name("MLObjectsDetected"),
                 object: nil,
@@ -121,8 +142,10 @@ final class WebHomeCameraModel: ObservableObject {
             )
             self.receiveClassifications(objects)
         }
-        controller.mlDetectionManager?.onFrameProcessed = { [weak self] pixelBuffer, objects in
-            guard let self, self.isCameraTab else { return }
+        controller.mlDetectionManager?.onFrameProcessed = { [weak self, weak controller] pixelBuffer, objects in
+            guard let self,
+                  self.isCameraTab,
+                  controller?.acceptsAnalysisResults == true else { return }
             // Settings → CAMERA → "AI voice". The announcer is the only thing
             // in the app that talks unprompted, so it needs a switch; the
             // readout and the boxes are unaffected.
@@ -272,6 +295,12 @@ final class WebHomeCameraModel: ObservableObject {
                     if tab != "post" { webReportsLiveCamera = false }
                     CameraAIAnnouncer.shared.setLiveCameraActive(false)
                 }
+                if tab != "post", tab != "holdmenu" {
+                    // This is a real destination change, even if a hold-menu
+                    // overlay already removed WebHomeCameraLayer and therefore
+                    // no second onDisappear will arrive to reset entry budget.
+                    controllerStorage?.suspendCapture(resetEntryBudget: true)
+                }
             }
         case "cameraLiveVisibilityChanged":
             webReportsLiveCamera = (body["visible"] as? Bool) == true
@@ -289,7 +318,18 @@ final class WebHomeCameraModel: ObservableObject {
             guard isCameraTab else { return }
             controllerStorage?.triggerShutter()
         case "cameraControl":
-            guard isCameraTab, let control = body["control"] as? String else { return }
+            guard let control = body["control"] as? String else { return }
+            // Cleanup is intentionally valid after visibility has fallen. The
+            // web sends this while a menu/composer transition is removing the
+            // live surface; rejecting it behind `isCameraTab` can leave a
+            // recording running until SwiftUI eventually delivers onDisappear.
+            if control == "recordStop" || control == "record" {
+                if controllerStorage?.isRecording == true {
+                    controllerStorage?.endRecording()
+                }
+                return
+            }
+            guard isCameraTab else { return }
             switch control {
             case "flash":
                 let controller = resolveController()
@@ -302,12 +342,18 @@ final class WebHomeCameraModel: ObservableObject {
             case "zoom":
                 let value = (body["value"] as? NSNumber)?.doubleValue ?? 1
                 resolveController().setZoomFactor(CGFloat(value))
-            case "record":
+            case "recordStart":
                 let controller = resolveController()
-                if controller.isRecording {
-                    controller.endRecording()
-                } else {
+                if !controller.isRecording {
                     controller.beginRecording()
+                }
+            case "resumePreview":
+                // A parked preview can only reopen from this explicit bridge
+                // message, sent by a deliberate tap on the visible affordance.
+                // Visibility changes and timers never call this path.
+                Task { [weak self] in
+                    guard let self, self.isCameraTab else { return }
+                    await self.resolveController().resumePreviewFromUserGesture()
                 }
             case "detect":
                 // ML detection ships on — activateCamera turns it on every time
@@ -363,7 +409,9 @@ final class WebHomeCameraModel: ObservableObject {
     /// a reflexive Don't Allow against a bare system alert costs the camera
     /// permanently. Poplur asks first; this fires only after a yes.
     func activateCamera(askIfUndecided: Bool = false) async {
-        guard isCameraTab else { return }
+        cameraActivationGeneration &+= 1
+        let activationGeneration = cameraActivationGeneration
+        guard isCameraTab, UIApplication.shared.applicationState == .active else { return }
         let controller = resolveController()
         let status = AVCaptureDevice.authorizationStatus(for: .video)
         switch status {
@@ -377,15 +425,21 @@ final class WebHomeCameraModel: ObservableObject {
             return
         }
         // Permission may have put up an OS sheet while the user/page moved on.
-        guard isCameraTab else { return }
+        guard cameraActivationGeneration == activationGeneration,
+              isCameraTab,
+              UIApplication.shared.applicationState == .active else { return }
         await controller.resumePreviewAfterInterruption()
-        guard isCameraTab else {
-            controller.suspendCapture()
+        guard cameraActivationGeneration == activationGeneration,
+              isCameraTab,
+              UIApplication.shared.applicationState == .active else {
+            // A newer activation owns the controller, or deactivateCamera()
+            // already won this generation. Never let this stale continuation
+            // stop a newer visible Camera session.
+            if cameraActivationGeneration == activationGeneration {
+                controller.suspendCapture()
+            }
             return
         }
-        // Pairs with the suspendCapture() in deactivateCamera(). Without this the
-        // camera would come back dead after the first time you leave the tab.
-        controller.resumeCapture()
 
         let recognition = recognitionManager ?? UserRecognitionManager()
         recognitionManager = recognition
@@ -410,15 +464,21 @@ final class WebHomeCameraModel: ObservableObject {
         // native behind a transparent WebView so the page's <video> is empty.
         // Vision's built-in detectors genuinely locate what they name, so the
         // boxes on screen mean something.
-        let boxes = controller.visionBoxDetector ?? VisionBoxDetector()
-        controller.visionBoxDetector = boxes
-        boxes.onBoxes = { [weak self] found in self?.receiveVisionBoxes(found) }
+        if controller.visionBoxDetector == nil {
+            let boxes = VisionBoxDetector()
+            boxes.onBoxes = { [weak self, weak controller] found in
+                guard controller?.acceptsAnalysisResults == true else { return }
+                self?.receiveVisionBoxes(found)
+            }
+            controller.visionBoxDetector = boxes
+        }
         UserDefaults.standard.set(true, forKey: "CameraObjectDetectionEnabled")
         await recognition.startRecognitionSession()
     }
 
     /// Mirrors HomeView.recordTabContent.onDisappear.
     func deactivateCamera() {
+        cameraActivationGeneration &+= 1
         CameraAIAnnouncer.shared.setLiveCameraActive(false)
         controllerStorage?.disableMLDetection()
         controllerStorage?.userRecognitionManager = nil
@@ -439,11 +499,11 @@ final class WebHomeCameraModel: ObservableObject {
         // `suspendCapture()`/`resumeCapture()` already existed and were already
         // paired — only HomeView called them, and HomeView is not mounted when
         // PoplurWebHome.isEnabled.
-        controllerStorage?.visionBoxDetector?.onBoxes = nil
-        controllerStorage?.visionBoxDetector = nil
         // Clear any boxes left painted over a camera that is no longer running.
         clearWebDetections()
-        controllerStorage?.suspendCapture()
+        controllerStorage?.suspendCapture(
+            resetEntryBudget: activeTab != "post" && activeTab != "holdmenu"
+        )
 
         // And kill the torch. Nothing else clears it: flipCamera() only clears it
         // when switching TO the front camera, and the implicit clear from stopping
@@ -575,7 +635,26 @@ struct PostLoginHomeSurface: View {
         // leaving Home must never leave the microphone open.
         .onDisappear { poplurAI.stop() }
         .onChange(of: scenePhase) { _, phase in
-            if phase != .active { poplurAI.stop() }
+            if phase == .active {
+                if camera.isCameraTab {
+                    Task { await camera.activateCamera() }
+                }
+            } else {
+                poplurAI.stop()
+                // Renderer revocation stops AVCaptureSession, but retaining its
+                // configured graph still owns the input/output objects. Use the
+                // same hard teardown as leaving Camera; foreground activation
+                // rebuilds it only if the live viewfinder is still front-most.
+                camera.deactivateCamera()
+            }
+        }
+        .onChange(of: camera.presentsCreator) { _, isPresented in
+            (PostLoginHomeWebView.liveWebView as? PoplurManagedWebView)?
+                .setHostOccluded(isPresented)
+            if isPresented {
+                poplurAI.stop()
+                camera.deactivateCamera()
+            }
         }
         // CREATE in the web hold menu opens the REAL chat — PoplurAIChatView,
         // the one backed by Google AI Studio through poplurAiApi — instead of

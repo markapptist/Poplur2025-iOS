@@ -4,6 +4,8 @@ import AVKit
 import AVFoundation
 import FirebaseAuth
 import UniformTypeIdentifiers
+import CoreTransferable
+import ImageIO
 
 // MARK: - Brand token
 
@@ -130,6 +132,7 @@ struct PoplurAIChatAttachment: Identifiable {
     var videoURL: URL?
     var fileName: String
     var fileType: PAIFileType
+    var ownsTemporaryFile = false
 
     enum PAIFileType { case photo, video, audio, pdf, gif, model, other }
 
@@ -211,6 +214,11 @@ final class PoplurAIChatViewModel: ObservableObject {
     @Published var smartMode = false
 
     var onPost: ((UIImage?, URL?) -> Void)?
+    private var responseTask: Task<Void, Never>?
+    private var responseToken: UInt64 = 0
+    private let messageLimit = 64
+    private let retainedMediaMessageLimit = 4
+    private let pendingAttachmentLimit = 4
 
     func loadInitialMedia(image: UIImage?, videoURL: URL?) {
         var a: PoplurAIChatAttachment?
@@ -223,23 +231,67 @@ final class PoplurAIChatViewModel: ObservableObject {
     }
 
     func removeAttachment(_ id: UUID) {
+        let removed = attachments.filter { $0.id == id }
+        cleanupTemporaryFiles(in: removed)
         attachments.removeAll { $0.id == id }
+    }
+
+    func addAttachment(_ attachment: PoplurAIChatAttachment) {
+        attachments.append(attachment)
+        if attachments.count > pendingAttachmentLimit {
+            let overflowCount = attachments.count - pendingAttachmentLimit
+            cleanupTemporaryFiles(in: Array(attachments.prefix(overflowCount)))
+            attachments.removeFirst(overflowCount)
+        }
     }
 
     func send() {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty || !attachments.isEmpty else { return }
+        guard responseTask == nil,
+              !isGenerating,
+              !text.isEmpty || !attachments.isEmpty else { return }
         let msg = PoplurAIChatMessage(role: .user, text: text, attachments: attachments)
         messages.append(msg)
+        enforceHistoryBudget()
         inputText = ""
         attachments = []
         showSuggestions = false
-        Task { await respond(to: msg) }
+        responseToken &+= 1
+        let token = responseToken
+        responseTask = Task { [weak self] in
+            guard let self else { return }
+            await self.respond(to: msg)
+            guard self.responseToken == token else { return }
+            self.responseTask = nil
+        }
     }
 
     func sendSuggestion(_ s: PoplurAISuggestion) {
         inputText = s.label
         send()
+    }
+
+    func stop() {
+        suspend()
+        messages.removeAll(keepingCapacity: false)
+    }
+
+    func suspend() {
+        responseToken &+= 1
+        responseTask?.cancel()
+        responseTask = nil
+        isGenerating = false
+        cleanupTemporaryFiles(in: messages.flatMap(\.attachments) + attachments)
+        attachments.removeAll(keepingCapacity: false)
+        messages.removeAll { message in
+            if case .generation = message.role { return true }
+            return message.isStreaming
+        }
+        for index in messages.indices {
+            messages[index].attachments.removeAll(keepingCapacity: false)
+            messages[index].resultImage = nil
+            messages[index].resultVideoURL = nil
+        }
     }
 
     // MARK: Response logic
@@ -249,7 +301,9 @@ final class PoplurAIChatViewModel: ObservableObject {
         var typingMsg = PoplurAIChatMessage(role: .assistant, text: "", isStreaming: true)
         let typingId = typingMsg.id
         messages.append(typingMsg)
-        try? await Task.sleep(nanoseconds: 200_000_000)
+        do { try await Task.sleep(nanoseconds: 200_000_000) }
+        catch { return }
+        guard !Task.isCancelled else { return }
         messages.removeAll { $0.id == typingId }
 
         let lower = msg.text.lowercased()
@@ -283,11 +337,14 @@ final class PoplurAIChatViewModel: ObservableObject {
 
     private func appendAssistant(_ text: String) {
         messages.append(PoplurAIChatMessage(role: .assistant, text: text))
+        enforceHistoryBudget()
     }
 
     private func offerStyleMenu() async {
         appendAssistant("I can do that! Which style would you like?")
-        try? await Task.sleep(nanoseconds: 300_000_000)
+        do { try await Task.sleep(nanoseconds: 300_000_000) }
+        catch { return }
+        guard !Task.isCancelled else { return }
         appendAssistant("• Hollywood\n• Horror\n• Anime\n• Pixar\n• 80s VHS\n• Clay\n• Cartoon")
     }
 
@@ -316,11 +373,14 @@ final class PoplurAIChatViewModel: ObservableObject {
         async let apiWork = performGeneration(prompt: prompt)
 
         for i in 0..<steps.count {
-            try? await Task.sleep(nanoseconds: 380_000_000)
+            do { try await Task.sleep(nanoseconds: 380_000_000) }
+            catch { return }
+            guard !Task.isCancelled else { return }
             updateStep(genId: genId, index: i)
         }
 
         let (resultImage, resultVideo, errText) = await apiWork
+        guard !Task.isCancelled else { return }
 
         // Mark all done
         if let idx = messages.firstIndex(where: { $0.id == genId }) {
@@ -329,7 +389,9 @@ final class PoplurAIChatViewModel: ObservableObject {
                 messages[idx].steps[i].isCurrent = false
             }
         }
-        try? await Task.sleep(nanoseconds: 200_000_000)
+        do { try await Task.sleep(nanoseconds: 200_000_000) }
+        catch { return }
+        guard !Task.isCancelled else { return }
         messages.removeAll { $0.id == genId }
         isGenerating = false
 
@@ -348,6 +410,7 @@ final class PoplurAIChatViewModel: ObservableObject {
             result.resultVideoURL = resultVideo
             messages.append(result)
         }
+        enforceHistoryBudget()
     }
 
     private func performGeneration(prompt: String) async -> (UIImage?, URL?, String?) {
@@ -379,6 +442,35 @@ final class PoplurAIChatViewModel: ObservableObject {
         messages.flatMap(\.attachments) + attachments
     }
 
+    private func enforceHistoryBudget() {
+        if messages.count > messageLimit {
+            let overflowCount = messages.count - messageLimit
+            cleanupTemporaryFiles(
+                in: messages.prefix(overflowCount).flatMap(\.attachments)
+            )
+            messages.removeFirst(overflowCount)
+        }
+        let mediaIndices = messages.indices.filter { index in
+            let message = messages[index]
+            return !message.attachments.isEmpty
+                || message.resultImage != nil
+                || message.resultVideoURL != nil
+        }
+        for index in mediaIndices.dropLast(retainedMediaMessageLimit) {
+            cleanupTemporaryFiles(in: messages[index].attachments)
+            messages[index].attachments.removeAll(keepingCapacity: false)
+            messages[index].resultImage = nil
+            messages[index].resultVideoURL = nil
+        }
+    }
+
+    private func cleanupTemporaryFiles(in attachments: [PoplurAIChatAttachment]) {
+        attachments.forEach { attachment in
+            guard attachment.ownsTemporaryFile, let url = attachment.videoURL else { return }
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
     private func callImageGeneration(prompt: String, source: UIImage?) async throws -> UIImage {
         guard let uid = Auth.auth().currentUser?.uid else { throw PAIChatError.notAuthenticated }
         let req = AIGenerationRequest(
@@ -388,11 +480,22 @@ final class PoplurAIChatViewModel: ObservableObject {
         )
         let resp = try await PoplurAIBackendClient().generate(req)
         guard let url = resp.outputUrl else { throw PAIChatError.generationFailed }
-        let (data, http) = try await URLSession.shared.data(from: url)
-        guard (http as? HTTPURLResponse)?.statusCode == 200, let img = UIImage(data: data) else {
+        let (downloadURL, http) = try await URLSession.shared.download(from: url)
+        guard (http as? HTTPURLResponse)?.statusCode == 200,
+              let source = CGImageSourceCreateWithURL(downloadURL as CFURL, nil),
+              let cgImage = CGImageSourceCreateThumbnailAtIndex(
+                source,
+                0,
+                [
+                    kCGImageSourceCreateThumbnailFromImageAlways: true,
+                    kCGImageSourceCreateThumbnailWithTransform: true,
+                    kCGImageSourceThumbnailMaxPixelSize: 2_048,
+                    kCGImageSourceShouldCacheImmediately: true,
+                ] as CFDictionary
+              ) else {
             throw PAIChatError.downloadFailed
         }
-        return img
+        return UIImage(cgImage: cgImage)
     }
 
     private func callVideoGeneration(prompt: String) async throws -> URL {
@@ -431,8 +534,8 @@ struct PoplurAIChatView: View {
     @State private var showSettings = false
     @State private var showStore = false
     @FocusState private var inputFocused: Bool
-    @State private var glitterPhase: CGFloat = 0
     @AppStorage("poplur_ai_chat_theme") private var theme: PoplurAIChatTheme = .prelogin
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -448,17 +551,12 @@ struct PoplurAIChatView: View {
                     AngularGradient(
                         colors: [pinkAI, pinkAI.opacity(0.15), pinkAI.opacity(0.6),
                                  pinkAI.opacity(0.05), pinkAI, pinkAI.opacity(0.3)],
-                        center: .center, startAngle: .degrees(glitterPhase), endAngle: .degrees(glitterPhase + 360)
+                        center: .center, startAngle: .degrees(0), endAngle: .degrees(360)
                     ),
                     lineWidth: 1.8
                 )
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
-                .onAppear {
-                    withAnimation(.linear(duration: 6).repeatForever(autoreverses: false)) {
-                        glitterPhase = 360
-                    }
-                }
 
             // Main layout
             VStack(spacing: theme.isFullCard ? 8 : 0) {
@@ -499,6 +597,16 @@ struct PoplurAIChatView: View {
         .environment(\.paiTheme, theme)
         .preferredColorScheme(theme.isLight ? .light : .dark)
         .onAppear { vm.loadInitialMedia(image: initialImage, videoURL: initialVideoURL) }
+        .onDisappear {
+            NotificationCenter.default.post(name: .poplurAIPauseAllMedia, object: nil)
+            vm.stop()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active {
+                NotificationCenter.default.post(name: .poplurAIPauseAllMedia, object: nil)
+                vm.suspend()
+            }
+        }
         .sheet(isPresented: $showSettings) { PAISettingsSheet() }
         .sheet(isPresented: $showStore) { PoplurStoreView() }
         .onReceive(NotificationCenter.default.publisher(for: .OpenPoplurStoreRequested)) { _ in
@@ -795,26 +903,19 @@ private struct PAIAssistantBubble: View {
 // MARK: - Typing indicator
 
 private struct PAITypingIndicator: View {
-    @State private var phase = 0
     @Environment(\.paiTheme) private var theme
-    private let timer = Timer.publish(every: 0.45, on: .main, in: .common).autoconnect()
 
     var body: some View {
         HStack(spacing: 5) {
             ForEach(0..<3, id: \.self) { i in
                 Circle()
-                    .fill(pinkAI.opacity(phase == i ? 1.0 : 0.3))
+                    .fill(pinkAI.opacity(i == 1 ? 1.0 : 0.3))
                     .frame(width: 7, height: 7)
-                    .scaleEffect(phase == i ? 1.3 : 1.0)
-                    .animation(.spring(response: 0.35, dampingFraction: 0.7), value: phase)
             }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
         .background(theme.typingBg, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .onReceive(timer) { _ in
-            phase = (phase + 1) % 3
-        }
     }
 }
 
@@ -881,19 +982,11 @@ private struct PAIGenerationBubble: View {
 }
 
 private struct PAISpinnerDot: View {
-    @State private var spinning = false
-
     var body: some View {
-        Circle()
-            .trim(from: 0, to: 0.7)
-            .stroke(pinkAI, style: StrokeStyle(lineWidth: 2, lineCap: .round))
-            .frame(width: 13, height: 13)
-            .rotationEffect(.degrees(spinning ? 360 : 0))
-            .onAppear {
-                withAnimation(.linear(duration: 0.9).repeatForever(autoreverses: false)) {
-                    spinning = true
-                }
-            }
+        Image(systemName: "sparkle")
+            .poplurIconShader()
+            .font(.system(size: 11, weight: .bold))
+            .foregroundStyle(pinkAI)
     }
 }
 
@@ -905,7 +998,6 @@ private struct PAIMediaPreviewCard: View {
     var onPost: (UIImage?, URL?) -> Void
 
     @State private var isPlaying = false
-    @State private var player: AVPlayer? = nil
     @State private var bounced = false
 
     var body: some View {
@@ -920,10 +1012,20 @@ private struct PAIMediaPreviewCard: View {
                         .frame(height: 200)
                         .clipped()
                 } else if let url = videoURL {
-                    PAIVideoPlayer(url: url)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 200)
-                        .clipped()
+                    if isPlaying {
+                        PAIVideoPlayer(url: url, isPlaying: $isPlaying)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 200)
+                            .clipped()
+                    } else {
+                        Color.black
+                            .overlay(
+                                Image(systemName: "play.circle.fill")
+                                    .poplurIconShader()
+                                    .font(.system(size: 44, weight: .bold))
+                                    .foregroundStyle(pinkAI)
+                            )
+                    }
                 }
                 // Neon border flash
                 RoundedRectangle(cornerRadius: 0, style: .continuous)
@@ -1031,14 +1133,20 @@ private struct PAIMediaPreviewCard: View {
     }
 }
 
+private extension Notification.Name {
+    static let poplurAIPlayExclusively = Notification.Name("PoplurAIPlayExclusively")
+    static let poplurAIPauseAllMedia = Notification.Name("PoplurAIPauseAllMedia")
+}
+
 private struct PAIVideoPlayer: UIViewRepresentable {
     let url: URL
+    @Binding var isPlaying: Bool
 
     func makeUIView(context: Context) -> UIView {
         let view = UIView()
         view.backgroundColor = .black
         let player = AVPlayer(url: url)
-        player.actionAtItemEnd = .none
+        player.actionAtItemEnd = .pause
         let layer = AVPlayerLayer(player: player)
         layer.videoGravity = .resizeAspectFill
         view.layer.addSublayer(layer)
@@ -1047,33 +1155,105 @@ private struct PAIVideoPlayer: UIViewRepresentable {
         context.coordinator.endObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,
             object: player.currentItem, queue: .main
-        ) { [weak player] _ in player?.seek(to: .zero); player?.play() }
-        player.play()
+        ) { [weak coordinator = context.coordinator] _ in
+            guard let coordinator else { return }
+            coordinator.player?.seek(to: .zero)
+            coordinator.finishPlayback()
+        }
         return view
     }
 
     func updateUIView(_ uiView: UIView, context: Context) {
         context.coordinator.layer?.frame = uiView.bounds
+        context.coordinator.update(binding: $isPlaying)
+        context.coordinator.applyPlaybackIntent(isPlaying)
     }
 
     static func dismantleUIView(_ uiView: UIView, coordinator: Coordinator) {
-        if let endObserver = coordinator.endObserver {
-            NotificationCenter.default.removeObserver(endObserver)
-            coordinator.endObserver = nil
-        }
-        coordinator.player?.pause()
-        coordinator.player?.replaceCurrentItem(with: nil)
-        coordinator.layer?.player = nil
-        coordinator.layer?.removeFromSuperlayer()
-        coordinator.layer = nil
-        coordinator.player = nil
+        coordinator.tearDown()
     }
 
-    func makeCoordinator() -> Coordinator { Coordinator() }
+    func makeCoordinator() -> Coordinator { Coordinator(binding: $isPlaying) }
+
     final class Coordinator {
         var player: AVPlayer?
         var layer: AVPlayerLayer?
         var endObserver: NSObjectProtocol?
+        fileprivate var wantsPlayback = false
+        private var binding: Binding<Bool>
+        private var lifecycleObservers: [NSObjectProtocol] = []
+
+        init(binding: Binding<Bool>) {
+            self.binding = binding
+            let center = NotificationCenter.default
+            lifecycleObservers = [
+                center.addObserver(
+                    forName: .poplurAIPlayExclusively,
+                    object: nil,
+                    queue: .main
+                ) { [weak self] note in
+                    guard let self else { return }
+                    if let source = note.object as? Coordinator, source === self { return }
+                    self.pauseAndClearIntent()
+                },
+                center.addObserver(
+                    forName: .poplurAIPauseAllMedia,
+                    object: nil,
+                    queue: .main
+                ) { [weak self] _ in self?.pauseAndClearIntent() },
+                center.addObserver(
+                    forName: UIApplication.willResignActiveNotification,
+                    object: nil,
+                    queue: .main
+                ) { [weak self] _ in self?.pauseAndClearIntent() },
+                center.addObserver(
+                    forName: UIApplication.didEnterBackgroundNotification,
+                    object: nil,
+                    queue: .main
+                ) { [weak self] _ in self?.pauseAndClearIntent() },
+            ]
+        }
+
+        func update(binding: Binding<Bool>) {
+            self.binding = binding
+        }
+
+        func applyPlaybackIntent(_ shouldPlay: Bool) {
+            wantsPlayback = shouldPlay
+            if shouldPlay {
+                NotificationCenter.default.post(name: .poplurAIPlayExclusively, object: self)
+                player?.play()
+            } else {
+                player?.pause()
+            }
+        }
+
+        private func pauseAndClearIntent() {
+            wantsPlayback = false
+            player?.pause()
+            if binding.wrappedValue { binding.wrappedValue = false }
+        }
+
+        fileprivate func finishPlayback() {
+            pauseAndClearIntent()
+        }
+
+        func tearDown() {
+            lifecycleObservers.forEach(NotificationCenter.default.removeObserver)
+            lifecycleObservers.removeAll(keepingCapacity: false)
+            if let endObserver {
+                NotificationCenter.default.removeObserver(endObserver)
+                self.endObserver = nil
+            }
+            player?.pause()
+            player?.replaceCurrentItem(with: nil)
+            layer?.player = nil
+            layer?.removeFromSuperlayer()
+            layer = nil
+            player = nil
+        }
+
+        deinit { tearDown() }
     }
 }
 
@@ -1135,6 +1315,45 @@ private struct PAISuggestionGrid: View {
 
 // MARK: - Input bar
 
+private struct PAIImportedMedia: Transferable, Sendable {
+    enum Kind: Sendable { case photo, video }
+
+    let url: URL
+    let kind: Kind
+
+    static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(contentType: .image) { media in
+            SentTransferredFile(media.url)
+        } importing: { received in
+            try copy(received.file, kind: .photo, fallbackExtension: "jpg")
+        }
+        FileRepresentation(contentType: .movie) { media in
+            SentTransferredFile(media.url)
+        } importing: { received in
+            try copy(received.file, kind: .video, fallbackExtension: "mov")
+        }
+    }
+
+    private static func copy(
+        _ source: URL,
+        kind: Kind,
+        fallbackExtension: String
+    ) throws -> PAIImportedMedia {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("PoplurAIImports", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        let ext = source.pathExtension.isEmpty ? fallbackExtension : source.pathExtension
+        let destination = directory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension(ext)
+        try FileManager.default.copyItem(at: source, to: destination)
+        return PAIImportedMedia(url: destination, kind: kind)
+    }
+}
+
 private struct PAIInputBar: View {
     @ObservedObject var vm: PoplurAIChatViewModel
     var inputFocused: FocusState<Bool>.Binding
@@ -1142,7 +1361,6 @@ private struct PAIInputBar: View {
 
     @State private var showPhotoPicker = false
     @State private var selectedPhoto: PhotosPickerItem? = nil
-    @State private var glitterPulse = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1253,7 +1471,6 @@ private struct PAIInputBar: View {
                                         center: .center, startRadius: 0, endRadius: 18
                                     )
                                 )
-                                .scaleEffect(glitterPulse ? 1.06 : 1.0)
                                 .shadow(color: pinkAI.opacity(0.6), radius: 10)
 
                             Image(systemName: "arrow.up")
@@ -1265,11 +1482,6 @@ private struct PAIInputBar: View {
                     }
                     .buttonStyle(PAIPressStyle())
                     .disabled(vm.isGenerating)
-                    .onAppear {
-                        withAnimation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true)) {
-                            glitterPulse = true
-                        }
-                    }
                 }
                 .padding(.trailing, 10)
                 .padding(.bottom, 6)
@@ -1279,16 +1491,52 @@ private struct PAIInputBar: View {
         .photosPicker(isPresented: $showPhotoPicker, selection: $selectedPhoto, matching: .any(of: [.images, .videos]))
         .onChange(of: selectedPhoto) { _, item in
             guard let item else { return }
-            Task {
-                if let data = try? await item.loadTransferable(type: Data.self),
-                   let img = UIImage(data: data) {
-                    await MainActor.run {
-                        vm.attachments.append(
-                            PoplurAIChatAttachment(image: img, fileName: "photo.jpg", fileType: .photo)
-                        )
-                    }
+            Task { @MainActor in
+                defer { selectedPhoto = nil }
+                guard let imported = try? await item.loadTransferable(type: PAIImportedMedia.self)
+                else { return }
+                let values = try? imported.url.resourceValues(forKeys: [.fileSizeKey])
+                guard let fileSize = values?.fileSize else {
+                    try? FileManager.default.removeItem(at: imported.url)
+                    return
                 }
-                selectedPhoto = nil
+
+                switch imported.kind {
+                case .photo:
+                    defer { try? FileManager.default.removeItem(at: imported.url) }
+                    guard fileSize <= 48 * 1_024 * 1_024,
+                          let source = CGImageSourceCreateWithURL(imported.url as CFURL, nil),
+                          let cgImage = CGImageSourceCreateThumbnailAtIndex(
+                            source,
+                            0,
+                            [
+                                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                                kCGImageSourceCreateThumbnailWithTransform: true,
+                                kCGImageSourceThumbnailMaxPixelSize: 2_048,
+                                kCGImageSourceShouldCacheImmediately: true,
+                            ] as CFDictionary
+                          ) else { return }
+                    vm.addAttachment(
+                        PoplurAIChatAttachment(
+                            image: UIImage(cgImage: cgImage),
+                            fileName: imported.url.lastPathComponent,
+                            fileType: .photo
+                        )
+                    )
+                case .video:
+                    guard fileSize <= 256 * 1_024 * 1_024 else {
+                        try? FileManager.default.removeItem(at: imported.url)
+                        return
+                    }
+                    vm.addAttachment(
+                        PoplurAIChatAttachment(
+                            videoURL: imported.url,
+                            fileName: imported.url.lastPathComponent,
+                            fileType: .video,
+                            ownsTemporaryFile: true
+                        )
+                    )
+                }
             }
         }
     }
@@ -1439,7 +1687,6 @@ private struct PAISettingsSheet: View {
 
 private struct PoplurAIConfettiLayer: View {
     @State private var particles: [PAIConfettiParticle] = []
-    private let timer = Timer.publish(every: 2.0, on: .main, in: .common).autoconnect()
 
     var body: some View {
         GeometryReader { geo in
@@ -1453,10 +1700,6 @@ private struct PoplurAIConfettiLayer: View {
                         .opacity(p.opacity)
                 }
             }
-            .onReceive(timer) { _ in
-                spawnParticle(in: geo.size)
-                fadeOldParticles()
-            }
             .onAppear { spawnInitialBatch(in: geo.size) }
         }
     }
@@ -1468,15 +1711,6 @@ private struct PoplurAIConfettiLayer: View {
         }
     }
 
-    private func spawnParticle(in size: CGSize) {
-        guard particles.count < 8 else { return }
-        particles.append(PAIConfettiParticle(bounds: size))
-    }
-
-    private func fadeOldParticles() {
-        let cutoff = Date().addingTimeInterval(-8)
-        particles.removeAll { $0.born < cutoff }
-    }
 }
 
 private struct PAIConfettiParticle: Identifiable {
@@ -1487,8 +1721,6 @@ private struct PAIConfettiParticle: Identifiable {
     let rotation: Double
     let color: Color
     let opacity: Double
-    let born = Date()
-
     init(bounds: CGSize) {
         x = CGFloat.random(in: 0...bounds.width)
         y = CGFloat.random(in: 0...bounds.height)

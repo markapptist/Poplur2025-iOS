@@ -39,8 +39,12 @@ enum OutputMusicMixer {
 
         let outputURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("poplur-mixed-\(UUID().uuidString).mp4")
+        PoplurTemporaryFileOwnership.claim(outputURL)
 
-        guard let session = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetHighestQuality) else { return nil }
+        guard let session = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetHighestQuality) else {
+            PoplurTemporaryFileOwnership.deleteIfOwned(outputURL)
+            return nil
+        }
         session.outputURL = outputURL
         session.outputFileType = .mp4
         session.shouldOptimizeForNetworkUse = true
@@ -50,7 +54,7 @@ enum OutputMusicMixer {
                 if session.status == .completed {
                     cont.resume(returning: outputURL)
                 } else {
-                    try? FileManager.default.removeItem(at: outputURL)
+                    PoplurTemporaryFileOwnership.deleteIfOwned(outputURL)
                     cont.resume(returning: nil)
                 }
             }
@@ -73,8 +77,12 @@ enum OutputMusicMixer {
 
         let silentURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("poplur-silent-\(UUID().uuidString).mp4")
+        PoplurTemporaryFileOwnership.claim(silentURL)
 
-        guard let writer = try? AVAssetWriter(outputURL: silentURL, fileType: .mp4) else { return nil }
+        guard let writer = try? AVAssetWriter(outputURL: silentURL, fileType: .mp4) else {
+            PoplurTemporaryFileOwnership.deleteIfOwned(silentURL)
+            return nil
+        }
 
         let videoSettings: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.h264,
@@ -89,9 +97,15 @@ enum OutputMusicMixer {
         videoInput.expectsMediaDataInRealTime = false
         let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: videoInput, sourcePixelBufferAttributes: nil)
 
-        guard writer.canAdd(videoInput) else { return nil }
+        guard writer.canAdd(videoInput) else {
+            PoplurTemporaryFileOwnership.deleteIfOwned(silentURL)
+            return nil
+        }
         writer.add(videoInput)
-        writer.startWriting()
+        guard writer.startWriting() else {
+            PoplurTemporaryFileOwnership.deleteIfOwned(silentURL)
+            return nil
+        }
         writer.startSession(atSourceTime: .zero)
 
         let fps: Int32 = 30
@@ -100,6 +114,11 @@ enum OutputMusicMixer {
 
         for i in 0..<frameCount {
             while !videoInput.isReadyForMoreMediaData {
+                if Task.isCancelled || writer.status == .failed || writer.status == .cancelled {
+                    writer.cancelWriting()
+                    PoplurTemporaryFileOwnership.deleteIfOwned(silentURL)
+                    return nil
+                }
                 try? await Task.sleep(nanoseconds: 5_000_000)
             }
             var pb: CVPixelBuffer?
@@ -116,7 +135,14 @@ enum OutputMusicMixer {
                     ctx.draw(cgImage, in: CGRect(origin: .zero, size: size))
                 }
                 CVPixelBufferUnlockBaseAddress(pb, [])
-                adaptor.append(pb, withPresentationTime: CMTime(value: CMTimeValue(i), timescale: fps))
+                guard adaptor.append(
+                    pb,
+                    withPresentationTime: CMTime(value: CMTimeValue(i), timescale: fps)
+                ) else {
+                    writer.cancelWriting()
+                    PoplurTemporaryFileOwnership.deleteIfOwned(silentURL)
+                    return nil
+                }
             }
         }
         videoInput.markAsFinished()
@@ -124,13 +150,13 @@ enum OutputMusicMixer {
         return await withCheckedContinuation { cont in
             writer.finishWriting {
                 guard writer.status == .completed else {
-                    try? FileManager.default.removeItem(at: silentURL)
+                    PoplurTemporaryFileOwnership.deleteIfOwned(silentURL)
                     cont.resume(returning: nil)
                     return
                 }
                 Task {
                     let mixed = await OutputMusicMixer.mixAudio(audioURL, intoVideo: silentURL, trimSeconds: nil)
-                    try? FileManager.default.removeItem(at: silentURL)
+                    PoplurTemporaryFileOwnership.deleteIfOwned(silentURL)
                     cont.resume(returning: mixed)
                 }
             }

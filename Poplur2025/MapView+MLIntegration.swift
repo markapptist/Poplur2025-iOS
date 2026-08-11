@@ -256,6 +256,13 @@ class CompleteMLMapIntegration {
     
     private let mlManager = SimplifiedMLDetectionManager()
     private var currentLocation: CLLocationCoordinate2D?
+    private var locationObserver: NSObjectProtocol?
+
+    deinit {
+        if let locationObserver {
+            NotificationCenter.default.removeObserver(locationObserver)
+        }
+    }
     
     func setup() {
         // Configure ML detection
@@ -269,7 +276,10 @@ class CompleteMLMapIntegration {
         }
         
         // Listen for location updates
-        NotificationCenter.default.addObserver(
+        if let locationObserver {
+            NotificationCenter.default.removeObserver(locationObserver)
+        }
+        locationObserver = NotificationCenter.default.addObserver(
             forName: NSNotification.Name("LocationUpdated"),
             object: nil,
             queue: .main

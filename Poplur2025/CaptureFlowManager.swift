@@ -8,6 +8,80 @@
 import SwiftUI
 import CoreLocation
 
+/// Tracks the exact temporary media files created by Poplur during this process.
+///
+/// A URL merely living under `tmp` is not proof that Poplur owns it: Photos,
+/// item providers, and system download APIs also vend temporary URLs. Producers
+/// claim only files whose destination name Poplur created; consumers can then
+/// delete those files without ever touching a provider- or user-owned original.
+enum PoplurTemporaryFileOwnership {
+    static let notificationKey = "poplurOwnsTemporaryFile"
+
+    private static let lock = NSLock()
+    private static var ownedPaths: Set<String> = []
+
+    @discardableResult
+    static func claim(_ url: URL) -> Bool {
+        guard let path = temporaryPath(for: url) else { return false }
+        lock.lock()
+        ownedPaths.insert(path)
+        lock.unlock()
+        return true
+    }
+
+    static func isOwned(_ url: URL) -> Bool {
+        guard let path = temporaryPath(for: url) else { return false }
+        lock.lock()
+        let result = ownedPaths.contains(path)
+        lock.unlock()
+        return result
+    }
+
+    /// Deletes only a URL previously claimed by `claim(_:)` and consumes that
+    /// ownership. Repeated releases and untrusted temporary URLs are no-ops.
+    static func deleteIfOwned(_ url: URL) {
+        guard let path = temporaryPath(for: url) else { return }
+        lock.lock()
+        let wasOwned = ownedPaths.remove(path) != nil
+        lock.unlock()
+        guard wasOwned else { return }
+
+        let fileManager = FileManager.default
+        guard fileManager.fileExists(atPath: path) else { return }
+        do {
+            try fileManager.removeItem(at: URL(fileURLWithPath: path))
+        } catch {
+            print("[PoplurTemporaryFileOwnership] Failed to remove \(path): \(error)")
+        }
+    }
+
+    /// Removes the current process's claimed temporary files without touching
+    /// provider-, Photos-, or user-owned URLs that happen to share iOS's tmp root.
+    static func deleteAllOwned() {
+        lock.lock()
+        let paths = ownedPaths
+        ownedPaths.removeAll(keepingCapacity: false)
+        lock.unlock()
+
+        let fileManager = FileManager.default
+        for path in paths where fileManager.fileExists(atPath: path) {
+            do {
+                try fileManager.removeItem(at: URL(fileURLWithPath: path))
+            } catch {
+                print("[PoplurTemporaryFileOwnership] Failed to remove \(path): \(error)")
+            }
+        }
+    }
+
+    private static func temporaryPath(for url: URL) -> String? {
+        guard url.isFileURL else { return nil }
+        let root = FileManager.default.temporaryDirectory.standardizedFileURL.path
+        let candidate = url.standardizedFileURL.path
+        guard candidate != root, candidate.hasPrefix(root + "/") else { return nil }
+        return candidate
+    }
+}
+
 /// Manages the two different post capture flows in the app
 enum CaptureFlow {
     /// Map-first flow: Map Tab -> Select coordinate -> Camera -> Capture -> Preview -> Edit -> Channel -> Post
@@ -104,6 +178,7 @@ final class CaptureFlowManager: ObservableObject {
     
     /// Start Map -> Camera flow: user clicked a coordinate on map and wants to post there
     func startMapToCameraFlow(coordinate: CLLocationCoordinate2D) {
+        releaseCapturedVideoIfNeeded()
         currentFlow = .mapToCamera(coordinate: coordinate)
         capturedImage = nil
         capturedVideoURL = nil
@@ -113,6 +188,9 @@ final class CaptureFlowManager: ObservableObject {
     
     /// Start Camera -> Map flow: user captured in camera and needs to select location
     func startCameraToMapFlow(image: UIImage?, videoURL: URL?) {
+        if capturedVideoURL?.standardizedFileURL != videoURL?.standardizedFileURL {
+            releaseCapturedVideoIfNeeded()
+        }
         currentFlow = .cameraToMap
         capturedImage = image
         capturedVideoURL = videoURL
@@ -129,6 +207,8 @@ final class CaptureFlowManager: ObservableObject {
     func completeFlow(finalCoordinate: CLLocationCoordinate2D, edits: PostCaptureEdits? = nil) {
         guard currentFlow != nil else {
             print("❌ [CaptureFlowManager] No active flow to complete")
+            releaseCapturedVideoIfNeeded()
+            capturedVideoURL = nil
             return
         }
 
@@ -146,6 +226,8 @@ final class CaptureFlowManager: ObservableObject {
         
         if let videoURL = capturedVideoURL {
             userInfo["videoURL"] = videoURL
+            userInfo[PoplurTemporaryFileOwnership.notificationKey] =
+                PoplurTemporaryFileOwnership.isOwned(videoURL)
         }
 
         if let edits {
@@ -188,7 +270,7 @@ final class CaptureFlowManager: ObservableObject {
     func cancelFlow() {
         print("🚫 [CaptureFlowManager] Canceling flow")
         pendingPostMetadata = nil
-        reset()
+        reset(releaseTemporaryVideo: true)
     }
 
     func consumePendingPostMetadata() -> PendingPostMetadata? {
@@ -198,11 +280,19 @@ final class CaptureFlowManager: ObservableObject {
     }
     
     /// Reset all state
-    private func reset() {
+    private func reset(releaseTemporaryVideo: Bool = false) {
+        if releaseTemporaryVideo {
+            releaseCapturedVideoIfNeeded()
+        }
         currentFlow = nil
         capturedImage = nil
         capturedVideoURL = nil
         confirmedCoordinate = nil
+    }
+
+    private func releaseCapturedVideoIfNeeded() {
+        guard let capturedVideoURL else { return }
+        PoplurTemporaryFileOwnership.deleteIfOwned(capturedVideoURL)
     }
 }
 

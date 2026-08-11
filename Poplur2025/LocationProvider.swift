@@ -3,9 +3,12 @@ import CoreLocation
 import Combine
 import SwiftUI
 import MapKit
+import UIKit
 
 @MainActor
 final class LocationProvider: NSObject, ObservableObject {
+    static let shared = LocationProvider()
+
     @Published var coordinate: CLLocationCoordinate2D?
     
     /// Compatibility property for MapView - converts coordinate to CLLocation
@@ -15,31 +18,53 @@ final class LocationProvider: NSObject, ObservableObject {
     }
 
     private let manager = CLLocationManager()
+    private var observerTokens: [NSObjectProtocol] = []
+    private var updateTimeoutTask: Task<Void, Never>?
     private var didRequest = false
+    private var updatesRequested = false
     private var isUpdating = false
-    private var hasPreciseFix = false
+
+    private static let acceptableHorizontalAccuracy: CLLocationAccuracy = 250
+    private static let updateTimeoutNanoseconds: UInt64 = 8_000_000_000
 
     override init() {
         super.init()
         manager.delegate = self
-        // Precise for the FIRST fix only. Continuous ten-metre GNSS keeps the
-        // radio in its hottest mode for the whole foreground session, and it is
-        // one of the big reasons the app heats the phone. After the first good
-        // fix lands, didUpdateLocations downshifts to hundred-metre / 50m
-        // filter — the radius product needs "which block", not "which metre".
-        manager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
-        manager.distanceFilter = 10
+        // Radius/map features need a block-level fix, not a continuous
+        // navigation-grade stream. Each visible/requested lease below runs for
+        // one adequate fix (or eight seconds), then turns the radio off.
+        manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
+        manager.distanceFilter = 50
         // A yes on the web's clay location card is the ONE thing allowed to
         // raise the real iOS dialog. See requestIfAlreadyAuthorized().
-        NotificationCenter.default.addObserver(
+        let center = NotificationCenter.default
+        observerTokens.append(center.addObserver(
             forName: Notification.Name("PoplurPermissionHandled"),
             object: nil,
             queue: .main
         ) { [weak self] note in
             guard (note.userInfo?["permission"] as? String) == "location",
                   (note.userInfo?["granted"] as? Bool) == true else { return }
-            Task { @MainActor in self?.request() }
-        }
+            Task { @MainActor [weak self] in self?.request() }
+        })
+        observerTokens.append(center.addObserver(
+            forName: UIApplication.didEnterBackgroundNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.suspendForBackground()
+            }
+        })
+        observerTokens.append(center.addObserver(
+            forName: UIApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.resumeIfRequested()
+            }
+        })
         // If app already has permission, optionally seed with last known location
         if let loc = manager.location?.coordinate {
             self.coordinate = loc
@@ -74,6 +99,7 @@ final class LocationProvider: NSObject, ObservableObject {
         switch manager.authorizationStatus {
         case .authorizedWhenInUse, .authorizedAlways:
             didRequest = true
+            updatesRequested = true
             startUpdatesIfAuthorized()
         default:
             break
@@ -81,6 +107,8 @@ final class LocationProvider: NSObject, ObservableObject {
     }
 
     func request() {
+        updatesRequested = true
+
         // Avoid spamming requests
         if didRequest { startUpdatesIfAuthorized(); return }
         didRequest = true
@@ -99,22 +127,51 @@ final class LocationProvider: NSObject, ObservableObject {
     }
 
     private func startUpdatesIfAuthorized() {
-        guard !isUpdating else { return }
+        guard updatesRequested,
+              UIApplication.shared.applicationState == .active,
+              !isUpdating else { return }
         let status = manager.authorizationStatus
         guard status == .authorizedWhenInUse || status == .authorizedAlways else { return }
         isUpdating = true
 
-        // For a quick coordinate, requestLocation() gives one update then stops
-        manager.requestLocation()
-        // Optionally also startUpdatingLocation to keep it fresh while in foreground
+        // Use the continuous API only inside this strictly bounded lease so we
+        // can wait briefly for an adequate fix and then shut it down ourselves.
         manager.startUpdatingLocation()
+        updateTimeoutTask?.cancel()
+        updateTimeoutTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: Self.updateTimeoutNanoseconds)
+            guard !Task.isCancelled else { return }
+            self?.stopHardwareUpdates()
+        }
     }
 
-    private func stopUpdates() {
-        if isUpdating {
-            manager.stopUpdatingLocation()
-            isUpdating = false
-        }
+    /// Ends the caller's visible/requested lease. A subsequent explicit request
+    /// safely starts a fresh bounded fix.
+    func stop() {
+        updatesRequested = false
+        stopHardwareUpdates()
+    }
+
+    private func stopHardwareUpdates() {
+        updateTimeoutTask?.cancel()
+        updateTimeoutTask = nil
+        guard isUpdating else { return }
+        manager.stopUpdatingLocation()
+        isUpdating = false
+    }
+
+    private func suspendForBackground() {
+        stopHardwareUpdates()
+    }
+
+    private func resumeIfRequested() {
+        startUpdatesIfAuthorized()
+    }
+
+    deinit {
+        updateTimeoutTask?.cancel()
+        manager.stopUpdatingLocation()
+        observerTokens.forEach(NotificationCenter.default.removeObserver)
     }
 }
 
@@ -125,7 +182,7 @@ extension LocationProvider: CLLocationManagerDelegate {
             case .authorizedWhenInUse, .authorizedAlways:
                 startUpdatesIfAuthorized()
             case .denied, .restricted:
-                stopUpdates()
+                stopHardwareUpdates()
             case .notDetermined:
                 break
             @unknown default:
@@ -135,17 +192,14 @@ extension LocationProvider: CLLocationManagerDelegate {
     }
 
     nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        guard let last = locations.last else { return }
-        Task { @MainActor in
-            self.coordinate = last.coordinate
-            // First usable fix delivered — drop the continuous stream to the
-            // cool tier. Anything that needs a precise moment (posting, a
-            // claim) should take its own one-shot requestLocation() rather
-            // than holding the whole session at ten metres.
-            if !self.hasPreciseFix {
-                self.hasPreciseFix = true
-                self.manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
-                self.manager.distanceFilter = 50
+        Task { @MainActor [weak self] in
+            guard let self, self.updatesRequested, self.isUpdating else { return }
+            guard let best = locations
+                .filter({ $0.horizontalAccuracy >= 0 })
+                .min(by: { $0.horizontalAccuracy < $1.horizontalAccuracy }) else { return }
+            self.coordinate = best.coordinate
+            if best.horizontalAccuracy <= Self.acceptableHorizontalAccuracy {
+                self.stopHardwareUpdates()
             }
         }
     }
@@ -153,8 +207,8 @@ extension LocationProvider: CLLocationManagerDelegate {
     nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         // You could surface an error state if needed
         // For now, just stop updates to avoid loops
-        Task { @MainActor in
-            self.stopUpdates()
+        Task { @MainActor [weak self] in
+            self?.stopHardwareUpdates()
         }
     }
 }

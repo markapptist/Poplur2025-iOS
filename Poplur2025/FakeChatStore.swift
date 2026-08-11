@@ -24,6 +24,8 @@ struct FakeMessage: Identifiable, Equatable {
 
 @MainActor
 class FakeChatStore: ObservableObject {
+    private static let maximumMessagesPerThread = 100
+
     @Published private(set) var threads: [FakeChatThread] = []
     @Published private(set) var messagesByThreadID: [UUID: [FakeMessage]] = [:]
     
@@ -38,7 +40,6 @@ class FakeChatStore: ObservableObject {
     init() {
         seedFakeData()
         requestNotificationAuthorization()
-        startIncomingMessageSimulation()
     }
     
     deinit {
@@ -83,77 +84,93 @@ class FakeChatStore: ObservableObject {
     private func requestNotificationAuthorization() {}
     
     func sendMessage(threadID: UUID, sender: FakeUser, content: String) {
-        Task { @MainActor in
-            let newMessage = FakeMessage(id: UUID(), threadID: threadID, sender: sender, content: content, timestamp: Date())
-            var threadMessages = messagesByThreadID[threadID] ?? []
-            threadMessages.append(newMessage)
-            messagesByThreadID[threadID] = threadMessages
-            
-            if let index = threads.firstIndex(where: { $0.id == threadID }) {
-                // If sender is not the current user (assumed here as users[0]), increment unread count
-                // But for sending message, we consider sender is current user, so reset unreadCount
-                if sender == users[0] {
-                    threads[index].unreadCount = 0
-                } else {
-                    threads[index].unreadCount += 1
-                }
+        let newMessage = FakeMessage(id: UUID(), threadID: threadID, sender: sender, content: content, timestamp: Date())
+        append(newMessage, to: threadID)
+
+        if let index = threads.firstIndex(where: { $0.id == threadID }) {
+            // If sender is not the current user (assumed here as users[0]), increment unread count
+            // But for sending message, we consider sender is current user, so reset unreadCount
+            if sender == users[0] {
+                threads[index].unreadCount = 0
+            } else {
+                threads[index].unreadCount = min(
+                    threads[index].unreadCount + 1,
+                    Self.maximumMessagesPerThread
+                )
             }
         }
     }
     
     func markThreadAsRead(threadID: UUID) {
-        Task { @MainActor in
-            guard let index = threads.firstIndex(where: { $0.id == threadID }) else { return }
-            threads[index].unreadCount = 0
-        }
+        guard let index = threads.firstIndex(where: { $0.id == threadID }) else { return }
+        threads[index].unreadCount = 0
     }
-    
-    private func startIncomingMessageSimulation() {
-        timer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
-            Task { await self?.simulateIncomingMessage() }
-        }
-    }
-    
-    private func simulateIncomingMessage() async {
-        await MainActor.run {
-            guard !threads.isEmpty, !users.isEmpty else { return }
-            
-            // Pick a random thread
-            let randomThreadIndex = Int.random(in: 0..<threads.count)
-            let thread = threads[randomThreadIndex]
-            
-            // Random sender from participants excluding the assumed current user (users[0])
-            let possibleSenders = thread.participants.filter { $0 != users[0] }
-            guard let sender = possibleSenders.randomElement() else { return }
-            
-            // Generate a random fake message content
-            let fakeContents = [
-                "Hello!",
-                "How's it going?",
-                "Did you see that?",
-                "Let's catch up soon.",
-                "I'll send you the files.",
-                "Thanks for your help!",
-                "Can you call me back?",
-                "Check this out!",
-                "Meeting at 3PM.",
-                "Got it!"
-            ]
-            let content = fakeContents.randomElement() ?? "Hi!"
-            
-            let newMessage = FakeMessage(id: UUID(), threadID: thread.id, sender: sender, content: content, timestamp: Date())
-            var threadMessages = messagesByThreadID[thread.id] ?? []
-            threadMessages.append(newMessage)
-            messagesByThreadID[thread.id] = threadMessages
-            
-            // Update unread count if this thread is not active
-            if activeThreadID == thread.id {
-                // User is in this chat, no unread count increment
-            } else {
-                threads[randomThreadIndex].unreadCount += 1
-                postLocalNotification(for: newMessage, thread: thread)
+
+    /// The simulation is explicitly leased by the visible chat surface. It is
+    /// idempotent so SwiftUI lifecycle callbacks cannot multiply timers.
+    func startIncomingMessageSimulation() {
+        guard timer == nil else { return }
+        let timer = Timer(timeInterval: 10, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.simulateIncomingMessage()
             }
         }
+        self.timer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    func stopIncomingMessageSimulation() {
+        timer?.invalidate()
+        timer = nil
+    }
+    
+    private func simulateIncomingMessage() {
+        guard timer != nil, !threads.isEmpty, !users.isEmpty else { return }
+
+        // Pick a random thread
+        let randomThreadIndex = Int.random(in: 0..<threads.count)
+        let thread = threads[randomThreadIndex]
+
+        // Random sender from participants excluding the assumed current user (users[0])
+        let possibleSenders = thread.participants.filter { $0 != users[0] }
+        guard let sender = possibleSenders.randomElement() else { return }
+
+        // Generate a random fake message content
+        let fakeContents = [
+            "Hello!",
+            "How's it going?",
+            "Did you see that?",
+            "Let's catch up soon.",
+            "I'll send you the files.",
+            "Thanks for your help!",
+            "Can you call me back?",
+            "Check this out!",
+            "Meeting at 3PM.",
+            "Got it!"
+        ]
+        let content = fakeContents.randomElement() ?? "Hi!"
+
+        let newMessage = FakeMessage(id: UUID(), threadID: thread.id, sender: sender, content: content, timestamp: Date())
+        append(newMessage, to: thread.id)
+
+        // Update unread count if this thread is not active
+        if activeThreadID != thread.id {
+            threads[randomThreadIndex].unreadCount = min(
+                threads[randomThreadIndex].unreadCount + 1,
+                Self.maximumMessagesPerThread
+            )
+            postLocalNotification(for: newMessage, thread: thread)
+        }
+    }
+
+    private func append(_ message: FakeMessage, to threadID: UUID) {
+        var threadMessages = messagesByThreadID[threadID] ?? []
+        let overflow = threadMessages.count - Self.maximumMessagesPerThread + 1
+        if overflow > 0 {
+            threadMessages.removeFirst(overflow)
+        }
+        threadMessages.append(message)
+        messagesByThreadID[threadID] = threadMessages
     }
     
     private func postLocalNotification(for message: FakeMessage, thread: FakeChatThread) {

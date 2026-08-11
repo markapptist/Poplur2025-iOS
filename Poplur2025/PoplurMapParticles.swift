@@ -37,7 +37,11 @@ struct PoplurThemeParticleOverlay: UIViewRepresentable {
 
     static func dismantleUIView(_ uiView: SKView, coordinator: Coordinator) {
         uiView.scene?.removeAllChildren()
-        uiView.presentScene(nil)
+        if let managed = uiView as? PoplurManagedSKView {
+            managed.poplurTearDown()
+        } else {
+            uiView.presentScene(nil)
+        }
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }

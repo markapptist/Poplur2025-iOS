@@ -110,7 +110,7 @@ struct CapturePreviewOverlay: View {
         case .analyzing:
             // Keep UI locked while scanning; user can still retake
             HStack(spacing: 24) {
-                Button { close() } label: {
+                Button { close(discardTemporaryVideo: true) } label: {
                     VStack(spacing: 8) {
                         Image(systemName: "xmark.circle.fill")
                             .poplurIconShader()
@@ -137,7 +137,7 @@ struct CapturePreviewOverlay: View {
 
     private var idleButtons: some View {
         HStack(spacing: 24) {
-            Button { close() } label: {
+            Button { close(discardTemporaryVideo: true) } label: {
                 VStack(spacing: 8) {
                     Image(systemName: "xmark.circle.fill")
                         .poplurIconShader()
@@ -199,7 +199,7 @@ struct CapturePreviewOverlay: View {
 
             // Action buttons
             HStack(spacing: 24) {
-                Button { close() } label: {
+                Button { close(discardTemporaryVideo: true) } label: {
                     VStack(spacing: 8) {
                         Image(systemName: "xmark.circle.fill")
                             .poplurIconShader()
@@ -243,7 +243,7 @@ struct CapturePreviewOverlay: View {
 
     private var failedButtons: some View {
         HStack(spacing: 24) {
-            Button { close() } label: {
+            Button { close(discardTemporaryVideo: true) } label: {
                 VStack(spacing: 8) {
                     Image(systemName: "xmark.circle.fill")
                         .poplurIconShader()
@@ -283,7 +283,10 @@ struct CapturePreviewOverlay: View {
 
     // MARK: - Actions
 
-    private func close() {
+    private func close(discardTemporaryVideo: Bool = false) {
+        if discardTemporaryVideo, let videoURL {
+            PoplurTemporaryFileOwnership.deleteIfOwned(videoURL)
+        }
         if let onDismiss { onDismiss() } else { dismiss() }
     }
 
@@ -331,6 +334,8 @@ struct CapturePreviewOverlay: View {
                     userInfo: [
                         "image": image as Any,
                         "videoURL": videoURL as Any,
+                        PoplurTemporaryFileOwnership.notificationKey:
+                            videoURL.map(PoplurTemporaryFileOwnership.isOwned) ?? false,
                         "latitude": coordinate.latitude,
                         "longitude": coordinate.longitude
                     ]
@@ -352,7 +357,14 @@ struct CapturePreviewOverlay: View {
         if let image {
             NotificationCenter.default.post(name: Notification.Name("UploadImageToCurrentCoordinate"), object: image)
         } else if let videoURL {
-            NotificationCenter.default.post(name: Notification.Name("UploadVideoToCurrentCoordinate"), object: videoURL)
+            NotificationCenter.default.post(
+                name: Notification.Name("UploadVideoToCurrentCoordinate"),
+                object: videoURL,
+                userInfo: [
+                    PoplurTemporaryFileOwnership.notificationKey:
+                        PoplurTemporaryFileOwnership.isOwned(videoURL)
+                ]
+            )
         }
         flowManager.completeFlow(finalCoordinate: coordinate)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
@@ -369,7 +381,12 @@ struct CapturePreviewOverlay: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
             NotificationCenter.default.post(
                 name: Notification.Name("OpenMapToSelectPostLocation"), object: nil,
-                userInfo: ["image": image as Any, "videoURL": videoURL as Any])
+                userInfo: [
+                    "image": image as Any,
+                    "videoURL": videoURL as Any,
+                    PoplurTemporaryFileOwnership.notificationKey:
+                        videoURL.map(PoplurTemporaryFileOwnership.isOwned) ?? false
+                ])
         }
     }
 
@@ -591,7 +608,7 @@ struct PostCaptureComposerOverlay: View {
                     // Route the AI-edited result through the normal post flow
                     usePoplurAI = true
                     generatedAdImage = resultImage
-                    generatedAdVideoURL = resultVideoURL
+                    replaceGeneratedAdVideoURL(with: resultVideoURL)
                     showPoplurAIChat = false
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                         withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) { step = .channel }
@@ -671,6 +688,7 @@ struct PostCaptureComposerOverlay: View {
             Button {
                 switch step {
                 case .filters:
+                    replaceGeneratedAdVideoURL(with: nil)
                     flowManager.cancelFlow()
                     onDismiss?()
                 case .creationChoice:
@@ -855,7 +873,7 @@ struct PostCaptureComposerOverlay: View {
             Button {
                 usePoplurAI = false
                 generatedAdImage = nil
-                generatedAdVideoURL = nil
+                replaceGeneratedAdVideoURL(with: nil)
                 generatedMeta = nil
                 generationError = nil
                 withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) { step = .channel }
@@ -1137,7 +1155,7 @@ struct PostCaptureComposerOverlay: View {
             },
             onBroadcast: {
                 generatedAdImage = adImage
-                generatedAdVideoURL = nil
+                replaceGeneratedAdVideoURL(with: nil)
                 withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) { step = .channel }
             },
             primaryTitle: "Pick Channel",
@@ -1261,7 +1279,7 @@ struct PostCaptureComposerOverlay: View {
         await MainActor.run {
             generatedMeta = meta
             generatedAdImage = image
-            generatedAdVideoURL = nil
+            replaceGeneratedAdVideoURL(with: nil)
             isGenerating = false
             generationStatusText = "Creating your Poplur TV ad..."
             withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) {
@@ -1273,7 +1291,7 @@ struct PostCaptureComposerOverlay: View {
     private func showGeneratedVideo(_ url: URL, meta: TVStyleMetadata) async {
         await MainActor.run {
             generatedMeta = meta
-            generatedAdVideoURL = url
+            replaceGeneratedAdVideoURL(with: url)
             generatedAdImage = nil
             isGenerating = false
             generationStatusText = "Creating your Poplur TV ad..."
@@ -1344,6 +1362,10 @@ struct PostCaptureComposerOverlay: View {
                 // Image + music → bake into a video
                 await MainActor.run { statusText = "Adding music…" }
                 if let videoWithMusic = await OutputMusicMixer.imageWithAudio(filteredImage, audioURL: musicURL, filter: .original) {
+                    if let videoURL,
+                       videoURL.standardizedFileURL != videoWithMusic.standardizedFileURL {
+                        PoplurTemporaryFileOwnership.deleteIfOwned(videoURL)
+                    }
                     await MainActor.run {
                         flowManager.capturedImage = nil
                         flowManager.capturedVideoURL = videoWithMusic
@@ -1355,6 +1377,9 @@ struct PostCaptureComposerOverlay: View {
                 }
             }
 
+            if let videoURL {
+                PoplurTemporaryFileOwnership.deleteIfOwned(videoURL)
+            }
             await MainActor.run {
                 flowManager.capturedImage = filteredImage
                 flowManager.capturedVideoURL = nil
@@ -1371,7 +1396,7 @@ struct PostCaptureComposerOverlay: View {
                 withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) { step = .adPrompt }
             },
             onBroadcast: {
-                generatedAdVideoURL = adVideoURL
+                replaceGeneratedAdVideoURL(with: adVideoURL)
                 generatedAdImage = nil
                 withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) { step = .channel }
             },
@@ -1398,27 +1423,47 @@ struct PostCaptureComposerOverlay: View {
         )
 
         Task {
+            var rawURL: URL?
             do {
                 // Download generated video to a local temp file
                 await MainActor.run { statusText = "Preparing video…" }
                 let (localURL, _) = try await URLSession.shared.download(from: adVideoURL)
                 let raw = FileManager.default.temporaryDirectory
                     .appendingPathComponent(UUID().uuidString + ".mp4")
+                PoplurTemporaryFileOwnership.claim(raw)
+                rawURL = raw
                 try FileManager.default.moveItem(at: localURL, to: raw)
 
                 // Apply filter + trim to the output
                 await MainActor.run { statusText = "Applying filter…" }
-                let processed = await PostCaptureMediaProcessor.exportVideo(
+                let exported = await PostCaptureMediaProcessor.exportVideo(
                     url: raw,
                     filter: selectedFilter,
                     trimSeconds: adVideoTrimSeconds
-                ) ?? raw
+                )
+                let processed = exported ?? raw
+                if exported != nil {
+                    PoplurTemporaryFileOwnership.deleteIfOwned(raw)
+                    rawURL = nil
+                }
 
                 // Mix in music if selected
                 var dest = processed
                 if let musicURL = selectedMusicURL {
                     await MainActor.run { statusText = "Adding music…" }
-                    dest = await OutputMusicMixer.mixAudio(musicURL, intoVideo: processed, trimSeconds: nil) ?? processed
+                    if let mixed = await OutputMusicMixer.mixAudio(
+                        musicURL,
+                        intoVideo: processed,
+                        trimSeconds: nil
+                    ) {
+                        dest = mixed
+                        PoplurTemporaryFileOwnership.deleteIfOwned(processed)
+                    }
+                }
+
+                for sourceURL in [videoURL, adVideoURL].compactMap({ $0 })
+                    where sourceURL.standardizedFileURL != dest.standardizedFileURL {
+                    PoplurTemporaryFileOwnership.deleteIfOwned(sourceURL)
                 }
 
                 await MainActor.run {
@@ -1429,6 +1474,9 @@ struct PostCaptureComposerOverlay: View {
                     NotificationCenter.default.post(name: Notification.Name("SwitchToProfileTab"), object: nil)
                 }
             } catch {
+                if let rawURL {
+                    PoplurTemporaryFileOwnership.deleteIfOwned(rawURL)
+                }
                 await MainActor.run {
                     isPosting = false
                     statusText = "Uploading your post..."
@@ -1695,6 +1743,14 @@ struct PostCaptureComposerOverlay: View {
         }
     }
 
+    private func replaceGeneratedAdVideoURL(with replacement: URL?) {
+        if let previous = generatedAdVideoURL,
+           previous.standardizedFileURL != replacement?.standardizedFileURL {
+            PoplurTemporaryFileOwnership.deleteIfOwned(previous)
+        }
+        generatedAdVideoURL = replacement
+    }
+
     private func post() {
         guard !isPosting else { return }
         isPosting = true
@@ -1706,17 +1762,32 @@ struct PostCaptureComposerOverlay: View {
 
             if let videoURL {
                 await MainActor.run { statusText = "Trimming and styling your video..." }
-                processedVideoURL = await PostCaptureMediaProcessor.exportVideo(
+                let exportedVideoURL = await PostCaptureMediaProcessor.exportVideo(
                     url: videoURL,
                     filter: selectedFilter,
                     trimSeconds: videoTrimSeconds
-                ) ?? videoURL
+                )
+                if let exportedVideoURL {
+                    processedVideoURL = exportedVideoURL
+                    if exportedVideoURL.standardizedFileURL != videoURL.standardizedFileURL {
+                        PoplurTemporaryFileOwnership.deleteIfOwned(videoURL)
+                    }
+                }
             }
 
             if let musicURL = selectedMusicURL {
                 if let videoURL = processedVideoURL {
                     await MainActor.run { statusText = "Adding music..." }
-                    processedVideoURL = await OutputMusicMixer.mixAudio(musicURL, intoVideo: videoURL, trimSeconds: nil) ?? videoURL
+                    if let mixedVideoURL = await OutputMusicMixer.mixAudio(
+                        musicURL,
+                        intoVideo: videoURL,
+                        trimSeconds: nil
+                    ) {
+                        processedVideoURL = mixedVideoURL
+                        if mixedVideoURL.standardizedFileURL != videoURL.standardizedFileURL {
+                            PoplurTemporaryFileOwnership.deleteIfOwned(videoURL)
+                        }
+                    }
                 } else if let image = processedImage {
                     await MainActor.run { statusText = "Adding music..." }
                     if let videoWithMusic = await OutputMusicMixer.imageWithAudio(image, audioURL: musicURL, filter: .original) {
@@ -1822,8 +1893,10 @@ private enum PostCaptureMediaProcessor {
         let outputURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("poplur-edited-\(UUID().uuidString)")
             .appendingPathExtension("mp4")
+        PoplurTemporaryFileOwnership.claim(outputURL)
 
         guard let export = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetHighestQuality) else {
+            PoplurTemporaryFileOwnership.deleteIfOwned(outputURL)
             return nil
         }
 
@@ -1849,7 +1922,7 @@ private enum PostCaptureMediaProcessor {
                 if export.status == .completed {
                     continuation.resume(returning: outputURL)
                 } else {
-                    try? FileManager.default.removeItem(at: outputURL)
+                    PoplurTemporaryFileOwnership.deleteIfOwned(outputURL)
                     continuation.resume(returning: nil)
                 }
             }

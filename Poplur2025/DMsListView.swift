@@ -1,9 +1,11 @@
 import SwiftUI
 
 struct ChatThreadListView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var chatStore: FakeChatStore
     @State private var navigateToThread: FakeChatThread? = nil
     @State private var activeVideoCallUser: FakeUser? = nil
+    @State private var isVisible = false
 
     init() {
         _chatStore = StateObject(wrappedValue: FakeChatStore())
@@ -108,6 +110,28 @@ struct ChatThreadListView: View {
                 }
             }
         }
+        .onAppear {
+            isVisible = true
+            updateIncomingMessageSimulation()
+        }
+        .onDisappear {
+            isVisible = false
+            chatStore.stopIncomingMessageSimulation()
+        }
+        .onChange(of: scenePhase) { _, _ in
+            updateIncomingMessageSimulation()
+        }
+        .onChange(of: activeVideoCallUser?.id) { _, _ in
+            updateIncomingMessageSimulation()
+        }
+    }
+
+    private func updateIncomingMessageSimulation() {
+        if isVisible && scenePhase == .active && activeVideoCallUser == nil {
+            chatStore.startIncomingMessageSimulation()
+        } else {
+            chatStore.stopIncomingMessageSimulation()
+        }
     }
 
     private func initials(for name: String) -> String {
@@ -168,6 +192,8 @@ struct ChatThreadListView: View {
 }
 
 struct DMDetailView: View {
+    private static let maximumMessageCount = 100
+
     let thread: FakeChatThread
 
     @State private var messages: [Message] = []
@@ -276,7 +302,7 @@ struct DMDetailView: View {
     private func send() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        messages.append(Message(text: text, isIncoming: false))
+        append(Message(text: text, isIncoming: false))
         draft = ""
         simulateReply(to: text)
     }
@@ -292,8 +318,16 @@ struct DMDetailView: View {
         ]
         let reply = replyOptions.randomElement() ?? "Okay"
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-            messages.append(Message(text: reply, isIncoming: true))
+            append(Message(text: reply, isIncoming: true))
         }
+    }
+
+    private func append(_ message: Message) {
+        let overflow = messages.count - Self.maximumMessageCount + 1
+        if overflow > 0 {
+            messages.removeFirst(overflow)
+        }
+        messages.append(message)
     }
 
     private func seedConversation() {
