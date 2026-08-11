@@ -421,6 +421,9 @@ struct PostLoginHomeWebView: UIViewRepresentable {
 
     /// Punch-through only for the camera tab (see the opacity note above).
     static func setCameraHole(_ on: Bool, on webView: WKWebView) {
+        // The native camera is the sole heavy renderer on this tab. The web
+        // layer remains alive only as its transparent controls/readout.
+        (webView as? PoplurManagedWebView)?.setLightweightOverlayMode(on)
         webView.isOpaque = !on
         let opaqueBg = UIColor(red: 5/255, green: 4/255, blue: 7/255, alpha: 1)
         webView.backgroundColor = on ? .clear : opaqueBg

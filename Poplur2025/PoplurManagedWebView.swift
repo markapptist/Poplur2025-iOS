@@ -30,6 +30,7 @@ final class PoplurManagedWebView: WKWebView {
     private var performanceRegistration: PoplurPerformanceRegistration?
     private var latestPolicy = PoplurPerformanceManager.shared.policy
     private var latestGrant = false
+    private var isLightweightOverlayMode = false
 
     init(
         performanceName: String,
@@ -85,6 +86,18 @@ final class PoplurManagedWebView: WKWebView {
         stopLoading()
     }
 
+    /// The camera tab's WebView is only a transparent HTML/CSS HUD over the
+    /// native AVCapture preview. Yield its heavy-renderer lease while keeping
+    /// that lightweight, interactive HUD alive; otherwise the WebView's higher
+    /// priority deterministically prevents NativeCamera from ever starting.
+    func setLightweightOverlayMode(_ enabled: Bool) {
+        guard isLightweightOverlayMode != enabled else { return }
+        isLightweightOverlayMode = enabled
+        if window != nil { ensurePerformanceRegistration() }
+        updatePerformanceVisibility()
+        applyLatestPolicyToDocument()
+    }
+
     private func ensurePerformanceRegistration() {
         guard performanceRegistration == nil else { return }
         performanceRegistration = PoplurPerformanceManager.shared.registerRenderer(
@@ -105,7 +118,7 @@ final class PoplurManagedWebView: WKWebView {
 
     private func updatePerformanceVisibility() {
         performanceRegistration?.setVisible(
-            window != nil && !isHidden && alpha > 0.01
+            window != nil && !isHidden && alpha > 0.01 && !isLightweightOverlayMode
         )
     }
 
@@ -123,7 +136,7 @@ final class PoplurManagedWebView: WKWebView {
     }
 
     private func applyLatestPolicyToDocument() {
-        let active = latestGrant
+        let active = (latestGrant || isLightweightOverlayMode)
             && window != nil
             && !isHidden
             && alpha > 0.01
@@ -237,6 +250,8 @@ enum PoplurWebPerformance {
           const nativeSetInterval = window.setInterval.bind(window);
           const nativeClearInterval = window.clearInterval.bind(window);
           const nativeDPR = Math.max(1, Number(window.devicePixelRatio) || 1);
+          const isMapSubframe = window !== window.top
+            && new URLSearchParams(window.location.search).get('map') === '1';
 
           let policy = \#(initial);
           let pageVisible = true;
@@ -258,6 +273,12 @@ enum PoplurWebPerformance {
           const frameRate = () => Math.max(1, Number(policy.interactiveFPS) || 12);
           const frameDelay = () => 1000 / frameRate();
           const inInteractiveBurst = () => performance.now() < interactiveUntil;
+          // Mapbox lives in Home's child frame. Its camera operations are
+          // finite and event-driven but routinely outlast a touch tail. Keep
+          // accepting queued subframe rAF at the capped policy rate while the
+          // renderer lease is active; the iframe is unmounted off Map and its
+          // own governor parks ambient work when the camera stops.
+          const canDriveFrames = () => isMapSubframe || inInteractiveBurst();
 
           function markIdle(idle) {
             document.documentElement?.classList.toggle('poplur-performance-idle', idle);
@@ -300,7 +321,7 @@ enum PoplurWebPerformance {
 
           function scheduleFrames() {
             if (!runnable() || frameDriver || frameTimer || frameQueue.size === 0) return;
-            if (!inInteractiveBurst()) {
+            if (!canDriveFrames()) {
               markIdle(true);
               return;
             }
@@ -317,7 +338,7 @@ enum PoplurWebPerformance {
 
           function flushFrames(now) {
             frameDriver = 0;
-            if (!runnable() || !inInteractiveBurst()) {
+            if (!runnable() || !canDriveFrames()) {
               markIdle(true);
               return;
             }
@@ -534,7 +555,14 @@ enum PoplurWebPerformance {
           window.__poplurPerformanceRuntime = {
             setPolicy: apply,
             getPolicy: () => Object.assign({}, policy),
-            wake: () => wake(Number(policy.interactionBurstMS) || 800)
+            wake: duration => {
+              const requested = Number.isFinite(Number(duration))
+                ? Number(duration)
+                : (Number(policy.interactionBurstMS) || 800);
+              // Known finite operations may finish, but page script can never
+              // turn this escape hatch into an unbounded rendering lease.
+              wake(Math.min(15000, Math.max(0, requested)));
+            }
           };
 
           ['pointerdown', 'touchstart', 'keydown', 'focusin', 'wheel'].forEach(name =>
