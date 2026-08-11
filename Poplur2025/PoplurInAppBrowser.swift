@@ -39,7 +39,15 @@ final class PoplurInAppBrowserViewController: UIViewController {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("PoplurInAppBrowser is created in code only") }
 
-    deinit { observations.forEach { $0.invalidate() } }
+    deinit {
+        observations.forEach { $0.invalidate() }
+    }
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        guard isBeingDismissed || navigationController?.isBeingDismissed == true else { return }
+        (webView as? PoplurManagedWebView)?.poplurTearDown()
+    }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -48,7 +56,11 @@ final class PoplurInAppBrowserViewController: UIViewController {
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .nonPersistent()
         config.allowsInlineMediaPlayback = true
-        let web = WKWebView(frame: .zero, configuration: config)
+        let web = PoplurManagedWebView(
+            performanceName: "InAppBrowserWeb",
+            priority: 200,
+            configuration: config
+        )
         web.allowsBackForwardNavigationGestures = true
         web.navigationDelegate = self
         web.uiDelegate = self

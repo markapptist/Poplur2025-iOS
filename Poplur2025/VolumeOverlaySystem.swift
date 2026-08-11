@@ -72,15 +72,20 @@ final class DeviceVolumeObserver: ObservableObject {
         // a silent app. Also reports whether the meter is being asked to show,
         // which separates "the observer is deaf" from "the bars are hidden".
         #if DEBUG
-        diagnosticsTimer = Timer.scheduledTimer(withTimeInterval: 15.0, repeats: true) { [weak self] _ in
-            let s = AVAudioSession.sharedInstance()
-            let showing = self?.isShowing ?? false
-            let line = "[PoplurAudio] category=\(s.category.rawValue) mode=\(s.mode.rawValue)"
-                + " outputVolume=\(String(format: "%.2f", s.outputVolume))"
-                + " otherAudio=\(s.isOtherAudioPlaying) outputs=\(s.currentRoute.outputs.map(\.portType.rawValue))"
-                + " barsShowing=\(showing)"
-            print(line)
-            PoplurDiagLog.append(line)
+        // Diagnostics are a measurement tool, not production work. A Debug
+        // device build is still the app a person holds, so do not wake it every
+        // 15 seconds unless that run explicitly opted into diagnostics.
+        if ProcessInfo.processInfo.arguments.contains("-PoplurDiagnostics") {
+            diagnosticsTimer = Timer.scheduledTimer(withTimeInterval: 15.0, repeats: true) { [weak self] _ in
+                let s = AVAudioSession.sharedInstance()
+                let showing = self?.isShowing ?? false
+                let line = "[PoplurAudio] category=\(s.category.rawValue) mode=\(s.mode.rawValue)"
+                    + " outputVolume=\(String(format: "%.2f", s.outputVolume))"
+                    + " otherAudio=\(s.isOtherAudioPlaying) outputs=\(s.currentRoute.outputs.map(\.portType.rawValue))"
+                    + " barsShowing=\(showing)"
+                print(line)
+                PoplurDiagLog.append(line)
+            }
         }
         #endif
 

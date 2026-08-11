@@ -21,6 +21,8 @@ final class PoplurAssetCache: @unchecked Sendable {
     enum PurgeReason: String, Sendable {
         case manual
         case memoryPressure
+        case thermalPressure
+        case inactive
         case background
         case budgetReduction
     }
@@ -31,33 +33,23 @@ final class PoplurAssetCache: @unchecked Sendable {
         var categoryItemLimits: [Category: Int]
 
         static func deviceDefault() -> Limits {
-            let gibibyte = 1_073_741_824
-            #if targetEnvironment(simulator)
-            let physicalMemory = 6 * gibibyte
-            #else
-            let physicalMemory = Int(clamping: ProcessInfo.processInfo.physicalMemory)
-            #endif
-
-            let byteLimit: Int
-            if physicalMemory <= 4 * gibibyte {
-                byteLimit = 150 * 1_048_576
-            } else if physicalMemory <= 8 * gibibyte {
-                byteLimit = 300 * 1_048_576
-            } else {
-                byteLimit = 450 * 1_048_576
-            }
-
+            // A larger phone must not silently turn into permission to retain
+            // hundreds of MB of decoded images, textures and scenes. Apart from
+            // memory pressure, those retained objects also keep more GPU-backed
+            // resources alive and make Poplur's energy use device-dependent.
+            // Keep one small, absolute application-owned working set instead.
+            let mebibyte = 1_048_576
             return Limits(
-                byteLimit: byteLimit,
-                itemLimit: 192,
+                byteLimit: 64 * mebibyte,
+                itemLimit: 64,
                 categoryItemLimits: [
-                    .model: 24,
-                    .texture: 72,
-                    .scene: 24,
-                    .decodedImage: 96,
-                    .temporary: 16,
-                    .video: 4,
-                    .webAsset: 96,
+                    .model: 6,
+                    .texture: 16,
+                    .scene: 4,
+                    .decodedImage: 24,
+                    .temporary: 4,
+                    .video: 1,
+                    .webAsset: 16,
                 ]
             )
         }

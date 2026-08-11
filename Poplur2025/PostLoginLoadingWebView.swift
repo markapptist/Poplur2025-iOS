@@ -42,7 +42,17 @@ struct PostLoginLoadingWebView: UIViewRepresentable {
             )
         }
 
-        let webView = WKWebView(frame: .zero, configuration: config)
+        let webView = PoplurManagedWebView(
+            performanceName: "PostLoginLoadingWeb",
+            // Home owns the only foreground work lease while this visual cover
+            // is present. Giving the cover the higher priority deadlocked the
+            // handoff: Home's rAF-based ready signal could never run, so the
+            // cover's short splash video looped forever. At a lower priority the
+            // approved cover remains painted but inert while Home reaches its
+            // first frame, then SwiftUI dismantles this WebView normally.
+            priority: 100,
+            configuration: config
+        )
         // This is a non-interactive cover. Never let WebKit expose transport
         // controls or promote its splash clip into a remote media session.
         webView.isUserInteractionEnabled = false
@@ -68,4 +78,8 @@ struct PostLoginLoadingWebView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: WKWebView, context: Context) {}
+
+    static func dismantleUIView(_ uiView: WKWebView, coordinator: ()) {
+        (uiView as? PoplurManagedWebView)?.poplurTearDown()
+    }
 }

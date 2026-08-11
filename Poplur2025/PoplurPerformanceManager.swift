@@ -59,6 +59,7 @@ struct PoplurPerformancePolicy: Equatable, Sendable {
     let assetCacheByteLimit: Int
     let decorativeRenderingAllowed: Bool
     let expensiveVideoTexturesAllowed: Bool
+    let continuousRenderingAllowed: Bool
 
     func targetFPS(for rateClass: PoplurFrameRateClass) -> Int {
         switch rateClass {
@@ -166,6 +167,7 @@ final class PoplurPerformanceManager: ObservableObject {
     var modelAndTextureCacheBudget: Int { policy.assetCacheByteLimit }
     var decorativeRenderingAllowed: Bool { policy.decorativeRenderingAllowed }
     var expensiveVideoTexturesAllowed: Bool { policy.expensiveVideoTexturesAllowed }
+    var continuousRenderingAllowed: Bool { policy.continuousRenderingAllowed }
     var isApplicationActive: Bool { applicationLifecycle == .active }
 
     private final class WeakRegistration {
@@ -237,8 +239,13 @@ final class PoplurPerformanceManager: ObservableObject {
     func setApplicationLifecycle(_ lifecycle: PoplurApplicationLifecycle) {
         guard applicationLifecycle != lifecycle else { return }
         applicationLifecycle = lifecycle
-        if lifecycle == .background {
-            _ = assetCache.purge(reason: .background)
+        if lifecycle != .active {
+            // Inactive is already off-screen from the person's perspective
+            // (Control Centre, app switcher, calls). Do not wait for the later
+            // background notification to release reusable CPU/GPU resources.
+            _ = assetCache.purge(reason: lifecycle == .background ? .background : .inactive)
+            purgeInactiveRendererResources()
+            releaseReusableRendererAssets()
         }
         recomputeMode(reason: "App \(lifecycle.rawValue)")
     }
@@ -361,6 +368,17 @@ final class PoplurPerformanceManager: ObservableObject {
             assetCache.removeAll(category: .decodedImage)
         }
 
+        if nextMode > previous {
+            purgeInactiveRendererResources()
+            releaseReusableRendererAssets()
+            if nextMode >= .lowPower {
+                // A serious thermal signal means retaining a warm working set
+                // is less useful than returning it immediately. New requests
+                // can repopulate only within the smaller policy budget.
+                _ = assetCache.purge(reason: .thermalPressure)
+            }
+        }
+
         if previous != nextMode {
             debugLog("Mode changed \(previous.diagnosticName) -> \(nextMode.diagnosticName). Reason: \(reason)")
         }
@@ -481,62 +499,66 @@ final class PoplurPerformanceManager: ObservableObject {
         case .full:
             return PoplurPerformancePolicy(
                 mode: mode,
-                targetFPS: 30,
-                interactiveTargetFPS: 60,
+                targetFPS: 12,
+                interactiveTargetFPS: 24,
                 particlesAllowed: true,
-                particleDensityMultiplier: 1,
-                dynamicShadowsAllowed: true,
-                postProcessingAllowed: true,
-                physicsQuality: .full,
-                maximumPreferredTextureResolution: 2_048,
-                assetCacheByteLimit: baseCacheByteLimit,
-                decorativeRenderingAllowed: true,
-                expensiveVideoTexturesAllowed: true
-            )
-        case .reduced:
-            return PoplurPerformancePolicy(
-                mode: mode,
-                targetFPS: 24,
-                interactiveTargetFPS: 30,
-                particlesAllowed: true,
-                particleDensityMultiplier: 0.5,
+                particleDensityMultiplier: 0.15,
                 dynamicShadowsAllowed: false,
                 postProcessingAllowed: false,
                 physicsQuality: .reduced,
                 maximumPreferredTextureResolution: 1_024,
+                assetCacheByteLimit: baseCacheByteLimit,
+                decorativeRenderingAllowed: true,
+                expensiveVideoTexturesAllowed: false,
+                continuousRenderingAllowed: false
+            )
+        case .reduced:
+            return PoplurPerformancePolicy(
+                mode: mode,
+                targetFPS: 8,
+                interactiveTargetFPS: 15,
+                particlesAllowed: true,
+                particleDensityMultiplier: 0.05,
+                dynamicShadowsAllowed: false,
+                postProcessingAllowed: false,
+                physicsQuality: .minimal,
+                maximumPreferredTextureResolution: 768,
                 assetCacheByteLimit: baseCacheByteLimit * 3 / 4,
                 decorativeRenderingAllowed: true,
-                expensiveVideoTexturesAllowed: false
+                expensiveVideoTexturesAllowed: false,
+                continuousRenderingAllowed: false
             )
         case .lowPower:
             return PoplurPerformancePolicy(
                 mode: mode,
-                targetFPS: 15,
-                interactiveTargetFPS: 24,
-                particlesAllowed: true,
-                particleDensityMultiplier: 0.22,
-                dynamicShadowsAllowed: false,
-                postProcessingAllowed: false,
-                physicsQuality: .minimal,
-                maximumPreferredTextureResolution: 1_024,
-                assetCacheByteLimit: baseCacheByteLimit / 2,
-                decorativeRenderingAllowed: true,
-                expensiveVideoTexturesAllowed: false
-            )
-        case .emergency:
-            return PoplurPerformancePolicy(
-                mode: mode,
-                targetFPS: 10,
-                interactiveTargetFPS: 15,
+                targetFPS: 4,
+                interactiveTargetFPS: 10,
                 particlesAllowed: false,
                 particleDensityMultiplier: 0,
                 dynamicShadowsAllowed: false,
                 postProcessingAllowed: false,
                 physicsQuality: .paused,
                 maximumPreferredTextureResolution: 512,
+                assetCacheByteLimit: baseCacheByteLimit / 2,
+                decorativeRenderingAllowed: false,
+                expensiveVideoTexturesAllowed: false,
+                continuousRenderingAllowed: false
+            )
+        case .emergency:
+            return PoplurPerformancePolicy(
+                mode: mode,
+                targetFPS: 1,
+                interactiveTargetFPS: 5,
+                particlesAllowed: false,
+                particleDensityMultiplier: 0,
+                dynamicShadowsAllowed: false,
+                postProcessingAllowed: false,
+                physicsQuality: .paused,
+                maximumPreferredTextureResolution: 256,
                 assetCacheByteLimit: baseCacheByteLimit / 4,
                 decorativeRenderingAllowed: false,
-                expensiveVideoTexturesAllowed: false
+                expensiveVideoTexturesAllowed: false,
+                continuousRenderingAllowed: false
             )
         }
     }
@@ -655,7 +677,10 @@ class PoplurManagedSCNView: SCNView {
         }
         scene?.isPaused = false
         isPlaying = desiredIsPlaying
-        rendersContinuously = desiredRendersContinuously
+        // Static SceneKit content is event-driven: property, action and camera
+        // changes still invalidate the view, but an unchanged scene no longer
+        // burns a display loop just because a caller once requested it.
+        rendersContinuously = desiredRendersContinuously && policy.continuousRenderingAllowed
         setNeedsDisplay()
     }
 

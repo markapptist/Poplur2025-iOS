@@ -46,7 +46,11 @@ struct PoplurClayMapView: UIViewRepresentable {
                                        forURLScheme: PoplurClayWebMap.scheme)
         }
 
-        let webView = WKWebView(frame: .zero, configuration: config)
+        let webView = PoplurManagedWebView(
+            performanceName: "ClayMapWeb",
+            priority: 140,
+            configuration: config
+        )
         webView.isOpaque = false
         webView.backgroundColor = UIColor(red: 5/255, green: 4/255, blue: 7/255, alpha: 1)
         webView.scrollView.isScrollEnabled = false
@@ -74,6 +78,11 @@ struct PoplurClayMapView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: WKWebView, context: Context) {}
+
+    static func dismantleUIView(_ uiView: WKWebView, coordinator: Coordinator) {
+        (uiView as? PoplurManagedWebView)?.poplurTearDown()
+        uiView.configuration.userContentController.removeScriptMessageHandler(forName: "poplur")
+    }
 
     /// Directory holding the synced web bundle (`ClayMapWeb/index.html` + assets).
     /// Deliberately does *not* fall back to a bare `index.html` lookup: other

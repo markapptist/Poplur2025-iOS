@@ -7613,7 +7613,11 @@ private struct MappedInWebView: UIViewRepresentable {
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
         config.allowsInlineMediaPlayback = true
-        let webView = WKWebView(frame: .zero, configuration: config)
+        let webView = PoplurManagedWebView(
+            performanceName: "MappedInWeb",
+            priority: 180,
+            configuration: config
+        )
         webView.scrollView.bounces = false
         webView.load(URLRequest(url: url))
         return webView
@@ -7621,6 +7625,10 @@ private struct MappedInWebView: UIViewRepresentable {
 
     func updateUIView(_ uiView: WKWebView, context: Context) {
         if uiView.url != url { uiView.load(URLRequest(url: url)) }
+    }
+
+    static func dismantleUIView(_ uiView: WKWebView, coordinator: ()) {
+        (uiView as? PoplurManagedWebView)?.poplurTearDown()
     }
 }
 

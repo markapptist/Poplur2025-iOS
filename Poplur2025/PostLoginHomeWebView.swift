@@ -343,7 +343,11 @@ struct PostLoginHomeWebView: UIViewRepresentable {
             )
         }
 
-        let webView = WKWebView(frame: .zero, configuration: config)
+        let webView = PoplurManagedWebView(
+            performanceName: "PostLoginHomeWeb",
+            priority: 140,
+            configuration: config
+        )
         // OPAQUE by default. A transparent WKWebView made WebKit fail to
         // composite media layers: the map iframe ran (audio playing) without
         // ever being visible, and feed clips never started. Transparency is now
@@ -381,18 +385,27 @@ struct PostLoginHomeWebView: UIViewRepresentable {
     }
 
     static func dismantleUIView(_ uiView: WKWebView, coordinator: Coordinator) {
+        (uiView as? PoplurManagedWebView)?.poplurTearDown()
         uiView.configuration.userContentController.removeScriptMessageHandler(forName: "poplur")
         uiView.configuration.userContentController.removeScriptMessageHandler(forName: "homeReady")
+        if liveWebView === uiView { liveWebView = nil }
     }
 
     private static let readinessScript = #"""
         (() => {
           let sent = false;
+          let readyBackstop = 0;
           const signalReady = () => {
             if (sent) return;
             sent = true;
+            if (readyBackstop) clearTimeout(readyBackstop);
             window.webkit.messageHandlers.homeReady.postMessage({ type: "ready" });
           };
+          // rAF is deliberately unable to wake an idle managed document. Keep
+          // the visual two-frame signal below, but guarantee this document-end
+          // script releases the launch cover even if load/fonts finish after
+          // the startup rendering lease has expired.
+          readyBackstop = setTimeout(signalReady, 750);
           const afterLoad = () => {
             const fontsReady = document.fonts?.ready ?? Promise.resolve();
             Promise.resolve(fontsReady).then(() => {

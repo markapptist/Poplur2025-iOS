@@ -30,7 +30,11 @@ private struct GoodCopySplashWebView: UIViewRepresentable {
         configuration.allowsInlineMediaPlayback = true
         configuration.mediaTypesRequiringUserActionForPlayback = []
 
-        let webView = WKWebView(frame: .zero, configuration: configuration)
+        let webView = PoplurManagedWebView(
+            performanceName: "GoodCopySplashWeb",
+            priority: 220,
+            configuration: configuration
+        )
         webView.isOpaque = false
         webView.backgroundColor = UIColor(red: 10 / 255, green: 7 / 255, blue: 9 / 255, alpha: 1)
         webView.scrollView.backgroundColor = webView.backgroundColor
@@ -86,4 +90,8 @@ private struct GoodCopySplashWebView: UIViewRepresentable {
     }
 
     func updateUIView(_ webView: WKWebView, context: Context) {}
+
+    static func dismantleUIView(_ webView: WKWebView, coordinator: ()) {
+        (webView as? PoplurManagedWebView)?.poplurTearDown()
+    }
 }

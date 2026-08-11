@@ -96,7 +96,11 @@ struct PreloginWebView: UIViewRepresentable {
                                        forURLScheme: PoplurPreloginWeb.scheme)
         }
 
-        let webView = WKWebView(frame: .zero, configuration: config)
+        let webView = PoplurManagedWebView(
+            performanceName: "PreloginWeb",
+            priority: 120,
+            configuration: config
+        )
         webView.isOpaque = true
         // Matches the splash background (#0a0709) so there is no flash between
         // the auth-resolving frame and the web splash. This is the SAME colour
@@ -149,6 +153,11 @@ struct PreloginWebView: UIViewRepresentable {
 
     func updateUIView(_ uiView: WKWebView, context: Context) {}
 
+    static func dismantleUIView(_ uiView: WKWebView, coordinator: Coordinator) {
+        (uiView as? PoplurManagedWebView)?.poplurTearDown()
+        uiView.configuration.userContentController.removeScriptMessageHandler(forName: "poplur")
+    }
+
     /// Directory holding the bundled pre-login web files (`PreloginWeb/splash.html`
     /// + `welcome.html` + assets). Scoped by subdirectory so it never resolves a
     /// different bundled `index.html` (e.g. ClayMapWeb / PoplurFPS).
@@ -180,8 +189,7 @@ struct PreloginWebView: UIViewRepresentable {
             let fileURL = root.appendingPathComponent(String(relativePath.dropFirst())).standardizedFileURL
 
             // Confine reads to the bundle directory (no `../` traversal).
-            guard fileURL.path.hasPrefix(root.path + "/") || fileURL.path == root.path,
-                  let data = try? Data(contentsOf: fileURL) else {
+            guard fileURL.path.hasPrefix(root.path + "/") || fileURL.path == root.path else {
                 urlSchemeTask.didFailWithError(URLError(.fileDoesNotExist))
                 return
             }
@@ -195,20 +203,54 @@ struct PreloginWebView: UIViewRepresentable {
             // for us, which is why only iOS showed it).
             if let rangeHeader = urlSchemeTask.request.value(forHTTPHeaderField: "Range"),
                rangeHeader.hasPrefix("bytes="),
-               let spec = rangeHeader.split(separator: "=").last {
-                let bounds = spec.split(separator: "-", omittingEmptySubsequences: false)
-                let start = Int(bounds.first ?? "") ?? 0
-                let end = bounds.count > 1 ? (Int(bounds[1]) ?? data.count - 1) : data.count - 1
-                let upper = min(end, data.count - 1)
-                guard start <= upper else {
-                    urlSchemeTask.didFailWithError(URLError(.badServerResponse))
+               let spec = rangeHeader.split(separator: "=").last,
+               let fileSize = try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+               fileSize > 0 {
+                let range = String(spec)
+                let bounds = range.split(separator: "-", omittingEmptySubsequences: false)
+                let start: Int
+                let upper: Int
+                if range.contains(",") || bounds.count != 2 {
+                    Self.respondRangeNotSatisfiable(to: urlSchemeTask, url: url, fileSize: fileSize)
+                    return
+                } else if bounds[0].isEmpty {
+                    // RFC 7233 suffix range: `bytes=-N` means the final N bytes.
+                    guard let suffixLength = Int(bounds[1]), suffixLength > 0 else {
+                        Self.respondRangeNotSatisfiable(to: urlSchemeTask, url: url, fileSize: fileSize)
+                        return
+                    }
+                    start = max(0, fileSize - suffixLength)
+                    upper = fileSize - 1
+                } else {
+                    guard let parsedStart = Int(bounds[0]), parsedStart >= 0 else {
+                        Self.respondRangeNotSatisfiable(to: urlSchemeTask, url: url, fileSize: fileSize)
+                        return
+                    }
+                    start = parsedStart
+                    upper = min(Int(bounds[1]) ?? (fileSize - 1), fileSize - 1)
+                }
+                guard start < fileSize, start <= upper else {
+                    Self.respondRangeNotSatisfiable(to: urlSchemeTask, url: url, fileSize: fileSize)
                     return
                 }
-                let slice = data.subdata(in: start..<(upper + 1))
+                let slice: Data
+                do {
+                    let handle = try FileHandle(forReadingFrom: fileURL)
+                    defer { try? handle.close() }
+                    try handle.seek(toOffset: UInt64(start))
+                    let length = upper - start + 1
+                    guard let bytes = try handle.read(upToCount: length), bytes.count == length else {
+                        throw URLError(.cannotDecodeContentData)
+                    }
+                    slice = bytes
+                } catch {
+                    urlSchemeTask.didFailWithError(error)
+                    return
+                }
                 let headers = [
                     "Content-Type": mime,
                     "Content-Length": "\(slice.count)",
-                    "Content-Range": "bytes \(start)-\(upper)/\(data.count)",
+                    "Content-Range": "bytes \(start)-\(upper)/\(fileSize)",
                     "Accept-Ranges": "bytes",
                     "Cache-Control": "no-store"
                 ]
@@ -222,6 +264,10 @@ struct PreloginWebView: UIViewRepresentable {
             }
 
             // Full-body response, advertising range support so media can seek.
+            guard let data = try? Data(contentsOf: fileURL, options: .mappedIfSafe) else {
+                urlSchemeTask.didFailWithError(URLError(.fileDoesNotExist))
+                return
+            }
             let headers = [
                 "Content-Type": mime,
                 "Content-Length": "\(data.count)",
@@ -241,6 +287,29 @@ struct PreloginWebView: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, stop urlSchemeTask: WKURLSchemeTask) {}
+
+        private static func respondRangeNotSatisfiable(
+            to task: WKURLSchemeTask,
+            url: URL,
+            fileSize: Int
+        ) {
+            let headers = [
+                "Content-Range": "bytes */\(fileSize)",
+                "Content-Length": "0",
+                "Accept-Ranges": "bytes"
+            ]
+            if let response = HTTPURLResponse(
+                url: url,
+                statusCode: 416,
+                httpVersion: "HTTP/1.1",
+                headerFields: headers
+            ) {
+                task.didReceive(response)
+                task.didFinish()
+            } else {
+                task.didFailWithError(URLError(.badServerResponse))
+            }
+        }
 
         private static func mimeType(forExtension ext: String) -> String {
             switch ext.lowercased() {

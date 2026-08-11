@@ -19,12 +19,24 @@ struct PoplurEarthIntroView: UIViewRepresentable {
 
     func updateUIView(_ uiView: UIView, context: Context) {}
 
+    static func dismantleUIView(_ uiView: UIView, coordinator: ()) {
+        if let webView = uiView as? PoplurManagedWebView {
+            webView.poplurTearDown()
+        } else if let sceneView = uiView as? PoplurManagedSCNView {
+            sceneView.poplurTearDown()
+        }
+    }
+
     // MARK: - Mapbox WebView globe
 
     private func makeWebGlobeView(token: String) -> WKWebView {
         let config = WKWebViewConfiguration()
         config.allowsInlineMediaPlayback = true
-        let webView = WKWebView(frame: .zero, configuration: config)
+        let webView = PoplurManagedWebView(
+            performanceName: "EarthIntroWeb",
+            priority: 180,
+            configuration: config
+        )
         webView.backgroundColor = UIColor(red: 5/255, green: 4/255, blue: 7/255, alpha: 1)
         webView.isOpaque = false
         webView.scrollView.isScrollEnabled = false

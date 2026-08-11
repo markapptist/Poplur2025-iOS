@@ -58,7 +58,11 @@ private struct _FPSWebView: UIViewRepresentable {
         )
         config.userContentController.addUserScript(mobileCSSScript)
 
-        let webView = WKWebView(frame: .zero, configuration: config)
+        let webView = PoplurManagedWebView(
+            performanceName: "FPSGameWeb",
+            priority: 240,
+            configuration: config
+        )
         webView.backgroundColor = .black
         webView.isOpaque = false
         webView.scrollView.isScrollEnabled = false
@@ -78,6 +82,10 @@ private struct _FPSWebView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: WKWebView, context: Context) {}
+
+    static func dismantleUIView(_ uiView: WKWebView, coordinator: ()) {
+        (uiView as? PoplurManagedWebView)?.poplurTearDown()
+    }
 
     private var mobileCSSInjection: String {
         """
