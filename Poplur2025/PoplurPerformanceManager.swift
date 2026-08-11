@@ -792,7 +792,7 @@ class PoplurManagedSCNView: SCNView {
     init(
         performanceName: String,
         classification: PoplurRendererClassification = .decorative,
-        rateClass: PoplurFrameRateClass = .decorative,
+        rateClass: PoplurFrameRateClass = .interactive,
         frame: CGRect = .zero,
         options: [String: Any]? = nil
     ) {
@@ -805,7 +805,7 @@ class PoplurManagedSCNView: SCNView {
     required init?(coder: NSCoder) {
         performanceName = "SceneKit"
         classification = .decorative
-        rateClass = .decorative
+        rateClass = .interactive
         super.init(coder: coder)
     }
 
