@@ -93,11 +93,13 @@ final class MarkHeadViewCoordinator: NSObject, AVSpeechSynthesizerDelegate {
 
     // MARK: Load model
 
+    @MainActor
     func load(into view: SCNView) {
         scnView = view
+        let maximumTextureDimension = PoplurPerformanceManager.shared.maximumPreferredTextureResolution
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
-            let scene = self.loadHeadScene()
+            let scene = self.loadHeadScene(maximumTextureDimension: maximumTextureDimension)
             DispatchQueue.main.async {
                 guard self.scnView === view else { return }
                 if let scene { self.configure(scene, in: view) }
@@ -106,26 +108,41 @@ final class MarkHeadViewCoordinator: NSObject, AVSpeechSynthesizerDelegate {
         }
     }
 
-    private func loadHeadScene() -> SCNScene? {
+    private func loadHeadScene(maximumTextureDimension: Int) -> SCNScene? {
+        let cacheKey = "MarkHeadScene:max=\(maximumTextureDimension)"
+        if let cached: SCNScene = PoplurAssetCache.shared.asset(forKey: cacheKey, category: .scene) {
+            return cached
+        }
+
+        let loaded: SCNScene?
         // Primary: load MarkHead.scn from the Assets catalog data asset, then apply PBR textures.
         if let scene = loadFromAssetsDataset() {
             print("[MarkHeadView] Loaded MarkHead from Assets catalog")
-            return scene
+            loaded = scene
+        } else {
+            // Fallback: bundle file paths (only present in debug builds with source-tree access).
+            loaded = [("MarkHead", "scn"), ("MarkHead", "dae")].lazy.compactMap { candidate in
+                guard let url = Bundle.main.url(forResource: candidate.0, withExtension: candidate.1),
+                      let scene = try? SCNScene(url: url, options: [
+                          SCNSceneSource.LoadingOption.convertUnitsToMeters: true,
+                          SCNSceneSource.LoadingOption.convertToYUp: true
+                      ]) else {
+                    return nil
+                }
+                print("[MarkHeadView] Loaded \(candidate.0).\(candidate.1) from bundle")
+                return scene
+            }.first
         }
-        // Fallback: bundle file paths (only present in debug builds with source-tree access).
-        for candidate in [("MarkHead", "scn"), ("MarkHead", "dae")] {
-            guard let url = Bundle.main.url(forResource: candidate.0, withExtension: candidate.1),
-                  let scene = try? SCNScene(url: url, options: [
-                      SCNSceneSource.LoadingOption.convertUnitsToMeters: true,
-                      SCNSceneSource.LoadingOption.convertToYUp: true
-                  ]) else {
-                continue
-            }
-            print("[MarkHeadView] Loaded \(candidate.0).\(candidate.1) from bundle")
-            applyMeshyTextures(to: scene)
-            return scene
-        }
-        return makeProceduralFallbackScene()
+        guard let loaded else { return makeProceduralFallbackScene() }
+        applyMeshyTextures(to: loaded, maximumTextureDimension: maximumTextureDimension)
+        let textureBytes = maximumTextureDimension * maximumTextureDimension * 4 * 5
+        _ = PoplurAssetCache.shared.insert(
+            loaded,
+            forKey: cacheKey,
+            category: .scene,
+            estimatedByteCost: 46_500_000 + textureBytes
+        )
+        return loaded
     }
 
     private func loadFromAssetsDataset() -> SCNScene? {
@@ -141,17 +158,31 @@ final class MarkHeadViewCoordinator: NSObject, AVSpeechSynthesizerDelegate {
             SCNSceneSource.LoadingOption.convertUnitsToMeters: true,
             SCNSceneSource.LoadingOption.convertToYUp: true
         ]) else { return nil }
-        applyMeshyTextures(to: scene)
         return scene
     }
 
-    private func applyMeshyTextures(to scene: SCNScene) {
+    private func applyMeshyTextures(to scene: SCNScene, maximumTextureDimension: Int) {
         let prefix = "Meshy_AI_Mark_character_head_3_0630045036_image-to-3d-texture"
-        let diffuse  = UIImage(named: "\(prefix)e")          // imageset name ends with extra 'e'
-        let normal   = UIImage(named: "\(prefix)_normal")
-        let metallic = UIImage(named: "\(prefix)_metallic")
-        let roughness = UIImage(named: "\(prefix)_roughness")
-        let emission = UIImage(named: "\(prefix)_emission")
+        let diffuse = PoplurTextureLoader.image(
+            named: "\(prefix)e",
+            maximumPixelDimension: maximumTextureDimension
+        ) // imageset name ends with extra 'e'
+        let normal = PoplurTextureLoader.image(
+            named: "\(prefix)_normal",
+            maximumPixelDimension: maximumTextureDimension
+        )
+        let metallic = PoplurTextureLoader.image(
+            named: "\(prefix)_metallic",
+            maximumPixelDimension: maximumTextureDimension
+        )
+        let roughness = PoplurTextureLoader.image(
+            named: "\(prefix)_roughness",
+            maximumPixelDimension: maximumTextureDimension
+        )
+        let emission = PoplurTextureLoader.image(
+            named: "\(prefix)_emission",
+            maximumPixelDimension: maximumTextureDimension
+        )
         scene.rootNode.enumerateHierarchy { node, _ in
             node.geometry?.materials.forEach { mat in
                 mat.lightingModel = .physicallyBased
@@ -331,6 +362,7 @@ final class MarkHeadViewCoordinator: NSObject, AVSpeechSynthesizerDelegate {
 
     // MARK: Playback
 
+    @MainActor
     private func startPlayback() {
         guard let format = pendingBuffers.first?.format else { finishSpeaking(); return }
 
@@ -368,6 +400,7 @@ final class MarkHeadViewCoordinator: NSObject, AVSpeechSynthesizerDelegate {
 
     // MARK: Lip Sync (CADisplayLink)
 
+    @MainActor
     private func startLipSync() {
         displayLink?.invalidate()
         displayLink = CADisplayLink(target: self, selector: #selector(tick))

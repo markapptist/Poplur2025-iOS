@@ -121,6 +121,7 @@ private struct USDZViewerRepresentable: UIViewRepresentable {
             performanceRegistration?.invalidate()
             performanceRegistration = nil
             motion.stopDeviceMotionUpdates()
+            queue.cancelAllOperations()
             arView?.session.pause()
             arView?.scene.anchors.removeAll()
             arView = nil
@@ -128,6 +129,19 @@ private struct USDZViewerRepresentable: UIViewRepresentable {
             modelEntity = nil
         }
 
-        deinit { tearDown() }
+        deinit {
+            let registration = performanceRegistration
+            let retainedMotion = motion
+            let retainedQueue = queue
+            let view = arView
+            Task { @MainActor in
+                registration?.setVisible(false)
+                registration?.invalidate()
+                retainedMotion.stopDeviceMotionUpdates()
+                retainedQueue.cancelAllOperations()
+                view?.session.pause()
+                view?.scene.anchors.removeAll()
+            }
+        }
     }
 }

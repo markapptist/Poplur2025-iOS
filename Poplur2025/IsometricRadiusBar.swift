@@ -789,7 +789,10 @@ private struct RadiusBarSceneView: UIViewRepresentable {
         private func startFollowingGlobe() {
             stopFollowingGlobe()
             let link = CADisplayLink(target: self, selector: #selector(followTick(_:)))
-            let target = Float(PoplurPerformanceManager.shared.targetFPS)
+            let targetFPS = MainActor.assumeIsolated {
+                PoplurPerformanceManager.shared.targetFPS
+            }
+            let target = Float(targetFPS)
             link.preferredFrameRateRange = CAFrameRateRange(minimum: 10, maximum: target, preferred: target)
             link.add(to: .main, forMode: .common)
             followLink = link
@@ -806,7 +809,10 @@ private struct RadiusBarSceneView: UIViewRepresentable {
             loopPhase = .rising
             loopTime = 0
             let link = CADisplayLink(target: self, selector: #selector(loopTick(_:)))
-            let target = Float(PoplurPerformanceManager.shared.targetFPS)
+            let targetFPS = MainActor.assumeIsolated {
+                PoplurPerformanceManager.shared.targetFPS
+            }
+            let target = Float(targetFPS)
             link.preferredFrameRateRange = CAFrameRateRange(minimum: 10, maximum: target, preferred: target)
             link.add(to: .main, forMode: .common)
             loopLink = link

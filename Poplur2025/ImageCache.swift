@@ -94,13 +94,17 @@ actor CachedImageLoader {
 /// catalogs do not expose a file URL for ImageIO thumbnail decoding, so this
 /// path resamples immediately after catalog lookup. Runtime/network images use
 /// the ImageIO path above and avoid decoding the full source in the first place.
-@MainActor
 enum PoplurTextureLoader {
-    static func image(named name: String, maximumPixelDimension: Int? = nil) -> UIImage? {
-        let maximumPixels = max(
-            256,
-            maximumPixelDimension ?? PoplurPerformanceManager.shared.maximumPreferredTextureResolution
+    @MainActor
+    static func image(named name: String) -> UIImage? {
+        image(
+            named: name,
+            maximumPixelDimension: PoplurPerformanceManager.shared.maximumPreferredTextureResolution
         )
+    }
+
+    static func image(named name: String, maximumPixelDimension: Int) -> UIImage? {
+        let maximumPixels = max(256, maximumPixelDimension)
         let cacheKey = "CatalogTexture:\(name):max=\(maximumPixels)"
         if let cached: UIImage = PoplurAssetCache.shared.asset(
             forKey: cacheKey,

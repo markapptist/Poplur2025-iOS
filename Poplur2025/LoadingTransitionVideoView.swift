@@ -22,7 +22,16 @@ struct LoadingTransitionVideoView: UIViewRepresentable {
             playerLayer?.player = nil
         }
 
-        deinit { tearDown() }
+        deinit {
+            let registration = performanceRegistration
+            let retainedPlayer = player
+            Task { @MainActor in
+                registration?.setVisible(false)
+                registration?.invalidate()
+                retainedPlayer?.pause()
+                retainedPlayer?.removeAllItems()
+            }
+        }
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }

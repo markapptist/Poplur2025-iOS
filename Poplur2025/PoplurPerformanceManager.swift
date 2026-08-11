@@ -238,7 +238,7 @@ final class PoplurPerformanceManager: ObservableObject {
         guard applicationLifecycle != lifecycle else { return }
         applicationLifecycle = lifecycle
         if lifecycle == .background {
-            assetCache.trim(toByteCount: baseCacheLimits.byteLimit / 2, reason: .background)
+            _ = assetCache.purge(reason: .background)
         }
         recomputeMode(reason: "App \(lifecycle.rawValue)")
     }
@@ -294,6 +294,9 @@ final class PoplurPerformanceManager: ObservableObject {
 
         if !registration.isVisible {
             registration.purgeIfInactive()
+            if registration.classification == .heavy {
+                releaseReusableRendererAssets()
+            }
             debugLog("Paused renderer: \(registration.name) (not visible)")
         }
         reconcileRenderers()
@@ -304,12 +307,15 @@ final class PoplurPerformanceManager: ObservableObject {
         registration.onPurgeInactiveResources()
         registrations.removeValue(forKey: registration.id)
         if activeHeavyRendererID == registration.id { activeHeavyRendererID = nil }
+        if registration.classification == .heavy { releaseReusableRendererAssets() }
         reconcileRenderers()
     }
 
     fileprivate func rendererRegistrationDidDeinit(id: UUID) {
+        let wasHeavy = registrations[id]?.value?.classification == .heavy
         registrations.removeValue(forKey: id)
         if activeHeavyRendererID == id { activeHeavyRendererID = nil }
+        if wasHeavy { releaseReusableRendererAssets() }
         reconcileRenderers()
     }
 
@@ -380,6 +386,8 @@ final class PoplurPerformanceManager: ObservableObject {
         if previousHeavyID != activeHeavyRendererID,
            let previous = previousHeavyID.flatMap({ registrations[$0]?.value }),
            let current = activeHeavyRendererID.flatMap({ registrations[$0]?.value }) {
+            previous.purgeIfInactive()
+            releaseReusableRendererAssets()
             debugLog("Paused renderer: \(previous.name) (replaced by \(current.name))")
         }
 
@@ -405,6 +413,17 @@ final class PoplurPerformanceManager: ObservableObject {
     private func purgeInactiveRendererResources() {
         compactRegistrations()
         registrations.values.compactMap(\.value).forEach { $0.purgeIfInactive() }
+    }
+
+    /// Live renderer objects own their currently displayed resources. These
+    /// entries are reusable copies only, so dropping them on a heavy-renderer
+    /// handoff cannot blank the new screen and prevents inactive 3D/video
+    /// resources from lingering outside the strict budget.
+    private func releaseReusableRendererAssets() {
+        assetCache.removeAll(category: .model)
+        assetCache.removeAll(category: .scene)
+        assetCache.removeAll(category: .texture)
+        assetCache.removeAll(category: .video)
     }
 
     private func compactRegistrations() {
