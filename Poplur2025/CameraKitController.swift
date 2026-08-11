@@ -128,6 +128,12 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
     private var liveTimer: Timer?
     private var performanceRegistration: PoplurPerformanceRegistration?
     private var thermalTripwireCancellable: AnyCancellable?
+    /// Capture-device pressure rises before the process-wide thermal tripwire.
+    /// Observe it without polling so Camera can shed sensor/ISP work while the
+    /// preview remains continuously visible. Owned and invalidated on the
+    /// serial session queue so a parked camera retains no device observer.
+    private var systemPressureObservation: NSKeyValueObservation?
+    private var capturePressureCappedForCurrentLease = false
     private var performanceWantsCapture = false
     private var recordingDeadlineTask: DispatchWorkItem?
     private var photoAtomicDeadlineTask: DispatchWorkItem?
@@ -174,8 +180,19 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
     private static let recordingMaximumDuration: TimeInterval = 10
     private static let recordingStopAcknowledgementDuration: TimeInterval = 1
     private static let photoAtomicMaximumDuration: TimeInterval = 3
-    private static let previewFrameRate = 24
+    // Keep the sharp 1080p preview, but cap its capture graph below the old
+    // 24 FPS sustained load. Recording remains 24 FPS. If capture-device
+    // pressure rises, 15 FPS is the conservative continuous-preview floor;
+    // this deliberately avoids the visibly laggy 10 FPS deployment.
+    private static let previewFrameRate = 18
+    private static let pressurePreviewFrameRate = 15
     private static let recordingFrameRateLimit = 24
+    private static let previewAnalysisFrameSampleInterval: TimeInterval = 2.5
+    private static let pressureAnalysisFrameSampleInterval: TimeInterval = 3.5
+    private static let activeFilterFrameSampleInterval: TimeInterval = 0.5
+    private static let pressureActiveFilterFrameSampleInterval: TimeInterval = 0.75
+    private static let activeFilterPresentationHoldDuration: TimeInterval = 1.25
+    private static let pressureActiveFilterPresentationHoldDuration: TimeInterval = 1.75
     private static let coldBudgetRecordLimit = 16
     private static let coldBudgetDefaultsKey = "CameraKitController.coldBudget.v2"
 
@@ -225,6 +242,11 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
     private var quarantinedAnalysisClaimID: UInt64?
     private var quarantinedAnalysisPipeline: CameraAnalysisPipeline?
     private var lastAnalysisTimeoutFamily: String?
+    /// Protected by analysisStateLock. Explicit AR gets a separate bounded
+    /// lane so its overlay remains usable without restoring the default idle
+    /// AI cadence for face/classification/box work.
+    private var activeFilterMinimumDispatchSpacing = CameraKitController.activeFilterFrameSampleInterval
+    private var activeFilterPresentationHold = CameraKitController.activeFilterPresentationHoldDuration
     private var pendingMLDetectionHandler: (([DetectedObject]) -> Void)?
     private var faceRecognitionCompletion: AnyCancellable?
     private let arFilterStateLock = NSLock()
@@ -235,7 +257,9 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
     private let minimumAnalysisDispatchSpacing: TimeInterval = 0.67
     private let minimumPerFamilyAnalysisSpacing: TimeInterval = 2.0
     private let maximumAnalysisClaimDuration: TimeInterval = 4.0
-    private let analysisFrameSampleInterval: TimeInterval = 1.5
+    /// Session-queue confined. AI/filters still receive fresh frames, but an
+    /// idle preview does not wake the BGRA + Vision/Core ML path every 1.5s.
+    private var analysisFrameSampleInterval = CameraKitController.previewAnalysisFrameSampleInterval
 
     // Camera position tracking
     var currentCameraPosition: AVCaptureDevice.Position = .back
@@ -264,6 +288,7 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
     deinit {
         NotificationCenter.default.removeObserver(self)
         liveTimer?.invalidate()
+        systemPressureObservation?.invalidate()
         videoDataOutput?.setSampleBufferDelegate(nil, queue: nil)
         let session = captureSession
         let temporaryRecordingURLs = [activeRecordingOutputURL, lastVideoURL].compactMap { $0 }
@@ -543,6 +568,9 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
             if self.captureSession.isRunning {
                 self.captureSession.stopRunning()
             }
+            self.systemPressureObservation?.invalidate()
+            self.systemPressureObservation = nil
+            self.capturePressureCappedForCurrentLease = false
 
             self.hardDeadlineStateLock.lock()
             let captureDelegateOwnsOutputs = self.hardDeadlinePhotoSettingsUniqueID != nil
@@ -1297,10 +1325,10 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
             captureSession.beginConfiguration()
             defer { captureSession.commitConfiguration() }
 
-            // Use an explicit 1080p ceiling for a sharp full-screen preview;
-            // `.high` can silently select 4K on newer phones. Expensive BGRA
-            // analysis is sampled separately rather than processing all 24
-            // preview frames.
+            // Keep an explicit 1080p ceiling for a sharp full-screen preview;
+            // `.high` can silently select 4K on newer devices. Sensor/ISP
+            // bandwidth is capped separately below, so energy reduction does
+            // not come from returning to the blurry 720p configuration.
             if captureSession.canSetSessionPreset(.hd1920x1080) {
                 captureSession.sessionPreset = .hd1920x1080
             } else if captureSession.canSetSessionPreset(.hd1280x720) {
@@ -1313,6 +1341,7 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
             captureSession.addInput(input)
             currentVideoInput = input
             currentCameraPosition = device.position
+            installSystemPressureObservationOnQueue(for: device)
             applyDefaultZoomOnQueue(to: device)
 
             if captureSession.canAddOutput(photoOutput) {
@@ -1343,6 +1372,68 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
             ?? AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: position)
             ?? AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)
             ?? AVCaptureDevice.default(for: .video)
+    }
+
+    /// Capture pressure is a camera-specific early warning and typically moves
+    /// before ProcessInfo's device-wide thermal state. Once it rises during a
+    /// lease, latch the conservative cap until Camera is fully parked rather
+    /// than oscillating between frame rates as the enclosure cools.
+    private func installSystemPressureObservationOnQueue(for device: AVCaptureDevice) {
+        systemPressureObservation?.invalidate()
+        capturePressureCappedForCurrentLease = device.systemPressureState.level != .nominal
+        updateAnalysisCadenceOnQueue()
+        systemPressureObservation = device.observe(\.systemPressureState, options: [.new]) {
+            [weak self, weak device] _, _ in
+            guard let self, let device else { return }
+            let level = device.systemPressureState.level
+            self.sessionQueue.async { [weak self, weak device] in
+                guard let self,
+                      let device,
+                      self.currentVideoInput?.device.uniqueID == device.uniqueID else { return }
+                self.applyCaptureSystemPressureOnQueue(level)
+            }
+        }
+    }
+
+    private func applyCaptureSystemPressureOnQueue(
+        _ level: AVCaptureDevice.SystemPressureState.Level
+    ) {
+        guard level != .nominal else { return }
+        capturePressureCappedForCurrentLease = true
+        updateAnalysisCadenceOnQueue()
+        guard isCaptureDesired(), !isRecording else { return }
+        let applied = applyCameraFrameRateOnQueue(Self.pressurePreviewFrameRate)
+        #if DEBUG
+        print(
+            "[PoplurPerformance] Camera pressure=\(level.rawValue) "
+                + "fps=\(Self.pressurePreviewFrameRate) analysis="
+                + "\(analysisFrameSampleInterval)s applied=\(applied)"
+        )
+        #endif
+    }
+
+    /// Session-queue entry point for both the default AI sampler and the
+    /// explicit-filter lane. AR raises only its own bounded cadence; face,
+    /// classification and object-box analysis are paused while AR is active.
+    private func updateAnalysisCadenceOnQueue() {
+        let filterActive = isARFilterProcessingWanted()
+        let pressureCapped = capturePressureCappedForCurrentLease
+        analysisFrameSampleInterval = filterActive
+            ? (pressureCapped
+                ? Self.pressureActiveFilterFrameSampleInterval
+                : Self.activeFilterFrameSampleInterval)
+            : (pressureCapped
+                ? Self.pressureAnalysisFrameSampleInterval
+                : Self.previewAnalysisFrameSampleInterval)
+
+        analysisStateLock.lock()
+        activeFilterMinimumDispatchSpacing = pressureCapped
+            ? Self.pressureActiveFilterFrameSampleInterval
+            : Self.activeFilterFrameSampleInterval
+        activeFilterPresentationHold = pressureCapped
+            ? Self.pressureActiveFilterPresentationHoldDuration
+            : Self.activeFilterPresentationHoldDuration
+        analysisStateLock.unlock()
     }
 
     /// The video zoom factor that shows as "1×" in the UI. On a virtual
@@ -1421,7 +1512,8 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
         }
 
         let shouldRun = granted && performanceWantsCapture
-        let dataProcessingAllowed = shouldRun && !isRecording
+        let recording = isRecording
+        let dataProcessingAllowed = shouldRun && !recording
         frameProcessingLock.lock()
         frameProcessingAllowed = dataProcessingAllowed
         frameProcessingLock.unlock()
@@ -1429,7 +1521,7 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
             && isMLDetectionEnabled
             && policy.mode != .emergency
 
-        let requestedFPS = isRecording
+        let requestedFPS = recording
             ? max(1, min(Self.recordingFrameRateLimit, policy.targetFPS(for: .interactive)))
             : max(1, min(Self.previewFrameRate, policy.targetFPS(for: .interactive)))
         let captureGeneration = setCaptureDesired(shouldRun)
@@ -1440,11 +1532,16 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
                     generation: captureGeneration,
                     desired: true
                 ) else { return }
+                let pressureCapped = self.capturePressureCappedForCurrentLease && !recording
+                self.updateAnalysisCadenceOnQueue()
+                let effectiveFPS = pressureCapped
+                    ? min(requestedFPS, Self.pressurePreviewFrameRate)
+                    : requestedFPS
                 if self.wantsVideoFrameDelivery && self.videoDataOutput == nil {
                     self.attachVideoDataOutputOnQueue()
                 }
                 self.setVideoFrameDeliveryActiveOnQueue(dataProcessingAllowed)
-                guard self.applyCameraFrameRateOnQueue(requestedFPS) else {
+                guard self.applyCameraFrameRateOnQueue(effectiveFPS) else {
                     DispatchQueue.main.async { [weak self] in
                         self?.parkCamera(reason: .unavailable, canResume: true, preserveLastFrame: true)
                     }
@@ -1477,18 +1574,58 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
     }
 
     @discardableResult
+    private func currentCaptureFrameRateLimitOnQueue() -> Int {
+        if isRecording { return Self.recordingFrameRateLimit }
+        return capturePressureCappedForCurrentLease
+            ? Self.pressurePreviewFrameRate
+            : Self.previewFrameRate
+    }
+
+    @discardableResult
     private func applyCameraFrameRateOnQueue(_ requestedFPS: Int) -> Bool {
-        guard let device = currentVideoInput?.device else { return false }
-        let fps = Double(requestedFPS)
-        guard device.activeFormat.videoSupportedFrameRateRanges.contains(where: {
-            $0.minFrameRate <= fps && fps <= $0.maxFrameRate
+        guard let input = currentVideoInput else { return false }
+        let device = input.device
+        let supportedRanges = device.activeFormat.videoSupportedFrameRateRanges
+        // A recording that cannot run at 24 should preserve motion quality at
+        // 30 before considering the preview's lower-energy rates. Preview and
+        // pressure paths intentionally keep their low-first fallback order.
+        let candidates = isRecording
+            ? [requestedFPS, 30, Self.previewFrameRate, Self.pressurePreviewFrameRate]
+            : [requestedFPS, Self.pressurePreviewFrameRate, Self.previewFrameRate, 24, 30]
+        guard let selectedFPS = candidates.first(where: { candidate in
+            let fps = Double(candidate)
+            return supportedRanges.contains(where: {
+                $0.minFrameRate <= fps && fps <= $0.maxFrameRate
+            })
         }) else { return false }
+
+        let duration = CMTime(value: 1, timescale: CMTimeScale(selectedFPS))
+        let currentOverride = input.videoMinFrameDurationOverride
+        let overrideNeedsUpdate = !currentOverride.isValid
+            || currentOverride.timescale == 0
+            || CMTimeCompare(currentOverride, duration) != 0
+        let requiresLiveReconfiguration = captureSession.isRunning && overrideNeedsUpdate
+        if requiresLiveReconfiguration {
+            captureSession.beginConfiguration()
+        }
+        defer {
+            if requiresLiveReconfiguration {
+                captureSession.commitConfiguration()
+            }
+        }
+
         do {
             try device.lockForConfiguration()
-            let duration = CMTime(value: 1, timescale: CMTimeScale(requestedFPS))
+            defer { device.unlockForConfiguration() }
+            // activeVideo* controls delivered cadence. The input override is
+            // equally important: it tells AVCaptureSession to allocate the
+            // capture graph for this maximum rather than the active format's
+            // potentially 60/120/240 FPS ceiling. Without it, a nominally
+            // 24 FPS preview can still carry the sensor/ISP pressure of that
+            // much higher format maximum.
+            input.videoMinFrameDurationOverride = duration
             device.activeVideoMinFrameDuration = duration
             device.activeVideoMaxFrameDuration = duration
-            device.unlockForConfiguration()
             return true
         } catch {
             #if DEBUG
@@ -1524,6 +1661,7 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
                 captureSession.addInput(newInput)
                 currentVideoInput = newInput
                 currentCameraPosition = device.position
+                installSystemPressureObservationOnQueue(for: device)
                 applyDefaultZoomOnQueue(to: device)
             } else if let oldInput = currentVideoInput, captureSession.canAddInput(oldInput) {
                 captureSession.addInput(oldInput)
@@ -1535,7 +1673,7 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
 
             captureSession.commitConfiguration()
 
-            let fpsLimit = isRecording ? Self.recordingFrameRateLimit : Self.previewFrameRate
+            let fpsLimit = currentCaptureFrameRateLimitOnQueue()
             if !applyCameraFrameRateOnQueue(fpsLimit) {
                 DispatchQueue.main.async { [weak self] in
                     self?.parkCamera(reason: .unavailable, canResume: true, preserveLastFrame: true)
@@ -1726,9 +1864,10 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
         }
     }
 
-    /// Runs on sessionQueue. Hardware preview remains a smooth 24 FPS, while
-    /// the costly BGRA/Vision/AR path opens for one frame every 1.5 seconds.
-    /// AR never changes ownership of the full-rate sensor preview.
+    /// Runs on sessionQueue. The hardware preview remains continuously visible
+    /// at its governed cadence. Default AI opens the costly BGRA path every
+    /// 2.5s (3.5s under pressure); an explicit AR filter temporarily uses its
+    /// separate 0.5s/0.75s lane. Neither owns the full-rate sensor preview.
     private func setVideoFrameDeliveryActiveOnQueue(_ active: Bool) {
         nextAnalysisSampleWorkItem?.cancel()
         nextAnalysisSampleWorkItem = nil
@@ -1811,7 +1950,7 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
         let shouldDeliver = frameProcessingAllowed && isCaptureDesired()
         frameProcessingLock.unlock()
         setVideoFrameDeliveryActiveOnQueue(shouldDeliver)
-        let fpsLimit = isRecording ? Self.recordingFrameRateLimit : Self.previewFrameRate
+        let fpsLimit = currentCaptureFrameRateLimitOnQueue()
         if !applyCameraFrameRateOnQueue(fpsLimit) {
             DispatchQueue.main.async { [weak self] in
                 self?.parkCamera(reason: .unavailable, canResume: true, preserveLastFrame: true)
@@ -1878,7 +2017,7 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
             let shouldDeliver = self.frameProcessingAllowed && self.isCaptureDesired()
             self.frameProcessingLock.unlock()
             self.setVideoFrameDeliveryActiveOnQueue(shouldDeliver)
-            let fpsLimit = self.isRecording ? Self.recordingFrameRateLimit : Self.previewFrameRate
+            let fpsLimit = self.currentCaptureFrameRateLimitOnQueue()
             if !self.applyCameraFrameRateOnQueue(fpsLimit) {
                 DispatchQueue.main.async { [weak self] in
                     self?.parkCamera(reason: .unavailable, canResume: true, preserveLastFrame: true)
@@ -1933,7 +2072,8 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
     
     // MARK: - Video Sample Buffer Delegate
     
-    // CRITICAL: Do NOT use @MainActor here - video frames arrive at 30-60fps
+    // CRITICAL: Do NOT use @MainActor here - sampled video frames arrive on
+    // the dedicated output queue.
     // Running this on main thread will freeze the UI
     func captureOutput(
         _ output: AVCaptureOutput,
@@ -1968,7 +2108,7 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
         
         // Once an AR manager exists, filtered frames are scheduled as one of
         // the serialized sampled families below. Running its landmark request
-        // on every 24 FPS hardware-preview frame was the camera's largest
+        // on every hardware-preview frame was the camera's largest
         // avoidable spike.
         guard let displayLayer, !isARFilterProcessingWanted() else { return }
         DispatchQueue.main.async {
@@ -1998,10 +2138,15 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
               !analysisTimedOutForCurrentWindow,
               now >= nextAnalysisDispatchUptime else { return nil }
 
-        var candidate = nextAnalysisPipeline
-        for _ in 0..<4 {
+        let activeFilterOnly = isARFilterProcessingWanted()
+        var candidate: CameraAnalysisPipeline = activeFilterOnly ? .arFilter : nextAnalysisPipeline
+        let candidateCount = activeFilterOnly ? 1 : 4
+        for _ in 0..<candidateCount {
             let lastDispatch = lastAnalysisDispatchUptime[candidate] ?? -.greatestFiniteMagnitude
-            let familyIsDue = now - lastDispatch >= minimumPerFamilyAnalysisSpacing
+            let requiredSpacing = candidate == .arFilter
+                ? activeFilterMinimumDispatchSpacing
+                : minimumPerFamilyAnalysisSpacing
+            let familyIsDue = now - lastDispatch >= requiredSpacing
             let familyIsAvailable: Bool
             switch candidate {
             case .faceRecognition:
@@ -2011,12 +2156,12 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
             case .objectBoxes:
                 familyIsAvailable = visionBoxDetector != nil
             case .arFilter:
-                familyIsAvailable = isARFilterProcessingWanted()
+                familyIsAvailable = activeFilterOnly
                     && arFilterManager != nil
                     && displayLayer != nil
             }
 
-            nextAnalysisPipeline = candidate.next
+            nextAnalysisPipeline = activeFilterOnly ? .arFilter : candidate.next
             if familyIsDue && familyIsAvailable {
                 analysisInFlight = true
                 activeAnalysisPipeline = candidate
@@ -2027,7 +2172,9 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
                     pipeline: candidate
                 )
                 lastAnalysisDispatchUptime[candidate] = now
-                nextAnalysisDispatchUptime = now + minimumAnalysisDispatchSpacing
+                nextAnalysisDispatchUptime = now + (candidate == .arFilter
+                    ? activeFilterMinimumDispatchSpacing
+                    : minimumAnalysisDispatchSpacing)
                 analysisClaimTimeoutTask?.cancel()
                 analysisClaimTimeoutTask = Task { [weak self] in
                     try? await Task.sleep(for: .seconds(self?.maximumAnalysisClaimDuration ?? 4))
@@ -2036,7 +2183,7 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
                 }
                 return claim
             }
-            candidate = candidate.next
+            candidate = activeFilterOnly ? .arFilter : candidate.next
         }
         return nil
     }
@@ -2114,11 +2261,23 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
         arFilterStateLock.unlock()
         sessionQueue.async { [weak self] in
             guard let self, self.isCaptureDesired() else { return }
+            self.updateAnalysisCadenceOnQueue()
+            self.analysisStateLock.lock()
+            self.nextAnalysisPipeline = wanted ? .arFilter : .faceRecognition
+            self.nextAnalysisDispatchUptime = 0
+            self.analysisStateLock.unlock()
             self.frameProcessingLock.lock()
             let allowed = self.frameProcessingAllowed
             self.frameProcessingLock.unlock()
             self.setVideoFrameDeliveryActiveOnQueue(allowed)
         }
+    }
+
+    private func currentActiveFilterPresentationHold() -> TimeInterval {
+        analysisStateLock.lock()
+        let duration = activeFilterPresentationHold
+        analysisStateLock.unlock()
+        return duration
     }
 
     private func runARAnalysis(
@@ -2130,6 +2289,7 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
             finishAnalysisPipeline(claimID: claim.id)
             return
         }
+        let presentationHold = currentActiveFilterPresentationHold()
         manager.applyFilterToVideoFrame(sampleBuffer) { [weak self, weak displayLayer] filteredBuffer in
             guard let self else { return }
             defer { self.finishAnalysisPipeline(claimID: claim.id) }
@@ -2147,16 +2307,18 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
                     displayLayer.flushAndRemoveImage()
                 }
                 if self.safelyEnqueueSampleBuffer(bufferToDisplay, to: displayLayer) {
-                    self.cameraPreviewViewController.markFilteredFrameReady()
+                    self.cameraPreviewViewController.markFilteredFrameReady(
+                        holdDuration: presentationHold
+                    )
                 }
             }
         }
     }
 
-    /// Run no family faster than once every two seconds, and retain the shared
-    /// claim until its asynchronous work finishes. The old path launched AR
-    /// landmarks on every frame while classification, four box requests and
-    /// face recognition competed on private queues.
+    /// Default AI families run no faster than once every two seconds. An
+    /// explicitly selected AR filter temporarily owns the serialized lane at
+    /// its bounded 2/1.3 FPS cadence; classification, boxes and recognition
+    /// stay paused until the filter is dismissed.
     private func dispatchNextAnalysisPipeline(
         sampleBuffer: CMSampleBuffer,
         pixelBuffer: CVPixelBuffer

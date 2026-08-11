@@ -209,16 +209,18 @@ final class CameraPreviewViewController: UIViewController {
         applyPreviewLayerVisibility()
     }
 
-    public func markFilteredFrameReady() {
+    public func markFilteredFrameReady(holdDuration: TimeInterval = 0.18) {
         guard wantsFilteredPreview else { return }
         filteredFramePresentationGeneration &+= 1
         let generation = filteredFramePresentationGeneration
+        let boundedHoldDuration = max(0.18, min(holdDuration, 2.0))
         hasFilteredFrame = true
         applyPreviewLayerVisibility()
-        // Filter work is deliberately sampled. Never leave its last processed
-        // buffer covering the continuously moving hardware preview, which
-        // looks like a frozen/laggy camera between samples.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) { [weak self] in
+        // Each new filtered frame supersedes the previous expiry. The AR lane
+        // therefore remains visually continuous at its bounded sampled rate,
+        // instead of flashing raw preview between samples, while a stalled
+        // filter still falls back to the live hardware preview within 2s.
+        DispatchQueue.main.asyncAfter(deadline: .now() + boundedHoldDuration) { [weak self] in
             guard let self,
                   self.filteredFramePresentationGeneration == generation,
                   self.wantsFilteredPreview else { return }
