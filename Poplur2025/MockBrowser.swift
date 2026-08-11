@@ -81,12 +81,12 @@ private struct BrowserSpriteSceneView: UIViewRepresentable {
     let urlString: String
 
     func makeUIView(context: Context) -> SKView {
-        let view = SKView(frame: .zero)
+        let view = PoplurManagedSKView(performanceName: "BrowserChrome2D")
         view.allowsTransparency = true
         view.backgroundColor = .clear
         view.isOpaque = false
         view.ignoresSiblingOrder = true
-        view.preferredFramesPerSecond = 60
+        view.preferredFramesPerSecond = PoplurPerformanceManager.shared.targetFPS
         view.isUserInteractionEnabled = false
         scene.scaleMode = .resizeFill
         view.presentScene(scene)
@@ -100,6 +100,10 @@ private struct BrowserSpriteSceneView: UIViewRepresentable {
         let size = uiView.bounds.size
         guard size.width > 1, size.height > 1 else { return }
         scene.updateLayout(size: size, urlString: urlString)
+    }
+
+    static func dismantleUIView(_ uiView: SKView, coordinator: ()) {
+        (uiView as? PoplurManagedSKView)?.poplurTearDown()
     }
 }
 

@@ -105,8 +105,14 @@ struct PoplurGameLaunchView: View {
                 Text("AI is generating your game\(String(repeating: ".", count: dotCount))")
                     .font(.system(size: 16, weight: .medium, design: .rounded))
                     .foregroundStyle(.white.opacity(0.75))
-                    .onAppear {
-                        Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
+                    .task {
+                        while !Task.isCancelled {
+                            do {
+                                try await Task.sleep(for: .milliseconds(500))
+                            } catch {
+                                return
+                            }
+                            guard !Task.isCancelled else { return }
                             dotCount = (dotCount % 3) + 1
                         }
                     }
@@ -300,7 +306,11 @@ struct SpriteKitCharacterView: UIViewRepresentable {
     let scale: CGFloat
 
     func makeUIView(context: Context) -> SKView {
-        let v = SKView(); v.backgroundColor = .clear; v.allowsTransparency = true
+        let v = PoplurManagedSKView(
+            performanceName: "PoplurGameLaunch2D",
+            classification: .heavy,
+            rateClass: .interactive
+        ); v.backgroundColor = .clear; v.allowsTransparency = true
         return v
     }
     func updateUIView(_ v: SKView, context: Context) {

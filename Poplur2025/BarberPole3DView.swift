@@ -17,7 +17,7 @@ public struct BarberPole3DView: UIViewRepresentable {
     }
 
     public func makeUIView(context: Context) -> SCNView {
-        let scnView = SCNView(frame: .zero)
+        let scnView = PoplurManagedSCNView(performanceName: "BarberPole3D")
         scnView.backgroundColor = .clear
         scnView.autoenablesDefaultLighting = false
         scnView.allowsCameraControl = false

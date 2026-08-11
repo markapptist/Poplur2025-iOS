@@ -20,6 +20,7 @@ final class DeviceVolumeObserver: ObservableObject {
     private var volumeNotificationObserver: NSObjectProtocol?
     private var volumeObservation: NSKeyValueObservation?
     private var hideTask: Task<Void, Never>?
+    private var diagnosticsTimer: Timer?
     private var lastVolumePopTime: TimeInterval = 0
     private var lastShownLevel: Float = 0
     private var lastShowTime: TimeInterval = 0
@@ -70,7 +71,8 @@ final class DeviceVolumeObserver: ObservableObject {
         // switch and `.playback` does not, so the category alone often explains
         // a silent app. Also reports whether the meter is being asked to show,
         // which separates "the observer is deaf" from "the bars are hidden".
-        Timer.scheduledTimer(withTimeInterval: 15.0, repeats: true) { [weak self] _ in
+        #if DEBUG
+        diagnosticsTimer = Timer.scheduledTimer(withTimeInterval: 15.0, repeats: true) { [weak self] _ in
             let s = AVAudioSession.sharedInstance()
             let showing = self?.isShowing ?? false
             let line = "[PoplurAudio] category=\(s.category.rawValue) mode=\(s.mode.rawValue)"
@@ -80,6 +82,7 @@ final class DeviceVolumeObserver: ObservableObject {
             print(line)
             PoplurDiagLog.append(line)
         }
+        #endif
 
         volumeNotificationObserver = NotificationCenter.default.addObserver(
             forName: NSNotification.Name("AVSystemController_SystemVolumeDidChangeNotification"),
@@ -96,6 +99,7 @@ final class DeviceVolumeObserver: ObservableObject {
         }
         volumeObservation?.invalidate()
         hideTask?.cancel()
+        diagnosticsTimer?.invalidate()
     }
 
     func showForHardwareVolumePress(level newLevel: Float? = nil) {

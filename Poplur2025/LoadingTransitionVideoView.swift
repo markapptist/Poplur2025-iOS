@@ -5,9 +5,33 @@ import SceneKit
 // MARK: – Post-login loading screen (loops auth_transition.mp4)
 
 struct LoadingTransitionVideoView: UIViewRepresentable {
+    @MainActor
     final class Coordinator {
         var player: AVQueuePlayer?
         var looper: AVPlayerLooper?
+        var performanceRegistration: PoplurPerformanceRegistration?
+
+        func tearDown(playerLayer: AVPlayerLayer? = nil) {
+            performanceRegistration?.setVisible(false)
+            performanceRegistration?.invalidate()
+            performanceRegistration = nil
+            player?.pause()
+            looper = nil
+            player?.removeAllItems()
+            player = nil
+            playerLayer?.player = nil
+        }
+
+        deinit {
+            let registration = performanceRegistration
+            let retainedPlayer = player
+            Task { @MainActor in
+                registration?.setVisible(false)
+                registration?.invalidate()
+                retainedPlayer?.pause()
+                retainedPlayer?.removeAllItems()
+            }
+        }
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -23,11 +47,29 @@ struct LoadingTransitionVideoView: UIViewRepresentable {
         context.coordinator.looper = looper
         view.playerLayer.player = queuePlayer
         view.playerLayer.videoGravity = .resizeAspect
-        queuePlayer.play()
+        let registration = PoplurPerformanceManager.shared.registerRenderer(
+            name: "AuthTransitionVideo",
+            classification: .decorative,
+            onPolicy: { [weak queuePlayer] _, granted in
+                granted ? queuePlayer?.play() : queuePlayer?.pause()
+            },
+            onPurgeInactiveResources: { [weak queuePlayer] in
+                queuePlayer?.pause()
+            }
+        )
+        context.coordinator.performanceRegistration = registration
+        view.visibilityChanged = { [weak registration] visible in
+            registration?.setVisible(visible)
+        }
         return view
     }
 
     func updateUIView(_ uiView: PlayerContainerView, context: Context) {}
+
+    static func dismantleUIView(_ uiView: PlayerContainerView, coordinator: Coordinator) {
+        uiView.visibilityChanged = nil
+        coordinator.tearDown(playerLayer: uiView.playerLayer)
+    }
 
     private static func videoURL() -> URL? {
         Bundle.main.url(forResource: "auth_transition", withExtension: "mp4")
@@ -36,6 +78,7 @@ struct LoadingTransitionVideoView: UIViewRepresentable {
 
     final class PlayerContainerView: UIView {
         let playerLayer = AVPlayerLayer()
+        var visibilityChanged: ((Bool) -> Void)?
 
         override init(frame: CGRect) {
             super.init(frame: frame)
@@ -51,6 +94,11 @@ struct LoadingTransitionVideoView: UIViewRepresentable {
             super.layoutSubviews()
             playerLayer.frame = bounds
         }
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            visibilityChanged?(window != nil && !isHidden && alpha > 0.01)
+        }
     }
 }
 
@@ -58,11 +106,11 @@ struct LoadingTransitionVideoView: UIViewRepresentable {
 
 struct LoginCubeLoadingView: UIViewRepresentable {
     func makeUIView(context: Context) -> SCNView {
-        let scnView = SCNView()
+        let scnView = PoplurManagedSCNView(performanceName: "LoginCubeLoading3D")
         scnView.backgroundColor = .white
         scnView.autoenablesDefaultLighting = true
         scnView.allowsCameraControl = false
-        scnView.preferredFramesPerSecond = 60
+        scnView.preferredFramesPerSecond = PoplurPerformanceManager.shared.targetFPS
         scnView.antialiasingMode = .multisampling4X
 
         let scene = SCNScene()
@@ -106,6 +154,10 @@ struct LoginCubeLoadingView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: SCNView, context: Context) {}
+
+    static func dismantleUIView(_ uiView: SCNView, coordinator: ()) {
+        (uiView as? PoplurManagedSCNView)?.poplurTearDown()
+    }
 
     private static func loadLoginCube() -> SCNNode? {
         let url = Bundle.main.url(forResource: "poplr_login_cube_equal_faces", withExtension: "dae", subdirectory: "LoginCube")

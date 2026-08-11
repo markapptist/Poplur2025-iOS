@@ -1490,7 +1490,8 @@ struct ProfileView: View {
         var current = barHeightFactor
         let incrementPerTick: CGFloat = 0.03
         while isHoldingCube && current < 1.0 {
-            try? await Task.sleep(nanoseconds: 33_000_000)
+            let fps = await MainActor.run { PoplurPerformanceManager.shared.targetFPS }
+            try? await Task.sleep(nanoseconds: UInt64(1_000_000_000 / max(1, fps)))
             current = min(1.0, current + incrementPerTick)
             await MainActor.run { barHeightFactor = current }
         }

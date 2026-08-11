@@ -31,14 +31,16 @@ enum PoplurPinModel {
 /// visually identical to a live 3D view but costs a fraction of the memory/GPU.
 @MainActor
 enum PoplurPinRenderer {
-    private static var cachedImage: UIImage?
     private static var isRendering = false
     private static var waiters: [(UIImage?) -> Void] = []
 
     /// Async: hands back the pre-rendered pin image (rendering it on first call, then cached).
     static func image(_ completion: @escaping (UIImage?) -> Void) {
-        if let cachedImage {
-            completion(cachedImage)
+        if let cached: UIImage = PoplurAssetCache.shared.asset(
+            forKey: "PoplurPin:snapshot:260x340",
+            category: .decodedImage
+        ) {
+            completion(cached)
             return
         }
         waiters.append(completion)
@@ -47,7 +49,14 @@ enum PoplurPinRenderer {
         // Defer a tick so the map can appear before the one-time decode/render hitch.
         DispatchQueue.main.async {
             let image = render()
-            cachedImage = image
+            if let image {
+                _ = PoplurAssetCache.shared.insert(
+                    image,
+                    forKey: "PoplurPin:snapshot:260x340",
+                    category: .decodedImage,
+                    estimatedByteCost: 260 * 340 * 4
+                )
+            }
             isRendering = false
             let pending = waiters
             waiters.removeAll()

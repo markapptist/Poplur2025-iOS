@@ -16,7 +16,7 @@ struct UserLocationParticleBurst: UIViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeUIView(context: Context) -> SKView {
-        let v = SKView()
+        let v = PoplurManagedSKView(performanceName: "UserLocationParticles2D")
         v.backgroundColor = .clear
         v.allowsTransparency = true
         v.isUserInteractionEnabled = false

@@ -65,12 +65,17 @@ struct TVStaticLoopingView: UIViewRepresentable {
     func updateUIView(_ uiView: TVStaticLoopingUIView, context: Context) {
         uiView.configure(isMuted: isMuted, volume: volume)
     }
+
+    static func dismantleUIView(_ uiView: TVStaticLoopingUIView, coordinator: ()) {
+        uiView.tearDown()
+    }
 }
 
 final class TVStaticLoopingUIView: UIView {
     private var player: AVQueuePlayer?
     private var looper: AVPlayerLooper?
     private var playerLayer: AVPlayerLayer?
+    private var performanceRegistration: PoplurPerformanceRegistration?
 
     init(isMuted: Bool = true, volume: Float = 1.0) {
         super.init(frame: .zero)
@@ -93,7 +98,16 @@ final class TVStaticLoopingUIView: UIView {
         self.player = queuePlayer
         self.looper = looper
         self.playerLayer = layer
-        queuePlayer.play()
+        performanceRegistration = PoplurPerformanceManager.shared.registerRenderer(
+            name: "TVStaticVideo",
+            classification: .decorative,
+            onPolicy: { [weak queuePlayer] _, granted in
+                granted ? queuePlayer?.play() : queuePlayer?.pause()
+            },
+            onPurgeInactiveResources: { [weak queuePlayer] in
+                queuePlayer?.pause()
+            }
+        )
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -108,5 +122,23 @@ final class TVStaticLoopingUIView: UIView {
         playerLayer?.frame = bounds
     }
 
-    deinit { player?.pause() }
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        performanceRegistration?.setVisible(window != nil && !isHidden && alpha > 0.01)
+    }
+
+    func tearDown() {
+        performanceRegistration?.setVisible(false)
+        performanceRegistration?.invalidate()
+        performanceRegistration = nil
+        player?.pause()
+        looper = nil
+        player?.removeAllItems()
+        playerLayer?.player = nil
+        playerLayer?.removeFromSuperlayer()
+        playerLayer = nil
+        player = nil
+    }
+
+    deinit { tearDown() }
 }

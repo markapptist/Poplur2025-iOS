@@ -45,16 +45,24 @@ enum CubeBrightness {
 // SCNSceneSource's C3DConvexPolyhedron path, an uncatchable native crash).
 private let runtimeCubeGLBLoadingEnabled = true
 
-// Parse each cube .glb ONCE into a native SCNGeometry node and reuse clones — a scrolling,
-// cube-heavy feed rebuilds an SCNView per post, so re-parsing every time is wasteful.
+// Parsed geometry is retained only inside PoplurAssetCache's strict byte/count budget.
 // Main-thread only (all callers run makeScene() on the main queue).
-private var cubeModelNodeCache: [String: SCNNode] = [:]
 
 /// Returns a cached SCNNode for a cube .glb, parsing it natively on first use.
 private func cachedCubeGeometryNode(from url: URL) -> SCNNode? {
-    if let cached = cubeModelNodeCache[url.path] { return cached }
+    let key = "CubeGeometry:\(url.standardizedFileURL.path)"
+    if let cached = PoplurAssetCache.shared.asset(forKey: key, category: .model, as: SCNNode.self) {
+        return cached
+    }
     guard let node = parseCubeGLBNode(from: url) else { return nil }
-    cubeModelNodeCache[url.path] = node
+    let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+    let fileBytes = (attributes?[.size] as? NSNumber)?.intValue ?? 0
+    _ = PoplurAssetCache.shared.insert(
+        node,
+        forKey: key,
+        category: .model,
+        estimatedByteCost: max(1_048_576, fileBytes * 4)
+    )
     return node
 }
 
@@ -202,18 +210,29 @@ private func embeddedBaseColorImage(js: [String: Any], data: Data, binOffset: In
 
 
 private enum CubeFaceImageCache {
-    private static var cache: [String: UIImage] = [:]
     static func image(for key: String, builder: () -> UIImage) -> UIImage {
-        if let img = cache[key] { return img }
+        let cacheKey = "CubeFace:\(key)"
+        if let img = PoplurAssetCache.shared.asset(forKey: cacheKey, category: .decodedImage, as: UIImage.self) {
+            return img
+        }
         let img = builder()
-        cache[key] = img
+        let width = max(1, Int((img.size.width * img.scale).rounded(.up)))
+        let height = max(1, Int((img.size.height * img.scale).rounded(.up)))
+        _ = PoplurAssetCache.shared.insert(
+            img,
+            forKey: cacheKey,
+            category: .decodedImage,
+            estimatedByteCost: width * height * 4
+        )
         return img
     }
     static func clearSkinCache() {
-        cache = cache.filter {
-            !$0.key.hasPrefix("face_bg_skin_") &&
-            !$0.key.hasPrefix("face_emission_neon_") &&
-            !$0.key.hasPrefix("face_cubemap_v2_")
+        PoplurAssetCache.shared.removeAll(category: .decodedImage) { key in
+            guard key.hasPrefix("CubeFace:") else { return false }
+            let rawKey = String(key.dropFirst("CubeFace:".count))
+            return rawKey.hasPrefix("face_bg_skin_")
+                || rawKey.hasPrefix("face_emission_neon_")
+                || rawKey.hasPrefix("face_cubemap_v2_")
         }
     }
 }
@@ -625,7 +644,7 @@ private struct CubeSceneView: UIViewRepresentable {
     var currentSkin: CubeSkin = CubeSkinStore.shared.current
 
     func makeUIView(context: Context) -> SCNView {
-        let scnView = SCNView()
+        let scnView = PoplurManagedSCNView(performanceName: "MainCube3D")
         scnView.backgroundColor = .clear
         // Removed: scnView.autoenablesDefaultLighting = false
         // Removed: scnView.rendersContinuously = true
@@ -633,13 +652,13 @@ private struct CubeSceneView: UIViewRepresentable {
         // Fast first frame: empty scene, no AA, lower FPS
         scnView.scene = SCNScene()
         scnView.isPlaying = true
-        scnView.preferredFramesPerSecond = 60
+        scnView.preferredFramesPerSecond = PoplurPerformanceManager.shared.targetFPS
         scnView.antialiasingMode = .multisampling4X
         // Defer full scene build and higher quality to next runloop
         DispatchQueue.main.async { [weak scnView] in
             guard let v = scnView else { return }
             v.scene = makeScene()
-            v.preferredFramesPerSecond = 120
+            v.preferredFramesPerSecond = PoplurPerformanceManager.shared.targetFPS
             v.isPlaying = true
             v.rendersContinuously = self.selectedTab == .record || self.selectedTab == .map
             // Removed: v.antialiasingMode = .multisampling4X
@@ -731,12 +750,14 @@ private struct CubeSceneView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: SCNView, context: Context) {
-        let shouldKeepRendererHot = selectedTab == .record || selectedTab == .map
+        let performance = PoplurPerformanceManager.shared
+        uiView.preferredFramesPerSecond = performance.targetFPS
+        let shouldKeepRendererHot = performance.isApplicationActive && (selectedTab == .record || selectedTab == .map)
         if uiView.rendersContinuously != shouldKeepRendererHot {
             uiView.rendersContinuously = shouldKeepRendererHot
         }
-        if !uiView.isPlaying {
-            uiView.isPlaying = true
+        if uiView.isPlaying != performance.isApplicationActive {
+            uiView.isPlaying = performance.isApplicationActive
         }
 
         // Keep tab state in sync
@@ -847,6 +868,18 @@ private struct CubeSceneView: UIViewRepresentable {
         coordinator.lastYawRightStep = previewYawRightStep
         coordinator.lastYawLeftStep = previewYawLeftStep
         return coordinator
+    }
+
+    static func dismantleUIView(_ uiView: SCNView, coordinator: Coordinator) {
+        coordinator.tearDown()
+        if let managed = uiView as? PoplurManagedSCNView {
+            managed.poplurTearDown()
+        } else {
+            uiView.isPlaying = false
+            uiView.rendersContinuously = false
+            uiView.scene?.isPaused = true
+            uiView.scene = nil
+        }
     }
 
     // MARK: - Scene
@@ -1597,8 +1630,8 @@ private struct CubeSceneView: UIViewRepresentable {
             }
             NotificationCenter.default.addObserver(forName: Notification.Name("CubePreviewSetFPS"), object: nil, queue: .main) { [weak self] notif in
                 guard let self = self, let scnView = self.view else { return }
-                let fps = (notif.userInfo?["fps"] as? Int) ?? 120
-                scnView.preferredFramesPerSecond = fps
+                let requestedFPS = (notif.userInfo?["fps"] as? Int) ?? PoplurPerformanceManager.shared.targetFPS
+                scnView.preferredFramesPerSecond = min(requestedFPS, PoplurPerformanceManager.shared.targetFPS)
             }
             
             // Flash/torch notifications - illuminate cube when flashlight is ON
@@ -1672,6 +1705,10 @@ private struct CubeSceneView: UIViewRepresentable {
         }
 
         deinit {
+            tearDown()
+        }
+
+        func tearDown() {
             peekTimer?.invalidate()
             peekTimer = nil
             if let token = skinChangeObserver {
@@ -1699,6 +1736,11 @@ private struct CubeSceneView: UIViewRepresentable {
             stopObservingMotion()
             stopObservingHold()
             stopAccelerometerSimulation()
+            popAVPlayer?.stop()
+            view?.isPlaying = false
+            view?.rendersContinuously = false
+            view?.scene?.isPaused = true
+            view = nil
         }
 
         func bindGeneratedCubeMaterials(from scene: SCNScene?) {
@@ -2742,7 +2784,7 @@ private struct _BackCubeSceneView: UIViewRepresentable {
     let skin: CubeSkin
 
     func makeUIView(context: Context) -> SCNView {
-        let scnView = SCNView(frame: .zero)
+        let scnView = PoplurManagedSCNView(performanceName: "BackCube3D")
         scnView.backgroundColor = .clear
         scnView.antialiasingMode = .multisampling2X
         scnView.isPlaying = false
@@ -2752,6 +2794,10 @@ private struct _BackCubeSceneView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: SCNView, context: Context) {}
+
+    static func dismantleUIView(_ uiView: SCNView, coordinator: ()) {
+        (uiView as? PoplurManagedSCNView)?.poplurTearDown()
+    }
 
     private func buildScene() -> SCNScene {
         let scene = SCNScene()

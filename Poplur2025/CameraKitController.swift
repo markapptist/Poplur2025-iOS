@@ -46,6 +46,10 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
     // Display layer for rendering processed frames
     var displayLayer: AVSampleBufferDisplayLayer?
     private var liveTimer: Timer?
+    private var performanceRegistration: PoplurPerformanceRegistration?
+    private var performanceWantsCapture = false
+    private let frameProcessingLock = NSLock()
+    private var frameProcessingAllowed = false
 
     // Camera position tracking
     var currentCameraPosition: AVCaptureDevice.Position = .back
@@ -74,6 +78,11 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
     deinit {
         NotificationCenter.default.removeObserver(self)
         liveTimer?.invalidate()
+        videoDataOutput?.setSampleBufferDelegate(nil, queue: nil)
+        let session = captureSession
+        sessionQueue.async {
+            if session.isRunning { session.stopRunning() }
+        }
     }
 
     @MainActor
@@ -85,12 +94,7 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
     func startPreview() async {
         await configureSessionIfNeeded()
         guard isReady else { return }
-        sessionQueue.async { [weak self] in
-            guard let self else { return }
-            if !self.captureSession.isRunning {
-                self.captureSession.startRunning()
-            }
-        }
+        resumeCapture()
     }
 
     @MainActor
@@ -105,27 +109,28 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
 
     /// Suspends the capture stream without tearing down session config.
     /// Call on tab-hide; pair with resumeCapture() on tab-show.
+    @MainActor
     func suspendCapture() {
-        sessionQueue.async { [weak self] in
-            guard let self, self.captureSession.isRunning else { return }
-            self.captureSession.stopRunning()
-        }
+        performanceWantsCapture = false
+        performanceRegistration?.setVisible(false)
+        applyCapturePerformance(policy: PoplurPerformanceManager.shared.policy, granted: false)
         mlDetectionManager?.isEnabled = false
     }
 
     /// Resumes the capture stream after suspendCapture().
     /// Does nothing if the session was never configured.
+    @MainActor
     func resumeCapture() {
         guard isReady else { return }
-        sessionQueue.async { [weak self] in
-            guard let self, !self.captureSession.isRunning else { return }
-            self.captureSession.startRunning()
-        }
-        mlDetectionManager?.isEnabled = isMLDetectionEnabled
+        performanceWantsCapture = true
+        let registration = ensurePerformanceRegistration()
+        registration.setVisible(true)
     }
 
     @MainActor
     func stop() {
+        performanceWantsCapture = false
+        performanceRegistration?.setVisible(false)
         isReady = false
         isRecording = false
         stopLiveVideo()
@@ -139,6 +144,8 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
 
     @MainActor
     func beginRecording() {
+        resumeCapture()
+        guard performanceRegistration?.isGrantedRendering == true else { return }
         isRecording = true
         lastVideoURL = nil
         let outputURL = FileManager.default.temporaryDirectory
@@ -324,6 +331,8 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
 
     @MainActor
     private func capturePhoto() {
+        resumeCapture()
+        guard performanceRegistration?.isGrantedRendering == true else { return }
         sessionQueue.async { [weak self] in
             guard let self else { return }
             guard self.configureSessionIfNeededOnQueue(),
@@ -446,6 +455,73 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
         }
         if connection.isVideoMirroringSupported {
             connection.isVideoMirrored = (currentCameraPosition == .front)
+        }
+    }
+
+    @MainActor
+    private func ensurePerformanceRegistration() -> PoplurPerformanceRegistration {
+        if let performanceRegistration { return performanceRegistration }
+        let registration = PoplurPerformanceManager.shared.registerRenderer(
+            name: "NativeCamera",
+            classification: .heavy,
+            rateClass: .interactive,
+            priority: 120,
+            onPolicy: { [weak self] policy, granted in
+                self?.applyCapturePerformance(policy: policy, granted: granted)
+            },
+            onPurgeInactiveResources: { [weak self] in
+                self?.displayLayer?.flushAndRemoveImage()
+                self?.arFilterManager?.stopARSession()
+            }
+        )
+        performanceRegistration = registration
+        return registration
+    }
+
+    @MainActor
+    private func applyCapturePerformance(policy: PoplurPerformancePolicy, granted: Bool) {
+        let shouldRun = granted && performanceWantsCapture
+        frameProcessingLock.lock()
+        frameProcessingAllowed = shouldRun
+        frameProcessingLock.unlock()
+        mlDetectionManager?.isEnabled = shouldRun && isMLDetectionEnabled && policy.mode != .emergency
+
+        let requestedFPS = max(10, min(30, policy.targetFPS(for: .interactive)))
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            self.videoDataOutput?.connection(with: .video)?.isEnabled = shouldRun
+            if shouldRun {
+                self.applyCameraFrameRateOnQueue(requestedFPS)
+                if !self.captureSession.isRunning { self.captureSession.startRunning() }
+            } else if self.captureSession.isRunning {
+                self.captureSession.stopRunning()
+            }
+        }
+
+        if !shouldRun {
+            displayLayer?.flushAndRemoveImage()
+            arFrameLock.lock()
+            arFrameInFlight = false
+            arFrameLock.unlock()
+        }
+    }
+
+    private func applyCameraFrameRateOnQueue(_ requestedFPS: Int) {
+        guard let device = currentVideoInput?.device else { return }
+        let fps = Double(requestedFPS)
+        guard device.activeFormat.videoSupportedFrameRateRanges.contains(where: {
+            $0.minFrameRate <= fps && fps <= $0.maxFrameRate
+        }) else { return }
+        do {
+            try device.lockForConfiguration()
+            let duration = CMTime(value: 1, timescale: CMTimeScale(requestedFPS))
+            device.activeVideoMinFrameDuration = duration
+            device.activeVideoMaxFrameDuration = duration
+            device.unlockForConfiguration()
+        } catch {
+            #if DEBUG
+            print("[PoplurPerformance] Camera FPS update failed: \(error.localizedDescription)")
+            #endif
         }
     }
 
@@ -735,6 +811,11 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
         didOutput sampleBuffer: CMSampleBuffer,
         from connection: AVCaptureConnection
     ) {
+        frameProcessingLock.lock()
+        let mayProcessFrame = frameProcessingAllowed
+        frameProcessingLock.unlock()
+        guard mayProcessFrame else { return }
+
         // Process ML detection if enabled
         if isMLDetectionEnabled {
             mlDetectionManager?.processFrame(sampleBuffer)

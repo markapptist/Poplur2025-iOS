@@ -44,12 +44,18 @@ private struct VideoTransitionPlayerView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: VideoTransitionUIView, context: Context) {}
+
+    static func dismantleUIView(_ uiView: VideoTransitionUIView, coordinator: ()) {
+        uiView.tearDown()
+    }
 }
 
 final class VideoTransitionUIView: UIView {
     private var player: AVPlayer?
     private var playerLayer: AVPlayerLayer?
     private var timeObserver: Any?
+    private var completionObserver: NSObjectProtocol?
+    private var performanceRegistration: PoplurPerformanceRegistration?
 
     init(coordinator: StripeTransitionCoordinator) {
         super.init(frame: .zero)
@@ -80,7 +86,7 @@ final class VideoTransitionUIView: UIView {
         }
 
         // Overlay hides when video finishes
-        NotificationCenter.default.addObserver(
+        completionObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,
             object: item,
             queue: .main
@@ -89,7 +95,21 @@ final class VideoTransitionUIView: UIView {
             coordinator.fireComplete()
         }
 
-        player.play()
+        performanceRegistration = PoplurPerformanceManager.shared.registerRenderer(
+            name: "AuthStripeTransitionVideo",
+            classification: .heavy,
+            priority: 200,
+            onPolicy: { [weak player] policy, granted in
+                if granted && policy.mode != .emergency {
+                    player?.play()
+                } else {
+                    player?.pause()
+                }
+            },
+            onPurgeInactiveResources: { [weak player] in
+                player?.pause()
+            }
+        )
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -99,9 +119,32 @@ final class VideoTransitionUIView: UIView {
         playerLayer?.frame = bounds
     }
 
-    deinit {
-        if let obs = timeObserver { player?.removeTimeObserver(obs) }
-        NotificationCenter.default.removeObserver(self)
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        performanceRegistration?.setVisible(window != nil && !isHidden && alpha > 0.01)
+    }
+
+    func tearDown() {
+        performanceRegistration?.setVisible(false)
+        performanceRegistration?.invalidate()
+        performanceRegistration = nil
+        if let timeObserver {
+            player?.removeTimeObserver(timeObserver)
+            self.timeObserver = nil
+        }
+        if let completionObserver {
+            NotificationCenter.default.removeObserver(completionObserver)
+            self.completionObserver = nil
+        }
         player?.pause()
+        player?.replaceCurrentItem(with: nil)
+        playerLayer?.player = nil
+        playerLayer?.removeFromSuperlayer()
+        playerLayer = nil
+        player = nil
+    }
+
+    deinit {
+        tearDown()
     }
 }

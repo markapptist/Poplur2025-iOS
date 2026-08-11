@@ -82,7 +82,7 @@ class HomeFeedLaunchCoverScene: SKScene {
     override func didMove(to view: SKView) {
         backgroundColor = .white
         view.isPaused = false
-        view.preferredFramesPerSecond = 60
+        view.preferredFramesPerSecond = PoplurPerformanceManager.shared.targetFPS
         view.shouldCullNonVisibleNodes = false
         PoplurEQSync.shared.configureAudioSession(for: .ambientPlayback)
         configureSceneIfNeeded()

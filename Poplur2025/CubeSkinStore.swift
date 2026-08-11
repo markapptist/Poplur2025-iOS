@@ -254,16 +254,12 @@ public enum CubeSkin: String, CaseIterable, Identifiable, Codable {
 
 // MARK: - Programmatic texture generation
 
-private enum CubeSkinTextureCache {
-    static let shared = NSCache<NSString, UIImage>()
-}
-
 extension CubeSkin {
     /// Returns a 300×300 programmatic background texture for this skin.
     /// Only `.rubber` varies per face — all other skins ignore `tab`.
     func makeTexture(tab: AppTab = .map) -> UIImage {
-        let cacheKey = "\(rawValue)-\(String(describing: tab))" as NSString
-        if let cached = CubeSkinTextureCache.shared.object(forKey: cacheKey) {
+        let cacheKey = "CubeSkin:\(rawValue)-\(String(describing: tab))"
+        if let cached: UIImage = PoplurAssetCache.shared.asset(forKey: cacheKey, category: .texture) {
             return cached
         }
 
@@ -491,7 +487,12 @@ extension CubeSkin {
                 }
             }
         }
-        CubeSkinTextureCache.shared.setObject(image, forKey: cacheKey)
+        _ = PoplurAssetCache.shared.insert(
+            image,
+            forKey: cacheKey,
+            category: .texture,
+            estimatedByteCost: 300 * 300 * 4
+        )
         return image
     }
 }

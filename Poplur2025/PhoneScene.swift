@@ -1737,11 +1737,16 @@ class PhoneScene: SKScene, ObservableObject {
     }
 
     private static func makeBootupFrames(named spritesheetName: String) -> [SKTexture] {
-        if let cached = bootupFrameCache[spritesheetName] {
+        let maximumPixels = PoplurPerformanceManager.shared.maximumPreferredTextureResolution
+        let cacheKey = "PhoneFrames:bootup:\(spritesheetName):max=\(maximumPixels)"
+        if let cached = cachedTextureFrames(forKey: cacheKey) {
             return cached
         }
 
-        guard let spriteSheet = UIImage(named: spritesheetName),
+        guard let spriteSheet = PoplurTextureLoader.image(
+            named: spritesheetName,
+            maximumPixelDimension: maximumPixels
+        ),
               let cgImage = spriteSheet.cgImage
         else { return [] }
 
@@ -1767,16 +1772,21 @@ class PhoneScene: SKScene, ObservableObject {
             }
         }
 
-        bootupFrameCache[spritesheetName] = frames
+        retainTextureFrames(frames, forKey: cacheKey, decodedByteCost: cgImage.bytesPerRow * cgImage.height)
         return frames
     }
 
     private static func makeBatteryFrames(named spritesheetName: String) -> [SKTexture] {
-        if let cached = batteryFrameCache[spritesheetName] {
+        let maximumPixels = PoplurPerformanceManager.shared.maximumPreferredTextureResolution
+        let cacheKey = "PhoneFrames:battery:\(spritesheetName):max=\(maximumPixels)"
+        if let cached = cachedTextureFrames(forKey: cacheKey) {
             return cached
         }
 
-        guard let spriteSheet = UIImage(named: spritesheetName),
+        guard let spriteSheet = PoplurTextureLoader.image(
+            named: spritesheetName,
+            maximumPixelDimension: maximumPixels
+        ),
               let cgImage = spriteSheet.cgImage
         else { return [] }
 
@@ -1802,16 +1812,21 @@ class PhoneScene: SKScene, ObservableObject {
             }
         }
 
-        batteryFrameCache[spritesheetName] = frames
+        retainTextureFrames(frames, forKey: cacheKey, decodedByteCost: cgImage.bytesPerRow * cgImage.height)
         return frames
     }
 
     private static func makeSignalStatusFrames(named spritesheetName: String) -> [SKTexture] {
-        if let cached = signalStatusFrameCache[spritesheetName] {
+        let maximumPixels = PoplurPerformanceManager.shared.maximumPreferredTextureResolution
+        let cacheKey = "PhoneFrames:signal:\(spritesheetName):max=\(maximumPixels)"
+        if let cached = cachedTextureFrames(forKey: cacheKey) {
             return cached
         }
 
-        guard let spriteSheet = UIImage(named: spritesheetName),
+        guard let spriteSheet = PoplurTextureLoader.image(
+            named: spritesheetName,
+            maximumPixelDimension: maximumPixels
+        ),
               let cgImage = spriteSheet.cgImage
         else { return [] }
 
@@ -1843,8 +1858,29 @@ class PhoneScene: SKScene, ObservableObject {
             }
         }
 
-        signalStatusFrameCache[spritesheetName] = frames
+        retainTextureFrames(frames, forKey: cacheKey, decodedByteCost: cgImage.bytesPerRow * cgImage.height)
         return frames
+    }
+
+    private static func cachedTextureFrames(forKey key: String) -> [SKTexture]? {
+        guard let array: NSArray = PoplurAssetCache.shared.asset(forKey: key, category: .texture) else {
+            return nil
+        }
+        return array as? [SKTexture]
+    }
+
+    private static func retainTextureFrames(
+        _ frames: [SKTexture],
+        forKey key: String,
+        decodedByteCost: Int
+    ) {
+        guard !frames.isEmpty else { return }
+        _ = PoplurAssetCache.shared.insert(
+            frames as NSArray,
+            forKey: key,
+            category: .texture,
+            estimatedByteCost: max(1, decodedByteCost)
+        )
     }
 
     private func fallbackPhoneArtworkName(for bootupSpritesheetName: String) -> String {
@@ -2208,9 +2244,6 @@ class PhoneScene: SKScene, ObservableObject {
     private static let batteryRows = 4
     private static let phoneHorizontalInsetFraction: CGFloat = 0.0
     private static let bootupFallbackDuration: TimeInterval = 1.8
-    private static var bootupFrameCache: [String: [SKTexture]] = [:]
-    private static var batteryFrameCache: [String: [SKTexture]] = [:]
-    private static var signalStatusFrameCache: [String: [SKTexture]] = [:]
     private let phoneAspectRatio: CGFloat = 1024.0 / 1536.0
     private let screenLeftFraction: CGFloat = 0.240
     private let screenTopFraction: CGFloat = 0.183

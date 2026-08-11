@@ -17,6 +17,8 @@ class HSScannerViewController: UIViewController, ARSessionDelegate {
     var onComplete: ((Swift.Result<HSOutput, HSError>) -> Void)?
 
     private var arView: ARSCNView!
+    private var faceConfiguration: ARFaceTrackingConfiguration?
+    private var performanceRegistration: PoplurPerformanceRegistration?
 
     // UI overlays
     private let instructionLabel = UILabel()
@@ -43,11 +45,34 @@ class HSScannerViewController: UIViewController, ARSessionDelegate {
         }
         let configuration = ARFaceTrackingConfiguration()
         configuration.isLightEstimationEnabled = true
+        faceConfiguration = configuration
         arView.automaticallyUpdatesLighting = true
-        arView.session.run(configuration, options: [.resetTracking, .removeExistingAnchors])
+        performanceRegistration = PoplurPerformanceManager.shared.registerRenderer(
+            name: "HeadScannerAR",
+            classification: .heavy,
+            rateClass: .interactive,
+            priority: 100,
+            onPolicy: { [weak self] policy, granted in
+                self?.applyPerformance(policy, granted: granted)
+            },
+            onPurgeInactiveResources: { [weak self] in
+                self?.arView?.session.pause()
+            }
+        )
 
         setupOverlayUI()
         updateUIForIdle()
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        performanceRegistration?.setVisible(true)
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        performanceRegistration?.setVisible(false)
+        arView?.session.pause()
     }
 
     private func setupOverlayUI() {
@@ -147,6 +172,7 @@ class HSScannerViewController: UIViewController, ARSessionDelegate {
     }
 
     @objc private func cancelTapped() {
+        performanceRegistration?.setVisible(false)
         arView.session.pause()
         onComplete?(Swift.Result.failure(HSError.cancelled))
     }
@@ -177,8 +203,32 @@ class HSScannerViewController: UIViewController, ARSessionDelegate {
         // Simulate preview image capture
         let previewImage = arView.snapshot()
 
+        performanceRegistration?.setVisible(false)
         arView.session.pause()
         onComplete?(Swift.Result.success(HSOutput(usdzURL: usdzURL, previewImage: previewImage)))
+    }
+
+    func tearDown() {
+        performanceRegistration?.setVisible(false)
+        performanceRegistration?.invalidate()
+        performanceRegistration = nil
+        arView?.session.pause()
+        arView?.session.delegate = nil
+        arView?.delegate = nil
+        arView?.scene.rootNode.removeAllActions()
+        arView?.scene.rootNode.childNodes.forEach { $0.removeFromParentNode() }
+        faceConfiguration = nil
+    }
+
+    deinit { tearDown() }
+
+    private func applyPerformance(_ policy: PoplurPerformancePolicy, granted: Bool) {
+        arView?.preferredFramesPerSecond = policy.targetFPS(for: .interactive)
+        guard granted, let configuration = faceConfiguration else {
+            arView?.session.pause()
+            return
+        }
+        arView?.session.run(configuration)
     }
 }
 
@@ -267,4 +317,8 @@ struct HSScannerViewControllerRepresentable: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ uiViewController: HSScannerViewController, context: Context) {}
+
+    static func dismantleUIViewController(_ uiViewController: HSScannerViewController, coordinator: ()) {
+        uiViewController.tearDown()
+    }
 }

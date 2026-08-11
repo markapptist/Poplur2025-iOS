@@ -2930,7 +2930,7 @@ private struct FeedBreakingNewsConfettiOverlay: UIViewRepresentable {
     let trigger: Int
 
     func makeUIView(context: Context) -> SKView {
-        let view = SKView()
+        let view = PoplurManagedSKView(performanceName: "FeedGlitter2D")
         view.backgroundColor = .clear
         view.allowsTransparency = true
         view.ignoresSiblingOrder = true

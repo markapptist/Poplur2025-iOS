@@ -8,7 +8,7 @@ struct PoplurMapSpriteOverlay: UIViewRepresentable {
     @Binding var isActive: Bool
 
     func makeUIView(context: Context) -> SKView {
-        let view = SKView()
+        let view = PoplurManagedSKView(performanceName: "MapSpriteOverlay2D")
         view.backgroundColor = .clear
         view.allowsTransparency = true
         view.ignoresSiblingOrder = true

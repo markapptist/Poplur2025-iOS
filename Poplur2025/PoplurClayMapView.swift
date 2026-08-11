@@ -102,20 +102,31 @@ struct PoplurClayMapView: UIViewRepresentable {
         // CPU profiles because of it. Hold the mapped bytes here instead —
         // bundle assets cannot change without a new build, and the data is
         // memory-mapped, so this costs virtual address space rather than RAM.
-        private static var assetCache: [String: (data: Data, mime: String)] = [:]
-        private static let assetCacheLock = NSLock()
+        private final class CachedAsset: NSObject {
+            let data: Data
+            let mime: String
+
+            init(data: Data, mime: String) {
+                self.data = data
+                self.mime = mime
+            }
+        }
 
         private static func cachedAsset(_ key: String) -> (data: Data, mime: String)? {
-            assetCacheLock.lock(); defer { assetCacheLock.unlock() }
-            return assetCache[key]
+            guard let cached: CachedAsset = PoplurAssetCache.shared.asset(
+                forKey: "ClayMapWeb:\(key)",
+                category: .webAsset
+            ) else { return nil }
+            return (cached.data, cached.mime)
         }
 
         private static func cacheAsset(_ key: String, data: Data, mime: String) {
-            assetCacheLock.lock(); defer { assetCacheLock.unlock() }
-            // Bounded so a long session cannot accumulate every capture-sized
-            // blob the page ever asked for.
-            if assetCache.count > 400 { assetCache.removeAll(keepingCapacity: true) }
-            assetCache[key] = (data, mime)
+            _ = PoplurAssetCache.shared.insert(
+                CachedAsset(data: data, mime: mime),
+                forKey: "ClayMapWeb:\(key)",
+                category: .webAsset,
+                estimatedByteCost: max(1, data.count)
+            )
         }
 
         func webView(_ webView: WKWebView, start urlSchemeTask: WKURLSchemeTask) {

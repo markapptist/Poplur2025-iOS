@@ -298,11 +298,25 @@ private struct NewspaperScrollOffsetKey: PreferenceKey {
 
 private final class MapSnapshotCache: @unchecked Sendable {
     static let shared = MapSnapshotCache()
-    private var dict: [String: UIImage] = [:]
-    private let lock = NSLock()
 
-    func get(_ key: String) -> UIImage? { lock.lock(); defer { lock.unlock() }; return dict[key] }
-    func set(_ key: String, _ img: UIImage) { lock.lock(); defer { lock.unlock() }; dict[key] = img }
+    func get(_ key: String) -> UIImage? {
+        PoplurAssetCache.shared.asset(forKey: "MapSnapshot:\(key)", category: .decodedImage)
+    }
+
+    func set(_ key: String, _ image: UIImage) {
+        let cost: Int
+        if let cgImage = image.cgImage {
+            cost = cgImage.bytesPerRow * cgImage.height
+        } else {
+            cost = max(1, Int(image.size.width * image.size.height * image.scale * image.scale * 4))
+        }
+        _ = PoplurAssetCache.shared.insert(
+            image,
+            forKey: "MapSnapshot:\(key)",
+            category: .decodedImage,
+            estimatedByteCost: cost
+        )
+    }
 }
 
 private struct MapSnapshotImage: View {

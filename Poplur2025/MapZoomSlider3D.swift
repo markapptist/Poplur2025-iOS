@@ -58,7 +58,7 @@ private struct SceneKitButtonView: UIViewRepresentable {
     let icon: String
     
     func makeUIView(context: Context) -> SCNView {
-        let view = SCNView()
+        let view = PoplurManagedSCNView(performanceName: "MapZoomSlider3D")
         view.allowsCameraControl = false
         view.autoenablesDefaultLighting = true
         view.backgroundColor = .clear
@@ -130,7 +130,7 @@ private struct SceneKitSliderTrack: UIViewRepresentable {
     func makeUIView(context: Context) -> SliderContainerView {
         let container = SliderContainerView()
         
-        let scnView = SCNView()
+        let scnView = PoplurManagedSCNView(performanceName: "MapZoomButton3D")
         scnView.allowsCameraControl = false
         scnView.autoenablesDefaultLighting = true
         scnView.backgroundColor = .clear

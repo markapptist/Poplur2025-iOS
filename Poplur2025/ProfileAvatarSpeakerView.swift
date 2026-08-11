@@ -268,7 +268,7 @@ struct PixelHead2DView: UIViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeUIView(context: Context) -> SKView {
-        let v = SKView()
+        let v = PoplurManagedSKView(performanceName: "AvatarSpeaker2D")
         v.backgroundColor = .clear
         v.allowsTransparency = true
         v.ignoresSiblingOrder = true
@@ -444,7 +444,7 @@ struct PixelHead3DView: UIViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeUIView(context: Context) -> SCNView {
-        let v = SCNView()
+        let v = PoplurManagedSCNView(performanceName: "AvatarSpeaker3D")
         v.backgroundColor = .clear; v.allowsCameraControl = false
         v.autoenablesDefaultLighting = false
         v.antialiasingMode = .multisampling4X
@@ -655,4 +655,3 @@ private struct SpeakBarView: View {
             }
     }
 }
-

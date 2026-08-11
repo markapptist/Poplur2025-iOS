@@ -1055,7 +1055,8 @@ struct HomeView: View {
                 let eased = t * t * (3 - 2 * t) // smoothstep ease-in-out
                 let next = start + (maxMeters - start) * eased
                 isometricBarModel.radius = min(maxMeters, next)
-                try? await Task.sleep(nanoseconds: 16_000_000) // ~60fps
+                let fps = PoplurPerformanceManager.shared.targetFPS(for: .interactive)
+                try? await Task.sleep(nanoseconds: UInt64(1_000_000_000 / max(1, fps)))
             }
         }
     }
@@ -3215,7 +3216,8 @@ struct HomeBarPlacementPreview: View {
                 let eased = t * t * (3 - 2 * t)
                 let next = start + (maxMeters - start) * eased
                 radius = min(maxMeters, next)
-                try? await Task.sleep(nanoseconds: 16_000_000)
+                let fps = PoplurPerformanceManager.shared.targetFPS(for: .interactive)
+                try? await Task.sleep(nanoseconds: UInt64(1_000_000_000 / max(1, fps)))
             }
         }
     }
