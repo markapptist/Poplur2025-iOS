@@ -77,7 +77,7 @@ struct WeatherParticleOverlay: UIViewRepresentable {
     @Binding var weatherState: WeatherVisualizationState
 
     func makeUIView(context: Context) -> SKView {
-        let view = SKView()
+        let view = PoplurManagedSKView(performanceName: "WeatherParticles2D")
         view.backgroundColor = .clear
         view.allowsTransparency = true
         view.ignoresSiblingOrder = true
@@ -103,7 +103,11 @@ struct WeatherParticleOverlay: UIViewRepresentable {
 
     static func dismantleUIView(_ uiView: SKView, coordinator: Coordinator) {
         coordinator.teardown()
-        uiView.presentScene(nil)
+        if let managed = uiView as? PoplurManagedSKView {
+            managed.poplurTearDown()
+        } else {
+            uiView.presentScene(nil)
+        }
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -620,7 +624,7 @@ struct Enhanced3DBeaconMarker: UIViewRepresentable {
     var role: ThemedMapMarkerRole = .post
     
     func makeUIView(context: Context) -> SCNView {
-        let view = SCNView()
+        let view = PoplurManagedSCNView(performanceName: "MapBeacon3D")
         view.allowsCameraControl = false
         view.autoenablesDefaultLighting = false
         view.backgroundColor = .clear
@@ -3323,7 +3327,7 @@ private struct SceneKitRotatingBarView: UIViewRepresentable {
 /// Blue 3D marker for user location - cone pin with sphere head
 private struct UserLocation3DMarker: UIViewRepresentable {
     func makeUIView(context: Context) -> SCNView {
-        let view = SCNView()
+        let view = PoplurManagedSCNView(performanceName: "MapUserMarker3D")
         view.allowsCameraControl = false
         view.autoenablesDefaultLighting = true
         view.backgroundColor = .clear
@@ -3415,7 +3419,7 @@ private struct SceneKit3DEnhancedMarker: UIViewRepresentable {
     let color: Color
     
     func makeUIView(context: Context) -> SCNView {
-        let view = SCNView()
+        let view = PoplurManagedSCNView(performanceName: "MapEnhancedMarker3D")
         view.allowsCameraControl = false
         view.autoenablesDefaultLighting = true
         view.backgroundColor = .clear
@@ -3531,7 +3535,7 @@ private struct Floating3DBeacon: UIViewRepresentable {
     let pulseSpeed: Double
     
     func makeUIView(context: Context) -> SCNView {
-        let view = SCNView()
+        let view = PoplurManagedSCNView(performanceName: "MapFloatingBeacon3D")
         view.allowsCameraControl = false
         view.autoenablesDefaultLighting = false
         view.backgroundColor = .clear

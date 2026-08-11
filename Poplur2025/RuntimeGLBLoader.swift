@@ -23,19 +23,17 @@ enum RuntimeGLBLoader {
         return header.elementsEqual(glbMagic)
     }
 
-    /// Caches decoded scenes by file path so each GLB is only ever run through GLTFSceneKit
-    /// ONCE. Re-invoking GLTFSceneSource.scene() repeatedly (e.g. a cube-heavy feed that rebuilds
-    /// an SCNView per post/scroll) is the trigger for GLTFSceneKit's intermittent native
-    /// EXC_BAD_ACCESS during decode — a signal we cannot catch in-process. Decoding once and
-    /// vending clones removes that trigger entirely (and is far cheaper).
+    /// Caches decoded scenes by file path so a hot asset is not repeatedly run through
+    /// GLTFSceneKit. The shared cache is byte/count bounded and can evict this scene under
+    /// pressure; unlike the old dictionary it cannot retain every decoded model forever.
     ///
     /// Callers MUST NOT mutate the returned scene's node graph in place — clone the nodes they
     /// need (see `CubeTabView.makeRuntimeCubeModelNode`). Main-thread only (SceneKit affinity);
-    /// the cache is a plain dictionary guarded by that contract.
-    private static var sceneCache: [String: SCNScene] = [:]
+    /// the cache and SceneKit access are guarded by the main-thread caller contract.
 
     static func loadScene(from url: URL, label: String) -> SCNScene? {
-        if let cached = sceneCache[url.path] {
+        let key = "RuntimeGLB:\(url.standardizedFileURL.path)"
+        if let cached = PoplurAssetCache.shared.asset(forKey: key, category: .scene, as: SCNScene.self) {
             return cached
         }
 
@@ -59,7 +57,16 @@ enum RuntimeGLBLoader {
             print("[RuntimeGLBLoader] Could not decode GLB: \(label) at \(url.path)")
             return nil
         }
-        sceneCache[url.path] = scene
+        let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+        let fileBytes = (attributes?[.size] as? NSNumber)?.intValue ?? 0
+        // Binary size understates decoded geometry/material memory. Four times the
+        // source size is a conservative accounting estimate, with a 1 MB floor.
+        _ = PoplurAssetCache.shared.insert(
+            scene,
+            forKey: key,
+            category: .scene,
+            estimatedByteCost: max(1_048_576, fileBytes * 4)
+        )
         return scene
     }
 
@@ -143,4 +150,3 @@ enum RuntimeGLBLoader {
         return Bundle.main.url(forResource: assetName, withExtension: "glb")
     }
 }
-

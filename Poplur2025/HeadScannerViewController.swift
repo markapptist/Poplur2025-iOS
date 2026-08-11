@@ -12,6 +12,11 @@ final class HeadScannerViewController: UIViewController, ARSessionDelegate {
     private var capturedGeometries: [ARFaceGeometry] = []
     private var lastCameraImage: UIImage?
     private var isFinishing = false
+    private var faceConfiguration: ARFaceTrackingConfiguration?
+    private var performanceRegistration: PoplurPerformanceRegistration?
+    private let previewCIContext = CIContext(options: [.cacheIntermediates: false])
+    private var lastPreviewCaptureTime: TimeInterval = 0
+    private var geometryUpdateCount = 0
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -25,6 +30,17 @@ final class HeadScannerViewController: UIViewController, ARSessionDelegate {
         arView.frame = view.bounds
     }
 
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        performanceRegistration?.setVisible(true)
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        performanceRegistration?.setVisible(false)
+        arView.session.pause()
+    }
+
     private func setupAR() {
         guard ARFaceTrackingConfiguration.isSupported else {
             onComplete?(.failure(.unavailable))
@@ -36,7 +52,22 @@ final class HeadScannerViewController: UIViewController, ARSessionDelegate {
         let config = ARFaceTrackingConfiguration()
         config.isWorldTrackingEnabled = true
         config.providesAudioData = false
-        arView.session.run(config, options: [.resetTracking, .removeExistingAnchors])
+        faceConfiguration = config
+        performanceRegistration = PoplurPerformanceManager.shared.registerRenderer(
+            name: "RealityHeadScannerAR",
+            classification: .heavy,
+            rateClass: .interactive,
+            priority: 100,
+            onPolicy: { [weak self] _, granted in
+                guard let self else { return }
+                if granted, let configuration = self.faceConfiguration {
+                    self.arView.session.run(configuration)
+                } else {
+                    self.arView.session.pause()
+                }
+            },
+            onPurgeInactiveResources: { [weak self] in self?.arView.session.pause() }
+        )
     }
 
     private func setupUI() {
@@ -81,6 +112,7 @@ final class HeadScannerViewController: UIViewController, ARSessionDelegate {
     @objc private func cancelTapped() {
         guard !isFinishing else { return }
         isFinishing = true
+        performanceRegistration?.setVisible(false)
         arView.session.pause()
         onComplete?(.failure(.cancelled))
         navigationController?.popViewController(animated: true)
@@ -89,6 +121,7 @@ final class HeadScannerViewController: UIViewController, ARSessionDelegate {
     @objc private func finishTapped() {
         guard !isFinishing else { return }
         isFinishing = true
+        performanceRegistration?.setVisible(false)
         arView.session.pause()
         let output = exportUSDZFromCapturedGeometry()
         onComplete?(.success(HeadScanOutput(usdzURL: output, previewImage: lastCameraImage)))
@@ -96,14 +129,17 @@ final class HeadScannerViewController: UIViewController, ARSessionDelegate {
     }
 
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
-        // Capture latest camera image for preview
-        lastCameraImage = UIImage(pixelBuffer: frame.capturedImage)
+        // A full CI conversion every AR frame needlessly allocated a new image and
+        // context 30–60 times/sec. Two preview samples/sec are sufficient for export.
+        guard frame.timestamp - lastPreviewCaptureTime >= 0.5 else { return }
+        lastPreviewCaptureTime = frame.timestamp
+        lastCameraImage = UIImage(pixelBuffer: frame.capturedImage, context: previewCIContext)
     }
 
     func session(_ session: ARSession, didAdd anchors: [ARAnchor]) {
         for anchor in anchors {
             if let faceAnchor = anchor as? ARFaceAnchor {
-                capturedGeometries.append(faceAnchor.geometry)
+                retainGeometrySample(faceAnchor.geometry)
             }
         }
     }
@@ -111,10 +147,32 @@ final class HeadScannerViewController: UIViewController, ARSessionDelegate {
     func session(_ session: ARSession, didUpdate anchors: [ARAnchor]) {
         for anchor in anchors {
             if let faceAnchor = anchor as? ARFaceAnchor {
-                capturedGeometries.append(faceAnchor.geometry)
+                geometryUpdateCount &+= 1
+                if geometryUpdateCount.isMultiple(of: 3) {
+                    retainGeometrySample(faceAnchor.geometry)
+                }
             }
         }
     }
+
+    private func retainGeometrySample(_ geometry: ARFaceGeometry) {
+        if capturedGeometries.count == 60 { capturedGeometries.removeFirst() }
+        capturedGeometries.append(geometry)
+    }
+
+    func tearDown() {
+        performanceRegistration?.setVisible(false)
+        performanceRegistration?.invalidate()
+        performanceRegistration = nil
+        arView.session.pause()
+        arView.session.delegate = nil
+        arView.scene.anchors.removeAll()
+        capturedGeometries.removeAll(keepingCapacity: false)
+        lastCameraImage = nil
+        faceConfiguration = nil
+    }
+
+    deinit { tearDown() }
 
     private func exportUSDZFromCapturedGeometry() -> URL? {
         guard !capturedGeometries.isEmpty else { return nil }
@@ -168,9 +226,8 @@ private extension MDLVertexDescriptor {
 }
 
 private extension UIImage {
-    convenience init?(pixelBuffer: CVPixelBuffer) {
+    convenience init?(pixelBuffer: CVPixelBuffer, context: CIContext) {
         let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
-        let context = CIContext(options: nil)
         guard let cgImage = context.createCGImage(ciImage, from: ciImage.extent) else { return nil }
         self.init(cgImage: cgImage, scale: UIScreen.main.scale, orientation: .right)
     }

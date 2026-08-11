@@ -31,14 +31,18 @@ private struct FeedChannelButtonSpriteView: UIViewRepresentable {
     func updateUIView(_ uiView: FeedChannelButtonSpriteHost, context: Context) {
         uiView.update(isPressed: isPressed, pressToken: pressToken)
     }
+
+    static func dismantleUIView(_ uiView: FeedChannelButtonSpriteHost, coordinator: ()) {
+        uiView.poplurTearDown()
+    }
 }
 
-private final class FeedChannelButtonSpriteHost: SKView {
+private final class FeedChannelButtonSpriteHost: PoplurManagedSKView {
     private let buttonScene: FeedChannelButtonSpriteScene
 
     init(kind: FeedChannelButtonKind) {
         buttonScene = FeedChannelButtonSpriteScene(kind: kind)
-        super.init(frame: .zero)
+        super.init(performanceName: "FeedChannelButton2D")
         configureView()
     }
 
@@ -63,7 +67,7 @@ private final class FeedChannelButtonSpriteHost: SKView {
         allowsTransparency = true
         ignoresSiblingOrder = true
         isUserInteractionEnabled = false
-        preferredFramesPerSecond = 60
+        preferredFramesPerSecond = PoplurPerformanceManager.shared.targetFPS
 
         buttonScene.scaleMode = .resizeFill
         buttonScene.backgroundColor = .clear

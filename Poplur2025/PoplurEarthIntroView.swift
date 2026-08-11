@@ -180,11 +180,15 @@ struct PoplurEarthIntroView: UIViewRepresentable {
     // MARK: - SCNSphere fallback (no token)
 
     private func makeFallbackView() -> SCNView {
-        let view = SCNView()
+        let view = PoplurManagedSCNView(
+            performanceName: "EarthIntro3D",
+            classification: .heavy
+        )
         view.backgroundColor = UIColor(red: 5/255, green: 4/255, blue: 7/255, alpha: 1)
         view.antialiasingMode = .multisampling2X
         view.isUserInteractionEnabled = false
-        view.rendersContinuously = true
+        view.rendersContinuously = PoplurPerformanceManager.shared.decorativeRenderingAllowed
+        view.preferredFramesPerSecond = PoplurPerformanceManager.shared.targetFPS
 
         let scene = SCNScene()
         scene.background.contents = Self.starfieldImage()
@@ -224,9 +228,9 @@ struct PoplurEarthIntroView: UIViewRepresentable {
         sphere.segmentCount = 96
         let m = SCNMaterial()
         m.lightingModel = .physicallyBased
-        m.diffuse.contents = UIImage(named: "earth_day")
+        m.diffuse.contents = PoplurTextureLoader.image(named: "earth_day")
             ?? UIColor(red: 0.2, green: 0.45, blue: 0.85, alpha: 1)
-        m.selfIllumination.contents = UIImage(named: "earth_night") ?? UIColor.clear
+        m.selfIllumination.contents = PoplurTextureLoader.image(named: "earth_night") ?? UIColor.clear
         m.selfIllumination.intensity = 0.6
         m.roughness.contents = 0.65
         m.metalness.contents = 0.0
@@ -241,11 +245,18 @@ struct PoplurEarthIntroView: UIViewRepresentable {
 
     // MARK: - Procedural starfield (used by fallback)
 
-    private static var cachedStars: UIImage?
-
     static func starfieldImage() -> UIImage {
-        if let cached = cachedStars { return cached }
-        let size = CGSize(width: 2048, height: 1024)
+        let maximum = PoplurPerformanceManager.shared.maximumPreferredTextureResolution
+        let width = max(512, maximum)
+        let height = max(256, width / 2)
+        let key = "EarthIntro:starfield:\(width)x\(height)"
+        if let cached: UIImage = PoplurAssetCache.shared.asset(
+            forKey: key,
+            category: .texture
+        ) {
+            return cached
+        }
+        let size = CGSize(width: width, height: height)
         let renderer = UIGraphicsImageRenderer(size: size)
         let image = renderer.image { ctx in
             let cg = ctx.cgContext
@@ -281,7 +292,12 @@ struct PoplurEarthIntroView: UIViewRepresentable {
                 cg.fillEllipse(in: CGRect(x: x, y: y, width: r, height: r))
             }
         }
-        cachedStars = image
+        _ = PoplurAssetCache.shared.insert(
+            image,
+            forKey: key,
+            category: .texture,
+            estimatedByteCost: width * height * 4
+        )
         return image
     }
 }

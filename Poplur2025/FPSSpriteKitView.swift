@@ -8,9 +8,13 @@ struct FPSSpriteKitView: UIViewRepresentable {
     var onQuit: (() -> Void)? = nil
 
     func makeUIView(context: Context) -> SKView {
-        let view = SKView(frame: .zero)
+        let view = PoplurManagedSKView(
+            performanceName: "PoplurFPSGame",
+            classification: .heavy,
+            rateClass: .interactive
+        )
         view.ignoresSiblingOrder = true
-        view.preferredFramesPerSecond = 60
+        view.preferredFramesPerSecond = PoplurPerformanceManager.shared.targetFPS(for: .interactive)
         view.backgroundColor = .black
         #if DEBUG
         view.showsFPS = false
@@ -27,5 +31,11 @@ struct FPSSpriteKitView: UIViewRepresentable {
         return view
     }
 
-    func updateUIView(_ uiView: SKView, context: Context) {}
+    func updateUIView(_ uiView: SKView, context: Context) {
+        uiView.preferredFramesPerSecond = PoplurPerformanceManager.shared.targetFPS(for: .interactive)
+    }
+
+    static func dismantleUIView(_ uiView: SKView, coordinator: ()) {
+        (uiView as? PoplurManagedSKView)?.poplurTearDown()
+    }
 }

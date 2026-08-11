@@ -35,7 +35,7 @@ struct LoginCubeView: UIViewRepresentable {
     }
 
     func makeUIView(context: Context) -> SCNView {
-        let view = SCNView()
+        let view = PoplurManagedSCNView(performanceName: "LoginCube3D")
         view.backgroundColor = .clear
         view.scene = Self.makeScene(isBackButton: onTap != nil, isNavigationCube: isNavigationCube, face: face)
         view.autoenablesDefaultLighting = true

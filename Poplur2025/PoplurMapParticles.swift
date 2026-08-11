@@ -11,7 +11,7 @@ struct PoplurThemeParticleOverlay: UIViewRepresentable {
     private var config: PoplurMapParticleConfig { skin.poplurTheme.mapThemeData.particles }
 
     func makeUIView(context: Context) -> SKView {
-        let view = SKView()
+        let view = PoplurManagedSKView(performanceName: "MapParticles2D")
         view.backgroundColor = .clear
         view.allowsTransparency = true
         view.ignoresSiblingOrder = true

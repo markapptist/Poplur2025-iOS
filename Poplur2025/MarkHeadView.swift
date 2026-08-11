@@ -16,7 +16,11 @@ struct MarkHeadView: UIViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(onFinished: onFinished, onLoaded: onLoaded) }
 
     func makeUIView(context: Context) -> SCNView {
-        let v = SCNView()
+        let v = PoplurManagedSCNView(
+            performanceName: "MarkHead3D",
+            classification: .heavy,
+            rateClass: .interactive
+        )
         v.isOpaque = false
         v.backgroundColor = .clear
         v.allowsCameraControl = false
@@ -24,6 +28,7 @@ struct MarkHeadView: UIViewRepresentable {
         v.autoenablesDefaultLighting = false
         v.isPlaying = true
         v.rendersContinuously = true
+        v.preferredFramesPerSecond = PoplurPerformanceManager.shared.targetFPS
         v.scene = SCNScene()
         context.coordinator.load(into: v)
         return v
@@ -35,6 +40,11 @@ struct MarkHeadView: UIViewRepresentable {
         } else {
             context.coordinator.stopSpeaking()
         }
+    }
+
+    static func dismantleUIView(_ uiView: SCNView, coordinator: Coordinator) {
+        coordinator.tearDown()
+        (uiView as? PoplurManagedSCNView)?.poplurTearDown()
     }
 }
 
@@ -89,6 +99,7 @@ final class MarkHeadViewCoordinator: NSObject, AVSpeechSynthesizerDelegate {
             guard let self else { return }
             let scene = self.loadHeadScene()
             DispatchQueue.main.async {
+                guard self.scnView === view else { return }
                 if let scene { self.configure(scene, in: view) }
                 else { print("[MarkHeadView] No head model could be loaded.") }
             }
@@ -360,7 +371,12 @@ final class MarkHeadViewCoordinator: NSObject, AVSpeechSynthesizerDelegate {
     private func startLipSync() {
         displayLink?.invalidate()
         displayLink = CADisplayLink(target: self, selector: #selector(tick))
-        displayLink?.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 60)
+        let target = Float(PoplurPerformanceManager.shared.targetFPS)
+        displayLink?.preferredFrameRateRange = CAFrameRateRange(
+            minimum: max(10, min(target, 15)),
+            maximum: target,
+            preferred: target
+        )
         displayLink?.add(to: .main, forMode: .common)
     }
 
@@ -394,7 +410,7 @@ final class MarkHeadViewCoordinator: NSObject, AVSpeechSynthesizerDelegate {
             setMorph("viseme_AA",   weight: 0)
             setMorph("viseme_O",    weight: 0)
         }
-
+        scnView?.setNeedsDisplay()
     }
 
     // MARK: Morph helpers
@@ -432,6 +448,7 @@ final class MarkHeadViewCoordinator: NSObject, AVSpeechSynthesizerDelegate {
 
     private func scheduleBlink() {
         blinkTimer?.invalidate()
+        guard scnView?.window != nil else { return }
         let interval = Double.random(in: 2.5...5.5)
         blinkTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
             self?.doBlink()
@@ -441,17 +458,33 @@ final class MarkHeadViewCoordinator: NSObject, AVSpeechSynthesizerDelegate {
     private func doBlink() {
         setMorph("eyeBlinkLeft", weight: 1)
         setMorph("eyeBlinkRight", weight: 1)
+        scnView?.setNeedsDisplay()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
             self?.setMorph("eyeBlinkLeft",  weight: 0)
             self?.setMorph("eyeBlinkRight", weight: 0)
+            self?.scnView?.setNeedsDisplay()
             self?.scheduleBlink()
         }
     }
 
     deinit {
+        tearDown()
+    }
+
+    func tearDown() {
         displayLink?.invalidate()
+        displayLink = nil
         blinkTimer?.invalidate()
+        blinkTimer = nil
+        writeSynth.stopSpeaking(at: .immediate)
+        player.stop()
         engine.stop()
+        pendingBuffers.removeAll(keepingCapacity: false)
+        amplitudeTimeline.removeAll(keepingCapacity: false)
+        morphMap.removeAll(keepingCapacity: false)
+        scnView?.scene?.isPaused = true
+        scnView = nil
+        isLoaded = false
     }
 }
 

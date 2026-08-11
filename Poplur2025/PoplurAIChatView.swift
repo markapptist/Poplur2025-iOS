@@ -1044,10 +1044,10 @@ private struct PAIVideoPlayer: UIViewRepresentable {
         view.layer.addSublayer(layer)
         context.coordinator.player = player
         context.coordinator.layer = layer
-        NotificationCenter.default.addObserver(
+        context.coordinator.endObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,
             object: player.currentItem, queue: .main
-        ) { _ in player.seek(to: .zero); player.play() }
+        ) { [weak player] _ in player?.seek(to: .zero); player?.play() }
         player.play()
         return view
     }
@@ -1057,11 +1057,24 @@ private struct PAIVideoPlayer: UIViewRepresentable {
     }
 
     static func dismantleUIView(_ uiView: UIView, coordinator: Coordinator) {
+        if let endObserver = coordinator.endObserver {
+            NotificationCenter.default.removeObserver(endObserver)
+            coordinator.endObserver = nil
+        }
         coordinator.player?.pause()
+        coordinator.player?.replaceCurrentItem(with: nil)
+        coordinator.layer?.player = nil
+        coordinator.layer?.removeFromSuperlayer()
+        coordinator.layer = nil
+        coordinator.player = nil
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
-    final class Coordinator { var player: AVPlayer?; var layer: AVPlayerLayer? }
+    final class Coordinator {
+        var player: AVPlayer?
+        var layer: AVPlayerLayer?
+        var endObserver: NSObjectProtocol?
+    }
 }
 
 // MARK: - Suggestion chips

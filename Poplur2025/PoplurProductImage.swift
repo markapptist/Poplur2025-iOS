@@ -20,7 +20,6 @@ enum PoplurProductImage {
     /// Answered requests, so a repeat detection costs nothing. The web side
     /// caches too; this covers the same page being asked for by several cards
     /// before any of them has stored an answer.
-    private static var cache: [String: String] = [:]
     private static var inFlight: Set<String> = []
 
     /// Refuse anything that is not a plain https product page. The URL comes
@@ -37,8 +36,11 @@ enum PoplurProductImage {
             deliver(urlString: urlString, dataURI: nil, webView: webView)
             return
         }
-        if let hit = cache[urlString] {
-            deliver(urlString: urlString, dataURI: hit, webView: webView)
+        if let hit: NSString = PoplurAssetCache.shared.asset(
+            forKey: "ProductImage:\(urlString)",
+            category: .webAsset
+        ) {
+            deliver(urlString: urlString, dataURI: hit as String, webView: webView)
             return
         }
         guard !inFlight.contains(urlString) else { return }
@@ -48,7 +50,14 @@ enum PoplurProductImage {
             let found = await resolve(url)
             await MainActor.run {
                 inFlight.remove(urlString)
-                if let found { cache[urlString] = found }
+                if let found {
+                    _ = PoplurAssetCache.shared.insert(
+                        found as NSString,
+                        forKey: "ProductImage:\(urlString)",
+                        category: .webAsset,
+                        estimatedByteCost: max(1, found.utf8.count)
+                    )
+                }
                 deliver(urlString: urlString, dataURI: found, webView: webView)
             }
         }

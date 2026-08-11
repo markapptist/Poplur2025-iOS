@@ -177,7 +177,7 @@ struct ConfettiOverlay: UIViewRepresentable {
     let coordinateConverter: ((CLLocationCoordinate2D) -> CGPoint?)?
     
     func makeUIView(context: Context) -> SKView {
-        let view = SKView()
+        let view = PoplurManagedSKView(performanceName: "Confetti2D")
         view.backgroundColor = .clear
         view.allowsTransparency = true
         view.ignoresSiblingOrder = true
@@ -506,4 +506,3 @@ private extension Double {
         return min(max(self, range.lowerBound), range.upperBound)
     }
 }
-

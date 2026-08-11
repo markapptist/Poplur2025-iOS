@@ -171,9 +171,13 @@ private struct FeedChannelButtonSceneView: UIViewRepresentable {
     func updateUIView(_ uiView: FeedChannelButtonSceneHost, context: Context) {
         uiView.update(isPressed: isPressed, pressToken: pressToken)
     }
+
+    static func dismantleUIView(_ uiView: FeedChannelButtonSceneHost, coordinator: ()) {
+        uiView.poplurTearDown()
+    }
 }
 
-private final class FeedChannelButtonSceneHost: SCNView {
+private final class FeedChannelButtonSceneHost: PoplurManagedSCNView {
     private let kind: FeedChannelButtonKind
     private let buttonNode = SCNNode()
     private let faceNode = SCNNode()
@@ -183,7 +187,7 @@ private final class FeedChannelButtonSceneHost: SCNView {
 
     init(kind: FeedChannelButtonKind) {
         self.kind = kind
-        super.init(frame: .zero, options: nil)
+        super.init(performanceName: "FeedChannelButton3D")
         configureScene()
     }
 
@@ -211,7 +215,7 @@ private final class FeedChannelButtonSceneHost: SCNView {
         antialiasingMode = .multisampling4X
         isJitteringEnabled = true
         isUserInteractionEnabled = false
-        preferredFramesPerSecond = 60
+        preferredFramesPerSecond = PoplurPerformanceManager.shared.targetFPS
         rendersContinuously = true
 
         let scene = SCNScene()

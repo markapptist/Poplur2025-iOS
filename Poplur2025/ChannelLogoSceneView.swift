@@ -24,7 +24,7 @@ struct ChannelObjectSceneView: UIViewRepresentable {
     }
 
     func makeUIView(context: Context) -> SCNView {
-        let view = SCNView()
+        let view = PoplurManagedSCNView(performanceName: "ChannelLogo3D")
         view.backgroundColor = .clear
         view.antialiasingMode = .multisampling4X
         view.isJitteringEnabled = true

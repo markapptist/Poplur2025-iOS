@@ -84,7 +84,9 @@ final class _PoplurRefreshInstallerView: UIView {
 private final class _PoplurRefreshLogoView: UIView {
     private let imageView = UIImageView()
     private weak var scrollView: UIScrollView?
-    private var displayLink: CADisplayLink?
+    private weak var refreshControl: UIRefreshControl?
+    private var contentOffsetObservation: NSKeyValueObservation?
+    private var refreshingObservation: NSKeyValueObservation?
 
     private var wasRefreshing = false
     private var isSpinning    = false
@@ -109,15 +111,28 @@ private final class _PoplurRefreshLogoView: UIView {
             imageView.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
 
-        let link = CADisplayLink(target: self, selector: #selector(tick))
-        link.add(to: .main, forMode: .common)
-        displayLink = link
+        refreshControl = scrollView.refreshControl
+        contentOffsetObservation = scrollView.observe(\.contentOffset, options: [.initial, .new]) { [weak self] _, _ in
+            self?.updateState()
+        }
+        refreshingObservation = refreshControl?.observe(\.isRefreshing, options: [.initial, .new]) { [weak self] _, _ in
+            self?.updateState()
+        }
+        refreshControl?.addTarget(self, action: #selector(refreshValueChanged), for: .valueChanged)
     }
 
     required init?(coder: NSCoder) { fatalError() }
-    deinit { displayLink?.invalidate() }
+    deinit {
+        contentOffsetObservation?.invalidate()
+        refreshingObservation?.invalidate()
+        refreshControl?.removeTarget(self, action: #selector(refreshValueChanged), for: .valueChanged)
+    }
 
-    @objc private func tick() {
+    @objc private func refreshValueChanged() {
+        updateState()
+    }
+
+    private func updateState() {
         guard let sv = scrollView else { return }
         let isRefreshing = sv.refreshControl?.isRefreshing == true
 

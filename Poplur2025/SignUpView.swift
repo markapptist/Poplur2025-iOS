@@ -872,7 +872,7 @@ private struct SignupAccount3DIcon: UIViewRepresentable {
     let kind: Kind
 
     func makeUIView(context: Context) -> SCNView {
-        let view = SCNView()
+        let view = PoplurManagedSCNView(performanceName: "SignUpCube3D")
         view.backgroundColor = .clear
         view.autoenablesDefaultLighting = true
         view.allowsCameraControl = false

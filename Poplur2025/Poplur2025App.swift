@@ -229,6 +229,15 @@ struct Poplur2025App: App {
                         .transition(.opacity)
                 }
             }
+            #if DEBUG
+            .overlay(alignment: .topTrailing) {
+                if ProcessInfo.processInfo.arguments.contains("-PoplurPerformanceOverlay") {
+                    PoplurPerformanceDiagnosticsView()
+                        .padding(.top, 8)
+                        .padding(.trailing, 8)
+                }
+            }
+            #endif
             .onReceive(NotificationCenter.default.publisher(for: .poplurWelcomePanelVisibilityChanged)) { note in
                 isWelcomePanelVisible = (note.object as? Bool) ?? true
             }
@@ -252,10 +261,28 @@ struct Poplur2025App: App {
             }
             .onChange(of: scenePhase) { _, phase in
                 switch phase {
-                case .background, .inactive:
+                case .background:
+                    PoplurPerformanceManager.shared.setApplicationLifecycle(.background)
                     preLoginMusic.stop()
                     NotificationCenter.default.post(name: .StopMapAudio, object: nil)
+                    PostLoginHomeWebView.PoplurWebSpeech.shared.cancel()
+                    CameraAIAnnouncer.shared.resetSession()
+                case .inactive:
+                    PoplurPerformanceManager.shared.setApplicationLifecycle(.inactive)
+                    preLoginMusic.stop()
+                    NotificationCenter.default.post(name: .StopMapAudio, object: nil)
+                    // The VOICE, too. Everything else the app plays is an audio
+                    // session this handler already closes, but speech comes out
+                    // of AVSpeechSynthesizer instances that keep talking through
+                    // a minimised app on their own. The web gate cancels its own
+                    // line, and that is the right lever while the WebView is
+                    // alive — but it cannot speak for the native announcer, and
+                    // a backgrounded WebView may never get to run its handler at
+                    // all. Stopping here is host-side and unconditional.
+                    PostLoginHomeWebView.PoplurWebSpeech.shared.cancel()
+                    CameraAIAnnouncer.shared.resetSession()
                 case .active:
+                    PoplurPerformanceManager.shared.setApplicationLifecycle(.active)
                     if isPreLoginVisible && !showSplash && !usePreloginWebEmbed {
                         preLoginMusic.start()
                     }

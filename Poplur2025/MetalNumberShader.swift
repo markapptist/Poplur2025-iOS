@@ -3,6 +3,10 @@ import SwiftUI
 private enum PoplurShaderPerformance {
     static let frameInterval: TimeInterval = 1.0 / 12.0
     static let browserFrameInterval: TimeInterval = 1.0 / 15.0
+
+    static func adaptiveInterval(base: TimeInterval, targetFPS: Int) -> TimeInterval {
+        max(base, 1.0 / Double(max(1, targetFPS)))
+    }
 }
 
 @available(iOS 17.0, macOS 14.0, tvOS 17.0, watchOS 10.0, *)
@@ -40,12 +44,15 @@ struct PoplurTextShaderScope: ViewModifier {
 
     @State private var epoch = Date()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ObservedObject private var performance = PoplurPerformanceManager.shared
 
     @ViewBuilder
     func body(content: Content) -> some View {
-        if #available(iOS 17.0, macOS 14.0, tvOS 17.0, watchOS 10.0, *) {
+        if !performance.postProcessingAllowed {
+            content
+        } else if #available(iOS 17.0, macOS 14.0, tvOS 17.0, watchOS 10.0, *) {
             if animated && !reduceMotion {
-                TimelineView(.periodic(from: epoch, by: PoplurShaderPerformance.frameInterval)) { timeline in
+                TimelineView(.periodic(from: epoch, by: PoplurShaderPerformance.adaptiveInterval(base: PoplurShaderPerformance.frameInterval, targetFPS: performance.targetFPS))) { timeline in
                     let time = timeline.date.timeIntervalSince(epoch)
 
                     content
@@ -108,12 +115,15 @@ struct PoplurGlobalShaderScope: ViewModifier {
 
     @State private var epoch = Date()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ObservedObject private var performance = PoplurPerformanceManager.shared
 
     @ViewBuilder
     func body(content: Content) -> some View {
-        if #available(iOS 17.0, macOS 14.0, tvOS 17.0, watchOS 10.0, *) {
+        if !performance.postProcessingAllowed {
+            content
+        } else if #available(iOS 17.0, macOS 14.0, tvOS 17.0, watchOS 10.0, *) {
             if animated && !reduceMotion {
-                TimelineView(.periodic(from: epoch, by: PoplurShaderPerformance.frameInterval)) { timeline in
+                TimelineView(.periodic(from: epoch, by: PoplurShaderPerformance.adaptiveInterval(base: PoplurShaderPerformance.frameInterval, targetFPS: performance.targetFPS))) { timeline in
                     let time = Float(timeline.date.timeIntervalSince(epoch))
 
                     content
@@ -152,12 +162,15 @@ struct MetalNumberShader: ViewModifier {
     // Stable epoch so time increases monotonically regardless of view rebuilds
     @State private var epoch = Date()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ObservedObject private var performance = PoplurPerformanceManager.shared
 
     @ViewBuilder
     func body(content: Content) -> some View {
-        if #available(iOS 17.0, *) {
+        if !performance.postProcessingAllowed {
+            content
+        } else if #available(iOS 17.0, *) {
             if animated && !reduceMotion {
-                TimelineView(.periodic(from: epoch, by: PoplurShaderPerformance.frameInterval)) { timeline in
+                TimelineView(.periodic(from: epoch, by: PoplurShaderPerformance.adaptiveInterval(base: PoplurShaderPerformance.frameInterval, targetFPS: performance.targetFPS))) { timeline in
                     let time = Float(timeline.date.timeIntervalSince(epoch))
                     shadered(content, time: time)
                 }
@@ -195,14 +208,17 @@ struct PoplurIconShader: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.poplurShaderTime) private var sharedTime
     @Environment(\.poplurShaderIconIntensity) private var inheritedIntensity
+    @ObservedObject private var performance = PoplurPerformanceManager.shared
 
     @ViewBuilder
     func body(content: Content) -> some View {
-        if #available(iOS 17.0, *) {
+        if !performance.postProcessingAllowed {
+            content
+        } else if #available(iOS 17.0, *) {
             if let sharedTime {
                 shadered(content, time: reduceMotion ? 0 : sharedTime)
             } else if animated && !reduceMotion {
-                TimelineView(.periodic(from: epoch, by: PoplurShaderPerformance.frameInterval)) { timeline in
+                TimelineView(.periodic(from: epoch, by: PoplurShaderPerformance.adaptiveInterval(base: PoplurShaderPerformance.frameInterval, targetFPS: performance.targetFPS))) { timeline in
                     let time = reduceMotion ? 0 : Float(timeline.date.timeIntervalSince(epoch))
                     shadered(content, time: time)
                 }
@@ -257,11 +273,14 @@ struct BrowserMetalGlassShader: ViewModifier {
 
     @State private var epoch = Date()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ObservedObject private var performance = PoplurPerformanceManager.shared
 
     @ViewBuilder
     func body(content: Content) -> some View {
-        if #available(iOS 17.0, *) {
-            TimelineView(.periodic(from: epoch, by: PoplurShaderPerformance.browserFrameInterval)) { timeline in
+        if !performance.postProcessingAllowed {
+            content
+        } else if #available(iOS 17.0, *) {
+            TimelineView(.periodic(from: epoch, by: PoplurShaderPerformance.adaptiveInterval(base: PoplurShaderPerformance.browserFrameInterval, targetFPS: performance.targetFPS))) { timeline in
                 let time = reduceMotion ? 0 : Float(timeline.date.timeIntervalSince(epoch))
 
                 content

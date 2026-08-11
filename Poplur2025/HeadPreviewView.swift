@@ -49,7 +49,10 @@ private struct HeadScenePreview: UIViewRepresentable {
     let modelURL: URL
 
     func makeUIView(context: Context) -> SCNView {
-        let view = SCNView()
+        let view = PoplurManagedSCNView(
+            performanceName: "HeadPreview3D",
+            classification: .heavy
+        )
         view.backgroundColor = .clear
         view.allowsCameraControl = false
         view.autoenablesDefaultLighting = false

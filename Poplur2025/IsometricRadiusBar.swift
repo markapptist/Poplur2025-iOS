@@ -116,7 +116,11 @@ public struct IsometricRadiusBar: View {
         }
         .onDisappear {
             print("🔴 [RadiusBar] BAR IS NOW HIDDEN - onDisappear called")
+            stopHoldIncrease()
+            stopDrain()
             stopAutoLooping()
+            animationTask?.cancel()
+            animationTask = nil
         }
     }
 }
@@ -168,6 +172,8 @@ private extension IsometricRadiusBar {
             }
         }
         let link = CADisplayLink(target: proxy, selector: #selector(DisplayLinkProxy.tick(_:)))
+        let target = Float(PoplurPerformanceManager.shared.targetFPS)
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 10, maximum: target, preferred: target)
         objc_setAssociatedObject(link, UnsafeRawPointer(bitPattern: 0xDEADBEEF)!, proxy, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
         link.add(to: .main, forMode: .common)
         holdTimer = link
@@ -198,6 +204,8 @@ private extension IsometricRadiusBar {
             }
         }
         let link = CADisplayLink(target: proxy, selector: #selector(DisplayLinkProxy.tick(_:)))
+        let target = Float(PoplurPerformanceManager.shared.targetFPS)
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 10, maximum: target, preferred: target)
         objc_setAssociatedObject(link, UnsafeRawPointer(bitPattern: 0xFEEDBEEF)!, proxy, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
         link.add(to: .main, forMode: .common)
         drainTimer = link
@@ -331,12 +339,12 @@ private struct RadiusBarSceneView: UIViewRepresentable {
     var autoLoop: Bool
 
     func makeUIView(context: Context) -> SCNView {
-        let scnView = SCNView()
+        let scnView = PoplurManagedSCNView(performanceName: "RadiusBar3D")
         scnView.backgroundColor = .clear
         scnView.allowsCameraControl = false
         scnView.antialiasingMode = .multisampling4X
         scnView.isPlaying = true
-        scnView.preferredFramesPerSecond = 60
+        scnView.preferredFramesPerSecond = PoplurPerformanceManager.shared.targetFPS
         scnView.scene = makeScene()
         context.coordinator.view = scnView
 
@@ -348,13 +356,18 @@ private struct RadiusBarSceneView: UIViewRepresentable {
 
     func updateUIView(_ uiView: SCNView, context: Context) {
         // Force update on every radius change to ensure animations happen
-        print("🔄 [RadiusBarSceneView] updateUIView called with radius=\(radius)m")
+        uiView.preferredFramesPerSecond = PoplurPerformanceManager.shared.targetFPS
         context.coordinator.updateHeight(from: radius)
         context.coordinator.updateMaterials(baseColor: baseColor, tintColor: tintColor, useNormalMap: useNormalMap, lightingModel: lightingModel)
         context.coordinator.setAutoLoopingEnabled(autoLoop)
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    static func dismantleUIView(_ uiView: SCNView, coordinator: Coordinator) {
+        coordinator.tearDown()
+        (uiView as? PoplurManagedSCNView)?.poplurTearDown()
+    }
 
     private func makeScene() -> SCNScene {
         let scene = SCNScene()
@@ -459,9 +472,9 @@ private struct RadiusBarSceneView: UIViewRepresentable {
         let globeMat = SCNMaterial()
         // Apply a multi-stripe texture and glossy finish
         // Replaced multi-stripe texture with earth_day texture from asset catalog
-        let earthTexture = UIImage(named: "earth_day")
+        let earthTexture = PoplurTextureLoader.image(named: "earth_day")
         globeMat.diffuse.contents = earthTexture
-        globeMat.normal.contents = UIImage(named: "8k_Earth_normal_map")
+        globeMat.normal.contents = PoplurTextureLoader.image(named: "8k_Earth_normal_map")
         globeMat.normal.intensity = 0.8
         globeMat.metalness.contents = 0.0
         globeMat.roughness.contents = 0.15
@@ -656,12 +669,20 @@ private struct RadiusBarSceneView: UIViewRepresentable {
         init(_ parent: RadiusBarSceneView) { self.parent = parent }
         
         deinit {
+            tearDown()
+        }
+
+        func tearDown() {
             stopFollowingGlobe()
             stopLoopingBar()
             if let token = tapObserver {
                 NotificationCenter.default.removeObserver(token)
                 tapObserver = nil
             }
+            view?.isPlaying = false
+            view?.rendersContinuously = false
+            view?.scene?.isPaused = true
+            view = nil
         }
 
         func prepareInitialState() {
@@ -692,8 +713,6 @@ private struct RadiusBarSceneView: UIViewRepresentable {
         }
 
         func updateHeight(from radius: Double, isInitial: Bool) {
-            print("🔧 [Coordinator] updateHeight START - radius=\(radius)m isInitial=\(isInitial)")
-            
             guard let scnView = view,
                   let root = scnView.scene?.rootNode,
                   let bar = root.childNode(withName: "bar", recursively: true),
@@ -701,8 +720,6 @@ private struct RadiusBarSceneView: UIViewRepresentable {
                 print("⚠️ [Coordinator] updateHeight FAILED - missing scene components")
                 return
             }
-            
-            print("🔧 [Coordinator] Current box.height = \(box.height)")
             
             if loopLink != nil {
                 print("⚠️ [Coordinator] updateHeight SKIPPED - loopLink is active")
@@ -716,9 +733,6 @@ private struct RadiusBarSceneView: UIViewRepresentable {
             let hardMaxH: Double = parent.maxSceneHeight * 0.75
             let appliedH = min(targetH, hardMaxH)
             
-            print("🎯 [Coordinator] Height calculation: radius=\(radius)m → targetH=\(targetH) → appliedH=\(appliedH)")
-            print("🎯 [Coordinator] Applying animation: \(box.height) → \(appliedH)")
-
             // Allow implicit animations to work - don't disable actions
             CATransaction.begin()
             CATransaction.setAnimationDuration(0.8)
@@ -726,8 +740,6 @@ private struct RadiusBarSceneView: UIViewRepresentable {
             box.height = CGFloat(appliedH)
             bar.position.y = Float(appliedH / 2.0)
             CATransaction.commit()
-            
-            print("✅ [Coordinator] Bar height command sent: \(appliedH) (animation should be running)")
         }
 
         private func clampedHeight(_ radius: Double) -> Double {
@@ -750,7 +762,6 @@ private struct RadiusBarSceneView: UIViewRepresentable {
             let t = min(1.0, max(0.0, (logR - logMin) / (logMax - logMin)))
             
             let result = minH + (maxH - minH) * t
-            print("📏 [clampedHeight] radius=\(r)m → log(\(logR)) → t=\(t) → height=\(result)")
             return min(result, maxH)
         }
         
@@ -778,6 +789,8 @@ private struct RadiusBarSceneView: UIViewRepresentable {
         private func startFollowingGlobe() {
             stopFollowingGlobe()
             let link = CADisplayLink(target: self, selector: #selector(followTick(_:)))
+            let target = Float(PoplurPerformanceManager.shared.targetFPS)
+            link.preferredFrameRateRange = CAFrameRateRange(minimum: 10, maximum: target, preferred: target)
             link.add(to: .main, forMode: .common)
             followLink = link
         }
@@ -793,6 +806,8 @@ private struct RadiusBarSceneView: UIViewRepresentable {
             loopPhase = .rising
             loopTime = 0
             let link = CADisplayLink(target: self, selector: #selector(loopTick(_:)))
+            let target = Float(PoplurPerformanceManager.shared.targetFPS)
+            link.preferredFrameRateRange = CAFrameRateRange(minimum: 10, maximum: target, preferred: target)
             link.add(to: .main, forMode: .common)
             loopLink = link
         }

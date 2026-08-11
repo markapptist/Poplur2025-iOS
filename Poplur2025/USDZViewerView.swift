@@ -25,7 +25,6 @@ private struct USDZViewerRepresentable: UIViewRepresentable {
 
         let config = ARWorldTrackingConfiguration()
         config.environmentTexturing = .automatic
-        view.session.run(config)
 
         // Load model entity
         do {
@@ -48,23 +47,47 @@ private struct USDZViewerRepresentable: UIViewRepresentable {
             // If loading fails, leave empty scene
         }
 
-        // Start motion
-        context.coordinator.startMotionUpdates()
+        context.coordinator.attach(to: view, configuration: config)
         return view
     }
 
     func updateUIView(_ uiView: ARView, context: Context) {}
 
+    static func dismantleUIView(_ uiView: ARView, coordinator: Coordinator) {
+        coordinator.tearDown()
+    }
+
     func makeCoordinator() -> Coordinator { Coordinator() }
 
+    @MainActor
     final class Coordinator {
         private let motion = CMMotionManager()
         private let queue = OperationQueue()
         weak var modelEntity: ModelEntity?
+        private weak var arView: ARView?
+        private var configuration: ARWorldTrackingConfiguration?
+        private var performanceRegistration: PoplurPerformanceRegistration?
 
-        func startMotionUpdates() {
+        func attach(to view: ARView, configuration: ARWorldTrackingConfiguration) {
+            arView = view
+            self.configuration = configuration
+            performanceRegistration = PoplurPerformanceManager.shared.registerRenderer(
+                name: "USDZViewerAR",
+                classification: .heavy,
+                rateClass: .interactive,
+                priority: 80,
+                onPolicy: { [weak self] policy, granted in
+                    self?.applyPerformance(policy, granted: granted)
+                },
+                onPurgeInactiveResources: { [weak view] in view?.session.pause() }
+            )
+            performanceRegistration?.setVisible(true)
+        }
+
+        private func startMotionUpdates(targetFPS: Int) {
             guard motion.isDeviceMotionAvailable else { return }
-            motion.deviceMotionUpdateInterval = 1.0 / 60.0
+            motion.deviceMotionUpdateInterval = 1.0 / Double(max(10, targetFPS))
+            guard !motion.isDeviceMotionActive else { return }
             motion.startDeviceMotionUpdates(using: .xArbitraryZVertical, to: queue) { [weak self] motion, _ in
                 guard let self, let motion else { return }
                 // Map attitude (roll/pitch) to model rotations similar to a cube tilt
@@ -83,8 +106,28 @@ private struct USDZViewerRepresentable: UIViewRepresentable {
             }
         }
 
-        deinit {
-            motion.stopDeviceMotionUpdates()
+        private func applyPerformance(_ policy: PoplurPerformancePolicy, granted: Bool) {
+            guard granted, let configuration else {
+                motion.stopDeviceMotionUpdates()
+                arView?.session.pause()
+                return
+            }
+            arView?.session.run(configuration)
+            startMotionUpdates(targetFPS: policy.targetFPS(for: .interactive))
         }
+
+        func tearDown() {
+            performanceRegistration?.setVisible(false)
+            performanceRegistration?.invalidate()
+            performanceRegistration = nil
+            motion.stopDeviceMotionUpdates()
+            arView?.session.pause()
+            arView?.scene.anchors.removeAll()
+            arView = nil
+            configuration = nil
+            modelEntity = nil
+        }
+
+        deinit { tearDown() }
     }
 }

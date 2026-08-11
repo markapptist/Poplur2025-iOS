@@ -77,17 +77,16 @@ struct CloudyWeatherWidget: View {
         .onAppear {
             cloudScale = 1.06
             glowPulse = true
-            scheduleUnitToggle()
         }
-    }
-
-    private func scheduleUnitToggle() {
-        Task {
-            while true {
-                try? await Task.sleep(nanoseconds: 3_000_000_000)
-                await MainActor.run {
-                    withAnimation { showCelsius.toggle() }
+        .task {
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(for: .seconds(3))
+                } catch {
+                    return
                 }
+                guard !Task.isCancelled else { return }
+                withAnimation { showCelsius.toggle() }
             }
         }
     }

@@ -70,12 +70,12 @@ private struct CubeSkinPreviewSceneView: UIViewRepresentable {
     let skin: CubeSkin
 
     func makeUIView(context: Context) -> SCNView {
-        let view = SCNView()
+        let view = PoplurManagedSCNView(performanceName: "CubeSkinPreview3D")
         view.backgroundColor = .clear
         view.scene = makeScene()
         view.allowsCameraControl = true
         view.antialiasingMode = .multisampling4X
-        view.preferredFramesPerSecond = 60
+        view.preferredFramesPerSecond = PoplurPerformanceManager.shared.targetFPS
         return view
     }
 
@@ -85,6 +85,10 @@ private struct CubeSkinPreviewSceneView: UIViewRepresentable {
         let skinTexture = skinImage(for: skin)
         for m in box.materials { m.diffuse.contents = skinTexture }
         uiView.isPlaying = true
+    }
+
+    static func dismantleUIView(_ uiView: SCNView, coordinator: ()) {
+        (uiView as? PoplurManagedSCNView)?.poplurTearDown()
     }
 
     private func skinImage(for skin: CubeSkin) -> UIImage {

@@ -121,9 +121,7 @@ private final class WelcomeScene: SKScene {
         // Make sure SKView is optimized
         view.ignoresSiblingOrder = true
         #if os(iOS)
-        if view.preferredFramesPerSecond < 120 {
-            view.preferredFramesPerSecond = 120 // take advantage of ProMotion where available
-        }
+        view.preferredFramesPerSecond = PoplurPerformanceManager.shared.targetFPS
         #endif
 
         setupPhysics()
@@ -990,8 +988,7 @@ private final class AuthConfettiScene: SKScene {
     override func didMove(to view: SKView) {
         view.allowsTransparency = true
         view.backgroundColor = .clear
-        // Decorative background only — 60fps is plenty and halves GPU work vs. 120fps.
-        view.preferredFramesPerSecond = 60
+        view.preferredFramesPerSecond = PoplurPerformanceManager.shared.targetFPS
         startIfNeeded()
     }
 

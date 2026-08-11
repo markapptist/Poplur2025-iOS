@@ -22,6 +22,7 @@ struct MediaPickerView: View {
     @State private var preparedVideoURL: URL?          // MP4 after transcode if video
     @State private var preparedPosterJPEG: Data?       // poster for video
     @State private var previewPlayer: AVPlayer?
+    @State private var previewEndObserver: NSObjectProtocol?
 
     @State private var showImagePicker = false
     @State private var mediaSourceType: UIImagePickerController.SourceType = .photoLibrary
@@ -182,14 +183,13 @@ struct MediaPickerView: View {
             startPreparation()
         }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("MediaPickerResetPreviewPlayer"))) { _ in
-            previewPlayer?.pause()
-            previewPlayer = nil
+            clearPreviewPlayer()
         }
         .onDisappear {
             // Cancel any ongoing preparation when leaving
             prepTask?.cancel()
             prepTask = nil
-            previewPlayer?.pause()
+            clearPreviewPlayer()
         }
     }
 
@@ -235,6 +235,17 @@ struct MediaPickerView: View {
         preparedVideoURL = nil
         preparedPosterJPEG = nil
         uploadProgress = 0
+        clearPreviewPlayer()
+    }
+
+    @MainActor
+    private func clearPreviewPlayer() {
+        if let previewEndObserver {
+            NotificationCenter.default.removeObserver(previewEndObserver)
+            self.previewEndObserver = nil
+        }
+        previewPlayer?.pause()
+        previewPlayer?.replaceCurrentItem(with: nil)
         previewPlayer = nil
     }
 
@@ -299,9 +310,13 @@ struct MediaPickerView: View {
                     let player = AVPlayer(url: mp4URL)
                     player.isMuted = true
                     self.previewPlayer = player
-                    NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: player.currentItem, queue: .main) { _ in
-                        player.seek(to: .zero)
-                        player.play()
+                    self.previewEndObserver = NotificationCenter.default.addObserver(
+                        forName: .AVPlayerItemDidPlayToEndTime,
+                        object: player.currentItem,
+                        queue: .main
+                    ) { [weak player] _ in
+                        player?.seek(to: .zero)
+                        player?.play()
                     }
                 }
             } catch {

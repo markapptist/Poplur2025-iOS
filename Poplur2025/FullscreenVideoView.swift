@@ -27,6 +27,7 @@ struct FullscreenVideoView: View {
     @State private var boundaryObserver: Any?
     
     @State private var pauseObserver: NSObjectProtocol?
+    @ObservedObject private var performance = PoplurPerformanceManager.shared
 
     // Backward-compat initializer (keeps older call sites working)
     init(url: URL, isActive: Binding<Bool>, isMuted: Bool = true, shouldLoop: Bool = true) {
@@ -65,6 +66,15 @@ struct FullscreenVideoView: View {
             .onChange(of: isMuted) {
                 player.isMuted = isMuted
                 if shouldPlay { updatePlayback() }
+            }
+            .onChange(of: performance.mode) {
+                updatePlayback()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+                player.pause()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+                updatePlayback()
             }
             .onDisappear {
                 print("[Video] onDisappear for url: \(url)")
@@ -154,7 +164,7 @@ struct FullscreenVideoView: View {
     }
 
     private func updatePlayback() {
-        if shouldPlay {
+        if shouldPlay && performance.isApplicationActive && performance.mode != .emergency {
             if !isMuted {
                 PoplurEQSync.shared.begin(.standaloneVideo)
                 activatePlaybackAudioSession()

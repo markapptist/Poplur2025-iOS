@@ -25,21 +25,22 @@ import WebKit
 enum PoplurThermalProbe {
     private static var started = false
     private static var lastState: ProcessInfo.ThermalState?
+    private static var thermalObserver: NSObjectProtocol?
 
     static func start() {
         guard !started else { return }
         started = true
 
-        NotificationCenter.default.addObserver(
+        // The shared manager owns policy, low-power, memory and lifecycle
+        // responses. This probe remains the native-to-web thermal bridge.
+        PoplurPerformanceManager.shared.startMonitoring()
+
+        thermalObserver = NotificationCenter.default.addObserver(
             forName: ProcessInfo.thermalStateDidChangeNotification,
             object: nil,
             queue: .main
         ) { _ in
-            Task { @MainActor in report(reason: "CHANGED") }
-        }
-
-        Timer.scheduledTimer(withTimeInterval: 20.0, repeats: true) { _ in
-            Task { @MainActor in report(reason: "sample") }
+                Task { @MainActor in report(reason: "CHANGED") }
         }
         report(reason: "start")
     }
