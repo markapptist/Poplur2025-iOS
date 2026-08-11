@@ -13,6 +13,7 @@ final class CubeMotionPoster {
 
     private let manager = CMMotionManager()
     private let queue = OperationQueue()
+    private var wantsUpdates = false
     private var isRunning = false
 
     /// Tweak sensitivity if needed. This scales the raw attitude values before posting.
@@ -20,15 +21,27 @@ final class CubeMotionPoster {
     var pitchScale: Double = 1.0
 
     private init() {
-        queue.qualityOfService = .userInteractive
+        queue.qualityOfService = .utility
+        queue.maxConcurrentOperationCount = 1
+        NotificationCenter.default.addObserver(self, selector: #selector(appDidBecomeActive), name: UIApplication.didBecomeActiveNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(appWillResignActive), name: UIApplication.willResignActiveNotification, object: nil)
     }
 
     func start() {
-        guard !isRunning else { return }
+        wantsUpdates = true
+        startHardwareIfNeeded()
+    }
+
+    private func startHardwareIfNeeded() {
+        guard wantsUpdates,
+              UIApplication.shared.applicationState == .active,
+              manager.isDeviceMotionAvailable,
+              !isRunning else { return }
         isRunning = true
 
-        // Prefer deviceMotion for fused attitude; adjust interval as needed
-        manager.deviceMotionUpdateInterval = 1.0 / 60.0
+        // Fifteen samples per second preserves responsive tilt control without
+        // running the motion fusion and main-thread bridge at display cadence.
+        manager.deviceMotionUpdateInterval = 1.0 / 15.0
         // Choose a reference frame; xArbitraryZVertical is generally stable for UI tilts
         manager.startDeviceMotionUpdates(using: .xArbitraryZVertical, to: queue) { motion, error in
             guard let motion = motion else { return }
@@ -47,30 +60,26 @@ final class CubeMotionPoster {
             }
         }
 
-        // Observe app lifecycle to stop when backgrounded
-        NotificationCenter.default.addObserver(self, selector: #selector(appDidBecomeActive), name: UIApplication.didBecomeActiveNotification, object: nil)
-        NotificationCenter.default.addObserver(self, selector: #selector(appWillResignActive), name: UIApplication.willResignActiveNotification, object: nil)
     }
 
     func stop() {
+        wantsUpdates = false
+        stopHardware()
+    }
+
+    private func stopHardware() {
         guard isRunning else { return }
         manager.stopDeviceMotionUpdates()
         isRunning = false
-        NotificationCenter.default.removeObserver(self, name: UIApplication.didBecomeActiveNotification, object: nil)
-        NotificationCenter.default.removeObserver(self, name: UIApplication.willResignActiveNotification, object: nil)
     }
 
     @objc private func appDidBecomeActive() {
-        // Ensure updates continue after returning to foreground
-        if isRunning, !manager.isDeviceMotionActive {
-            start()
-        }
+        startHardwareIfNeeded()
     }
 
     @objc private func appWillResignActive() {
-        // Pause updates to save power; they'll resume on becomeActive
-        if isRunning {
-            manager.stopDeviceMotionUpdates()
-        }
+        // Preserve the user's tilt preference, but release motion hardware for
+        // the entire inactive/background interval.
+        stopHardware()
     }
 }

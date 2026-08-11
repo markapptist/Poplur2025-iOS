@@ -34,8 +34,10 @@ class UserRecognitionManager: ObservableObject {
     private var savedFaceImage: UIImage?
     private var savedFaceObservation: VNFaceObservation?
     
-    // Minimum time between recognition attempts (prevents spam)
-    private let recognitionCooldown: TimeInterval = 0.5
+    // Minimum time between recognition attempts. CameraKitController offers a
+    // dedicated face slot at roughly 1 Hz; this guard also protects callers
+    // outside that capture path without making recognition feel delayed.
+    private let recognitionCooldown: TimeInterval = 1.0
     
     // MARK: - Initialization
     
@@ -154,16 +156,12 @@ class UserRecognitionManager: ObservableObject {
     }
     
     /// Process detected objects to find users
-    func processDetectedObjects(_ _: [DetectedObject], from pixelBuffer: CVPixelBuffer?) {
-        guard Date().timeIntervalSince(lastRecognitionTime) > recognitionCooldown else {
-            return
-        }
-
-        // Vision image classification often labels face scenes by surrounding context.
-        // Run face detection from the frame itself instead of trusting a "person" label.
-        if let buffer = pixelBuffer {
-            detectFaces(in: buffer)
-        }
+    func processDetectedObjects(_ _: [DetectedObject], from _: CVPixelBuffer?) {
+        // CameraKitController schedules face recognition independently from
+        // classification. Keeping the former callback-triggered request here
+        // would put face Vision work back onto the classifier's frame and undo
+        // the round-robin energy budget. The compatibility hook remains because
+        // both native and web camera bridges still use it for result handling.
     }
     
     /// Detect faces in the camera frame

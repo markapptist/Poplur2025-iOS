@@ -37,11 +37,11 @@ final class VisionBoxDetector {
         let confidence: Float
     }
 
-    /// Frames are cheap to receive and expensive to analyse. The classifier
-    /// already skips 15, and this session was spent getting the phone cool —
-    /// so this runs on its own budget and drops any frame that arrives while a
-    /// request is still in flight rather than queueing work behind it.
-    var frameSkipInterval = 12
+    /// CameraKitController now chooses this detector's round-robin frame at
+    /// roughly 1 Hz. Keep this local gate at one so the controller cadence is
+    /// not multiplied by another twelve; `isProcessing` remains the hard
+    /// backpressure guard if a Vision request outlives its allotted window.
+    var frameSkipInterval = 1
 
     private var frameCount = 0
     private var isProcessing = false

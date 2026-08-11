@@ -250,9 +250,6 @@ enum PoplurWebPerformance {
           const nativeSetInterval = window.setInterval.bind(window);
           const nativeClearInterval = window.clearInterval.bind(window);
           const nativeDPR = Math.max(1, Number(window.devicePixelRatio) || 1);
-          const isMapSubframe = window !== window.top
-            && new URLSearchParams(window.location.search).get('map') === '1';
-
           let policy = \#(initial);
           let pageVisible = true;
           let interactiveUntil = performance.now() + Math.max(0, Number(policy.startupBurstMS) || 0);
@@ -273,12 +270,11 @@ enum PoplurWebPerformance {
           const frameRate = () => Math.max(1, Number(policy.interactiveFPS) || 12);
           const frameDelay = () => 1000 / frameRate();
           const inInteractiveBurst = () => performance.now() < interactiveUntil;
-          // Mapbox lives in Home's child frame. Its camera operations are
-          // finite and event-driven but routinely outlast a touch tail. Keep
-          // accepting queued subframe rAF at the capped policy rate while the
-          // renderer lease is active; the iframe is unmounted off Map and its
-          // own governor parks ambient work when the camera stops.
-          const canDriveFrames = () => isMapSubframe || inInteractiveBurst();
+          // Script work may run only inside a finite native rendering lease.
+          // Mapbox camera operations explicitly request a lease matching their
+          // duration; a child frame cannot keep the GPU awake merely by
+          // scheduling another rAF from the previous one.
+          const canDriveFrames = () => inInteractiveBurst();
 
           function markIdle(idle) {
             document.documentElement?.classList.toggle('poplur-performance-idle', idle);

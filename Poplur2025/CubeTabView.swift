@@ -644,23 +644,27 @@ private struct CubeSceneView: UIViewRepresentable {
     var currentSkin: CubeSkin = CubeSkinStore.shared.current
 
     func makeUIView(context: Context) -> SCNView {
-        let scnView = PoplurManagedSCNView(performanceName: "MainCube3D")
+        let scnView = PoplurManagedSCNView(
+            performanceName: "MainCube3D",
+            rateClass: .interactive
+        )
         scnView.backgroundColor = .clear
         // Removed: scnView.autoenablesDefaultLighting = false
         // Removed: scnView.rendersContinuously = true
         scnView.allowsCameraControl = false
         // Fast first frame: empty scene, no AA, lower FPS
         scnView.scene = SCNScene()
-        scnView.isPlaying = true
-        scnView.preferredFramesPerSecond = PoplurPerformanceManager.shared.targetFPS
+        scnView.isPlaying = false
+        scnView.preferredFramesPerSecond = PoplurPerformanceManager.shared.targetFPS(for: .interactive)
         scnView.antialiasingMode = .multisampling4X
         // Defer full scene build and higher quality to next runloop
         DispatchQueue.main.async { [weak scnView] in
             guard let v = scnView else { return }
             v.scene = makeScene()
-            v.preferredFramesPerSecond = PoplurPerformanceManager.shared.targetFPS
-            v.isPlaying = true
-            v.rendersContinuously = self.selectedTab == .record || self.selectedTab == .map
+            v.preferredFramesPerSecond = PoplurPerformanceManager.shared.targetFPS(for: .interactive)
+            v.isPlaying = false
+            v.rendersContinuously = false
+            v.setNeedsDisplay()
             // Removed: v.antialiasingMode = .multisampling4X
 
             context.coordinator.bindGeneratedCubeMaterials(from: v.scene)
@@ -751,14 +755,8 @@ private struct CubeSceneView: UIViewRepresentable {
 
     func updateUIView(_ uiView: SCNView, context: Context) {
         let performance = PoplurPerformanceManager.shared
-        uiView.preferredFramesPerSecond = performance.targetFPS
-        let shouldKeepRendererHot = performance.isApplicationActive && (selectedTab == .record || selectedTab == .map)
-        if uiView.rendersContinuously != shouldKeepRendererHot {
-            uiView.rendersContinuously = shouldKeepRendererHot
-        }
-        if uiView.isPlaying != performance.isApplicationActive {
-            uiView.isPlaying = performance.isApplicationActive
-        }
+        uiView.preferredFramesPerSecond = performance.targetFPS(for: .interactive)
+        context.coordinator.applyLifecycle(isActive: performance.isApplicationActive)
 
         // Keep tab state in sync
         context.coordinator.syncToSelectedTab(selectedTab)
@@ -1514,6 +1512,7 @@ private struct CubeSceneView: UIViewRepresentable {
 
         // New stored property to track if user is interacting (pan gesture active)
         private var isInteracting: Bool = false
+        private var isFlashing: Bool = false
 
         // New stored property to suspend spin temporarily
         private var suspendSpin: Bool = false
@@ -1569,20 +1568,33 @@ private struct CubeSceneView: UIViewRepresentable {
 
         private var rotationSpeedMultiplier: Double { parent.rotationSpeedMultiplier }
 
-        private var selectedTabNeedsContinuousRenderer: Bool {
-            parent.selectedTab == .record || parent.selectedTab == .map
-        }
-
         private func setRendererHot(_ hot: Bool) {
             guard let scnView = view else { return }
-            scnView.isPlaying = true
-            scnView.rendersContinuously = hot || selectedTabNeedsContinuousRenderer
+            guard PoplurPerformanceManager.shared.isApplicationActive else {
+                scnView.isPlaying = false
+                scnView.rendersContinuously = false
+                return
+            }
+            scnView.isPlaying = hot
+            scnView.rendersContinuously = hot
         }
 
         private func restoreRendererMode() {
             guard let scnView = view else { return }
-            scnView.rendersContinuously = selectedTabNeedsContinuousRenderer
+            let shouldAnimate = isInteracting || isBlinking || isFlashing
+            scnView.isPlaying = shouldAnimate
+            scnView.rendersContinuously = shouldAnimate
             scnView.setNeedsDisplay()
+        }
+
+        func applyLifecycle(isActive: Bool) {
+            guard let scnView = view else { return }
+            guard isActive else {
+                scnView.isPlaying = false
+                scnView.rendersContinuously = false
+                return
+            }
+            restoreRendererMode()
         }
 
         // Safe AVAudioPlayer — used in place of SCNAction.playAudio/SCNAudioPlayer which
@@ -1628,10 +1640,11 @@ private struct CubeSceneView: UIViewRepresentable {
                     }
                 }
             }
+            let previewMaximumFPS = PoplurPerformanceManager.shared.targetFPS(for: .interactive)
             NotificationCenter.default.addObserver(forName: Notification.Name("CubePreviewSetFPS"), object: nil, queue: .main) { [weak self] notif in
                 guard let self = self, let scnView = self.view else { return }
-                let requestedFPS = (notif.userInfo?["fps"] as? Int) ?? PoplurPerformanceManager.shared.targetFPS
-                scnView.preferredFramesPerSecond = min(requestedFPS, PoplurPerformanceManager.shared.targetFPS)
+                let requestedFPS = (notif.userInfo?["fps"] as? Int) ?? previewMaximumFPS
+                scnView.preferredFramesPerSecond = min(requestedFPS, previewMaximumFPS)
             }
             
             // Flash/torch notifications - illuminate cube when flashlight is ON
@@ -1999,8 +2012,8 @@ private struct CubeSceneView: UIViewRepresentable {
         func resumeForCameraTab() {
             guard let scnView = view,
                   let cube = scnView.scene?.rootNode.childNode(withName: "cube", recursively: true) else { return }
-            scnView.isPlaying = true
-            scnView.rendersContinuously = true
+            scnView.isPlaying = false
+            scnView.rendersContinuously = false
             if !isBlinking {
                 cube.removeAction(forKey: "recordBlink")
                 cube.scale = SCNVector3(1.0, 1.0, 1.0)
@@ -2011,6 +2024,7 @@ private struct CubeSceneView: UIViewRepresentable {
             if !isInteracting {
                 applyCombinedRotation(to: cube)
             }
+            scnView.setNeedsDisplay()
         }
 
         private func animateToYaw(_ yaw: Float, bouncy: Bool = false) {
@@ -2123,8 +2137,11 @@ private struct CubeSceneView: UIViewRepresentable {
                 }
 
                 // Subtle cube lean: follows device tilt, max ~12° at 45° tilt
-                self.liveRollYaw = Float(-roll) * 0.27
-                self.applyCombinedRotation(to: cube)
+                let nextRollYaw = Float(-roll) * 0.27
+                if abs(nextRollYaw - self.liveRollYaw) >= 0.005 {
+                    self.liveRollYaw = nextRollYaw
+                    self.applyCombinedRotation(to: cube)
+                }
 
                 // Tab snap when tilt exceeds ~34° with 1.5 s cooldown
                 let snapThreshold: Double = 0.60
@@ -2178,6 +2195,7 @@ private struct CubeSceneView: UIViewRepresentable {
         private func beginBlink() {
             guard !isBlinking, let scnView = view, let cube = scnView.scene?.rootNode.childNode(withName: "cube", recursively: true) else { return }
             isBlinking = true
+            setRendererHot(true)
 
             // Adjusted: slower and more gradual pop cycle
             let up = SCNAction.scale(to: 1.12, duration: 1.2)
@@ -2205,6 +2223,7 @@ private struct CubeSceneView: UIViewRepresentable {
             isBlinking = false
             cube.removeAction(forKey: "recordBlink")
             cube.scale = SCNVector3(1.0, 1.0, 1.0)
+            restoreRendererMode()
         }
 
         private func playPopSafely() {
@@ -2220,6 +2239,8 @@ private struct CubeSceneView: UIViewRepresentable {
         /// Start illuminating cube when flashlight is ON - makes icons glow from within
         private func startFlashing() {
             guard let scnView = view, let cube = scnView.scene?.rootNode.childNode(withName: "cube", recursively: true) else { return }
+            isFlashing = true
+            setRendererHot(true)
             
             // Stop any existing flash animation
             cube.removeAction(forKey: "flashGlow")
@@ -2261,6 +2282,7 @@ private struct CubeSceneView: UIViewRepresentable {
         /// Stop illuminating cube when flashlight is OFF - return to normal
         private func stopFlashing() {
             guard let scnView = view, let cube = scnView.scene?.rootNode.childNode(withName: "cube", recursively: true) else { return }
+            isFlashing = false
             
             print("🔦 [CubeTabView] Stopping flash - restoring normal emission")
             
@@ -2279,6 +2301,7 @@ private struct CubeSceneView: UIViewRepresentable {
             }
             
             SCNTransaction.commit()
+            restoreRendererMode()
             
             print("💤 [CubeTabView] Cube returned to normal emission intensity (flash OFF)")
         }
@@ -2307,7 +2330,8 @@ private struct CubeSceneView: UIViewRepresentable {
             box.materials = mats
             cubeMaterials = mats
             applyAllDynamicFaces()
-            scnView.isPlaying = true
+            scnView.isPlaying = false
+            scnView.setNeedsDisplay()
         }
 
         private func applyCombinedRotation(to node: SCNNode) {
@@ -2315,6 +2339,7 @@ private struct CubeSceneView: UIViewRepresentable {
             // Cube only rotates on Y — no X/Z tilt permitted
             let qY = simd_quatf(angle: currentYaw + liveRollYaw, axis: SIMD3<Float>(0, 1, 0))
             node.simdOrientation = qY
+            view?.setNeedsDisplay()
         }
 
         func applyPreviewHover(_ enabled: Bool) {

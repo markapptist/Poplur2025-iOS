@@ -3,7 +3,18 @@ import Combine
 import CoreLocation
 import CoreMedia
 import CoreVideo
+import Foundation
 import UIKit
+
+private enum CameraAnalysisPipeline: Int {
+    case faceRecognition
+    case classification
+    case objectBoxes
+
+    var next: CameraAnalysisPipeline {
+        CameraAnalysisPipeline(rawValue: (rawValue + 1) % 3) ?? .faceRecognition
+    }
+}
 
 final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewControllerProviding, RecordPreviewViewProviding, PreviewViewControllerProviding, PreviewViewProviding {
     @Published var isReady: Bool = false
@@ -50,6 +61,12 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
     private var performanceWantsCapture = false
     private let frameProcessingLock = NSLock()
     private var frameProcessingAllowed = false
+    /// Camera analysis is useful at human-response speed, not video frame rate.
+    /// Start at face recognition so the classifier callback cannot immediately
+    /// launch a duplicate face request on the first camera frame.
+    private var nextAnalysisPipeline: CameraAnalysisPipeline = .faceRecognition
+    private var nextAnalysisDispatchUptime: TimeInterval = 0
+    private let minimumAnalysisDispatchSpacing: TimeInterval = 0.34
 
     // Camera position tracking
     var currentCameraPosition: AVCaptureDevice.Position = .back
@@ -386,7 +403,13 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
             captureSession.beginConfiguration()
             defer { captureSession.commitConfiguration() }
 
-            if captureSession.canSetSessionPreset(.high) {
+            // The preview, web overlay, Vision requests and in-app recording all
+            // fit comfortably in 720p. `.high` can select 1080p/4K depending on
+            // the device, making the sensor, ISP and BGRA frame output process
+            // substantially more pixels without improving the phone-sized UI.
+            if captureSession.canSetSessionPreset(.hd1280x720) {
+                captureSession.sessionPreset = .hd1280x720
+            } else if captureSession.canSetSessionPreset(.high) {
                 captureSession.sessionPreset = .high
             }
 
@@ -816,23 +839,11 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
         frameProcessingLock.unlock()
         guard mayProcessFrame else { return }
 
-        // Process ML detection if enabled
-        if isMLDetectionEnabled {
-            mlDetectionManager?.processFrame(sampleBuffer)
-        }
-        
-        // Real boxes (people, animals, screens, barcodes) for the web overlay.
-        if let boxes = visionBoxDetector,
-           let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) {
-            boxes.process(pixelBuffer: pixelBuffer)
-        }
-
-        // Process user recognition (face detection for registered users)
-        if let userRecognition = userRecognitionManager,
-           let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) {
-            Task { @MainActor in
-                userRecognition.detectFaces(in: pixelBuffer)
-            }
+        if let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) {
+            dispatchNextAnalysisPipeline(
+                sampleBuffer: sampleBuffer,
+                pixelBuffer: pixelBuffer
+            )
         }
         
         // If user recognition manager exposes registered-user radius, publish it here
@@ -918,6 +929,42 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
             }
         }
     }
+
+    /// Run at most one expensive Vision/Core ML family per scheduled camera
+    /// frame. The old path handed the same buffer to classification, four box
+    /// detectors and face recognition together. Their private queues then
+    /// competed for CPU/GPU/Neural Engine time even though each result changes
+    /// slowly. Round-robin dispatch keeps every feature live at roughly 1 Hz
+    /// while leaving clear recovery time between pipelines.
+    private func dispatchNextAnalysisPipeline(
+        sampleBuffer: CMSampleBuffer,
+        pixelBuffer: CVPixelBuffer
+    ) {
+        let now = ProcessInfo.processInfo.systemUptime
+        guard now >= nextAnalysisDispatchUptime else { return }
+        nextAnalysisDispatchUptime = now + minimumAnalysisDispatchSpacing
+
+        let pipeline = nextAnalysisPipeline
+        nextAnalysisPipeline = pipeline.next
+
+        switch pipeline {
+        case .faceRecognition:
+            if let userRecognition = userRecognitionManager {
+                // UserRecognitionManager publishes UI-observable state. Keep
+                // its entry point on the main actor as before; only the Vision
+                // request itself moves to its background queue.
+                Task { @MainActor in
+                    userRecognition.detectFaces(in: pixelBuffer)
+                }
+            }
+        case .classification:
+            if isMLDetectionEnabled {
+                mlDetectionManager?.processFrame(sampleBuffer)
+            }
+        case .objectBoxes:
+            visionBoxDetector?.process(pixelBuffer: pixelBuffer)
+        }
+    }
     
     // MARK: - ML Detection Helper
     
@@ -927,6 +974,10 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
         if mlDetectionManager == nil {
             mlDetectionManager = SimplifiedMLDetectionManager()
         }
+        // CameraKitController owns the cross-pipeline cadence. Keeping the
+        // manager's former every-12th-frame gate as well would compound the two
+        // schedulers and make classification update only every ~12 seconds.
+        mlDetectionManager?.frameSkipInterval = 1
         mlDetectionManager?.isEnabled = true
         mlDetectionManager?.onDetection = onDetection ?? { objects in
             NotificationCenter.default.post(

@@ -69,6 +69,30 @@ struct PoplurPerformancePolicy: Equatable, Sendable {
     }
 }
 
+/// Bounded, content-free evidence captured when iOS changes thermal state.
+///
+/// iOS intentionally exposes a thermal pressure state rather than a battery or
+/// enclosure temperature in Celsius. Capturing the renderer lease *before* it
+/// is revoked lets a later, disconnected device run identify which subsystem
+/// was active when the operating system raised the pressure level. This is an
+/// attribution lead, not proof that the named renderer caused the transition.
+struct PoplurThermalTransitionRecord: Codable, Identifiable, Sendable {
+    let id: UUID
+    let timestamp: Date
+    let previousState: String
+    let state: String
+    let previousStateDurationSeconds: Double
+    let activeHeavyRenderer: String?
+    let activeHeavyOwnershipDurationSeconds: Double?
+    let visibleRenderers: [String]
+    let modeBeforeTransition: String
+    let decorativeFPSBeforeTransition: Int
+    let interactiveFPSBeforeTransition: Int
+    let applicationLifecycle: String
+    let cacheBytesBeforePurge: Int
+    let cachedItemCountBeforePurge: Int
+}
+
 @MainActor
 final class PoplurPerformanceRegistration {
     fileprivate weak var manager: PoplurPerformanceManager?
@@ -156,6 +180,9 @@ final class PoplurPerformanceManager: ObservableObject {
     @Published private(set) var activeHeavyRendererCount = 0
     @Published private(set) var currentRendererName: String?
     @Published private(set) var memoryWarningCount = 0
+    @Published private(set) var isThermalTripwireActive: Bool
+    @Published private(set) var thermalTripwireCooldownEndsAt: Date?
+    @Published private(set) var recentThermalTransitions: [PoplurThermalTransitionRecord]
 
     var targetFPS: Int { policy.targetFPS }
     var particlesAllowed: Bool { policy.particlesAllowed }
@@ -180,10 +207,17 @@ final class PoplurPerformanceManager: ObservableObject {
     private let baseCacheLimits: PoplurAssetCache.Limits
     private var registrations: [UUID: WeakRegistration] = [:]
     private var activeHeavyRendererID: UUID?
+    private var activeHeavyRendererGrantedAt: Date?
     private var activationSequence: UInt64 = 0
     private var notificationTokens: [NSObjectProtocol] = []
     private var memoryRecoveryTask: Task<Void, Never>?
+    private var thermalRecoveryTask: Task<Void, Never>?
+    private var thermalStateEnteredAt: Date
     private var monitoringStarted = false
+
+    private static let thermalRecoveryCooldown: TimeInterval = 30
+    private static let thermalTransitionLimit = 16
+    private static let thermalTransitionDefaultsKey = "PoplurPerformance.thermalTransitions.v1"
 
     private init(
         processInfo: ProcessInfo = .processInfo,
@@ -195,11 +229,16 @@ final class PoplurPerformanceManager: ObservableObject {
         let thermal = processInfo.thermalState
         let lowPower = processInfo.isLowPowerModeEnabled
         let initialMode = Self.mode(for: thermal, lowPower: lowPower, memoryPressure: false, lifecycle: .inactive)
+        let now = Date()
         self.mode = initialMode
         self.thermalState = thermal
         self.thermalCondition = Self.thermalName(thermal)
         self.isLowPowerModeEnabled = lowPower
         self.policy = Self.makePolicy(mode: initialMode, baseCacheByteLimit: baseCacheLimits.byteLimit)
+        self.isThermalTripwireActive = thermal != .nominal
+        self.thermalTripwireCooldownEndsAt = nil
+        self.recentThermalTransitions = Self.loadThermalTransitions()
+        self.thermalStateEnteredAt = now
     }
 
     func startMonitoring() {
@@ -288,10 +327,36 @@ final class PoplurPerformanceManager: ObservableObject {
         let cache = assetCache.snapshot()
         let usedMB = Int((Double(cache.estimatedByteCount) / 1_048_576.0).rounded())
         let limitMB = Int((Double(cache.byteLimit) / 1_048_576.0).rounded())
+        let tripwire = thermalTripwireStatus
+        let lastTransition = recentThermalTransitions.last.map {
+            "\($0.previousState)>\($0.state):\($0.activeHeavyRenderer ?? "none")"
+        } ?? "none"
         return "mode=\(mode.diagnosticName) thermal=\(thermalCondition) fps=\(targetFPS) "
             + "heavy=\(activeHeavyRendererCount) visible=\(visibleRendererCount) "
             + "cache=\(usedMB)/\(limitMB)MB assets=\(cache.itemCount)/\(cache.itemLimit) "
-            + "renderer=\(currentRendererName ?? "none") warnings=\(memoryWarningCount)"
+            + "renderer=\(currentRendererName ?? "none") tripwire=\(tripwire) "
+            + "lastThermal=\(lastTransition) warnings=\(memoryWarningCount)"
+    }
+
+    /// Human-readable, bounded history suitable for a debug overlay or a
+    /// post-run device log. Renderer names are fixed subsystem labels; no user
+    /// or content data is retained.
+    func thermalDiagnosticsSummary(limit: Int = 5) -> String {
+        let boundedLimit = max(1, min(limit, Self.thermalTransitionLimit))
+        let formatter = ISO8601DateFormatter()
+        return recentThermalTransitions.suffix(boundedLimit).map { record in
+            let stateDuration = String(format: "%.1fs", record.previousStateDurationSeconds)
+            let ownerDuration = record.activeHeavyOwnershipDurationSeconds.map {
+                String(format: "%.1fs", $0)
+            } ?? "n/a"
+            let visible = record.visibleRenderers.isEmpty ? "none" : record.visibleRenderers.joined(separator: ",")
+            return "\(formatter.string(from: record.timestamp)) "
+                + "\(record.previousState)>\(record.state) "
+                + "previousStateFor=\(stateDuration) "
+                + "owner=\(record.activeHeavyRenderer ?? "none") ownerFor=\(ownerDuration) "
+                + "visible=\(visible) mode=\(record.modeBeforeTransition) "
+                + "fps=\(record.decorativeFPSBeforeTransition)/\(record.interactiveFPSBeforeTransition)"
+        }.joined(separator: "\n")
     }
 
     fileprivate func rendererVisibilityDidChange(_ registration: PoplurPerformanceRegistration) {
@@ -313,7 +378,10 @@ final class PoplurPerformanceManager: ObservableObject {
         registration.apply(policy, granted: false)
         registration.onPurgeInactiveResources()
         registrations.removeValue(forKey: registration.id)
-        if activeHeavyRendererID == registration.id { activeHeavyRendererID = nil }
+        if activeHeavyRendererID == registration.id {
+            activeHeavyRendererID = nil
+            activeHeavyRendererGrantedAt = nil
+        }
         if registration.classification == .heavy { releaseReusableRendererAssets() }
         reconcileRenderers()
     }
@@ -321,16 +389,43 @@ final class PoplurPerformanceManager: ObservableObject {
     fileprivate func rendererRegistrationDidDeinit(id: UUID) {
         let wasHeavy = registrations[id]?.value?.classification == .heavy
         registrations.removeValue(forKey: id)
-        if activeHeavyRendererID == id { activeHeavyRendererID = nil }
+        if activeHeavyRendererID == id {
+            activeHeavyRendererID = nil
+            activeHeavyRendererGrantedAt = nil
+        }
         if wasHeavy { releaseReusableRendererAssets() }
         reconcileRenderers()
     }
 
     private func refreshSystemSignals(reason: String) {
-        thermalState = processInfo.thermalState
+        let observedThermalState = processInfo.thermalState
+        let transition = observedThermalState == thermalState
+            ? nil
+            : makeThermalTransitionRecord(to: observedThermalState)
+
+        thermalState = observedThermalState
         thermalCondition = Self.thermalName(thermalState)
         isLowPowerModeEnabled = processInfo.isLowPowerModeEnabled
+        updateThermalTripwire(for: observedThermalState)
         recomputeMode(reason: reason)
+
+        if let transition {
+            appendThermalTransition(transition)
+            thermalStateEnteredAt = transition.timestamp
+            debugLog(
+                "Thermal transition \(transition.previousState) -> \(transition.state); "
+                    + "owner=\(transition.activeHeavyRenderer ?? "none") "
+                    + "visible=\(transition.visibleRenderers.joined(separator: ","))"
+            )
+            if observedThermalState != .nominal {
+                enforceThermalTripwire(reason: "Thermal state became \(thermalCondition)")
+            }
+        } else if reason == "Startup", isThermalTripwireActive {
+            // The manager may be created while the phone is already warm, in
+            // which case there is no transition notification to trigger the
+            // initial fail-safe purge.
+            enforceThermalTripwire(reason: "Startup thermal state is \(thermalCondition)")
+        }
     }
 
     private func handleMemoryWarning() {
@@ -351,12 +446,17 @@ final class PoplurPerformanceManager: ObservableObject {
 
     private func recomputeMode(reason: String) {
         let previousPolicy = policy
-        let nextMode = Self.mode(
+        var nextMode = Self.mode(
             for: thermalState,
             lowPower: isLowPowerModeEnabled,
             memoryPressure: memoryPressureActive,
             lifecycle: applicationLifecycle
         )
+        if isThermalTripwireActive {
+            // A nominal reading during the cooldown remains reduced. Serious
+            // and critical pressure enter the emergency policy immediately.
+            nextMode = max(nextMode, thermalState == .serious || thermalState == .critical ? .emergency : .reduced)
+        }
         let previous = mode
         mode = nextMode
         policy = Self.makePolicy(mode: nextMode, baseCacheByteLimit: baseCacheLimits.byteLimit)
@@ -389,7 +489,7 @@ final class PoplurPerformanceManager: ObservableObject {
     private func reconcileRenderers() {
         compactRegistrations()
         let previousHeavyID = activeHeavyRendererID
-        activeHeavyRendererID = applicationLifecycle == .active
+        activeHeavyRendererID = applicationLifecycle == .active && !isThermalTripwireActive
             ? registrations.values
                 .compactMap(\.value)
                 .filter { $0.isVisible && $0.classification == .heavy }
@@ -401,6 +501,9 @@ final class PoplurPerformanceManager: ObservableObject {
                     return $0.id.uuidString < $1.id.uuidString
                 }?.id
             : nil
+        if previousHeavyID != activeHeavyRendererID {
+            activeHeavyRendererGrantedAt = activeHeavyRendererID == nil ? nil : Date()
+        }
         if previousHeavyID != activeHeavyRendererID,
            let previous = previousHeavyID.flatMap({ registrations[$0]?.value }),
            let current = activeHeavyRendererID.flatMap({ registrations[$0]?.value }) {
@@ -417,9 +520,9 @@ final class PoplurPerformanceManager: ObservableObject {
             }
             switch registration.classification {
             case .heavy:
-                granted = registration.id == activeHeavyRendererID
+                granted = !isThermalTripwireActive && registration.id == activeHeavyRendererID
             case .decorative:
-                granted = policy.decorativeRenderingAllowed
+                granted = !isThermalTripwireActive && policy.decorativeRenderingAllowed
             case .lightweight:
                 granted = true
             }
@@ -474,6 +577,101 @@ final class PoplurPerformanceManager: ObservableObject {
         #endif
     }
 
+    private var thermalTripwireStatus: String {
+        guard isThermalTripwireActive else { return "off" }
+        guard thermalState == .nominal,
+              let cooldownEnd = thermalTripwireCooldownEndsAt else { return "active" }
+        let seconds = max(0, Int(cooldownEnd.timeIntervalSinceNow.rounded(.up)))
+        return "cooldown(\(seconds)s)"
+    }
+
+    /// Updates only the tripwire latch. Renderer revocation happens in the
+    /// following `recomputeMode` call, after attribution has already captured
+    /// the current owner.
+    private func updateThermalTripwire(for state: ProcessInfo.ThermalState) {
+        thermalRecoveryTask?.cancel()
+        thermalRecoveryTask = nil
+
+        guard state == .nominal else {
+            isThermalTripwireActive = true
+            thermalTripwireCooldownEndsAt = nil
+            return
+        }
+
+        guard isThermalTripwireActive else {
+            thermalTripwireCooldownEndsAt = nil
+            return
+        }
+
+        let cooldownEnd = Date().addingTimeInterval(Self.thermalRecoveryCooldown)
+        thermalTripwireCooldownEndsAt = cooldownEnd
+        thermalRecoveryTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(Self.thermalRecoveryCooldown))
+            guard !Task.isCancelled,
+                  let self,
+                  self.processInfo.thermalState == .nominal else { return }
+            self.isThermalTripwireActive = false
+            self.thermalTripwireCooldownEndsAt = nil
+            self.thermalRecoveryTask = nil
+            self.recomputeMode(reason: "Thermal recovery cooldown elapsed")
+        }
+    }
+
+    private func enforceThermalTripwire(reason: String) {
+        // `recomputeMode` has already revoked heavy/decorative leases. Their
+        // callbacks stop capture, AR, media and scripted rendering before the
+        // app-owned reusable working set is discarded.
+        purgeInactiveRendererResources()
+        releaseReusableRendererAssets()
+        let releasedBytes = assetCache.purge(reason: .thermalPressure)
+        debugLog("Thermal tripwire enforced; released \(releasedBytes) bytes. Reason: \(reason)")
+    }
+
+    private func makeThermalTransitionRecord(
+        to nextState: ProcessInfo.ThermalState
+    ) -> PoplurThermalTransitionRecord {
+        let now = Date()
+        let cache = assetCache.snapshot()
+        let live = registrations.values.compactMap(\.value)
+        let owner = activeHeavyRendererID.flatMap { registrations[$0]?.value }
+        let ownershipDuration = owner.flatMap { _ in
+            activeHeavyRendererGrantedAt.map { max(0, now.timeIntervalSince($0)) }
+        }
+        return PoplurThermalTransitionRecord(
+            id: UUID(),
+            timestamp: now,
+            previousState: Self.thermalName(thermalState),
+            state: Self.thermalName(nextState),
+            previousStateDurationSeconds: max(0, now.timeIntervalSince(thermalStateEnteredAt)),
+            activeHeavyRenderer: owner?.name,
+            activeHeavyOwnershipDurationSeconds: ownershipDuration,
+            visibleRenderers: live.filter(\.isVisible).map(\.name).sorted(),
+            modeBeforeTransition: mode.diagnosticName,
+            decorativeFPSBeforeTransition: policy.targetFPS,
+            interactiveFPSBeforeTransition: policy.interactiveTargetFPS,
+            applicationLifecycle: applicationLifecycle.rawValue,
+            cacheBytesBeforePurge: cache.estimatedByteCount,
+            cachedItemCountBeforePurge: cache.itemCount
+        )
+    }
+
+    private func appendThermalTransition(_ record: PoplurThermalTransitionRecord) {
+        recentThermalTransitions.append(record)
+        if recentThermalTransitions.count > Self.thermalTransitionLimit {
+            recentThermalTransitions.removeFirst(recentThermalTransitions.count - Self.thermalTransitionLimit)
+        }
+        guard let data = try? JSONEncoder().encode(recentThermalTransitions) else { return }
+        UserDefaults.standard.set(data, forKey: Self.thermalTransitionDefaultsKey)
+    }
+
+    private static func loadThermalTransitions() -> [PoplurThermalTransitionRecord] {
+        guard let data = UserDefaults.standard.data(forKey: thermalTransitionDefaultsKey),
+              let records = try? JSONDecoder().decode([PoplurThermalTransitionRecord].self, from: data) else {
+            return []
+        }
+        return Array(records.suffix(thermalTransitionLimit))
+    }
+
     private static func mode(
         for thermal: ProcessInfo.ThermalState,
         lowPower: Bool,
@@ -484,8 +682,7 @@ final class PoplurPerformanceManager: ObservableObject {
         switch thermal {
         case .nominal: result = .full
         case .fair: result = .reduced
-        case .serious: result = .lowPower
-        case .critical: result = .emergency
+        case .serious, .critical: result = .emergency
         @unknown default: result = .reduced
         }
         if lowPower { result = max(result, .lowPower) }
@@ -499,8 +696,8 @@ final class PoplurPerformanceManager: ObservableObject {
         case .full:
             return PoplurPerformancePolicy(
                 mode: mode,
-                targetFPS: 12,
-                interactiveTargetFPS: 24,
+                targetFPS: 30,
+                interactiveTargetFPS: 60,
                 particlesAllowed: true,
                 particleDensityMultiplier: 0.15,
                 dynamicShadowsAllowed: false,
@@ -515,8 +712,8 @@ final class PoplurPerformanceManager: ObservableObject {
         case .reduced:
             return PoplurPerformancePolicy(
                 mode: mode,
-                targetFPS: 8,
-                interactiveTargetFPS: 15,
+                targetFPS: 24,
+                interactiveTargetFPS: 30,
                 particlesAllowed: true,
                 particleDensityMultiplier: 0.05,
                 dynamicShadowsAllowed: false,
@@ -531,8 +728,8 @@ final class PoplurPerformanceManager: ObservableObject {
         case .lowPower:
             return PoplurPerformancePolicy(
                 mode: mode,
-                targetFPS: 4,
-                interactiveTargetFPS: 10,
+                targetFPS: 15,
+                interactiveTargetFPS: 24,
                 particlesAllowed: false,
                 particleDensityMultiplier: 0,
                 dynamicShadowsAllowed: false,
@@ -547,8 +744,8 @@ final class PoplurPerformanceManager: ObservableObject {
         case .emergency:
             return PoplurPerformancePolicy(
                 mode: mode,
-                targetFPS: 1,
-                interactiveTargetFPS: 5,
+                targetFPS: 5,
+                interactiveTargetFPS: 10,
                 particlesAllowed: false,
                 particleDensityMultiplier: 0,
                 dynamicShadowsAllowed: false,
