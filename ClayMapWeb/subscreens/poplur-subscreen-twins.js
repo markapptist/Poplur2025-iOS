@@ -141,7 +141,7 @@ const allGuideChannels = [
   ['poplur_channel_105_modelling', 105, 'Modelling', 'runwayraw  ▶  casting call  ▶  backstage'],
   ['poplur_channel_106_fashion', 106, 'Fashion', 'fitcheckdaily  ▶  thrift loop  ▶  street style'],
   ['poplur_channel_107_music', 107, 'Music', 'basement.set  ▶  warehouse live  ▶  CBC Music 94.1'],
-  ['poplur_channel_108_tech', 108, 'Tech', 'shipit  ▶  desk setup  ▶  new demo'],
+  ['poplur_channel_108_tech', 108, 'Tech', 'shipit  ▶  desk setup  ▶  new build'],
   ['poplur_channel_109_news', 109, 'News', 'localwire  ▶  harbourfront rally  ▶  breaking'],
   ['poplur_channel_112_shopping', 112, 'Shopping', 'sample sale  ▶  pop-up finds  ▶  under $20'],
   ['poplur_channel_113_cartoon', 113, 'Cartoon', 'doodlecast  ▶  clay OC  ▶  new upload'],
@@ -154,48 +154,48 @@ const groups = {
   feed: {
     label: 'Feed',
     screens: [
-      { id: 'feed-tvguide', title: 'TV Guide', detail: 'FeedOpenTVGuide overlay', icon: H.tvGuide, render: () => feedTVGuide() },
-      { id: 'feed-comments', title: 'Comments', detail: 'Feed comment credits roll', icon: H.chat, render: () => feedComments() },
-      { id: 'feed-news', title: 'News', detail: 'Poplur Newspaper page', icon: H.news, render: () => feedNews() },
-      { id: 'feed-music', title: 'Music', detail: 'Hold menu music channel', icon: H.music, render: () => feedMusic() },
-      { id: 'feed-games', title: 'Games', detail: 'Hold menu games channel', icon: H.games, render: () => feedGames() },
-      { id: 'feed-like', title: 'Like', detail: 'Double-tap heart burst', icon: H.like, render: () => feedLike() },
+      { id: 'feed-tvguide', title: 'TV Guide', detail: 'Live channels in your radius', icon: H.tvGuide, render: () => feedTVGuide() },
+      { id: 'feed-comments', title: 'Comments', detail: 'Community comments', icon: H.chat, render: () => feedComments() },
+      { id: 'feed-news', title: 'News', detail: 'Local stories in your radius', icon: H.news, render: () => feedNews() },
+      { id: 'feed-music', title: 'Music', detail: 'Music in your radius', icon: H.music, render: () => feedMusic() },
+      { id: 'feed-games', title: 'Games', detail: 'Games in your radius', icon: H.games, render: () => feedGames() },
+      { id: 'feed-like', title: 'Like', detail: 'Save this post to your likes', icon: H.like, render: () => feedLike() },
       { id: 'feed-cc', title: 'CC On/Off', detail: 'Captions + auto translation', icon: H.cc, render: () => feedCC() },
     ],
   },
   camera: {
     label: 'Camera',
     screens: [
-      { id: 'camera-capture', title: 'Capture', detail: 'Record tab camera controls', icon: H.create, render: () => cameraCapture() },
-      { id: 'camera-roll', title: 'Camera Roll', detail: 'showCameraRollWindow', icon: H.cameraRoll, render: () => cameraRoll() },
-      { id: 'camera-create', title: 'Create', detail: 'OpenCreatorRequested', icon: H.create, render: () => creatorScreen() },
-      { id: 'camera-preview', title: 'Preview', detail: 'CapturePreviewOverlay', icon: H.tvGuide, render: () => cameraPreview() },
-      { id: 'camera-live', title: 'Live', detail: 'LiveVideoStatusBadge', icon: H.tvGuide, render: () => cameraLive() },
-      { id: 'camera-chat', title: 'Chat', detail: 'OpenDMsRequested', icon: H.chat, render: () => messagesScreen('Camera') },
-      { id: 'camera-store', title: 'Store', detail: 'OpenPoplurStoreRequested', icon: H.store, render: () => storeScreen() },
+      { id: 'camera-capture', title: 'Capture', detail: 'Photo, video, and live capture', icon: H.create, render: () => cameraCapture() },
+      { id: 'camera-roll', title: 'Camera Roll', detail: 'Recent photos and videos', icon: H.cameraRoll, render: () => cameraRoll() },
+      { id: 'camera-create', title: 'Create', detail: 'AI creation tools', icon: H.create, render: () => creatorScreen() },
+      { id: 'camera-preview', title: 'Preview', detail: 'Review your capture', icon: H.tvGuide, render: () => cameraPreview() },
+      { id: 'camera-live', title: 'Live', detail: 'Live broadcast controls', icon: H.tvGuide, render: () => cameraLive() },
+      { id: 'camera-chat', title: 'Chat', detail: 'Messages in your radius', icon: H.chat, render: () => messagesScreen('Camera') },
+      { id: 'camera-store', title: 'Store', detail: 'Shop Poplur', icon: H.store, render: () => storeScreen() },
     ],
   },
   map: {
     label: 'Map',
     screens: [
-      { id: 'map-locate', title: 'Locate', detail: 'CenterMapOnUser', icon: H.locate, render: () => mapLocate() },
-      { id: 'map-post', title: 'Post', detail: 'PoplurAIStartMapPost', icon: H.post, render: () => mapPost() },
-      { id: 'map-tour', title: 'Tour', detail: 'PoplurAISetTourActive', icon: H.tour, render: () => mapTour() },
-      { id: 'map-search', title: 'Search', detail: 'PoplurMapSearchOverlay', icon: H.locate, render: () => mapSearch() },
+      { id: 'map-locate', title: 'Locate', detail: 'Return to your location', icon: H.locate, render: () => mapLocate() },
+      { id: 'map-post', title: 'Post', detail: 'Place a post on the map', icon: H.post, render: () => mapPost() },
+      { id: 'map-tour', title: 'Tour', detail: 'Explore places in your radius', icon: H.tour, render: () => mapTour() },
+      { id: 'map-search', title: 'Search', detail: 'Search places, people, and posts', icon: H.locate, render: () => mapSearch() },
       { id: 'map-claims', title: 'Claims', detail: 'Dominance and radius pins', icon: H.stats, render: () => mapClaims() },
-      { id: 'map-chat', title: 'Chat', detail: 'OpenDMsRequested', icon: H.chat, render: () => messagesScreen('Map') },
+      { id: 'map-chat', title: 'Chat', detail: 'Messages near this map area', icon: H.chat, render: () => messagesScreen('Map') },
     ],
   },
   profile: {
     label: 'Profile',
     screens: [
-      { id: 'profile-messages', title: 'Messages', detail: 'MessagesRootView', icon: H.chat, render: () => messagesScreen('Profile') },
-      { id: 'profile-settings', title: 'Settings', detail: 'AppSettingsView', icon: H.settings, render: () => settingsScreen() },
-      { id: 'profile-stats', title: 'Stats', detail: 'ProfileStatsView', icon: H.stats, render: () => statsScreen() },
-      { id: 'profile-alerts', title: 'Notifications', detail: 'ProfileNotificationBanner', icon: H.notifications, render: () => notificationsScreen() },
-      { id: 'profile-store', title: 'Store', detail: 'RadiusStoreView', icon: H.store, render: () => storeScreen() },
-      { id: 'profile-phone', title: 'Phone', detail: 'PopularPhone overlay', icon: H.phone, render: () => phoneScreen() },
-      { id: 'profile-creator', title: 'Creator', detail: 'PoplurAICreateView', icon: H.create, render: () => creatorScreen() },
+      { id: 'profile-messages', title: 'Messages', detail: 'Chats in your radius', icon: H.chat, render: () => messagesScreen('Profile') },
+      { id: 'profile-settings', title: 'Settings', detail: 'App and subscreen preferences', icon: H.settings, render: () => settingsScreen() },
+      { id: 'profile-stats', title: 'Stats', detail: 'Radius and creator insights', icon: H.stats, render: () => statsScreen() },
+      { id: 'profile-alerts', title: 'Notifications', detail: 'Alerts in your radius', icon: H.notifications, render: () => notificationsScreen() },
+      { id: 'profile-store', title: 'Store', detail: 'Shop Poplur', icon: H.store, render: () => storeScreen() },
+      { id: 'profile-phone', title: 'Phone', detail: 'Calls, contacts, texts, and games', icon: H.phone, render: () => phoneScreen() },
+      { id: 'profile-creator', title: 'Creator', detail: 'AI creation tools', icon: H.create, render: () => creatorScreen() },
     ],
   },
 };
@@ -582,11 +582,11 @@ screenEl.addEventListener('click', e => {
     if (storeAction.dataset.storeAction === 'add') {
       const productItem = profileStoreProducts.find(item => item.id === profileStoreProduct);
       profileCartCount += 1;
-      profileStoreNotice = `${productItem?.title || 'Item'} added to your test cart.`;
+      profileStoreNotice = `${productItem?.title || 'Item'} added to your cart.`;
     } else {
       profileStoreNotice = profileCartCount
-        ? `Test checkout is ready with ${profileCartCount} item${profileCartCount === 1 ? '' : 's'}.`
-        : 'Choose a product before opening the test checkout.';
+        ? `Checkout is ready with ${profileCartCount} item${profileCartCount === 1 ? '' : 's'}.`
+        : 'Choose a product before opening checkout.';
     }
     renderScreen();
     return;
@@ -654,12 +654,12 @@ screenEl.addEventListener('click', e => {
   const settingAction = e.target.closest('[data-setting-action]');
   if (settingAction) {
     const messages = {
-      seed: 'Demo content controls opened for this test profile.',
-      repair: 'User ID repair test completed without changing account data.',
-      backup: 'A test backup is ready to export.',
-      signout: 'Sign-out confirmation works. Account state was preserved for testing.',
+      seed: 'Content preview controls are ready.',
+      repair: 'Your profile and sign-in status look healthy.',
+      backup: 'Your backup is ready to export.',
+      signout: 'Sign-out confirmation opened for this device.',
     };
-    profileSettingsNotice = messages[settingAction.dataset.settingAction] || 'This settings route is ready.';
+    profileSettingsNotice = messages[settingAction.dataset.settingAction] || 'This setting is ready.';
     renderScreen();
     return;
   }
@@ -1498,7 +1498,7 @@ function messagesScreen(from) {
     <div class="ios-screen messages profile-scroll-page">
       <div class="message-top">
         <img src="${H.chat}" alt="">
-        <div><h1>Chats</h1><span style="color:#777;font-weight:800">${esc(from)} route · OpenDMsRequested</span></div>
+        <div><h1>Chats</h1><span style="color:#777;font-weight:800">${esc(from)} messages</span></div>
       </div>
       <div class="message-list">
         ${profileMailThreads.map(item => thread(item)).join('')}
@@ -1535,7 +1535,7 @@ function storeScreen() {
           <h2>${esc(selected.title)}</h2>
           <strong class="store-detail-price">${esc(selected.price)}</strong>
           <p>${esc(selected.description)}</p>
-          <button type="button" class="profile-action wide" data-store-action="add">Add to test cart</button>
+          <button type="button" class="profile-action wide" data-store-action="add">Add to cart</button>
           <button type="button" class="profile-secondary-action" data-store-action="checkout">
             Open cart${profileCartCount ? ` (${profileCartCount})` : ''}
           </button>
@@ -1778,14 +1778,14 @@ function settingsScreen() {
     },
     {
       img: ios('settings_ic_flask', 'settings_ic_flask.png'),
-      title: 'Seed NA (1000)',
-      sub: 'Demo content controls',
+      title: 'Content previews',
+      sub: 'Preview sample content',
       panel: 'seed',
     },
     {
       img: ios('settings_ic_wrench', 'settings_ic_wrench.png'),
-      title: 'Fix Empty UserIDs',
-      sub: 'Maintenance',
+      title: 'Account health',
+      sub: 'Profile and sign-in status',
       panel: 'repair',
     },
     {
@@ -1821,7 +1821,7 @@ function settingsScreen() {
 
   return `
     <div class="ios-screen settings-page profile-scroll-page">
-      <div class="settings-hero"><img src="${H.settings}" alt=""><div><h1>Settings</h1><span style="color:var(--subtle);font-weight:800">AppSettingsView</span></div></div>
+      <div class="settings-hero"><img src="${H.settings}" alt=""><div><h1>Settings</h1><span style="color:var(--subtle);font-weight:800">Personalize Poplur</span></div></div>
       ${settingsSection('Playback', 'Video, captions, language, and background audio.', playbackRows)}
       <div class="translation-card">
         <div>
@@ -1841,7 +1841,7 @@ function settingsScreen() {
         </div>
       </div>
       ${settingsSection('Subscreens', 'These choices apply to every subscreen in Feed, Camera, Map, and Profile.', subscreenRows, 'subscreen-settings-section')}
-      ${settingsSection('Notifications & Data', 'Alerts, demo content, maintenance, and backups.', dataRows)}
+      ${settingsSection('Notifications & Data', 'Alerts, sample content, account care, and backups.', dataRows)}
       ${settingsSection('About', 'Version, credits, and legal information.', aboutRows)}
       ${settingsSection('Account', 'Your Poplur session.', accountRows)}
       ${profileSettingsNotice ? `<div class="profile-notice" role="status">${esc(profileSettingsNotice)}</div>` : ''}
@@ -1889,32 +1889,32 @@ function settingsPanelScreen(panel) {
       detail: `Captions currently translate to ${profileSettingState.language}. Use the language controls on the main Settings screen to change it.`,
     },
     seed: {
-      title: 'Seed NA',
-      detail: 'Preview the demo-content controls without modifying production data.',
-      action: ['seed', 'Open demo controls'],
+      title: 'Content previews',
+      detail: 'Preview sample-content controls without changing your account.',
+      action: ['seed', 'Open content controls'],
     },
     repair: {
-      title: 'Fix Empty UserIDs',
-      detail: 'Run the safe test version of the account-maintenance check.',
-      action: ['repair', 'Run test repair'],
+      title: 'Account health',
+      detail: 'Review profile and sign-in sync status for this device.',
+      action: ['repair', 'Run check'],
     },
     backup: {
       title: 'Back Up Data',
-      detail: 'Prepare a test archive of profile, message, and post metadata.',
-      action: ['backup', 'Prepare test backup'],
+      detail: 'Prepare an archive of profile, message, and post metadata.',
+      action: ['backup', 'Prepare backup'],
     },
     about: {
       title: 'About Poplur',
-      detail: 'Poplur Rough Copy interactive subscreens. Built for device-parity testing.',
+      detail: 'Version, credits, and app information for Poplur.',
     },
     terms: {
       title: 'Terms of Service',
-      detail: 'This test route opens the legal surface without leaving the Profile flow.',
+      detail: 'Read Poplur legal terms without leaving Settings.',
     },
     signout: {
       title: 'Sign Out',
-      detail: 'Confirm that the sign-out route responds. Testing keeps your current account active.',
-      action: ['signout', 'Test sign-out confirmation'],
+      detail: 'Review the sign-out confirmation for this device.',
+      action: ['signout', 'Review sign out'],
     },
   };
   const item = panels[panel] || panels.about;
@@ -1924,7 +1924,7 @@ function settingsPanelScreen(panel) {
         <button type="button" class="profile-back" data-setting-back aria-label="Back to settings">‹</button>
         <div>
           <h1>${esc(item.title)}</h1>
-          <span>Settings detail</span>
+          <span>Poplur Settings</span>
         </div>
       </div>
       <div class="settings-detail-card">
