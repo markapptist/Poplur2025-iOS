@@ -101,6 +101,12 @@ enum PoplurWebCaptureStore {
         return key
     }
 
+    /// A selected Photos video stays file-backed all the way into WebKit. This
+    /// avoids decoding it into a base64 payload just to write it back to disk.
+    static func registerCameraRollVideoAsset(videoURL: URL) -> String {
+        register(videoURL: videoURL)
+    }
+
     static func item(for key: String) -> Item? {
         lock.lock()
         defer { lock.unlock() }
@@ -160,6 +166,77 @@ enum PoplurWebCaptureStore {
         if removed.ownsTemporaryFile, let fileURL = removed.item.fileURL {
             PoplurTemporaryFileOwnership.deleteIfOwned(fileURL)
         }
+    }
+}
+
+/// Durable home-profile media lives outside the short-lived camera hand-off
+/// store. It is served through the same custom scheme as captures, so WKWebView
+/// can range-seek the ten-second clip after an app relaunch without receiving a
+/// large base64 message from JavaScript again.
+enum PoplurProfileSelfieStore {
+    private static let extensionKey = "poplur.profile.selfieVideoExtension"
+
+    private static var directory: URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+    }
+
+    private static func fileExtension(for mimeType: String) -> String? {
+        switch mimeType.lowercased() {
+        case "video/mp4", "video/mp4;codecs=avc1.42e01e": return "mp4"
+        case "video/webm", "video/webm;codecs=vp8": return "webm"
+        case "video/quicktime": return "mov"
+        default: return nil
+        }
+    }
+
+    private static func mimeType(for fileExtension: String) -> String {
+        switch fileExtension.lowercased() {
+        case "mp4": return "video/mp4"
+        case "webm": return "video/webm"
+        default: return "video/quicktime"
+        }
+    }
+
+    static func sourceURL() -> String? {
+        guard let ext = UserDefaults.standard.string(forKey: extensionKey),
+              FileManager.default.fileExists(atPath: videoURL(extension: ext).path) else { return nil }
+        return "\(PoplurClayWebMap.scheme)://\(PoplurClayWebMap.host)/profile-selfie.\(ext)"
+    }
+
+    static func item(for relativePath: String) -> (url: URL, mimeType: String)? {
+        guard relativePath.hasPrefix("/profile-selfie."),
+              !relativePath.dropFirst("/profile-selfie.".count).contains("/"),
+              let ext = UserDefaults.standard.string(forKey: extensionKey),
+              relativePath == "/profile-selfie.\(ext)" else { return nil }
+        let url = videoURL(extension: ext)
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return (url, mimeType(for: ext))
+    }
+
+    @discardableResult
+    static func persist(data: Data, mimeType: String) -> String? {
+        guard !data.isEmpty, data.count <= 12_000_000,
+              let ext = fileExtension(for: mimeType) else { return nil }
+        let destination = videoURL(extension: ext)
+        do {
+            for staleExtension in ["mp4", "webm", "mov"] where staleExtension != ext {
+                try? FileManager.default.removeItem(at: videoURL(extension: staleExtension))
+            }
+            try data.write(to: destination, options: .atomic)
+            UserDefaults.standard.set(ext, forKey: extensionKey)
+            return sourceURL()
+        } catch {
+            print("[PostLoginHomeWebView] failed to persist profile selfie: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    static func extensionForPersistedVideo() -> String? {
+        UserDefaults.standard.string(forKey: extensionKey)
+    }
+
+    private static func videoURL(extension ext: String) -> URL {
+        directory.appendingPathComponent("profile-selfie.\(ext)")
     }
 }
 
@@ -357,6 +434,10 @@ struct PostLoginHomeWebView: UIViewRepresentable {
     /// boxes, so the live web view is published here rather than threaded
     /// through every intermediate type.
     static weak var liveWebView: WKWebView?
+    /// The coordinator owns renderer recovery, while the SwiftUI scene owns
+    /// foreground state. Keeping the active coordinator here lets a deferred
+    /// recovery resume only after UIKit has brought the app forward again.
+    static weak var liveCoordinator: Coordinator?
     /// `evaluateJavaScript` completions are asynchronous. A parked delivery
     /// must not suspend the HUD after a newer running delivery has already
     /// reopened it, so every state handoff owns a monotonically newer token.
@@ -406,6 +487,35 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                       Self.liveWebView === webView else { return }
                 managedWebView?.setLightweightOverlayRuntimeSuspended(true)
             }
+        }
+    }
+
+    /// Mirrors the real UIKit lifecycle into the shared Home document. A
+    /// WKWebView may emit `pagehide` on background without a paired `pageshow`,
+    /// which used to leave the camera's native preview visible with all web HUD
+    /// controls unmounted after reopening the app.
+    @MainActor
+    static func setApplicationActive(_ active: Bool) {
+        guard let webView = liveWebView else { return }
+        let activeLiteral = active ? "true" : "false"
+        // WKWebView can miss pageshow after an app foreground cycle. Replaying it
+        // lets the web runtime resume its own animation and media scheduling too.
+        let lifecycleScript = active
+            ? "window.dispatchEvent(new Event('pageshow')); window.dispatchEvent(new CustomEvent('poplur-native-app-lifecycle', { detail: { active: \(activeLiteral) } })); true;"
+            : "window.dispatchEvent(new CustomEvent('poplur-native-app-lifecycle', { detail: { active: \(activeLiteral) } })); true;"
+        webView.evaluateJavaScript(lifecycleScript)
+
+        let refresh = { [weak webView] in
+            guard let webView, Self.liveWebView === webView else { return }
+            (webView as? PoplurManagedWebView)?.refreshApplicationLifecycle()
+        }
+        if active {
+            // `scenePhase` can become active a run-loop turn before UIKit's
+            // applicationState updates. Let the host state settle first.
+            DispatchQueue.main.async(execute: refresh)
+            liveCoordinator?.recoverIfNeeded()
+        } else {
+            refresh()
         }
     }
 
@@ -462,6 +572,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
     func makeCoordinator() -> Coordinator {
         Coordinator(
             initialWebTab: initialView == "camera" ? "post" : initialView,
+            homeURL: PoplurWebHome.url(for: initialView),
             onReady: onReady,
             onWebEvent: onWebEvent
         )
@@ -519,6 +630,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         // by the web performance policy.
         webView.navigationDelegate = context.coordinator
         Self.liveWebView = webView
+        Self.liveCoordinator = context.coordinator
 
         if PoplurClayMapView.bundledRootURL() != nil, let url = PoplurWebHome.url(for: initialView) {
             // A cache migration is rare (only when the embedded build stamp
@@ -547,6 +659,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         uiView.configuration.userContentController.removeScriptMessageHandler(forName: "poplur")
         uiView.configuration.userContentController.removeScriptMessageHandler(forName: "homeReady")
         if liveWebView === uiView { liveWebView = nil }
+        if liveCoordinator === coordinator { liveCoordinator = nil }
         PoplurWebCaptureStore.purge()
     }
 
@@ -602,13 +715,19 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         private var notificationObservers: [NSObjectProtocol] = []
         private var currentWebTab: String
         private var webReportsLiveCamera = false
+        private let homeURL: URL?
+        private var recoveryWorkItem: DispatchWorkItem?
+        private var recoveryAttempt = 0
+        private var recoveryPending = false
 
         init(
             initialWebTab: String,
+            homeURL: URL?,
             onReady: @escaping () -> Void,
             onWebEvent: ((String, [String: Any]) -> Void)? = nil
         ) {
             currentWebTab = initialWebTab
+            self.homeURL = homeURL
             self.onReady = onReady
             self.onWebEvent = onWebEvent
             super.init()
@@ -632,6 +751,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         }
 
         deinit {
+            recoveryWorkItem?.cancel()
             notificationObservers.forEach(NotificationCenter.default.removeObserver)
         }
 
@@ -917,7 +1037,16 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     updateCameraHole()
                 }
                 if type == "cameraLiveVisibilityChanged" {
-                    webReportsLiveCamera = (body["visible"] as? Bool) == true
+                    let visible = (body["visible"] as? Bool) == true
+                    // A page teardown while the app is backgrounded is not a
+                    // navigation away from Camera. Keep the punch-through and
+                    // desired camera state ready for the matching foreground
+                    // event instead of accepting a stale queued bridge message.
+                    if !visible,
+                       (body["lifecycleHidden"] as? Bool) == true {
+                        return
+                    }
+                    webReportsLiveCamera = visible
                     updateCameraHole()
                 }
                 if type == "fetchProductImage", let webView = bridge.webView,
@@ -946,6 +1075,34 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     PoplurWebCaptureStore.remove(sourceURL.lastPathComponent)
                     return
                 }
+                if type == "saveProfileSelfieVideo", let rawVideo = body["video"] as? String {
+                    persistProfileSelfieVideo(rawVideo, into: bridge.webView)
+                    return
+                }
+                if type == "saveProfileSelfieVideoAsset", let rawSource = body["src"] as? String {
+                    guard let sourceURL = URL(string: rawSource),
+                          sourceURL.scheme == PoplurClayWebMap.scheme,
+                          sourceURL.host == PoplurClayWebMap.host,
+                          sourceURL.pathComponents.contains("captures"),
+                          let item = PoplurWebCaptureStore.item(for: sourceURL.lastPathComponent),
+                          item.mimeType.lowercased().hasPrefix("video/") else {
+                        print("[PostLoginHomeWebView] rejected invalid profile selfie asset")
+                        return
+                    }
+                    if let data = item.data {
+                        persistProfileSelfieVideoData(data, mimeType: item.mimeType)
+                        PoplurWebCaptureStore.remove(sourceURL.lastPathComponent)
+                    } else if let fileURL = item.fileURL, let webView = bridge.webView {
+                        persistProfileSelfieVideoFile(
+                            fileURL,
+                            into: webView,
+                            captureKey: sourceURL.lastPathComponent
+                        )
+                    } else {
+                        print("[PostLoginHomeWebView] profile selfie asset has no readable source")
+                    }
+                    return
+                }
                 if type == "requestProfile", let webView = bridge.webView {
                     // Answer immediately from Auth/local disk, then refresh from
                     // Firestore. A single network-dependent callback used to
@@ -960,6 +1117,9 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                         localProfile["photo"] = localPhoto
                     } else if let remotePhoto = authUser?.photoURL?.absoluteString {
                         localProfile["photo"] = remotePhoto
+                    }
+                    if let localSelfie = PoplurProfileSelfieStore.sourceURL() {
+                        localProfile["video"] = localSelfie
                     }
                     pushProfile(localProfile, into: webView)
 
@@ -979,6 +1139,11 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                            let remotePhoto = data["profilePictureURL"] as? String,
                            !remotePhoto.isEmpty {
                             profile["photo"] = remotePhoto
+                        }
+                        if profile["video"] == nil,
+                           let remoteSelfie = data["profileSelfieVideoURL"] as? String,
+                           !remoteSelfie.isEmpty {
+                            profile["video"] = remoteSelfie
                         }
                         await MainActor.run { self.pushProfile(profile, into: webView) }
                     }
@@ -1135,6 +1300,86 @@ struct PostLoginHomeWebView: UIViewRepresentable {
             }
         }
 
+        private func persistProfileSelfieVideo(_ dataURI: String, into webView: WKWebView? = nil) {
+            guard let comma = dataURI.firstIndex(of: ","),
+                  dataURI[..<comma].lowercased().hasPrefix("data:video/"),
+                  let mimeType = dataURI[..<comma]
+                    .dropFirst("data:".count)
+                    .split(separator: ";", maxSplits: 1)
+                    .first.map(String.init),
+                  let data = Data(base64Encoded: String(dataURI[dataURI.index(after: comma)...])) else {
+                print("[PostLoginHomeWebView] rejected invalid profile selfie video")
+                return
+            }
+            persistProfileSelfieVideoData(data, mimeType: mimeType, into: webView)
+        }
+
+        private func persistProfileSelfieVideoData(
+            _ data: Data,
+            mimeType: String,
+            into webView: WKWebView? = nil
+        ) {
+            guard let localURL = PoplurProfileSelfieStore.persist(data: data, mimeType: mimeType) else {
+                print("[PostLoginHomeWebView] rejected profile selfie video data")
+                return
+            }
+            if let webView { pushProfile(["video": localURL], into: webView) }
+            guard let uid = Auth.auth().currentUser?.uid else { return }
+            Task {
+                do {
+                    let ext = PoplurProfileSelfieStore.extensionForPersistedVideo() ?? "mp4"
+                    let reference = Storage.storage().reference().child("profile_selfies/\(uid).\(ext)")
+                    _ = try await reference.putDataAsync(data)
+                    let downloadURL = try await reference.downloadURL()
+                    try await Firestore.firestore().collection("users").document(uid).setData(
+                        ["profileSelfieVideoURL": downloadURL.absoluteString],
+                        merge: true
+                    )
+                } catch {
+                    print("[PostLoginHomeWebView] profile selfie cloud sync failed for \(localURL): \(error.localizedDescription)")
+                }
+            }
+        }
+
+        /// Photo-library videos can be long and several hundred megabytes. The
+        /// profile is intentionally a ten-second selfie, so export only its
+        /// opening ten seconds at a compact 720p-class preset before persisting
+        /// or syncing it. The browser stays on its temporary preview until the
+        /// durable custom-scheme URL is delivered below.
+        private func persistProfileSelfieVideoFile(
+            _ sourceURL: URL,
+            into webView: WKWebView,
+            captureKey: String
+        ) {
+            let asset = AVURLAsset(url: sourceURL)
+            guard let exporter = AVAssetExportSession(
+                asset: asset,
+                presetName: AVAssetExportPreset1280x720
+            ) else {
+                print("[PostLoginHomeWebView] profile selfie export session unavailable")
+                return
+            }
+            let temporaryURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("profile-selfie-export-\(UUID().uuidString).mp4")
+            try? FileManager.default.removeItem(at: temporaryURL)
+            exporter.outputURL = temporaryURL
+            exporter.outputFileType = .mp4
+            let duration = min(asset.duration, CMTime(seconds: 10, preferredTimescale: 600))
+            exporter.timeRange = CMTimeRange(start: .zero, duration: duration)
+            exporter.exportAsynchronously { [weak self] in
+                defer { try? FileManager.default.removeItem(at: temporaryURL) }
+                guard exporter.status == .completed,
+                      let data = try? Data(contentsOf: temporaryURL) else {
+                    print("[PostLoginHomeWebView] profile selfie export failed: \(exporter.error?.localizedDescription ?? "unknown")")
+                    return
+                }
+                DispatchQueue.main.async {
+                    self?.persistProfileSelfieVideoData(data, mimeType: "video/mp4", into: webView)
+                    PoplurWebCaptureStore.remove(captureKey)
+                }
+            }
+        }
+
         private func signalHomeReady() {
             guard !didSignalReady else { return }
             didSignalReady = true
@@ -1145,7 +1390,61 @@ struct PostLoginHomeWebView: UIViewRepresentable {
             DispatchQueue.main.async { [onReady] in onReady() }
         }
 
+        /// WebKit can kill its web-content process under memory pressure while
+        /// keeping the native HUD and the WKWebView itself alive. Without a
+        /// reload, that leaves the exact permanent black Home surface seen on
+        /// device. Retry the embedded document with a small bounded backoff;
+        /// backgrounded apps defer until `setApplicationActive(true)` above.
+        func recoverIfNeeded() {
+            guard recoveryPending, let webView = bridge.webView else { return }
+            scheduleRecovery(of: webView, reason: "foreground")
+        }
+
+        private func scheduleRecovery(of webView: WKWebView, reason: String) {
+            guard let homeURL else {
+                print("[PostLoginHomeWebView] cannot recover web renderer: home URL missing")
+                return
+            }
+            recoveryPending = true
+            guard UIApplication.shared.applicationState == .active else { return }
+            guard recoveryWorkItem == nil else { return }
+
+            let attempt = min(recoveryAttempt + 1, 4)
+            recoveryAttempt = attempt
+            let delay = min(0.18 * pow(2.0, Double(attempt - 1)), 1.5)
+            let work = DispatchWorkItem { [weak self, weak webView] in
+                guard let self, let webView, self.bridge.webView === webView else { return }
+                self.recoveryWorkItem = nil
+                guard UIApplication.shared.applicationState == .active else { return }
+                self.didSignalReady = false
+                self.recoveryPending = false
+                PostLoginHomeWebView.setCameraHole(false, on: webView)
+                print("[PostLoginHomeWebView] reloading terminated web renderer (\(reason), attempt \(attempt))")
+                webView.load(URLRequest(url: homeURL, cachePolicy: .reloadIgnoringLocalCacheData))
+            }
+            recoveryWorkItem = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+        }
+
+        func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            scheduleRecovery(of: webView, reason: "web-content process terminated")
+        }
+
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            guard (error as NSError).code != NSURLErrorCancelled else { return }
+            scheduleRecovery(of: webView, reason: "provisional navigation failed")
+        }
+
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            guard (error as NSError).code != NSURLErrorCancelled else { return }
+            scheduleRecovery(of: webView, reason: "navigation failed")
+        }
+
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            recoveryWorkItem?.cancel()
+            recoveryWorkItem = nil
+            recoveryPending = false
+            recoveryAttempt = 0
             // Let WebKit commit one compositor turn, then release the native
             // cover even if the document's governed rAF/timer queue is parked.
             // `signalHomeReady` is idempotent, so the concrete web first-paint

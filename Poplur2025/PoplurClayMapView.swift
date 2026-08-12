@@ -152,10 +152,18 @@ struct PoplurClayMapView: UIViewRepresentable {
             // Captures are the user's own media and can change under the same
             // key, so they must never be cached. Everything else ships inside
             // the app bundle and cannot change without a new build.
-            let cacheControl = relativePath.hasPrefix("/captures/")
+            let cacheControl = (relativePath.hasPrefix("/captures/") || relativePath.hasPrefix("/profile-selfie."))
                 ? "no-store"
                 : "public, max-age=31536000, immutable"
-            if relativePath.hasPrefix("/captures/") {
+            if let selfie = PoplurProfileSelfieStore.item(for: relativePath) {
+                serveCaptureFile(
+                    selfie.url,
+                    mime: selfie.mimeType,
+                    request: urlSchemeTask.request,
+                    task: urlSchemeTask
+                )
+                return
+            } else if relativePath.hasPrefix("/captures/") {
                 let key = String(relativePath.dropFirst("/captures/".count))
                 guard !key.contains("/"),
                       let item = PoplurWebCaptureStore.item(for: key) else {

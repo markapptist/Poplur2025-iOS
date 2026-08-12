@@ -303,7 +303,16 @@ final class WebHomeCameraModel: ObservableObject {
                 }
             }
         case "cameraLiveVisibilityChanged":
-            webReportsLiveCamera = (body["visible"] as? Bool) == true
+            let visible = (body["visible"] as? Bool) == true
+            // The web Camera is deliberately unmounted while its document is
+            // backgrounded. Do not mistake that lifecycle cleanup for leaving
+            // the post tab: foregrounding must be able to restart the same
+            // native preview before React paints its HUD again.
+            if !visible,
+               (body["lifecycleHidden"] as? Bool) == true {
+                return
+            }
+            webReportsLiveCamera = visible
             liveCameraVisible = webReportsLiveCamera && activeTab == "post"
             if !liveCameraVisible {
                 // Do not wait for SwiftUI's removal transaction before stopping
@@ -635,17 +644,21 @@ struct PostLoginHomeSurface: View {
         // leaving Home must never leave the microphone open.
         .onDisappear { poplurAI.stop() }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active {
+            // Calls, Control Center and permission sheets may make SwiftUI's
+            // scene `.inactive` while Poplur remains fully visible behind the
+            // system UI. Treating that as a background transition unmounted the
+            // web screen tree and left only the native status/HUD chrome on a
+            // black surface. Only a real background transition tears down the
+            // camera or tells the web layer it is hidden.
+            if phase == .background {
+                PostLoginHomeWebView.setApplicationActive(false)
+                poplurAI.stop()
+                camera.deactivateCamera()
+            } else {
+                PostLoginHomeWebView.setApplicationActive(true)
                 if camera.isCameraTab {
                     Task { await camera.activateCamera() }
                 }
-            } else {
-                poplurAI.stop()
-                // Renderer revocation stops AVCaptureSession, but retaining its
-                // configured graph still owns the input/output objects. Use the
-                // same hard teardown as leaving Camera; foreground activation
-                // rebuilds it only if the live viewfinder is still front-most.
-                camera.deactivateCamera()
             }
         }
         .onChange(of: camera.presentsCreator) { _, isPresented in

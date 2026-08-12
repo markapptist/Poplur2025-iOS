@@ -131,6 +131,13 @@ final class PoplurManagedWebView: WKWebView {
         applyLatestPolicyToDocument()
     }
 
+    /// UIKit owns whether this document is genuinely foregrounded. Refresh the
+    /// governed runtime directly because WebKit can miss a matching `pageshow`
+    /// after the app returns from the switcher.
+    func refreshApplicationLifecycle() {
+        applyLatestPolicyToDocument()
+    }
+
     private func ensurePerformanceRegistration() {
         guard performanceRegistration == nil else { return }
         performanceRegistration = PoplurPerformanceManager.shared.registerRenderer(

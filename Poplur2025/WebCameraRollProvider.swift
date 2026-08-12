@@ -2,6 +2,7 @@ import Photos
 import ImageIO
 import UIKit
 import WebKit
+import AVFoundation
 
 // MARK: - Web camera-roll provider (Phase 3.5 bridge)
 //
@@ -52,7 +53,7 @@ enum WebCameraRollProvider {
             let options = PHFetchOptions()
             options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
             options.fetchLimit = itemLimit
-            let assets = PHAsset.fetchAssets(with: .image, options: options)
+            let assets = PHAsset.fetchAssets(with: options)
 
             let imageOptions = PHImageRequestOptions()
             imageOptions.isSynchronous = true
@@ -64,6 +65,7 @@ enum WebCameraRollProvider {
             let side = thumbSide * UIScreen.main.scale / 2
             var items: [[String: Any]] = []
             assets.enumerateObjects { asset, _, _ in
+                guard asset.mediaType == .image || asset.mediaType == .video else { return }
                 manager.requestImage(
                     for: asset,
                     targetSize: CGSize(width: side, height: side),
@@ -71,15 +73,20 @@ enum WebCameraRollProvider {
                     options: imageOptions
                 ) { image, _ in
                     if let data = image?.jpegData(compressionQuality: 0.7) {
-                        items.append([
-                            "kind": "photo",
+                        var item: [String: Any] = [
+                            "kind": asset.mediaType == .video ? "video" : "photo",
                             "src": "data:image/jpeg;base64,\(data.base64EncodedString())",
                             // The grid deliberately carries only a small thumbnail.
                             // Selection uses this stable identifier to request the
                             // source separately instead of stretching 240 px over
                             // the full-screen composer.
                             "assetId": asset.localIdentifier,
-                        ])
+                        ]
+                        if asset.mediaType == .video {
+                            let seconds = Int(round(asset.duration))
+                            item["length"] = String(format: "%d:%02d", seconds / 60, seconds % 60)
+                        }
+                        items.append(item)
                     }
                 }
             }
@@ -131,6 +138,52 @@ enum WebCameraRollProvider {
                 requestId: requestId,
                 assetId: assetId,
                 message: "asset_not_found",
+                into: webView
+            )
+            return
+        }
+
+        if asset.mediaType == .video {
+            let videoOptions = PHVideoRequestOptions()
+            videoOptions.version = .current
+            videoOptions.deliveryMode = .highQualityFormat
+            videoOptions.isNetworkAccessAllowed = true
+            PHImageManager.default().requestAVAsset(forVideo: asset, options: videoOptions) { avAsset, _, info in
+                if (info?[PHImageCancelledKey] as? Bool) == true {
+                    deliverAssetError(
+                        requestId: requestId,
+                        assetId: assetId,
+                        message: "request_cancelled",
+                        into: webView
+                    )
+                    return
+                }
+                guard let sourceURL = (avAsset as? AVURLAsset)?.url else {
+                    deliverAssetError(
+                        requestId: requestId,
+                        assetId: assetId,
+                        message: "source_unavailable",
+                        into: webView
+                    )
+                    return
+                }
+                let key = PoplurWebCaptureStore.registerCameraRollVideoAsset(videoURL: sourceURL)
+                let source = "\(PoplurClayWebMap.scheme)://\(PoplurClayWebMap.host)/captures/\(key)"
+                deliverAssetPayload([
+                    "requestId": requestId,
+                    "assetId": assetId,
+                    "kind": "video",
+                    "src": source,
+                ], into: webView)
+            }
+            return
+        }
+
+        guard asset.mediaType == .image else {
+            deliverAssetError(
+                requestId: requestId,
+                assetId: assetId,
+                message: "unsupported_asset",
                 into: webView
             )
             return
