@@ -35,7 +35,21 @@ final class PoplurManagedWebView: WKWebView {
     private var isHostOccluded = false
     private var keepsVisibleDocumentAlive = false
     var onRuntimeActiveChange: ((Bool) -> Void)?
+    var onForegroundVisibilityChange: ((Bool) -> Void)?
     private var lastReportedRuntimeActive: Bool?
+    private var lastReportedForegroundVisible: Bool?
+
+    /// Real UIKit visibility, deliberately independent of renderer/media
+    /// policy. The one visible navigator must keep receiving Core Motion even
+    /// when the camera HUD or heavyweight renderer is parked; hidden,
+    /// covered, removed and background documents still release it.
+    var poplurIsForegroundVisible: Bool {
+        window != nil
+            && !isHidden
+            && alpha > 0.01
+            && !isHostOccluded
+            && UIApplication.shared.applicationState == .active
+    }
 
     var poplurIsRuntimeActive: Bool {
         (
@@ -111,7 +125,9 @@ final class PoplurManagedWebView: WKWebView {
 
     func poplurTearDown() {
         onRuntimeActiveChange?(false)
+        onForegroundVisibilityChange?(false)
         lastReportedRuntimeActive = false
+        lastReportedForegroundVisible = false
         performanceRegistration?.setVisible(false)
         performanceRegistration?.invalidate()
         performanceRegistration = nil
@@ -196,6 +212,15 @@ final class PoplurManagedWebView: WKWebView {
                 && !isLightweightOverlayMode
                 && !isHostOccluded
         )
+        reportForegroundVisibility()
+    }
+
+    private func reportForegroundVisibility() {
+        let foregroundVisible = poplurIsForegroundVisible
+        if lastReportedForegroundVisible != foregroundVisible {
+            lastReportedForegroundVisible = foregroundVisible
+            onForegroundVisibilityChange?(foregroundVisible)
+        }
     }
 
     private func apply(policy: PoplurPerformancePolicy, granted: Bool) {
@@ -212,6 +237,7 @@ final class PoplurManagedWebView: WKWebView {
     }
 
     private func applyLatestPolicyToDocument() {
+        reportForegroundVisibility()
         let active = poplurIsRuntimeActive
         if lastReportedRuntimeActive != active {
             lastReportedRuntimeActive = active

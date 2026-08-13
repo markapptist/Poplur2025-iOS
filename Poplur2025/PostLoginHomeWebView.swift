@@ -617,7 +617,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         webView.scrollView.contentInsetAdjustmentBehavior = .never
         webView.overrideUserInterfaceStyle = .dark
         context.coordinator.bridge.webView = webView
-        webView.onRuntimeActiveChange = { active in
+        webView.onForegroundVisibilityChange = { active in
             if active { CubeMotionPoster.shared.start(owner: "web-home") }
             else { CubeMotionPoster.shared.stop(owner: "web-home") }
         }
@@ -727,11 +727,6 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         private var recoveryWorkItem: DispatchWorkItem?
         private var recoveryAttempt = 0
         private var recoveryPending = false
-        private var motionBridgeBusy = false
-        private var pendingMotion: (roll: Double, pitch: Double)?
-        private var motionBridgeGeneration = 0
-        private var motionBridgeStartedAt: CFTimeInterval = 0
-        private var motionBridgeRecoveryUsed = false
 
         init(
             initialWebTab: String,
@@ -766,53 +761,25 @@ struct PostLoginHomeWebView: UIViewRepresentable {
             ) { [weak self] note in
                 guard let self,
                       let webView = self.bridge.webView,
-                      (webView as? PoplurManagedWebView)?.poplurIsRuntimeActive == true,
+                      (webView as? PoplurManagedWebView)?.poplurIsForegroundVisible == true,
                       let roll = note.userInfo?["roll"] as? Double,
                       let pitch = note.userInfo?["pitch"] as? Double else { return }
-                self.enqueueMotion(roll: roll, pitch: pitch, on: webView)
+                self.deliverMotion(roll: roll, pitch: pitch, on: webView)
             })
         }
 
-        /// WKWebView evaluation is asynchronous. Keep at most one evaluation
-        /// in flight and one latest-value slot so a brief WebKit stall can
-        /// never turn 30Hz sensor delivery into an unbounded main-thread queue.
-        private func enqueueMotion(roll: Double, pitch: Double, on webView: WKWebView) {
-            pendingMotion = (roll, pitch)
-            if motionBridgeBusy {
-                // A terminated/throttled JS world does not always invoke an
-                // outstanding evaluation callback. The next real sensor sample
-                // is already our clock: after 0.75s, retire that stale bridge
-                // generation and deliver the latest pose. No polling timer.
-                guard !motionBridgeRecoveryUsed,
-                      CACurrentMediaTime() - motionBridgeStartedAt > 0.75 else { return }
-                motionBridgeRecoveryUsed = true
-                motionBridgeGeneration &+= 1
-                motionBridgeBusy = false
-            }
-            drainMotion(on: webView)
-        }
-
-        private func drainMotion(on webView: WKWebView) {
-            guard let motion = pendingMotion,
-                  (webView as? PoplurManagedWebView)?.poplurIsRuntimeActive == true else {
-                pendingMotion = nil
-                motionBridgeBusy = false
-                return
-            }
-            pendingMotion = nil
-            motionBridgeBusy = true
-            motionBridgeGeneration &+= 1
-            let generation = motionBridgeGeneration
-            motionBridgeStartedAt = CACurrentMediaTime()
+        /// This tiny dispatch deliberately has no completion-based lock. WebKit
+        /// can omit an evaluateJavaScript completion while its governed timers
+        /// are idle; the old lock then permanently stopped live cube motion.
+        /// Core Motion is already a fixed 30Hz source and delivery is limited to
+        /// the genuinely foreground document, so callback-free dispatch is
+        /// bounded without coupling motion to page inactivity policy.
+        private func deliverMotion(roll: Double, pitch: Double, on webView: WKWebView) {
+            guard (webView as? PoplurManagedWebView)?.poplurIsForegroundVisible == true else { return }
             webView.evaluateJavaScript(
-                "window.dispatchEvent(new CustomEvent('poplur-native-motion',{detail:{roll:\(motion.roll),pitch:\(motion.pitch)}}));true;"
-            ) { [weak self, weak webView] _, _ in
-                guard let self, self.motionBridgeGeneration == generation else { return }
-                self.motionBridgeBusy = false
-                self.motionBridgeRecoveryUsed = false
-                guard let webView else { self.pendingMotion = nil; return }
-                if self.pendingMotion != nil { self.drainMotion(on: webView) }
-            }
+                "window.dispatchEvent(new CustomEvent('poplur-native-motion',{detail:{roll:\(roll),pitch:\(pitch)}}));true;",
+                completionHandler: nil
+            )
         }
 
         deinit {
