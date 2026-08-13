@@ -450,7 +450,7 @@ final class WebHomeCameraModel: ObservableObject {
                 } else {
                     controller.disableMLDetection()
                     controller.visionBoxDetector = nil
-                    if (controller.arFilterManager?.activeFilter ?? .none) == .none {
+                    if (controller.arFilterManager?.activeFilter ?? ARFilterManager.ARFilter.none) == ARFilterManager.ARFilter.none {
                         controller.stopVideoFrameDelivery()
                     }
                     cloudScanRequested = false

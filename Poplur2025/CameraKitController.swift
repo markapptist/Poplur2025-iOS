@@ -899,7 +899,7 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
             cameraPosition: currentCameraPosition == .front ? "front" : "back",
             wasRecording: isRecording,
             mlEnabled: mlDetectionManager?.isEnabled == true,
-            arEnabled: (arFilterManager?.activeFilter ?? .none) != .none,
+            arEnabled: (arFilterManager?.activeFilter ?? ARFilterManager.ARFilter.none) != ARFilterManager.ARFilter.none,
             torchEnabled: isTorchOn || isScreenFlashOn
         )
         var records = Self.loadColdBudgetRecords()
