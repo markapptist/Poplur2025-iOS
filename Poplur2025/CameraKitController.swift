@@ -175,17 +175,18 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
     }
 
     // Preview stays live while Camera is genuinely front-most. Hidden surfaces
-    // and any non-nominal thermal state still hard-park immediately; an
-    // arbitrary visible ten-second cutoff made the camera feel broken.
+    // hard-park immediately. Only serious/critical thermal pressure may replace
+    // the attended viewfinder with the emergency retained-frame state; a fair
+    // reading must not make the camera feel broken.
     private static let recordingMaximumDuration: TimeInterval = 10
     private static let recordingStopAcknowledgementDuration: TimeInterval = 1
     private static let photoAtomicMaximumDuration: TimeInterval = 3
-    // Keep the sharp 1080p preview, but cap its capture graph below the old
-    // 24 FPS sustained load. Recording remains 24 FPS. If capture-device
-    // pressure rises, 15 FPS is the conservative continuous-preview floor;
-    // this deliberately avoids the visibly laggy 10 FPS deployment.
-    private static let previewFrameRate = 18
-    private static let pressurePreviewFrameRate = 15
+    // The visible camera is an attended surface, so it keeps a smooth 24 FPS
+    // 1080p preview. Heat savings belong to lifecycle ownership (the complete
+    // capture graph is removed whenever Camera is not front-most) and to the
+    // already-sampled AI output—not to making the live viewfinder look broken.
+    private static let previewFrameRate = 24
+    private static let pressurePreviewFrameRate = 24
     private static let recordingFrameRateLimit = 24
     private static let previewAnalysisFrameSampleInterval: TimeInterval = 2.5
     private static let pressureAnalysisFrameSampleInterval: TimeInterval = 3.5
@@ -195,6 +196,18 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
     private static let pressureActiveFilterPresentationHoldDuration: TimeInterval = 1.75
     private static let coldBudgetRecordLimit = 16
     private static let coldBudgetDefaultsKey = "CameraKitController.coldBudget.v2"
+
+    @MainActor
+    private var requiresEmergencyThermalPark: Bool {
+        switch PoplurPerformanceManager.shared.thermalState {
+        case .serious, .critical:
+            return true
+        case .nominal, .fair:
+            return false
+        @unknown default:
+            return false
+        }
+    }
 
     /// Deadline ownership is read on the capture-session queue and mutated on
     /// the main actor. A tiny lock lets a cancelled, already-fired work item
@@ -365,7 +378,7 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
     @MainActor
     func suspendCapture(resetEntryBudget: Bool = true) {
         if photoCaptureInFlight,
-           !PoplurPerformanceManager.shared.isThermalTripwireActive {
+           !requiresEmergencyThermalPark {
             isPreviewWindowActive = false
             parkAfterPhotoCapture = true
             pendingPhotoParkReason = .leftCamera
@@ -475,7 +488,7 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
             return
         }
         let registration = ensurePerformanceRegistration()
-        guard !PoplurPerformanceManager.shared.isThermalTripwireActive else {
+        guard !requiresEmergencyThermalPark else {
             parkCamera(reason: .thermal, canResume: false, preserveLastFrame: true)
             return
         }
@@ -969,7 +982,7 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
         guard !isRecording, !photoCaptureInFlight else { return }
         beginPreviewWindow(reason: .recordingStarted, explicitUserResume: true)
         guard performanceRegistration?.isGrantedRendering == true,
-              !PoplurPerformanceManager.shared.isThermalTripwireActive else {
+              !requiresEmergencyThermalPark else {
             parkCamera(reason: .thermal, canResume: false, preserveLastFrame: true)
             return
         }
@@ -1149,7 +1162,7 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
     @objc func toggleTorchOn() {
         guard (isPreviewWindowActive || isRecording),
               performanceRegistration?.isGrantedRendering == true,
-              !PoplurPerformanceManager.shared.isThermalTripwireActive else {
+              !requiresEmergencyThermalPark else {
             toggleTorchOff()
             return
         }
@@ -1248,7 +1261,7 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
         let alreadyRunning = isPreviewWindowActive
         beginPreviewWindow(reason: .explicitResume, explicitUserResume: true)
         guard performanceRegistration?.isGrantedRendering == true,
-              !PoplurPerformanceManager.shared.isThermalTripwireActive else {
+              !requiresEmergencyThermalPark else {
             parkCamera(reason: .thermal, canResume: false, preserveLastFrame: true)
             return
         }
@@ -1488,7 +1501,10 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
             .removeDuplicates()
             .sink { [weak self] isActive in
                 guard let self else { return }
-                if isActive, self.performanceWantsCapture, !self.isColdBudgetParked {
+                if isActive,
+                   self.requiresEmergencyThermalPark,
+                   self.performanceWantsCapture,
+                   !self.isColdBudgetParked {
                     self.parkCamera(reason: .thermal, canResume: false, preserveLastFrame: true)
                 } else if !isActive,
                           self.isColdBudgetParked,
@@ -1505,7 +1521,7 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
     private func applyCapturePerformance(policy: PoplurPerformancePolicy, granted: Bool) {
         if !granted,
            performanceWantsCapture,
-           PoplurPerformanceManager.shared.isThermalTripwireActive,
+           requiresEmergencyThermalPark,
            !isColdBudgetParked {
             parkCamera(reason: .thermal, canResume: false, preserveLastFrame: true)
             return
@@ -1521,9 +1537,14 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
             && isMLDetectionEnabled
             && policy.mode != .emergency
 
+        // Active Camera owns the capture graph exclusively. Do not turn the
+        // visible viewfinder into a thermal indicator by lowering its cadence;
+        // lifecycle revocation hard-parks the complete graph when Camera is no
+        // longer front-most, while sampled analysis remains independently
+        // bounded. Recording and preview therefore share the same smooth cap.
         let requestedFPS = recording
-            ? max(1, min(Self.recordingFrameRateLimit, policy.targetFPS(for: .interactive)))
-            : max(1, min(Self.previewFrameRate, policy.targetFPS(for: .interactive)))
+            ? Self.recordingFrameRateLimit
+            : Self.previewFrameRate
         let captureGeneration = setCaptureDesired(shouldRun)
         sessionQueue.async { [weak self] in
             guard let self else { return }

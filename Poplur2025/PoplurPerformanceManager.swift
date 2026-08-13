@@ -496,7 +496,10 @@ final class PoplurPerformanceManager: ObservableObject {
     private func reconcileRenderers() {
         compactRegistrations()
         let previousHeavyID = activeHeavyRendererID
-        activeHeavyRendererID = applicationLifecycle == .active && !isThermalTripwireActive
+        // Visibility and exclusivity own renderer lifetime. A thermal signal
+        // may adjust policy, but it must not revoke the one page the user is
+        // actively looking at and turn that page into a frozen placeholder.
+        activeHeavyRendererID = applicationLifecycle == .active
             ? registrations.values
                 .compactMap(\.value)
                 .filter { $0.isVisible && $0.classification == .heavy }
@@ -527,9 +530,9 @@ final class PoplurPerformanceManager: ObservableObject {
             }
             switch registration.classification {
             case .heavy:
-                granted = !isThermalTripwireActive && registration.id == activeHeavyRendererID
+                granted = registration.id == activeHeavyRendererID
             case .decorative:
-                granted = !isThermalTripwireActive && policy.decorativeRenderingAllowed
+                granted = policy.decorativeRenderingAllowed
             case .lightweight:
                 granted = true
             }
