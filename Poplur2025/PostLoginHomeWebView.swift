@@ -618,8 +618,8 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         webView.overrideUserInterfaceStyle = .dark
         context.coordinator.bridge.webView = webView
         webView.onRuntimeActiveChange = { active in
-            if active { CubeMotionPoster.shared.start() }
-            else { CubeMotionPoster.shared.stop() }
+            if active { CubeMotionPoster.shared.start(owner: "web-home") }
+            else { CubeMotionPoster.shared.stop(owner: "web-home") }
         }
         // This host unmounts inactive tabs in React. Keep the one visible tab
         // fully alive even when the heavy-renderer arbiter temporarily denies
@@ -729,6 +729,9 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         private var recoveryPending = false
         private var motionBridgeBusy = false
         private var pendingMotion: (roll: Double, pitch: Double)?
+        private var motionBridgeGeneration = 0
+        private var motionBridgeStartedAt: CFTimeInterval = 0
+        private var motionBridgeRecoveryUsed = false
 
         init(
             initialWebTab: String,
@@ -775,7 +778,17 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         /// never turn 30Hz sensor delivery into an unbounded main-thread queue.
         private func enqueueMotion(roll: Double, pitch: Double, on webView: WKWebView) {
             pendingMotion = (roll, pitch)
-            guard !motionBridgeBusy else { return }
+            if motionBridgeBusy {
+                // A terminated/throttled JS world does not always invoke an
+                // outstanding evaluation callback. The next real sensor sample
+                // is already our clock: after 0.75s, retire that stale bridge
+                // generation and deliver the latest pose. No polling timer.
+                guard !motionBridgeRecoveryUsed,
+                      CACurrentMediaTime() - motionBridgeStartedAt > 0.75 else { return }
+                motionBridgeRecoveryUsed = true
+                motionBridgeGeneration &+= 1
+                motionBridgeBusy = false
+            }
             drainMotion(on: webView)
         }
 
@@ -788,11 +801,15 @@ struct PostLoginHomeWebView: UIViewRepresentable {
             }
             pendingMotion = nil
             motionBridgeBusy = true
+            motionBridgeGeneration &+= 1
+            let generation = motionBridgeGeneration
+            motionBridgeStartedAt = CACurrentMediaTime()
             webView.evaluateJavaScript(
                 "window.dispatchEvent(new CustomEvent('poplur-native-motion',{detail:{roll:\(motion.roll),pitch:\(motion.pitch)}}));true;"
             ) { [weak self, weak webView] _, _ in
-                guard let self else { return }
+                guard let self, self.motionBridgeGeneration == generation else { return }
                 self.motionBridgeBusy = false
+                self.motionBridgeRecoveryUsed = false
                 guard let webView else { self.pendingMotion = nil; return }
                 if self.pendingMotion != nil { self.drainMotion(on: webView) }
             }
@@ -801,7 +818,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         deinit {
             recoveryWorkItem?.cancel()
             notificationObservers.forEach(NotificationCenter.default.removeObserver)
-            CubeMotionPoster.shared.stop()
+            CubeMotionPoster.shared.stop(owner: "web-home")
         }
 
         func deliverNativeVoiceCommand(token: Int, json: String?) {

@@ -2118,7 +2118,7 @@ private struct CubeSceneView: UIViewRepresentable {
         func startObservingMotion() {
             stopObservingMotion()
             if SettingsStore.shared.tiltControlEnabled {
-                CubeMotionPoster.shared.start()
+                CubeMotionPoster.shared.start(owner: "native-cube")
             }
             motionObserver = NotificationCenter.default.addObserver(forName: Notification.Name("CubeMotionUpdate"), object: nil, queue: .main) { [weak self] notif in
                 guard let self,
@@ -2176,7 +2176,7 @@ private struct CubeSceneView: UIViewRepresentable {
                 motionObserver = nil
             }
             liveRollYaw = 0
-            CubeMotionPoster.shared.stop()
+            CubeMotionPoster.shared.stop(owner: "native-cube")
         }
 
         private func startObservingHold() {

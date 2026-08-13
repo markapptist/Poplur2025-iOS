@@ -13,7 +13,7 @@ final class CubeMotionPoster {
 
     private let manager = CMMotionManager()
     private let queue = OperationQueue()
-    private var wantsUpdates = false
+    private var owners: Set<String> = []
     private var isRunning = false
 
     /// Tweak sensitivity if needed. This scales the raw attitude values before posting.
@@ -27,13 +27,17 @@ final class CubeMotionPoster {
         NotificationCenter.default.addObserver(self, selector: #selector(appWillResignActive), name: UIApplication.willResignActiveNotification, object: nil)
     }
 
-    func start() {
-        wantsUpdates = true
+    func start(owner: String = "legacy") {
+        owners.insert(owner)
         startHardwareIfNeeded()
     }
 
     private func startHardwareIfNeeded() {
-        guard wantsUpdates,
+        // `isRunning` is our bookkeeping; `isDeviceMotionActive` is Core
+        // Motion's truth. Recover if iOS invalidated the stream while the
+        // visible Home owner remained alive.
+        if isRunning && !manager.isDeviceMotionActive { isRunning = false }
+        guard !owners.isEmpty,
               UIApplication.shared.applicationState == .active,
               manager.isDeviceMotionAvailable,
               !isRunning else { return }
@@ -63,9 +67,9 @@ final class CubeMotionPoster {
 
     }
 
-    func stop() {
-        wantsUpdates = false
-        stopHardware()
+    func stop(owner: String = "legacy") {
+        owners.remove(owner)
+        if owners.isEmpty { stopHardware() }
     }
 
     private func stopHardware() {
@@ -79,7 +83,7 @@ final class CubeMotionPoster {
     }
 
     @objc private func appWillResignActive() {
-        // Preserve the user's tilt preference, but release motion hardware for
+        // Preserve every owner's lease, but release motion hardware for
         // the entire inactive/background interval.
         stopHardware()
     }

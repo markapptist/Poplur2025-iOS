@@ -276,9 +276,9 @@ final class SettingsStore: ObservableObject {
             objectWillChange.send()
             defaults.set(newValue, forKey: Keys.tiltControlEnabled)
             if newValue {
-                CubeMotionPoster.shared.start()
+                CubeMotionPoster.shared.start(owner: "settings")
             } else {
-                CubeMotionPoster.shared.stop()
+                CubeMotionPoster.shared.stop(owner: "settings")
             }
         }
     }
