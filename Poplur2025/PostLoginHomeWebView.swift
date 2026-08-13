@@ -621,6 +621,10 @@ struct PostLoginHomeWebView: UIViewRepresentable {
             if active { CubeMotionPoster.shared.start() }
             else { CubeMotionPoster.shared.stop() }
         }
+        // This host unmounts inactive tabs in React. Keep the one visible tab
+        // fully alive even when the heavy-renderer arbiter temporarily denies
+        // its lease; native background/cover/teardown remain hard boundaries.
+        webView.setKeepsVisibleDocumentAlive(true)
         // Without a uiDelegate, WebKit shows its OWN permission sheets for
         // geolocation and getUserMedia — separate from, and on top of, the OS
         // permissions the app already holds. The shared clay bridge answers them

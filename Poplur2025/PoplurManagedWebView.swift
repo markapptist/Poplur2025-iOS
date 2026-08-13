@@ -33,12 +33,14 @@ final class PoplurManagedWebView: WKWebView {
     private var isLightweightOverlayMode = false
     private var isLightweightOverlayRuntimeSuspended = false
     private var isHostOccluded = false
+    private var keepsVisibleDocumentAlive = false
     var onRuntimeActiveChange: ((Bool) -> Void)?
     private var lastReportedRuntimeActive: Bool?
 
     var poplurIsRuntimeActive: Bool {
         (
             latestGrant
+                || keepsVisibleDocumentAlive
                 || (isLightweightOverlayMode && !isLightweightOverlayRuntimeSuspended)
         )
             && window != nil
@@ -46,6 +48,20 @@ final class PoplurManagedWebView: WKWebView {
             && alpha > 0.01
             && !isHostOccluded
             && UIApplication.shared.applicationState == .active
+    }
+
+    /// Home mounts exactly one active React screen at a time. Its renderer
+    /// lease may be withheld while native Camera owns the expensive renderer,
+    /// but that must never suspend the foreground document's Feed/Profile
+    /// media, timers, or small navigator canvas. Hidden/covered/background
+    /// boundaries still close the runtime through the visibility guards above.
+    func setKeepsVisibleDocumentAlive(_ enabled: Bool) {
+        guard keepsVisibleDocumentAlive != enabled else {
+            applyLatestPolicyToDocument()
+            return
+        }
+        keepsVisibleDocumentAlive = enabled
+        applyLatestPolicyToDocument()
     }
 
     init(
