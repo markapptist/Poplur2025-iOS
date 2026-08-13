@@ -261,6 +261,7 @@ enum PoplurWebPerformance {
         let object: [String: Any] = [
             "mode": policy.mode.diagnosticName,
             "active": active,
+            "idleFPS": max(1, policy.targetFPS),
             "interactiveFPS": max(1, policy.interactiveTargetFPS),
             "startupBurstMS": startupBurstMS,
             "interactionBurstMS": interactionBurstMS,
@@ -274,7 +275,7 @@ enum PoplurWebPerformance {
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: object),
               let json = String(data: data, encoding: .utf8) else {
-            return "{\"active\":false,\"interactiveFPS\":1,\"maxDevicePixelRatio\":1}"
+            return "{\"active\":false,\"idleFPS\":1,\"interactiveFPS\":1,\"maxDevicePixelRatio\":1}"
         }
         return json.replacingOccurrences(of: "<", with: "\\u003c")
     }
@@ -315,15 +316,18 @@ enum PoplurWebPerformance {
           const suspendedMedia = new Set();
 
           const runnable = () => policy.active !== false && pageVisible && !document.hidden;
-          const frameRate = () => Math.max(1, Number(policy.interactiveFPS) || 12);
+          // The visible document has two cadences, never two lifecycle states:
+          // direct manipulation gets the interactive budget, while authored
+          // motion between touches continues at the lower foreground budget.
+          // Only an actually hidden/covered document is suspended. This keeps
+          // the globe and device-orientation cube alive without letting an
+          // active Three/Mapbox loop drive a ProMotion display at 120 Hz.
+          const frameRate = () => Math.max(
+            1,
+            Number(inInteractiveBurst() ? policy.interactiveFPS : policy.idleFPS) || 12
+          );
           const frameDelay = () => 1000 / frameRate();
           const inInteractiveBurst = () => performance.now() < interactiveUntil;
-          // Script work may run only inside a finite native rendering lease.
-          // Mapbox camera operations explicitly request a lease matching their
-          // duration; a child frame cannot keep the GPU awake merely by
-          // scheduling another rAF from the previous one.
-          const canDriveFrames = () => inInteractiveBurst();
-
           function markIdle(idle) {
             document.documentElement?.classList.toggle('poplur-performance-idle', idle);
           }
@@ -344,10 +348,6 @@ enum PoplurWebPerformance {
               // not enqueue rAF callbacks, so the frame driver cannot be the
               // mechanism that marks the document idle.
               markIdle(true);
-              intervals.forEach(record => {
-                if (record.timer) nativeClearTimeout(record.timer);
-                record.timer = 0;
-              });
             }, delay + 1);
           }
 
@@ -365,10 +365,6 @@ enum PoplurWebPerformance {
 
           function scheduleFrames() {
             if (!runnable() || frameDriver || frameTimer || frameQueue.size === 0) return;
-            if (!canDriveFrames()) {
-              markIdle(true);
-              return;
-            }
             const delay = Math.max(0, frameDelay() - (performance.now() - lastFrame));
             if (delay > 2) {
               frameTimer = nativeSetTimeout(() => {
@@ -382,10 +378,7 @@ enum PoplurWebPerformance {
 
           function flushFrames(now) {
             frameDriver = 0;
-            if (!runnable() || !canDriveFrames()) {
-              markIdle(true);
-              return;
-            }
+            if (!runnable()) return;
             if (now - lastFrame + 0.5 < frameDelay()) {
               scheduleFrames();
               return;
@@ -405,11 +398,9 @@ enum PoplurWebPerformance {
           window.requestAnimationFrame = callback => {
             const id = ++frameSequence;
             frameQueue.set(id, callback);
-            // Script-scheduled work must never manufacture a new interaction
-            // lease. Shared governors commonly use setTimeout -> rAF; treating
-            // that as user input let an idle document wake itself forever. A
-            // real input event calls wake(), and any queued paint is delivered
-            // during that bounded burst.
+            // Scheduling work does not manufacture an interaction lease. It
+            // receives the bounded foreground cadence until real input calls
+            // wake(), then temporarily receives the interactive cadence.
             scheduleFrames();
             return id;
           };
@@ -424,9 +415,11 @@ enum PoplurWebPerformance {
           };
 
           function armInterval(record) {
-            // Recurring timers run only during an interaction burst. wake()
-            // rearms them; a visually idle document has no polling metronome.
-            if (!runnable() || !inInteractiveBurst() || record.timer) return;
+            // Components on inactive tabs are unmounted. Timers belonging to
+            // the one visible screen therefore remain functional between
+            // touches, while pauseWork tears them down at the real lifecycle
+            // boundary (covered/background/removed WebView).
+            if (!runnable() || record.timer) return;
             record.timer = nativeSetTimeout(function tick() {
               record.timer = 0;
               if (!intervals.has(record.id)) return;
@@ -631,7 +624,7 @@ enum PoplurWebPerformance {
             const style = document.createElement('style');
             style.id = 'poplur-performance-style';
             style.textContent =
-              '.poplur-performance-paused *, .poplur-performance-idle * {' +
+              '.poplur-performance-paused * {' +
               'animation-play-state:paused!important;' +
               '}' +
               'html[data-poplur-performance-mode="LOW_POWER"] #confetti>*:not(:nth-child(6n)) {' +
