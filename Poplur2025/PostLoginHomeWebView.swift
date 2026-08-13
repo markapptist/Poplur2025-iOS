@@ -617,6 +617,10 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         webView.scrollView.contentInsetAdjustmentBehavior = .never
         webView.overrideUserInterfaceStyle = .dark
         context.coordinator.bridge.webView = webView
+        webView.onRuntimeActiveChange = { active in
+            if active { CubeMotionPoster.shared.start() }
+            else { CubeMotionPoster.shared.stop() }
+        }
         // Without a uiDelegate, WebKit shows its OWN permission sheets for
         // geolocation and getUserMedia — separate from, and on top of, the OS
         // permissions the app already holds. The shared clay bridge answers them
@@ -719,6 +723,8 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         private var recoveryWorkItem: DispatchWorkItem?
         private var recoveryAttempt = 0
         private var recoveryPending = false
+        private var motionBridgeBusy = false
+        private var pendingMotion: (roll: Double, pitch: Double)?
 
         init(
             initialWebTab: String,
@@ -748,11 +754,50 @@ struct PostLoginHomeWebView: UIViewRepresentable {
             ) { [weak self] note in
                 self?.deliverNativeCapture(note)
             })
+            notificationObservers.append(NotificationCenter.default.addObserver(
+                forName: Notification.Name("CubeMotionUpdate"), object: nil, queue: .main
+            ) { [weak self] note in
+                guard let self,
+                      let webView = self.bridge.webView,
+                      (webView as? PoplurManagedWebView)?.poplurIsRuntimeActive == true,
+                      let roll = note.userInfo?["roll"] as? Double,
+                      let pitch = note.userInfo?["pitch"] as? Double else { return }
+                self.enqueueMotion(roll: roll, pitch: pitch, on: webView)
+            })
+        }
+
+        /// WKWebView evaluation is asynchronous. Keep at most one evaluation
+        /// in flight and one latest-value slot so a brief WebKit stall can
+        /// never turn 30Hz sensor delivery into an unbounded main-thread queue.
+        private func enqueueMotion(roll: Double, pitch: Double, on webView: WKWebView) {
+            pendingMotion = (roll, pitch)
+            guard !motionBridgeBusy else { return }
+            drainMotion(on: webView)
+        }
+
+        private func drainMotion(on webView: WKWebView) {
+            guard let motion = pendingMotion,
+                  (webView as? PoplurManagedWebView)?.poplurIsRuntimeActive == true else {
+                pendingMotion = nil
+                motionBridgeBusy = false
+                return
+            }
+            pendingMotion = nil
+            motionBridgeBusy = true
+            webView.evaluateJavaScript(
+                "window.dispatchEvent(new CustomEvent('poplur-native-motion',{detail:{roll:\(motion.roll),pitch:\(motion.pitch)}}));true;"
+            ) { [weak self, weak webView] _, _ in
+                guard let self else { return }
+                self.motionBridgeBusy = false
+                guard let webView else { self.pendingMotion = nil; return }
+                if self.pendingMotion != nil { self.drainMotion(on: webView) }
+            }
         }
 
         deinit {
             recoveryWorkItem?.cancel()
             notificationObservers.forEach(NotificationCenter.default.removeObserver)
+            CubeMotionPoster.shared.stop()
         }
 
         func deliverNativeVoiceCommand(token: Int, json: String?) {

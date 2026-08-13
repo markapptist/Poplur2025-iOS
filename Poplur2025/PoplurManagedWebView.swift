@@ -33,6 +33,20 @@ final class PoplurManagedWebView: WKWebView {
     private var isLightweightOverlayMode = false
     private var isLightweightOverlayRuntimeSuspended = false
     private var isHostOccluded = false
+    var onRuntimeActiveChange: ((Bool) -> Void)?
+    private var lastReportedRuntimeActive: Bool?
+
+    var poplurIsRuntimeActive: Bool {
+        (
+            latestGrant
+                || (isLightweightOverlayMode && !isLightweightOverlayRuntimeSuspended)
+        )
+            && window != nil
+            && !isHidden
+            && alpha > 0.01
+            && !isHostOccluded
+            && UIApplication.shared.applicationState == .active
+    }
 
     init(
         performanceName: String,
@@ -80,6 +94,8 @@ final class PoplurManagedWebView: WKWebView {
     }
 
     func poplurTearDown() {
+        onRuntimeActiveChange?(false)
+        lastReportedRuntimeActive = false
         performanceRegistration?.setVisible(false)
         performanceRegistration?.invalidate()
         performanceRegistration = nil
@@ -180,15 +196,11 @@ final class PoplurManagedWebView: WKWebView {
     }
 
     private func applyLatestPolicyToDocument() {
-        let active = (
-            latestGrant
-                || (isLightweightOverlayMode && !isLightweightOverlayRuntimeSuspended)
-        )
-            && window != nil
-            && !isHidden
-            && alpha > 0.01
-            && !isHostOccluded
-            && UIApplication.shared.applicationState == .active
+        let active = poplurIsRuntimeActive
+        if lastReportedRuntimeActive != active {
+            lastReportedRuntimeActive = active
+            onRuntimeActiveChange?(active)
+        }
         setAllMediaPlaybackSuspended(!active, completionHandler: nil)
         evaluateJavaScript(PoplurWebPerformance.updateScript(policy: latestPolicy, active: active))
     }
@@ -316,6 +328,13 @@ enum PoplurWebPerformance {
           const suspendedMedia = new Set();
 
           const runnable = () => policy.active !== false && pageVisible && !document.hidden;
+          // The Home navigator is a single small foreground canvas. It may
+          // opt into the physical display clock for smooth globe rotation and
+          // immediate device-tilt response without lifting the governed rAF
+          // cadence for Mapbox, weather, media, or the rest of the document.
+          window.__poplurDisplayRAF = callback => nativeRAF(callback);
+          window.__poplurCancelDisplayRAF = id => nativeCAF(id);
+          window.__poplurDisplayActive = () => runnable();
           // The visible document has two cadences, never two lifecycle states:
           // direct manipulation gets the interactive budget, while authored
           // motion between touches continues at the lower foreground budget.

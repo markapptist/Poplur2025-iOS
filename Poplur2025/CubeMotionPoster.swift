@@ -39,9 +39,10 @@ final class CubeMotionPoster {
               !isRunning else { return }
         isRunning = true
 
-        // Fifteen samples per second preserves responsive tilt control without
-        // running the motion fusion and main-thread bridge at display cadence.
-        manager.deviceMotionUpdateInterval = 1.0 / 15.0
+        // Thirty sensor samples, interpolated by the navigator's 60fps canvas,
+        // read as continuous motion without paying for 60 native→JS bridge
+        // evaluations per second. Hardware still stops when the app is inactive.
+        manager.deviceMotionUpdateInterval = 1.0 / 30.0
         // Choose a reference frame; xArbitraryZVertical is generally stable for UI tilts
         manager.startDeviceMotionUpdates(using: .xArbitraryZVertical, to: queue) { motion, error in
             guard let motion = motion else { return }
