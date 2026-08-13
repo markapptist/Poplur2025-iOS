@@ -56,6 +56,11 @@ public class SimplifiedMLDetectionManager {
     private let detectionQueue = DispatchQueue(label: "com.app.ml-detection", qos: .userInitiated)
     private var isProcessing: Bool = false
     private var portalHitStreak: Int = 0
+    /// The readout has one primary answer, even though every frame publishes
+    /// several findings. Remember its prior ordering so two close Vision
+    /// scores do not make the scene phrase flicker while the phone is still.
+    /// This state is confined to `detectionQueue` with the rest of inference.
+    private var lastPresentationIdentifiers: [String] = []
     private lazy var productClassifier: VNCoreMLModel? = {
         guard let modelURL = Bundle.main.url(
             forResource: "PoplurProductClassifier",
@@ -246,13 +251,14 @@ public class SimplifiedMLDetectionManager {
             )
         }
 
-        // Everything else the frame actually contains, in Vision's own ranking.
-        // This is the line that makes the camera see a room instead of a single
-        // subject: one answer per frame was never a confidence problem, it was
-        // this function throwing thirteen live observations away.
-        let named = observations
+        // Everything else the frame actually contains. Keep the complete bag,
+        // but choose the first (display) answer by semantic usefulness rather
+        // than raw probability alone. VNClassifyImageRequest quite reasonably
+        // gives visual clues such as "cord", "line", "texture" and "structure"
+        // high scores; those clues help the scanner, but presenting one as the
+        // camera's entire understanding of a room is not useful to a person.
+        var named = observations
             .filter { $0.confidence >= confidenceThreshold }
-            .prefix(maxReportedObjects)
             .map {
                 DetectedObject(
                     identifier: Self.readableLabel($0.identifier),
@@ -260,7 +266,134 @@ public class SimplifiedMLDetectionManager {
                 )
             }
 
-        return Self.merged(refined.map { [$0] } ?? [], Array(named))
+        // Vision often reports the explicit room/place label below several
+        // texture clues. Surface that context without inventing a class: every
+        // synthesized phrase below is backed by an identifier Vision emitted
+        // for this same frame, and carries that observation's real confidence.
+        if let context = Self.sceneContext(
+            from: observations,
+            minimumConfidence: confidenceThreshold
+        ) {
+            named.insert(context, at: 0)
+        }
+
+        var candidates = Self.merged(refined.map { [$0] } ?? [], named)
+        candidates.sort {
+            let lhs = Self.presentationScore(for: $0)
+            let rhs = Self.presentationScore(for: $1)
+            if lhs == rhs { return $0.confidence > $1.confidence }
+            return lhs > rhs
+        }
+
+        // Hysteresis only holds the previous answer when Vision still sees it
+        // and the new winner is close. Panning to a genuinely different scene
+        // switches immediately because the old label is absent (or far weaker).
+        if let previous = lastPresentationIdentifiers.first,
+           let previousIndex = candidates.firstIndex(where: {
+               $0.identifier.caseInsensitiveCompare(previous) == .orderedSame
+           }),
+           let winner = candidates.first {
+            let previousCandidate = candidates[previousIndex]
+            let winnerScore = Self.presentationScore(for: winner)
+            let previousScore = Self.presentationScore(for: previousCandidate)
+            if previousScore + 0.10 >= winnerScore {
+                candidates.remove(at: previousIndex)
+                candidates.insert(previousCandidate, at: 0)
+            }
+        }
+
+        // Keep close runners-up in their prior order while they remain present.
+        // A much stronger new result must move forward immediately; otherwise
+        // an old 15% clue could stay ahead of a new 90% object indefinitely.
+        if let primary = candidates.first, lastPresentationIdentifiers.count > 1 {
+            var stable = [primary]
+            var remaining = Array(candidates.dropFirst())
+            for previous in lastPresentationIdentifiers.dropFirst() {
+                guard let index = remaining.firstIndex(where: {
+                    $0.identifier.caseInsensitiveCompare(previous) == .orderedSame
+                }) else { continue }
+                let previousCandidate = remaining[index]
+                let nextScore = remaining.first.map { Self.presentationScore(for: $0) }
+                    ?? -Float.greatestFiniteMagnitude
+                guard Self.presentationScore(for: previousCandidate) + 0.10 >= nextScore else {
+                    continue
+                }
+                stable.append(remaining.remove(at: index))
+            }
+            stable.append(contentsOf: remaining)
+            candidates = stable
+        }
+
+        let presented = Array(candidates.prefix(maxReportedObjects))
+        lastPresentationIdentifiers = presented.map(\.identifier)
+        return presented
+    }
+
+    /// A scene phrase derived from Vision's own broad scene taxonomy. Specific
+    /// rooms win over generic indoor/outdoor groupings.
+    private static func sceneContext(
+        from observations: [VNClassificationObservation],
+        minimumConfidence: Float
+    ) -> DetectedObject? {
+        let groups: [(label: String, terms: [String])] = [
+            ("living room", ["living room", "lounge"]),
+            ("bedroom", ["bedroom", "bedchamber"]),
+            ("kitchen", ["kitchen"]),
+            ("bathroom", ["bathroom", "washroom"]),
+            ("office", ["office", "workspace"]),
+            ("store", ["shop", "store", "supermarket"]),
+            ("restaurant", ["restaurant", "dining room", "cafe"]),
+            ("street scene", ["street scene", "street", "roadway", "sidewalk"]),
+            ("outdoor scene", ["outdoor", "outdoors", "landscape", "natural scene"]),
+            ("indoor room", ["indoor", "interior", "room", "home interior"])
+        ]
+
+        let eligible = groups.compactMap { group -> DetectedObject? in
+            let matches = observations.filter { observation in
+                guard observation.confidence >= minimumConfidence else { return false }
+                let identifier = observation.identifier.lowercased()
+                let tokens = identifier.split(whereSeparator: { !$0.isLetter }).map(String.init)
+                let words = Set(tokens)
+                let boundedPhrase = " \(tokens.joined(separator: " ")) "
+                return group.terms.contains { term in
+                    let phraseWords = term.split(separator: " ").map(String.init)
+                    return phraseWords.count > 1
+                        ? boundedPhrase.contains(" \(phraseWords.joined(separator: " ")) ")
+                        : words.contains(term)
+                }
+            }
+            guard let strongest = matches.max(by: { $0.confidence < $1.confidence }) else { return nil }
+            return DetectedObject(identifier: group.label, confidence: strongest.confidence)
+        }
+        return eligible.max(by: { $0.confidence < $1.confidence })
+    }
+
+    /// Rank what is most useful to SAY, while retaining original confidence
+    /// for the percentage and all downstream scan/commerce decisions.
+    private static func presentationScore(for object: DetectedObject) -> Float {
+        let label = object.identifier.lowercased()
+        var score = object.confidence
+
+        let sceneTerms = [
+            "room", "indoor", "outdoor", "interior", "kitchen", "bedroom",
+            "bathroom", "office", "restaurant", "store", "street", "landscape"
+        ]
+        let concreteTerms = [
+            "person", "face", "cat", "dog", "animal", "chair", "table", "desk",
+            "door", "window", "cabinet", "sofa", "couch", "bed", "computer",
+            "laptop", "monitor", "screen", "television", "phone", "camera",
+            "book", "bottle", "cup", "plant", "car", "bicycle", "food"
+        ]
+        let clueOnlyTerms = [
+            "cord", "wire", "line", "edge", "pattern", "texture", "material",
+            "shadow", "color", "shape", "structure", "artifact"
+        ]
+        let labelTerms = Set(label.split(whereSeparator: { !$0.isLetter }).map(String.init))
+
+        if sceneTerms.contains(where: { labelTerms.contains($0) }) { score += 0.14 }
+        if concreteTerms.contains(where: { labelTerms.contains($0) }) { score += 0.07 }
+        if clueOnlyTerms.contains(where: { labelTerms.contains($0) }) { score -= 0.12 }
+        return score
     }
 
     /// Vision's taxonomy identifiers are machine-shaped ("coffee_mug",

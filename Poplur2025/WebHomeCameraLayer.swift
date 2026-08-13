@@ -199,6 +199,7 @@ final class WebHomeCameraModel: ObservableObject {
             ]
         })
         var emittedLabels = Set(latestVisionBoxes.map { $0.label.lowercased() })
+        var emittedPrimaryClassification = false
 
         // The web view owns the single shader readout, and it picks its own
         // winner (most confident `whole`), so the runners-up no longer compete
@@ -223,9 +224,14 @@ final class WebHomeCameraModel: ObservableObject {
                 "w": 1.0,
                 "h": 1.0,
                 "whole": true,
+                // SimplifiedMLDetectionManager orders a stable, semantically
+                // useful reading first. Preserve that decision explicitly;
+                // the web must not undo it by sorting raw confidence again.
+                "primary": !emittedPrimaryClassification,
                 "label": label,
                 "confidence": Double(object.confidence)
             ])
+            emittedPrimaryClassification = true
         }
 
         guard JSONSerialization.isValidJSONObject(payload),
