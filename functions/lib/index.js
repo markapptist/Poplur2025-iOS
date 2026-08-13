@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.poplurAiApi = exports.premiumAiAssist = void 0;
+exports.poplurAiApi = exports.cameraSceneScan = exports.premiumAiAssist = void 0;
 const admin = __importStar(require("firebase-admin"));
 const firebase_functions_1 = require("firebase-functions");
 const params_1 = require("firebase-functions/params");
@@ -81,6 +81,67 @@ exports.premiumAiAssist = (0, https_1.onCall)({
         });
         throw new https_1.HttpsError("internal", "AI generation failed. Please try again.");
     }
+});
+/** One explicit Camera Scan sends one reduced JPEG. This is intentionally not
+ * a streaming endpoint: the expensive model has no permission to follow the
+ * camera after the user turns Scan off. */
+exports.cameraSceneScan = (0, https_1.onCall)({
+    region: protectedRegion,
+    enforceAppCheck: true,
+    secrets: [googleAiApiKey],
+    timeoutSeconds: 30,
+    memory: "512MiB",
+}, async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid)
+        throw new https_1.HttpsError("unauthenticated", "Sign in to scan a scene.");
+    const imageBase64 = typeof request.data?.imageBase64 === "string" ? request.data.imageBase64 : "";
+    if (!imageBase64 || imageBase64.length > 1_400_000) {
+        throw new https_1.HttpsError("invalid-argument", "Send one JPEG smaller than 1 MB.");
+    }
+    // One result every eight seconds per account is enough for a deliberate
+    // scan and makes button mashing bounded at the server as well as the phone.
+    const rateRef = db.collection("cameraScanRate").doc(uid);
+    await db.runTransaction(async (transaction) => {
+        const snapshot = await transaction.get(rateRef);
+        const lastAt = snapshot.data()?.lastAt;
+        if (lastAt && Date.now() - lastAt.toMillis() < 8_000) {
+            throw new https_1.HttpsError("resource-exhausted", "Let this scan finish before starting another.");
+        }
+        transaction.set(rateRef, { lastAt: firestore_1.FieldValue.serverTimestamp() }, { merge: true });
+    });
+    configureGoogleAIKey();
+    const payload = await callGeminiGenerateContent({
+        apiKey: googleAiApiKey.value(),
+        model: process.env.POPLUR_CAMERA_SCAN_MODEL || "gemini-2.5-flash",
+        contents: [{ parts: [
+                    { text: [
+                            "Identify the scene and the most visually evident objects in this camera image.",
+                            "Do not guess brands or product models unless distinctive visible evidence supports it.",
+                            "Return concise JSON only: {primary:string, confidence:number, context:string[], description:string}.",
+                            "confidence is 0 to 1; context has at most 3 different concrete objects or scene facts.",
+                        ].join(" ") },
+                    { inlineData: { mimeType: "image/jpeg", data: imageBase64 } },
+                ] }],
+        generationConfig: {
+            temperature: 0.1,
+            maxOutputTokens: 180,
+            responseMimeType: "application/json",
+        },
+    });
+    const result = parseJson(extractGeminiText(payload));
+    const primary = typeof result.primary === "string" ? result.primary.trim().slice(0, 80) : "";
+    if (!primary)
+        throw new https_1.HttpsError("internal", "The scene scan returned no useful answer.");
+    const confidence = typeof result.confidence === "number"
+        ? Math.max(0, Math.min(1, result.confidence))
+        : 0.7;
+    return {
+        primary,
+        confidence,
+        context: stringArrayField(result.context).slice(0, 3),
+        description: typeof result.description === "string" ? result.description.trim().slice(0, 180) : "",
+    };
 });
 exports.poplurAiApi = (0, https_1.onRequest)({
     region: protectedRegion,

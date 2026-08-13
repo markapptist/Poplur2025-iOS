@@ -1,4 +1,7 @@
 import SwiftUI
+import FirebaseAuth
+import FirebaseFunctions
+import CoreImage
 import AVFoundation
 import UIKit
 
@@ -36,9 +39,13 @@ final class WebHomeCameraModel: ObservableObject {
     /// foreground. A stale task may finish, but it can never reclaim capture.
     private var cameraActivationGeneration: UInt64 = 0
     private var webReportsLiveCamera = false
+    private var webWantsDetection = false
     private var latestVisionBoxes: [VisionBoxDetector.Box] = []
     private var latestClassifications: [DetectedObject] = []
+    private var latestCloudClassifications: [DetectedObject] = []
     private var latestARFace: (bounds: CGRect, confidence: Float, roll: CGFloat, yaw: CGFloat)?
+    private var cloudScanRequested = false
+    private var cloudScanInFlight = false
     var isCameraTab: Bool { activeTab == "post" && liveCameraVisible }
 
     init() {
@@ -153,6 +160,45 @@ final class WebHomeCameraModel: ObservableObject {
                 CameraAIAnnouncer.shared.announceMLObjects(objects)
             }
             self.recognitionManager?.processDetectedObjects(objects, from: pixelBuffer)
+            self.submitCloudSceneScanIfRequested(pixelBuffer)
+        }
+    }
+
+    /// One explicit Scan activation may upload one reduced still. The callable
+    /// carries Firebase Auth/App Check automatically; no API key or live stream
+    /// ever enters the app bundle.
+    private func submitCloudSceneScanIfRequested(_ pixelBuffer: CVPixelBuffer) {
+        guard cloudScanRequested, !cloudScanInFlight, isCameraTab else { return }
+        cloudScanRequested = false
+        cloudScanInFlight = true
+
+        let image = CIImage(cvPixelBuffer: pixelBuffer)
+        let extent = image.extent
+        let scale = min(1, 640 / max(extent.width, extent.height))
+        let reduced = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        let context = CIContext(options: [.cacheIntermediates: false])
+        guard let cgImage = context.createCGImage(reduced, from: reduced.extent),
+              let jpeg = UIImage(cgImage: cgImage).jpegData(compressionQuality: 0.68) else {
+            cloudScanInFlight = false
+            return
+        }
+
+        Functions.functions(region: "us-central1").httpsCallable("cameraSceneScan").call([
+            "imageBase64": jpeg.base64EncodedString()
+        ]) { [weak self] result, _ in
+            Task { @MainActor in
+                guard let self else { return }
+                self.cloudScanInFlight = false
+                guard self.isCameraTab, self.webWantsDetection,
+                      let data = result?.data as? [String: Any],
+                      let primary = data["primary"] as? String,
+                      !primary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+                let confidence = (data["confidence"] as? NSNumber)?.floatValue ?? 0.7
+                let context = (data["context"] as? [String] ?? []).prefix(3)
+                self.latestCloudClassifications = [DetectedObject(identifier: primary, confidence: confidence)]
+                    + context.map { DetectedObject(identifier: $0, confidence: max(0.45, confidence - 0.12)) }
+                self.publishCombinedDetections()
+            }
         }
     }
 
@@ -208,7 +254,10 @@ final class WebHomeCameraModel: ObservableObject {
         // and it cost more than the readout: the web grows the scan radius from
         // the labels it RECEIVES, so capping this at one meant a frame with six
         // recognised things scored the same as a frame with one.
-        for (index, object) in latestClassifications.prefix(6).enumerated() {
+        let presentedClassifications = latestCloudClassifications.isEmpty
+            ? latestClassifications
+            : latestCloudClassifications
+        for (index, object) in presentedClassifications.prefix(6).enumerated() {
             let label = object.identifier.trimmingCharacters(in: .whitespacesAndNewlines)
             guard emittedLabels.insert(label.lowercased()).inserted else { continue }
             payload.append([
@@ -247,6 +296,7 @@ final class WebHomeCameraModel: ObservableObject {
         latestARFace = nil
         latestVisionBoxes = []
         latestClassifications = []
+        latestCloudClassifications = []
         PostLoginHomeWebView.sendDetections("[]")
     }
 
@@ -378,12 +428,37 @@ final class WebHomeCameraModel: ObservableObject {
                 // plain toggle still works.
                 let controller = resolveController()
                 let wantsOn = (body["on"] as? Bool) ?? (controller.mlDetectionManager == nil)
+                webWantsDetection = wantsOn
                 if wantsOn {
                     latestClassifications = []
+                    latestCloudClassifications = []
+                    cloudScanRequested = true
+                    let recognition = recognitionManager ?? UserRecognitionManager()
+                    recognitionManager = recognition
+                    controller.userRecognitionManager = recognition
+                    Task { await recognition.startRecognitionSession() }
                     enableClassificationBridge(on: controller)
+                    controller.startVideoFrameDelivery()
+                    if controller.visionBoxDetector == nil {
+                        let boxes = VisionBoxDetector()
+                        boxes.onBoxes = { [weak self, weak controller] found in
+                            guard controller?.acceptsAnalysisResults == true else { return }
+                            self?.receiveVisionBoxes(found)
+                        }
+                        controller.visionBoxDetector = boxes
+                    }
                 } else {
                     controller.disableMLDetection()
+                    controller.visionBoxDetector = nil
+                    if controller.arFilterManager?.activeFilter == .none {
+                        controller.stopVideoFrameDelivery()
+                    }
+                    cloudScanRequested = false
                     latestClassifications = []
+                    latestCloudClassifications = []
+                    latestVisionBoxes = []
+                    controller.userRecognitionManager = nil
+                    recognitionManager?.clearRecognition()
                     publishCombinedDetections()
                 }
                 UserDefaults.standard.set(wantsOn, forKey: "CameraObjectDetectionEnabled")
@@ -456,39 +531,34 @@ final class WebHomeCameraModel: ObservableObject {
             return
         }
 
-        let recognition = recognitionManager ?? UserRecognitionManager()
-        recognitionManager = recognition
-        controller.userRecognitionManager = recognition
         CameraAIAnnouncer.shared.setLiveCameraActive(true)
 
-        // Camera always opens with detection enabled. DETECT OFF remains a
-        // session control, but an old persisted off value must not survive an
-        // update/reinstall and silently disable the default on the next visit.
-        enableClassificationBridge(on: controller)
-        // enableMLDetection() only says detection is WANTED. Frames are what make
-        // it happen, and on this path nothing was attaching a video data output —
-        // that lived solely inside setupARFilterSupport(), which only HomeView
-        // called. So the classifier and face detector sat armed and idle: no
-        // green boxes, no announcements, and no error to say why.
-        controller.startVideoFrameDelivery()
-
-        // Real boxes for the web overlay. The web's own detector
-        // (poplur-clay-map/src/mlDetect.ts) is explicitly a SIMULATION — it
-        // clusters a frame-difference map and labels the blobs from a plausible
-        // list — and it cannot run here anyway, because on iOS the camera is
-        // native behind a transparent WebView so the page's <video> is empty.
-        // Vision's built-in detectors genuinely locate what they name, so the
-        // boxes on screen mean something.
-        if controller.visionBoxDetector == nil {
-            let boxes = VisionBoxDetector()
-            boxes.onBoxes = { [weak self, weak controller] found in
-                guard controller?.acceptsAnalysisResults == true else { return }
-                self?.receiveVisionBoxes(found)
+        // Preview quality is independent from ML. Normally this is off; retain
+        // a Scan tap that landed during camera permission/session startup.
+        if webWantsDetection {
+            latestClassifications = []
+            latestCloudClassifications = []
+            cloudScanRequested = true
+            let recognition = recognitionManager ?? UserRecognitionManager()
+            recognitionManager = recognition
+            controller.userRecognitionManager = recognition
+            enableClassificationBridge(on: controller)
+            controller.startVideoFrameDelivery()
+            if controller.visionBoxDetector == nil {
+                let boxes = VisionBoxDetector()
+                boxes.onBoxes = { [weak self, weak controller] found in
+                    guard controller?.acceptsAnalysisResults == true else { return }
+                    self?.receiveVisionBoxes(found)
+                }
+                controller.visionBoxDetector = boxes
             }
-            controller.visionBoxDetector = boxes
+            await recognition.startRecognitionSession()
+        } else {
+            controller.disableMLDetection()
+            controller.visionBoxDetector = nil
+            controller.stopVideoFrameDelivery()
         }
-        UserDefaults.standard.set(true, forKey: "CameraObjectDetectionEnabled")
-        await recognition.startRecognitionSession()
+        UserDefaults.standard.set(webWantsDetection, forKey: "CameraObjectDetectionEnabled")
     }
 
     /// Mirrors HomeView.recordTabContent.onDisappear.

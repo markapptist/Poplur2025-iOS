@@ -1885,6 +1885,17 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
         }
     }
 
+    /// Park only the BGRA/Vision branch. AVCaptureVideoPreviewLayer keeps the
+    /// full-quality foreground preview smooth; this releases the expensive
+    /// sample-buffer conversion when Scan and AR are both off.
+    func stopVideoFrameDelivery() {
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            self.wantsVideoFrameDelivery = false
+            self.setVideoFrameDeliveryActiveOnQueue(false)
+        }
+    }
+
     /// Runs on sessionQueue. The hardware preview remains continuously visible
     /// at its governed cadence. Default AI opens the costly BGRA path every
     /// 2.5s (3.5s under pressure); an explicit AR filter temporarily uses its

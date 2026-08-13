@@ -721,9 +721,18 @@ function formatBytes(bytes) {
 
 function stopPhoneBoot() {
   if (phoneBootTimer) {
-    window.clearInterval(phoneBootTimer);
+    window.cancelAnimationFrame(phoneBootTimer);
     phoneBootTimer = null;
   }
+}
+
+function finishPhoneBoot(page, device) {
+  stopPhoneBoot();
+  phoneMode = 'menu';
+  page.classList.remove('is-booting');
+  page.classList.add('is-ready');
+  device.classList.remove('phone-vibrating');
+  renderPhoneMenu();
 }
 
 function stopStoreCarousel() {
@@ -802,20 +811,25 @@ function startPhoneBoot() {
     } catch (_) {}
   }
 
-  let frame = 0;
-  phoneBootTimer = window.setInterval(() => {
-    frame += 1;
-    if (frame >= 16) {
+  // Derive the sprite frame from elapsed time instead of counting interval
+  // callbacks. Governed WKWebView timers can be coalesced; a missed callback
+  // previously left this surface on frame zero forever. This loop is bounded,
+  // visible-only, and completes immediately on the first late callback.
+  const startedAt = performance.now();
+  const advance = now => {
+    if (activeScreen !== 'profile-phone' || !page.isConnected) {
       stopPhoneBoot();
-      phoneMode = 'menu';
-      page.classList.remove('is-booting');
-      page.classList.add('is-ready');
-      device.classList.remove('phone-vibrating');
-      renderPhoneMenu();
+      return;
+    }
+    const frame = Math.min(16, Math.floor((now - startedAt) / 112));
+    if (frame >= 16) {
+      finishPhoneBoot(page, device);
       return;
     }
     setPhoneBootFrame(frame);
-  }, 112);
+    phoneBootTimer = window.requestAnimationFrame(advance);
+  };
+  phoneBootTimer = window.requestAnimationFrame(advance);
 }
 
 function setPhoneBootFrame(frame) {

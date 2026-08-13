@@ -107,12 +107,6 @@ public class SimplifiedMLDetectionManager {
     private func performDetection(on pixelBuffer: CVPixelBuffer) {
         defer { isProcessing = false }
 
-        // The bundled product classifier knows exactly one subject, so it is a
-        // BONUS label, never a gate. It used to `return` the moment it saw its
-        // one product, which is why the camera looked blind everywhere except
-        // at that product: a hit suppressed the full-taxonomy pass entirely.
-        let product = classifyCommercialProduct(on: pixelBuffer) ?? []
-
         let request = VNClassifyImageRequest()
         let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .up, options: [:])
         do {
@@ -121,11 +115,14 @@ public class SimplifiedMLDetectionManager {
                 .filter { $0.confidence >= min(confidenceThreshold, 0.08) }
                 .prefix(14)
             let scene = preferredCommercialResult(from: Array(observations))
-            publish(Self.merged(product, scene), for: pixelBuffer)
+            // Do not mix the old one-product Portal model into a general scene
+            // scan. It confidently called unrelated dark rectangular objects
+            // (including a tower fan) a PlayStation Portal. The explicit Scan
+            // session now asks the authenticated cloud scene model for product
+            // specificity and keeps this local pass as an offline fallback.
+            publish(scene, for: pixelBuffer)
         } catch {
-            // The scene pass failed — still report whatever the product model
-            // saw rather than dropping the frame's only answer.
-            publish(product, for: pixelBuffer)
+            publish([], for: pixelBuffer)
             DispatchQueue.main.async {
                 self.onError?(error)
             }
@@ -188,9 +185,10 @@ public class SimplifiedMLDetectionManager {
         // update to clear a stale label after the camera moves away.
         DispatchQueue.main.async {
             self.onDetection?(detectedObjects)
-            if !detectedObjects.isEmpty {
-                self.onFrameProcessed?(pixelBuffer, detectedObjects)
-            }
+            // Explicit cloud Scan also needs the sampled still when Vision has
+            // no confident local label — that is precisely when the stronger
+            // scene model is most useful.
+            self.onFrameProcessed?(pixelBuffer, detectedObjects)
         }
     }
 
