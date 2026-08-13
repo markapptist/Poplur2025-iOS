@@ -2269,14 +2269,33 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
         analysisClaimTimeoutTask = nil
         analysisStateLock.unlock()
         #if DEBUG
-        print("[CameraColdBudget] analysis timeout family=\(family); analysis parked for this preview window")
+        print("[CameraResourcePool] analysis timeout family=\(family); quarantined while raw preview remains live")
         #endif
         Task { @MainActor [weak self] in
             guard let self, self.performanceWantsCapture else { return }
-            // A stuck AR request retains either its last completed filtered
-            // frame or the still-visible hardware preview. Parking here emits
-            // the explicit resume affordance and prevents a black auto-loop.
-            self.parkCamera(reason: .unavailable, canResume: true, preserveLastFrame: true)
+            // Vision/Core ML/Core Image owns one serialized analysis lane. A
+            // timed-out job is not safely cancellable, so quarantine that lane
+            // until its real completion arrives, but never revoke the separate
+            // camera-preview lease. Parking the whole AVCaptureSession here was
+            // the frozen live-camera frame seen after a slow face/filter pass.
+            self.mlDetectionManager?.isEnabled = false
+            self.setARFilterProcessingWanted(false)
+            self.arFilterManager?.activeFilter = .none
+            self.arFilterManager?.stopARSession()
+            self.displayLayer?.flushAndRemoveImage()
+            NotificationCenter.default.post(
+                name: Notification.Name("ARFiltersStateChanged"),
+                object: nil,
+                userInfo: ["isShown": false]
+            )
+            NotificationCenter.default.post(
+                name: Notification.Name("ARFilterChanged"),
+                object: nil,
+                userInfo: ["filter": "None"]
+            )
+            self.sessionQueue.async { [weak self] in
+                self?.setVideoFrameDeliveryActiveOnQueue(false)
+            }
         }
     }
 
