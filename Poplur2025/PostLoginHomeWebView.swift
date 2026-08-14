@@ -777,10 +777,10 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         }
 
         private func syncMotionLease() {
-            // Map already owns a continuously rotating globe plus Mapbox, and
-            // Camera owns AVCapture/analysis. Neither screen needs a motion
-            // sensor and JavaScript bridge waking its navigator as well.
-            let eligible = webForegroundActive && currentWebTab != "map" && currentWebTab != "post"
+            // The navigator is present on every home tab and subscreen. Keep a
+            // single Core Motion lease for the foreground web home instead of
+            // leaving Map and Camera as non-responsive exceptions.
+            let eligible = webForegroundActive
             if eligible { CubeMotionPoster.shared.start(owner: "web-home") }
             else { CubeMotionPoster.shared.stop(owner: "web-home") }
         }
@@ -793,11 +793,12 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         /// bounded without coupling motion to page inactivity policy.
         private func deliverMotion(roll: Double, pitch: Double, on webView: WKWebView) {
             guard webForegroundActive,
-                  currentWebTab != "map",
-                  currentWebTab != "post",
                   (webView as? PoplurManagedWebView)?.poplurIsForegroundVisible == true else { return }
             let now = ProcessInfo.processInfo.systemUptime
-            guard now - lastMotionDeliveryUptime >= 0.1 else { return }
+            // Core Motion samples at 15 Hz. Forward each changed sample, then
+            // let the renderer interpolate; that keeps camcorder aim direct
+            // without creating a display-rate WebKit bridge.
+            guard now - lastMotionDeliveryUptime >= (1.0 / 15.0) else { return }
             if let lastRoll = lastDeliveredRoll,
                let lastPitch = lastDeliveredPitch,
                abs(roll - lastRoll) < 0.008,
