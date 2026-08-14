@@ -788,17 +788,17 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         /// This tiny dispatch deliberately has no completion-based lock. WebKit
         /// can omit an evaluateJavaScript completion while its governed timers
         /// are idle; the old lock then permanently stopped live cube motion.
-        /// Core Motion is a fixed 15Hz source and delivery is limited to
+        /// Core Motion is a fixed 30Hz source and delivery is limited to
         /// the genuinely foreground document, so callback-free dispatch is
         /// bounded without coupling motion to page inactivity policy.
         private func deliverMotion(roll: Double, pitch: Double, on webView: WKWebView) {
             guard webForegroundActive,
                   (webView as? PoplurManagedWebView)?.poplurIsForegroundVisible == true else { return }
             let now = ProcessInfo.processInfo.systemUptime
-            // Core Motion samples at 15 Hz. Forward each changed sample, then
+            // Core Motion samples at 30 Hz. Forward each changed sample, then
             // let the renderer interpolate; that keeps camcorder aim direct
             // without creating a display-rate WebKit bridge.
-            guard now - lastMotionDeliveryUptime >= (1.0 / 15.0) else { return }
+            guard now - lastMotionDeliveryUptime >= (1.0 / 30.0) else { return }
             if let lastRoll = lastDeliveredRoll,
                let lastPitch = lastDeliveredPitch,
                abs(roll - lastRoll) < 0.008,
