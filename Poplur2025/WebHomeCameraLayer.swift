@@ -46,6 +46,7 @@ final class WebHomeCameraModel: ObservableObject {
     private var latestARFace: (bounds: CGRect, confidence: Float, roll: CGFloat, yaw: CGFloat)?
     private var cloudScanRequested = false
     private var cloudScanInFlight = false
+    private var recognitionObserver: NSObjectProtocol?
     var isCameraTab: Bool { activeTab == "post" && liveCameraVisible }
 
     init() {
@@ -53,6 +54,19 @@ final class WebHomeCameraModel: ObservableObject {
         // singleton announcer immediately so a late result from another camera
         // session cannot speak over this surface.
         CameraAIAnnouncer.shared.setLiveCameraActive(false)
+        recognitionObserver = NotificationCenter.default.addObserver(
+            forName: .UserRecognizedInCamera,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.publishCombinedDetections() }
+        }
+    }
+
+    deinit {
+        if let recognitionObserver {
+            NotificationCenter.default.removeObserver(recognitionObserver)
+        }
     }
 
     private static let peopleClassificationTerms: Set<String> = [
@@ -220,8 +234,10 @@ final class WebHomeCameraModel: ObservableObject {
 
     private func publishCombinedDetections() {
         var payload: [[String: Any]] = []
+        let recognized = recognitionManager?.recognizedUser
+        let recognizedBounds = recognitionManager?.recognizedFaceBounds
         if let face = latestARFace {
-            payload.append([
+            var facePayload: [String: Any] = [
                 "id": "face",
                 "x": Double(face.bounds.minX),
                 "y": Double(1 - face.bounds.minY - face.bounds.height),
@@ -231,6 +247,31 @@ final class WebHomeCameraModel: ObservableObject {
                 "confidence": Double(face.confidence),
                 "roll": Double(face.roll),
                 "yaw": Double(face.yaw)
+            ]
+            if let recognized, recognized.isRecent {
+                facePayload["user"] = [
+                    "handle": "@\(recognized.profile.username)",
+                    "name": recognized.nameForSpeech,
+                    "radiusKm": recognized.radiusMeters / 1000
+                ]
+                facePayload["isUser"] = true
+            }
+            payload.append(facePayload)
+        } else if let bounds = recognizedBounds, let recognized, recognized.isRecent {
+            payload.append([
+                "id": "face",
+                "x": Double(bounds.minX),
+                "y": Double(1 - bounds.minY - bounds.height),
+                "w": Double(bounds.width),
+                "h": Double(bounds.height),
+                "label": "face",
+                "confidence": Double(recognized.confidence),
+                "user": [
+                    "handle": "@\(recognized.profile.username)",
+                    "name": recognized.nameForSpeech,
+                    "radiusKm": recognized.radiusMeters / 1000
+                ],
+                "isUser": true
             ])
         }
         payload.append(contentsOf: latestVisionBoxes.map { box in
@@ -687,7 +728,7 @@ struct PostLoginHomeSurface: View {
                     camera?.handleWebEvent(type: type, body: body)
                     if type == "requestVoiceAssistant" {
                         // This message can only come from the explicit HEY
-                        // POPLUR tile. It is therefore the native permission
+                        // POPLUR profile button. It is therefore the permission
                         // ask point; mounting Home itself never opens a sheet.
                         poplurAI?.requestPermissionAndStartCommand()
                     }
@@ -714,8 +755,8 @@ struct PostLoginHomeSurface: View {
         // overheating. It had also parked the audio session in `.measurement`,
         // silencing all playback.
         //
-        // The way in is now the PROFILE hold menu's HEY POPLUR tile, which the web
-        // already bridges as `requestVoiceAssistant` -> requestPermissionAndStartCommand()
+        // The way in is now the PROFILE rail's HEY POPLUR button, which the web
+        // bridges as `requestVoiceAssistant` -> requestPermissionAndStartCommand()
         // (see onWebEvent above). Stopping is still unconditional: backgrounding or
         // leaving Home must never leave the microphone open.
         .onDisappear { poplurAI.stop() }

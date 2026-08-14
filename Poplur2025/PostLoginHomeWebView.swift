@@ -788,7 +788,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         /// This tiny dispatch deliberately has no completion-based lock. WebKit
         /// can omit an evaluateJavaScript completion while its governed timers
         /// are idle; the old lock then permanently stopped live cube motion.
-        /// Core Motion is already a fixed 30Hz source and delivery is limited to
+        /// Core Motion is a fixed 15Hz source and delivery is limited to
         /// the genuinely foreground document, so callback-free dispatch is
         /// bounded without coupling motion to page inactivity policy.
         private func deliverMotion(roll: Double, pitch: Double, on webView: WKWebView) {

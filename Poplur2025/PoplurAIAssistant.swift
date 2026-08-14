@@ -75,8 +75,8 @@ final class PoplurAIAssistantController: ObservableObject {
 
     /// How long an invoked session keeps the mic open with nothing said.
     ///
-    /// "Hey Poplur" is now ON DEMAND — armed from the PROFILE hold menu's HEY
-    /// POPLUR tile, never at mount. Always-on listening kept a live
+    /// "Hey Poplur" is now ON DEMAND — armed from the PROFILE rail's HEY
+    /// POPLUR button, never at mount. Always-on listening kept a live
     /// AVAudioEngine, a continuous mic tap and a speech recognizer running for
     /// the whole session; measured on device, turning it off took the feed video
     /// from 0.52x real time / ~13fps to 1.0x / 28-38fps, and the phone stopped
@@ -84,7 +84,7 @@ final class PoplurAIAssistantController: ObservableObject {
     /// which silenced all playback app-wide.
     ///
     /// So nothing calls `start()` on appear any more (see WebHomeCameraLayer).
-    /// `requestPermissionAndStartCommand()` — already wired to that tile — is the
+    /// `requestPermissionAndStartCommand()` — already wired to that button — is the
     /// only way in, and this timeout is the way out, so an armed session cannot
     /// silently become the always-on listener again by another route.
     static let idleListenTimeout: TimeInterval = 45
@@ -106,7 +106,7 @@ final class PoplurAIAssistantController: ObservableObject {
         beginListeningIfAuthorized()
     }
 
-    /// Called only by the user's explicit HEY POPLUR tile action.
+    /// Called only by the user's explicit HEY POPLUR profile-button action.
     func requestPermissionAndStartCommand() {
         start()
         armIdleListenTimeout()
@@ -841,18 +841,14 @@ struct PoplurAIAssistantOverlay: View {
 
     @State private var pulse = false
     @State private var wavePhase: CGFloat = 0
+    @State private var ringRotation = 0.0
 
     var body: some View {
         GeometryReader { proxy in
             ZStack {
                 if controller.isIlluminated {
-                    // Full-screen color wash
-                    accent
-                        .opacity(pulse ? 0.20 : 0.10)
-                        .ignoresSafeArea()
-                        .transition(.opacity)
-
-                    // Edge glow
+                    // The assistant wears the same thin rainbow perimeter as
+                    // live camera recognition. Keep the center untouched.
                     assistantEdges(in: proxy)
                         .transition(.opacity)
 
@@ -892,10 +888,13 @@ struct PoplurAIAssistantOverlay: View {
                 if active {
                     pulse = false
                     wavePhase = 0
+                    ringRotation = 0
                     withAnimation(.easeInOut(duration: 0.72).repeatForever(autoreverses: true)) { pulse = true }
                     withAnimation(.linear(duration: 1.1).repeatForever(autoreverses: false)) { wavePhase = .pi * 2 }
+                    withAnimation(.linear(duration: 4).repeatForever(autoreverses: false)) { ringRotation = 360 }
                 } else {
                     pulse = false
+                    ringRotation = 0
                 }
             }
         }
@@ -905,51 +904,38 @@ struct PoplurAIAssistantOverlay: View {
     }
 
     private func assistantEdges(in proxy: GeometryProxy) -> some View {
-        let line: CGFloat = pulse ? 22.0 : 12.0
-        let opacity: Double = pulse ? 1.0 : 0.65
+        let safe = proxy.safeAreaInsets
+        let padding = EdgeInsets(
+            top: max(5, safe.top),
+            leading: max(5, safe.leading),
+            bottom: max(5, safe.bottom),
+            trailing: max(5, safe.trailing)
+        )
+        let rainbow = [
+            Color(red: 1.00, green: 0.18, blue: 0.58),
+            Color(red: 1.00, green: 0.54, blue: 0.24),
+            Color(red: 1.00, green: 0.89, blue: 0.24),
+            Color(red: 0.42, green: 0.94, blue: 0.35),
+            Color(red: 0.21, green: 0.85, blue: 0.81),
+            Color(red: 0.24, green: 0.62, blue: 1.00),
+            Color(red: 0.54, green: 0.42, blue: 1.00),
+            Color(red: 0.84, green: 0.38, blue: 1.00),
+            Color(red: 1.00, green: 0.18, blue: 0.58)
+        ]
 
-        return ZStack {
-            EdgeGlowEdge(edge: .top, thickness: line)
-                .fill(accent.opacity(opacity))
-                .blur(radius: 12)
-            EdgeGlowEdge(edge: .bottom, thickness: line)
-                .fill(accent.opacity(opacity))
-                .blur(radius: 12)
-            EdgeGlowEdge(edge: .leading, thickness: line)
-                .fill(accent.opacity(opacity))
-                .blur(radius: 12)
-            EdgeGlowEdge(edge: .trailing, thickness: line)
-                .fill(accent.opacity(opacity))
-                .blur(radius: 12)
-        }
-        .frame(width: proxy.size.width, height: proxy.size.height)
-        .shadow(color: accent.opacity(0.9), radius: pulse ? 32 : 20)
-    }
-}
-
-private struct EdgeGlowEdge: Shape {
-    enum Edge {
-        case top
-        case bottom
-        case leading
-        case trailing
-    }
-
-    let edge: Edge
-    let thickness: CGFloat
-
-    func path(in rect: CGRect) -> Path {
-        let frame: CGRect
-        switch edge {
-        case .top:
-            frame = CGRect(x: rect.minX, y: rect.minY, width: rect.width, height: thickness)
-        case .bottom:
-            frame = CGRect(x: rect.minX, y: rect.maxY - thickness, width: rect.width, height: thickness)
-        case .leading:
-            frame = CGRect(x: rect.minX, y: rect.minY, width: thickness, height: rect.height)
-        case .trailing:
-            frame = CGRect(x: rect.maxX - thickness, y: rect.minY, width: thickness, height: rect.height)
-        }
-        return Path(frame)
+        return RoundedRectangle(cornerRadius: 32, style: .continuous)
+            .stroke(
+                AngularGradient(
+                    colors: rainbow,
+                    center: .center,
+                    angle: .degrees(ringRotation)
+                ),
+                lineWidth: 1
+            )
+            .padding(padding)
+            .opacity(pulse ? 1 : 0.62)
+            .shadow(color: Color(red: 0.96, green: 0.23, blue: 0.60).opacity(0.32), radius: 7)
+            .shadow(color: Color(red: 0.37, green: 0.88, blue: 0.92).opacity(0.28), radius: 6)
+            .shadow(color: Color(red: 0.55, green: 0.42, blue: 1.00).opacity(0.20), radius: 9)
     }
 }
