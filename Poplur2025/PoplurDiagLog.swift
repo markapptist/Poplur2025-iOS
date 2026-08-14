@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 /// A diagnostics log that does not need a live console attached.
@@ -89,5 +90,33 @@ enum PoplurDiagLog {
     /// Marks a fresh run so old lines are never mistaken for the current build.
     static func markLaunch() {
         append("=== LAUNCH === build=\(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?")")
+    }
+
+    /// Resident memory for the whole process, not merely Poplur's bounded asset
+    /// cache. This is intentionally sampled only at lifecycle boundaries (and
+    /// at a very low background cadence) so the diagnostic cannot become the
+    /// work it is trying to identify.
+    static func residentMemoryBytes() -> UInt64? {
+        var info = mach_task_basic_info()
+        var count = mach_msg_type_number_t(
+            MemoryLayout<mach_task_basic_info>.size / MemoryLayout<natural_t>.size
+        )
+        let result = withUnsafeMutablePointer(to: &info) { pointer in
+            pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(
+                    mach_task_self_,
+                    task_flavor_t(MACH_TASK_BASIC_INFO),
+                    $0,
+                    &count
+                )
+            }
+        }
+        guard result == KERN_SUCCESS else { return nil }
+        return UInt64(info.resident_size)
+    }
+
+    static func megabytes(_ bytes: UInt64?) -> String {
+        guard let bytes else { return "unknown" }
+        return String(format: "%.1f", Double(bytes) / 1_048_576.0)
     }
 }

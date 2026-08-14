@@ -15,6 +15,11 @@ final class CubeMotionPoster {
     private let queue = OperationQueue()
     private var owners: Set<String> = []
     private var isRunning = false
+    private var streamGeneration: UInt64 = 0
+    private var lastSampleUptime: TimeInterval = 0
+    private var lastRestartUptime: TimeInterval = 0
+    private var healthWorkItem: DispatchWorkItem?
+    private(set) var latestSample: (roll: Double, pitch: Double)?
 
     /// Tweak sensitivity if needed. This scales the raw attitude values before posting.
     var rollScale: Double = 1.0
@@ -28,6 +33,10 @@ final class CubeMotionPoster {
     }
 
     func start(owner: String = "legacy") {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in self?.start(owner: owner) }
+            return
+        }
         owners.insert(owner)
         startHardwareIfNeeded()
     }
@@ -42,6 +51,9 @@ final class CubeMotionPoster {
               manager.isDeviceMotionAvailable,
               !isRunning else { return }
         isRunning = true
+        streamGeneration &+= 1
+        let generation = streamGeneration
+        lastSampleUptime = ProcessInfo.processInfo.systemUptime
 
         // The visible navigator renders at 60fps and interpolates between these
         // samples. Thirty sensor updates keep that interpolation responsive
@@ -49,12 +61,25 @@ final class CubeMotionPoster {
         // display-rate source. Hidden/background owners still stop hardware.
         manager.deviceMotionUpdateInterval = 1.0 / 30.0
         // Choose a reference frame; xArbitraryZVertical is generally stable for UI tilts
-        manager.startDeviceMotionUpdates(using: .xArbitraryZVertical, to: queue) { motion, error in
-            guard let motion = motion else { return }
+        manager.startDeviceMotionUpdates(using: .xArbitraryZVertical, to: queue) { [weak self] motion, error in
+            guard let self else { return }
+            guard let motion else {
+                if error != nil {
+                    DispatchQueue.main.async { [weak self] in
+                        self?.restartIfCurrent(generation: generation, reason: "core-motion-error")
+                    }
+                }
+                return
+            }
             let attitude = motion.attitude
             let roll = attitude.roll * self.rollScale
             let pitch = attitude.pitch * self.pitchScale
-            DispatchQueue.main.async {
+            DispatchQueue.main.async { [weak self] in
+                guard let self,
+                      self.isRunning,
+                      self.streamGeneration == generation else { return }
+                self.lastSampleUptime = ProcessInfo.processInfo.systemUptime
+                self.latestSample = (roll, pitch)
                 NotificationCenter.default.post(
                     name: Notification.Name("CubeMotionUpdate"),
                     object: nil,
@@ -65,21 +90,74 @@ final class CubeMotionPoster {
                 )
             }
         }
-
+        scheduleHealthCheck()
     }
 
     func stop(owner: String = "legacy") {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in self?.stop(owner: owner) }
+            return
+        }
         owners.remove(owner)
         if owners.isEmpty { stopHardware() }
     }
 
     private func stopHardware() {
-        guard isRunning else { return }
+        healthWorkItem?.cancel()
+        healthWorkItem = nil
+        streamGeneration &+= 1
+        guard isRunning || manager.isDeviceMotionActive else { return }
         manager.stopDeviceMotionUpdates()
         isRunning = false
     }
 
+    /// Core Motion can remain nominally active after an interruption while no
+    /// longer delivering samples. A foreground-only heartbeat repairs that
+    /// silent state; it never runs while Poplur is hidden or backgrounded.
+    private func scheduleHealthCheck() {
+        healthWorkItem?.cancel()
+        guard isRunning,
+              !owners.isEmpty,
+              UIApplication.shared.applicationState == .active else { return }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            let now = ProcessInfo.processInfo.systemUptime
+            if !self.manager.isDeviceMotionActive || now - self.lastSampleUptime > 1.25 {
+                self.restartHardware(reason: "sample-timeout")
+            } else {
+                self.scheduleHealthCheck()
+            }
+        }
+        healthWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: work)
+    }
+
+    private func restartIfCurrent(generation: UInt64, reason: String) {
+        guard isRunning, streamGeneration == generation else { return }
+        restartHardware(reason: reason)
+    }
+
+    private func restartHardware(reason: String) {
+        guard !owners.isEmpty,
+              UIApplication.shared.applicationState == .active else {
+            stopHardware()
+            return
+        }
+        let now = ProcessInfo.processInfo.systemUptime
+        guard now - lastRestartUptime >= 0.5 else {
+            scheduleHealthCheck()
+            return
+        }
+        lastRestartUptime = now
+        PoplurDiagLog.append("[CubeMotion] restarting reason=\(reason) owners=\(owners.sorted().joined(separator: ","))")
+        stopHardware()
+        startHardwareIfNeeded()
+    }
+
     @objc private func appDidBecomeActive() {
+        // Always reconcile against Core Motion's real state on return. The
+        // owners intentionally survive background so the visible navigator can
+        // resume without waiting for SwiftUI to rebuild its WebView.
         startHardwareIfNeeded()
     }
 

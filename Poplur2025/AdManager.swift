@@ -5,6 +5,9 @@ final class AdManager: NSObject, FullScreenContentDelegate {
     static let shared = AdManager()
     
     private var interstitial: InterstitialAd?
+    private weak var pendingRootViewController: UIViewController?
+    private var presentationPending = false
+    private var isLoading = false
     private var interstitialUnitID: String {
         Bundle.main.object(forInfoDictionaryKey: "PoplurAdMobInterstitialUnitID") as? String
             ?? "ca-app-pub-2086359936541081/6696033455"
@@ -27,25 +30,47 @@ final class AdManager: NSObject, FullScreenContentDelegate {
     }
     
     func loadInterstitial() {
+        guard !isLoading else { return }
+        isLoading = true
         let request = Request()
         InterstitialAd.load(with: interstitialUnitID, request: request) { [weak self] ad, error in
             guard let self = self else { return }
+            self.isLoading = false
             if error != nil {
-                // Optionally log the error
                 self.interstitial = nil
+                print("[Ads] Interstitial failed to load: \(error!.localizedDescription)")
                 return
             }
             self.interstitial = ad
             self.interstitial?.fullScreenContentDelegate = self
+            self.presentPendingInterstitialIfPossible()
         }
     }
     
     func presentInterstitial(from root: UIViewController) {
         if let ad = interstitial {
+            presentationPending = false
+            pendingRootViewController = nil
+            interstitial = nil
+            ad.fullScreenContentDelegate = self
             ad.present(from: root)
         } else {
+            // Feed changes are often faster than the first network response.
+            // Keep one eligible presentation and fulfil it when AdMob returns
+            // instead of dropping the only real-ad opportunity in the session.
+            presentationPending = true
+            pendingRootViewController = root
             loadInterstitial()
         }
+    }
+
+    private func presentPendingInterstitialIfPossible() {
+        guard presentationPending,
+              let root = pendingRootViewController,
+              root.viewIfLoaded?.window != nil else {
+            return
+        }
+        presentInterstitial(from: root)
     }
 
     /// The web home has no view controller of its own to present from — find

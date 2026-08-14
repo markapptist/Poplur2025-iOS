@@ -203,6 +203,63 @@ final class PoplurEQSync {
         }
     }
 
+    /// Background is an ownership boundary, not a lower-volume playback mode.
+    /// Clear every stale logical lane before deactivating the process-wide audio
+    /// session. The sole exception is an *actively playing* station whose user
+    /// explicitly selected Settings → Radio → Outside app.
+    func enforceBackgroundPolicy(preservingOutsideRadio: Bool) {
+        let changed = withLock { state -> Bool in
+            let previous = state.activeLanes
+            if preservingOutsideRadio, previous.contains(.mapRadio) {
+                state.activeLanes = [.mapRadio]
+                state.currentAudioSessionRole = .mixedPlayback
+            } else {
+                state.activeLanes.removeAll(keepingCapacity: false)
+                state.currentAudioSessionRole = preservingOutsideRadio ? .mixedPlayback : nil
+            }
+            return previous != state.activeLanes
+        }
+
+        if !preservingOutsideRadio {
+            do {
+                try AVAudioSession.sharedInstance().setActive(
+                    false,
+                    options: [.notifyOthersOnDeactivation]
+                )
+            } catch {
+                PoplurDiagLog.append("[BackgroundFence] audio deactivation failed: \(error)")
+            }
+        }
+        if changed { notifyChanged() }
+    }
+
+    func diagnosticsLine() -> String {
+        withLock { state in
+            let lanes = state.activeLanes.map { lane -> String in
+                switch lane {
+                case .mapRadio: return "mapRadio"
+                case .feedBumper: return "feedBumper"
+                case .feedVideo: return "feedVideo"
+                case .standaloneVideo: return "standaloneVideo"
+                case .rainAmbient: return "rainAmbient"
+                case .cityMusic: return "cityMusic"
+                case .holdMenu: return "holdMenu"
+                case .transientFX: return "transientFX"
+                }
+            }.sorted().joined(separator: ",")
+            let role: String
+            switch state.currentAudioSessionRole {
+            case .ambientPlayback: role = "ambient"
+            case .mixedPlayback: role = "mixed"
+            case .feedPlayback: role = "feed"
+            case .voicePrompt: role = "voice"
+            case .wakeRecognition: role = "recognition"
+            case nil: role = "none"
+            }
+            return "role=\(role) lanes=\(lanes.isEmpty ? "none" : lanes)"
+        }
+    }
+
     private func notifyChanged() {
         DispatchQueue.main.async {
             NotificationCenter.default.post(name: .poplurEQSyncChanged, object: self)
@@ -213,6 +270,149 @@ final class PoplurEQSync {
         lock.lock()
         defer { lock.unlock() }
         return body(self)
+    }
+}
+
+/// One background authority for all process-wide owners. Individual screens
+/// still tear themselves down, but this fence closes races where a late async
+/// callback reactivated audio after its screen's first stop notification.
+/// Nothing here runs while Poplur is the visible app.
+@MainActor
+final class PoplurBackgroundResourceFence {
+    static let shared = PoplurBackgroundResourceFence()
+
+    private var webRadioState = "off"
+    private var webRadioScope = "screen"
+    private var enteredBackgroundAt: Date?
+    private var backgroundResidentBytes: UInt64?
+    private var auditTask: Task<Void, Never>?
+    private var graceTaskID: UIBackgroundTaskIdentifier = .invalid
+
+    private init() {}
+
+    func updateWebRadio(state: String, scope: String) {
+        guard ["off", "muted", "fallback", "live"].contains(state),
+              ["screen", "app", "outside"].contains(scope) else { return }
+        webRadioState = state
+        webRadioScope = scope
+    }
+
+    func enterBackground() {
+        guard enteredBackgroundAt == nil else { return }
+        enteredBackgroundAt = Date()
+        backgroundResidentBytes = PoplurDiagLog.residentMemoryBytes()
+        snapshot(reason: "background-before-fence")
+        applyFence(reason: "entry")
+
+        if graceTaskID == .invalid {
+            graceTaskID = UIApplication.shared.beginBackgroundTask(withName: "PoplurResourceFence") { [weak self] in
+                Task { @MainActor in self?.finishGraceTask() }
+            }
+        }
+
+        auditTask?.cancel()
+        auditTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            // Catch AVPlayer/AudioContext promises which resolve after the first
+            // lifecycle callback and try to reclaim the session.
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            guard !Task.isCancelled, UIApplication.shared.applicationState == .background else {
+                self.finishGraceTask()
+                return
+            }
+            self.applyFence(reason: "one-second-recheck")
+            self.snapshot(reason: "background-after-fence")
+            self.finishGraceTask()
+
+            // A suspended app will not execute these sleeps. If an allowed or
+            // leaked background owner keeps the process runnable, one tiny
+            // sample every five minutes gives the next device pull an RSS slope.
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 300_000_000_000)
+                guard !Task.isCancelled,
+                      UIApplication.shared.applicationState == .background else { return }
+                self.snapshot(reason: "background-five-minute-sample")
+            }
+        }
+    }
+
+    func enterForeground() {
+        auditTask?.cancel()
+        auditTask = nil
+        finishGraceTask()
+        snapshot(reason: "foreground-return")
+        enteredBackgroundAt = nil
+        backgroundResidentBytes = nil
+    }
+
+    private var preservesOutsideRadio: Bool {
+        webRadioScope == "outside" && (webRadioState == "live" || webRadioState == "fallback")
+    }
+
+    private func applyFence(reason: String) {
+        NotificationCenter.default.post(name: .StopMapAudio, object: nil)
+        NotificationCenter.default.post(name: .PauseGlobalFeedAudio, object: nil)
+        FeedAudioManager.shared.stopAll()
+        PostLoginHomeWebView.PoplurWebSpeech.shared.cancel()
+        CameraAIAnnouncer.shared.resetSession()
+        PoplurEQSync.shared.enforceBackgroundPolicy(
+            preservingOutsideRadio: preservesOutsideRadio
+        )
+        PoplurDiagLog.append(
+            "[BackgroundFence] applied reason=\(reason) outsideRadio=\(preservesOutsideRadio)"
+        )
+    }
+
+    private func snapshot(reason: String) {
+        let resident = PoplurDiagLog.residentMemoryBytes()
+        let deltaMB: String
+        if let resident, let baseline = backgroundResidentBytes {
+            deltaMB = String(format: "%.1f", Double(Int64(resident) - Int64(baseline)) / 1_048_576.0)
+        } else {
+            deltaMB = "unknown"
+        }
+        let session = AVAudioSession.sharedInstance()
+        let outputs = session.currentRoute.outputs.map(\.portType.rawValue).joined(separator: ",")
+        let elapsed = enteredBackgroundAt.map { String(format: "%.1f", Date().timeIntervalSince($0)) } ?? "0.0"
+        let line = "[ResourceSnapshot] reason=\(reason) "
+            + "rssMB=\(PoplurDiagLog.megabytes(resident)) rssDeltaMB=\(deltaMB) "
+            + "backgroundFor=\(elapsed)s outsideRadio=\(preservesOutsideRadio) "
+            + "webRadio=\(webRadioScope)/\(webRadioState) "
+            + "audioCategory=\(session.category.rawValue) audioMode=\(session.mode.rawValue) "
+            + "route=\(outputs.isEmpty ? "none" : outputs) "
+            + "eq={\(PoplurEQSync.shared.diagnosticsLine())} "
+            + "performance={\(PoplurPerformanceManager.shared.diagnosticsLine())}"
+        PoplurDiagLog.append(line)
+        captureWebSnapshot(reason: reason)
+    }
+
+    private func captureWebSnapshot(reason: String) {
+        guard let webView = PostLoginHomeWebView.liveWebView else {
+            PoplurDiagLog.append("[WebResourceSnapshot] reason=\(reason) webView=none")
+            return
+        }
+        let script = """
+        (() => JSON.stringify({
+          audio: typeof window.__poplurAudioDebug === 'function' ? window.__poplurAudioDebug() : 'unavailable',
+          radio: document.documentElement.dataset.poplurRadio || 'unset',
+          radioContext: document.documentElement.dataset.poplurRadioContext || 'unset',
+          displayActive: typeof window.__poplurDisplayActive === 'function' ? !!window.__poplurDisplayActive() : null,
+          playingMedia: Array.from(document.querySelectorAll('audio,video')).filter(el => !el.paused).length
+        }))()
+        """
+        webView.evaluateJavaScript(script) { value, error in
+            let result = (value as? String) ?? "unavailable"
+            let suffix = error.map { " error=\($0.localizedDescription)" } ?? ""
+            PoplurDiagLog.append(
+                "[WebResourceSnapshot] reason=\(reason) data=\(result)\(suffix)"
+            )
+        }
+    }
+
+    private func finishGraceTask() {
+        guard graceTaskID != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(graceTaskID)
+        graceTaskID = .invalid
     }
 }
 

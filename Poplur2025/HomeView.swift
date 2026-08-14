@@ -2539,7 +2539,12 @@ struct HomeView: View {
                         NotificationCenter.default.post(name: .ResumeFeedAudio, object: nil)
                     }
                 case .background:
-                    poplurAI.enterBackground()
+                    // Background never owns the microphone. The old path kept
+                    // an AVAudioEngine, mic tap and recognizer alive specifically
+                    // because the app has the audio background entitlement.
+                    // That made one HEY POPLUR activation capable of warming the
+                    // phone long after the screen locked.
+                    poplurAI.stop()
                     cameraControllerHolder.stopIfLoaded()
                     NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
                     NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)

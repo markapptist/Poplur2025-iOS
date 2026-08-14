@@ -778,7 +778,16 @@ struct PostLoginHomeWebView: UIViewRepresentable {
 
         func setWebForegroundActive(_ active: Bool) {
             webForegroundActive = active
+            if active {
+                // A new/foreground document has no guarantee it heard the last
+                // event emitted before WebKit committed or resumed. Reset the
+                // bridge dedupe and replay Core Motion's latest real sample.
+                lastMotionDeliveryUptime = 0
+                lastDeliveredRoll = nil
+                lastDeliveredPitch = nil
+            }
             syncMotionLease()
+            if active { replayLatestMotion() }
         }
 
         private func syncMotionLease() {
@@ -788,6 +797,14 @@ struct PostLoginHomeWebView: UIViewRepresentable {
             let eligible = webForegroundActive
             if eligible { CubeMotionPoster.shared.start(owner: "web-home") }
             else { CubeMotionPoster.shared.stop(owner: "web-home") }
+        }
+
+        private func replayLatestMotion() {
+            guard webForegroundActive,
+                  let webView = bridge.webView,
+                  (webView as? PoplurManagedWebView)?.poplurIsForegroundVisible == true,
+                  let sample = CubeMotionPoster.shared.latestSample else { return }
+            deliverMotion(roll: sample.roll, pitch: sample.pitch, on: webView)
         }
 
         /// This tiny dispatch deliberately has no completion-based lock. WebKit
@@ -1019,6 +1036,17 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     }
                     return
                 }
+                if type == "radioPlayback",
+                   let state = body["state"] as? String,
+                   let scope = body["scope"] as? String {
+                    Task { @MainActor in
+                        PoplurBackgroundResourceFence.shared.updateWebRadio(
+                            state: state,
+                            scope: scope
+                        )
+                    }
+                    return
+                }
                 if type == "speak", let text = body["text"] as? String {
                     PoplurWebSpeech.shared.speak(
                         text,
@@ -1091,15 +1119,32 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     )
                     return
                 }
-                if type == "feedChannelChanged" {
-                    // The web feed reports channel changes; the shell owns the
-                    // AdMob gate and presentation, exactly as the native
-                    // FeedView did before the feed went web.
+                if type == "feedChannelChanged" || type == "feedContentAdvanced" {
+                    // Native inventory follows real feed progression. The old
+                    // bridge only heard channel-button presses, so an entire
+                    // session of clips could complete without ever requesting
+                    // a real ad.
                     let channel = (body["channelId"] as? String) ?? "unknown"
                     let index = (body["index"] as? NSNumber)?.intValue ?? 0
-                    if FeedAdProbabilitySettings.shouldShowGoogleMobileAd(
-                        for: index, namespace: "web_\(channel)"
-                    ) {
+                    let isContentAdvance = type == "feedContentAdvanced"
+                    let namespace = isContentAdvance
+                        ? "web_\(channel)_content"
+                        : "web_\(channel)"
+                    // Feed content needs a cadence guarantee. A small channel
+                    // can have only two or three clips, and a stable random
+                    // hash may place every one outside the 30% network band.
+                    // Every third real post keeps the existing 30% intent and
+                    // makes a normal viewing session reach actual inventory.
+                    let shouldPresent: Bool
+                    if isContentAdvance {
+                        let sequence = (body["sequence"] as? NSNumber)?.intValue ?? 0
+                        shouldPresent = sequence > 0 && sequence % 3 == 0
+                    } else {
+                        shouldPresent = FeedAdProbabilitySettings.shouldShowGoogleMobileAd(
+                            for: index, namespace: namespace
+                        )
+                    }
+                    if shouldPresent {
                         DispatchQueue.main.async {
                             AdManager.shared.presentInterstitialOverKeyWindow()
                         }
@@ -1474,6 +1519,13 @@ struct PostLoginHomeWebView: UIViewRepresentable {
             if let webView = bridge.webView {
                 PoplurThermalProbe.sendCurrent(to: webView)
             }
+            // The document listener now exists. Replay once so an unchanged
+            // handset attitude is not lost merely because native began sampling
+            // a fraction of a second before React installed its handler.
+            lastMotionDeliveryUptime = 0
+            lastDeliveredRoll = nil
+            lastDeliveredPitch = nil
+            replayLatestMotion()
             flushPendingNativeVoiceCommand()
             DispatchQueue.main.async { [onReady] in onReady() }
         }

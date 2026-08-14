@@ -25,10 +25,13 @@ final class CameraAIAnnouncer: NSObject, AVSpeechSynthesizerDelegate {
     /// Deduplicates — won't repeat the same username until clearLastUser() is called.
     func announceRecognizedUser(_ user: RecognizedUser) {
         guard liveCameraActive else { return }
+        guard UserDefaults.standard.string(forKey: "poplur.cameraAiVoice") != "0" else { return }
         guard user.profile.username != lastSpokenUsername else { return }
         lastSpokenUsername = user.profile.username
+        // Lead with the direct recognition confirmation the user is waiting for;
+        // radius/post metadata follows only after their name is unmistakable.
         let posts = user.postCount == 1 ? "1 post" : "\(user.postCount) posts"
-        speak("\(user.nameForSpeech). Username \(user.profile.username). Current radius \(user.formattedRadius). \(posts).")
+        speak("\(user.nameForSpeech), I detect your face. Your overall radius is \(user.formattedRadius), across \(posts).")
     }
 
     func clearLastUser() {

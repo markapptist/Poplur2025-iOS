@@ -267,6 +267,7 @@ struct Poplur2025App: App {
                     NotificationCenter.default.post(name: .StopMapAudio, object: nil)
                     PostLoginHomeWebView.PoplurWebSpeech.shared.cancel()
                     CameraAIAnnouncer.shared.resetSession()
+                    PoplurBackgroundResourceFence.shared.enterBackground()
                 case .inactive:
                     PoplurPerformanceManager.shared.setApplicationLifecycle(.inactive)
                     preLoginMusic.stop()
@@ -283,6 +284,7 @@ struct Poplur2025App: App {
                     CameraAIAnnouncer.shared.resetSession()
                 case .active:
                     PoplurPerformanceManager.shared.setApplicationLifecycle(.active)
+                    PoplurBackgroundResourceFence.shared.enterForeground()
                     if isPreLoginVisible && !showSplash && !usePreloginWebEmbed {
                         preLoginMusic.start()
                     }
