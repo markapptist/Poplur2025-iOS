@@ -43,10 +43,10 @@ final class CubeMotionPoster {
               !isRunning else { return }
         isRunning = true
 
-        // Thirty sensor samples, interpolated by the navigator's 60fps canvas,
-        // read as continuous motion without paying for 60 native→JS bridge
-        // evaluations per second. Hardware still stops when the app is inactive.
-        manager.deviceMotionUpdateInterval = 1.0 / 30.0
+        // The navigator interpolates between samples. Fifteen sensor updates
+        // are enough for responsive parallax without driving a permanent
+        // 30Hz native→WebKit bridge and WebGL redraw loop.
+        manager.deviceMotionUpdateInterval = 1.0 / 15.0
         // Choose a reference frame; xArbitraryZVertical is generally stable for UI tilts
         manager.startDeviceMotionUpdates(using: .xArbitraryZVertical, to: queue) { motion, error in
             guard let motion = motion else { return }

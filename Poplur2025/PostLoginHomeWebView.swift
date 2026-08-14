@@ -618,8 +618,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         webView.overrideUserInterfaceStyle = .dark
         context.coordinator.bridge.webView = webView
         webView.onForegroundVisibilityChange = { active in
-            if active { CubeMotionPoster.shared.start(owner: "web-home") }
-            else { CubeMotionPoster.shared.stop(owner: "web-home") }
+            context.coordinator.setWebForegroundActive(active)
         }
         // This host unmounts inactive tabs in React. Keep the one visible tab
         // fully alive even when the heavy-renderer arbiter temporarily denies
@@ -727,6 +726,10 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         private var recoveryWorkItem: DispatchWorkItem?
         private var recoveryAttempt = 0
         private var recoveryPending = false
+        private var webForegroundActive = false
+        private var lastMotionDeliveryUptime: TimeInterval = 0
+        private var lastDeliveredRoll: Double?
+        private var lastDeliveredPitch: Double?
 
         init(
             initialWebTab: String,
@@ -768,6 +771,20 @@ struct PostLoginHomeWebView: UIViewRepresentable {
             })
         }
 
+        func setWebForegroundActive(_ active: Bool) {
+            webForegroundActive = active
+            syncMotionLease()
+        }
+
+        private func syncMotionLease() {
+            // Map already owns a continuously rotating globe plus Mapbox, and
+            // Camera owns AVCapture/analysis. Neither screen needs a motion
+            // sensor and JavaScript bridge waking its navigator as well.
+            let eligible = webForegroundActive && currentWebTab != "map" && currentWebTab != "post"
+            if eligible { CubeMotionPoster.shared.start(owner: "web-home") }
+            else { CubeMotionPoster.shared.stop(owner: "web-home") }
+        }
+
         /// This tiny dispatch deliberately has no completion-based lock. WebKit
         /// can omit an evaluateJavaScript completion while its governed timers
         /// are idle; the old lock then permanently stopped live cube motion.
@@ -775,7 +792,21 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         /// the genuinely foreground document, so callback-free dispatch is
         /// bounded without coupling motion to page inactivity policy.
         private func deliverMotion(roll: Double, pitch: Double, on webView: WKWebView) {
-            guard (webView as? PoplurManagedWebView)?.poplurIsForegroundVisible == true else { return }
+            guard webForegroundActive,
+                  currentWebTab != "map",
+                  currentWebTab != "post",
+                  (webView as? PoplurManagedWebView)?.poplurIsForegroundVisible == true else { return }
+            let now = ProcessInfo.processInfo.systemUptime
+            guard now - lastMotionDeliveryUptime >= 0.1 else { return }
+            if let lastRoll = lastDeliveredRoll,
+               let lastPitch = lastDeliveredPitch,
+               abs(roll - lastRoll) < 0.008,
+               abs(pitch - lastPitch) < 0.008 {
+                return
+            }
+            lastMotionDeliveryUptime = now
+            lastDeliveredRoll = roll
+            lastDeliveredPitch = pitch
             webView.evaluateJavaScript(
                 "window.dispatchEvent(new CustomEvent('poplur-native-motion',{detail:{roll:\(roll),pitch:\(pitch)}}));true;",
                 completionHandler: nil
@@ -1067,6 +1098,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                 if type == "tabChanged", let tab = body["tab"] as? String {
                     currentWebTab = tab
                     if tab != "post" { webReportsLiveCamera = false }
+                    syncMotionLease()
                     updateCameraHole()
                 }
                 if type == "cameraLiveVisibilityChanged" {
