@@ -367,12 +367,22 @@ struct MediaPickerView: View {
     }
 
     private func uploadImageData(_ data: Data) async throws -> String {
+        guard let uid = Auth.auth().currentUser?.uid else {
+            throw NSError(
+                domain: "Upload",
+                code: 401,
+                userInfo: [NSLocalizedDescriptionKey: "Please sign in again before uploading."]
+            )
+        }
         let storageRef = Storage.storage().reference()
-        let imageRef = storageRef.child("media/\(UUID().uuidString).jpg")
+        let imageRef = storageRef.child("posts/\(uid)/\(UUID().uuidString).jpg")
+        let metadata = StorageMetadata()
+        metadata.contentType = "image/jpeg"
+        metadata.customMetadata = ["ownerUID": uid]
 
         // Put data with progress
         return try await withCheckedThrowingContinuation { continuation in
-            let task = imageRef.putData(data, metadata: nil) { _, error in
+            let task = imageRef.putData(data, metadata: metadata) { _, error in
                 if let error = error {
                     continuation.resume(throwing: error)
                     return
@@ -399,14 +409,27 @@ struct MediaPickerView: View {
     }
 
     private func uploadVideoFile(_ fileURL: URL, posterJPEG: Data?) async throws -> (mediaURL: String, posterURL: String?) {
+        guard let uid = Auth.auth().currentUser?.uid else {
+            throw NSError(
+                domain: "Upload",
+                code: 401,
+                userInfo: [NSLocalizedDescriptionKey: "Please sign in again before uploading."]
+            )
+        }
         let storageRef = Storage.storage().reference()
         let id = UUID().uuidString
-        let videoRef = storageRef.child("media/\(id).mp4")
-        let posterRef = storageRef.child("media/\(id)_poster.jpg")
+        let videoRef = storageRef.child("posts/\(uid)/\(id).mp4")
+        let posterRef = storageRef.child("posts/\(uid)/\(id)_poster.jpg")
+        let videoMetadata = StorageMetadata()
+        videoMetadata.contentType = "video/mp4"
+        videoMetadata.customMetadata = ["ownerUID": uid]
+        let posterMetadata = StorageMetadata()
+        posterMetadata.contentType = "image/jpeg"
+        posterMetadata.customMetadata = ["ownerUID": uid]
 
         // Upload video
         let mediaURL: String = try await withCheckedThrowingContinuation { continuation in
-            let task = videoRef.putFile(from: fileURL, metadata: nil) { _, error in
+            let task = videoRef.putFile(from: fileURL, metadata: videoMetadata) { _, error in
                 if let error = error {
                     continuation.resume(throwing: error)
                     return
@@ -435,7 +458,7 @@ struct MediaPickerView: View {
         var posterURLString: String? = nil
         if let posterJPEG, !posterJPEG.isEmpty {
             posterURLString = try await withCheckedThrowingContinuation { continuation in
-                let task = posterRef.putData(posterJPEG, metadata: nil) { _, error in
+                let task = posterRef.putData(posterJPEG, metadata: posterMetadata) { _, error in
                     if let error = error {
                         // Non-fatal: still return mediaURL
                         print("Poster upload failed: \(error.localizedDescription)")
@@ -471,9 +494,14 @@ struct MediaPickerView: View {
             "createdAt": FieldValue.serverTimestamp(),
             "createdAtMillis": Int64(Date().timeIntervalSince1970 * 1000)
         ]
-        if let uid = Auth.auth().currentUser?.uid {
-            post["userID"] = uid
+        guard let uid = Auth.auth().currentUser?.uid else {
+            throw NSError(
+                domain: "Upload",
+                code: 401,
+                userInfo: [NSLocalizedDescriptionKey: "Your sign-in expired before the post was saved."]
+            )
         }
+        post["userID"] = uid
         if let posterURL, !posterURL.isEmpty {
             post["posterURL"] = posterURL
         }

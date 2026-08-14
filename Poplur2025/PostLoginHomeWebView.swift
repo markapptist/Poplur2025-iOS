@@ -755,6 +755,11 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                 self?.deliverUploadResult(success: false, note: note)
             })
             notificationObservers.append(NotificationCenter.default.addObserver(
+                forName: Notification.Name("PostUploadProgress"), object: nil, queue: .main
+            ) { [weak self] note in
+                self?.deliverUploadProgress(note)
+            })
+            notificationObservers.append(NotificationCenter.default.addObserver(
                 forName: Notification.Name("CaptureComplete"), object: nil, queue: .main
             ) { [weak self] note in
                 self?.deliverNativeCapture(note)
@@ -854,6 +859,23 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                   let json = String(data: data, encoding: .utf8) else { return }
             webView.evaluateJavaScript(
                 "window.dispatchEvent(new CustomEvent('poplur-upload-result', { detail: \(json) })); true;"
+            )
+        }
+
+        private func deliverUploadProgress(_ note: Notification) {
+            guard let requestID = note.userInfo?["requestId"] as? String,
+                  let fraction = note.userInfo?["fraction"] as? Double,
+                  let webView = bridge.webView else { return }
+            let phase = (note.userInfo?["phase"] as? String) ?? "UPLOADING"
+            let payload: [String: Any] = [
+                "requestId": requestID,
+                "fraction": min(1, max(0, fraction)),
+                "phase": phase
+            ]
+            guard let data = try? JSONSerialization.data(withJSONObject: payload),
+                  let json = String(data: data, encoding: .utf8) else { return }
+            webView.evaluateJavaScript(
+                "window.dispatchEvent(new CustomEvent('poplur-upload-progress', { detail: \(json) })); true;"
             )
         }
 

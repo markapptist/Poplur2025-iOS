@@ -225,6 +225,7 @@ final class PostUploadService {
             return
         }
         queuedUploads.append(request)
+        Self.reportProgress(0.02, phase: "QUEUED", requestID: request.requestID)
         startNextUploadIfPossible()
     }
 
@@ -249,23 +250,34 @@ final class PostUploadService {
     private func perform(_ request: UploadRequest) async {
         defer { releaseTemporaryFile(for: request) }
         do {
+            guard Auth.auth().currentUser != nil else {
+                throw NSError(
+                    domain: "PostUploadService",
+                    code: 4,
+                    userInfo: [NSLocalizedDescriptionKey: "Please sign in again before uploading."]
+                )
+            }
+            Self.reportProgress(0.06, phase: "PREPARING", requestID: request.requestID)
             switch request.payload {
             case .image(let image):
                 try await upload(
                     image: image,
                     at: request.coordinate,
                     radiusMeters: request.radiusMeters,
-                    caption: request.caption
+                    caption: request.caption,
+                    requestID: request.requestID
                 )
             case .video(let url):
                 try await upload(
                     videoURL: url,
                     at: request.coordinate,
                     radiusMeters: request.radiusMeters,
-                    caption: request.caption
+                    caption: request.caption,
+                    requestID: request.requestID
                 )
             }
             try Task.checkCancellation()
+            Self.reportProgress(1, phase: "POSTED", requestID: request.requestID)
             Self.report(success: true, message: nil, requestID: request.requestID)
         } catch is CancellationError {
             Self.report(success: false, message: "Upload cancelled.", requestID: request.requestID)
@@ -319,7 +331,13 @@ final class PostUploadService {
 
     // MARK: - Upload
 
-    private func upload(image: UIImage, at coordinate: CLLocationCoordinate2D, radiusMeters: Int, caption: String?) async throws {
+    private func upload(
+        image: UIImage,
+        at coordinate: CLLocationCoordinate2D,
+        radiusMeters: Int,
+        caption: String?,
+        requestID: String?
+    ) async throws {
         guard let data = image.poplur4KJPEGData() else {
             throw NSError(
                 domain: "PostUploadService",
@@ -328,31 +346,131 @@ final class PostUploadService {
             )
         }
         try Task.checkCancellation()
-        let reference = Storage.storage().reference().child("media/\(UUID().uuidString).jpg")
-        _ = try await reference.putDataAsync(data)
+        Self.reportProgress(0.10, phase: "PREPARING", requestID: requestID)
+        guard let uid = Auth.auth().currentUser?.uid else {
+            throw NSError(
+                domain: "PostUploadService",
+                code: 6,
+                userInfo: [NSLocalizedDescriptionKey: "Please sign in again before uploading."]
+            )
+        }
+        let reference = Storage.storage().reference().child("posts/\(uid)/\(UUID().uuidString).jpg")
+        try await uploadData(
+            data,
+            to: reference,
+            metadata: Self.storageMetadata(contentType: "image/jpeg"),
+            requestID: requestID,
+            progressRange: 0.12...0.84
+        )
         try Task.checkCancellation()
+        Self.reportProgress(0.88, phase: "FINALIZING", requestID: requestID)
         let mediaURL = try await reference.downloadURL().absoluteString
+        Self.reportProgress(0.94, phase: "SAVING POST", requestID: requestID)
         try await savePost(mediaURL: mediaURL, posterURL: nil, at: coordinate, radiusMeters: radiusMeters, caption: caption)
     }
 
-    private func upload(videoURL: URL, at coordinate: CLLocationCoordinate2D, radiusMeters: Int, caption: String?) async throws {
+    private func upload(
+        videoURL: URL,
+        at coordinate: CLLocationCoordinate2D,
+        radiusMeters: Int,
+        caption: String?,
+        requestID: String?
+    ) async throws {
         try Task.checkCancellation()
-        let reference = Storage.storage().reference().child("media/\(UUID().uuidString).mp4")
-        _ = try await reference.putFileAsync(from: videoURL)
+        guard let uid = Auth.auth().currentUser?.uid else {
+            throw NSError(
+                domain: "PostUploadService",
+                code: 7,
+                userInfo: [NSLocalizedDescriptionKey: "Please sign in again before uploading."]
+            )
+        }
+        let reference = Storage.storage().reference().child("posts/\(uid)/\(UUID().uuidString).mp4")
+        try await uploadFile(
+            videoURL,
+            to: reference,
+            metadata: Self.storageMetadata(contentType: "video/mp4"),
+            requestID: requestID,
+            progressRange: 0.10...0.80
+        )
         try Task.checkCancellation()
+        Self.reportProgress(0.84, phase: "FINALIZING", requestID: requestID)
         let mediaURL = try await reference.downloadURL().absoluteString
 
         // A poster frame keeps the feed from showing a black tile before the
         // clip decodes, matching what the picker upload stores.
         var posterURL: String?
         if let poster = Self.posterJPEG(for: videoURL) {
-            let posterRef = Storage.storage().reference().child("media/\(UUID().uuidString)-poster.jpg")
-            _ = try? await posterRef.putDataAsync(poster)
+            Self.reportProgress(0.88, phase: "MAKING PREVIEW", requestID: requestID)
+            let posterRef = Storage.storage().reference().child("posts/\(uid)/\(UUID().uuidString)-poster.jpg")
+            _ = try? await posterRef.putDataAsync(
+                poster,
+                metadata: Self.storageMetadata(contentType: "image/jpeg")
+            )
             posterURL = try? await posterRef.downloadURL().absoluteString
         }
 
         try Task.checkCancellation()
+        Self.reportProgress(0.94, phase: "SAVING POST", requestID: requestID)
         try await savePost(mediaURL: mediaURL, posterURL: posterURL, at: coordinate, radiusMeters: radiusMeters, caption: caption)
+    }
+
+    /// Firebase exposes byte progress only on the callback upload tasks, not on
+    /// `putDataAsync` / `putFileAsync`. Bridge those callbacks into async/await
+    /// while forwarding the real `Progress.fractionCompleted` to the composer.
+    private func uploadData(
+        _ data: Data,
+        to reference: StorageReference,
+        metadata: StorageMetadata,
+        requestID: String?,
+        progressRange: ClosedRange<Double>
+    ) async throws {
+        try await withCheckedThrowingContinuation {
+            (continuation: CheckedContinuation<Void, Error>) in
+            var task: StorageUploadTask?
+            var progressHandle: String?
+            task = reference.putData(data, metadata: metadata) { _, error in
+                if let progressHandle { task?.removeObserver(withHandle: progressHandle) }
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume() }
+            }
+            progressHandle = task?.observe(.progress) { snapshot in
+                guard let fraction = snapshot.progress?.fractionCompleted else { return }
+                Self.reportProgress(
+                    progressRange.lowerBound
+                        + (progressRange.upperBound - progressRange.lowerBound) * fraction,
+                    phase: "UPLOADING",
+                    requestID: requestID
+                )
+            }
+        }
+    }
+
+    private func uploadFile(
+        _ fileURL: URL,
+        to reference: StorageReference,
+        metadata: StorageMetadata,
+        requestID: String?,
+        progressRange: ClosedRange<Double>
+    ) async throws {
+        try await withCheckedThrowingContinuation {
+            (continuation: CheckedContinuation<Void, Error>) in
+            var task: StorageUploadTask?
+            var progressHandle: String?
+            task = reference.putFile(from: fileURL, metadata: metadata) { _, error in
+                if let progressHandle { task?.removeObserver(withHandle: progressHandle) }
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume() }
+            }
+            progressHandle = task?.observe(.progress) { snapshot in
+                guard let fraction = snapshot.progress?.fractionCompleted else { return }
+                Self.reportProgress(
+                    progressRange.lowerBound
+                        + (progressRange.upperBound - progressRange.lowerBound) * fraction,
+                    phase: "UPLOADING",
+                    requestID: requestID
+                )
+            }
+        }
     }
 
     /// Same document shape `MediaPickerView.savePostToFirestore` writes, so both
@@ -373,7 +491,14 @@ final class PostUploadService {
             "createdAt": FieldValue.serverTimestamp(),
             "createdAtMillis": Int64(Date().timeIntervalSince1970 * 1000)
         ]
-        if let uid = Auth.auth().currentUser?.uid { post["userID"] = uid }
+        guard let uid = Auth.auth().currentUser?.uid else {
+            throw NSError(
+                domain: "PostUploadService",
+                code: 5,
+                userInfo: [NSLocalizedDescriptionKey: "Your sign-in expired before the post was saved."]
+            )
+        }
+        post["userID"] = uid
         if let posterURL, !posterURL.isEmpty { post["posterURL"] = posterURL }
         if let caption, !caption.isEmpty { post["caption"] = caption }
 
@@ -390,6 +515,15 @@ final class PostUploadService {
         return UIImage(cgImage: cgImage).jpegData(compressionQuality: 0.8)
     }
 
+    private static func storageMetadata(contentType: String) -> StorageMetadata {
+        let metadata = StorageMetadata()
+        metadata.contentType = contentType
+        if let uid = Auth.auth().currentUser?.uid {
+            metadata.customMetadata = ["ownerUID": uid]
+        }
+        return metadata
+    }
+
     /// `PostUploadSuccess` is already observed by HomeView, which dismisses the
     /// uploading banner. Failures get their own name so a silent drop can never
     /// look like a success again.
@@ -402,6 +536,26 @@ final class PostUploadService {
                 name: Notification.Name(success ? "PostUploadSuccess" : "PostUploadFailed"),
                 object: nil,
                 userInfo: userInfo.isEmpty ? nil : userInfo
+            )
+        }
+    }
+
+    private static func reportProgress(
+        _ fraction: Double,
+        phase: String,
+        requestID: String?
+    ) {
+        guard let requestID else { return }
+        let bounded = min(1, max(0, fraction))
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(
+                name: Notification.Name("PostUploadProgress"),
+                object: nil,
+                userInfo: [
+                    "requestId": requestID,
+                    "fraction": bounded,
+                    "phase": phase
+                ]
             )
         }
     }

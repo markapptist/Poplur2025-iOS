@@ -41,33 +41,46 @@ enum WebPostPublisher {
             )
         }
 
-        guard let dataUrl = body["data"] as? String else {
+        guard let mediaSource = body["data"] as? String else {
             fail("The capture never reached the app.")
             return
         }
-        guard let payload = decodeDataURL(dataUrl) else {
+        let inlinePayload = decodeDataURL(mediaSource)
+        let storedCapture = inlinePayload == nil ? captureItem(from: mediaSource) : nil
+        guard inlinePayload != nil || storedCapture != nil else {
             fail("That capture could not be decoded for upload.")
             return
         }
         let kind = body["kind"] as? String ?? "photo"
-        print("[WebPostPublisher] publishPost received: kind=\(kind) bytes=\(payload.count) requestId=\(body["requestId"] as? String ?? "-") coord=\(body["latitude"] != nil)")
-
-        // Radius and caption cannot ride on the image-only upload
-        // notifications, so stage them for the upload that follows.
-        if let radiusKm = body["radiusKm"] as? Double {
-            PostUploadService.shared.nextRadiusMeters = Int(radiusKm * 1000)
-        }
-        PostUploadService.shared.nextCaption = body["caption"] as? String
-        PostUploadService.shared.nextRequestID = body["requestId"] as? String
+        let byteCount = inlinePayload?.count
+            ?? storedCapture?.data?.count
+            ?? storedCapture?.fileURL.flatMap(fileSize)
+            ?? 0
+        print("[WebPostPublisher] publishPost received: kind=\(kind) bytes=\(byteCount) requestId=\(body["requestId"] as? String ?? "-") coord=\(body["latitude"] != nil)")
 
         var userInfo: [String: Any] = [:]
         if kind == "video" {
-            // A recording has to become a file URL for the uploader.
+            guard storedCapture == nil
+                    || storedCapture?.mimeType.lowercased().hasPrefix("video/") == true else {
+                fail("That recording was not a video capture.")
+                return
+            }
+
+            // A recording has to become a file URL for the uploader. Native
+            // captures are already file-backed in PoplurWebCaptureStore; copy
+            // that trusted source into an upload-owned staging file instead of
+            // reading the whole clip into JavaScript/base64 and back into RAM.
             let url = FileManager.default.temporaryDirectory
                 .appendingPathComponent("poplur-post-\(UUID().uuidString).mp4")
             PoplurTemporaryFileOwnership.claim(url)
             do {
-                try payload.write(to: url, options: .atomic)
+                if let sourceURL = storedCapture?.fileURL {
+                    try FileManager.default.copyItem(at: sourceURL, to: url)
+                } else if let payload = inlinePayload ?? storedCapture?.data {
+                    try payload.write(to: url, options: .atomic)
+                } else {
+                    throw CocoaError(.fileReadNoSuchFile)
+                }
             } catch {
                 PoplurTemporaryFileOwnership.deleteIfOwned(url)
                 fail("The recording could not be staged for upload: \(error.localizedDescription)")
@@ -76,12 +89,42 @@ enum WebPostPublisher {
             userInfo["videoURL"] = url
             userInfo[PoplurTemporaryFileOwnership.notificationKey] = true
         } else {
+            guard storedCapture == nil
+                    || storedCapture?.mimeType.lowercased().hasPrefix("image/") == true else {
+                fail("That photo was not an image capture.")
+                return
+            }
+            let payload: Data?
+            if let inlinePayload {
+                payload = inlinePayload
+            } else if let data = storedCapture?.data {
+                payload = data
+            } else if let sourceURL = storedCapture?.fileURL {
+                payload = try? Data(contentsOf: sourceURL, options: .mappedIfSafe)
+            } else {
+                payload = nil
+            }
+            guard let payload else {
+                fail("That photo could not be read for upload.")
+                return
+            }
             guard let image = UIImage(data: payload) else {
                 fail("That photo could not be read for upload.")
                 return
             }
             userInfo["image"] = image
         }
+
+        // Radius and caption cannot ride on the image-only upload
+        // notifications, so stage them only after the media is known-good and
+        // immediately before the upload notification that consumes them. A
+        // decode/staging failure must not leak this post's metadata into the
+        // next capture.
+        if let radiusKm = body["radiusKm"] as? Double {
+            PostUploadService.shared.nextRadiusMeters = Int(radiusKm * 1000)
+        }
+        PostUploadService.shared.nextCaption = body["caption"] as? String
+        PostUploadService.shared.nextRequestID = body["requestId"] as? String
 
         // A post bound to a map spot carries its coordinate; a plain channel
         // post uploads to wherever the user currently is.
@@ -123,5 +166,26 @@ enum WebPostPublisher {
         guard let comma = value.firstIndex(of: ","), value.hasPrefix("data:") else { return nil }
         let encoded = String(value[value.index(after: comma)...])
         return Data(base64Encoded: encoded, options: .ignoreUnknownCharacters)
+    }
+
+    /// Resolve only capture URLs minted by this app's own WebKit scheme. The
+    /// composer uses these URLs for native camera and Camera Roll media so the
+    /// preview can stay file/data-backed without allocating a second base64
+    /// copy. Arbitrary file/network URLs are deliberately rejected here.
+    private static func captureItem(from value: String) -> PoplurWebCaptureStore.Item? {
+        guard let url = URL(string: value),
+              url.scheme == PoplurClayWebMap.scheme,
+              url.host == PoplurClayWebMap.host,
+              url.query == nil,
+              url.fragment == nil,
+              url.path.hasPrefix("/captures/") else { return nil }
+        let key = String(url.path.dropFirst("/captures/".count))
+        guard !key.isEmpty, !key.contains("/") else { return nil }
+        return PoplurWebCaptureStore.item(for: key)
+    }
+
+    private static func fileSize(_ url: URL) -> Int? {
+        let values = try? url.resourceValues(forKeys: [.fileSizeKey])
+        return values?.fileSize
     }
 }
