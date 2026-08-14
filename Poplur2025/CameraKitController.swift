@@ -181,15 +181,26 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
     private static let recordingMaximumDuration: TimeInterval = 10
     private static let recordingStopAcknowledgementDuration: TimeInterval = 1
     private static let photoAtomicMaximumDuration: TimeInterval = 3
-    // The visible camera is an attended surface, so it keeps a smooth 24 FPS
-    // 1080p preview. Heat savings belong to lifecycle ownership (the complete
-    // capture graph is removed whenever Camera is not front-most) and to the
-    // already-sampled AI output—not to making the live viewfinder look broken.
+    // The visible camera is an attended surface: a cool device gets the smooth
+    // 24 FPS 1080p preview. But lifecycle ownership alone did not hold the
+    // enclosure — on device (14 Aug) the viewfinder took ProcessInfo from
+    // nominal to fair in 42s and could reach SERIOUS(throttling), where the
+    // only remaining response was a hard park.
+    //
+    // Under pressure the preview steps down rather than parking. 20, not 15:
+    // measured on device, 15 reads as visible judder on the viewfinder ("camera
+    // is starting to lag"), and below ~20 the eye starts tracking individual
+    // frames. Most of the pressure-mode saving is taken where the user cannot
+    // see it — the sampled Vision/Core ML cadence below — not from the image.
     private static let previewFrameRate = 24
-    private static let pressurePreviewFrameRate = 24
+    private static let pressurePreviewFrameRate = 20
     private static let recordingFrameRateLimit = 24
     private static let previewAnalysisFrameSampleInterval: TimeInterval = 2.5
-    private static let pressureAnalysisFrameSampleInterval: TimeInterval = 3.5
+    // Each analysis wake opens the BGRA conversion plus a Vision/Core ML pass —
+    // far more energy per event than a preview frame, and invisible to the user
+    // (results are announced, not rendered per-frame). This is where pressure
+    // mode should take its saving, so it stretches further than the preview.
+    private static let pressureAnalysisFrameSampleInterval: TimeInterval = 5.0
     private static let activeFilterFrameSampleInterval: TimeInterval = 0.5
     private static let pressureActiveFilterFrameSampleInterval: TimeInterval = 0.75
     private static let activeFilterPresentationHoldDuration: TimeInterval = 1.25
@@ -1393,7 +1404,10 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
     /// than oscillating between frame rates as the enclosure cools.
     private func installSystemPressureObservationOnQueue(for device: AVCaptureDevice) {
         systemPressureObservation?.invalidate()
+        // Seed from process-wide thermal too: a camera opened on an already-warm
+        // device must start capped, not wait for AVCapture's own pressure signal.
         capturePressureCappedForCurrentLease = device.systemPressureState.level != .nominal
+            || ProcessInfo.processInfo.thermalState != .nominal
         updateAnalysisCadenceOnQueue()
         systemPressureObservation = device.observe(\.systemPressureState, options: [.new]) {
             [weak self, weak device] _, _ in
@@ -1419,6 +1433,25 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
         #if DEBUG
         print(
             "[PoplurPerformance] Camera pressure=\(level.rawValue) "
+                + "fps=\(Self.pressurePreviewFrameRate) analysis="
+                + "\(analysisFrameSampleInterval)s applied=\(applied)"
+        )
+        #endif
+    }
+
+    /// Runs on sessionQueue. Same latch as capture-hardware pressure, but fed
+    /// by the process-wide thermal tripwire (which fires at fair, before
+    /// AVCapture's own pressure signal on some devices). Recording keeps its
+    /// own frame-rate path untouched.
+    private func latchPressureCapFromThermalOnQueue() {
+        guard !capturePressureCappedForCurrentLease else { return }
+        capturePressureCappedForCurrentLease = true
+        updateAnalysisCadenceOnQueue()
+        guard isCaptureDesired(), !isRecording else { return }
+        let applied = applyCameraFrameRateOnQueue(Self.pressurePreviewFrameRate)
+        #if DEBUG
+        print(
+            "[PoplurPerformance] Camera thermal tripwire cap "
                 + "fps=\(Self.pressurePreviewFrameRate) analysis="
                 + "\(analysisFrameSampleInterval)s applied=\(applied)"
         )
@@ -1506,6 +1539,14 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
                    self.performanceWantsCapture,
                    !self.isColdBudgetParked {
                     self.parkCamera(reason: .thermal, canResume: false, preserveLastFrame: true)
+                } else if isActive {
+                    // Tripwire at fair: the camera is the attributed burner, so
+                    // it sheds load first — latch the pressure cap for the rest
+                    // of this lease instead of leaving the sensor at full
+                    // cadence until serious forces a hard park.
+                    self.sessionQueue.async { [weak self] in
+                        self?.latchPressureCapFromThermalOnQueue()
+                    }
                 } else if !isActive,
                           self.isColdBudgetParked,
                           self.latestColdBudgetUpdate.reason == .thermal {
@@ -1537,11 +1578,11 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
             && isMLDetectionEnabled
             && policy.mode != .emergency
 
-        // Active Camera owns the capture graph exclusively. Do not turn the
-        // visible viewfinder into a thermal indicator by lowering its cadence;
-        // lifecycle revocation hard-parks the complete graph when Camera is no
-        // longer front-most, while sampled analysis remains independently
-        // bounded. Recording and preview therefore share the same smooth cap.
+        // Active Camera owns the capture graph exclusively. A cool device gets
+        // the full preview rate; capture-hardware pressure or the process
+        // thermal tripwire latches the lower pressure cap via the min() below.
+        // Recording keeps its own limit — a capped preview must not degrade a
+        // clip the user is actively making.
         let requestedFPS = recording
             ? Self.recordingFrameRateLimit
             : Self.previewFrameRate
