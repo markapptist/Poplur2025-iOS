@@ -315,9 +315,17 @@ final class PoplurAIAssistantController: ObservableObject {
                     }
                 }
             }
-            setStatus("Say Hey Poplur")
+            // Do NOT clobber "Listening". requestPermissionAndStartCommand()
+            // calls beginListeningIfAuthorized() and then activateWake(); this
+            // line used to land after activateWake()'s "Listening" and reset the
+            // pill to the idle prompt while isListeningForCommand was already
+            // true — the waveform animated over a label saying "Say Hey Poplur",
+            // so an armed mic looked idle and users waited instead of speaking.
+            if !isListeningForCommand { setStatus("Say Hey Poplur") }
+            PoplurDiagLog.append("[PoplurAI] recognition session started (engine running: \(audioEngine.isRunning))")
         } catch {
             setStatus("Poplur AI could not start listening")
+            PoplurDiagLog.append("[PoplurAI] START FAILED: \(error.localizedDescription)")
             scheduleRecognitionRestart(delay: 1_000_000_000)
         }
     }
@@ -498,6 +506,7 @@ final class PoplurAIAssistantController: ObservableObject {
             let commandText = normalized[wakeRange.upperBound...]
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             activateWake()
+            PoplurDiagLog.append("[PoplurAI] WAKE MATCHED in \"\(normalized)\" — command=\"\(commandText)\"")
             if !commandText.isEmpty {
                 emitCommand(Self.parse(commandText))
             }
@@ -506,7 +515,13 @@ final class PoplurAIAssistantController: ObservableObject {
 
         if isListeningForCommand, !normalized.isEmpty {
             markHandled(normalized, at: now)
+            PoplurDiagLog.append("[PoplurAI] command (already awake): \"\(normalized)\"")
             emitCommand(Self.parse(normalized))
+        } else {
+            // The silent case. Every "Hey Poplur does nothing" report lands here:
+            // either the transcript never carried the wake phrase, or the session
+            // was not in command mode to accept a bare command.
+            PoplurDiagLog.append("[PoplurAI] heard \"\(normalized)\" — no wake match, awake=\(isListeningForCommand)")
         }
     }
 
@@ -564,6 +579,7 @@ final class PoplurAIAssistantController: ObservableObject {
         commandToken += 1
         isIlluminated = true
         isListeningForCommand = false
+        PoplurDiagLog.append("[PoplurAI] EMIT \(command) token=\(commandToken) → web bridge")
         setStatus(Self.feedback(for: command))
         speak(Self.feedback(for: command))
         wakeTask = Task { @MainActor in
@@ -930,7 +946,11 @@ struct PoplurAIAssistantOverlay: View {
                     center: .center,
                     angle: .degrees(ringRotation)
                 ),
-                lineWidth: 1
+                // Matches the profile avatar's 4pt gradient ring (ProfileTwin's
+                // .avatarFrame padding). At 1pt this read as a hairline and was
+                // easy to miss entirely on device, which is the whole problem
+                // with a perimeter that exists to tell you the mic is open.
+                lineWidth: 4
             )
             .padding(padding)
             .opacity(pulse ? 1 : 0.62)
