@@ -4,12 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Poplur — Splash</title>
-  <!-- The splash covers the welcome's booting: warm every heavy asset the
-       welcome and sign-up need so they appear instantly composed. -->
-  <link rel="preload" as="fetch" href="/poplur-clay-map/public/poplur_icon_cube.glb">
-  <link rel="preload" as="fetch" href="/.claude/artifacts/models/poplur-globe-lite.glb">
-  <link rel="preload" as="fetch" href="/Poplur2025-iOS/Poplur2025/MarkHead_TalkingRig.glb">
-  <link rel="preload" as="fetch" href="/poplur-clay-map/public/zoom_buildings.glb">
+  <!-- Keep splash startup light. 3D assets load on demand on their own screens. -->
   <link rel="preload" as="audio" href="/Poplur2025-iOS/Poplur2025/pop.mp3">
   <style>
     * { box-sizing: border-box; }
@@ -97,22 +92,33 @@
       background: rgba(28,8,18,.55);
       box-shadow: inset 0 2px 4px rgba(0,0,0,.5);
     }
+    /* The bar is full width and slides in from the left behind .track's
+       existing overflow:hidden, rather than growing its own `width`.
+       `width` is a layout property, so it cannot be composited — every frame
+       needed main-thread layout, and this bar is on screen precisely when the
+       main thread is saturated launching the app. It therefore got no frames
+       and sat frozen on its first keyframe at 4%, which is what a stuck
+       progress bar looked like on device.
+       translateX runs on the compositor and keeps moving while the main thread
+       is blocked. Sliding rather than scaling on purpose: scaleX would squash
+       the 45deg barber stripes as the bar filled. */
     .fill {
       position: absolute;
-      inset: 0 auto 0 0;
-      width: 0;
+      inset: 0;
       border-radius: inherit;
       background-image: repeating-linear-gradient(45deg, #ffe1f1 0 15px, #ff86c4 15px 29px, #f53c99 29px 44px);
       background-size: 62px 62px;
       box-shadow: inset 0 2px 2px rgba(255,255,255,.6), inset 0 -2px 4px rgba(140,18,74,.5), 0 0 16px rgba(244,59,153,.32);
+      transform: translateX(-96%);
+      will-change: transform;
       animation: splashFill 4s ease-out infinite, barber .7s linear infinite;
     }
     @keyframes shaderSweep { to { background-position: -120% 0; } }
-    @keyframes splashFill { 0% { width: 4%; } 70% { width: 90%; } 88%, 100% { width: 100%; } }
+    @keyframes splashFill { 0% { transform: translateX(-96%); } 70% { transform: translateX(-10%); } 88%, 100% { transform: translateX(0); } }
     @keyframes barber { from { background-position: 0 0; } to { background-position: -62px 0; } }
     @media (prefers-reduced-motion: reduce) {
       .loading-text { animation: none; }
-      .fill { animation: none; width: 70%; }
+      .fill { animation: none; transform: translateX(-30%); }
     }
   </style>
 </head>
