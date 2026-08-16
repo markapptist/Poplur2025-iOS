@@ -355,9 +355,11 @@ struct Poplur2025App: App {
     private var authenticatedContent: some View {
         ZStack {
             if auth.isResolvingAuthState {
-                // Match the approved, logo-free launch frame while Firebase restores the session.
-                // This is intentionally content-free: no unapproved loading screen is presented.
-                Color(red: 0.039, green: 0.027, blue: 0.035).ignoresSafeArea()
+                // Returning users must see the same approved Clay splash while
+                // Firebase restores their session. A plain dark placeholder made
+                // physical-device cold launches diverge from the approved GCL slot.
+                PostLoginLoadingWebView()
+                    .ignoresSafeArea()
                     .transition(.opacity)
             } else if auth.isAuthenticated {
                 ZStack {
