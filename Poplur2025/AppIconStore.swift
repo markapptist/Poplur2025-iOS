@@ -6,14 +6,6 @@ enum PoplurAppIcon: String, CaseIterable, Identifiable, Sendable {
     case pastel = "pastel"
     case neonBlue = "neonBlue"
     case roseGold = "roseGold"
-    case camo = "camo"
-    case chocolate = "chocolate"
-    case gold = "gold"
-    case ice = "ice"
-    case rainbow = "rainbow"
-    case rubber = "rubber"
-    case sparklePink = "sparklePink"
-    case toy = "toy"
 
     var id: String { rawValue }
 
@@ -23,14 +15,6 @@ enum PoplurAppIcon: String, CaseIterable, Identifiable, Sendable {
         case .pastel: return "Pastel Clay"
         case .neonBlue: return "Neon Blue"
         case .roseGold: return "Rose Gold"
-        case .camo: return "Camo Clay"
-        case .chocolate: return "Chocolate"
-        case .gold: return "Gold Clay"
-        case .ice: return "Ice Clay"
-        case .rainbow: return "Rainbow"
-        case .rubber: return "Rubber Clay"
-        case .sparklePink: return "Sparkle Pink"
-        case .toy: return "Toy Clay"
         }
     }
 
@@ -40,14 +24,6 @@ enum PoplurAppIcon: String, CaseIterable, Identifiable, Sendable {
         case .pastel: return "AppIconPastel"
         case .neonBlue: return "AppIconNeonBlue"
         case .roseGold: return "AppIconRoseGold"
-        case .camo: return "AppIconCamo"
-        case .chocolate: return "AppIconChocolate"
-        case .gold: return "AppIconGold"
-        case .ice: return "AppIconIce"
-        case .rainbow: return "AppIconRainbow"
-        case .rubber: return "AppIconRubber"
-        case .sparklePink: return "AppIconSparklePink"
-        case .toy: return "AppIconToy"
         }
     }
 
