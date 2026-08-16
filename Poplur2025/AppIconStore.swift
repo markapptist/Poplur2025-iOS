@@ -122,6 +122,37 @@ final class AppIconStore: ObservableObject {
     }
 }
 
+private struct AppIconOptionView: View {
+    let icon: PoplurAppIcon
+    let isSelected: Bool
+
+    var body: some View {
+        VStack(spacing: 8) {
+            ZStack(alignment: .topTrailing) {
+                Image(icon.previewAssetName)
+                    .resizable()
+                    .scaledToFit()
+                    .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 22, style: .continuous)
+                            .stroke(isSelected ? Color.pink : Color.clear, lineWidth: 3)
+                    }
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 25, weight: .bold))
+                        .foregroundStyle(.white, Color.pink)
+                        .offset(x: 5, y: -5)
+                }
+            }
+            Text(icon.displayName)
+                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .foregroundStyle(.primary)
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+        }
+    }
+}
+
 struct AppIconPickerView: View {
     @ObservedObject var store: AppIconStore
     @Environment(\.dismiss) private var dismiss
@@ -138,32 +169,10 @@ struct AppIconPickerView: View {
                         Button {
                             store.apply(icon)
                         } label: {
-                            VStack(spacing: 8) {
-                                ZStack(alignment: .topTrailing) {
-                                    Image(icon.previewAssetName)
-                                        .resizable()
-                                        .scaledToFit()
-                                        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-                                        .overlay {
-                                            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                                                .stroke(
-                                                    store.selectedIcon == icon ? Color.pink : Color.clear,
-                                                    lineWidth: 3
-                                                )
-                                        }
-                                    if store.selectedIcon == icon {
-                                        Image(systemName: "checkmark.circle.fill")
-                                            .font(.system(size: 25, weight: .bold))
-                                            .foregroundStyle(.white, Color.pink)
-                                            .offset(x: 5, y: -5)
-                                    }
-                                }
-                                Text(icon.displayName)
-                                    .font(.system(size: 13, weight: .bold, design: .rounded))
-                                    .foregroundStyle(.primary)
-                                    .multilineTextAlignment(.center)
-                                    .lineLimit(2)
-                            }
+                            AppIconOptionView(
+                                icon: icon,
+                                isSelected: store.selectedIcon == icon
+                            )
                         }
                         .buttonStyle(.plain)
                         .disabled(store.isApplying)
@@ -178,7 +187,6 @@ struct AppIconPickerView: View {
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(.red)
                         .padding(.horizontal, 20)
-                        .accessibilityLiveRegion(.assertive)
                 }
             }
             .navigationTitle("App Icon")
