@@ -1,33 +1,13 @@
 import SwiftUI
 import WebKit
 
-// MARK: - Post-login LOADING Web Embed (Phase 3)
+// MARK: - Post-login approved splash embed
 //
-// The approved post-login load screen is the prototype's web "Loading" screen
-// (clay globe + wordmark + rotating clay messages, three.js) — NOT the old
-// auth_transition.mp4. It is rendered inside a WKWebView exactly like the
-// pre-login splash/welcome, reusing the same offline bundle root and custom
-// URL-scheme handler (PoplurPreloginWeb.scheme / PreloginWebView.PreloginSchemeHandler).
-//
-// Built by scripts/build-loading-ios.mjs into PreloginWeb/loading.html (the flow's
-// `?embed=Loading` screen, Draco models rewired to the bundled compressed copies).
-// There is no bridge here — the screen only animates; the app controls how long it
-// shows before revealing the post-login home.
-
-extension PoplurPreloginWeb {
-    /// The approved post-login loading screen (isolated via ?embed=Loading; the
-    /// bundle also defaults to "Loading" if the query is dropped).
-    static var loadingURL: URL? { URL(string: "\(scheme)://\(host)/loading.html?embed=Loading") }
-}
-
-/// Which cover the post-login transition shows (user rule): the approved globe
-/// LOADING only after an explicit sign-in/up; the SPLASH, looping with its clay
-/// progress bar, for an already-signed-in launch while the home warms up.
-enum PostLoginCoverPage { case loading, splash }
+// This host deliberately loads PoplurPreloginWeb.splashURL: the identical
+// bundled splash.html used while signed out. There is no alternate post-login
+// loading design and no native visual recreation.
 
 struct PostLoginLoadingWebView: UIViewRepresentable {
-    var page: PostLoginCoverPage = .loading
-
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
         config.mediaTypesRequiringUserActionForPlayback = []
@@ -68,11 +48,13 @@ struct PostLoginLoadingWebView: UIViewRepresentable {
         // (same as welcome) — pin to dark regardless of device appearance.
         webView.overrideUserInterfaceStyle = .dark
 
-        let pageURL = page == .loading ? PoplurPreloginWeb.loadingURL : PoplurPreloginWeb.splashURL
-        if PreloginWebView.bundledRootURL() != nil, let url = pageURL {
+        // Always use the same approved splash.html that signed-out launch uses.
+        // A second loading document here made physical and signed-out launches
+        // disagree and allowed an unapproved fallback to resurface.
+        if PreloginWebView.bundledRootURL() != nil, let url = PoplurPreloginWeb.splashURL {
             webView.load(URLRequest(url: url))
         } else {
-            print("[PostLoginLoadingWebView] PreloginWeb/loading.html missing — run scripts/build-loading-ios.mjs")
+            print("[PostLoginLoadingWebView] PreloginWeb/splash.html missing — run scripts/build-prelogin-ios.mjs")
         }
         return webView
     }

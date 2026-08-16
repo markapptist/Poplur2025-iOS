@@ -30,12 +30,14 @@ struct AppSettingsView: View {
     @ObservedObject private var settings = SettingsStore.shared
     @ObservedObject private var cubeSkinStore = CubeSkinStore.shared
     @ObservedObject private var profileThemeStore = ProfileThemeStore.shared
+    @ObservedObject private var appIconStore = AppIconStore.shared
 
     @State private var cacheSizeText: String = "—"
     @State private var infoTitle: String = ""
     @State private var infoBody: String = ""
     @State private var showInfoSheet = false
     @State private var showProfileThemePicker = false
+    @State private var showAppIconPicker = false
     @State private var isSimulatorRunning = false
 
     // Skins shown in the design (4 tiles).
@@ -173,6 +175,18 @@ struct AppSettingsView: View {
                         }
                     }
 
+                    section("APP ICON") {
+                        card {
+                            navRow(
+                                icon: appIconStore.selectedIcon.previewAssetName,
+                                title: "App Icon",
+                                subtitle: appIconStore.selectedIcon.displayName
+                            ) {
+                                showAppIconPicker = true
+                            }
+                        }
+                    }
+
                     section("ABOUT") {
                         card {
                             navRow(icon: "settings_ic_info", title: "About Poplur") {
@@ -205,6 +219,9 @@ struct AppSettingsView: View {
         }
         .sheet(isPresented: $showProfileThemePicker) {
             ProfileThemePickerView(store: profileThemeStore)
+        }
+        .sheet(isPresented: $showAppIconPicker) {
+            AppIconPickerView(store: appIconStore)
         }
     }
 

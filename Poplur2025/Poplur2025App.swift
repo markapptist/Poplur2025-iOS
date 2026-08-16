@@ -92,7 +92,6 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         Task { @MainActor in
             PoplurNotificationCenter.shared.configure()
             WatchRadiusSync.shared.start()
-            CubeSkinStore.shared.syncAppIcon()
         }
 
         return true
@@ -159,6 +158,7 @@ struct Poplur2025App: App {
     @State private var authTransitionToken = 0
     @State private var isWelcomePanelVisible = true
     @State private var showSplash: Bool
+    @State private var authTransitionEarliestFinish = Date.distantPast
     @Environment(\.scenePhase) private var scenePhase
 
     /// Phase 1 web-embed migration: the pre-login flow (splash + welcome) is the
@@ -399,14 +399,23 @@ struct Poplur2025App: App {
                     }
 
                     if showAuthTransition {
-                        // Only mount the approved clay barber-pole splash if the home
-                        // has not become ready after its brief fast-path window. A
-                        // cached feed should open directly without a loading screen.
-                        PostLoginLoadingWebView(page: .splash)
+                        // This is the exact approved splash used by the signed-out
+                        // flow. Keep one source of truth on every launch path: no
+                        // native remake and no alternate post-login loading page.
+                        PostLoginLoadingWebView()
                             .ignoresSafeArea()
                             .transition(.opacity)
                             .zIndex(100)
                     }
+                }
+                .onAppear {
+                    // A restored Firebase session can resolve before SwiftUI
+                    // installs either onChange observer on a fast physical
+                    // device. The authenticated branch itself is the final
+                    // launch edge, so it guarantees the approved splash mounts
+                    // once even when that earlier state transition was missed.
+                    guard !auth.isResolvingAuthState, !showAuthTransition else { return }
+                    triggerAuthTransition()
                 }
                 .task(id: auth.currentUser?.uid) {
                     await PoplurNotificationCenter.shared.refreshDailyNotificationForCurrentUser()
@@ -458,9 +467,8 @@ struct Poplur2025App: App {
             triggerAuthTransition()
         }
         // Cold launch as a RETURNING signed-in user: auth resolves from the
-        // restoring state straight to authenticated (no isAuthenticated edge), so
-        // cover the home/map warm-up (globe→city fly-in + 3D load) with the same
-        // Loading screen instead of dropping onto a half-booted map.
+        // restoring state straight to authenticated (no isAuthenticated edge),
+        // so show the same approved splash as signed-out launch.
         .onChange(of: auth.isResolvingAuthState) { _, resolving in
             guard !resolving, auth.isAuthenticated, !showAuthTransition else { return }
             triggerAuthTransition()
@@ -470,19 +478,15 @@ struct Poplur2025App: App {
     private func triggerAuthTransition() {
         authTransitionToken += 1
         let token = authTransitionToken
-        showAuthTransition = false
+        // Physical devices can report the warmed Home document ready before a
+        // delayed cover ever mounts. Present the approved signed-out splash on
+        // the authentication edge itself, then enforce its authored 3.2-second
+        // beat so readiness cannot skip it after a cold or cached launch.
+        showAuthTransition = true
         isAuthenticatedHomeReady = false
-        // Give a warm/cached Home one first-paint window to reveal immediately.
-        // If its local web bundle has not painted after that point, cover only
-        // that real wait with the approved clay barber-pole splash. The previous
-        // 350 ms window outlasted the generic readiness fallback, suppressing the
-        // splash even on physical-device cold loads.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-            guard token == authTransitionToken,
-                  !isAuthenticatedHomeReady,
-                  auth.isAuthenticated else { return }
-            showAuthTransition = true
-        }
+        authTransitionEarliestFinish = Date().addingTimeInterval(
+            PoplurPreloginWeb.splashDurationSeconds
+        )
         // Absolute native escape hatch. Neither the managed JavaScript clock,
         // WebKit navigation callbacks nor a renderer lease is allowed to own
         // the lifetime of this cover. A warm-device thermal tripwire can park
@@ -504,6 +508,17 @@ struct Poplur2025App: App {
 
     private func finishAuthTransitionIfReady() {
         guard showAuthTransition, isAuthenticatedHomeReady else { return }
+        let remaining = authTransitionEarliestFinish.timeIntervalSinceNow
+        if remaining > 0 {
+            let token = authTransitionToken
+            DispatchQueue.main.asyncAfter(deadline: .now() + remaining) {
+                guard token == authTransitionToken,
+                      auth.isAuthenticated,
+                      isAuthenticatedHomeReady else { return }
+                finishAuthTransitionIfReady()
+            }
+            return
+        }
         withAnimation(.easeInOut(duration: 0.45)) {
             showAuthTransition = false
         }

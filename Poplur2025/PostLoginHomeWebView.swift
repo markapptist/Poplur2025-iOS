@@ -1080,6 +1080,48 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     }
                     return
                 }
+                if type == "appIconChanged", let webView = bridge.webView {
+                    let stableID = (body["id"] as? String)
+                        ?? (body["iconID"] as? String)
+                        ?? (body["iconId"] as? String)
+                    guard let stableID, let requestedIcon = PoplurAppIcon(rawValue: stableID) else {
+                        Task { @MainActor [weak self, weak webView] in
+                            guard let self, let webView else { return }
+                            self.pushAppIcon(
+                                AppIconStore.shared.selectedIcon,
+                                accepted: false,
+                                message: "Unknown app icon ID.",
+                                into: webView
+                            )
+                        }
+                        return
+                    }
+                    Task { @MainActor [weak self, weak webView] in
+                        AppIconStore.shared.apply(requestedIcon) { [weak self, weak webView] accepted, message in
+                            guard let self, let webView else { return }
+                            self.pushAppIcon(
+                                AppIconStore.shared.selectedIcon,
+                                accepted: accepted,
+                                message: message,
+                                into: webView
+                            )
+                        }
+                    }
+                    return
+                }
+                if type == "requestAppIcon", let webView = bridge.webView {
+                    Task { @MainActor [weak self, weak webView] in
+                        guard let self, let webView else { return }
+                        AppIconStore.shared.refreshFromSystem()
+                        self.pushAppIcon(
+                            AppIconStore.shared.selectedIcon,
+                            accepted: true,
+                            message: nil,
+                            into: webView
+                        )
+                    }
+                    return
+                }
                 // The clay permission card was answered. Nothing native listened
                 // for this before, which is why the primer and the real dialog
                 // were unsequenced: the map asked iOS directly on load and the
@@ -1266,6 +1308,15 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     currentWebTab = tab
                     if tab != "post" { webReportsLiveCamera = false }
                     syncMotionLease()
+                    // The lease remains owned across web tabs, so start() has
+                    // no edge on which to replay its latest sample. Reset only
+                    // bridge dedupe and push the retained attitude after the
+                    // destination has committed; otherwise a still-held phone
+                    // can leave that page's navigator in its neutral pose.
+                    lastMotionDeliveryUptime = 0
+                    lastDeliveredRoll = nil
+                    lastDeliveredPitch = nil
+                    replayLatestMotion()
                     updateCameraHole()
                 }
                 if type == "cameraLiveVisibilityChanged" {
@@ -1503,6 +1554,24 @@ struct PostLoginHomeWebView: UIViewRepresentable {
             webView.evaluateJavaScript(
                 "window.poplurProfileTheme && window.poplurProfileTheme(\(text)); " +
                 "window.dispatchEvent(new CustomEvent('poplur-native-profile-theme', {detail: \(text)})); true;"
+            )
+        }
+
+        private func pushAppIcon(
+            _ icon: PoplurAppIcon,
+            accepted: Bool,
+            message: String?,
+            into webView: WKWebView
+        ) {
+            var payload: [String: Any] = [
+                "id": icon.rawValue,
+                "accepted": accepted
+            ]
+            if let message { payload["message"] = message }
+            guard let json = try? JSONSerialization.data(withJSONObject: payload),
+                  let text = String(data: json, encoding: .utf8) else { return }
+            webView.evaluateJavaScript(
+                "window.dispatchEvent(new CustomEvent('poplur-native-app-icon', {detail: \(text)})); true;"
             )
         }
 

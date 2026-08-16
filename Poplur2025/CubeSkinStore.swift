@@ -522,28 +522,13 @@ public final class CubeSkinStore: ObservableObject {
         } else {
             current = .clay
         }
-        syncAppIcon()
     }
 
     public func apply(_ skin: CubeSkin) {
         guard current != skin else { return }
         current = skin
         UserDefaults.standard.set(skin.rawValue, forKey: defaultsKey)
-        syncAppIcon()
         NotificationCenter.default.post(name: .CubeSkinDidChange, object: skin)
-    }
-
-    public func syncAppIcon() {
-        let iconName = current.alternateAppIconName
-        DispatchQueue.main.async {
-            guard UIApplication.shared.supportsAlternateIcons else { return }
-            guard UIApplication.shared.alternateIconName != iconName else { return }
-            UIApplication.shared.setAlternateIconName(iconName) { error in
-                if let error {
-                    print("App icon update failed: \(error.localizedDescription)")
-                }
-            }
-        }
     }
 }
 
