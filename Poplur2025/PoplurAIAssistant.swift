@@ -57,6 +57,8 @@ final class PoplurAIAssistantController: ObservableObject {
     private var suppressRecognitionCallbacksUntil = Date.distantPast
     private var lastRecognitionRestartAt = Date.distantPast
     private var recognitionStartedAt = Date.distantPast
+    /// Microphone buffers delivered to the current recognition request.
+    private var tapBufferCount = 0
     private var listeningSuppressedUntil = Date.distantPast
     private var wakeWatchdogTask: Task<Void, Never>?
     private var idleListenTask: Task<Void, Never>?
@@ -290,8 +292,19 @@ final class PoplurAIAssistantController: ObservableObject {
                 return
             }
             inputNode.removeTap(onBus: 0)
-            inputNode.installTap(onBus: 0, bufferSize: 2048, format: format) { [weak request] buffer, _ in
+            // Count buffers so the log can separate "the recognizer rejected us"
+            // from "no microphone audio ever arrived". Both present as silence.
+            tapBufferCount = 0
+            let session = audioSession
+            inputNode.installTap(onBus: 0, bufferSize: 2048, format: format) { [weak self, weak request] buffer, _ in
                 request?.append(buffer)
+                guard let self else { return }
+                Task { @MainActor in
+                    self.tapBufferCount += 1
+                    if self.tapBufferCount == 1 || self.tapBufferCount == 50 {
+                        PoplurDiagLog.append("[PoplurAI] mic tap buffer #\(self.tapBufferCount) frames=\(buffer.frameLength) fmt=\(Int(format.sampleRate))Hz/\(format.channelCount)ch inputAvailable=\(session.isInputAvailable)")
+                    }
+                }
             }
 
             audioEngine.prepare()
@@ -310,6 +323,16 @@ final class PoplurAIAssistantController: ObservableObject {
                         }
                     }
                     guard Date() >= self.suppressRecognitionCallbacksUntil else { return }
+                    if let error {
+                        // The whole point of this line: 60 sessions started with
+                        // zero transcripts and no recorded reason. Without the
+                        // domain/code an instant-restart loop is indistinguishable
+                        // from a mic that is simply hearing nothing.
+                        let ns = error as NSError
+                        PoplurDiagLog.append("[PoplurAI] RECOGNITION ERROR \(ns.domain) code=\(ns.code) taps=\(self.tapBufferCount) — \(ns.localizedDescription)")
+                    } else if result?.isFinal == true {
+                        PoplurDiagLog.append("[PoplurAI] recognition final (taps=\(self.tapBufferCount)) — restarting")
+                    }
                     if error != nil || result?.isFinal == true {
                         self.scheduleRecognitionRestart(delay: 2_000_000_000)
                     }
