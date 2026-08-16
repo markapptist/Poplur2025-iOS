@@ -4,7 +4,7 @@ import Testing
 struct AppIconCatalogTests {
     @Test func catalogUsesStableUniqueIdentifiers() {
         let icons = PoplurAppIcon.allCases
-        #expect(icons.count == 4)
+        #expect(icons.count == 12)
         #expect(Set(icons.map(\.rawValue)).count == icons.count)
         #expect(icons.first == .defaultClay)
         #expect(PoplurAppIcon.defaultClay.alternateIconName == nil)

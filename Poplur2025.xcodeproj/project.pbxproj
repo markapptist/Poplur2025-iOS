@@ -546,7 +546,7 @@
 		391605E32E3F4902000ACB3E /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "AppIconPastel AppIconNeonBlue AppIconRoseGold";
+				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "AppIconPastel AppIconNeonBlue AppIconRoseGold AppIconCamo AppIconChocolate AppIconGold AppIconIce AppIconRainbow AppIconRubber AppIconSparklePink AppIconToy";
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
@@ -589,7 +589,7 @@
 		391605E42E3F4902000ACB3E /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "AppIconPastel AppIconNeonBlue AppIconRoseGold";
+				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "AppIconPastel AppIconNeonBlue AppIconRoseGold AppIconCamo AppIconChocolate AppIconGold AppIconIce AppIconRainbow AppIconRubber AppIconSparklePink AppIconToy";
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
