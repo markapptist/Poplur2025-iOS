@@ -70,6 +70,14 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         // showed an uploading banner and then dropped the media on the floor.
         PostUploadService.shared.start()
 
+        // Consumable approvals can arrive after the Store screen or even the
+        // previous process is gone. Keep one account-bound StoreKit observer
+        // alive for the application lifetime so verified credits are recovered
+        // without asking the user to rebuild the old web bag.
+        Task { @MainActor in
+            PoplurCardPurchaseService.shared.startObservingTransactions()
+        }
+
         // Defer ad SDK init to after first frame — MobileAds.shared.start() is synchronous
         // and can block the main thread for 100–300 ms, delaying first render.
         DispatchQueue.main.async {

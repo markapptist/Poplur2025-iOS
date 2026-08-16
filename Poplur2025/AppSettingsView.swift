@@ -29,11 +29,13 @@ private enum SC {
 struct AppSettingsView: View {
     @ObservedObject private var settings = SettingsStore.shared
     @ObservedObject private var cubeSkinStore = CubeSkinStore.shared
+    @ObservedObject private var profileThemeStore = ProfileThemeStore.shared
 
     @State private var cacheSizeText: String = "—"
     @State private var infoTitle: String = ""
     @State private var infoBody: String = ""
     @State private var showInfoSheet = false
+    @State private var showProfileThemePicker = false
     @State private var isSimulatorRunning = false
 
     // Skins shown in the design (4 tiles).
@@ -159,6 +161,18 @@ struct AppSettingsView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
 
+                    section("PROFILE THEME") {
+                        card {
+                            navRow(
+                                icon: "settings_ic_play",
+                                title: "Profile Background",
+                                subtitle: profileThemeStore.selectedTheme.displayName
+                            ) {
+                                showProfileThemePicker = true
+                            }
+                        }
+                    }
+
                     section("ABOUT") {
                         card {
                             navRow(icon: "settings_ic_info", title: "About Poplur") {
@@ -188,6 +202,9 @@ struct AppSettingsView: View {
         .onAppear { refreshCacheSize() }
         .sheet(isPresented: $showInfoSheet) {
             infoSheet
+        }
+        .sheet(isPresented: $showProfileThemePicker) {
+            ProfileThemePickerView(store: profileThemeStore)
         }
     }
 

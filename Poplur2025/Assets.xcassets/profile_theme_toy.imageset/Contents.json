@@ -1,0 +1,12 @@
+{
+  "images" : [
+    {
+      "filename" : "profile_theme_toy.png",
+      "idiom" : "universal"
+    }
+  ],
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  }
+}

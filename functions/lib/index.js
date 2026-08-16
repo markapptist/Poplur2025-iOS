@@ -33,13 +33,15 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.poplurAiApi = exports.cameraSceneScan = exports.premiumAiAssist = void 0;
+exports.poplurAiApi = exports.cameraSceneScan = exports.premiumAiAssist = exports.verifyCardPurchase = void 0;
 const admin = __importStar(require("firebase-admin"));
 const firebase_functions_1 = require("firebase-functions");
 const params_1 = require("firebase-functions/params");
 const https_1 = require("firebase-functions/v2/https");
 const firestore_1 = require("firebase-admin/firestore");
 const premiumAiFlows_1 = require("./ai/premiumAiFlows");
+var cardPurchases_1 = require("./cardPurchases");
+Object.defineProperty(exports, "verifyCardPurchase", { enumerable: true, get: function () { return cardPurchases_1.verifyCardPurchase; } });
 admin.initializeApp();
 const db = admin.firestore();
 const googleAiApiKey = (0, params_1.defineSecret)("GOOGLE_AI_API_KEY");

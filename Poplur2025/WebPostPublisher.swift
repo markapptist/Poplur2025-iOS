@@ -124,6 +124,7 @@ enum WebPostPublisher {
             PostUploadService.shared.nextRadiusMeters = Int(radiusKm * 1000)
         }
         PostUploadService.shared.nextCaption = body["caption"] as? String
+        PostUploadService.shared.nextChannelID = body["channelId"] as? String
         PostUploadService.shared.nextRequestID = body["requestId"] as? String
 
         // A post bound to a map spot carries its coordinate; a plain channel

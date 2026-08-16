@@ -3,14 +3,23 @@ import GoogleMobileAds
 
 final class AdManager: NSObject, FullScreenContentDelegate {
     static let shared = AdManager()
+    static let feedAdVisibilityNotification = Notification.Name("PoplurFeedAdVisibility")
     
     private var interstitial: InterstitialAd?
     private weak var pendingRootViewController: UIViewController?
     private var presentationPending = false
     private var isLoading = false
     private var interstitialUnitID: String {
+        #if DEBUG
+        // Physical development builds must never request paid inventory. This
+        // Google-owned unit is guaranteed to return a labelled test ad, which
+        // also makes the Feed bridge verifiable without depending on account
+        // fill or risking invalid-traffic policy violations.
+        return "ca-app-pub-3940256099942544/4411468910"
+        #else
         Bundle.main.object(forInfoDictionaryKey: "PoplurAdMobInterstitialUnitID") as? String
             ?? "ca-app-pub-2086359936541081/6696033455"
+        #endif
     }
     
     private var hasStarted = false
@@ -53,6 +62,7 @@ final class AdManager: NSObject, FullScreenContentDelegate {
             pendingRootViewController = nil
             interstitial = nil
             ad.fullScreenContentDelegate = self
+            publishFeedAdVisibility(true)
             ad.present(from: root)
         } else {
             // Feed changes are often faster than the first network response.
@@ -62,6 +72,14 @@ final class AdManager: NSObject, FullScreenContentDelegate {
             pendingRootViewController = root
             loadInterstitial()
         }
+    }
+
+    private func publishFeedAdVisibility(_ visible: Bool) {
+        NotificationCenter.default.post(
+            name: Self.feedAdVisibilityNotification,
+            object: self,
+            userInfo: ["open": visible]
+        )
     }
 
     private func presentPendingInterstitialIfPossible() {
@@ -91,11 +109,13 @@ final class AdManager: NSObject, FullScreenContentDelegate {
     // MARK: - GADFullScreenContentDelegate
     
     func adDidDismissFullScreenContent(_ ad: FullScreenPresentingAd) {
+        publishFeedAdVisibility(false)
         interstitial = nil
         loadInterstitial()
     }
     
     func ad(_ ad: FullScreenPresentingAd, didFailToPresentFullScreenContentWithError error: Error) {
+        publishFeedAdVisibility(false)
         interstitial = nil
         loadInterstitial()
     }

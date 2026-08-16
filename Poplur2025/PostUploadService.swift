@@ -50,6 +50,7 @@ final class PostUploadService {
         let coordinate: CLLocationCoordinate2D
         let radiusMeters: Int
         let caption: String?
+        let channelID: String?
         let requestID: String?
 
         func isDuplicate(of other: UploadRequest) -> Bool {
@@ -66,6 +67,7 @@ final class PostUploadService {
     /// before posting. They apply to the next upload only.
     var nextRadiusMeters: Int?
     var nextCaption: String?
+    var nextChannelID: String?
     /// Correlates the web composer's pending UI state with its native upload.
     /// Native capture flows do not set this, so their existing notifications
     /// remain unchanged.
@@ -107,6 +109,7 @@ final class PostUploadService {
                 guard let self, let image = note.object as? UIImage else { return }
                 let radius = self.takeRadius()
                 let caption = self.takeCaption()
+                let channelID = self.takeChannelID()
                 let requestID = self.takeRequestID()
                 guard let coordinate = self.resolveCoordinate() else {
                     Self.report(success: false, message: "No location for this post yet.", requestID: requestID)
@@ -117,6 +120,7 @@ final class PostUploadService {
                     coordinate: coordinate,
                     radiusMeters: radius,
                     caption: caption,
+                    channelID: channelID,
                     requestID: requestID
                 ))
             }
@@ -127,6 +131,7 @@ final class PostUploadService {
                 guard let self, let url = note.object as? URL else { return }
                 let radius = self.takeRadius()
                 let caption = self.takeCaption()
+                let channelID = self.takeChannelID()
                 let requestID = self.takeRequestID()
                 guard let coordinate = self.resolveCoordinate() else {
                     PoplurTemporaryFileOwnership.deleteIfOwned(url)
@@ -138,6 +143,7 @@ final class PostUploadService {
                     coordinate: coordinate,
                     radiusMeters: radius,
                     caption: caption,
+                    channelID: channelID,
                     requestID: requestID
                 ))
             }
@@ -151,6 +157,7 @@ final class PostUploadService {
                 guard let self, let info = note.userInfo else { return }
                 let radius = self.takeRadius()
                 let caption = self.takeCaption()
+                let channelID = self.takeChannelID()
                 let requestID = self.takeRequestID()
                 guard let latitude = info["latitude"] as? Double,
                       let longitude = info["longitude"] as? Double else {
@@ -168,12 +175,12 @@ final class PostUploadService {
                 if let image = info["image"] as? UIImage {
                     self.enqueue(UploadRequest(
                         payload: .image(image), coordinate: coordinate, radiusMeters: radius,
-                        caption: caption, requestID: requestID
+                        caption: caption, channelID: channelID, requestID: requestID
                     ))
                 } else if let videoURL = info["videoURL"] as? URL {
                     self.enqueue(UploadRequest(
                         payload: .video(videoURL), coordinate: coordinate, radiusMeters: radius,
-                        caption: caption, requestID: requestID
+                        caption: caption, channelID: channelID, requestID: requestID
                     ))
                 } else {
                     Self.report(success: false, message: "That post had no media to upload.", requestID: requestID)
@@ -265,6 +272,7 @@ final class PostUploadService {
                     at: request.coordinate,
                     radiusMeters: request.radiusMeters,
                     caption: request.caption,
+                    channelID: request.channelID,
                     requestID: request.requestID
                 )
             case .video(let url):
@@ -273,6 +281,7 @@ final class PostUploadService {
                     at: request.coordinate,
                     radiusMeters: request.radiusMeters,
                     caption: request.caption,
+                    channelID: request.channelID,
                     requestID: request.requestID
                 )
             }
@@ -317,6 +326,11 @@ final class PostUploadService {
         return nextCaption
     }
 
+    private func takeChannelID() -> String? {
+        defer { nextChannelID = nil }
+        return nextChannelID
+    }
+
     private func takeRequestID() -> String? {
         defer { nextRequestID = nil }
         return nextRequestID
@@ -336,6 +350,7 @@ final class PostUploadService {
         at coordinate: CLLocationCoordinate2D,
         radiusMeters: Int,
         caption: String?,
+        channelID: String?,
         requestID: String?
     ) async throws {
         guard let data = image.poplur4KJPEGData() else {
@@ -366,7 +381,10 @@ final class PostUploadService {
         Self.reportProgress(0.88, phase: "FINALIZING", requestID: requestID)
         let mediaURL = try await reference.downloadURL().absoluteString
         Self.reportProgress(0.94, phase: "SAVING POST", requestID: requestID)
-        try await savePost(mediaURL: mediaURL, posterURL: nil, at: coordinate, radiusMeters: radiusMeters, caption: caption)
+        try await savePost(
+            mediaURL: mediaURL, posterURL: nil, mediaType: "photo",
+            at: coordinate, radiusMeters: radiusMeters, caption: caption, channelID: channelID
+        )
     }
 
     private func upload(
@@ -374,6 +392,7 @@ final class PostUploadService {
         at coordinate: CLLocationCoordinate2D,
         radiusMeters: Int,
         caption: String?,
+        channelID: String?,
         requestID: String?
     ) async throws {
         try Task.checkCancellation()
@@ -411,7 +430,10 @@ final class PostUploadService {
 
         try Task.checkCancellation()
         Self.reportProgress(0.94, phase: "SAVING POST", requestID: requestID)
-        try await savePost(mediaURL: mediaURL, posterURL: posterURL, at: coordinate, radiusMeters: radiusMeters, caption: caption)
+        try await savePost(
+            mediaURL: mediaURL, posterURL: posterURL, mediaType: "video",
+            at: coordinate, radiusMeters: radiusMeters, caption: caption, channelID: channelID
+        )
     }
 
     /// Firebase exposes byte progress only on the callback upload tasks, not on
@@ -478,14 +500,17 @@ final class PostUploadService {
     private func savePost(
         mediaURL: String,
         posterURL: String?,
+        mediaType: String,
         at coordinate: CLLocationCoordinate2D,
         radiusMeters: Int,
-        caption: String?
+        caption: String?,
+        channelID: String?
     ) async throws {
         var post: [String: Any] = [
             "latitude": coordinate.latitude,
             "longitude": coordinate.longitude,
             "mediaURL": mediaURL,
+            "mediaType": mediaType,
             "radius": radiusMeters,
             "viewCount": 0,
             "createdAt": FieldValue.serverTimestamp(),
@@ -501,6 +526,7 @@ final class PostUploadService {
         post["userID"] = uid
         if let posterURL, !posterURL.isEmpty { post["posterURL"] = posterURL }
         if let caption, !caption.isEmpty { post["caption"] = caption }
+        if let channelID, !channelID.isEmpty { post["channelId"] = channelID }
 
         _ = try await Firestore.firestore().collection("posts").addDocument(data: post)
     }

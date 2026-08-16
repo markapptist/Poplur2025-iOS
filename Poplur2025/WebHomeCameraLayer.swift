@@ -64,6 +64,8 @@ final class WebHomeCameraModel: ObservableObject {
     }
 
     deinit {
+        phoneBootHaptics?.cancel()
+        phoneBootPlayer?.stop()
         if let recognitionObserver {
             NotificationCenter.default.removeObserver(recognitionObserver)
         }
@@ -342,8 +344,36 @@ final class WebHomeCameraModel: ObservableObject {
     }
 
     private var phoneBootHaptics: Task<Void, Never>?
+    private var phoneBootPlayer: AVAudioPlayer?
 
-    private func runPhoneBootEffects() {
+    private func playPhoneBootSound() {
+        phoneBootPlayer?.stop()
+        phoneBootPlayer = nil
+        guard let url = Bundle.main.url(
+            forResource: "popular_phone_bootup",
+            withExtension: "mp3"
+        ) else { return }
+        do {
+            let player = try AVAudioPlayer(contentsOf: url)
+            player.numberOfLoops = 0
+            player.volume = 1
+            player.prepareToPlay()
+            player.play()
+            phoneBootPlayer = player
+        } catch {
+            print("[WebHomeCameraModel] phone boot sound failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func runPhoneBootEffects(playBootSound: Bool = true) {
+        if playBootSound {
+            playPhoneBootSound()
+        } else {
+            // A theme change has its own short Pop. Do not let the longer boot
+            // cue from screen entry mask it if the user changes finishes fast.
+            phoneBootPlayer?.stop()
+            phoneBootPlayer = nil
+        }
         phoneBootHaptics?.cancel()
         phoneBootHaptics = Task { @MainActor in
             let beats: [(UIImpactFeedbackGenerator.FeedbackStyle, UInt64, CGFloat)] = [
@@ -384,6 +414,8 @@ final class WebHomeCameraModel: ObservableObject {
         switch type {
         case "phoneBootEffects":
             runPhoneBootEffects()
+        case "phoneThemeEffects":
+            runPhoneBootEffects(playBootSound: false)
         case "tabChanged":
             if let tab = body["tab"] as? String {
                 activeTab = tab
@@ -695,6 +727,7 @@ struct PostLoginHomeSurface: View {
     let onReady: () -> Void
     @StateObject private var camera = WebHomeCameraModel()
     @StateObject private var poplurAI = PoplurAIAssistantController()
+    @ObservedObject private var profileThemeStore = ProfileThemeStore.shared
     @Environment(\.scenePhase) private var scenePhase
 
     init(initialTab: AppTab = .feed, onReady: @escaping () -> Void = {}) {
@@ -747,6 +780,11 @@ struct PostLoginHomeSurface: View {
             )
             .allowsHitTesting(false)
         }
+        .preferredColorScheme(
+            camera.activeTab == "profile"
+                ? profileThemeStore.selectedTheme.preferredColorScheme
+                : nil
+        )
         // NOT started on appear any more. Arming the recognizer just because Home
         // mounted is what made "Hey Poplur" always-on, and always-on cost a live
         // AVAudioEngine + a continuous mic tap + a speech recognizer for the

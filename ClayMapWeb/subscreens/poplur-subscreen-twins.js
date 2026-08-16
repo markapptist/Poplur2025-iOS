@@ -1,5 +1,7 @@
 const IOS = 'assets/';
 const CLAY = '../';
+const STORE_MODELS = './store-models/';
+const STORE_POSTERS = './store-posters/';
 
 const ios = (set, file) => `${IOS}${set}.imageset/${file}`;
 const clay = file => `${CLAY}${file}`;
@@ -203,6 +205,9 @@ const groups = {
 let activeGroup = 'feed';
 let activeScreen = groups.feed.screens[0].id;
 let phoneBootTimer = null;
+let phoneThemeTimer = null;
+let phoneToneContext = null;
+let phoneToneSuspendTimer = null;
 let phoneColorIndex = 0;
 let phoneMenuScreen = 'main';
 let phoneMenuIndex = 0;
@@ -210,7 +215,11 @@ let phoneMode = 'menu';
 let profileMailThread = null;
 let profileStoreProduct = null;
 let profileStoreNotice = '';
-let profileCartCount = 0;
+let profileStoreBag = [];
+let profileStoreView = 'catalog';
+let profileStoreCheckoutPending = false;
+let profileStoreCheckoutRequestId = null;
+let profileStoreCheckoutSnapshot = null;
 let profileStoreTab = 'featured';
 let profileStoreSlide = 0;
 let storeCarouselTimer = null;
@@ -265,44 +274,263 @@ const profileMailThreads = [
 
 const profileStoreProducts = [
   {
-    id: 'world-card',
-    img: A.storeCard,
-    title: 'Poplur World Card',
+    id: 'inverted',
+    iosProductId: 'com.apptist.Poplur2025.card.inverted',
+    androidProductId: 'com.apptists.poplur2025.card.inverted',
+    model: `${STORE_MODELS}poplur_card_inverted.glb`,
+    poster: `${STORE_POSTERS}poplur_card_inverted.jpg`,
+    title: 'Inverted Card',
     category: 'cards',
-    price: '$24.99',
-    description: 'A clay World Service card for sharing your Poplur identity anywhere.',
+    price: '$2.99',
+    priceAmount: 2.99,
+    credits: 300,
+    kicker: 'BOLD BY DESIGN',
+    tone: 'inverted',
+    description: 'A sharp inside-out Poplur finish. Adds 300 Poplur Credits after a verified purchase.',
   },
   {
-    id: 'cube-v2',
-    img: A.storeCube,
-    title: 'Poplur Cube V2',
-    category: 'hardware',
-    price: '$39.99',
-    description: 'A tactile Poplur cube with the familiar camera and navigation faces.',
-  },
-  {
-    id: 'radius-5',
-    img: A.store5,
-    title: '5km Radius Boost',
-    category: 'radius',
+    id: 'lens',
+    iosProductId: 'com.apptist.Poplur2025.card.lens',
+    androidProductId: 'com.apptists.poplur2025.card.lens',
+    model: `${STORE_MODELS}poplur_card_lens.glb`,
+    poster: `${STORE_POSTERS}poplur_card_lens.jpg`,
+    title: 'Lens Card',
+    category: 'cards',
     price: '$4.99',
-    description: 'Extend one post by five kilometres and keep the local signal moving.',
+    priceAmount: 4.99,
+    credits: 550,
+    kicker: 'FOCUS FORWARD',
+    tone: 'lens',
+    description: 'A glossy optical card with a camera-lens core. Adds 550 Poplur Credits after a verified purchase.',
   },
   {
-    id: 'radius-25',
-    img: A.store25,
-    title: '25km Radius Boost',
-    category: 'radius',
-    price: '$19.99',
-    description: 'A wider radius boost for launches, live events, and major moments.',
+    id: 'splitDiamond',
+    iosProductId: 'com.apptist.Poplur2025.card.splitdiamond',
+    androidProductId: 'com.apptists.poplur2025.card.splitdiamond',
+    model: `${STORE_MODELS}poplur_card_split_diamond.glb`,
+    poster: `${STORE_POSTERS}poplur_card_split_diamond.jpg`,
+    title: 'Split Diamond Card',
+    category: 'cards',
+    price: '$6.99',
+    priceAmount: 6.99,
+    credits: 800,
+    kicker: 'CUT TO STAND OUT',
+    tone: 'splitdiamond',
+    description: 'A faceted split-diamond card built for standout profiles. Adds 800 Poplur Credits after a verified purchase.',
+  },
+  {
+    id: 'swoosh',
+    iosProductId: 'com.apptist.Poplur2025.card.swoosh',
+    androidProductId: 'com.apptists.poplur2025.card.swoosh',
+    model: `${STORE_MODELS}poplur_card_swoosh.glb`,
+    poster: `${STORE_POSTERS}poplur_card_swoosh.jpg`,
+    title: 'Swoosh Card',
+    category: 'cards',
+    price: '$9.99',
+    priceAmount: 9.99,
+    credits: 1200,
+    kicker: 'MADE TO MOVE',
+    tone: 'swoosh',
+    description: 'A flowing sculpted card with Poplur motion. Adds 1,200 Poplur Credits after a verified purchase.',
   },
 ];
 
-const profileStorePromos = [
-  { kicker: 'NEW', title: 'Poplur Cube V2', copy: 'Your home control, made physical.', img: A.storeCube, product: 'cube-v2', tone: 'ink' },
-  { kicker: 'WORLD SERVICE', title: 'Carry your Poplur identity.', copy: 'Tap-ready. Worldwide. Very pink.', img: A.storeCard, product: 'world-card', tone: 'pink' },
-  { kicker: 'GO FARTHER', title: 'Give a post more room.', copy: 'Radius boosts for launches and live moments.', img: A.store25, product: 'radius-25', tone: 'blue' },
-];
+const profileStorePromos = profileStoreProducts.map(item => ({
+  kicker: item.kicker,
+  title: item.title,
+  copy: item.description,
+  credits: `${item.credits.toLocaleString('en-US')} Poplur Credits`,
+  price: item.price,
+  product: item.id,
+  tone: item.tone,
+  model: item.model,
+  poster: item.poster,
+}));
+
+const storeBagCount = () => profileStoreBag.reduce((total, line) => total + line.quantity, 0);
+
+function storeBagLines() {
+  return profileStoreBag.map(line => ({
+    ...line,
+    product: profileStoreProducts.find(item => item.id === line.cardId),
+  })).filter(line => line.product);
+}
+
+function storeBagTotal() {
+  return storeBagLines().reduce((total, line) => total + (line.product.priceAmount * line.quantity), 0);
+}
+
+function formatStoreMoney(amount) {
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
+}
+
+function storeBagMutationIsLocked() {
+  if (!profileStoreCheckoutPending) return false;
+  profileStoreNotice = 'Checkout is still in progress. Your bag stays locked until the store returns a final result.';
+  return true;
+}
+
+function addStoreProduct(cardId) {
+  if (storeBagMutationIsLocked()) return;
+  const productItem = profileStoreProducts.find(item => item.id === cardId);
+  if (!productItem) return;
+  const existing = profileStoreBag.find(line => line.cardId === cardId);
+  if ((existing?.quantity || 0) >= 10 || storeBagCount() >= 20) {
+    profileStoreNotice = 'Your bag can hold up to 10 of one card and 20 cards total.';
+    return;
+  }
+  profileStoreBag = existing
+    ? profileStoreBag.map(line => line.cardId === cardId ? { ...line, quantity: line.quantity + 1 } : line)
+    : [...profileStoreBag, { cardId, quantity: 1 }];
+  profileStoreNotice = `${productItem.title} added to your bag.`;
+}
+
+function updateStoreQuantity(cardId, delta) {
+  if (storeBagMutationIsLocked()) return;
+  const current = profileStoreBag.find(line => line.cardId === cardId);
+  if (!current) return;
+  if (delta > 0 && (current.quantity >= 10 || storeBagCount() >= 20)) {
+    profileStoreNotice = 'Your bag can hold up to 10 of one card and 20 cards total.';
+    return;
+  }
+  const nextQuantity = current.quantity + delta;
+  profileStoreBag = nextQuantity > 0
+    ? profileStoreBag.map(line => line.cardId === cardId ? { ...line, quantity: nextQuantity } : line)
+    : profileStoreBag.filter(line => line.cardId !== cardId);
+  profileStoreNotice = '';
+}
+
+function removeStoreProduct(cardId) {
+  if (storeBagMutationIsLocked()) return;
+  profileStoreBag = profileStoreBag.filter(line => line.cardId !== cardId);
+  profileStoreNotice = '';
+}
+
+function removeCompletedStoreItems(completedItems) {
+  if (!Array.isArray(completedItems) || !completedItems.length || !Array.isArray(profileStoreCheckoutSnapshot)) return 0;
+  const requestedByCard = new Map(profileStoreCheckoutSnapshot.map(line => [line.cardId, line.quantity]));
+  const completedByCard = new Map();
+  let removed = 0;
+  completedItems.forEach(item => {
+    const key = String(item?.cardId || item?.productId || item?.id || '');
+    const quantity = Math.max(0, Math.floor(Number(item?.quantity) || 0));
+    const productItem = profileStoreProducts.find(product =>
+      key === product.id || key === product.iosProductId || key === product.androidProductId
+    );
+    if (!productItem || !quantity) return;
+    const requested = requestedByCard.get(productItem.id) || 0;
+    const alreadyCompleted = completedByCard.get(productItem.id) || 0;
+    completedByCard.set(productItem.id, Math.min(requested, alreadyCompleted + quantity));
+  });
+  profileStoreBag = profileStoreBag.flatMap(line => {
+    const completed = completedByCard.get(line.cardId) || 0;
+    removed += Math.min(line.quantity, completed);
+    const quantity = line.quantity - completed;
+    return quantity > 0 ? [{ ...line, quantity }] : [];
+  });
+  profileStoreCheckoutSnapshot = profileStoreCheckoutSnapshot.flatMap(line => {
+    const quantity = line.quantity - (completedByCard.get(line.cardId) || 0);
+    return quantity > 0 ? [{ ...line, quantity }] : [];
+  });
+  return removed;
+}
+
+function requestStoreCheckout() {
+  const lines = storeBagLines();
+  if (!lines.length) {
+    profileStoreNotice = 'Your bag is empty. Choose a card to continue.';
+    renderScreen();
+    return;
+  }
+  if (profileStoreCheckoutPending) return;
+
+  profileStoreCheckoutRequestId = window.crypto?.randomUUID?.() ||
+    `poplur-store-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  profileStoreCheckoutSnapshot = lines.map(line => ({
+    cardId: line.product.id,
+    iosProductId: line.product.iosProductId,
+    androidProductId: line.product.androidProductId,
+    quantity: line.quantity,
+  }));
+  profileStoreCheckoutPending = true;
+  profileStoreNotice = 'Opening secure checkout…';
+
+  const message = {
+    type: 'poplurStoreCheckoutRequested',
+    requestId: profileStoreCheckoutRequestId,
+    currency: 'USD',
+    total: Number(storeBagTotal().toFixed(2)),
+    items: lines.map(line => ({
+      id: line.product.id,
+      cardId: line.product.id,
+      iosProductId: line.product.iosProductId,
+      androidProductId: line.product.androidProductId,
+      name: line.product.title,
+      quantity: line.quantity,
+      unitPrice: line.product.priceAmount,
+      credits: line.product.credits,
+      creditTotal: line.product.credits * line.quantity,
+      lineTotal: Number((line.product.priceAmount * line.quantity).toFixed(2)),
+    })),
+  };
+
+  if (window.parent === window) {
+    profileStoreCheckoutPending = false;
+    profileStoreCheckoutRequestId = null;
+    profileStoreCheckoutSnapshot = null;
+    profileStoreNotice = 'Secure checkout is available in the Poplur app.';
+    renderScreen();
+    return;
+  }
+  window.parent.postMessage(message, '*');
+  renderScreen();
+}
+
+function handleStoreCheckoutResult(data) {
+  if (!data || data.type !== 'poplurStoreCheckoutResult') return;
+  if (!profileStoreCheckoutPending || typeof profileStoreCheckoutRequestId !== 'string') return;
+  if (typeof data.requestId !== 'string' || data.requestId !== profileStoreCheckoutRequestId) return;
+
+  const status = String(data.status || '').toLowerCase();
+  if (!['pending', 'success', 'cancelled', 'canceled', 'failure'].includes(status)) return;
+  const completed = removeCompletedStoreItems(data.completedItems);
+  if (status === 'pending') {
+    profileStoreNotice = data.message || (completed
+      ? 'Completed items were verified. Your remaining bag stays locked while approval is pending.'
+      : 'Purchase approval is pending. Your bag stays locked until the store returns a final result.');
+  } else {
+    const remainingRequested = Array.isArray(profileStoreCheckoutSnapshot)
+      ? profileStoreCheckoutSnapshot.reduce((total, line) => total + line.quantity, 0)
+      : 0;
+    profileStoreCheckoutPending = false;
+    profileStoreCheckoutRequestId = null;
+    profileStoreCheckoutSnapshot = null;
+    if (status === 'success') {
+      if (remainingRequested === 0) {
+        profileStoreView = 'catalog';
+        profileStoreProduct = null;
+      }
+      profileStoreNotice = remainingRequested > 0
+        ? 'Verified items were removed, but an unmatched item remains in your bag. It was not charged.'
+        : (data.message || 'Purchase verified. Your Poplur Credits are ready.');
+    } else if (status === 'cancelled' || status === 'canceled') {
+      profileStoreNotice = data.message || (completed
+        ? 'Checkout stopped after completed items were verified. Unpurchased items remain in your bag.'
+        : 'Checkout was cancelled. Your bag is unchanged.');
+    } else {
+      profileStoreNotice = data.message || (completed
+        ? 'Completed items were verified. Unpurchased items remain in your bag.'
+        : 'Checkout could not be completed. Your bag is unchanged.');
+    }
+  }
+  renderScreen();
+}
+
+window.addEventListener('message', event => {
+  if (window.parent !== window && event.source !== window.parent) return;
+  handleStoreCheckoutResult(event.data);
+});
+
 
 const profileStats = [
   {
@@ -312,6 +540,9 @@ const profileStats = [
     label: 'Total Posts',
     delta: '+18 this month',
     description: 'Your publishing pace is above your recent four-week average.',
+    benchmark: 'You publish 1.6× more often than creators with a similar radius.',
+    driver: 'Food and local-discovery posts account for 61% of your recent radius growth.',
+    action: 'Keep the pace, but move one of every four posts into a new city opportunity window.',
     points: [34, 52, 46, 68, 74, 88, 96],
   },
   {
@@ -321,6 +552,9 @@ const profileStats = [
     label: 'Radius Reach',
     delta: '+4.2 km today',
     description: 'Harbourfront and downtown posts are extending your active radius.',
+    benchmark: 'Your 41.8 km active reach is in the top 18% of nearby creators.',
+    driver: 'Fast first-hour reactions are carrying your posts past their original neighbourhoods.',
+    action: 'Post in Toronto between 7:30–9:00 PM, then test one global opportunity each week.',
     points: [28, 38, 51, 44, 63, 72, 84],
   },
   {
@@ -330,6 +564,9 @@ const profileStats = [
     label: 'Trending Speed',
     delta: 'Top 12% nearby',
     description: 'Your latest post is spreading eight times faster than your baseline.',
+    benchmark: 'Your strongest posts reach their first 100 viewers 6 minutes faster than peers.',
+    driver: 'Clear subjects in the first second and comment replies within ten minutes raise velocity.',
+    action: 'Lead with the location or payoff immediately and answer the first three comments.',
     points: [18, 26, 44, 39, 58, 78, 92],
   },
   {
@@ -339,7 +576,63 @@ const profileStats = [
     label: 'Creator Streak',
     delta: '12 days',
     description: 'Keep posting daily to reach the next creator streak milestone.',
+    benchmark: 'Only 9% of creators in your radius have maintained a streak this long.',
+    driver: 'Your strongest days pair one discovery post with one short reply or update.',
+    action: 'Protect the streak with a prepared 9–14 second post before your local 9:00 PM cutoff.',
     points: [22, 31, 42, 54, 66, 78, 90],
+  },
+];
+
+const worldPostingOpportunities = [
+  {
+    city: 'Toronto',
+    region: 'Canada',
+    content: 'Food · local discovery',
+    window: 'Thu 7:30–9:00 PM local',
+    lift: '+31%',
+    confidence: '92%',
+    reason: 'Viewer demand is climbing while the number of fresh neighbourhood posts is still low.',
+    move: 'Lead with the place in the first second, show the payoff by second four, and reply early.',
+  },
+  {
+    city: 'Lagos',
+    region: 'Nigeria',
+    content: 'Fashion · music',
+    window: 'Sat 5:00–7:00 PM local',
+    lift: '+24%',
+    confidence: '87%',
+    reason: 'Weekend reshares are carrying visual culture posts beyond their original radius.',
+    move: 'Use a strong reveal, keep the cut under 14 seconds, and add a location-aware caption.',
+  },
+  {
+    city: 'London',
+    region: 'United Kingdom',
+    content: 'News · live events',
+    window: 'Wed 12:00–1:30 PM local',
+    lift: '+18%',
+    confidence: '84%',
+    reason: 'Midday viewers are reacting quickly to concise, place-specific updates.',
+    move: 'State what changed, where it happened, and why it matters before the fifth second.',
+  },
+  {
+    city: 'São Paulo',
+    region: 'Brazil',
+    content: 'Sports · comedy',
+    window: 'Sun 6:00–8:00 PM local',
+    lift: '+16%',
+    confidence: '80%',
+    reason: 'Conversation density is high, but creator supply drops after live events finish.',
+    move: 'Post the reaction immediately after the event and ask one specific question.',
+  },
+  {
+    city: 'Seoul',
+    region: 'South Korea',
+    content: 'Tech · beauty',
+    window: 'Tue 8:00–10:00 PM local',
+    lift: '+14%',
+    confidence: '78%',
+    reason: 'Saves and repeat views are strongest for fast demonstrations during evening discovery.',
+    move: 'Show the finished result first, then explain one technique with captions on.',
   },
 ];
 
@@ -471,6 +764,7 @@ function renderNav() {
 
 function renderScreen() {
   stopPhoneBoot();
+  stopPhoneThemeChange();
   stopStoreCarousel();
   const group = groups[activeGroup];
   const item = group.screens.find(s => s.id === activeScreen) || group.screens[0];
@@ -562,16 +856,32 @@ screenEl.addEventListener('click', e => {
     return;
   }
 
+  const storeQuantity = e.target.closest('[data-store-quantity]');
+  if (storeQuantity) {
+    updateStoreQuantity(storeQuantity.dataset.storeQuantity, Number(storeQuantity.dataset.delta) || 0);
+    renderScreen();
+    return;
+  }
+
+  const storeRemove = e.target.closest('[data-store-remove]');
+  if (storeRemove) {
+    removeStoreProduct(storeRemove.dataset.storeRemove);
+    renderScreen();
+    return;
+  }
+
   const storeProduct = e.target.closest('[data-store-product]');
   if (storeProduct) {
     profileStoreProduct = storeProduct.dataset.storeProduct;
+    profileStoreView = 'catalog';
     profileStoreNotice = '';
     renderScreen();
     return;
   }
 
   if (e.target.closest('[data-store-back]')) {
-    profileStoreProduct = null;
+    if (profileStoreView === 'bag') profileStoreView = 'catalog';
+    else profileStoreProduct = null;
     profileStoreNotice = '';
     renderScreen();
     return;
@@ -579,14 +889,19 @@ screenEl.addEventListener('click', e => {
 
   const storeAction = e.target.closest('[data-store-action]');
   if (storeAction) {
-    if (storeAction.dataset.storeAction === 'add') {
-      const productItem = profileStoreProducts.find(item => item.id === profileStoreProduct);
-      profileCartCount += 1;
-      profileStoreNotice = `${productItem?.title || 'Item'} added to your cart.`;
-    } else {
-      profileStoreNotice = profileCartCount
-        ? `Checkout is ready with ${profileCartCount} item${profileCartCount === 1 ? '' : 's'}.`
-        : 'Choose a product before opening checkout.';
+    const action = storeAction.dataset.storeAction;
+    if (action === 'add') {
+      addStoreProduct(profileStoreProduct || profileStorePromos[profileStoreSlide]?.product);
+    } else if (action === 'bag') {
+      profileStoreProduct = null;
+      profileStoreView = 'bag';
+      profileStoreNotice = '';
+    } else if (action === 'continue') {
+      profileStoreView = 'catalog';
+      profileStoreNotice = '';
+    } else if (action === 'checkout') {
+      requestStoreCheckout();
+      return;
     }
     renderScreen();
     return;
@@ -670,6 +985,19 @@ screenEl.addEventListener('click', e => {
     return;
   }
 
+  const menuChoice = e.target.closest('[data-phone-menu-index]');
+  if (menuChoice && activeScreen === 'profile-phone' && phoneMode === 'menu') {
+    const choiceIndex = Number(menuChoice.dataset.phoneMenuIndex);
+    const items = phoneMenuItems();
+    if (Number.isInteger(choiceIndex) && items[choiceIndex]) {
+      phoneMenuIndex = choiceIndex;
+      phoneVibrate(18);
+      playPhoneKeyTone('5');
+      activatePhoneMenuItem();
+    }
+    return;
+  }
+
   const key = e.target.closest('[data-phone-key]');
   if (key) {
     handlePhoneKey(key.dataset.phoneKey);
@@ -726,6 +1054,19 @@ function stopPhoneBoot() {
   }
 }
 
+function stopPhoneThemeChange() {
+  if (phoneThemeTimer) {
+    window.clearTimeout(phoneThemeTimer);
+    phoneThemeTimer = null;
+  }
+  const page = screenEl.querySelector('.phone-page');
+  const device = screenEl.querySelector('.popular-phone-device');
+  const lcd = screenEl.querySelector('.phone-lcd-overlay');
+  page?.classList.remove('phone-theme-changing');
+  device?.classList.remove('phone-vibrating');
+  lcd?.classList.remove('theme-changed');
+}
+
 function finishPhoneBoot(page, device) {
   stopPhoneBoot();
   phoneMode = 'menu';
@@ -745,8 +1086,28 @@ function stopStoreCarousel() {
 function setStoreSlide(index) {
   const count = profileStorePromos.length;
   profileStoreSlide = (index + count) % count;
-  const track = screenEl.querySelector('.store-carousel-track');
-  if (track) track.style.transform = `translateX(-${profileStoreSlide * 100}%)`;
+  const promo = profileStorePromos[profileStoreSlide];
+  const featured = screenEl.querySelector('[data-store-featured]');
+  if (featured && promo) {
+    featured.className = `store-promo ${promo.tone}`;
+    featured.setAttribute('aria-label', `${promo.title} featured product`);
+    const kicker = featured.querySelector('[data-store-featured-kicker]');
+    const title = featured.querySelector('[data-store-featured-title]');
+    const copy = featured.querySelector('[data-store-featured-copy]');
+    const credits = featured.querySelector('[data-store-featured-credits]');
+    const price = featured.querySelector('[data-store-featured-price]');
+    const link = featured.querySelector('[data-store-featured-link]');
+    const viewer = featured.querySelector('model-viewer');
+    if (kicker) kicker.textContent = promo.kicker;
+    if (title) title.textContent = promo.title;
+    if (copy) copy.textContent = promo.copy;
+    if (credits) credits.textContent = promo.credits;
+    if (price) price.textContent = promo.price;
+    if (link) link.dataset.storeProduct = promo.product;
+    if (viewer && viewer.getAttribute('poster') !== promo.poster) viewer.setAttribute('poster', promo.poster);
+    if (viewer && viewer.getAttribute('src') !== promo.model) viewer.setAttribute('src', promo.model);
+    if (viewer) viewer.setAttribute('alt', `${promo.title} rotating 3D preview`);
+  }
   screenEl.querySelectorAll('[data-store-slide]').forEach((dot, dotIndex) => {
     dot.classList.toggle('on', dotIndex === profileStoreSlide);
     dot.setAttribute('aria-current', dotIndex === profileStoreSlide ? 'true' : 'false');
@@ -757,7 +1118,7 @@ function initStoreTwin() {
   if (!screenEl.querySelector('.store-carousel')) return;
   setStoreSlide(profileStoreSlide);
   if (!profileSettingState.subscreenCarouselAutoplay) return;
-  storeCarouselTimer = window.setInterval(() => setStoreSlide(profileStoreSlide + 1), 4200);
+  storeCarouselTimer = window.setInterval(() => setStoreSlide(profileStoreSlide + 1), 3000);
 }
 
 function initPhoneTwin() {
@@ -781,10 +1142,8 @@ function applyPhoneColor() {
   const colorway = currentPhoneColorway();
   const rest = page.querySelector('.phone-resting');
   const boot = page.querySelector('.phone-boot-frame');
-  const label = page.querySelector('.phone-color-label');
   if (rest) rest.src = colorway.rest;
   if (boot) boot.style.backgroundImage = `url("${colorway.boot}")`;
-  if (label) label.textContent = colorway.title;
 }
 
 function startPhoneBoot() {
@@ -794,6 +1153,7 @@ function startPhoneBoot() {
   if (!page || !boot || !device) return;
 
   stopPhoneBoot();
+  stopPhoneThemeChange();
   phoneMenuScreen = 'main';
   phoneMenuIndex = 0;
   phoneMode = 'boot';
@@ -843,7 +1203,40 @@ function setPhoneBootFrame(frame) {
 function stepPhoneColor(direction) {
   phoneColorIndex = (phoneColorIndex + direction + phoneColorways.length) % phoneColorways.length;
   applyPhoneColor();
-  startPhoneBoot();
+  startPhoneThemeChange();
+}
+
+function startPhoneThemeChange() {
+  const page = screenEl.querySelector('.phone-page');
+  const device = screenEl.querySelector('.popular-phone-device');
+  const lcd = screenEl.querySelector('.phone-lcd-overlay');
+  if (!page || !device || !lcd) return;
+
+  stopPhoneBoot();
+  stopPhoneThemeChange();
+  phoneMode = 'theme';
+  page.classList.remove('is-booting');
+  page.classList.add('is-ready', 'phone-theme-changing');
+  device.classList.add('phone-vibrating');
+  lcd.classList.add('theme-changed');
+  lcd.innerHTML = '<div class="lcd-theme-changed"><span>THEME</span><strong>CHANGED</strong></div>';
+  phoneVibrate([52, 34, 52, 34, 82]);
+  page.classList.remove('phone-led-flash');
+  void page.offsetWidth;
+  page.classList.add('phone-led-flash');
+  try {
+    if (window.parent !== window) window.parent.postMessage({ type: 'poplur-phone-theme-effects' }, '*');
+  } catch (_) {}
+
+  phoneThemeTimer = window.setTimeout(() => {
+    phoneThemeTimer = null;
+    if (activeScreen !== 'profile-phone' || !page.isConnected) return;
+    page.classList.remove('phone-theme-changing');
+    device.classList.remove('phone-vibrating');
+    lcd.classList.remove('theme-changed');
+    phoneMode = 'menu';
+    renderPhoneMenu();
+  }, 1280);
 }
 
 function phoneVibrate(pattern = 18) {
@@ -860,6 +1253,7 @@ function phoneMenuItems() {
 function renderPhoneMenu() {
   const lcd = screenEl.querySelector('.phone-lcd-overlay');
   if (!lcd) return;
+  lcd.classList.remove('theme-changed');
 
   if (phoneMode === 'call') {
     lcd.innerHTML = phoneStatus('CALLING', 'POPLUR PHONE', '5 HANG UP  * BACK');
@@ -889,7 +1283,7 @@ function renderPhoneMenu() {
     <div class="lcd-topline-mini"><span>▮▮▮ ⋮</span><span>▮▮</span></div>
     <div class="lcd-title-row"><strong>${esc(menu.title).toUpperCase()}</strong><em>${phoneMenuIndex + 1}/${items.length}</em></div>
     <div class="lcd-menu-list">
-      ${visible.map((item, offset) => phoneMenuRow(item, start + offset === phoneMenuIndex)).join('')}
+      ${visible.map((item, offset) => phoneMenuRow(item, start + offset, start + offset === phoneMenuIndex)).join('')}
     </div>
     <div class="lcd-softkeys">2/8 SCROLL&nbsp;&nbsp;5 OK&nbsp;&nbsp;* BACK</div>
   `;
@@ -903,20 +1297,21 @@ function phoneStatus(line1, line2, footer) {
   `;
 }
 
-function phoneMenuRow(item, selected) {
+function phoneMenuRow(item, index, selected) {
   return `
-    <div class="lcd-menu-row ${selected ? 'selected' : ''}">
+    <button type="button" class="lcd-menu-row ${selected ? 'selected' : ''}" data-phone-menu-index="${index}" aria-label="Open ${esc(item.title)}">
       <b>${esc(item.glyph)}</b>
       <span><strong>${esc(item.title)}</strong><em>${esc(item.detail)}</em></span>
-    </div>
+    </button>
   `;
 }
 
 function handlePhoneKey(key) {
   if (activeScreen !== 'profile-phone') return;
-  if (phoneMode === 'boot') return;
   phoneVibrate(18);
   pulsePhoneKey(key);
+  playPhoneKeyTone(key);
+  if (phoneMode === 'boot' || phoneMode === 'theme') return;
 
   if (phoneMode !== 'menu') {
     if (key === '*') {
@@ -965,6 +1360,49 @@ function handlePhoneKey(key) {
       activatePhoneMenuItem();
     }
   }
+}
+
+function playPhoneKeyTone(key) {
+  const dtmf = {
+    '1': [697, 1209], '2': [697, 1336], '3': [697, 1477],
+    '4': [770, 1209], '5': [770, 1336], '6': [770, 1477],
+    '7': [852, 1209], '8': [852, 1336], '9': [852, 1477],
+    '*': [941, 1209], '0': [941, 1336], '#': [941, 1477],
+  }[key];
+  if (!dtmf) return;
+  try {
+    const AudioCtor = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtor) return;
+    phoneToneContext ||= new AudioCtor();
+    const context = phoneToneContext;
+    if (context.state === 'suspended') void context.resume();
+    if (phoneToneSuspendTimer) window.clearTimeout(phoneToneSuspendTimer);
+    const gain = context.createGain();
+    const started = context.currentTime;
+    gain.gain.setValueAtTime(0.0001, started);
+    gain.gain.exponentialRampToValueAtTime(0.055, started + 0.008);
+    gain.gain.setValueAtTime(0.055, started + 0.075);
+    gain.gain.exponentialRampToValueAtTime(0.0001, started + 0.115);
+    gain.connect(context.destination);
+    let ended = 0;
+    dtmf.forEach(frequency => {
+      const oscillator = context.createOscillator();
+      oscillator.type = 'sine';
+      oscillator.frequency.setValueAtTime(frequency, started);
+      oscillator.connect(gain);
+      oscillator.onended = () => {
+        oscillator.disconnect();
+        ended += 1;
+        if (ended === dtmf.length) gain.disconnect();
+      };
+      oscillator.start(started);
+      oscillator.stop(started + 0.12);
+    });
+    phoneToneSuspendTimer = window.setTimeout(() => {
+      phoneToneSuspendTimer = null;
+      if (phoneToneContext?.state === 'running') void phoneToneContext.suspend();
+    }, 700);
+  } catch (_) {}
 }
 
 function activatePhoneMenuItem() {
@@ -1531,37 +1969,41 @@ function thread(item) {
   `;
 }
 
+function storeModelViewer(item, className) {
+  return `<model-viewer class="${className}" src="${esc(item.model)}" poster="${esc(item.poster)}" alt="${esc(item.title)} rotating 3D preview" loading="eager" reveal="auto" auto-rotate rotation-per-second="18deg" camera-controls interaction-prompt="none" environment-image="neutral" shadow-intensity="1" exposure="1.08"></model-viewer>`;
+}
+
 function storeScreen() {
+  if (profileStoreView === 'bag') return storeBagScreen();
+
   const selected = profileStoreProducts.find(item => item.id === profileStoreProduct);
+  const bagCount = storeBagCount();
   if (selected) {
     return `
-      <div class="ios-screen store-page profile-scroll-page">
+      <div class="ios-screen store-page store-new profile-scroll-page">
         <div class="profile-subscreen-toolbar store-toolbar">
           <button type="button" class="profile-back" data-store-back aria-label="Back to store">‹</button>
-          <div>
-            <h1>Product</h1>
-            <span>Poplur Store · ${profileCartCount} in cart</span>
-          </div>
+          <div><h1>${esc(selected.title)}</h1><span>${selected.credits.toLocaleString('en-US')} Poplur Credits</span></div>
+          <button type="button" class="store-cart-button" data-store-action="bag" aria-label="Open bag with ${bagCount} items">Bag ${bagCount}</button>
         </div>
         <div class="store-detail">
-          <div class="store-detail-visual"><img src="${selected.img}" alt=""></div>
-          <span class="profile-kicker">FEATURED</span>
+          <div class="store-detail-visual ${esc(selected.tone)}">${storeModelViewer(selected, 'store-detail-model')}</div>
+          <span class="profile-kicker">${esc(selected.kicker)}</span>
           <h2>${esc(selected.title)}</h2>
           <strong class="store-detail-price">${esc(selected.price)}</strong>
           <p>${esc(selected.description)}</p>
-          <button type="button" class="profile-action wide" data-store-action="add">Add to cart</button>
-          <button type="button" class="profile-secondary-action" data-store-action="checkout">
-            Open cart${profileCartCount ? ` (${profileCartCount})` : ''}
-          </button>
+          <div class="store-credit-pill">${selected.credits.toLocaleString('en-US')} credits after verified purchase</div>
+          <button type="button" class="profile-action wide" data-store-action="add" ${profileStoreCheckoutPending ? 'disabled aria-disabled="true"' : ''}>Add to Bag</button>
+          <button type="button" class="profile-secondary-action" data-store-action="bag">View Bag${bagCount ? ` (${bagCount})` : ''}</button>
           ${profileStoreNotice ? `<div class="profile-notice" role="status">${esc(profileStoreNotice)}</div>` : ''}
         </div>
       </div>
     `;
   }
 
-  const tabs = [
-    ['featured', 'Featured'], ['hardware', 'Hardware'], ['cards', 'Cards'], ['radius', 'Radius'],
-  ];
+  const featured = profileStorePromos[profileStoreSlide] || profileStorePromos[0];
+  const featuredProduct = profileStoreProducts.find(item => item.id === featured.product) || profileStoreProducts[0];
+  const tabs = [['featured', 'Featured'], ['cards', 'Cards']];
   const visibleProducts = profileStoreTab === 'featured'
     ? profileStoreProducts
     : profileStoreProducts.filter(item => item.category === profileStoreTab);
@@ -1569,38 +2011,76 @@ function storeScreen() {
     <div class="ios-screen store-page store-new profile-scroll-page">
       <nav class="store-nav" aria-label="Store categories">
         <img class="store-logo" src="${A.logo}" alt="Poplur">
-        <div class="store-tabs">
-          ${tabs.map(([id, label]) => `<button type="button" class="${profileStoreTab === id ? 'on' : ''}" data-store-tab="${id}" aria-pressed="${profileStoreTab === id}">${label}</button>`).join('')}
-        </div>
-        <button type="button" class="store-cart-button" data-store-action="checkout" aria-label="Open bag">Bag ${profileCartCount}</button>
+        <div class="store-tabs">${tabs.map(([id, label]) => `<button type="button" class="${profileStoreTab === id ? 'on' : ''}" data-store-tab="${id}" aria-pressed="${profileStoreTab === id}">${label}</button>`).join('')}</div>
+        <button type="button" class="store-cart-button" data-store-action="bag" aria-label="Open bag with ${bagCount} items">Bag ${bagCount}</button>
       </nav>
 
       <header class="store-heading">
-        <h1>Poplur Store</h1>
-        <p>Hardware, World Service cards, and more room for every pop.</p>
+        <span>POPLUR CARDS</span>
+        <h1>Pick your card.<br>Power your Poplur.</h1>
+        <p>Explore every card in 3D, then add Poplur Credits through verified in-app checkout.</p>
       </header>
 
-      <section class="store-carousel" aria-label="Featured products">
-        <div class="store-carousel-track" style="transform:translateX(-${profileStoreSlide * 100}%)">
-          ${profileStorePromos.map(promo => `
-            <button type="button" class="store-promo ${promo.tone}" data-store-product="${promo.product}">
-              <span class="store-promo-copy"><small>${promo.kicker}</small><strong>${promo.title}</strong><em>${promo.copy}</em></span>
-              <img src="${promo.img}" alt="">
-            </button>
-          `).join('')}
-        </div>
-        <div class="store-carousel-dots" aria-label="Choose featured item">
-          ${profileStorePromos.map((_, index) => `<button type="button" class="${index === profileStoreSlide ? 'on' : ''}" data-store-slide="${index}" aria-label="Featured item ${index + 1}"></button>`).join('')}
+      <section class="store-carousel" aria-label="Featured card carousel">
+        <article class="store-promo ${esc(featured.tone)}" data-store-featured aria-label="${esc(featured.title)} featured product">
+          <div class="store-promo-copy">
+            <small data-store-featured-kicker>${esc(featured.kicker)}</small>
+            <strong data-store-featured-title>${esc(featured.title)}</strong>
+            <em data-store-featured-copy>${esc(featured.copy)}</em>
+            <b data-store-featured-credits>${esc(featured.credits)}</b>
+            <span data-store-featured-price>${esc(featured.price)}</span>
+            <button type="button" class="store-promo-link" data-store-featured-link data-store-product="${esc(featured.product)}">View card</button>
+          </div>
+          ${storeModelViewer(featuredProduct, 'store-featured-model')}
+        </article>
+        <div class="store-carousel-dots" aria-label="Choose featured card">
+          ${profileStorePromos.map((promo, index) => `<button type="button" class="${index === profileStoreSlide ? 'on' : ''}" data-store-slide="${index}" aria-label="Show ${esc(promo.title)}" aria-current="${index === profileStoreSlide}"></button>`).join('')}
         </div>
       </section>
 
       <section class="store-products">
-        <div class="store-section-title"><img src="${A.storeBag}" alt=""><div><small>${profileStoreTab === 'featured' ? 'SHOP' : 'CATEGORY'}</small><h2>${tabs.find(([id]) => id === profileStoreTab)?.[1] || 'Featured'}</h2></div></div>
-        <div class="product-grid">
-          ${visibleProducts.map(product).join('')}
-        </div>
+        <div class="store-section-title"><img src="${A.storeBag}" alt=""><div><small>CARDS</small><h2>Shop the collection</h2></div></div>
+        <div class="product-grid">${visibleProducts.map(product).join('')}</div>
         ${profileStoreNotice ? `<div class="profile-notice" role="status">${esc(profileStoreNotice)}</div>` : ''}
       </section>
+    </div>
+  `;
+}
+
+function storeBagScreen() {
+  const lines = storeBagLines();
+  const totalCredits = lines.reduce((total, line) => total + (line.product.credits * line.quantity), 0);
+  return `
+    <div class="ios-screen store-page store-new profile-scroll-page">
+      <div class="profile-subscreen-toolbar store-toolbar">
+        <button type="button" class="profile-back" data-store-back aria-label="Back to store">‹</button>
+        <div><h1>Your Bag</h1><span>${storeBagCount()} item${storeBagCount() === 1 ? '' : 's'}</span></div>
+      </div>
+      <main class="store-bag">
+        ${lines.length ? `
+          <div class="store-bag-lines">${lines.map(line => `
+            <article class="store-bag-line">
+              <img class="store-product-poster" src="${esc(line.product.poster)}" alt="">
+              <div class="store-bag-copy"><strong>${esc(line.product.title)}</strong><span>${line.product.credits.toLocaleString('en-US')} credits each</span><b>${formatStoreMoney(line.product.priceAmount * line.quantity)}</b></div>
+              <div class="store-quantity" aria-label="Quantity for ${esc(line.product.title)}">
+                <button type="button" data-store-quantity="${esc(line.product.id)}" data-delta="-1" aria-label="Decrease quantity" ${profileStoreCheckoutPending ? 'disabled' : ''}>−</button>
+                <span>${line.quantity}</span>
+                <button type="button" data-store-quantity="${esc(line.product.id)}" data-delta="1" aria-label="Increase quantity" ${profileStoreCheckoutPending || line.quantity >= 10 || storeBagCount() >= 20 ? 'disabled' : ''}>+</button>
+              </div>
+              <button type="button" class="store-remove" data-store-remove="${esc(line.product.id)}" ${profileStoreCheckoutPending ? 'disabled' : ''}>Remove</button>
+            </article>
+          `).join('')}</div>
+          <section class="store-bag-summary">
+            <div><span>Total credits</span><strong>${totalCredits.toLocaleString('en-US')}</strong></div>
+            <div><span>Total</span><strong>${formatStoreMoney(storeBagTotal())}</strong></div>
+            <p>Credits are added only after Poplur receives a verified purchase result.</p>
+            <button type="button" class="store-checkout-button" data-store-action="checkout" ${profileStoreCheckoutPending ? 'disabled aria-busy="true"' : ''}>${profileStoreCheckoutPending ? 'Checkout in progress…' : `Check Out · ${formatStoreMoney(storeBagTotal())}`}</button>
+          </section>
+        ` : `
+          <section class="store-empty-bag"><div class="store-empty-icon">P</div><h2>Your bag is empty.</h2><p>Choose a 3D Poplur card to add credits to your account.</p><button type="button" class="profile-action wide" data-store-action="continue">Shop Cards</button></section>
+        `}
+        ${profileStoreNotice ? `<div class="profile-notice" role="status">${esc(profileStoreNotice)}</div>` : ''}
+      </main>
     </div>
   `;
 }
@@ -1608,8 +2088,10 @@ function storeScreen() {
 function product(item) {
   return `
     <button type="button" class="product-card product-button" data-store-product="${esc(item.id)}">
-      <img src="${item.img}" alt="">
+      <img class="store-product-poster" src="${esc(item.poster)}" alt="${esc(item.title)} 3D card">
+      <small>${esc(item.kicker)}</small>
       <strong>${esc(item.title)}</strong>
+      <em>${item.credits.toLocaleString('en-US')} Poplur Credits</em>
       <span>${esc(item.price)} · View</span>
     </button>
   `;
@@ -1985,30 +2467,104 @@ function statsScreen() {
             `).join('')}
           </div>
           <p>${esc(selected.description)}</p>
+          <div class="stats-detail-explanation">
+            <article><span>BENCHMARK</span><p>${esc(selected.benchmark)}</p></article>
+            <article><span>WHAT DRIVES IT</span><p>${esc(selected.driver)}</p></article>
+            <article><span>NEXT MOVE</span><p>${esc(selected.action)}</p></article>
+          </div>
         </div>
       </div>
     `;
   }
 
   return `
-    <div class="ios-screen stats-page profile-scroll-page">
-      <div class="stats-header">
-        <div>
-          <div class="page-title"><img src="${H.stats}" alt=""><h1 style="font-size:36px">Stats</h1></div>
-          <p class="page-sub">Creator performance and radius progress.</p>
+    <div class="ios-screen stats-page stats-world-page profile-scroll-page">
+      <header class="stats-world-header">
+        <span class="profile-kicker">AI WORLD INTELLIGENCE</span>
+        <h1>Your signal, everywhere.</h1>
+        <p>Live recommendations from your performance and anonymized aggregate activity across Poplur.</p>
+      </header>
+
+      <section class="stats-globe-stage" aria-label="Your worldwide creator performance">
+        <div class="stats-globe-halo" aria-hidden="true"></div>
+        <div class="stats-globe-spin" aria-hidden="true">
+          <div class="stats-globe-sphere">
+            <i class="stats-meridian m1"></i>
+            <i class="stats-meridian m2"></i>
+            <i class="stats-meridian m3"></i>
+            <i class="stats-meridian m4"></i>
+            <i class="stats-latitude l1"></i>
+            <i class="stats-latitude l2"></i>
+            <i class="stats-latitude l3"></i>
+            <i class="stats-latitude l4"></i>
+            <i class="stats-continent c1"></i>
+            <i class="stats-continent c2"></i>
+            <i class="stats-continent c3"></i>
+            <i class="stats-continent c4"></i>
+          </div>
         </div>
-        <img src="${A.statsSphere}" alt="">
-      </div>
-      <div class="ring"><div><div><strong>74%</strong><span>GOAL</span></div></div></div>
-      <div class="stats-grid">
-        ${profileStats.map(item => `
-          <button type="button" class="stat-card stat-button" data-stat-key="${esc(item.id)}">
-            <img src="${item.img}" alt="">
+
+        <div class="stats-globe-core">
+          <strong>74%</strong>
+          <span>WORLD GOAL</span>
+          <em>on track</em>
+        </div>
+
+        ${profileStats.map((item, index) => `
+          <button type="button" class="stats-orbit-callout callout-${index + 1}" data-stat-key="${esc(item.id)}" aria-label="Open ${esc(item.label)} details">
+            <span>${esc(item.label)}</span>
             <strong>${esc(item.value)}</strong>
-            <span>${esc(item.label)} · View</span>
+            <em>${esc(item.delta)}</em>
           </button>
         `).join('')}
-      </div>
+
+        <div class="stats-live-signal" aria-hidden="true"><i></i><span>AI MODEL LIVE</span></div>
+      </section>
+
+      <section class="stats-ai-briefing" aria-label="Worldwide posting opportunities">
+        <div class="stats-section-heading">
+          <div><span>YOUR NEXT BEST MOVES</span><h2>AI opportunity map</h2></div>
+          <strong>5 markets</strong>
+        </div>
+        <p class="stats-section-copy">Lift estimates compare each market’s current audience demand, creator supply, local time, content fit, and your own history. Times are shown in each city’s local time.</p>
+        <div class="stats-opportunity-list">
+          ${worldPostingOpportunities.map((item, index) => `
+            <article class="stats-opportunity ${index === 0 ? 'priority' : ''}">
+              <div class="stats-opportunity-rank">${String(index + 1).padStart(2, '0')}</div>
+              <div class="stats-opportunity-main">
+                <header>
+                  <div><h3>${esc(item.city)}</h3><span>${esc(item.region)}</span></div>
+                  <strong>${esc(item.lift)} lift</strong>
+                </header>
+                <div class="stats-opportunity-tags"><span>${esc(item.content)}</span><span>${esc(item.window)}</span></div>
+                <p><b>Why now:</b> ${esc(item.reason)}</p>
+                <p><b>What to do:</b> ${esc(item.move)}</p>
+                <footer><span>AI confidence</span><strong>${esc(item.confidence)}</strong><i style="--confidence:${esc(item.confidence)}"></i></footer>
+              </div>
+            </article>
+          `).join('')}
+        </div>
+      </section>
+
+      <section class="stats-improvement-plan" aria-label="Personal improvement plan">
+        <div class="stats-section-heading">
+          <div><span>PERSONAL PLAYBOOK</span><h2>How to grow your radius</h2></div>
+          <strong>Next 7 days</strong>
+        </div>
+        <ol>
+          <li><strong>Protect the hook.</strong><span>Name the place, result, or question in the first 1.5 seconds. Your clearest openings travel 2.3× farther.</span></li>
+          <li><strong>Post into demand gaps.</strong><span>Publish Toronto food on Thursday night, then test one global market instead of repeating a saturated local slot.</span></li>
+          <li><strong>Create conversation early.</strong><span>Reply to the first three comments within ten minutes. Comments add more radius than passive views.</span></li>
+          <li><strong>Keep clips decisive.</strong><span>Your 9–14 second videos retain 19% more viewers than longer posts; captions raise completion in sound-off sessions.</span></li>
+        </ol>
+      </section>
+
+      <section class="stats-method-card">
+        <span class="profile-kicker">HOW THIS AI WORKS</span>
+        <h2>Recommendations, explained.</h2>
+        <p>The model scores anonymized aggregate demand, active-post supply, completion, reactions, comment velocity, radius change, local time, and category fit. Your personal history adjusts the ranking so the advice is useful to you—not merely globally popular.</p>
+        <p>Lift is an estimate, not a guarantee. Confidence falls when a market has less recent activity. No other creator’s private identity or individual behaviour is shown.</p>
+      </section>
     </div>
   `;
 }
@@ -2043,7 +2599,6 @@ function phoneScreen() {
     <div class="ios-screen phone-page">
       <button type="button" class="phone-swipe-arrow left" data-phone-step="-1" aria-label="Previous phone colorway">‹</button>
       <button type="button" class="phone-swipe-arrow right" data-phone-step="1" aria-label="Next phone colorway">›</button>
-      <div class="phone-color-label">${esc(colorway.title)}</div>
       <div class="popular-phone-device">
         <img class="phone-resting" src="${colorway.rest}" alt="">
         <div class="phone-boot-frame" style="background-image:url('${colorway.boot}')"></div>

@@ -187,13 +187,13 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
     // nominal to fair in 42s and could reach SERIOUS(throttling), where the
     // only remaining response was a hard park.
     //
-    // Under pressure the preview steps down rather than parking. 20, not 15:
-    // measured on device, 15 reads as visible judder on the viewfinder ("camera
-    // is starting to lag"), and below ~20 the eye starts tracking individual
-    // frames. Most of the pressure-mode saving is taken where the user cannot
-    // see it — the sampled Vision/Core ML cadence below — not from the image.
-    private static let previewFrameRate = 24
-    private static let pressurePreviewFrameRate = 20
+    // Start at the previously pressure-only 20fps instead of waiting 42s for
+    // the enclosure to warm. Under pressure, 18fps is the lowest small step
+    // that remains usable without the obvious 15fps judder measured on device.
+    // Recording keeps its explicit 24fps budget below; this reduction applies
+    // to the sustained live preview and sampled analysis path.
+    private static let previewFrameRate = 20
+    private static let pressurePreviewFrameRate = 18
     private static let recordingFrameRateLimit = 24
     private static let previewAnalysisFrameSampleInterval: TimeInterval = 2.5
     // Each analysis wake opens the BGRA conversion plus a Vision/Core ML pass —

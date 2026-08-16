@@ -11,6 +11,8 @@ import {
   validatePremiumAIInput,
 } from "./ai/premiumAiFlows";
 
+export { verifyCardPurchase } from "./cardPurchases";
+
 admin.initializeApp();
 
 const db = admin.firestore();

@@ -57,6 +57,38 @@ firebase deploy --only functions:premiumAiAssist,poplurAiApi
 
 The callable maps `GOOGLE_AI_API_KEY` into the environment variables expected by the Google GenAI tooling. The HTTP API uses `GOOGLE_AI_API_KEY` directly on the backend. Override models with `POPLUR_IMAGE_MODEL`, `POPLUR_VIDEO_MODEL`, or `POPLUR_TEXT_MODEL` if needed.
 
+## Card Store Purchases
+
+`verifyCardPurchase` is the App Check-protected callable used after StoreKit or
+Google Play Billing returns a completed transaction. It verifies the signed
+store transaction, binds it to the authenticated Firebase user, and grants the
+catalog credit amount exactly once through `verifiedStorePurchases` and
+`creatorCreditTransactions`. Mobile clients must not write credit balances.
+
+Create these consumable products with matching prices in the store consoles:
+
+| Card | App Store Connect product ID | Google Play product ID | Credits |
+| --- | --- | --- | ---: |
+| Inverted | `com.apptist.Poplur2025.card.inverted` | `com.apptists.poplur2025.card.inverted` | 300 |
+| Lens | `com.apptist.Poplur2025.card.lens` | `com.apptists.poplur2025.card.lens` | 550 |
+| Split Diamond | `com.apptist.Poplur2025.card.splitdiamond` | `com.apptists.poplur2025.card.splitdiamond` | 800 |
+| Swoosh | `com.apptist.Poplur2025.card.swoosh` | `com.apptists.poplur2025.card.swoosh` | 1,200 |
+
+Before production deployment:
+
+1. Set `APPLE_APP_ID` to the app's numeric App Store Connect Apple ID. The three
+   Apple root certificates under `src/apple-root-certificates` are copied into
+   the compiled function during `npm run build`.
+2. Enable the Google Play Android Developer API and grant the Cloud Functions
+   runtime service account access to the Poplur app in Play Console.
+3. Deploy the callable and Firestore rules, then exercise sandbox/license-test
+   purchases before activating the products.
+
+The iOS request contains `platform`, the platform product ID, and StoreKit's
+signed transaction JWS. The Android request contains `platform`, the platform
+product ID, and the Play purchase token. Prices and credit amounts always come
+from the server allowlist above.
+
 ## Emulator Testing
 
 ```bash

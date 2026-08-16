@@ -1,0 +1,12 @@
+{
+  "images" : [
+    {
+      "filename" : "profile_theme_rainbow_neon_thumb.png",
+      "idiom" : "universal"
+    }
+  ],
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  }
+}

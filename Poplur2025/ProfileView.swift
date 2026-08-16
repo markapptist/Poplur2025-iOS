@@ -1,6 +1,5 @@
 import SwiftUI
 import UIKit
-import SpriteKit
 import FirebaseAuth
 @preconcurrency import FirebaseFirestore
 import UserNotifications
@@ -117,6 +116,7 @@ struct ProfileView: View {
     @Environment(\.layoutPreviewMode) private var layoutPreviewMode
     @EnvironmentObject private var auth: AuthViewModel
     @ObservedObject private var cubeSkinStore = CubeSkinStore.shared
+    @ObservedObject private var profileThemeStore = ProfileThemeStore.shared
     @GestureState private var isInteractingWithCube: Bool = false
     @State private var isScrollDisabled = false
     
@@ -373,6 +373,27 @@ struct ProfileView: View {
 
     private var skinTheme: CubeSkinAppTheme {
         cubeSkinStore.current.appTheme
+    }
+
+    private var profileTheme: ProfileTheme {
+        profileThemeStore.selectedTheme
+    }
+
+    private var profileForeground: Color {
+        profileTheme == .default ? .black : profileTheme.foreground
+    }
+
+    private var profileAccent: Color {
+        profileTheme == .default ? skinTheme.accent : profileTheme.primaryAccent
+    }
+
+    private var profileTextShadow: Color {
+        guard profileTheme != .default else { return .clear }
+        switch profileTheme.statusBarAppearance {
+        case .darkContent: return .white.opacity(0.34)
+        case .lightContent: return .black.opacity(0.58)
+        case .inherited: return .clear
+        }
     }
 
     let userID: String?
@@ -661,8 +682,9 @@ struct ProfileView: View {
                 .controlSize(.regular)
             Text("Loading posts")
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(.black.opacity(0.58))
+                .foregroundColor(profileTheme == .default ? .black.opacity(0.58) : profileForeground.opacity(0.82))
                 .poplurTextShader(intensity: 0.58)
+                .shadow(color: profileTextShadow, radius: 3, x: 0, y: 1)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .id("top")
@@ -673,10 +695,11 @@ struct ProfileView: View {
             Image(systemName: "square.stack.3d.up.slash")
                 .poplurIconShader()
                 .font(.system(size: 36, weight: .semibold))
-                .foregroundColor(.black.opacity(0.55))
+                .foregroundColor(profileTheme == .default ? .black.opacity(0.55) : profileForeground.opacity(0.78))
             Text("No posts yet.")
-                .foregroundColor(.black.opacity(0.58))
+                .foregroundColor(profileTheme == .default ? .black.opacity(0.58) : profileForeground.opacity(0.82))
                 .poplurTextShader(intensity: 0.58)
+                .shadow(color: profileTextShadow, radius: 3, x: 0, y: 1)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .id("top")
@@ -761,12 +784,14 @@ struct ProfileView: View {
                             .foregroundColor(skinTheme.secondaryText)
                         Text("Messages")
                             .font(.headline)
-                            .foregroundColor(.black)
+                            .foregroundColor(profileForeground)
                             .poplurTextShader(intensity: 0.78)
+                            .shadow(color: profileTextShadow, radius: 3, x: 0, y: 1)
                         Text("Your uploaded messages will appear here")
                             .font(.subheadline)
-                            .foregroundColor(.black.opacity(0.58))
+                            .foregroundColor(profileTheme == .default ? .black.opacity(0.58) : profileForeground.opacity(0.82))
                             .poplurTextShader(intensity: 0.52)
+                            .shadow(color: profileTextShadow, radius: 3, x: 0, y: 1)
                             .multilineTextAlignment(.center)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -795,12 +820,14 @@ struct ProfileView: View {
                             .foregroundColor(skinTheme.secondaryText)
                         Text("Saved")
                             .font(.headline)
-                            .foregroundColor(.black)
+                            .foregroundColor(profileForeground)
                             .poplurTextShader(intensity: 0.78)
+                            .shadow(color: profileTextShadow, radius: 3, x: 0, y: 1)
                         Text("Posts you save will appear here")
                             .font(.subheadline)
-                            .foregroundColor(.black.opacity(0.58))
+                            .foregroundColor(profileTheme == .default ? .black.opacity(0.58) : profileForeground.opacity(0.82))
                             .poplurTextShader(intensity: 0.52)
+                            .shadow(color: profileTextShadow, radius: 3, x: 0, y: 1)
                             .multilineTextAlignment(.center)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1142,9 +1169,7 @@ struct ProfileView: View {
 
     private var profileRootScene: some View {
         ZStack {
-            // Pink sparkle background
-            DS.Color.background.ignoresSafeArea()
-            PoplurSparkleBackground().ignoresSafeArea()
+            profileBackground
 
             profileMainStack
                 .zIndex(1)
@@ -1153,6 +1178,35 @@ struct ProfileView: View {
             profileTransientOverlays
             profileRouteOverlays
                 .zIndex(showNotificationBanner ? 10_000 : 0)
+        }
+    }
+
+    @ViewBuilder
+    private var profileBackground: some View {
+        if profileTheme == .default {
+            // Preserve the existing default profile background exactly.
+            DS.Color.background.ignoresSafeArea()
+            PoplurSparkleBackground().ignoresSafeArea()
+        } else if let assetName = profileTheme.backgroundAssetName,
+                  UIImage(named: assetName) != nil {
+            GeometryReader { proxy in
+                Image(assetName)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+                    .clipped()
+            }
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+
+            profileTheme.overlayColor
+                .opacity(profileTheme.overlayOpacity)
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+        } else {
+            // Defensive fallback if an asset is removed from the bundle.
+            DS.Color.background.ignoresSafeArea()
+            PoplurSparkleBackground().ignoresSafeArea()
         }
     }
 
@@ -1239,6 +1293,7 @@ struct ProfileView: View {
                 .onChange(of: navigateToScanner) { _, _ in handleProfileChildRouteChanged() }
                 .onChange(of: navigateToViewer) { _, _ in postMainTabChildRouteVisibility() }
                 .onChange(of: routedUserID) { _, newUserID in handleRoutedUserIDChanged(newUserID) }
+                .preferredColorScheme(profileTheme.preferredColorScheme)
                 .toolbar(.hidden, for: .navigationBar)
                 .id(viewID)
         )
@@ -1792,8 +1847,9 @@ struct ProfileView: View {
     private var usernameRow: some View {
         Text(profileTitleText)
             .font(.system(size: 22, weight: .heavy, design: .rounded))
-            .foregroundColor(.black)
+            .foregroundColor(profileForeground)
             .poplurTextShader(intensity: 0.9)
+            .shadow(color: profileTextShadow, radius: 3, x: 0, y: 1)
             .padding(.top, 4)
             .task(id: effectiveUserID) {
                 // Fetch username for the profile being viewed (re-runs when effectiveUserID changes)
@@ -1824,7 +1880,7 @@ struct ProfileView: View {
                         .foregroundStyle(businessStatusColor(businessProfile.verificationStatus))
                     Text(businessProfile.verificationStatus == .verified ? "Verified Business" : businessProfile.verificationStatus.title)
                         .font(.system(size: 11, weight: .black, design: .rounded))
-                        .foregroundStyle(.black)
+                        .foregroundStyle(profileForeground)
                 }
                 .padding(.horizontal, 11)
                 .padding(.vertical, 7)
@@ -1834,7 +1890,7 @@ struct ProfileView: View {
                 if !businessProfile.category.isEmpty || !businessProfile.address.isEmpty {
                     Text([businessProfile.category, businessProfile.address].filter { !$0.isEmpty }.joined(separator: " - "))
                         .font(.system(size: 11, weight: .bold, design: .rounded))
-                        .foregroundStyle(.black.opacity(0.56))
+                        .foregroundStyle(profileTheme == .default ? .black.opacity(0.56) : profileForeground.opacity(0.80))
                         .lineLimit(1)
                         .minimumScaleFactor(0.72)
                         .padding(.horizontal, 24)
@@ -1959,14 +2015,19 @@ struct ProfileView: View {
             Button(action: action) {
                 Text(title)
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(isSelected ? .black : .black.opacity(0.72))
+                    .foregroundColor(
+                        profileTheme == .default
+                            ? (isSelected ? .black : .black.opacity(0.72))
+                            : profileForeground.opacity(isSelected ? 1 : 0.78)
+                    )
                     .poplurTextShader(intensity: isSelected ? 0.86 : 0.58)
+                    .shadow(color: profileTextShadow, radius: 3, x: 0, y: 1)
                     .padding(8)
             }
             .buttonStyle(.plain)
 
             Capsule()
-                .fill(isSelected ? skinTheme.accent : Color.clear)
+                .fill(isSelected ? profileAccent : Color.clear)
                 .frame(width: 48, height: 3)
         }
     }
@@ -2857,141 +2918,145 @@ private struct ProfileNotificationsView: View {
 }
 
 private struct PoplurCreditCardProduct: Identifiable {
-    let id: String
+    let id: String // Stable cross-platform card ID.
     let name: String
-    let spriteSheetName: String
-    let price: String
+    let modelName: String
+    let posterAssetName: String
+    let iosProductID: String
+    let fallbackPrice: String
+    let credits: Int
     let accent: Color
-    let material: String
-    let delivery: String
+    let kicker: String
+    let description: String
+
+    var presentationRotationX: Float {
+        id == "swoosh" ? .pi / 2 : 0
+    }
 
     static let catalog: [PoplurCreditCardProduct] = [
-        PoplurCreditCardProduct(id: "cosmic-silver", name: "Cosmic Silver", spriteSheetName: "poplur_card_cosmic_silver_spritesheet", price: "$29", accent: Color(red: 0.56, green: 0.58, blue: 0.60), material: "star-polished graphite", delivery: "Ships in 3-5 days"),
-        PoplurCreditCardProduct(id: "icy-aqua", name: "Icy Aqua", spriteSheetName: "poplur_card_icy_aqua_spritesheet", price: "$29", accent: Color(red: 0.05, green: 0.66, blue: 0.66), material: "turquoise crystal", delivery: "Ships in 3-5 days"),
-        PoplurCreditCardProduct(id: "champagne-gold", name: "Champagne Gold", spriteSheetName: "poplur_card_champagne_gold_spritesheet", price: "$35", accent: Color(red: 0.86, green: 0.55, blue: 0.12), material: "gold glitter resin", delivery: "Ships in 2-4 days"),
-        PoplurCreditCardProduct(id: "jet-black", name: "Jet Black Onyx", spriteSheetName: "poplur_card_jet_black_onyx_spritesheet", price: "$35", accent: Color(red: 0.06, green: 0.06, blue: 0.07), material: "black starfield", delivery: "Ships in 2-4 days"),
-        PoplurCreditCardProduct(id: "amethyst", name: "Amethyst Purple", spriteSheetName: "poplur_card_amethyst_purple_spritesheet", price: "$39", accent: Color(red: 0.46, green: 0.14, blue: 0.76), material: "faceted crystal", delivery: "Limited finish"),
-        PoplurCreditCardProduct(id: "ruby", name: "Ruby Red", spriteSheetName: "poplur_card_ruby_red_spritesheet", price: "$39", accent: Color(red: 0.72, green: 0.02, blue: 0.08), material: "ruby sparkle", delivery: "Limited finish"),
-        PoplurCreditCardProduct(id: "emerald", name: "Emerald Green", spriteSheetName: "poplur_card_emerald_green_spritesheet", price: "$39", accent: Color(red: 0.0, green: 0.45, blue: 0.20), material: "emerald glitter", delivery: "Limited finish"),
-        PoplurCreditCardProduct(id: "sapphire", name: "Sapphire Blue", spriteSheetName: "poplur_card_sapphire_blue_spritesheet", price: "$39", accent: Color(red: 0.03, green: 0.19, blue: 0.72), material: "sapphire crystal", delivery: "Limited finish")
-    ]
-}
-
-private final class PoplurCreditCardSpriteScene: SKScene {
-    private let sheetName: String
-    private let cardSize = CGSize(width: 482, height: 320)
-    private var cardNode: SKSpriteNode?
-
-    init(sheetName: String) {
-        self.sheetName = sheetName
-        super.init(size: cardSize)
-        scaleMode = .resizeFill
-        backgroundColor = .clear
-    }
-
-    required init?(coder aDecoder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    override func didMove(to view: SKView) {
-        view.allowsTransparency = true
-        view.backgroundColor = .clear
-        buildSprite()
-    }
-
-    override func didChangeSize(_ oldSize: CGSize) {
-        super.didChangeSize(oldSize)
-        layoutSprite()
-    }
-
-    private func buildSprite() {
-        guard cardNode == nil else { return }
-
-        let node = SKSpriteNode(texture: makeFirstTexture())
-        node.anchorPoint = CGPoint(x: 0.5, y: 0.5)
-        addChild(node)
-        cardNode = node
-        layoutSprite()
-    }
-
-    private func makeFirstTexture() -> SKTexture {
-        let sheet = SKTexture(imageNamed: sheetName)
-        let sheetSize = CGSize(width: 1122, height: 1402)
-        let origin = CGPoint(x: 62, y: 54)
-        let rect = CGRect(
-            x: origin.x / sheetSize.width,
-            y: (sheetSize.height - origin.y - cardSize.height) / sheetSize.height,
-            width: cardSize.width / sheetSize.width,
-            height: cardSize.height / sheetSize.height
+        PoplurCreditCardProduct(
+            id: "inverted",
+            name: "Inverted Card",
+            modelName: "poplur_card_inverted",
+            posterAssetName: "poplur_store_card_inverted_poster",
+            iosProductID: "com.apptist.Poplur2025.card.inverted",
+            fallbackPrice: "$2.99",
+            credits: 300,
+            accent: Color(red: 0.93, green: 0.20, blue: 0.52),
+            kicker: "BOLD BY DESIGN",
+            description: "A sharp inside-out Poplur finish. Adds 300 Poplur Credits after verification."
+        ),
+        PoplurCreditCardProduct(
+            id: "lens",
+            name: "Lens Card",
+            modelName: "poplur_card_lens",
+            posterAssetName: "poplur_store_card_lens_poster",
+            iosProductID: "com.apptist.Poplur2025.card.lens",
+            fallbackPrice: "$4.99",
+            credits: 550,
+            accent: Color(red: 0.10, green: 0.70, blue: 0.92),
+            kicker: "FOCUS FORWARD",
+            description: "A glossy optical card with a camera-lens core. Adds 550 Poplur Credits after verification."
+        ),
+        PoplurCreditCardProduct(
+            id: "splitDiamond",
+            name: "Split Diamond Card",
+            modelName: "poplur_card_split_diamond",
+            posterAssetName: "poplur_store_card_split_diamond_poster",
+            iosProductID: "com.apptist.Poplur2025.card.splitdiamond",
+            fallbackPrice: "$6.99",
+            credits: 800,
+            accent: Color(red: 0.58, green: 0.30, blue: 0.94),
+            kicker: "CUT TO STAND OUT",
+            description: "A faceted split-diamond card built for standout profiles. Adds 800 Poplur Credits after verification."
+        ),
+        PoplurCreditCardProduct(
+            id: "swoosh",
+            name: "Swoosh Card",
+            modelName: "poplur_card_swoosh",
+            posterAssetName: "poplur_store_card_swoosh_poster",
+            iosProductID: "com.apptist.Poplur2025.card.swoosh",
+            fallbackPrice: "$9.99",
+            credits: 1_200,
+            accent: Color(red: 0.12, green: 0.78, blue: 0.68),
+            kicker: "MADE TO MOVE",
+            description: "A flowing sculpted card with Poplur motion. Adds 1,200 Poplur Credits after verification."
         )
-        let texture = SKTexture(rect: rect, in: sheet)
-        texture.filteringMode = .linear
-        return texture
-    }
-
-    private func layoutSprite() {
-        guard let cardNode else { return }
-        cardNode.position = CGPoint(x: size.width / 2, y: size.height / 2)
-        cardNode.size = size
-    }
-}
-
-private final class CreditCardSceneHolder: ObservableObject {
-    let scene: PoplurCreditCardSpriteScene
-    init(sheetName: String) {
-        scene = PoplurCreditCardSpriteScene(sheetName: sheetName)
-    }
-}
-
-private struct PoplurCreditCardSpriteView: View {
-    let card: PoplurCreditCardProduct
-    @StateObject private var holder: CreditCardSceneHolder
-
-    init(card: PoplurCreditCardProduct) {
-        self.card = card
-        _holder = StateObject(wrappedValue: CreditCardSceneHolder(sheetName: card.spriteSheetName))
-    }
-
-    var body: some View {
-        SpriteView(scene: holder.scene, options: [.allowsTransparency])
-            .aspectRatio(482.0 / 320.0, contentMode: .fit)
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-    }
+    ]
 }
 
 private struct ProfileStoreCreditCardCarousel: View {
     let cards: [PoplurCreditCardProduct]
+    let displayPrice: (PoplurCreditCardProduct) -> String
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var selectedIndex = 0
+    private let timer = Timer.publish(every: 3, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        GeometryReader { proxy in
-            let cardWidth = min(max(proxy.size.width * 0.68, 228), 348)
-            let cardHeight = cardWidth / (482.0 / 320.0)
-            let spacing: CGFloat = 18
-            let cycleWidth = CGFloat(cards.count) * (cardWidth + spacing)
-            let speed: CGFloat = 34
-            let cycleDuration = max(1, Double(cycleWidth / speed))
-            let repeatedCards = Array(repeating: cards, count: 3).flatMap { $0 }
+        let card = cards[selectedIndex]
+        VStack(spacing: 14) {
+            PoplurStoreCardModelView(
+                modelName: card.modelName,
+                presentationRotationX: card.presentationRotationX
+            )
+            .id(card.id)
+            .frame(height: 238)
+            .background(
+                LinearGradient(
+                    colors: [Color.black, card.accent.opacity(0.72)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+            .accessibilityLabel("\(card.name) rotating 3D preview")
 
-            TimelineView(.animation) { context in
-                let elapsed = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: cycleDuration)
-                let offset = reduceMotion ? 0 : -CGFloat(elapsed) * speed
-
-                HStack(spacing: spacing) {
-                    ForEach(Array(repeatedCards.enumerated()), id: \.offset) { _, card in
-                        PoplurCreditCardSpriteView(card: card)
-                            .frame(width: cardWidth, height: cardHeight)
-                            .accessibilityLabel(card.name)
-                    }
+            VStack(spacing: 7) {
+                Text(card.kicker)
+                    .font(.system(size: 11, weight: .black, design: .rounded))
+                    .foregroundStyle(card.accent)
+                Text(card.name)
+                    .font(.system(size: 29, weight: .heavy, design: .rounded))
+                    .foregroundStyle(.black)
+                Text(card.description)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.black.opacity(0.62))
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 560)
+                HStack(spacing: 10) {
+                    Text("\(card.credits.formatted()) credits")
+                    Text("•")
+                    Text(displayPrice(card))
                 }
-                .offset(x: offset)
-                .frame(width: proxy.size.width, height: proxy.size.height, alignment: .leading)
+                .font(.system(size: 15, weight: .heavy, design: .rounded))
+                .foregroundStyle(.black)
+            }
+
+            HStack(spacing: 8) {
+                ForEach(cards.indices, id: \.self) { index in
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.28)) { selectedIndex = index }
+                    } label: {
+                        Capsule()
+                            .fill(index == selectedIndex ? card.accent : Color.black.opacity(0.18))
+                            .frame(width: index == selectedIndex ? 24 : 8, height: 8)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Show \(cards[index].name)")
+                }
             }
         }
-        .frame(height: 270)
-        .clipped()
+        .padding(.horizontal, 20)
+        .padding(.vertical, 22)
+        .frame(maxWidth: .infinity)
         .background(Color.white)
+        .onReceive(timer) { _ in
+            guard !reduceMotion, !cards.isEmpty else { return }
+            withAnimation(.easeInOut(duration: 0.34)) {
+                selectedIndex = (selectedIndex + 1) % cards.count
+            }
+        }
     }
 }
 
@@ -3001,6 +3066,8 @@ private struct RadiusStoreView: View {
     @ObservedObject var purchaseVM: RadiusPurchaseViewModel
     @State private var selectedCardID = PoplurCreditCardProduct.catalog[0].id
     @State private var orderMessage: String?
+    @State private var cardPricesByID: [String: String] = [:]
+    @State private var isPurchasingCard = false
 
     private let columns = [
         GridItem(.adaptive(minimum: 168), spacing: 14)
@@ -3015,7 +3082,10 @@ private struct RadiusStoreView: View {
             VStack(spacing: 0) {
                 profileStoreNavigation
 
-                ProfileStoreCreditCardCarousel(cards: PoplurCreditCardProduct.catalog)
+                ProfileStoreCreditCardCarousel(
+                    cards: PoplurCreditCardProduct.catalog,
+                    displayPrice: displayPrice
+                )
                     .padding(.top, 8)
 
                 profileStoreHero
@@ -3047,12 +3117,17 @@ private struct RadiusStoreView: View {
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .task {
+            cardPricesByID = await PoplurCardPurchaseService.shared.displayPrices()
             await purchaseVM.loadProducts()
             let delivered = await purchaseVM.finishUndeliveredRadiusPurchases(userID: userID)
             if delivered > 0 {
                 purchasedRadiusMeters += delivered
             }
         }
+    }
+
+    private func displayPrice(_ card: PoplurCreditCardProduct) -> String {
+        cardPricesByID[card.iosProductID] ?? card.fallbackPrice
     }
 
     private var profileStoreNavigation: some View {
@@ -3092,7 +3167,7 @@ private struct RadiusStoreView: View {
                 .lineLimit(1)
                 .foregroundColor(.black)
 
-            Text("World Service cards, radius boosts, and Poplur hardware.")
+            Text("Collect a 3D Poplur card and receive verified credits instantly.")
                 .font(.system(size: 20, weight: .regular))
                 .multilineTextAlignment(.center)
                 .foregroundColor(.black.opacity(0.64))
@@ -3130,7 +3205,12 @@ private struct RadiusStoreView: View {
 
     private var featuredCard: some View {
         VStack(alignment: .leading, spacing: 14) {
-            PoplurCreditCardSpriteView(card: selectedCard)
+            PoplurStoreCardPosterView(
+                assetName: selectedCard.posterAssetName,
+                name: selectedCard.name,
+                accent: selectedCard.accent
+            )
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                 .shadow(color: selectedCard.accent.opacity(0.28), radius: 22, x: 0, y: 12)
 
             HStack(alignment: .top, spacing: 14) {
@@ -3139,7 +3219,7 @@ private struct RadiusStoreView: View {
                         .font(.system(size: 23, weight: .heavy, design: .rounded))
                         .foregroundColor(.black)
 
-                    Text("Poplur World Service members card in \(selectedCard.material).")
+                    Text(selectedCard.description)
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundColor(.black.opacity(0.62))
                         .fixedSize(horizontal: false, vertical: true)
@@ -3147,15 +3227,15 @@ private struct RadiusStoreView: View {
 
                 Spacer()
 
-                Text(selectedCard.price)
+                Text(displayPrice(selectedCard))
                     .font(.system(size: 24, weight: .heavy, design: .rounded))
                     .foregroundColor(.black)
             }
 
             HStack(spacing: 10) {
-                storeBadge("Contactless")
-                storeBadge("Numbered")
-                storeBadge(selectedCard.delivery)
+                storeBadge("3D collectible")
+                storeBadge("\(selectedCard.credits.formatted()) credits")
+                storeBadge("Server verified")
             }
         }
         .padding(16)
@@ -3167,7 +3247,7 @@ private struct RadiusStoreView: View {
 
     private var finishPicker: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Choose a finish")
+            Text("Choose a card")
                 .font(.system(size: 18, weight: .heavy, design: .rounded))
                 .foregroundColor(.black)
 
@@ -3214,7 +3294,11 @@ private struct RadiusStoreView: View {
             selectedCardID = card.id
         } label: {
             VStack(alignment: .leading, spacing: 10) {
-                PoplurCreditCardSpriteView(card: card)
+                PoplurStoreCardPosterView(
+                    assetName: card.posterAssetName,
+                    name: card.name,
+                    accent: card.accent
+                )
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
                 Text(card.name)
@@ -3224,7 +3308,7 @@ private struct RadiusStoreView: View {
                     .fixedSize(horizontal: false, vertical: true)
 
                 HStack {
-                    Text(card.price)
+                    Text(displayPrice(card))
                         .font(.system(size: 15, weight: .heavy, design: .rounded))
                         .foregroundColor(.black)
                     Spacer()
@@ -3251,6 +3335,14 @@ private struct RadiusStoreView: View {
     private var checkoutSummary: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
+                PoplurStoreCardPosterView(
+                    assetName: selectedCard.posterAssetName,
+                    name: selectedCard.name,
+                    accent: selectedCard.accent
+                )
+                .frame(width: 66, height: 66)
+                .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Order summary")
                         .font(.system(size: 18, weight: .heavy, design: .rounded))
@@ -3262,7 +3354,7 @@ private struct RadiusStoreView: View {
 
                 Spacer()
 
-                Text(selectedCard.price)
+                Text(displayPrice(selectedCard))
                     .font(.system(size: 20, weight: .heavy, design: .rounded))
                     .foregroundColor(.black)
             }
@@ -3270,22 +3362,27 @@ private struct RadiusStoreView: View {
             Divider()
 
             HStack {
-                Text("Estimated shipping")
+                Text("Credit delivery")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(.black.opacity(0.58))
                 Spacer()
-                Text("Free")
+                Text("Instant after verification")
                     .font(.system(size: 14, weight: .heavy, design: .rounded))
                     .foregroundColor(.green)
             }
 
             Button {
-                orderMessage = "\(selectedCard.name) card is ready for checkout."
+                purchaseSelectedCard()
             } label: {
                 HStack {
-                    Image(systemName: "creditcard.fill")
-                        .poplurIconShader()
-                    Text("Buy \(selectedCard.name)")
+                    if isPurchasingCard {
+                        ProgressView()
+                            .tint(.white)
+                    } else {
+                        Image(systemName: "apple.logo")
+                            .poplurIconShader()
+                    }
+                    Text(isPurchasingCard ? "Opening App Store…" : "Buy \(selectedCard.name)")
                 }
                 .font(.system(size: 16, weight: .heavy, design: .rounded))
                 .foregroundColor(.white)
@@ -3293,6 +3390,7 @@ private struct RadiusStoreView: View {
                 .background(Color.black, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
             .buttonStyle(.plain)
+            .disabled(isPurchasingCard)
 
             if let orderMessage {
                 Text(orderMessage)
@@ -3305,6 +3403,27 @@ private struct RadiusStoreView: View {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .fill(Color.black.opacity(0.045))
         )
+    }
+
+    private func purchaseSelectedCard() {
+        guard !isPurchasingCard else { return }
+        let card = selectedCard
+        isPurchasingCard = true
+        orderMessage = "Opening secure App Store checkout…"
+        Task { @MainActor in
+            let items: [[String: Any]] = [[
+                "cardId": card.id,
+                "iosProductId": card.iosProductID,
+                "quantity": 1
+            ]]
+            let result = await PoplurCardPurchaseService.shared.checkout(
+                rawItems: items
+            ) { pendingResult in
+                orderMessage = pendingResult.message
+            }
+            orderMessage = result.message
+            isPurchasingCard = false
+        }
     }
 
     private var radiusAddOns: some View {

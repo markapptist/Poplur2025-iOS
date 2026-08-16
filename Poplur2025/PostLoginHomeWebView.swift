@@ -730,6 +730,8 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         private var lastMotionDeliveryUptime: TimeInterval = 0
         private var lastDeliveredRoll: Double?
         private var lastDeliveredPitch: Double?
+        private var activeStoreCheckoutRequestID: String?
+        private var activeStoreCheckoutProductCounts: [String: Int] = [:]
 
         init(
             initialWebTab: String,
@@ -773,6 +775,21 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                       let roll = note.userInfo?["roll"] as? Double,
                       let pitch = note.userInfo?["pitch"] as? Double else { return }
                 self.deliverMotion(roll: roll, pitch: pitch, on: webView)
+            })
+            notificationObservers.append(NotificationCenter.default.addObserver(
+                forName: AdManager.feedAdVisibilityNotification, object: nil, queue: .main
+            ) { [weak self] note in
+                guard let webView = self?.bridge.webView else { return }
+                let open = (note.userInfo?["open"] as? Bool) == true
+                webView.evaluateJavaScript(
+                    "window.dispatchEvent(new CustomEvent('poplur-native-feed-ad',{detail:{open:\(open)}}));true;",
+                    completionHandler: nil
+                )
+            })
+            notificationObservers.append(NotificationCenter.default.addObserver(
+                forName: .poplurCardPurchaseRecovered, object: nil, queue: .main
+            ) { [weak self] note in
+                self?.deliverRecoveredStorePurchase(note)
             })
         }
 
@@ -979,6 +996,88 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                 }
                 if type == "cameraDetectDefault", let on = body["enabled"] as? Bool {
                     UserDefaults.standard.set(on ? "1" : "0", forKey: "poplur.cameraDetectDefault")
+                    return
+                }
+                // Store checkout remains a web-owned bag, but payment and
+                // fulfillment cross this native boundary. StoreKit authorizes
+                // each consumable; the server verifies its signed JWS and
+                // grants credits before native finishes the transaction.
+                if type == "poplurStoreCheckoutRequested", let webView = bridge.webView {
+                    let rawRequestID = (body["requestId"] as? String) ?? ""
+                    let requestID = rawRequestID.count <= 160 ? rawRequestID : ""
+                    let rawItems = body["items"]
+                    guard !requestID.isEmpty,
+                          let productCounts = Self.storeCheckoutProductCounts(from: rawItems) else {
+                        pushStoreCheckoutResult(
+                            PoplurCardCheckoutResult(
+                                status: .failure,
+                                message: "The bag could not be validated. Please review it and try again.",
+                                completedProductCounts: [:],
+                                creditsAdded: 0,
+                                availableCredits: nil
+                            ),
+                            requestID: requestID,
+                            into: webView
+                        )
+                        return
+                    }
+                    guard activeStoreCheckoutRequestID == nil else {
+                        pushStoreCheckoutResult(
+                            PoplurCardCheckoutResult(
+                                status: .failure,
+                                message: "Another App Store checkout is already in progress.",
+                                completedProductCounts: [:],
+                                creditsAdded: 0,
+                                availableCredits: nil
+                            ),
+                            requestID: requestID,
+                            into: webView
+                        )
+                        return
+                    }
+                    activeStoreCheckoutRequestID = requestID
+                    activeStoreCheckoutProductCounts = productCounts
+                    Task { @MainActor [weak self, weak webView] in
+                        let result = await PoplurCardPurchaseService.shared.checkout(
+                            rawItems: rawItems
+                        ) { [weak self, weak webView] pendingResult in
+                            guard let self, let webView, self.bridge.webView === webView else { return }
+                            self.deliverStoreCheckoutResult(
+                                pendingResult,
+                                requestID: requestID,
+                                into: webView
+                            )
+                        }
+                        guard let self, let webView, self.bridge.webView === webView else { return }
+                        self.deliverStoreCheckoutResult(result, requestID: requestID, into: webView)
+                    }
+                    return
+                }
+                // Profile themes are shared with the native fallback through one
+                // stable-ID store. The manifest-owned status-bar value is derived
+                // again natively instead of trusting arbitrary web colors.
+                if type == "profileThemeChanged", let webView = bridge.webView {
+                    let stableID = (body["id"] as? String)
+                        ?? (body["themeID"] as? String)
+                        ?? (body["themeId"] as? String)
+                    guard let stableID else { return }
+                    let requestedStatusBar = body["statusBar"] as? String
+                    Task { @MainActor [weak self, weak webView] in
+                        let selectedTheme = ProfileThemeStore.shared.select(stableID: stableID)
+                        if let requestedStatusBar,
+                           requestedStatusBar != selectedTheme.webStatusBarValue {
+                            print("[PostLoginHomeWebView] ignored mismatched profile theme status bar for \(stableID)")
+                        }
+                        guard let self, let webView else { return }
+                        self.pushProfileTheme(selectedTheme, into: webView)
+                    }
+                    return
+                }
+                if type == "requestProfileTheme", let webView = bridge.webView {
+                    Task { @MainActor [weak self, weak webView] in
+                        guard let self, let webView else { return }
+                        self.pushProfileTheme(ProfileThemeStore.shared.selectedTheme, into: webView)
+                    }
                     return
                 }
                 // The clay permission card was answered. Nothing native listened
@@ -1281,6 +1380,9 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                         await MainActor.run { self.pushProfile(profile, into: webView) }
                     }
                 }
+                if type == "requestProfilePosts", let webView = bridge.webView {
+                    deliverProfilePosts(into: webView)
+                }
                 if let onWebEvent {
                     DispatchQueue.main.async { onWebEvent(type, body) }
                 }
@@ -1389,6 +1491,159 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                 "window.poplurProfile && window.poplurProfile(\(text)); " +
                 "window.dispatchEvent(new CustomEvent('poplur-native-profile', {detail: \(text)})); true;"
             )
+        }
+
+        private func pushProfileTheme(_ theme: ProfileTheme, into webView: WKWebView) {
+            let payload = [
+                "id": theme.rawValue,
+                "statusBar": theme.webStatusBarValue
+            ]
+            guard let json = try? JSONSerialization.data(withJSONObject: payload),
+                  let text = String(data: json, encoding: .utf8) else { return }
+            webView.evaluateJavaScript(
+                "window.poplurProfileTheme && window.poplurProfileTheme(\(text)); " +
+                "window.dispatchEvent(new CustomEvent('poplur-native-profile-theme', {detail: \(text)})); true;"
+            )
+        }
+
+        private func pushStoreCheckoutResult(
+            _ result: PoplurCardCheckoutResult,
+            requestID: String,
+            into webView: WKWebView
+        ) {
+            let payload = result.webPayload(requestID: requestID)
+            guard let json = try? JSONSerialization.data(withJSONObject: payload),
+                  let text = String(data: json, encoding: .utf8) else { return }
+            webView.evaluateJavaScript(
+                "window.postMessage(\(text), '*'); " +
+                "window.dispatchEvent(new CustomEvent('poplur-native-store-checkout-result', {detail: \(text)})); true;"
+            )
+        }
+
+        private func deliverStoreCheckoutResult(
+            _ result: PoplurCardCheckoutResult,
+            requestID: String,
+            into webView: WKWebView
+        ) {
+            guard activeStoreCheckoutRequestID == requestID else { return }
+            pushStoreCheckoutResult(result, requestID: requestID, into: webView)
+            if result.status != .pending {
+                activeStoreCheckoutRequestID = nil
+                activeStoreCheckoutProductCounts = [:]
+            }
+        }
+
+        private func deliverRecoveredStorePurchase(_ note: Notification) {
+            guard let requestID = activeStoreCheckoutRequestID,
+                  let webView = bridge.webView,
+                  let productID = note.userInfo?[PoplurCardPurchaseRecoveryNotification.productIDKey] as? String,
+                  let recovery = note.object as? PoplurCardCheckoutResult,
+                  let remaining = activeStoreCheckoutProductCounts[productID],
+                  remaining > 0 else { return }
+
+            if remaining == 1 { activeStoreCheckoutProductCounts.removeValue(forKey: productID) }
+            else { activeStoreCheckoutProductCounts[productID] = remaining - 1 }
+            let hasMore = activeStoreCheckoutProductCounts.values.contains(where: { $0 > 0 })
+            let routed = PoplurCardCheckoutResult(
+                status: hasMore ? .pending : .success,
+                message: recovery.message,
+                completedProductCounts: [productID: 1],
+                creditsAdded: recovery.creditsAdded,
+                availableCredits: recovery.availableCredits
+            )
+            deliverStoreCheckoutResult(routed, requestID: requestID, into: webView)
+        }
+
+        private static func storeCheckoutProductCounts(from rawItems: Any?) -> [String: Int]? {
+            guard let items = rawItems as? [[String: Any]], !items.isEmpty else { return nil }
+            var productCounts: [String: Int] = [:]
+            var total = 0
+            for item in items {
+                guard let cardID = item["cardId"] as? String,
+                      let productID = PoplurCardPurchaseService.productIDByCardID[cardID],
+                      (item["iosProductId"] as? String) == productID,
+                      let quantityNumber = item["quantity"] as? NSNumber else { return nil }
+                let rawQuantity = quantityNumber.doubleValue
+                guard rawQuantity.rounded(.towardZero) == rawQuantity,
+                      rawQuantity >= 1,
+                      rawQuantity <= 10 else { return nil }
+                let quantity = Int(rawQuantity)
+                total += quantity
+                guard total <= 20 else { return nil }
+                productCounts[productID, default: 0] += quantity
+            }
+            return productCounts
+        }
+
+        /// ProfileTwin is the shipping Profile surface, so the native shell is
+        /// its authenticated Firestore boundary. Send a bounded metadata page;
+        /// the web grid renders still previews and opens only one selected
+        /// video, avoiding the decoder explosion that a video-per-tile grid had.
+        private func deliverProfilePosts(into webView: WKWebView) {
+            guard let uid = Auth.auth().currentUser?.uid else { return }
+            Task {
+                do {
+                    let snapshot = try await Firestore.firestore()
+                        .collection("posts")
+                        .whereField("userID", isEqualTo: uid)
+                        .limit(to: 64)
+                        .getDocuments()
+
+                    func createdMillis(_ data: [String: Any]) -> Double {
+                        if let value = data["createdAtMillis"] as? NSNumber {
+                            return value.doubleValue
+                        }
+                        if let timestamp = data["createdAt"] as? Timestamp {
+                            return timestamp.dateValue().timeIntervalSince1970 * 1000
+                        }
+                        return 0
+                    }
+
+                    let rows: [[String: Any]] = snapshot.documents
+                        .sorted { createdMillis($0.data()) > createdMillis($1.data()) }
+                        .compactMap { document in
+                            let data = document.data()
+                            guard let mediaURL = (data["mediaURL"] as? String)?
+                                .trimmingCharacters(in: .whitespacesAndNewlines),
+                                  !mediaURL.isEmpty else { return nil }
+                            let lowerURL = mediaURL.lowercased()
+                            let inferredType = lowerURL.contains(".mp4")
+                                || lowerURL.contains(".mov")
+                                || lowerURL.contains(".m4v")
+                                || lowerURL.contains(".webm")
+                                ? "video" : "photo"
+                            var row: [String: Any] = [
+                                "id": document.documentID,
+                                "mediaURL": mediaURL,
+                                "mediaType": (data["mediaType"] as? String) ?? inferredType,
+                                "createdAtMillis": createdMillis(data)
+                            ]
+                            if let poster = data["posterURL"] as? String, !poster.isEmpty {
+                                row["posterURL"] = poster
+                            }
+                            if let caption = data["caption"] as? String, !caption.isEmpty {
+                                row["caption"] = caption
+                            }
+                            if let channel = data["channelId"] as? String, !channel.isEmpty {
+                                row["channelId"] = channel
+                            }
+                            return row
+                        }
+
+                    let payload: [String: Any] = ["posts": rows]
+                    guard let encoded = try? JSONSerialization.data(withJSONObject: payload),
+                          let json = String(data: encoded, encoding: .utf8) else { return }
+                    await MainActor.run {
+                        guard self.bridge.webView === webView else { return }
+                        webView.evaluateJavaScript(
+                            "window.dispatchEvent(new CustomEvent('poplur-native-profile-posts', {detail: \(json)}));true;",
+                            completionHandler: nil
+                        )
+                    }
+                } catch {
+                    print("[PostLoginHomeWebView] profile posts query failed: \(error.localizedDescription)")
+                }
+            }
         }
 
         private func persistProfilePhoto(_ dataURI: String) {
