@@ -10,6 +10,21 @@ service cloud.firestore {
       return signedIn() && request.auth.uid == userId;
     }
 
+    // The parent post's owner. Posts are written with `userID` by iOS and
+    // `userId` by some older paths -- both spellings are already tolerated by
+    // the posts rules below, so engagement rules must tolerate them too or a
+    // post created through the other path becomes impossible to engage with.
+    // postId is passed explicitly rather than picked up from the calling match
+    // block. Relying on the ambient path variable evaluated inconsistently --
+    // create resolved it while read and delete raised "Null value error" --
+    // which is the sort of difference that silently opens a read path.
+    function postOwnerOf(postId) {
+      let path = /databases/$(database)/documents/posts/$(postId);
+      return exists(path)
+        ? get(path).data.get('userID', get(path).data.get('userId', ''))
+        : '';
+    }
+
     function protectedPremiumAIFields() {
       return [
         'isPremium',
@@ -82,6 +97,38 @@ service cloud.firestore {
       allow update, delete: if signedIn()
         && (resource.data.userID == request.auth.uid
           || resource.data.userId == request.auth.uid);
+
+      // Engagements on a post. Creating one is what causes its owner to be
+      // notified, so these rules are the boundary that stops a client paging
+      // somebody on someone else's behalf.
+      match /engagements/{engagementId} {
+        // Readable by the post's owner (their notification history) and by the
+        // actor (so a client can tell whether it already liked this post).
+        allow read: if signedIn()
+          && (request.auth.uid == resource.data.actorUid
+            || request.auth.uid == postOwnerOf(postId));
+
+        // An actor may only create engagements AS THEMSELVES, and postOwnerUid
+        // must match the real owner of the parent post. postOwnerUid is
+        // denormalised so the notification trigger needs no second read, which
+        // makes it exactly the field worth forging -- hence checking it against
+        // the parent document here rather than trusting the client.
+        allow create: if signedIn()
+          && request.resource.data.actorUid == request.auth.uid
+          && request.resource.data.postOwnerUid == postOwnerOf(postId)
+          && request.resource.data.kind in ['like', 'view', 'comment']
+          && request.resource.data.createdAt == request.time;
+
+        // Immutable. Editing an engagement after the fact would let a 'view'
+        // become a 'comment' AFTER the trigger decided not to notify for it.
+        allow update: if false;
+
+        // Unlikes and deleting your own comment; the owner may remove anything
+        // on their own post.
+        allow delete: if signedIn()
+          && (request.auth.uid == resource.data.actorUid
+            || request.auth.uid == postOwnerOf(postId));
+      }
     }
 
     match /delivery_orders/{orderId} {

@@ -12,6 +12,7 @@ import {
 } from "./ai/premiumAiFlows";
 
 export { verifyCardPurchase } from "./cardPurchases";
+export { notifyOnEngagement } from "./engagementNotifications";
 
 admin.initializeApp();
 
