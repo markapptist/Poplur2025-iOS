@@ -105,6 +105,9 @@ struct PoplurDeviceNotification: Identifiable, Codable, Hashable {
         case radiusDip
         case areaTakeover
         case dailyInsight
+        /// Someone liked or commented on your post. Delivered remotely by the
+        /// notifyOnEngagement Cloud Function, not scheduled locally.
+        case engagement
     }
 
     let id: String
@@ -217,13 +220,80 @@ final class PoplurNotificationCenter: NSObject, ObservableObject, UNUserNotifica
             )
         }
         persistNotifications()
+        // Reading the list is what clears the badge — same rule the web bell
+        // now follows via markEngagementSeen.
+        refreshBadge()
     }
 
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
-        [.banner, .sound, .badge]
+        // A push arriving while the app is open must still reach the list, or
+        // the banner and the notifications screen disagree about what happened.
+        await MainActor.run { Self.shared.recordIfEngagement(notification.request.content) }
+        return [.banner, .sound, .badge]
+    }
+
+    /// Handles a tap on a delivered notification.
+    ///
+    /// This lives here rather than in NotificationsCoordinator because that class
+    /// also assigns itself as the UNUserNotificationCenter delegate — from its
+    /// init, at module load — while `configure()` runs later from
+    /// didFinishLaunching and therefore WINS. Its didReceive has never been
+    /// called, so the postFocusRequest it posts has never fired.
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse
+    ) async {
+        let content = response.notification.request.content
+        await MainActor.run {
+            Self.shared.recordIfEngagement(content)
+            // Accept BOTH spellings. The Cloud Function's data payload uses
+            // `postId`; the older local path and NotificationsCoordinator use
+            // `postID`. A silent case mismatch here is a tap that does nothing.
+            let info = content.userInfo
+            let postId = (info["postId"] as? String) ?? (info["postID"] as? String)
+            if let postId, !postId.isEmpty {
+                NotificationCenter.default.post(
+                    name: .postFocusRequest,
+                    object: nil,
+                    userInfo: ["postID": postId]
+                )
+            }
+        }
+    }
+
+    /// Files an incoming engagement push into the in-app list.
+    ///
+    /// Keyed on engagementId, so the same push seen first in the foreground and
+    /// then again on tap collapses to one row rather than two —
+    /// addInAppNotification already replaces by id.
+    private func recordIfEngagement(_ content: UNNotificationContent) {
+        let info = content.userInfo
+        guard let engagementId = info["engagementId"] as? String, !engagementId.isEmpty else { return }
+        addInAppNotification(
+            PoplurDeviceNotification(
+                id: engagementId,
+                kind: .engagement,
+                title: content.title,
+                detail: content.body,
+                createdAt: Date(),
+                isUnread: true
+            )
+        )
+        refreshBadge()
+    }
+
+    /// Keeps the springboard badge equal to the unread count.
+    ///
+    /// The daily digest set `content.badge` when SCHEDULING, which cannot be
+    /// right for remote pushes — the server has no idea how many unread items
+    /// this device holds. Owning it locally means the badge matches the list,
+    /// and clearing it is just marking everything read.
+    func refreshBadge() {
+        let unread = notifications.filter(\.isUnread).count
+        UNUserNotificationCenter.current().setBadgeCount(unread) { _ in }
     }
 
     private func shouldCreateDailyNotification() -> Bool {

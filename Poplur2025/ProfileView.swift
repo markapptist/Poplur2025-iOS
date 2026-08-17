@@ -63,6 +63,10 @@ private extension ProfileNotificationItem.Kind {
             self = .accumulatedRadius
         case .areaTakeover, .dailyInsight:
             self = .like
+        case .engagement:
+            // A like or comment on your post — the heart is literally what this
+            // row means, where the other three borrow it.
+            self = .like
         }
     }
 }
