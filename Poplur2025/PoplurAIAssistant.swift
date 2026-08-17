@@ -429,14 +429,45 @@ final class PoplurAIAssistantController: ObservableObject {
         guard audioSessionObserverTokens.isEmpty else { return }
         let center = NotificationCenter.default
         audioSessionObserverTokens = [
-            center.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] _ in
+            center.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] note in
+                // Only a FINISHED interruption is worth restarting for. Rebuilding
+                // the session while one is still in progress just recreates
+                // something that cannot record, and then trips the restart again.
+                let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt ?? 0
+                guard AVAudioSession.InterruptionType(rawValue: raw) == .ended else {
+                    PoplurDiagLog.append("[PoplurAI] interruption began — holding, not restarting")
+                    return
+                }
+                PoplurDiagLog.append("[PoplurAI] interruption ended — restarting")
                 Task { @MainActor in
                     self?.scheduleRecognitionRestart(delay: 900_000_000)
                 }
             },
-            center.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] _ in
-                Task { @MainActor in
-                    self?.scheduleRecognitionRestart(delay: 700_000_000)
+            center.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] note in
+                // THE BUG THIS FIXES: restartRecognition() calls
+                // configureAudioSession(for: .wakeRecognition, force: true), and
+                // changing an AVAudioSession's category EMITS this notification.
+                // Restarting on it meant the assistant restarted because it had
+                // just restarted — a self-sustaining loop. Measured on device:
+                // 116 recognition sessions, one 100ms microphone buffer each,
+                // zero recognition errors and zero final results, because every
+                // session was torn down ~700ms in, long before enough audio
+                // accumulated to transcribe anything. "Hey Poplur" could never
+                // hear a word, and nothing in the loop looked like a failure.
+                //
+                // A category or configuration change is us; a device actually
+                // coming or going is not, and still deserves a restart.
+                let raw = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt ?? 0
+                let reason = AVAudioSession.RouteChangeReason(rawValue: raw) ?? .unknown
+                switch reason {
+                case .categoryChange, .routeConfigurationChange, .unknown:
+                    PoplurDiagLog.append("[PoplurAI] route change ignored (reason=\(raw), self-inflicted)")
+                    return
+                default:
+                    PoplurDiagLog.append("[PoplurAI] route change — restarting (reason=\(raw))")
+                    Task { @MainActor in
+                        self?.scheduleRecognitionRestart(delay: 700_000_000)
+                    }
                 }
             }
         ]
