@@ -67,6 +67,12 @@ final class AuthViewModel: ObservableObject {
                 self.currentUser = user
                 self.isAuthenticated = (user != nil)
                 self.isResolvingAuthState = false
+                // FCM issues this device's token independently of auth, and on a
+                // fresh install it lands FIRST — so the delegate has no uid to
+                // attach it to and skips the write. Re-syncing here is what stops
+                // the device from staying registered to nobody. This listener
+                // also fires once immediately, so a cached session is covered.
+                if user != nil { PoplurMessaging.shared.syncTokenForCurrentUser() }
             }
         }
     }

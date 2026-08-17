@@ -4,6 +4,7 @@ import SwiftUI
 import FirebaseAppCheck
 import FirebaseCore
 import FirebaseFirestore
+import FirebaseMessaging
 #if canImport(GoogleMobileAds)
 import GoogleMobileAds
 #endif
@@ -94,7 +95,41 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
             WatchRadiusSync.shared.start()
         }
 
+        // Engagement push notifications, phase 1. This asks iOS for an APNs token
+        // and wires the FCM delegate; it does NOT request notification
+        // authorization — that ask stays with the clay primer card
+        // (PoplurPermissionRouting.requestNotificationsAfterPrimer), because
+        // Apple's sheet must never appear with no Poplur card in front of it.
+        Task { @MainActor in PoplurMessaging.shared.start() }
+
         return true
+    }
+
+    /// Hands the APNs token to FCM.
+    ///
+    /// Without this, FirebaseMessaging can mint an FCM token that has no APNs
+    /// token underneath it — registration looks completely healthy and every
+    /// send fails silently. PoplurMessaging logs that state explicitly for the
+    /// same reason.
+    func application(_ application: UIApplication,
+                     didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        Messaging.messaging().apnsToken = deviceToken
+        PoplurDiagLog.append("[PoplurMessaging] APNs token received (\(deviceToken.count) bytes)")
+        // Sync from HERE, not only from the auth listener. FCM refuses to mint a
+        // token before its APNs token is set, and the auth listener fires first —
+        // device logs showed "No APNS token specified before fetching FCM Token"
+        // on every launch, recovering a second later only because the Messaging
+        // delegate fires independently. This makes the ordering deliberate rather
+        // than leaving the first attempt to fail and be rescued.
+        Task { @MainActor in PoplurMessaging.shared.syncTokenForCurrentUser() }
+    }
+
+    func application(_ application: UIApplication,
+                     didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        // Expected on the simulator, which has no APNs. On a device this names a
+        // real provisioning problem — most often a missing Push Notifications
+        // capability or an App ID without push enabled.
+        PoplurDiagLog.append("[PoplurMessaging] APNs registration FAILED: \(error.localizedDescription)")
     }
 
     /// The app is portrait-only except while the PoplurFPS game is on screen, which
