@@ -168,6 +168,17 @@ final class PoplurPerformanceRegistration {
 final class PoplurPerformanceManager: ObservableObject {
     static let shared = PoplurPerformanceManager()
 
+    /// Master off-switch for every automatic degradation: the thermal ladder,
+    /// the tripwire, low-power and memory-pressure demotion, and the FPS caps
+    /// in the full policy. Diagnostics keep reporting the true thermal state —
+    /// only the *reactions* stop. Backgrounding still drops to emergency; a
+    /// hidden app has nothing to render.
+    ///
+    /// OFF means the phone WILL heat: the 14 Aug camera baseline measured 58s
+    /// to `fair` without these brakes and 25min with them. Flip to false to
+    /// restore the governor.
+    static let governorDisabled = true
+
     @Published private(set) var mode: PoplurPerformanceMode
     @Published private(set) var policy: PoplurPerformancePolicy
     @Published private(set) var thermalState: ProcessInfo.ThermalState
@@ -235,7 +246,7 @@ final class PoplurPerformanceManager: ObservableObject {
         self.thermalCondition = Self.thermalName(thermal)
         self.isLowPowerModeEnabled = lowPower
         self.policy = Self.makePolicy(mode: initialMode, baseCacheByteLimit: baseCacheLimits.byteLimit)
-        self.isThermalTripwireActive = thermal != .nominal
+        self.isThermalTripwireActive = Self.governorDisabled ? false : thermal != .nominal
         self.thermalTripwireCooldownEndsAt = nil
         self.recentThermalTransitions = Self.loadThermalTransitions()
         self.thermalStateEnteredAt = now
@@ -602,6 +613,12 @@ final class PoplurPerformanceManager: ObservableObject {
         thermalRecoveryTask?.cancel()
         thermalRecoveryTask = nil
 
+        if Self.governorDisabled {
+            isThermalTripwireActive = false
+            thermalTripwireCooldownEndsAt = nil
+            return
+        }
+
         guard state == .nominal else {
             isThermalTripwireActive = true
             thermalTripwireCooldownEndsAt = nil
@@ -688,6 +705,9 @@ final class PoplurPerformanceManager: ObservableObject {
         memoryPressure: Bool,
         lifecycle: PoplurApplicationLifecycle
     ) -> PoplurPerformanceMode {
+        if governorDisabled {
+            return lifecycle != .active ? .emergency : .full
+        }
         var result: PoplurPerformanceMode
         switch thermal {
         case .nominal: result = .full
@@ -706,8 +726,8 @@ final class PoplurPerformanceManager: ObservableObject {
         case .full:
             return PoplurPerformancePolicy(
                 mode: mode,
-                targetFPS: 12,
-                interactiveTargetFPS: 24,
+                targetFPS: governorDisabled ? 60 : 12,
+                interactiveTargetFPS: governorDisabled ? 60 : 24,
                 particlesAllowed: true,
                 particleDensityMultiplier: 0.15,
                 dynamicShadowsAllowed: false,
