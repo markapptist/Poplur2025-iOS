@@ -73,6 +73,9 @@ enum PoplurPreloginWeb {
 
     static var splashURL: URL? { URL(string: "\(scheme)://\(host)/splash.html?v=\(buildStamp)") }
     static var welcomeURL: URL? { URL(string: "\(scheme)://\(host)/welcome.html?v=\(buildStamp)") }
+    /// The APPROVED post-login Loading screen — clay globe, wordmark, rotating
+    /// clay messages — built offline by scripts/build-loading-ios.mjs.
+    static var loadingURL: URL? { URL(string: "\(scheme)://\(host)/loading.html?v=\(buildStamp)") }
 }
 
 struct PreloginWebView: UIViewRepresentable {

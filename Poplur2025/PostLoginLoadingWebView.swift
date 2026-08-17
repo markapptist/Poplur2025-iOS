@@ -48,9 +48,16 @@ struct PostLoginLoadingWebView: UIViewRepresentable {
         // (same as welcome) — pin to dark regardless of device appearance.
         webView.overrideUserInterfaceStyle = .dark
 
-        // Always use the same approved splash.html that signed-out launch uses.
-        // A second loading document here made physical and signed-out launches
-        // disagree and allowed an unapproved fallback to resurface.
+        // The APPROVED clay splash is the SHORT VIDEO CLIP in splash.html — the
+        // same one signed-out launch shows, so both paths agree. The globe Loading
+        // screen is a different approved screen (kept for watch/wear); putting it
+        // here was wrong and is reverted.
+        //
+        // Autoplay is already permitted above (mediaTypesRequiringUserActionForPlayback
+        // is empty, inline playback on), and the clip is bundled at
+        // PreloginWeb/Poplur2025-iOS/Poplur2025/poplur_splash.mp4 — both verified.
+        // So when a launch shows the logo on black instead of the clip, that is the
+        // WKWebView still starting up, not a missing or blocked video.
         if PreloginWebView.bundledRootURL() != nil, let url = PoplurPreloginWeb.splashURL {
             webView.load(URLRequest(url: url))
         } else {

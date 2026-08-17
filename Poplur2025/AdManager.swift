@@ -9,17 +9,14 @@ final class AdManager: NSObject, FullScreenContentDelegate {
     private weak var pendingRootViewController: UIViewController?
     private var presentationPending = false
     private var isLoading = false
-    private var interstitialUnitID: String {
-        #if DEBUG
-        // Physical development builds must never request paid inventory. This
-        // Google-owned unit is guaranteed to return a labelled test ad, which
-        // also makes the Feed bridge verifiable without depending on account
-        // fill or risking invalid-traffic policy violations.
-        return "ca-app-pub-3940256099942544/4411468910"
-        #else
-        Bundle.main.object(forInfoDictionaryKey: "PoplurAdMobInterstitialUnitID") as? String
-            ?? "ca-app-pub-2086359936541081/6696033455"
-        #endif
+    private var interstitialUnitID: String? {
+        guard let value = Bundle.main.object(
+            forInfoDictionaryKey: "PoplurAdMobInterstitialUnitID"
+        ) as? String else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("ca-app-pub-"),
+              !trimmed.contains("3940256099942544") else { return nil }
+        return trimmed
     }
     
     private var hasStarted = false
@@ -33,13 +30,17 @@ final class AdManager: NSObject, FullScreenContentDelegate {
 
     func start() {
         guard !hasStarted else { return }
+        guard interstitialUnitID != nil else {
+            print("[Ads] Production interstitial unit is missing or invalid; ads disabled")
+            return
+        }
         MobileAds.shared.start(completionHandler: nil)
         hasStarted = true
         loadInterstitial()
     }
     
     func loadInterstitial() {
-        guard !isLoading else { return }
+        guard !isLoading, let interstitialUnitID else { return }
         isLoading = true
         let request = Request()
         InterstitialAd.load(with: interstitialUnitID, request: request) { [weak self] ad, error in

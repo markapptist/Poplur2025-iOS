@@ -228,8 +228,19 @@
      stepping onto the pane interpolates rather than jumping.
      flex-start rather than centred: the stack scrolls, and a centred overflow
      clips at BOTH ends, which is what was eating the button. */
-  .phone.introPane .cubeStage.risen { top: 26.5%; transform: translate(-50%, -50%) scale(0.5); }
-  .phone.introPane #paneAccountIntro .formStack { top: 33%; justify-content: flex-start; }
+  .phone.introPane .cubeStage.risen { top: 20.5%; transform: translate(-50%, -50%) scale(0.4); }
+  .phone.introPane #paneAccountIntro .formStack { top: 29%; justify-content: flex-start; }
+  /* The button is the end of the page, so it sits at the end of the page.
+     `margin-top: auto` claims only space that is genuinely free: on a short
+     screen the stack overflows and the button flows normally right after the
+     copy, which is the case `flex-start` above exists for. Measured before
+     this: the Next button ended 147px above the bottom of an 852px screen,
+     with nothing under it — it read as floating mid-page. */
+  .phone.introPane #introNext { margin-top: auto; margin-bottom: clamp(4px, 1.6cqh, 16px); }
+  /* The account art belongs to the copy, not to the cube. It used to collide
+     with it — see the inline-top note in computeLayout — so give it a little
+     air on both sides now that the two are genuinely separate objects. */
+  .phone.introPane .introArt { margin-top: clamp(2px, 1cqh, 10px); margin-bottom: clamp(4px, 1.4cqh, 12px); }
 
   /* Cream extruded clay type — chunky rounded letterforms, soft top light,
      pressed pink under-shadow */
@@ -471,10 +482,34 @@
      used everywhere else in pre-login: .introItem was the one text class on this
      page that never declared a font-family, so it fell back to the -apple-system
      stack from the reset and read as a different typeface to everything around it. */
+  /* Same cream extruded clay as the title (.clayText), one weight down: the
+     four points ARE the screen, and leaving them as flat pink body copy made
+     the only styled thing on the pane the word "Personal". The shadow stack is
+     .clayText's, halved — at 13px the full 6px/12px lift smears instead of
+     reading as depth. */
   .introItem { display: block;
     font-family: "Arial Rounded MT Bold", ui-rounded, "SF Pro Rounded", system-ui, sans-serif;
     font-size: clamp(11px, 3cqw, 13px); font-weight: 800; line-height: 1.34;
-    color: #ffe3f1; text-shadow: 0 1px 3px rgba(104, 2, 48, 0.5); }
+    color: #f8efdc;
+    text-shadow:
+      0 -1px 0 rgba(255, 255, 255, 0.34),
+      0 1px 0 #d8b98e,
+      0 2px 0 rgba(158, 14, 78, 0.45),
+      0 3px 5px rgba(104, 2, 48, 0.45);
+    /* Each point arrives on its own beat, in reading order, so the pane
+       assembles itself rather than appearing as one block of text. `both`
+       holds the from-state before the delay elapses — without it every point
+       flashes at full opacity for a frame before its animation starts. */
+    opacity: 0; translate: 0 10px;
+    animation: introItemIn 0.52s cubic-bezier(0.22, 0.9, 0.3, 1) both;
+    animation-delay: calc(var(--i, 0) * 95ms + 140ms); }
+  @keyframes introItemIn {
+    from { opacity: 0; translate: 0 10px; }
+    to { opacity: 1; translate: 0 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .introItem { animation: none; opacity: 1; translate: 0 0; }
+  }
   /* Personal and business are two pages of one step, so switching account type
      interpolates the stack instead of cutting straight to the other copy. */
   #paneAccountIntro .formStack { transition: opacity 0.18s ease; }
@@ -820,7 +855,16 @@
       </div>
     </div>
   </div>
-  <audio id="radioBed" loop preload="none" src="/poplur-clay-map/public/radio_bed.wav"></audio>
+  <!-- The radio_bed.wav element used to live here. It is gone, not silenced.
+       It was a mono 11 kHz 12-second loop that nothing was ever meant to hear,
+       held down by `volume = 0` — and iOS ignores `volume` on a media element
+       entirely, so on a real iPhone it played at FULL volume and was the buzz
+       under the whole of pre-login. `muted` would have worked, but the mute
+       button's own applyMute() unmutes every <audio> on the page, so the buzz
+       would have come straight back the first time somebody un-muted. The only
+       version of this that cannot regress is not having the element. Pre-login
+       audio is now exactly the AI voice, the live station, and the pops. -->
+
     </div>
   </div>
 </div>
@@ -1279,7 +1323,15 @@
       var gap = Math.max(14, (btnsTop - logoB - cubeH - textH) / 3)
       var cubeTop = logoB + gap + cubeH / 2
       var textTop = logoB + gap + cubeH + gap
-      if (stage.classList.contains('risen')) stage.style.top = cubeTop + 'px'
+      // The explainer pane is the one screen that positions the cube from CSS
+      // (`.phone.introPane .cubeStage.risen`) rather than from this measured
+      // layout, because it needs a smaller, higher cube than the welcome does.
+      // An inline `top` written here outranks that rule — which is exactly what
+      // dropped the cube back down into the stack and left the account art
+      // sitting on top of it. Measured: cube 269-361px, art 281-377px.
+      // Hand the pane back to its stylesheet instead of fighting it.
+      if (document.querySelector('.phone.introPane')) stage.style.removeProperty('top')
+      else if (stage.classList.contains('risen')) stage.style.top = cubeTop + 'px'
       clayHeadEl.style.top = textTop + 'px'
       claySubEl.style.top = (textTop + headH + innerGap) + 'px'
       aiText.style.top = (textTop + headH + innerGap + subH + innerGap) + 'px'
@@ -1324,9 +1376,9 @@
       }, 450)
     }, 5200)
 
-    // ── Radio bed — starts on the GCL audio grant or first touch, and keeps
-    // playing across carousel slides so it is never cut off or restarted ──
-    var radio = document.getElementById('radioBed')
+    // ── Pre-login audio — the AI voice and the live station, nothing else.
+    // Whatever turns audio on (the GCL grant, or the first touch on a device)
+    // starts the voice; the station tunes itself separately below. ──
     var audioOn = false
     var synth = window.speechSynthesis
     function speakAI(text) {
@@ -1351,22 +1403,11 @@
     function setAudio(on) {
       audioOn = on
       if (on) {
-        radio.muted = false
-        if (radio.volume === 1) radio.volume = 0.55
-        // Pick the bed up where the previous screen left it — never restart.
-        if (radio.paused) {
-          try { radio.currentTime = parseFloat(sessionStorage.getItem('poplurRadio.t') || '0') || 0 } catch (e) {}
-        }
-        radio.play().catch(function () {})
         speakAI(aiText.textContent)
       } else {
-        radio.pause()
         try { synth && synth.cancel() } catch (e) {}
       }
     }
-    setInterval(function () {
-      if (!radio.paused) try { sessionStorage.setItem('poplurRadio.t', String(radio.currentTime)) } catch (e) {}
-    }, 500)
     // Mute toggle: silences the radio bed, AI voice, and pops across pre-login.
     // Persisted so the choice survives the carousel and page handoffs.
     ;(function () {
@@ -1390,11 +1431,10 @@
       try { saved = sessionStorage.getItem('poplurMuted') || '0' } catch (e) {}
       if (saved === '1') applyMute(true)
     })()
-    // ── Live radio: the fuzz bed is never audible. Cycle through the nearest
+    // ── Live radio: the only music in pre-login. Cycle through the nearest
     // popular stations (Radio Browser, ordered by clickcount) until one
     // actually plays, then that station IS the radio. ──
     ;(function () {
-      radio.volume = 0 // fuzz bed silenced permanently; kept only as a clock
       var live = document.createElement('audio')
       live.crossOrigin = 'anonymous'
       live.preload = 'none'
@@ -1433,16 +1473,20 @@
       })
       tune() // ambient attempt — succeeds inside the prototype frame
     })()
-    // Attempt ambient autoplay: permitted inside the prototype (its frame
-    // grants allow=autoplay); silently ignored where the browser blocks it
-    // until a gesture or a GCL grant arrives.
-    setTimeout(function () {
-      if (audioOn) return
-      radio.muted = false
-      if (radio.volume === 1) radio.volume = 0.55
-      try { radio.currentTime = parseFloat(sessionStorage.getItem('poplurRadio.t') || '0') || 0 } catch (e) {}
-      radio.play().then(function () { setAudio(true) }).catch(function () {})
-    }, 300)
+    // Attempt ambient audio: permitted inside the prototype (its frame grants
+    // allow=autoplay), ignored on a device until a gesture. This used to probe
+    // for permission by play()ing the radio bed and turning audio on if that
+    // resolved — which is the other reason the bed existed. With the bed gone,
+    // ask directly, and let the first touch re-arm it if the browser refused.
+    setTimeout(function () { if (!audioOn) setAudio(true) }, 300)
+    // On a device audio is granted by the first touch and not before. Calling
+    // setAudio again is harmless and is what starts the voice there — speakAI
+    // simply speaks the current line. Previously the only device path to audio
+    // was the permission pane, several screens in.
+    window.addEventListener('pointerdown', function audioOnce () {
+      window.removeEventListener('pointerdown', audioOnce)
+      setAudio(true)
+    })
     addEventListener('message', function (event) {
       var data = event && event.data
       if (!data) return
@@ -1474,6 +1518,11 @@
       // drives both halves of that — a smaller, higher cube and a stack that
       // comes up with it — so the two move as one.
       document.querySelector('.phone')?.classList.toggle('introPane', index === 8)
+      // Stepping onto (or off) the explainer changes which of the two cube
+      // positions applies, and only computeLayout owns the inline top that
+      // decides it. Without this the class flips but the cube keeps whatever
+      // pixel top the last layout pass wrote.
+      if (window.__poplurComputeLayout) window.__poplurComputeLayout()
     }
     // Cube = back button. Each sign-up step goes back one logical page; the
     // personal photo pane (7) returns to Create login (3).
@@ -1576,6 +1625,7 @@
     }
 
     var introPainted = false
+    var introLastBiz = null
     function renderAccountIntro () {
       var biz = isBusiness()
       var copy = biz ? INTRO.business : INTRO.personal
@@ -1587,16 +1637,26 @@
         document.getElementById('introArtBusiness').hidden = !biz
         var list = document.getElementById('introList')
         list.textContent = ''
-        copy.points.forEach(function (text) {
+        copy.points.forEach(function (text, i) {
           var row = document.createElement('div')
           row.className = 'introItem'
+          // Drives the stagger in CSS rather than a per-row delay in script, so
+          // the timing lives next to the animation it belongs to.
+          row.style.setProperty('--i', i)
           row.textContent = text
           list.appendChild(row)
         })
       }
       // First paint is instant — there is nothing to interpolate from, and the
-      // pane is still sliding in. Only a genuine change of account type fades.
-      if (!introPainted || !stack) { introPainted = true; paint(); return }
+      // pane is still sliding in. Only a genuine CHANGE of account type fades.
+      // Re-entering on the SAME type also repaints, instantly: the rows are
+      // rebuilt, so their entrance animations start over and the points stagger
+      // in again. Without this the guard held the old rows and the second visit
+      // showed the copy already assembled.
+      var changed = introPainted && introLastBiz !== biz
+      introPainted = true
+      introLastBiz = biz
+      if (!changed || !stack) { paint(); return }
       stack.classList.add('introSwapping')
       setTimeout(function () {
         paint()

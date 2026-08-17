@@ -87,10 +87,8 @@ const ASSETS = [
    "Poplur2025-iOS/Poplur2025/pop.mp3"],
   [join(WORKSPACE, "Poplur2025-iOS/Poplur2025/Assets.xcassets/logo.imageset/logo1.png"),
    "Poplur2025-iOS/Poplur2025/Assets.xcassets/logo.imageset/logo1.png"],
-  // The splash preloads the loading globe so the post-login Loading screen has
-  // it warm. It was the last 404 in the bundle: the hint is absolute
-  // (/.claude/artifacts/models/...) and nothing mirrored that path, so the
-  // preload failed and the globe was fetched cold later.
+  // Keep the loading globe bundled for the post-login Loading screen. The
+  // splash no longer preloads it; the destination screen requests it on demand.
   [join(WORKSPACE, ".claude/artifacts/models/poplur-globe-lite.glb"),
    ".claude/artifacts/models/poplur-globe-lite.glb"],
 ];
@@ -386,10 +384,8 @@ const POPLUR_WEBGL_OK = (function () {
 }
 
 // splash.html is already a clean, self-contained page with zero network refs.
-// Phase 2: all three preloaded GLBs (poplur_icon_cube, MarkHead_TalkingRig,
-// zoom_buildings) are now bundled (compressed), so the splash preload hints all
-// resolve against the local scheme handler and warm the models for the welcome
-// hero cube + Choose-Account icons. Nothing to strip — kept verbatim.
+// 3D models remain bundled for the destination screens, but the approved splash
+// intentionally does not preload them so launch avoids unnecessary decode/I/O.
 function cleanSplash(html) {
   // The canonical splash owns first-painted-frame gating and explicitly disables
   // native/PiP/remote controls. Keep this transform idempotent so generated

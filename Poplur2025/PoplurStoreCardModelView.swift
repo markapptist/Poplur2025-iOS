@@ -9,9 +9,13 @@ struct PoplurStoreCardModelView: UIViewRepresentable {
     let presentationRotationX: Float
 
     func makeUIView(context: Context) -> SCNView {
-        let view = SCNView(frame: .zero)
+        let view = PoplurManagedSCNView(
+            performanceName: "StoreCardCarousel3D",
+            classification: .heavy,
+            rateClass: .decorative
+        )
         view.backgroundColor = .clear
-        view.antialiasingMode = .multisampling4X
+        view.antialiasingMode = .multisampling2X
         view.preferredFramesPerSecond = 30
         view.allowsCameraControl = true
         view.autoenablesDefaultLighting = false
@@ -21,6 +25,11 @@ struct PoplurStoreCardModelView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: SCNView, context: Context) {}
+
+    static func dismantleUIView(_ uiView: SCNView, coordinator: Void) {
+        uiView.scene?.rootNode.removeAllActions()
+        (uiView as? PoplurManagedSCNView)?.poplurTearDown()
+    }
 
     private func makeScene() -> SCNScene {
         let scene = SCNScene()
