@@ -119,14 +119,21 @@
      a kill switch, so the .poplur-colorlab class below is now present by
      default instead of only on an explicit opt-in.
      Geometry is a deliberate mirror of .muteBtn — same top, same padding,
-     same z-index, same shadow, `right` swapped for `left` — so the two read
-     as one pair across the top of the screen rather than two near-matches. */
+     same shadow, `right` swapped for `left` — so the two read as one pair
+     across the top of the screen rather than two near-matches.
+     The one deliberate difference is the z-index: 61 here against .muteBtn's
+     60. .glassOverlay is also 60 and covers the screen with pointer-events
+     when `.on`, and an equal z-index is resolved by DOM order — so the
+     permission windows (which raise it 3.4s after load and hold it until BOTH
+     the location and camera asks are answered) swallowed every tap on the orb.
+     One above keeps it usable while judging those screens. Visually identical
+     either way: the two buttons never overlap. .muteBtn still has this. */
   .hueBtn { display: none; }
   html.poplur-colorlab .hueBtn {
     display: block;
     position: absolute;
     top: calc(env(safe-area-inset-top, 0px) + clamp(12px, 3cqw, 20px));
-    right: calc(env(safe-area-inset-right, 0px) + clamp(12px, 3cqw, 20px)); z-index: 60;
+    right: calc(env(safe-area-inset-right, 0px) + clamp(12px, 3cqw, 20px)); z-index: 61;
     appearance: none; background: none; border: 0; padding: 6px; cursor: pointer; line-height: 0; }
   html.poplur-colorlab .hueBtn:active { transform: scale(0.9); }
   /* The map's takeover picker, brought over so the two colour controls in the
@@ -228,7 +235,16 @@
      stepping onto the pane interpolates rather than jumping.
      flex-start rather than centred: the stack scrolls, and a centred overflow
      clips at BOTH ends, which is what was eating the button. */
-  .phone.introPane .cubeStage.risen { top: 20.5%; transform: translate(-50%, -50%) scale(0.4); }
+  /* The explainer is the one pane where the logo and the cube compete: the
+     cube rises to 20.5% and the logo sits at 58-92px, so they occupy the same
+     band and whichever paints second cuts into the other. The cube is the
+     back button and has to stay readable, so the logo steps aside here rather
+     than being stacked above or below it. Every other pane keeps it. */
+  .phone.introPane .wLogoWrap { display: none; }
+  /* Raised from 20.5% now the logo no longer occupies this pane: with the top
+     band free the cube can sit where the logo used to, which also opens the
+     gap between it and the account image below. */
+  .phone.introPane .cubeStage.risen { top: 13%; transform: translate(-50%, -50%) scale(0.4); }
   .phone.introPane #paneAccountIntro .formStack { top: 29%; justify-content: flex-start; }
   /* The button is the end of the page, so it sits at the end of the page.
      `margin-top: auto` claims only space that is genuinely free: on a short
@@ -474,10 +490,16 @@
      the same object as the card you just picked — the Mark head for personal,
      the building for business — so the step reads as a continuation of that
      choice rather than a new subject. */
-  .introArt { width: 96px; height: 96px; margin: 0 auto 2px; position: relative; }
+  .introArt { width: 124px; height: 124px; margin: 0 auto 2px; position: relative; }
   .introArt canvas { width: 100%; height: 100%; display: block; }
+  /* .account-3d-icon is shared with the Choose Account cards, where 42px is
+     correct. On the explainer it is the pane's only image, so here it fills its
+     box. At 42px in a 124px box it sat at the box's LEFT edge — 27px left of
+     centre, reading as uncentred — with 54px of dead space beneath it that
+     pushed the copy 72px away instead of 18px. */
+  .introArt .account-3d-icon { flex: 0 0 auto; width: 100%; height: 100%; border-radius: 26px; }
   .introList { display: flex; flex-direction: column; gap: 9px; width: min(268px, 82cqw);
-    margin: 2px auto 0; text-align: left; }
+    margin: 2px auto 0; text-align: center; }
   /* No bullets — the copy carries itself. Type matches .stackSub, the body face
      used everywhere else in pre-login: .introItem was the one text class on this
      page that never declared a font-family, so it fell back to the -apple-system
