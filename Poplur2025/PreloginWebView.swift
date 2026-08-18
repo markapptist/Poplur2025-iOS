@@ -72,34 +72,11 @@ enum PoplurPreloginWeb {
     }
 
     static var splashURL: URL? { URL(string: "\(scheme)://\(host)/splash.html?v=\(buildStamp)") }
-    static var welcomeURL: URL? { URL(string: "\(scheme)://\(host)/welcome.html?v=\(buildStamp)") }
-    /// The APPROVED post-login Loading screen — clay globe, wordmark, rotating
-    /// clay messages — built offline by scripts/build-loading-ios.mjs.
-    static var loadingURL: URL? { URL(string: "\(scheme)://\(host)/loading.html?v=\(buildStamp)") }
-}
 
-struct PreloginWebView: UIViewRepresentable {
-    let auth: AuthViewModel
-    /// Called when the web flow reports `complete` (Phase 3 handoff hook).
-    var onComplete: () -> Void = {}
-
-    func makeCoordinator() -> Coordinator { Coordinator(auth: auth, onComplete: onComplete) }
-
-    func makeUIView(context: Context) -> WKWebView {
-        let config = WKWebViewConfiguration()
-        config.allowsInlineMediaPlayback = true
-        // Autoplay the splash video + radio bed without a gesture (as the
-        // prototype does inside its frame).
-        config.mediaTypesRequiringUserActionForPlayback = []
-        config.userContentController.add(context.coordinator, name: "poplur")
-
-        // Splash video diagnostics, INJECTED rather than written into the page:
-        // splash.html is approved Good Copy and must not be edited to debug it.
-        // The video sits at opacity 0 until the page adds .ready on a painted
-        // frame, so "no video at all" and "video playing invisibly" look
-        // identical on screen. This reports which one it is, plus the media
-        // element's own error code.
-        let splashProbe = #"""
+    /// Splash video diagnostics, shared by BOTH hosts that load splash.html.
+    /// Injected rather than written into the page: splash.html is approved
+    /// Good Copy and must not be edited to debug it.
+    static let splashVideoProbe = #"""
         (function () {
           function report(stage, video) {
             try {
@@ -131,6 +108,34 @@ struct PreloginWebView: UIViewRepresentable {
           } else { attach(); }
         })();
         """#
+    static var welcomeURL: URL? { URL(string: "\(scheme)://\(host)/welcome.html?v=\(buildStamp)") }
+    /// The APPROVED post-login Loading screen — clay globe, wordmark, rotating
+    /// clay messages — built offline by scripts/build-loading-ios.mjs.
+    static var loadingURL: URL? { URL(string: "\(scheme)://\(host)/loading.html?v=\(buildStamp)") }
+}
+
+struct PreloginWebView: UIViewRepresentable {
+    let auth: AuthViewModel
+    /// Called when the web flow reports `complete` (Phase 3 handoff hook).
+    var onComplete: () -> Void = {}
+
+    func makeCoordinator() -> Coordinator { Coordinator(auth: auth, onComplete: onComplete) }
+
+    func makeUIView(context: Context) -> WKWebView {
+        let config = WKWebViewConfiguration()
+        config.allowsInlineMediaPlayback = true
+        // Autoplay the splash video + radio bed without a gesture (as the
+        // prototype does inside its frame).
+        config.mediaTypesRequiringUserActionForPlayback = []
+        config.userContentController.add(context.coordinator, name: "poplur")
+
+        // Splash video diagnostics, INJECTED rather than written into the page:
+        // splash.html is approved Good Copy and must not be edited to debug it.
+        // The video sits at opacity 0 until the page adds .ready on a painted
+        // frame, so "no video at all" and "video playing invisibly" look
+        // identical on screen. This reports which one it is, plus the media
+        // element's own error code.
+        let splashProbe = PoplurPreloginWeb.splashVideoProbe
         config.userContentController.addUserScript(
             WKUserScript(source: splashProbe, injectionTime: .atDocumentEnd, forMainFrameOnly: true)
         )

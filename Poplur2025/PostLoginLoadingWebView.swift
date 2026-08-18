@@ -8,8 +8,40 @@ import WebKit
 // loading design and no native visual recreation.
 
 struct PostLoginLoadingWebView: UIViewRepresentable {
+    /// Receives the injected splash probe. This host had no message handler at
+    /// all, which is why instrumenting only PreloginWebView produced media
+    /// requests (the scheme handler class is shared by both hosts) and not a
+    /// single video report: a signed-in launch never goes through that host.
+    final class Coordinator: NSObject, WKScriptMessageHandler {
+        func userContentController(_ userContentController: WKUserContentController,
+                                   didReceive message: WKScriptMessage) {
+            guard message.name == "poplur",
+                  let body = message.body as? [String: Any],
+                  (body["type"] as? String) == "splashVideoDiag" else { return }
+            let stage = body["stage"] as? String ?? "?"
+            let readyState = body["readyState"] as? Int ?? -1
+            let networkState = body["networkState"] as? Int ?? -1
+            let paused = (body["paused"] as? Bool).map(String.init) ?? "?"
+            let ready = (body["ready"] as? Bool).map(String.init) ?? "?"
+            let errorCode = body["errorCode"] as? Int ?? 0
+            PoplurDiagLog.append(
+                "[PostLoginLoadingSplash] video \(stage) readyState=\(readyState) "
+                + "network=\(networkState) paused=\(paused) ready=\(ready) err=\(errorCode)"
+            )
+        }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
+        // Same probe the pre-login host injects, so the two paths are comparable.
+        config.userContentController.add(context.coordinator, name: "poplur")
+        config.userContentController.addUserScript(
+            WKUserScript(source: PoplurPreloginWeb.splashVideoProbe,
+                         injectionTime: .atDocumentEnd,
+                         forMainFrameOnly: true)
+        )
         config.mediaTypesRequiringUserActionForPlayback = []
         config.allowsInlineMediaPlayback = true
         config.allowsPictureInPictureMediaPlayback = false
@@ -33,6 +65,27 @@ struct PostLoginLoadingWebView: UIViewRepresentable {
             priority: 100,
             configuration: config
         )
+        // Keep this document's runtime alive WITHOUT taking the heavy-renderer
+        // lease. That combination is the whole fix.
+        //
+        // The cover is deliberately priority 100 so Home wins the single heavy
+        // renderer and can reach its first frame -- raising it deadlocked the
+        // handoff, which is why it was lowered. But losing that lease SUSPENDS
+        // the document, and a suspended document cannot start playback. Measured
+        // on device: the clip reached readyState=4 (HAVE_ENOUGH_DATA), network=1
+        // (idle), err=0 -- fully buffered and perfectly decodable -- and stayed
+        // paused=true forever, with `playing` never firing. splash.html reveals
+        // the video only once playback starts (its three paths all require it,
+        // and the play() rejection is swallowed), so .ready was never added, the
+        // clip sat at opacity 0, and the logo fallback covered a working video.
+        // The looping progress bar underneath is CSS on the compositor, which
+        // runs regardless -- which is what made this look like a hung loader.
+        //
+        // poplurIsRuntimeActive treats lightweight-overlay mode as a third way to
+        // stay live besides holding the lease, which is exactly what a cover that
+        // must animate while yielding to Home needs.
+        webView.setLightweightOverlayMode(true)
+
         // This is a non-interactive cover. Never let WebKit expose transport
         // controls or promote its splash clip into a remote media session.
         webView.isUserInteractionEnabled = false
@@ -56,8 +109,14 @@ struct PostLoginLoadingWebView: UIViewRepresentable {
         // Autoplay is already permitted above (mediaTypesRequiringUserActionForPlayback
         // is empty, inline playback on), and the clip is bundled at
         // PreloginWeb/Poplur2025-iOS/Poplur2025/poplur_splash.mp4 — both verified.
-        // So when a launch shows the logo on black instead of the clip, that is the
-        // WKWebView still starting up, not a missing or blocked video.
+        // A launch showing the logo on black instead of the clip was NOT the
+        // WebView still starting up, as this comment used to claim. Device
+        // measurement showed the opposite: the clip is fully buffered
+        // (readyState=4, err=0) and simply never permitted to play, because the
+        // cover had yielded the renderer lease and its document was suspended.
+        // setLightweightOverlayMode above is what fixes it. Left recorded here
+        // because that guess is why the fallback was read as a slow start for
+        // months instead of as a stuck one.
         if PreloginWebView.bundledRootURL() != nil, let url = PoplurPreloginWeb.splashURL {
             webView.load(URLRequest(url: url))
         } else {
@@ -68,7 +127,7 @@ struct PostLoginLoadingWebView: UIViewRepresentable {
 
     func updateUIView(_ uiView: WKWebView, context: Context) {}
 
-    static func dismantleUIView(_ uiView: WKWebView, coordinator: ()) {
+    static func dismantleUIView(_ uiView: WKWebView, coordinator: Coordinator) {
         (uiView as? PoplurManagedWebView)?.poplurTearDown()
     }
 }
