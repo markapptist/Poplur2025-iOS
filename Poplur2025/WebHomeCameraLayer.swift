@@ -759,6 +759,14 @@ struct PostLoginHomeSurface: View {
                 onReady: onReady,
                 onWebEvent: { [weak camera, weak poplurAI] type, body in
                     camera?.handleWebEvent(type: type, body: body)
+                    if type == "notificationsRead" {
+                        // The web notifications panel replaced the native
+                        // ProfileView's, and markAllRead() was only ever called
+                        // from that native screen -- so reading your
+                        // notifications cleared the in-app dot and left the app
+                        // icon badge lit with nothing unread behind it.
+                        Task { @MainActor in PoplurNotificationCenter.shared.markAllRead() }
+                    }
                     if type == "requestVoiceAssistant" {
                         // This message can only come from the explicit HEY
                         // POPLUR profile button. It is therefore the permission
