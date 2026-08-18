@@ -28,6 +28,33 @@ enum PoplurClayWebMap {
     static let scheme = "poplur-clay"
     static let host = "app"
 
+    /// Cache key for the web bundle, and the reason web changes actually ship.
+    ///
+    /// `index.html` is the ONE stable filename in this bundle (everything else
+    /// is content-hashed by Vite), and it was loaded at a URL whose query items
+    /// are identical on every build — mapMode and fallback2d and nothing else.
+    /// `devicectl install` replaces the app bundle but KEEPS the data
+    /// container, so WKWebView answered that unchanged URL from its cache: the
+    /// cached index.html kept naming the OLD hashed js/css, and the whole web
+    /// layer stayed frozen on a previous build while the native binary updated
+    /// underneath it. Every web change then looks like it silently failed to
+    /// ship — new bundle synced, new build installed, same old screens.
+    ///
+    /// PreloginWebView hit exactly this and fixed it (commit 04b04a0); the fix
+    /// was never carried across to the post-login surface, which is where the
+    /// map, feed, profile and every hold-menu screen live. Same remedy, same
+    /// reasoning: the executable's modification time changes on every build
+    /// without anyone having to remember to bump a number.
+    static var buildStamp: String {
+        let version = (Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0")
+            + "-" + (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0")
+        guard let executable = Bundle.main.executableURL,
+              let attributes = try? FileManager.default.attributesOfItem(atPath: executable.path),
+              let built = attributes[.modificationDate] as? Date
+        else { return version }
+        return version + "-" + String(Int(built.timeIntervalSince1970))
+    }
+
     static var indexURL: URL? { URL(string: "\(scheme)://\(host)/index.html") }
 }
 
@@ -68,7 +95,10 @@ struct PoplurClayMapView: UIViewRepresentable {
                 URLQueryItem(
                     name: "fallback2d",
                     value: !use3D && SettingsStore.prefers2DMapForThisDevice ? "1" : "0"
-                )
+                ),
+                // Varies per build, so a new install can never be answered from
+                // the previous build's cache. See buildStamp above.
+                URLQueryItem(name: "v", value: PoplurClayWebMap.buildStamp),
             ]
             webView.load(URLRequest(url: components?.url ?? indexURL))
         } else {
