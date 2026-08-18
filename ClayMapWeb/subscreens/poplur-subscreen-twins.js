@@ -202,6 +202,7 @@ const groups = {
   },
 };
 
+let embedMiss = false;
 let activeGroup = 'feed';
 let activeScreen = groups.feed.screens[0].id;
 let phoneBootTimer = null;
@@ -693,6 +694,16 @@ if (embeddedScreen) {
   if (embeddedGroup) {
     activeGroup = embeddedGroup[0];
     activeScreen = embeddedScreen;
+  } else {
+    // A MISS MUST RENDER NOTHING. Hiding the chrome above was only half the
+    // promise: `activeScreen` still held this file's default — the first Feed
+    // screen, the mock TV Guide — and renderScreen falls back to
+    // `group.screens[0]` besides, so every unknown id answered with a fake TV
+    // Guide inside the shipped app. That is exactly how `profile-home` and
+    // `feed-home` (host doors with no counterpart here, as the note above
+    // predicted) put a mock TV Guide on Profile and Feed. Blank is the only
+    // honest answer to "show me a screen I do not have".
+    embedMiss = true;
   }
 }
 
@@ -752,6 +763,13 @@ function renderScreen() {
   stopPhoneBoot();
   stopPhoneThemeChange();
   stopStoreCarousel();
+  // An embed asked for a screen this catalogue does not have: draw nothing.
+  // Never the default screen, which read as a real (wrong) app screen.
+  if (embedMiss) {
+    screenEl.className = 'screen';
+    screenEl.innerHTML = '';
+    return;
+  }
   const group = groups[activeGroup];
   const item = group.screens.find(s => s.id === activeScreen) || group.screens[0];
   screenEl.className = `screen ${activeGroup}-screen`;
