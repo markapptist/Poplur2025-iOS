@@ -1305,6 +1305,17 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     PoplurPermissionRouting.markHandled(permission)
                 }
                 if type == "tabChanged", let tab = body["tab"] as? String {
+                    // Record the surface in the diagnostics stream. The thermal
+                    // soak reads this log to attribute heat, and until now it
+                    // could not name the screen: PoplurPerformanceManager only
+                    // knows the registered RENDERER (PostLoginHomeWeb covers
+                    // every web tab), and snapshots are event-driven, so a
+                    // settled dwell is pure silence. Every measured dwell to
+                    // date says "Home" by inference, never by record. One line
+                    // per user-initiated tab change: no polling, no timer.
+                    if tab != currentWebTab {
+                        PoplurDiagLog.append("[WebTab] committed=\(tab) previous=\(currentWebTab)")
+                    }
                     currentWebTab = tab
                     if tab != "post" { webReportsLiveCamera = false }
                     syncMotionLease()
