@@ -1,0 +1,8 @@
+# Installed packages never belong in the repo — a stray `git add -A` from the
+# workspace root vacuumed 2,000+ node_modules files into 639eb20 before this
+# file existed. Secrets stay in the environment / Secrets.swift as everywhere
+# else in this repo.
+node_modules/
+.env
+*.local
+serviceAccount*.json
