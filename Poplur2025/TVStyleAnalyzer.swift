@@ -19,9 +19,6 @@ actor TVStyleAnalyzer {
     static let shared = TVStyleAnalyzer()
     private init() {}
 
-    private let endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
-    private let model    = "claude-haiku-4-5-20251001"
-
     func analyze(image: UIImage) async throws -> TVStyleMetadata {
         let jpeg = resized(image).jpegData(compressionQuality: 0.72) ?? Data()
         return try await callClaude(imageData: jpeg)
@@ -53,65 +50,26 @@ actor TVStyleAnalyzer {
         }
     }
 
+    // The Claude classification runs on Poplur's backend (POST /tv/style);
+    // the device only ships the reduced JPEG and decodes the JSON reply.
     private func callClaude(imageData: Data) async throws -> TVStyleMetadata {
-        let key = AppSecrets.claudeAPIKey
-        guard !key.isEmpty else { throw TVAnalyzerError.noAPIKey }
-
-        let prompt = """
-You are a TV broadcast classifier for Poplur TV, a social platform where every post is a TV broadcast.
-Analyze this image and respond ONLY with a JSON object — no extra text, no markdown:
-{"channel":"<food|fitness|sports|beauty|fashion|music|tech|news|city|entertainment>","tvFormat":"<commercial|highlight_reel|cooking_show|documentary|talk_show|music_video|news_segment>","adConcept":"<what this would be as a TV ad or show in under 8 words>","caption":"<PUNCHY ALL-CAPS HEADLINE MAX 5 WORDS>","tagline":"<one compelling motivational sentence>","broadcastName":"<POPLUR CHANNEL e.g. POPLUR FITNESS>"}
-"""
-
-        let body: [String: Any] = [
-            "model": model,
-            "max_tokens": 300,
-            "messages": [[
-                "role": "user",
-                "content": [
-                    ["type": "image", "source": [
-                        "type": "base64",
-                        "media_type": "image/jpeg",
-                        "data": imageData.base64EncodedString()
-                    ]],
-                    ["type": "text", "text": prompt]
-                ]
-            ]]
-        ]
-
-        var req = URLRequest(url: endpoint)
-        req.httpMethod = "POST"
-        req.setValue(key,           forHTTPHeaderField: "x-api-key")
-        req.setValue("2023-06-01",  forHTTPHeaderField: "anthropic-version")
-        req.setValue("application/json", forHTTPHeaderField: "content-type")
-        req.httpBody = try JSONSerialization.data(withJSONObject: body)
-        req.timeoutInterval = 20
-
-        let (data, response) = try await URLSession.shared.data(for: req)
-        if let http = response as? HTTPURLResponse, http.statusCode != 200 {
-            let body = String(data: data, encoding: .utf8) ?? ""
-            print("🎬 [TVStyleAnalyzer] HTTP \(http.statusCode): \(body)")
-            throw TVAnalyzerError.httpError(http.statusCode)
+        let payload: [String: Any]
+        do {
+            payload = try await PoplurAIBackendClient()
+                .tvStyleMetadata(imageBase64: imageData.base64EncodedString())
+        } catch let error as AIStackError {
+            if case .backendError(let status) = error {
+                print("🎬 [TVStyleAnalyzer] backend HTTP \(status)")
+                throw TVAnalyzerError.httpError(status)
+            }
+            throw TVAnalyzerError.parseError
         }
-
-        guard
-            let outer   = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-            let content = (outer["content"] as? [[String: Any]])?.first,
-            var text    = content["text"] as? String
-        else { throw TVAnalyzerError.parseError }
-
-        // Strip markdown code fences Claude sometimes adds
-        if let range = text.range(of: "{"), let end = text.range(of: "}", options: .backwards) {
-            text = String(text[range.lowerBound...end.upperBound])
-        }
-
-        guard let jsonData = text.data(using: .utf8) else { throw TVAnalyzerError.parseError }
+        let jsonData = try JSONSerialization.data(withJSONObject: payload)
         return try JSONDecoder().decode(TVStyleMetadata.self, from: jsonData)
     }
 }
 
 enum TVAnalyzerError: Error {
-    case noAPIKey
     case parseError
     case httpError(Int)
 }

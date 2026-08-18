@@ -101,36 +101,21 @@ final class AuthAIGuideVM: ObservableObject {
         }
     }
 
+    // Pre-login, so this goes through the backend's unauthenticated,
+    // rate-limited guest route; the per-screen system prompt lives server-side.
     private func callClaude(question: String) async -> String {
-        let key = AppSecrets.claudeAPIKey
-        guard !key.isEmpty, let url = URL(string: "https://api.anthropic.com/v1/messages") else {
-            return screen.greeting
+        let wireScreen: String
+        switch screen {
+        case .welcome: wireScreen = "welcome"
+        case .login:   wireScreen = "login"
+        case .signUp:  wireScreen = "signUp"
         }
-        var req = URLRequest(url: url)
-        req.httpMethod = "POST"
-        req.setValue(key, forHTTPHeaderField: "x-api-key")
-        req.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
-        req.setValue("application/json", forHTTPHeaderField: "content-type")
-        req.timeoutInterval = 10
-        let body: [String: Any] = [
-            "model": "claude-haiku-4-5-20251001",
-            "max_tokens": 80,
-            "system": screen.systemPrompt,
-            "messages": [["role": "user", "content": question]]
-        ]
-        guard let bodyData = try? JSONSerialization.data(withJSONObject: body) else {
-            return screen.greeting
-        }
-        req.httpBody = bodyData
         do {
-            let (data, _) = try await URLSession.shared.data(for: req)
-            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let content = (json["content"] as? [[String: Any]])?.first,
-               let text = content["text"] as? String {
-                return text
-            }
-        } catch {}
-        return screen.greeting
+            return try await PoplurAIBackendClient()
+                .authGuideReply(screen: wireScreen, question: question)
+        } catch {
+            return screen.greeting
+        }
     }
 }
 

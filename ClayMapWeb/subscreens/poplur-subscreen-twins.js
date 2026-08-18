@@ -143,7 +143,7 @@ const allGuideChannels = [
   ['poplur_channel_105_modelling', 105, 'Modelling', 'runwayraw  ▶  casting call  ▶  backstage'],
   ['poplur_channel_106_fashion', 106, 'Fashion', 'fitcheckdaily  ▶  thrift loop  ▶  street style'],
   ['poplur_channel_107_music', 107, 'Music', 'basement.set  ▶  warehouse live  ▶  CBC Music 94.1'],
-  ['poplur_channel_108_tech', 108, 'Tech', 'shipit  ▶  desk setup  ▶  new build'],
+  ['poplur_channel_108_tech', 108, 'Tech', 'shipit  ▶  desk setup  ▶  new demo'],
   ['poplur_channel_109_news', 109, 'News', 'localwire  ▶  harbourfront rally  ▶  breaking'],
   ['poplur_channel_112_shopping', 112, 'Shopping', 'sample sale  ▶  pop-up finds  ▶  under $20'],
   ['poplur_channel_113_cartoon', 113, 'Cartoon', 'doodlecast  ▶  clay OC  ▶  new upload'],
@@ -156,48 +156,48 @@ const groups = {
   feed: {
     label: 'Feed',
     screens: [
-      { id: 'feed-tvguide', title: 'TV Guide', detail: 'Live channels in your radius', icon: H.tvGuide, render: () => feedTVGuide() },
-      { id: 'feed-comments', title: 'Comments', detail: 'Community comments', icon: H.chat, render: () => feedComments() },
-      { id: 'feed-news', title: 'News', detail: 'Local stories in your radius', icon: H.news, render: () => feedNews() },
-      { id: 'feed-music', title: 'Music', detail: 'Music in your radius', icon: H.music, render: () => feedMusic() },
-      { id: 'feed-games', title: 'Games', detail: 'Games in your radius', icon: H.games, render: () => feedGames() },
-      { id: 'feed-like', title: 'Like', detail: 'Save this post to your likes', icon: H.like, render: () => feedLike() },
+      { id: 'feed-tvguide', title: 'TV Guide', detail: 'FeedOpenTVGuide overlay', icon: H.tvGuide, render: () => feedTVGuide() },
+      { id: 'feed-comments', title: 'Comments', detail: 'Feed comment credits roll', icon: H.chat, render: () => feedComments() },
+      { id: 'feed-news', title: 'News', detail: 'Poplur Newspaper page', icon: H.news, render: () => feedNews() },
+      { id: 'feed-music', title: 'Music', detail: 'Hold menu music channel', icon: H.music, render: () => feedMusic() },
+      { id: 'feed-games', title: 'Games', detail: 'Hold menu games channel', icon: H.games, render: () => feedGames() },
+      { id: 'feed-like', title: 'Like', detail: 'Double-tap heart burst', icon: H.like, render: () => feedLike() },
       { id: 'feed-cc', title: 'CC On/Off', detail: 'Captions + auto translation', icon: H.cc, render: () => feedCC() },
     ],
   },
   camera: {
     label: 'Camera',
     screens: [
-      { id: 'camera-capture', title: 'Capture', detail: 'Photo, video, and live capture', icon: H.create, render: () => cameraCapture() },
-      { id: 'camera-roll', title: 'Camera Roll', detail: 'Recent photos and videos', icon: H.cameraRoll, render: () => cameraRoll() },
-      { id: 'camera-create', title: 'Create', detail: 'AI creation tools', icon: H.create, render: () => creatorScreen() },
-      { id: 'camera-preview', title: 'Preview', detail: 'Review your capture', icon: H.tvGuide, render: () => cameraPreview() },
-      { id: 'camera-live', title: 'Live', detail: 'Live broadcast controls', icon: H.tvGuide, render: () => cameraLive() },
-      { id: 'camera-chat', title: 'Chat', detail: 'Messages in your radius', icon: H.chat, render: () => messagesScreen('Camera') },
-      { id: 'camera-store', title: 'Store', detail: 'Shop Poplur', icon: H.store, render: () => storeScreen() },
+      { id: 'camera-capture', title: 'Capture', detail: 'Record tab camera controls', icon: H.create, render: () => cameraCapture() },
+      { id: 'camera-roll', title: 'Camera Roll', detail: 'showCameraRollWindow', icon: H.cameraRoll, render: () => cameraRoll() },
+      { id: 'camera-create', title: 'Create', detail: 'OpenCreatorRequested', icon: H.create, render: () => creatorScreen() },
+      { id: 'camera-preview', title: 'Preview', detail: 'CapturePreviewOverlay', icon: H.tvGuide, render: () => cameraPreview() },
+      { id: 'camera-live', title: 'Live', detail: 'LiveVideoStatusBadge', icon: H.tvGuide, render: () => cameraLive() },
+      { id: 'camera-chat', title: 'Chat', detail: 'OpenDMsRequested', icon: H.chat, render: () => messagesScreen('Camera') },
+      { id: 'camera-store', title: 'Store', detail: 'OpenPoplurStoreRequested', icon: H.store, render: () => storeScreen() },
     ],
   },
   map: {
     label: 'Map',
     screens: [
-      { id: 'map-locate', title: 'Locate', detail: 'Return to your location', icon: H.locate, render: () => mapLocate() },
-      { id: 'map-post', title: 'Post', detail: 'Place a post on the map', icon: H.post, render: () => mapPost() },
-      { id: 'map-tour', title: 'Tour', detail: 'Explore places in your radius', icon: H.tour, render: () => mapTour() },
-      { id: 'map-search', title: 'Search', detail: 'Search places, people, and posts', icon: H.locate, render: () => mapSearch() },
+      { id: 'map-locate', title: 'Locate', detail: 'CenterMapOnUser', icon: H.locate, render: () => mapLocate() },
+      { id: 'map-post', title: 'Post', detail: 'PoplurAIStartMapPost', icon: H.post, render: () => mapPost() },
+      { id: 'map-tour', title: 'Tour', detail: 'PoplurAISetTourActive', icon: H.tour, render: () => mapTour() },
+      { id: 'map-search', title: 'Search', detail: 'PoplurMapSearchOverlay', icon: H.locate, render: () => mapSearch() },
       { id: 'map-claims', title: 'Claims', detail: 'Dominance and radius pins', icon: H.stats, render: () => mapClaims() },
-      { id: 'map-chat', title: 'Chat', detail: 'Messages near this map area', icon: H.chat, render: () => messagesScreen('Map') },
+      { id: 'map-chat', title: 'Chat', detail: 'OpenDMsRequested', icon: H.chat, render: () => messagesScreen('Map') },
     ],
   },
   profile: {
     label: 'Profile',
     screens: [
-      { id: 'profile-messages', title: 'Messages', detail: 'Chats in your radius', icon: H.chat, render: () => messagesScreen('Profile') },
-      { id: 'profile-settings', title: 'Settings', detail: 'App and subscreen preferences', icon: H.settings, render: () => settingsScreen() },
-      { id: 'profile-stats', title: 'Stats', detail: 'Radius and creator insights', icon: H.stats, render: () => statsScreen() },
-      { id: 'profile-alerts', title: 'Notifications', detail: 'Alerts in your radius', icon: H.notifications, render: () => notificationsScreen() },
-      { id: 'profile-store', title: 'Store', detail: 'Shop Poplur', icon: H.store, render: () => storeScreen() },
-      { id: 'profile-phone', title: 'Phone', detail: 'Calls, contacts, texts, and games', icon: H.phone, render: () => phoneScreen() },
-      { id: 'profile-creator', title: 'Creator', detail: 'AI creation tools', icon: H.create, render: () => creatorScreen() },
+      { id: 'profile-messages', title: 'Messages', detail: 'MessagesRootView', icon: H.chat, render: () => messagesScreen('Profile') },
+      { id: 'profile-settings', title: 'Settings', detail: 'AppSettingsView', icon: H.settings, render: () => settingsScreen() },
+      { id: 'profile-stats', title: 'Stats', detail: 'ProfileStatsView', icon: H.stats, render: () => statsScreen() },
+      { id: 'profile-alerts', title: 'Notifications', detail: 'ProfileNotificationBanner', icon: H.notifications, render: () => notificationsScreen() },
+      { id: 'profile-store', title: 'Store', detail: 'RadiusStoreView', icon: H.store, render: () => storeScreen() },
+      { id: 'profile-phone', title: 'Phone', detail: 'PopularPhone overlay', icon: H.phone, render: () => phoneScreen() },
+      { id: 'profile-creator', title: 'Creator', detail: 'PoplurAICreateView', icon: H.create, render: () => creatorScreen() },
     ],
   },
 };
@@ -636,23 +636,12 @@ const worldPostingOpportunities = [
   },
 ];
 
-const PROFILE_SETTINGS_KEY = 'poplur.profile.settings.v2';
-const savedProfileSettings = (() => {
-  try { return JSON.parse(window.localStorage.getItem(PROFILE_SETTINGS_KEY) || '{}'); } catch { return {}; }
-})();
-
 const profileSettingState = {
   videoDuration: '10s',
   captions: true,
   notifications: true,
   tvGuide: true,
   language: 'English',
-  subscreenMotion: true,
-  subscreenLargeControls: false,
-  subscreenHighContrast: false,
-  subscreenDeviceEffects: true,
-  subscreenCarouselAutoplay: true,
-  ...savedProfileSettings,
   // REAL setting, not a demo row: mirrors poplur.radio.background in the app.
   // In the shell this document shares the app's origin (both served off the
   // poplur-clay:// bundle) so localStorage IS the app's; on the dev workbench
@@ -662,17 +651,6 @@ const profileSettingState = {
     try { return window.localStorage.getItem('poplur.radio.background') === '1'; } catch { return false; }
   })(),
 };
-
-function persistProfileSettings() {
-  try { window.localStorage.setItem(PROFILE_SETTINGS_KEY, JSON.stringify(profileSettingState)); } catch { /* embedded */ }
-}
-
-function applySubscreenSettings() {
-  document.body.classList.toggle('subscreens-reduced-motion', !profileSettingState.subscreenMotion);
-  document.body.classList.toggle('subscreens-large-controls', !!profileSettingState.subscreenLargeControls);
-  document.body.classList.toggle('subscreens-high-contrast', !!profileSettingState.subscreenHighContrast);
-  document.body.classList.toggle('subscreens-tv-guide-static', !profileSettingState.tvGuide);
-}
 
 function persistRadioBackground(on) {
   try { window.localStorage.setItem('poplur.radio.background', on ? '1' : '0'); } catch { /* embedded */ }
@@ -701,14 +679,22 @@ if (params.get('rcl') === '1') {
   document.body.classList.add('rcl-clay');
 }
 if (embeddedScreen) {
+  // Chrome off the moment the host asks to embed -- BEFORE resolving the id.
+  // This class is the only thing hiding the picker sidebar, the GCL refresh bar
+  // and the mock status bar/island. Gating it on a successful lookup meant a
+  // single stale screen id exposed the entire review catalogue inside the
+  // shipped app, complete with a "Last refreshed" banner and a fake clock two
+  // millimetres above the real one. The host's ids and this artifact's ids drift
+  // independently (camera-ai-chat vs camera-chat, map-home with no counterpart
+  // at all), so a miss is expected and must degrade to a blank screen, never to
+  // a dev tool.
+  document.body.classList.add('embed');
   const embeddedGroup = Object.entries(groups).find(([, group]) => group.screens.some(screen => screen.id === embeddedScreen));
   if (embeddedGroup) {
     activeGroup = embeddedGroup[0];
     activeScreen = embeddedScreen;
-    document.body.classList.add('embed');
   }
 }
-applySubscreenSettings();
 
 const tabsEl = document.getElementById('groupTabs');
 const listEl = document.getElementById('screenList');
@@ -924,8 +910,6 @@ screenEl.addEventListener('click', e => {
   if (settingToggle) {
     const key = settingToggle.dataset.settingToggle;
     if (key in profileSettingState) profileSettingState[key] = !profileSettingState[key];
-    persistProfileSettings();
-    applySubscreenSettings();
     // Radio-in-background is live app state, not twin demo state.
     if (key === 'radioBackground') persistRadioBackground(profileSettingState.radioBackground);
     renderScreen();
@@ -935,7 +919,6 @@ screenEl.addEventListener('click', e => {
   const settingLanguage = e.target.closest('[data-setting-language]');
   if (settingLanguage) {
     profileSettingState.language = settingLanguage.dataset.settingLanguage;
-    persistProfileSettings();
     profileSettingsNotice = `Captions will translate to ${profileSettingState.language}.`;
     renderScreen();
     return;
@@ -960,7 +943,6 @@ screenEl.addEventListener('click', e => {
   if (settingChoice) {
     const key = settingChoice.dataset.settingChoice;
     if (key in profileSettingState) profileSettingState[key] = settingChoice.dataset.settingValue;
-    persistProfileSettings();
     profileSettingsNotice = `Video duration changed to ${profileSettingState.videoDuration}.`;
     renderScreen();
     return;
@@ -969,12 +951,12 @@ screenEl.addEventListener('click', e => {
   const settingAction = e.target.closest('[data-setting-action]');
   if (settingAction) {
     const messages = {
-      seed: 'Content preview controls are ready.',
-      repair: 'Your profile and sign-in status look healthy.',
-      backup: 'Your backup is ready to export.',
-      signout: 'Sign-out confirmation opened for this device.',
+      seed: 'Demo content controls opened for this test profile.',
+      repair: 'User ID repair test completed without changing account data.',
+      backup: 'A test backup is ready to export.',
+      signout: 'Sign-out confirmation works. Account state was preserved for testing.',
     };
-    profileSettingsNotice = messages[settingAction.dataset.settingAction] || 'This setting is ready.';
+    profileSettingsNotice = messages[settingAction.dataset.settingAction] || 'This settings route is ready.';
     renderScreen();
     return;
   }
@@ -1049,7 +1031,7 @@ function formatBytes(bytes) {
 
 function stopPhoneBoot() {
   if (phoneBootTimer) {
-    window.cancelAnimationFrame(phoneBootTimer);
+    window.clearInterval(phoneBootTimer);
     phoneBootTimer = null;
   }
 }
@@ -1065,15 +1047,6 @@ function stopPhoneThemeChange() {
   page?.classList.remove('phone-theme-changing');
   device?.classList.remove('phone-vibrating');
   lcd?.classList.remove('theme-changed');
-}
-
-function finishPhoneBoot(page, device) {
-  stopPhoneBoot();
-  phoneMode = 'menu';
-  page.classList.remove('is-booting');
-  page.classList.add('is-ready');
-  device.classList.remove('phone-vibrating');
-  renderPhoneMenu();
 }
 
 function stopStoreCarousel() {
@@ -1117,7 +1090,6 @@ function setStoreSlide(index) {
 function initStoreTwin() {
   if (!screenEl.querySelector('.store-carousel')) return;
   setStoreSlide(profileStoreSlide);
-  if (!profileSettingState.subscreenCarouselAutoplay) return;
   storeCarouselTimer = window.setInterval(() => setStoreSlide(profileStoreSlide + 1), 3000);
 }
 
@@ -1159,37 +1131,24 @@ function startPhoneBoot() {
   phoneMode = 'boot';
   page.classList.remove('is-ready');
   page.classList.add('is-booting');
-  device.classList.toggle('phone-vibrating', !!profileSettingState.subscreenDeviceEffects);
+  device.classList.add('phone-vibrating');
   setPhoneBootFrame(0);
-  if (profileSettingState.subscreenDeviceEffects) phoneVibrate([38, 28, 38, 28, 58]);
-  page.classList.remove('phone-led-flash');
-  if (profileSettingState.subscreenDeviceEffects) {
-    void page.offsetWidth;
-    page.classList.add('phone-led-flash');
-    try {
-      if (window.parent !== window) window.parent.postMessage({ type: 'poplur-phone-boot-effects' }, '*');
-    } catch (_) {}
-  }
+  phoneVibrate([38, 28, 38, 28, 58]);
 
-  // Derive the sprite frame from elapsed time instead of counting interval
-  // callbacks. Governed WKWebView timers can be coalesced; a missed callback
-  // previously left this surface on frame zero forever. This loop is bounded,
-  // visible-only, and completes immediately on the first late callback.
-  const startedAt = performance.now();
-  const advance = now => {
-    if (activeScreen !== 'profile-phone' || !page.isConnected) {
-      stopPhoneBoot();
-      return;
-    }
-    const frame = Math.min(16, Math.floor((now - startedAt) / 112));
+  let frame = 0;
+  phoneBootTimer = window.setInterval(() => {
+    frame += 1;
     if (frame >= 16) {
-      finishPhoneBoot(page, device);
+      stopPhoneBoot();
+      phoneMode = 'menu';
+      page.classList.remove('is-booting');
+      page.classList.add('is-ready');
+      device.classList.remove('phone-vibrating');
+      renderPhoneMenu();
       return;
     }
     setPhoneBootFrame(frame);
-    phoneBootTimer = window.requestAnimationFrame(advance);
-  };
-  phoneBootTimer = window.requestAnimationFrame(advance);
+  }, 112);
 }
 
 function setPhoneBootFrame(frame) {
@@ -1240,7 +1199,6 @@ function startPhoneThemeChange() {
 }
 
 function phoneVibrate(pattern = 18) {
-  if (!profileSettingState.subscreenDeviceEffects) return;
   try {
     if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(pattern);
   } catch (_) {}
@@ -1950,7 +1908,7 @@ function messagesScreen(from) {
     <div class="ios-screen messages profile-scroll-page">
       <div class="message-top">
         <img src="${H.chat}" alt="">
-        <div><h1>Chats</h1><span style="color:#777;font-weight:800">${esc(from)} messages</span></div>
+        <div><h1>Chats</h1><span style="color:#777;font-weight:800">${esc(from)} route · OpenDMsRequested</span></div>
       </div>
       <div class="message-list">
         ${profileMailThreads.map(item => thread(item)).join('')}
@@ -2197,7 +2155,7 @@ function mapClaims() {
 function settingsScreen() {
   if (profileSettingsPanel) return settingsPanelScreen(profileSettingsPanel);
 
-  const playbackRows = [
+  const rows = [
     {
       img: ios('settings_ic_film', 'settings_ic_film.png'),
       title: 'Video duration',
@@ -2217,56 +2175,6 @@ function settingsScreen() {
       panel: 'translation',
     },
     {
-      img: ios('settings_ic_play', 'settings_ic_play.png'),
-      title: 'Radio in background',
-      sub: profileSettingState.radioBackground
-        ? 'Keeps playing when you leave the radio'
-        : 'Plays only on the radio screen',
-      toggle: 'radioBackground',
-    },
-  ];
-
-  const subscreenRows = [
-    {
-      img: ios('settings_ic_play', 'settings_ic_play.png'),
-      title: 'Animated transitions',
-      sub: profileSettingState.subscreenMotion ? 'Motion on every subscreen' : 'Motion reduced everywhere',
-      toggle: 'subscreenMotion',
-    },
-    {
-      img: H.settings,
-      title: 'Larger controls',
-      sub: profileSettingState.subscreenLargeControls ? 'Roomier tap targets' : 'Standard tap targets',
-      toggle: 'subscreenLargeControls',
-    },
-    {
-      img: ios('settings_ic_info', 'settings_ic_info.png'),
-      title: 'Enhanced contrast',
-      sub: profileSettingState.subscreenHighContrast ? 'Stronger contrast on all screens' : 'Standard contrast',
-      toggle: 'subscreenHighContrast',
-    },
-    {
-      img: H.store,
-      title: 'Carousel autoplay',
-      sub: profileSettingState.subscreenCarouselAutoplay ? 'Promotions advance automatically' : 'Carousels move manually',
-      toggle: 'subscreenCarouselAutoplay',
-    },
-    {
-      img: H.phone,
-      title: 'Device effects',
-      sub: profileSettingState.subscreenDeviceEffects ? 'Phone vibration and LED enabled' : 'Phone vibration and LED disabled',
-      toggle: 'subscreenDeviceEffects',
-    },
-    {
-      img: ios('settings_ic_play', 'settings_ic_play.png'),
-      title: 'TV guide animation',
-      sub: profileSettingState.tvGuide ? 'Flip animation on' : 'Animation off',
-      toggle: 'tvGuide',
-    },
-  ];
-
-  const dataRows = [
-    {
       img: ios('settings_ic_bell', 'settings_ic_bell.png'),
       title: 'Notifications',
       sub: profileSettingState.notifications ? 'Daily Poplur alerts' : 'Off',
@@ -2274,14 +2182,28 @@ function settingsScreen() {
     },
     {
       img: ios('settings_ic_flask', 'settings_ic_flask.png'),
-      title: 'Content previews',
-      sub: 'Preview sample content',
+      title: 'Seed NA (1000)',
+      sub: 'Demo content controls',
       panel: 'seed',
     },
     {
+      img: ios('settings_ic_play', 'settings_ic_play.png'),
+      title: 'TV guide animation',
+      sub: profileSettingState.tvGuide ? 'Flip animation on' : 'Animation off',
+      toggle: 'tvGuide',
+    },
+    {
+      img: ios('settings_ic_play', 'settings_ic_play.png'),
+      title: 'Radio in background',
+      sub: profileSettingState.radioBackground
+        ? 'Keeps playing when you leave the radio'
+        : 'Plays only on the radio screen',
+      toggle: 'radioBackground',
+    },
+    {
       img: ios('settings_ic_wrench', 'settings_ic_wrench.png'),
-      title: 'Account health',
-      sub: 'Profile and sign-in status',
+      title: 'Fix Empty UserIDs',
+      sub: 'Maintenance',
       panel: 'repair',
     },
     {
@@ -2290,9 +2212,6 @@ function settingsScreen() {
       sub: 'Cloud export',
       panel: 'backup',
     },
-  ];
-
-  const aboutRows = [
     {
       img: ios('settings_ic_info', 'settings_ic_info.png'),
       title: 'About Poplur',
@@ -2305,20 +2224,11 @@ function settingsScreen() {
       sub: 'Legal',
       panel: 'terms',
     },
-  ];
-
-  const accountRows = [{
-    img: ios('settings_ic_signout', 'settings_ic_signout.png'),
-    title: 'Sign Out',
-    sub: 'Account',
-    panel: 'signout',
-    className: 'settings-signout',
-  }];
+  ].map(settingsRow).join('');
 
   return `
     <div class="ios-screen settings-page profile-scroll-page">
-      <div class="settings-hero"><img src="${H.settings}" alt=""><div><h1>Settings</h1><span style="color:var(--subtle);font-weight:800">Personalize Poplur</span></div></div>
-      ${settingsSection('Playback', 'Video, captions, language, and background audio.', playbackRows)}
+      <div class="settings-hero"><img src="${H.settings}" alt=""><div><h1>Settings</h1><span style="color:var(--subtle);font-weight:800">AppSettingsView</span></div></div>
       <div class="translation-card">
         <div>
           <strong>Translate captions to</strong>
@@ -2336,24 +2246,16 @@ function settingsScreen() {
           `).join('')}
         </div>
       </div>
-      ${settingsSection('Subscreens', 'These choices apply to every subscreen in Feed, Camera, Map, and Profile.', subscreenRows, 'subscreen-settings-section')}
-      ${settingsSection('Notifications & Data', 'Alerts, sample content, account care, and backups.', dataRows)}
-      ${settingsSection('About', 'Version, credits, and legal information.', aboutRows)}
-      ${settingsSection('Account', 'Your Poplur session.', accountRows)}
+      <div class="settings-list">${rows}</div>
+      ${settingsRow({
+        img: ios('settings_ic_signout', 'settings_ic_signout.png'),
+        title: 'Sign Out',
+        sub: 'Account',
+        panel: 'signout',
+        className: 'settings-signout',
+      })}
       ${profileSettingsNotice ? `<div class="profile-notice" role="status">${esc(profileSettingsNotice)}</div>` : ''}
     </div>
-  `;
-}
-
-function settingsSection(title, detail, rows, className = '') {
-  return `
-    <section class="settings-section ${className}" aria-label="${esc(title)} settings">
-      <div class="settings-section-heading">
-        <strong>${esc(title)}</strong>
-        <span>${esc(detail)}</span>
-      </div>
-      <div class="settings-list">${rows.map(settingsRow).join('')}</div>
-    </section>
   `;
 }
 
@@ -2385,32 +2287,32 @@ function settingsPanelScreen(panel) {
       detail: `Captions currently translate to ${profileSettingState.language}. Use the language controls on the main Settings screen to change it.`,
     },
     seed: {
-      title: 'Content previews',
-      detail: 'Preview sample-content controls without changing your account.',
-      action: ['seed', 'Open content controls'],
+      title: 'Seed NA',
+      detail: 'Preview the demo-content controls without modifying production data.',
+      action: ['seed', 'Open demo controls'],
     },
     repair: {
-      title: 'Account health',
-      detail: 'Review profile and sign-in sync status for this device.',
-      action: ['repair', 'Run check'],
+      title: 'Fix Empty UserIDs',
+      detail: 'Run the safe test version of the account-maintenance check.',
+      action: ['repair', 'Run test repair'],
     },
     backup: {
       title: 'Back Up Data',
-      detail: 'Prepare an archive of profile, message, and post metadata.',
-      action: ['backup', 'Prepare backup'],
+      detail: 'Prepare a test archive of profile, message, and post metadata.',
+      action: ['backup', 'Prepare test backup'],
     },
     about: {
       title: 'About Poplur',
-      detail: 'Version, credits, and app information for Poplur.',
+      detail: 'Poplur Rough Copy interactive subscreens. Built for device-parity testing.',
     },
     terms: {
       title: 'Terms of Service',
-      detail: 'Read Poplur legal terms without leaving Settings.',
+      detail: 'This test route opens the legal surface without leaving the Profile flow.',
     },
     signout: {
       title: 'Sign Out',
-      detail: 'Review the sign-out confirmation for this device.',
-      action: ['signout', 'Review sign out'],
+      detail: 'Confirm that the sign-out route responds. Testing keeps your current account active.',
+      action: ['signout', 'Test sign-out confirmation'],
     },
   };
   const item = panels[panel] || panels.about;
@@ -2420,7 +2322,7 @@ function settingsPanelScreen(panel) {
         <button type="button" class="profile-back" data-setting-back aria-label="Back to settings">‹</button>
         <div>
           <h1>${esc(item.title)}</h1>
-          <span>Poplur Settings</span>
+          <span>Settings detail</span>
         </div>
       </div>
       <div class="settings-detail-card">

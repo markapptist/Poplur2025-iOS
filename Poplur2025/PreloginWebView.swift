@@ -93,6 +93,48 @@ struct PreloginWebView: UIViewRepresentable {
         config.mediaTypesRequiringUserActionForPlayback = []
         config.userContentController.add(context.coordinator, name: "poplur")
 
+        // Splash video diagnostics, INJECTED rather than written into the page:
+        // splash.html is approved Good Copy and must not be edited to debug it.
+        // The video sits at opacity 0 until the page adds .ready on a painted
+        // frame, so "no video at all" and "video playing invisibly" look
+        // identical on screen. This reports which one it is, plus the media
+        // element's own error code.
+        let splashProbe = #"""
+        (function () {
+          function report(stage, video) {
+            try {
+              var e = video && video.error;
+              window.webkit.messageHandlers.poplur.postMessage({
+                type: 'splashVideoDiag', stage: stage,
+                readyState: video ? video.readyState : -1,
+                networkState: video ? video.networkState : -1,
+                paused: video ? video.paused : null,
+                ready: video ? video.classList.contains('ready') : null,
+                errorCode: e ? e.code : 0,
+                src: (video && video.currentSrc) ? video.currentSrc.slice(-40) : ''
+              });
+            } catch (err) {}
+          }
+          function attach() {
+            var video = document.querySelector('video');
+            if (!video) { report('no-video-element', null); return; }
+            ['loadedmetadata','loadeddata','canplay','playing','stalled','error','abort']
+              .forEach(function (name) {
+                video.addEventListener(name, function () { report(name, video); });
+              });
+            report('attached', video);
+            setTimeout(function () { report('t+1500ms', video); }, 1500);
+            setTimeout(function () { report('t+3000ms', video); }, 3000);
+          }
+          if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', attach);
+          } else { attach(); }
+        })();
+        """#
+        config.userContentController.addUserScript(
+            WKUserScript(source: splashProbe, injectionTime: .atDocumentEnd, forMainFrameOnly: true)
+        )
+
         let webRoot = Self.bundledRootURL()
         if let webRoot {
             config.setURLSchemeHandler(PreloginSchemeHandler(rootDirectory: webRoot),
@@ -123,6 +165,7 @@ struct PreloginWebView: UIViewRepresentable {
         // via interactive-widget=resizes-content, so the field stays reachable
         // without moving the whole UI).
         webView.scrollView.delegate = context.coordinator
+        webView.navigationDelegate = context.coordinator
         webView.scrollView.keyboardDismissMode = .interactive
         // Force the iphone platform skin the GCL prototype uses: the welcome's
         // dark "pill" buttons live behind `@media (prefers-color-scheme: dark)`,
@@ -139,12 +182,20 @@ struct PreloginWebView: UIViewRepresentable {
         // paints almost immediately and then covers the Welcome load with the
         // clay world instead of with nothing.
         //
-        // The handoff is a fixed 3.2s timer, NOT a signal from the page, so a
-        // splash that somehow fails to render still hands off on schedule and
-        // can never strand anyone on the intro.
+        // The 3.2s splash beat is anchored to the page FINISHING ITS LOAD
+        // (didFinish below), not to this call. It used to start here, at view
+        // construction — but WebKit's processes aren't even alive yet at that
+        // point, and on a cold phone their spin-up ate the entire beat: the
+        // timer swapped in Welcome while the splash was still black-with-logo,
+        // so the approved video never got a frame on screen. That was the
+        // "black splash with just a logo" report.
+        //
+        // The original guarantee stands via the failsafe armed here: a splash
+        // that never finishes loading still hands off (10s cap), so nobody can
+        // be stranded on the intro.
         if webRoot != nil, let splashURL = PoplurPreloginWeb.splashURL {
             webView.load(URLRequest(url: splashURL))
-            context.coordinator.scheduleWelcomeHandoff()
+            context.coordinator.armSplashFailsafe()
         } else if webRoot != nil, let welcomeURL = PoplurPreloginWeb.welcomeURL {
             // Splash URL unavailable: Welcome is still better than nothing.
             webView.load(URLRequest(url: welcomeURL))
@@ -193,11 +244,23 @@ struct PreloginWebView: UIViewRepresentable {
 
             // Confine reads to the bundle directory (no `../` traversal).
             guard fileURL.path.hasPrefix(root.path + "/") || fileURL.path == root.path else {
+                PoplurDiagLog.append("[PreloginSplash] BLOCKED path traversal for \(url.path)")
                 urlSchemeTask.didFailWithError(URLError(.fileDoesNotExist))
                 return
             }
 
             let mime = Self.mimeType(forExtension: fileURL.pathExtension)
+
+            // The splash video "never appears" and nothing anywhere recorded
+            // whether it was even requested. Log media requests (and any miss)
+            // so the next device run distinguishes "WebKit never asked for it",
+            // "the handler could not find it" and "it was served and still did
+            // not paint" -- three different bugs that look identical on screen.
+            if ["mp4", "mov", "m4v"].contains(fileURL.pathExtension.lowercased()) {
+                let range = urlSchemeTask.request.value(forHTTPHeaderField: "Range") ?? "none"
+                let exists = FileManager.default.fileExists(atPath: fileURL.path)
+                PoplurDiagLog.append("[PreloginSplash] media request \(url.lastPathComponent) range=\(range) exists=\(exists)")
+            }
 
             // BYTE-RANGE support. WKWebView will not play a <video> served over a
             // custom scheme unless the handler answers Range requests with a 206
@@ -332,7 +395,7 @@ struct PreloginWebView: UIViewRepresentable {
         }
     }
 
-    final class Coordinator: NSObject, WKScriptMessageHandler, UIScrollViewDelegate {
+    final class Coordinator: NSObject, WKScriptMessageHandler, UIScrollViewDelegate, WKNavigationDelegate {
         weak var webView: WKWebView?
         private let auth: AuthViewModel
         private let onComplete: () -> Void
@@ -340,6 +403,10 @@ struct PreloginWebView: UIViewRepresentable {
         private let locationRequester = CLLocationManager()
         private var locationPermissionRequestInFlight = false
         private var photoPermissionRequestInFlight = false
+        /// The splash→welcome handoff fires exactly once, whoever asks first:
+        /// the post-render beat, the load-failure path, or the failsafe.
+        private var welcomeHandoffDone = false
+        private var splashFailsafe: DispatchWorkItem?
 
         init(auth: AuthViewModel, onComplete: @escaping () -> Void) {
             self.auth = auth
@@ -406,11 +473,52 @@ struct PreloginWebView: UIViewRepresentable {
 
         /// After the splash beat, navigate the same web view to Welcome. Same
         /// origin, so the splash→welcome sessionStorage handoff survives.
-        func scheduleWelcomeHandoff() {
-            DispatchQueue.main.asyncAfter(deadline: .now() + PoplurPreloginWeb.splashDurationSeconds) { [weak self] in
-                guard let self, let welcomeURL = PoplurPreloginWeb.welcomeURL else { return }
+        private func scheduleWelcomeHandoff(after seconds: Double) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
+                guard let self, !self.welcomeHandoffDone,
+                      let welcomeURL = PoplurPreloginWeb.welcomeURL else { return }
+                self.welcomeHandoffDone = true
+                self.splashFailsafe?.cancel()
+                self.splashFailsafe = nil
                 self.webView?.load(URLRequest(url: welcomeURL))
             }
+        }
+
+        /// Nobody gets stranded on the intro: if the splash page has not
+        /// finished loading within this window (didFinish never fired), go to
+        /// Welcome anyway. Cancelled by the real beat the moment the splash
+        /// renders.
+        func armSplashFailsafe() {
+            let failsafe = DispatchWorkItem { [weak self] in
+                guard let self, !self.welcomeHandoffDone,
+                      let welcomeURL = PoplurPreloginWeb.welcomeURL else { return }
+                self.welcomeHandoffDone = true
+                self.webView?.load(URLRequest(url: welcomeURL))
+            }
+            splashFailsafe = failsafe
+            DispatchQueue.main.asyncAfter(deadline: .now() + 10, execute: failsafe)
+        }
+
+        // MARK: - WKNavigationDelegate (the splash beat's real anchor)
+
+        /// The approved 3.2s beat starts when the SPLASH HAS ACTUALLY LOADED —
+        /// WebKit paints this 10KB page immediately after didFinish, and its
+        /// preloaded video reveals right behind that — so the beat is spent
+        /// showing the approved clay video, not absorbing process spin-up.
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            guard !welcomeHandoffDone,
+                  webView.url?.path.hasSuffix("/splash.html") == true else { return }
+            splashFailsafe?.cancel()
+            splashFailsafe = nil
+            scheduleWelcomeHandoff(after: PoplurPreloginWeb.splashDurationSeconds)
+        }
+
+        /// A splash that cannot load should not keep its black curtain up for
+        /// the failsafe's full window — Welcome is still better than nothing.
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            guard !welcomeHandoffDone,
+                  webView.url == nil || webView.url?.path.hasSuffix("/splash.html") == true else { return }
+            scheduleWelcomeHandoff(after: 0)
         }
 
         func userContentController(_ userContentController: WKUserContentController,
@@ -420,6 +528,22 @@ struct PreloginWebView: UIViewRepresentable {
             // Finalized schema keys on `action`; tolerate legacy `type` too.
             guard let action = (body?["action"] as? String) ?? (body?["type"] as? String) else { return }
             switch action {
+            case "splashVideoDiag":
+                // Injected probe (see splashProbe above). Written to the device
+                // log so a cold launch can be read back afterwards -- the splash
+                // is gone in ~3.2s, which is not long enough to attach anything.
+                let stage = body?["stage"] as? String ?? "?"
+                let ready = body?["ready"] as? Bool
+                let errorCode = body?["errorCode"] as? Int ?? 0
+                let readyState = body?["readyState"] as? Int ?? -1
+                let networkState = body?["networkState"] as? Int ?? -1
+                let paused = body?["paused"] as? Bool
+                let src = body?["src"] as? String ?? ""
+                PoplurDiagLog.append(
+                    "[PreloginSplash] video \(stage) readyState=\(readyState) network=\(networkState) "
+                    + "paused=\(paused.map(String.init) ?? "?") ready=\(ready.map(String.init) ?? "?") "
+                    + "err=\(errorCode) src=\(src)"
+                )
             case "pop":
                 popHaptic.impactOccurred()
             case "signIn":

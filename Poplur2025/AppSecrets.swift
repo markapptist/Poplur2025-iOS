@@ -5,9 +5,8 @@ import Foundation
 /// Private values can be supplied through UserDefaults, the process environment,
 /// or Info.plist. No provider credential is embedded in the application source.
 enum AppSecrets {
-    static var claudeAPIKey: String {
-        value(userDefaultsKey: "poplur_claude_key", configurationKey: "POPLUR_CLAUDE_API_KEY")
-    }
+    // The Anthropic key lives only on the backend (ANTHROPIC_API_KEY secret on
+    // poplurAiApi); every Claude call goes through PoplurAIBackendClient.
 
     static var mapboxToken: String {
         value(userDefaultsKey: "poplur_mapbox_token", configurationKey: "POPLUR_MAPBOX_TOKEN")

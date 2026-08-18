@@ -258,11 +258,6 @@ final class BumperService: ObservableObject {
     // MARK: - Claude Script
 
     private func generateScript(for post: FeedPost, channelName: String, language: PoplurLanguage) async throws -> String {
-        let claudeKey = AppSecrets.claudeAPIKey
-        guard !claudeKey.isEmpty else {
-            return fallbackScript(for: post, channelName: channelName, language: language)
-        }
-
         let parts    = [post.cityName, post.countryName].compactMap { $0 }
         let location = parts.isEmpty ? nil : parts.joined(separator: ", ")
 
@@ -278,45 +273,22 @@ final class BumperService: ObservableObject {
             context += "\nRadius reach: \(rKm)"
         }
 
-        let langLine: String
+        // The host-sentence prompt lives on the backend (POST /bumper/script);
+        // the device only sends the structured context and the language.
+        let wireLanguage: String
         switch language {
-        case .french:  langLine = "Write the sentence in French (français). Sound like a natural French TV presenter."
-        case .spanish: langLine = "Write the sentence in Spanish (español). Sound like a natural Spanish TV presenter."
-        case .english: langLine = "Write the sentence in English. Sound like a natural English-speaking TV presenter."
+        case .french:  wireLanguage = "french"
+        case .spanish: wireLanguage = "spanish"
+        case .english: wireLanguage = "english"
         }
 
-        let prompt = """
-        You are a charismatic TV host for Poplur, a social video app. \
-        Using the details below, write ONE natural spoken sentence (12–22 words) that a host \
-        would say live on air to introduce the next video. \
-        Reference the channel, location, and radius reach naturally — don't just list them. \
-        Be warm, specific, and engaging. Vary your phrasing. \
-        \(langLine) \
-        Return ONLY the spoken sentence — no quotes, no labels, no extra text.
-
-        \(context)
-        """
-
-        var req = URLRequest(url: URL(string: "https://api.anthropic.com/v1/messages")!)
-        req.httpMethod = "POST"
-        req.setValue(claudeKey,          forHTTPHeaderField: "x-api-key")
-        req.setValue("2023-06-01",       forHTTPHeaderField: "anthropic-version")
-        req.setValue("application/json", forHTTPHeaderField: "content-type")
-        req.httpBody = try JSONSerialization.data(withJSONObject: [
-            "model": "claude-haiku-4-5-20251001",
-            "max_tokens": 80,
-            "messages": [["role": "user", "content": prompt]]
-        ])
-
-        let (data, response) = try await URLSession.shared.data(for: req)
-        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+        do {
+            let script = try await PoplurAIBackendClient()
+                .bumperScript(context: context, language: wireLanguage)
+            return script.trimmingCharacters(in: .whitespacesAndNewlines)
+        } catch {
             return fallbackScript(for: post, channelName: channelName, language: language)
         }
-
-        let json    = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        let content = (json?["content"] as? [[String: Any]])?.first
-        let text    = (content?["text"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-        return text ?? fallbackScript(for: post, channelName: channelName, language: language)
     }
 
     private func fallbackScript(for post: FeedPost, channelName: String, language: PoplurLanguage) -> String {

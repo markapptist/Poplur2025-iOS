@@ -1,3 +1,4 @@
+import Anthropic from "@anthropic-ai/sdk";
 import * as admin from "firebase-admin";
 import { logger } from "firebase-functions";
 import { defineSecret } from "firebase-functions/params";
@@ -18,6 +19,7 @@ admin.initializeApp();
 
 const db = admin.firestore();
 const googleAiApiKey = defineSecret("GOOGLE_AI_API_KEY");
+const anthropicApiKey = defineSecret("ANTHROPIC_API_KEY");
 const protectedRegion = "us-central1";
 
 type PoplurAIContentType =
@@ -170,7 +172,7 @@ export const poplurAiApi = onRequest(
   {
     region: protectedRegion,
     cors: true,
-    secrets: [googleAiApiKey],
+    secrets: [googleAiApiKey, anthropicApiKey],
     timeoutSeconds: 300,
     memory: "1GiB",
   },
@@ -318,6 +320,14 @@ async function routePoplurAIRequest(req: Request, res: Response): Promise<void> 
       return;
     }
 
+    // Pre-login surface: the auth-screen voice guide runs before any Firebase
+    // user exists, so this route authenticates nobody and is instead
+    // rate-limited per client IP with a tightly bounded prompt and output.
+    if (req.method === "POST" && path === "/assistant/guest-chat") {
+      await handleAuthGuideChat(req, res);
+      return;
+    }
+
     const uid = await requireFirebaseUser(req);
 
     if (req.method === "GET" && path === "/credits/balance") {
@@ -332,6 +342,31 @@ async function routePoplurAIRequest(req: Request, res: Response): Promise<void> 
 
     if (req.method === "POST" && path === "/radio/host") {
       await handleRadioHost(uid, req, res);
+      return;
+    }
+
+    if (req.method === "POST" && path === "/assistant/chat") {
+      await handleAssistantChat(uid, req, res);
+      return;
+    }
+
+    if (req.method === "POST" && path === "/tv/style") {
+      await handleTvStyle(uid, req, res);
+      return;
+    }
+
+    if (req.method === "POST" && path === "/bumper/script") {
+      await handleBumperScript(uid, req, res);
+      return;
+    }
+
+    if (req.method === "POST" && path === "/games/config") {
+      await handleGameConfig(uid, req, res);
+      return;
+    }
+
+    if (req.method === "POST" && path === "/video/storyboard") {
+      await handleVideoStoryboard(uid, req, res);
       return;
     }
 
@@ -482,6 +517,312 @@ async function handleGenerate(
     await failGenerationJob(uid, jobId, cost, error);
     throw error;
   }
+}
+
+async function handleAssistantChat(uid: string, req: Request, res: Response): Promise<void> {
+  const body = objectBody(req);
+  const question = stringField(body.question, "question", 500);
+  const apiKey = anthropicApiKey.value() || process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    throw httpError(500, "missing_anthropic_key", "ANTHROPIC_API_KEY is not configured server-side.");
+  }
+
+  const anthropic = new Anthropic({ apiKey });
+  const message = await anthropic.messages.create({
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 120,
+    system:
+      "You are Poplur AI, a friendly voice assistant built into the Poplur social media app. " +
+      "Answer concisely in 1-2 sentences max. Be upbeat and helpful.",
+    messages: [{ role: "user", content: question }],
+    metadata: { user_id: uid },
+  });
+
+  const reply = message.content
+    .filter((block): block is Anthropic.TextBlock => block.type === "text")
+    .map((block) => block.text)
+    .join(" ")
+    .trim();
+  if (!reply) {
+    throw httpError(502, "assistant_empty_reply", "The assistant returned no text.");
+  }
+
+  res.status(200).json({ reply });
+}
+
+const CLAUDE_ON_DEVICE_MODEL = "claude-haiku-4-5-20251001";
+
+function anthropicClient(): Anthropic {
+  const apiKey = anthropicApiKey.value() || process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    throw httpError(500, "missing_anthropic_key", "ANTHROPIC_API_KEY is not configured server-side.");
+  }
+  return new Anthropic({ apiKey });
+}
+
+function extractClaudeText(message: Anthropic.Message): string {
+  return message.content
+    .filter((block): block is Anthropic.TextBlock => block.type === "text")
+    .map((block) => block.text)
+    .join(" ")
+    .trim();
+}
+
+/** Strip markdown code fences and surrounding prose, then parse the JSON object. */
+function parseClaudeJson(text: string): Record<string, unknown> {
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start < 0 || end <= start) {
+    throw httpError(502, "assistant_invalid_json", "The assistant returned no JSON object.");
+  }
+  try {
+    return JSON.parse(text.slice(start, end + 1)) as Record<string, unknown>;
+  } catch {
+    throw httpError(502, "assistant_invalid_json", "The assistant returned invalid JSON.");
+  }
+}
+
+/** Classifies one post image into Poplur TV broadcast metadata. */
+async function handleTvStyle(uid: string, req: Request, res: Response): Promise<void> {
+  const body = objectBody(req);
+  const imageBase64 = typeof body.imageBase64 === "string" ? body.imageBase64 : "";
+  // Reject rather than truncate — a sliced base64 string is a corrupt image.
+  if (!imageBase64 || imageBase64.length > 1_400_000) {
+    throw httpError(400, "invalid_field", "Send one JPEG smaller than 1 MB as imageBase64.");
+  }
+
+  const prompt = [
+    "You are a TV broadcast classifier for Poplur TV, a social platform where every post is a TV broadcast.",
+    "Analyze this image and respond ONLY with a JSON object — no extra text, no markdown:",
+    "{\"channel\":\"<food|fitness|sports|beauty|fashion|music|tech|news|city|entertainment>\"," +
+      "\"tvFormat\":\"<commercial|highlight_reel|cooking_show|documentary|talk_show|music_video|news_segment>\"," +
+      "\"adConcept\":\"<what this would be as a TV ad or show in under 8 words>\"," +
+      "\"caption\":\"<PUNCHY ALL-CAPS HEADLINE MAX 5 WORDS>\"," +
+      "\"tagline\":\"<one compelling motivational sentence>\"," +
+      "\"broadcastName\":\"<POPLUR CHANNEL e.g. POPLUR FITNESS>\"}",
+  ].join("\n");
+
+  const message = await anthropicClient().messages.create({
+    model: CLAUDE_ON_DEVICE_MODEL,
+    max_tokens: 300,
+    messages: [{
+      role: "user",
+      content: [
+        { type: "image", source: { type: "base64", media_type: "image/jpeg", data: imageBase64 } },
+        { type: "text", text: prompt },
+      ],
+    }],
+    metadata: { user_id: uid },
+  });
+
+  const result = parseClaudeJson(extractClaudeText(message));
+  res.status(200).json({
+    channel: optionalStringField(result.channel, 40) ?? "entertainment",
+    tvFormat: optionalStringField(result.tvFormat, 40) ?? "commercial",
+    adConcept: optionalStringField(result.adConcept, 120) ?? "",
+    caption: optionalStringField(result.caption, 80) ?? "",
+    tagline: optionalStringField(result.tagline, 200) ?? "",
+    broadcastName: optionalStringField(result.broadcastName, 60) ?? "POPLUR TV",
+  });
+}
+
+/** One spoken TV-host sentence introducing the next feed video. */
+async function handleBumperScript(uid: string, req: Request, res: Response): Promise<void> {
+  const body = objectBody(req);
+  const context = stringField(body.context, "context", 700);
+  const language = optionalStringField(body.language, 20) ?? "english";
+
+  const langLine = language === "french"
+    ? "Write the sentence in French (français). Sound like a natural French TV presenter."
+    : language === "spanish"
+      ? "Write the sentence in Spanish (español). Sound like a natural Spanish TV presenter."
+      : "Write the sentence in English. Sound like a natural English-speaking TV presenter.";
+
+  const prompt = [
+    "You are a charismatic TV host for Poplur, a social video app.",
+    "Using the details below, write ONE natural spoken sentence (12–22 words) that a host would say live on air to introduce the next video.",
+    "Reference the channel, location, and radius reach naturally — don't just list them.",
+    `Be warm, specific, and engaging. Vary your phrasing. ${langLine}`,
+    "Return ONLY the spoken sentence — no quotes, no labels, no extra text.",
+    "",
+    context,
+  ].join("\n");
+
+  const message = await anthropicClient().messages.create({
+    model: CLAUDE_ON_DEVICE_MODEL,
+    max_tokens: 80,
+    messages: [{ role: "user", content: prompt }],
+    metadata: { user_id: uid },
+  });
+
+  const script = extractClaudeText(message);
+  if (!script) {
+    throw httpError(502, "assistant_empty_reply", "The assistant returned no script.");
+  }
+  res.status(200).json({ script });
+}
+
+const GAME_CONFIG_SHAPE = [
+  "Return exactly this JSON shape:",
+  "{",
+  "  \"game\": \"<game_key>\",",
+  "  \"character\": \"<character_id>\",",
+  "  \"gameName\": \"<creative 2-4 word title>\",",
+  "  \"theme\": \"<one word: Jungle|Space|Neon|Arctic|Lava|Ocean|Cyber|Ancient|Dream|Toxic>\",",
+  "  \"skyColor\": \"<hex #RRGGBB>\",",
+  "  \"groundColor\": \"<hex #RRGGBB>\",",
+  "  \"accentColor\": \"<hex #RRGGBB>\",",
+  "  \"difficulty\": \"<easy|medium|hard>\",",
+  "  \"speed\": <integer 200-380>,",
+  "  \"powerUps\": [\"<name>\", \"<name>\"],",
+  "  \"enemyType\": \"<creative enemy name>\",",
+  "  \"specialMechanic\": \"<one short phrase>\"",
+  "}",
+].join("\n");
+
+const GAME_SYSTEM_PROMPTS: Record<string, string> = {
+  arcade: [
+    "You generate game session configs for Poplur, a mobile game app. Return ONLY valid JSON — no markdown, no code fences.",
+    "",
+    "Available game keys: stella_blast",
+    "Available character ids: pop, zyla, blip, rex, stella, glitch",
+    "",
+    GAME_CONFIG_SHAPE,
+    "",
+    "Generate a polished arcade-shooter session that feels closer to a real console game than a toy mini-game.",
+    "Use stella_blast, choose cinematic space/neon colors, and make the mechanics sound skill-based.",
+  ].join("\n"),
+  maker: [
+    "You generate game session configs for Poplur, a mobile game app, from a user's description.",
+    "Return ONLY valid JSON — no markdown, no code fences.",
+    "",
+    "Available game keys: pop_runner (side-scroller), stella_blast (arcade shooter), zyla_quest (action/adventure), rex_hoops (sports)",
+    "Available character ids: pop, zyla, blip, rex, stella, glitch",
+    "",
+    GAME_CONFIG_SHAPE,
+    "",
+    "Choose the game key that best fits the user's description. Pick colours and mechanics that",
+    "match their theme. Make it sound like a polished console game, not a toy mini-game.",
+  ].join("\n"),
+};
+
+/** One generated Poplur mini-game session config. */
+async function handleGameConfig(uid: string, req: Request, res: Response): Promise<void> {
+  const body = objectBody(req);
+  const mode = optionalStringField(body.mode, 20) ?? "arcade";
+  const system = GAME_SYSTEM_PROMPTS[mode];
+  if (!system) {
+    throw httpError(400, "invalid_field", "mode must be \"arcade\" or \"maker\".");
+  }
+  const prompt = optionalStringField(body.prompt, 500);
+  const userMessage = mode === "maker" && prompt
+    ? `Create a game based on this idea: ${prompt}`
+    : "Generate a fresh, surprising game config now.";
+
+  const message = await anthropicClient().messages.create({
+    model: CLAUDE_ON_DEVICE_MODEL,
+    max_tokens: 280,
+    system,
+    messages: [{ role: "user", content: userMessage }],
+    metadata: { user_id: uid },
+  });
+
+  res.status(200).json({ config: parseClaudeJson(extractClaudeText(message)) });
+}
+
+/** Three-shot AI-video storyboard for the Android AI video studio. */
+async function handleVideoStoryboard(uid: string, req: Request, res: Response): Promise<void> {
+  const body = objectBody(req);
+  const prompt = stringField(body.prompt, "prompt", 500);
+  const styleLabel = optionalStringField(body.styleLabel, 80) ?? "Poplur TV";
+  const styleSuffix = optionalStringField(body.styleSuffix, 300) ?? "";
+  const locationName = optionalStringField(body.locationName, 120);
+
+  const system = [
+    "You are a creative director for Poplur, a social video app where content is tied to real-world locations.",
+    "Generate a 3-shot storyboard for a short vertical social video based on the user's prompt.",
+    `Style: ${styleLabel}${styleSuffix ? ` — ${styleSuffix}` : ""}`,
+    locationName ? `Location: ${locationName}.` : "",
+    "",
+    "Return ONLY valid JSON in this exact structure — no markdown, no explanation:",
+    "{",
+    "  \"title\": \"short catchy title\",",
+    "  \"style\": \"brief style description\",",
+    "  \"shots\": [",
+    "    {\"shot\": 1, \"type\": \"opening shot type\", \"prompt\": \"detailed visual description of what happens in this 5-second clip, no text or watermarks\", \"duration\": 5},",
+    "    {\"shot\": 2, \"type\": \"main action type\", \"prompt\": \"detailed visual description\", \"duration\": 5},",
+    "    {\"shot\": 3, \"type\": \"closing shot type\", \"prompt\": \"detailed visual description\", \"duration\": 5}",
+    "  ]",
+    "}",
+    "",
+    "IMPORTANT: Each prompt must describe ORIGINAL characters only — no copyrighted IP, no named celebrities or brands.",
+    `Make the prompts rich, cinematic, and specific to the ${styleLabel} aesthetic.`,
+  ].filter((line) => line !== undefined).join("\n");
+
+  const message = await anthropicClient().messages.create({
+    model: CLAUDE_ON_DEVICE_MODEL,
+    max_tokens: 600,
+    system,
+    messages: [{ role: "user", content: prompt }],
+    metadata: { user_id: uid },
+  });
+
+  const result = parseClaudeJson(extractClaudeText(message));
+  if (!Array.isArray(result.shots) || result.shots.length === 0) {
+    throw httpError(502, "assistant_invalid_json", "The storyboard has no shots.");
+  }
+  res.status(200).json(result);
+}
+
+const AUTH_GUIDE_SYSTEM_PROMPTS: Record<string, string> = {
+  welcome:
+    "You are Poplur's onboarding guide. Poplur is a location-based social app — every post has a radius " +
+    "that controls how far it reaches. Answer in 1-2 warm, friendly sentences.",
+  login:
+    "You are Poplur's sign-in helper. The user is logging in with email and password. If stuck, they can " +
+    "tap FORGOT to reset. Answer in 1-2 sentences.",
+  signUp:
+    "You are Poplur's sign-up guide. Personal accounts are for individual creators; business accounts " +
+    "unlock brand features. Answer in 1-2 friendly sentences.",
+};
+
+/** Pre-login auth-screen voice guide. Unauthenticated by necessity, so the
+ * prompt is server-owned, the output is tiny, and each client IP is limited
+ * to one request every few seconds via the same transaction pattern as
+ * cameraSceneScan. */
+async function handleAuthGuideChat(req: Request, res: Response): Promise<void> {
+  const body = objectBody(req);
+  const screen = optionalStringField(body.screen, 20) ?? "welcome";
+  const system = AUTH_GUIDE_SYSTEM_PROMPTS[screen];
+  if (!system) {
+    throw httpError(400, "invalid_field", "screen must be welcome, login, or signUp.");
+  }
+  const question = stringField(body.question, "question", 300);
+
+  const clientIp = (req.ip || req.header("x-forwarded-for") || "unknown").split(",")[0].trim();
+  const rateKey = Buffer.from(clientIp).toString("base64url").slice(0, 100);
+  const rateRef = db.collection("authGuideRate").doc(rateKey);
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(rateRef);
+    const lastAt = snapshot.data()?.lastAt as Timestamp | undefined;
+    if (lastAt && Date.now() - lastAt.toMillis() < 4_000) {
+      throw httpError(429, "rate_limited", "One question at a time — give the guide a moment.");
+    }
+    transaction.set(rateRef, { lastAt: FieldValue.serverTimestamp() }, { merge: true });
+  });
+
+  const message = await anthropicClient().messages.create({
+    model: CLAUDE_ON_DEVICE_MODEL,
+    max_tokens: 80,
+    system,
+    messages: [{ role: "user", content: question }],
+  });
+
+  const reply = extractClaudeText(message);
+  if (!reply) {
+    throw httpError(502, "assistant_empty_reply", "The assistant returned no text.");
+  }
+  res.status(200).json({ reply });
 }
 
 async function handleRadioHost(uid: string, req: Request, res: Response): Promise<void> {

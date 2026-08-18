@@ -445,6 +445,11 @@ struct PoplurAIBackendEndpoint {
     static let generateGame = "/ai/generate/game"
     static let jobs = "/ai/jobs"
     static let radioHost = "/radio/host"
+    static let assistantChat = "/assistant/chat"
+    static let assistantGuestChat = "/assistant/guest-chat"
+    static let tvStyle = "/tv/style"
+    static let bumperScript = "/bumper/script"
+    static let gameConfig = "/games/config"
     static let radiusBoost = "/posts/%@/radius-boost"
     static let businessCampaign = "/businesses/%@/ai-campaigns"
 }
@@ -495,6 +500,102 @@ struct PoplurAIBackendClient: Sendable {
             throw AIStackError.backendError(http.statusCode)
         }
         return response(from: job, fallbackRequest: request)
+    }
+
+    /// Hey Poplur's conversational turn. The Anthropic key lives on the
+    /// backend with the other provider credentials — mobile never calls
+    /// api.anthropic.com directly, same rule as every provider above.
+    func assistantReply(question: String) async throws -> String {
+        guard let baseURL else { throw AIStackError.backendBaseURLMissing }
+        let token = try await firebaseIDToken()
+        var urlRequest = URLRequest(url: apiURL(baseURL: baseURL, endpoint: PoplurAIBackendEndpoint.assistantChat))
+        urlRequest.httpMethod = "POST"
+        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        urlRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        urlRequest.httpBody = try JSONSerialization.data(withJSONObject: ["question": question])
+
+        let (data, response) = try await urlSession.data(for: urlRequest)
+        guard let http = response as? HTTPURLResponse,
+              (200..<300).contains(http.statusCode),
+              let payload = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let reply = payload["reply"] as? String,
+              !reply.isEmpty else {
+            throw AIStackError.backendError((response as? HTTPURLResponse)?.statusCode ?? 0)
+        }
+        return reply
+    }
+
+    /// Shared POST helper for the small JSON-in/JSON-out Claude endpoints.
+    /// `authenticated: false` is only for the pre-login guest routes.
+    private func postJSON(
+        endpoint: String,
+        body: [String: Any],
+        authenticated: Bool = true
+    ) async throws -> [String: Any] {
+        guard let baseURL else { throw AIStackError.backendBaseURLMissing }
+        var urlRequest = URLRequest(url: apiURL(baseURL: baseURL, endpoint: endpoint))
+        urlRequest.httpMethod = "POST"
+        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if authenticated {
+            let token = try await firebaseIDToken()
+            urlRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        urlRequest.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await urlSession.data(for: urlRequest)
+        guard let http = response as? HTTPURLResponse,
+              (200..<300).contains(http.statusCode),
+              let payload = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw AIStackError.backendError((response as? HTTPURLResponse)?.statusCode ?? 0)
+        }
+        return payload
+    }
+
+    /// Poplur TV broadcast metadata for one post image. Claude runs on the
+    /// backend; the device only ships the reduced JPEG.
+    func tvStyleMetadata(imageBase64: String) async throws -> [String: Any] {
+        try await postJSON(
+            endpoint: PoplurAIBackendEndpoint.tvStyle,
+            body: ["imageBase64": imageBase64]
+        )
+    }
+
+    /// One spoken TV-host sentence introducing the next feed video.
+    func bumperScript(context: String, language: String) async throws -> String {
+        let payload = try await postJSON(
+            endpoint: PoplurAIBackendEndpoint.bumperScript,
+            body: ["context": context, "language": language]
+        )
+        guard let script = payload["script"] as? String, !script.isEmpty else {
+            throw AIStackError.backendError(0)
+        }
+        return script
+    }
+
+    /// A generated mini-game session config, returned as raw JSON data so the
+    /// caller can decode its own config type.
+    func gameConfig(mode: String, prompt: String?) async throws -> Data {
+        var body: [String: Any] = ["mode": mode]
+        if let prompt, !prompt.isEmpty { body["prompt"] = prompt }
+        let payload = try await postJSON(endpoint: PoplurAIBackendEndpoint.gameConfig, body: body)
+        guard let config = payload["config"] as? [String: Any] else {
+            throw AIStackError.backendError(0)
+        }
+        return try JSONSerialization.data(withJSONObject: config)
+    }
+
+    /// Pre-login auth-screen guide answer. No Firebase user exists yet, so
+    /// this hits the unauthenticated, rate-limited guest route.
+    func authGuideReply(screen: String, question: String) async throws -> String {
+        let payload = try await postJSON(
+            endpoint: PoplurAIBackendEndpoint.assistantGuestChat,
+            body: ["screen": screen, "question": question],
+            authenticated: false
+        )
+        guard let reply = payload["reply"] as? String, !reply.isEmpty else {
+            throw AIStackError.backendError(0)
+        }
+        return reply
     }
 
     func radioHostAudio(

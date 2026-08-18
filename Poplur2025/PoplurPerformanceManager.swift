@@ -175,9 +175,16 @@ final class PoplurPerformanceManager: ObservableObject {
     /// hidden app has nothing to render.
     ///
     /// OFF means the phone WILL heat: the 14 Aug camera baseline measured 58s
-    /// to `fair` without these brakes and 25min with them. Flip to false to
-    /// restore the governor.
-    static let governorDisabled = true
+    /// to `fair` without these brakes and 25min with them.
+    ///
+    /// Recontracted after the 17 Aug thermal audit: the FULL tier no longer
+    /// masks quality at rest (60fps interactive / 30fps decorative below),
+    /// so there is nothing here worth switching off in normal use — this
+    /// switch now only kills the safety ladder, and the camera's
+    /// systemPressureState brakes stay armed regardless (CameraKitController
+    /// installs them unconditionally). Ship it true only for an experiment,
+    /// on purpose.
+    static let governorDisabled = false
 
     @Published private(set) var mode: PoplurPerformanceMode
     @Published private(set) var policy: PoplurPerformancePolicy
@@ -726,8 +733,14 @@ final class PoplurPerformanceManager: ObservableObject {
         case .full:
             return PoplurPerformancePolicy(
                 mode: mode,
-                targetFPS: governorDisabled ? 60 : 12,
-                interactiveTargetFPS: governorDisabled ? 60 : 24,
+                // Full quality is the resting state: gestures and real motion
+                // get 60, decoration runs at 30 while visible and sleeps via
+                // the web governor's ambient lease when the user goes idle.
+                // The old 12/24 caps were the quality masking that got the
+                // whole governor switched off — do not bring them back here;
+                // the ladder below is where thermal reductions live.
+                targetFPS: 30,
+                interactiveTargetFPS: 60,
                 particlesAllowed: true,
                 particleDensityMultiplier: 0.15,
                 dynamicShadowsAllowed: false,

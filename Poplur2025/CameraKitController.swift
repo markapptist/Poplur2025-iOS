@@ -210,7 +210,10 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
 
     @MainActor
     private var requiresEmergencyThermalPark: Bool {
-        if PoplurPerformanceManager.governorDisabled { return false }
+        // Deliberately NOT gated on governorDisabled: parking the camera at
+        // serious/critical protects the device, it does not mask quality —
+        // the camera is the one subsystem that has pinned a phone at serious
+        // (67 attributed transitions before the 14 Aug brakes).
         switch PoplurPerformanceManager.shared.thermalState {
         case .serious, .critical:
             return true
@@ -1405,11 +1408,10 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
     /// than oscillating between frame rates as the enclosure cools.
     private func installSystemPressureObservationOnQueue(for device: AVCaptureDevice) {
         systemPressureObservation?.invalidate()
-        if PoplurPerformanceManager.governorDisabled {
-            capturePressureCappedForCurrentLease = false
-            updateAnalysisCadenceOnQueue()
-            return
-        }
+        // Always installed, governor switch or not: systemPressureState is the
+        // camera-specific early warning that moves before ProcessInfo, and
+        // skipping it was how an "experiment" switch silently removed the
+        // brakes from the app's one proven burner.
         // Seed from process-wide thermal too: a camera opened on an already-warm
         // device must start capped, not wait for AVCapture's own pressure signal.
         capturePressureCappedForCurrentLease = device.systemPressureState.level != .nominal

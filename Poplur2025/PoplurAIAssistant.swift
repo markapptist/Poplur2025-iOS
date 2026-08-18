@@ -675,32 +675,14 @@ final class PoplurAIAssistantController: ObservableObject {
     }
 
     private func fetchClaudeResponse(_ question: String) async -> String {
-        guard let apiKey = UserDefaults.standard.string(forKey: "poplur_claude_key"), !apiKey.isEmpty else {
-            return "I'm here! Set your Poplur API key in settings to enable full conversation."
-        }
-        guard let url = URL(string: "https://api.anthropic.com/v1/messages") else { return "Something went wrong." }
-        var req = URLRequest(url: url)
-        req.httpMethod = "POST"
-        req.setValue(apiKey, forHTTPHeaderField: "x-api-key")
-        req.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
-        req.setValue("application/json", forHTTPHeaderField: "content-type")
-        let body: [String: Any] = [
-            "model": "claude-haiku-4-5-20251001",
-            "max_tokens": 120,
-            "system": "You are Poplur AI, a friendly voice assistant built into the Poplur social media app. Answer concisely in 1-2 sentences max. Be upbeat and helpful.",
-            "messages": [["role": "user", "content": question]]
-        ]
-        guard let bodyData = try? JSONSerialization.data(withJSONObject: body) else { return "Something went wrong." }
-        req.httpBody = bodyData
+        // Conversation runs through Poplur's backend, which holds the
+        // Anthropic credential — the same never-ship-a-provider-key rule the
+        // rest of the AI stack enforces (see PoplurAIBackendClient).
         do {
-            let (data, _) = try await URLSession.shared.data(for: req)
-            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let content = (json["content"] as? [[String: Any]])?.first,
-               let text = content["text"] as? String {
-                return text
-            }
-        } catch {}
-        return "I didn't catch that. Try again!"
+            return try await PoplurAIBackendClient().assistantReply(question: question)
+        } catch {
+            return "I didn't catch that. Try again!"
+        }
     }
 
     private func speak(_ text: String) {
