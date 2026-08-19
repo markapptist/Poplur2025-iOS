@@ -15,6 +15,7 @@ import {
 export { verifyCardPurchase } from "./cardPurchases";
 export { notifyOnEngagement } from "./engagementNotifications";
 export { meshyGenerate, meshyStatus } from "./meshyModels";
+export { generateRetroGame } from "./retro/generateRetroGame";
 
 if (admin.apps.length === 0) admin.initializeApp();
 

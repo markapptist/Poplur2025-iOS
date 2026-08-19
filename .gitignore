@@ -30,3 +30,5 @@ DerivedData/
 
 # Leftover from iCloud git recovery (renamed .git) — never commit
 .git-broken/
+
+firestore-debug.log
