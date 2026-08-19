@@ -944,6 +944,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         ) {
             if message.name == "homeReady" {
                 signalHomeReady()
+                pushAuthToken()
                 return
             }
             if let body = message.body as? [String: Any],
@@ -955,6 +956,13 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                 // covered by the approved splash until React has painted.
                 if type == "homeReady" {
                     signalHomeReady()
+                    pushAuthToken()
+                }
+                // The web layer cannot mint a Firebase ID token — this process
+                // owns auth — but Meshy generation is authorized server-side by
+                // role, so it needs one. It asks; we answer.
+                if type == "requestAuthToken" {
+                    pushAuthToken()
                 }
                 // The web layer's own heat probe. A WKWebView's console.log never
                 // reaches this process's stdout, so the probe hands its line to
@@ -1844,6 +1852,32 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                 DispatchQueue.main.async {
                     self?.persistProfileSelfieVideoData(data, mimeType: "video/mp4", into: webView)
                     PoplurWebCaptureStore.remove(captureKey)
+                }
+            }
+        }
+
+        /// Hand the web layer a short-lived Firebase ID token.
+        ///
+        /// It is a bearer credential, so it is pushed on demand rather than
+        /// stored: the web keeps it in a module variable for its hour and never
+        /// writes it to localStorage, where anything else in the document could
+        /// read it. Sent for the SAME reason the key lives in a function — the
+        /// server has to know who is asking before it spends credits.
+        func pushAuthToken() {
+            guard let user = Auth.auth().currentUser else { return }
+            user.getIDToken { token, error in
+                guard let token, error == nil else { return }
+                DispatchQueue.main.async { [weak self] in
+                    guard let webView = self?.webView else { return }
+                    // JSON-encode: a raw interpolation of a token into a script
+                    // string is an injection waiting to happen.
+                    guard let payload = try? JSONSerialization.data(
+                        withJSONObject: ["token": token, "expiresIn": 3600]
+                    ), let json = String(data: payload, encoding: .utf8) else { return }
+                    webView.evaluateJavaScript(
+                        "window.dispatchEvent(new CustomEvent('poplur-native-auth-token', { detail: \(json) })); true;",
+                        completionHandler: nil
+                    )
                 }
             }
         }
