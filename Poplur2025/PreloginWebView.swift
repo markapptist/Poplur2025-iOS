@@ -482,12 +482,26 @@ struct PreloginWebView: UIViewRepresentable {
             DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
                 guard let self, !self.welcomeHandoffDone,
                       let welcomeURL = PoplurPreloginWeb.welcomeURL else { return }
+                // Still waiting on Firebase: hold the splash rather than swapping
+                // in Welcome. This host now covers the auth-resolving wait as well
+                // (Poplur2025App no longer mounts a second splash for it), and a
+                // returning signed-in user must never see Welcome flash past on
+                // the way to Home. The splash video loops, so holding here simply
+                // plays it again — the beat resumes the moment auth resolves.
+                guard !self.auth.isResolvingAuthState else {
+                    self.scheduleWelcomeHandoff(after: Self.authPollSeconds)
+                    return
+                }
                 self.welcomeHandoffDone = true
                 self.splashFailsafe?.cancel()
                 self.splashFailsafe = nil
                 self.webView?.load(URLRequest(url: welcomeURL))
             }
         }
+
+        /// How often the held beat re-checks Firebase. Short enough to feel
+        /// immediate, long enough not to spin the main queue behind the splash.
+        private static let authPollSeconds: Double = 0.15
 
         /// Nobody gets stranded on the intro: if the splash page has not
         /// finished loading within this window (didFinish never fired), go to
@@ -497,6 +511,13 @@ struct PreloginWebView: UIViewRepresentable {
             let failsafe = DispatchWorkItem { [weak self] in
                 guard let self, !self.welcomeHandoffDone,
                       let welcomeURL = PoplurPreloginWeb.welcomeURL else { return }
+                // Same hold as the real beat: the failsafe exists so a splash that
+                // never rendered cannot strand anyone, not to overrule auth. If
+                // Firebase is still resolving, keep the splash and re-check.
+                guard !self.auth.isResolvingAuthState else {
+                    self.armSplashFailsafe()
+                    return
+                }
                 self.welcomeHandoffDone = true
                 self.webView?.load(URLRequest(url: welcomeURL))
             }

@@ -389,10 +389,21 @@ struct Poplur2025App: App {
     @ViewBuilder
     private var authenticatedContent: some View {
         ZStack {
-            if auth.isResolvingAuthState {
+            if auth.isResolvingAuthState && !usePreloginWebEmbed {
                 // Returning users must see the same approved Clay splash while
                 // Firebase restores their session. A plain dark placeholder made
                 // physical-device cold launches diverge from the approved GCL slot.
+                //
+                // Behind the web embed this branch is SKIPPED, and that is the
+                // whole point: it hosts splash.html, and the pre-login embed
+                // below hosts splash.html too. Rendering both meant a signed-out
+                // launch played the approved splash twice — the first WebView
+                // was torn down mid-clip and a second one restarted the video
+                // from frame zero, cross-faded by the animation below, which
+                // read as two splashes. One surface now carries the whole wait:
+                // the pre-login embed mounts while auth is still resolving and
+                // its splash simply keeps looping (the video is `loop`) until
+                // there is something real to show.
                 PostLoginLoadingWebView()
                     .ignoresSafeArea()
                     .transition(.opacity)
