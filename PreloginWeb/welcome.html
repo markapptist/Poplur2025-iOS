@@ -1065,8 +1065,20 @@
           circle(dot.x, dot.y, radius * 0.8, 'rgba(255,240,250,' + (flare * 0.85) + ')')
         }
       }
-      if (!still) animationFrame = requestAnimationFrame(draw)
+      // The heaviest loop on this screen: a full-screen redraw of every stud,
+      // three to five circle fills each, at 60fps forever. Park it with the
+      // rest of the ambient work — the studs hold their last pose, which is
+      // what they look like at any given instant anyway.
+      if (still) return
+      if (window.__poplurAmbient && !window.__poplurAmbient.awake()) { dotsParked = true; return }
+      animationFrame = requestAnimationFrame(draw)
     }
+    var dotsParked = false
+    if (window.__poplurAmbient) window.__poplurAmbient.onWake(function () {
+      if (!dotsParked) return
+      dotsParked = false
+      animationFrame = requestAnimationFrame(draw)
+    })
 
     addEventListener('resize', rebuild)
     addEventListener('load', rebuild)
@@ -1075,6 +1087,53 @@
     if (reduceMotion.addEventListener) reduceMotion.addEventListener('change', motionChanged)
     else if (reduceMotion.addListener) reduceMotion.addListener(motionChanged)
     rebuild()
+  })()
+
+  // ── Ambient sleep: the idle contract post-login already keeps ─────────────
+  //
+  // This screen ran THREE permanent requestAnimationFrame loops — the confetti,
+  // the cube's yaw, and a WebGL draw every frame — so it never reached a
+  // resting state at all. That is the whole of "pre-login doesn't feel as
+  // controlled as post-login": post-login parks its ambient work when nothing
+  // is happening, and this document had no way to.
+  //
+  // It is also why the thermal gate could not measure here. measure() waits for
+  // a document to declare idle through `poplur-ambient-sleep` and
+  // __poplurChromeIdle and throws after 120s if neither arrives — a page that
+  // never rests can never be sampled at rest. Declaring the same two signals is
+  // what puts this screen on the same scale as every other surface.
+  //
+  // Any touch wakes it, so the motion is there whenever someone is looking.
+  window.__poplurAmbient = (function () {
+    var awake = true, timer = 0, wakers = []
+    // Long enough that reading a pane never stills it mid-thought, short enough
+    // that a phone left on this screen stops burning frames.
+    var QUIET_MS = 20000
+    function sleep () {
+      if (!awake) return
+      awake = false
+      document.documentElement.classList.add('poplur-ambient-sleep')
+      window.__poplurChromeIdle = true
+    }
+    function wake () {
+      window.clearTimeout(timer)
+      timer = window.setTimeout(sleep, QUIET_MS)
+      if (awake) return
+      awake = true
+      document.documentElement.classList.remove('poplur-ambient-sleep')
+      window.__poplurChromeIdle = false
+      for (var i = 0; i < wakers.length; i++) { try { wakers[i]() } catch (e) {} }
+    }
+    ;['pointerdown', 'pointermove', 'keydown', 'touchstart', 'wheel'].forEach(function (t) {
+      window.addEventListener(t, wake, { passive: true })
+    })
+    wake()
+    return {
+      awake: function () { return awake },
+      // Loops park themselves and register here to be restarted.
+      onWake: function (fn) { wakers.push(fn) },
+      wake: wake,
+    }
   })()
 
   ;(() => {
@@ -1170,8 +1229,19 @@
       // Nothing is on screen behind a backgrounded WebView, so stop spawning
       // and stop drawing — the loop stays alive only to keep time.
       if (document.hidden) { requestAnimationFrame(tick); return }
-      carry += dt * birthRate
-      while (carry >= 1) { spawn(); carry -= 1 }
+      // Asleep: stop SPAWNING but keep drawing until the field has drained, so
+      // the confetti settles out rather than vanishing mid-air. Once the last
+      // piece is gone the loop parks completely and waits to be woken.
+      var resting = window.__poplurAmbient && !window.__poplurAmbient.awake()
+      if (!resting) {
+        carry += dt * birthRate
+        while (carry >= 1) { spawn(); carry -= 1 }
+      } else if (!particles.length) {
+        ctx.setTransform(1, 0, 0, 1, 0, 0)
+        ctx.clearRect(0, 0, cv.width, cv.height)
+        parked = true
+        return
+      }
       ctx.setTransform(1, 0, 0, 1, 0, 0)
       ctx.clearRect(0, 0, cv.width, cv.height)
       for (var i = particles.length - 1; i >= 0; i--) {
@@ -1197,7 +1267,14 @@
       }
       requestAnimationFrame(tick)
     }
+    var parked = false
     requestAnimationFrame(tick)
+    if (window.__poplurAmbient) window.__poplurAmbient.onWake(function () {
+      if (!parked) return
+      parked = false
+      last = performance.now()
+      requestAnimationFrame(tick)
+    })
     var stage = document.getElementById('lcubeStage')
     var yaw = -24, vel = 46, dragging = false, startX = 0, startYaw = 0, lastT = 0
     // Two modes: 'spin' — constant rotation on the welcome pane; 'back' — on a
@@ -1277,7 +1354,14 @@
     }
     stage.addEventListener('pointerup', up); stage.addEventListener('pointercancel', up)
     var last = performance.now()
+    var cubeParked = false
     function loop(now) {
+      // Asleep and not mid-gesture: stop advancing the yaw. The GL draw below
+      // reads __poplurCubeYaw, so parking here stops the render too.
+      if (!dragging && window.__poplurAmbient && !window.__poplurAmbient.awake()) {
+        cubeParked = true
+        return
+      }
       requestAnimationFrame(loop)
       // Guard the frame delta: if the rAF clock stalls or jumps (throttled or
       // non-compositing environments), fall back to a nominal 60fps step so the
@@ -1306,6 +1390,12 @@
       window.__poplurCubeRoll = roll
     }
     requestAnimationFrame(loop)
+    if (window.__poplurAmbient) window.__poplurAmbient.onWake(function () {
+      if (!cubeParked) return
+      cubeParked = false
+      last = performance.now()
+      requestAnimationFrame(loop)
+    })
   })()
 
   ;(() => {
@@ -2186,6 +2276,13 @@ if (POPLUR_WEBGL_OK) document.querySelectorAll("canvas[data-account-model]").for
       if (window.__poplurCubeGLReady) window.__poplurCubeGLReady();
       const draw = () => {
         if (!runtime || runtime.renderer !== renderer) return;
+        // The third permanent loop. It reads __poplurCubeYaw, which stops
+        // advancing when the cube parks, so continuing to draw would burn a
+        // full WebGL frame to render an unchanged pose. Park with it.
+        if (window.__poplurAmbient && !window.__poplurAmbient.awake()) {
+          runtime.frame = 0;
+          return;
+        }
         runtime.frame = requestAnimationFrame(draw);
         group.rotation.y = (window.__poplurCubeYaw || 0) * Math.PI / 180;
         const rollRad = (window.__poplurCubeRoll || 0) * Math.PI / 180;
@@ -2196,6 +2293,9 @@ if (POPLUR_WEBGL_OK) document.querySelectorAll("canvas[data-account-model]").for
         renderer.render(scene, camera);
       };
       draw();
+      if (window.__poplurAmbient) window.__poplurAmbient.onWake(() => {
+        if (runtime && runtime.renderer === renderer && !runtime.frame) draw();
+      });
     }, undefined, () => {
       if (!runtime || runtime.renderer !== renderer) return;
       recoveryAttempt += 1;
