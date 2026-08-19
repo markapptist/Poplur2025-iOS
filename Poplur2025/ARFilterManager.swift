@@ -25,7 +25,10 @@ class ARFilterManager: NSObject, ObservableObject {
     @Published var isARActive: Bool = false
     
     /// Available filters
-    @Published var availableFilters: [ARFilter] = ARFilter.allCases
+    /// The nine with bundled artwork. NOT `allCases` any more: the fifteen web
+    /// ids have no `ar_filter_*` thumbnail, so listing them here would put
+    /// blank tiles in ARFilterSelector and the video-call rail.
+    @Published var availableFilters: [ARFilter] = ARFilter.nativePickerFilters
     
     // MARK: - Private Properties
     
@@ -43,6 +46,24 @@ class ARFilterManager: NSObject, ObservableObject {
     
     // MARK: - AR Filters
     
+    /// A whole-frame colour recipe: the Core Image twin of one CSS `filter`
+    /// chain. Defaults are the identity, so a recipe names only what it changes.
+    struct Grade {
+        /// CSS `brightness()` — a multiplier, carried here and converted to an
+        /// exposure stop at apply time.
+        var brightness: Double = 1
+        var contrast: Double = 1
+        /// CSS `saturate()`. 0 is `grayscale(1)`.
+        var saturation: Double = 1
+        var hueDegrees: Double = 0
+        var sepia: Double = 0
+        /// CSS `blur()`, in points at the web's reference size.
+        var blur: Double = 0
+        /// Stands in for the web's `drop-shadow` glows, which on an opaque
+        /// video frame read as bloom rather than as a cast shadow.
+        var bloom: Double = 0
+    }
+
     enum ARFilter: String, CaseIterable, Identifiable {
         case none = "None"
         case faceSmoothing = "Smooth"
@@ -53,7 +74,91 @@ class ARFilterManager: NSObject, ObservableObject {
         case warmth = "Warm"
         case cool = "Cool"
         case vintage = "Vintage"
-        
+
+        // ── The web rail's fifteen ────────────────────────────────────────
+        // The rail in ARFilters.tsx was rebuilt from the filter sheet and its
+        // ids replaced the nine above wholesale. Nothing here learned them, and
+        // WebHomeCameraLayer resolves the web's id against `rawValue` — so
+        // `none`/`None` was the ONLY pair that ever matched and every real
+        // selection resolved to `.none`. Picking a filter told the native
+        // pipeline "no filter", which also posted isShown:false and kept the
+        // filtered display layer from ever cross-fading in. That is the whole
+        // reason the rail did nothing on a device.
+        //
+        // These carry the COLOUR GRADE only — the same recipe the web applies
+        // as a CSS `filter`, translated to Core Image in `grade` below. The
+        // seven head-worn ones have no costume here on purpose: their artwork
+        // does not exist, and inventing it is not this fix's job. The three
+        // that DO have costumes (puppy-love, butterfly-dream, inferno-eyes)
+        // draw them in the web overlay, which on iOS is a transparent WebView
+        // sitting on top of this preview — so they land without native work.
+        //
+        // Deliberately ADDED rather than replacing the nine: ARFilterSelector
+        // and InAppVideoCallView show the legacy set with real bundled
+        // `ar_filter_*` thumbnails, and these have none. `availableFilters`
+        // stays the native nine so those pickers are unchanged.
+        case webSmoothGlow = "smooth-glow"
+        case webPop3D = "pop-3d"
+        case webPuppyLove = "puppy-love"
+        case webRetroVHS = "retro-vhs"
+        case webChromeShine = "chrome-shine"
+        case webButterflyDream = "butterfly-dream"
+        case webComicPop = "comic-pop"
+        case webInfernoEyes = "inferno-eyes"
+        case webHeartCrown = "heart-crown"
+        case webFisheyeFun = "fisheye-fun"
+        case webOilSlick = "oil-slick"
+        case webStarryNight = "starry-night"
+        case webDinoHood = "dino-hood"
+        case webAngel = "angel"
+        case webFlowerCrown = "flower-crown"
+
+        /// "smooth-glow" -> "Smooth Glow". The rail owns the real captions;
+        /// this is only for logs and accessibility on the native side.
+        static func labelFromID(_ id: String) -> String {
+            id.split(separator: "-").map(\.capitalized).joined(separator: " ")
+        }
+
+        /// The nine with bundled artwork and a native picker entry. The web
+        /// cases above are reachable only by id, over the bridge.
+        static var nativePickerFilters: [ARFilter] {
+            [.none, .faceSmoothing, .beautyFilter, .brightening,
+             .glowingSkin, .sharpen, .warmth, .cool, .vintage]
+        }
+
+        /// A whole-frame colour recipe, mirroring the web's CSS `filter` chain
+        /// for the same id. `nil` means "one of the legacy nine", which grades
+        /// only the face oval through compositeFaceEffect instead.
+        ///
+        /// CSS multiplies brightness; CIColorControls ADDS it, so brightness
+        /// travels as an exposure stop (log2) where it belongs. Everything else
+        /// maps across directly.
+        var grade: Grade? {
+            switch self {
+            case .webSmoothGlow:      return Grade(brightness: 1.07, contrast: 1.05, saturation: 1.06, blur: 1.1, bloom: 0.45)
+            // Anaglyph is a per-channel offset, which a colour recipe cannot
+            // express. This is the saturation lift only — honest stand-in, same
+            // compromise the web's own chain makes with drop-shadows.
+            case .webPop3D:           return Grade(saturation: 1.1, bloom: 0.2)
+            case .webPuppyLove:       return Grade(brightness: 1.08, contrast: 1.02, saturation: 1.14, sepia: 0.1)
+            case .webRetroVHS:        return Grade(brightness: 0.96, contrast: 1.18, saturation: 1.45, hueDegrees: -6)
+            case .webChromeShine:     return Grade(brightness: 1.12, contrast: 1.55, saturation: 0, bloom: 0.5)
+            case .webButterflyDream:  return Grade(brightness: 1.1, contrast: 0.98, saturation: 1.22, hueDegrees: 6)
+            case .webComicPop:        return Grade(brightness: 1.04, contrast: 1.85, saturation: 1.7)
+            case .webInfernoEyes:     return Grade(brightness: 0.82, contrast: 1.3, saturation: 1.35, hueDegrees: -18, sepia: 0.25)
+            case .webHeartCrown:      return Grade(brightness: 1.1, contrast: 1.02, saturation: 1.25, hueDegrees: -8)
+            // STAND-IN on both platforms: a real fisheye is a per-pixel barrel
+            // warp and needs a geometry pass, not a colour recipe.
+            case .webFisheyeFun:      return Grade(brightness: 1.04, contrast: 1.12, saturation: 1.15)
+            case .webOilSlick:        return Grade(brightness: 1.05, contrast: 1.25, saturation: 2.2, hueDegrees: 150)
+            case .webStarryNight:     return Grade(brightness: 0.72, contrast: 1.2, saturation: 1.3, hueDegrees: 205)
+            case .webDinoHood:        return Grade(brightness: 1.04, contrast: 1.05, saturation: 1.2, hueDegrees: -14)
+            case .webAngel:           return Grade(brightness: 1.24, contrast: 0.94, saturation: 1.05, blur: 0.6, bloom: 0.6)
+            case .webFlowerCrown:     return Grade(brightness: 1.09, contrast: 1.02, saturation: 1.28, sepia: 0.12)
+            default:                  return nil
+            }
+        }
+
         var id: String { rawValue }
 
         /// What the rail calls it.
@@ -76,6 +181,8 @@ class ARFilterManager: NSObject, ObservableObject {
             case .warmth: return "Freckles"
             case .cool: return "Ice Crown"
             case .vintage: return "Round Specs"
+            // The web cases carry their label in the id itself.
+            default: return Self.labelFromID(rawValue)
             }
         }
 
@@ -90,6 +197,7 @@ class ARFilterManager: NSObject, ObservableObject {
             case .warmth: return "circle.grid.3x3.fill"
             case .cool: return "snowflake"
             case .vintage: return "camera.aperture"
+            default: return "camera.filters"
             }
         }
 
@@ -104,6 +212,9 @@ class ARFilterManager: NSObject, ObservableObject {
             case .warmth: return "ar_filter_warm"
             case .cool: return "ar_filter_cool"
             case .vintage: return "ar_filter_vintage"
+            // Unreachable from a picker — the web cases are excluded from
+            // availableFilters precisely because this asset does not exist.
+            default: return "ar_filter_none"
             }
         }
         
@@ -119,6 +230,7 @@ class ARFilterManager: NSObject, ObservableObject {
             case .warmth: return "Freckles and a warm tone"
             case .cool: return "A crown of ice, on a cool tone"
             case .vintage: return "Round specs, on a vintage wash"
+            default: return "\(Self.labelFromID(rawValue)) colour grade"
             }
         }
     }
@@ -159,8 +271,21 @@ class ARFilterManager: NSObject, ObservableObject {
     /// Apply filter to image
     func applyFilter(to image: CIImage, faceObservation: VNFaceObservation?) -> CIImage? {
         guard activeFilter != .none else { return image }
+
+        // A GRADE is a whole-frame colour recipe: Retro VHS, Comic Pop and
+        // Starry Night grade the picture, not a face oval, and they must land
+        // whether or not anybody is in shot. This used to return early on a
+        // missing face — the code below even logs "Frame will remain
+        // unchanged" — so the rail did nothing at all unless a face happened to
+        // be detected, which is the wrong contract for fourteen of these.
+        if let grade = activeFilter.grade {
+            return applyGrade(grade, to: image).cropped(to: image.extent)
+        }
+
+        // The legacy nine are BEAUTY filters: they grade the face oval only, so
+        // they genuinely have nothing to do without an observation.
         guard let faceObservation else { return image }
-        
+
         var outputImage = image
         
         switch activeFilter {
@@ -193,6 +318,10 @@ class ARFilterManager: NSObject, ObservableObject {
             
         case .vintage:
             outputImage = applyVintageFilter(to: outputImage)
+
+        default:
+            // Every web case returned above through `grade`.
+            return image
         }
         
         let faceComposite = compositeFaceEffect(
@@ -414,6 +543,62 @@ class ARFilterManager: NSObject, ObservableObject {
     // MARK: - Filter Implementations
     
     /// Smoothing filter to reduce wrinkles and imperfections
+    /// Run one `Grade` over the whole frame, in the order a browser applies a
+    /// CSS `filter` chain: blur, then colour, then hue, then sepia, then bloom.
+    ///
+    /// Each step is skipped when it is the identity, so a recipe that only
+    /// shifts saturation costs one CIFilter rather than six.
+    private func applyGrade(_ grade: Grade, to image: CIImage) -> CIImage {
+        var output = image
+        let extent = image.extent
+
+        if grade.blur > 0.01, let blur = CIFilter(name: "CIGaussianBlur") {
+            blur.setValue(output, forKey: kCIInputImageKey)
+            blur.setValue(grade.blur, forKey: kCIInputRadiusKey)
+            // A blur bleeds past the frame; clamp back or the edges go
+            // transparent and the preview shows a dark border.
+            if let blurred = blur.outputImage { output = blurred.cropped(to: extent) }
+        }
+
+        // CSS brightness() is a MULTIPLIER. CIColorControls' brightness is an
+        // additive offset, which crushes blacks when used as one — so the
+        // multiplier travels as an exposure stop, where it belongs.
+        if abs(grade.brightness - 1) > 0.001, let exposure = CIFilter(name: "CIExposureAdjust") {
+            exposure.setValue(output, forKey: kCIInputImageKey)
+            exposure.setValue(log2(max(0.01, grade.brightness)), forKey: kCIInputEVKey)
+            if let adjusted = exposure.outputImage { output = adjusted }
+        }
+
+        if abs(grade.contrast - 1) > 0.001 || abs(grade.saturation - 1) > 0.001,
+           let controls = CIFilter(name: "CIColorControls") {
+            controls.setValue(output, forKey: kCIInputImageKey)
+            controls.setValue(grade.contrast, forKey: kCIInputContrastKey)
+            controls.setValue(grade.saturation, forKey: kCIInputSaturationKey)
+            if let adjusted = controls.outputImage { output = adjusted }
+        }
+
+        if abs(grade.hueDegrees) > 0.001, let hue = CIFilter(name: "CIHueAdjust") {
+            hue.setValue(output, forKey: kCIInputImageKey)
+            hue.setValue(grade.hueDegrees * .pi / 180, forKey: kCIInputAngleKey)
+            if let adjusted = hue.outputImage { output = adjusted }
+        }
+
+        if grade.sepia > 0.001, let sepia = CIFilter(name: "CISepiaTone") {
+            sepia.setValue(output, forKey: kCIInputImageKey)
+            sepia.setValue(grade.sepia, forKey: kCIInputIntensityKey)
+            if let adjusted = sepia.outputImage { output = adjusted }
+        }
+
+        if grade.bloom > 0.001, let bloom = CIFilter(name: "CIBloom") {
+            bloom.setValue(output, forKey: kCIInputImageKey)
+            bloom.setValue(grade.bloom, forKey: kCIInputIntensityKey)
+            bloom.setValue(8.0, forKey: kCIInputRadiusKey)
+            if let bloomed = bloom.outputImage { output = bloomed.cropped(to: extent) }
+        }
+
+        return output
+    }
+
     private func applySmoothingFilter(to image: CIImage) -> CIImage {
         // Use bilateral filter for edge-preserving smoothing
         guard let smoothingFilter = CIFilter(name: "CIMedianFilter") else {
@@ -691,6 +876,15 @@ class ARFilterManager: NSObject, ObservableObject {
             output = addRoundedOutline(rect: right, width: max(5, face.width * 0.035), color: frameColor, to: output)
             let bridge = CGRect(x: left.maxX, y: eyeLine.y - face.height * 0.015, width: max(1, right.minX - left.maxX), height: max(5, face.height * 0.03))
             output = sourceOver(roundedRect(bridge, radius: bridge.height * 0.5, color: frameColor, extent: image.extent), output)
+
+        default:
+            // The web cases have no native costume — that artwork does not
+            // exist and is not invented here. Their three that DO have one
+            // (puppy-love, butterfly-dream, inferno-eyes) draw it in the web
+            // overlay, which on iOS is a transparent WebView over this preview,
+            // so it lands on top without a native pass. They also never reach
+            // this function: applyFilter returns them at the grade.
+            break
         }
 
         return output.cropped(to: image.extent)

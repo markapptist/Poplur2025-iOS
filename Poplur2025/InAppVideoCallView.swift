@@ -15,7 +15,9 @@ struct InAppVideoCallView: View {
 
     private enum CallPhase { case connecting, connected }
 
-    private static let filters: [ARFilterManager.ARFilter] = ARFilterManager.ARFilter.allCases
+    // NOT allCases: the fifteen web-rail ids added to ARFilter have no bundled
+    // thumbnail or tint here, so they would show as blank tiles on this rail.
+    private static let filters: [ARFilterManager.ARFilter] = ARFilterManager.ARFilter.nativePickerFilters
 
     var body: some View {
         ZStack {
@@ -394,6 +396,10 @@ private struct VideoCallAREffectOverlay: View {
                     sharpenGrid(proxy: proxy)
                 case .warmth, .cool, .vintage:
                     EmptyView()
+                default:
+                    // Web-rail ids share the enum but never reach this rail —
+                    // `filters` above is nativePickerFilters, not allCases.
+                    EmptyView()
                 }
             }
             .onAppear {
@@ -425,6 +431,10 @@ private struct VideoCallAREffectOverlay: View {
         case .faceSmoothing:
             Color.white.opacity(0.05).blendMode(.screen)
         case .sharpen:
+            EmptyView()
+        default:
+            // Web-rail ids never reach this rail (see `filters` above), but the
+            // switch has to stay total now that they share the enum.
             EmptyView()
         }
     }
