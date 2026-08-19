@@ -189,6 +189,15 @@ final class PoplurPerformanceManager: ObservableObject {
     @Published private(set) var mode: PoplurPerformanceMode
     @Published private(set) var policy: PoplurPerformancePolicy
     @Published private(set) var thermalState: ProcessInfo.ThermalState
+    /// Whether the device is on a charger.
+    ///
+    /// The governor used to be blind to this, and the device log says that was
+    /// the wrong call: of 17 recorded nominal->fair transitions, 14 happened
+    /// while charging, and two of the three SERIOUS(throttling) events did too.
+    /// One of those was at battery=100%, where the charger draws almost nothing
+    /// -- so that heat was the app spending a 60fps budget the device no longer
+    /// had the headroom for, not the charger.
+    @Published private(set) var isCharging: Bool
     @Published private(set) var thermalCondition: String
     @Published private(set) var isLowPowerModeEnabled: Bool
     @Published private(set) var memoryPressureActive = false
@@ -250,6 +259,7 @@ final class PoplurPerformanceManager: ObservableObject {
         let now = Date()
         self.mode = initialMode
         self.thermalState = thermal
+        self.isCharging = Self.readCharging()
         self.thermalCondition = Self.thermalName(thermal)
         self.isLowPowerModeEnabled = lowPower
         self.policy = Self.makePolicy(mode: initialMode, baseCacheByteLimit: baseCacheLimits.byteLimit)
@@ -270,6 +280,9 @@ final class PoplurPerformanceManager: ObservableObject {
             },
             center.addObserver(forName: .NSProcessInfoPowerStateDidChange, object: nil, queue: .main) { [weak self] _ in
                 Task { @MainActor in self?.refreshSystemSignals(reason: "Low Power Mode") }
+            },
+            center.addObserver(forName: UIDevice.batteryStateDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in self?.refreshSystemSignals(reason: "Charger") }
             },
             center.addObserver(forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main) { [weak self] _ in
                 Task { @MainActor in self?.handleMemoryWarning() }
@@ -356,6 +369,7 @@ final class PoplurPerformanceManager: ObservableObject {
             + "heavy=\(activeHeavyRendererCount) visible=\(visibleRendererCount) "
             + "cache=\(usedMB)/\(limitMB)MB assets=\(cache.itemCount)/\(cache.itemLimit) "
             + "renderer=\(currentRendererName ?? "none") tripwire=\(tripwire) "
+            + "charging=\(isCharging) "
             + "lastThermal=\(lastTransition) warnings=\(memoryWarningCount)"
     }
 
@@ -418,6 +432,18 @@ final class PoplurPerformanceManager: ObservableObject {
         reconcileRenderers()
     }
 
+    /// Battery monitoring is enabled at app start (Poplur2025App), but enable it
+    /// here too: this type can be constructed before that runs, and an unenabled
+    /// monitor reports .unknown, which would read as "not charging" and quietly
+    /// disable the clamp below.
+    private static func readCharging() -> Bool {
+        if !UIDevice.current.isBatteryMonitoringEnabled {
+            UIDevice.current.isBatteryMonitoringEnabled = true
+        }
+        let state = UIDevice.current.batteryState
+        return state == .charging || state == .full
+    }
+
     private func refreshSystemSignals(reason: String) {
         let observedThermalState = processInfo.thermalState
         let transition = observedThermalState == thermalState
@@ -427,6 +453,7 @@ final class PoplurPerformanceManager: ObservableObject {
         thermalState = observedThermalState
         thermalCondition = Self.thermalName(thermalState)
         isLowPowerModeEnabled = processInfo.isLowPowerModeEnabled
+        isCharging = Self.readCharging()
         updateThermalTripwire(for: observedThermalState)
         recomputeMode(reason: reason)
 
@@ -478,6 +505,19 @@ final class PoplurPerformanceManager: ObservableObject {
             // A nominal reading during the cooldown remains reduced. Serious
             // and critical pressure enter the emergency policy immediately.
             nextMode = max(nextMode, thermalState == .serious || thermalState == .critical ? .emergency : .reduced)
+        }
+        // Plugged in, the phone is already turning charge into heat, so the same
+        // frame budget costs more headroom than it does on battery. Take a step
+        // down rather than wait for thermalState to degrade -- the ladder above
+        // is REACTIVE by construction (nominal -> full, fair -> reduced), so
+        // without this the app spends the full budget right up until the device
+        // is already hot, which is exactly the pattern the device log shows.
+        //
+        // Deliberately a floor, not a fixed mode: real thermal pressure can
+        // still push this further down, and unplugging restores full quality.
+        // One line to tune if REDUCED turns out to be too cautious.
+        if isCharging {
+            nextMode = max(nextMode, .reduced)
         }
         let previous = mode
         mode = nextMode
