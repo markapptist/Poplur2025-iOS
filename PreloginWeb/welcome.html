@@ -392,7 +392,7 @@
   .permission-location::after{content:"";position:absolute;left:16px;top:11px;width:9px;height:9px;border:3.5px solid #f6ecd7;border-radius:50%;background:rgba(255,255,255,.15);box-shadow:0 1px 2px rgba(83,0,43,.28)}
   .permission-title{margin:0 0 7px;font-size:15px;font-weight:900;line-height:1.18;letter-spacing:0}
   .permission-copy{margin:0;color:#6f5867;font-size:10px;font-weight:700;line-height:1.42;letter-spacing:0}
-  .permission-shader{color:transparent;background-image:linear-gradient(105deg,#25131f 0%,#8b214f 22%,#ff6cad 42%,#173f58 62%,#35c8ef 78%,#25131f 100%);background-size:260% 100%;background-position:0 0;background-clip:text;-webkit-background-clip:text;-webkit-text-fill-color:transparent;text-shadow:0 0 7px rgba(255,84,166,.12),0 0 10px rgba(53,200,239,.08);animation:permissionTextShader 4.8s linear infinite}
+  .permission-shader{color:transparent;background-image:linear-gradient(105deg,#25131f 0%,#8b214f 22%,#ff6cad 42%,#173f58 62%,#35c8ef 78%,#25131f 100%);background-size:260% 100%;background-position:0 0;background-clip:text;-webkit-background-clip:text;-webkit-text-fill-color:transparent;text-shadow:0 0 7px rgba(255,84,166,.12),0 0 10px rgba(53,200,239,.08);animation:permissionTextShader 4.8s linear 6}
   .permission-copy.permission-shader{background-image:linear-gradient(105deg,#69515f 0%,#b43b76 28%,#ff7eba 45%,#38758a 68%,#69515f 100%);text-shadow:0 0 5px rgba(255,84,166,.1)}
   .permission-actions{display:grid;grid-template-columns:1fr 1fr;border-top:1px solid rgba(95,54,77,.18)}
   .permission-action{height:39px;border:0;background:rgba(255,255,255,.58);color:#8b5270;font:900 11px/1 system-ui,-apple-system,sans-serif;cursor:pointer}
@@ -1080,30 +1080,76 @@
   ;(() => {
     var colors = ['#FF2D55', '#FF9500', '#FFCC00', '#34C759', '#007AFF', '#AF52DE']
     var box = document.getElementById('confetti')
-    var birthRate = 45, particles = [], last = performance.now(), carry = 0
-    function place(p) {
-      var t = p.age
-      var x = p.x + p.vx * t + 0.5 * p.ax * t * t
-      var y = p.y + p.vy * t + 0.5 * p.ay * t * t
-      var scale = Math.max(0.2, p.scale - 0.03 * t)
-      var alpha = Math.max(0, Math.min(1, p.alpha - 0.05 * t))
-      p.el.style.transform = 'translate3d(' + x + 'px,' + y + 'px,0) rotate(' + (p.rotation + p.rotationSpeed * t) + 'rad) scale(' + scale + ')'
-      p.el.style.opacity = alpha
+
+    // ── One canvas, not 189 elements ────────────────────────────────────────
+    // This used to hold a live <i class="cf"> per particle: ~189 of them at
+    // steady state (birthRate 45/s x ~4.2s life), each given a fresh `transform`
+    // and `opacity` inline on EVERY frame. That is roughly 22,000 style
+    // mutations a second across 189 separate compositing layers, and it is why
+    // the pre-login ran hotter than anything post-login — which is measured by
+    // a gate this document has never been on.
+    //
+    // Same physics, same numbers, same sprite. The particles are now plain
+    // objects drawn into a single 2D canvas: one clearRect and one drawImage
+    // each, no DOM writes and no layers.
+    var cv = document.createElement('canvas')
+    cv.style.cssText = 'position:absolute;inset:0;pointer-events:none'
+    box.appendChild(cv)
+    var ctx = cv.getContext('2d')
+    // Capped at 2: confetti is soft-edged clay, not type — the third sample
+    // buys nothing here and this is a FULL-SCREEN surface, so unlike the 124px
+    // account art its cost scales with the viewport.
+    var dpr = Math.min(window.devicePixelRatio || 1, 2), W = 0, H = 0
+    function resize () {
+      W = box.clientWidth || 393
+      H = box.clientHeight || 852
+      cv.width = Math.round(W * dpr)
+      cv.height = Math.round(H * dpr)
     }
+    resize()
+    window.addEventListener('resize', resize)
+
+    // The clay sprinkle, drawn ONCE per colour. Baking the rounded rect, the
+    // drop shadow and the pressed highlight into a sprite keeps exactly what
+    // the .cf rule drew while making the per-frame cost a single blit.
+    var SPRITE = 13, PAD = 6, SS = SPRITE + PAD * 2
+    var sprites = colors.map(function (hex) {
+      var sc = document.createElement('canvas')
+      sc.width = sc.height = Math.round(SS * dpr)
+      var c = sc.getContext('2d')
+      c.scale(dpr, dpr)
+      c.translate(PAD, PAD)
+      c.shadowColor = 'rgba(110, 4, 54, 0.45)'
+      c.shadowBlur = 3
+      c.shadowOffsetY = 2
+      c.fillStyle = hex
+      c.beginPath()
+      if (c.roundRect) c.roundRect(0, 0, SPRITE, SPRITE, 3)
+      else c.rect(0, 0, SPRITE, SPRITE)
+      c.fill()
+      c.shadowColor = 'transparent'
+      // inset 0 1px 1px rgba(255,255,255,.55) + inset 0 -1px 2px rgba(0,0,0,.18)
+      c.globalCompositeOperation = 'source-atop'
+      var g = c.createLinearGradient(0, 0, 0, SPRITE)
+      g.addColorStop(0, 'rgba(255,255,255,0.55)')
+      g.addColorStop(0.3, 'rgba(255,255,255,0)')
+      g.addColorStop(0.8, 'rgba(0,0,0,0)')
+      g.addColorStop(1, 'rgba(0,0,0,0.18)')
+      c.fillStyle = g
+      c.fillRect(0, 0, SPRITE, SPRITE)
+      return sc
+    })
+
+    var birthRate = 45, particles = [], last = performance.now(), carry = 0
     function spawn(prefillAge) {
-      var width = box.clientWidth || 393
       var life = 3.2 + Math.random() * 2
       var speed = 130 + Math.random() * 180
       var spread = (Math.random() - 0.5) * (Math.PI / 5)
-      var d = document.createElement('i')
-      d.className = 'cf'
-      d.style.background = colors[(Math.random() * colors.length) | 0]
-      box.appendChild(d)
-      var p = {
-        el: d,
+      particles.push({
+        sprite: sprites[(Math.random() * sprites.length) | 0],
         age: Math.min(prefillAge || 0, life - 0.001),
         life: life,
-        x: -200 + Math.random() * (width + 400),
+        x: -200 + Math.random() * (W + 400),
         y: -44,
         vx: Math.sin(spread) * speed,
         vy: Math.cos(spread) * speed,
@@ -1113,26 +1159,41 @@
         rotationSpeed: 2.5,
         scale: 0.33 + Math.random() * 0.44,
         alpha: 0.9 + Math.random() * 0.2
-      }
-      particles.push(p)
-      place(p)
+      })
     }
     for (var i = 0; i < Math.round(birthRate * 4.2); i++) {
-      var life = 3.2 + Math.random() * 2
-      spawn(Math.random() * life)
+      spawn(Math.random() * (3.2 + Math.random() * 2))
     }
     function tick(now) {
       var dt = Math.min(0.05, Math.max(0, (now - last) / 1000))
       last = now
+      // Nothing is on screen behind a backgrounded WebView, so stop spawning
+      // and stop drawing — the loop stays alive only to keep time.
+      if (document.hidden) { requestAnimationFrame(tick); return }
       carry += dt * birthRate
       while (carry >= 1) { spawn(); carry -= 1 }
+      ctx.setTransform(1, 0, 0, 1, 0, 0)
+      ctx.clearRect(0, 0, cv.width, cv.height)
       for (var i = particles.length - 1; i >= 0; i--) {
         var p = particles[i]
         p.age += dt
-        if (p.age >= p.life) {
-          p.el.remove()
-          particles.splice(i, 1)
-        } else place(p)
+        if (p.age >= p.life) { particles.splice(i, 1); continue }
+        var t = p.age
+        var x = p.x + p.vx * t + 0.5 * p.ax * t * t
+        var y = p.y + p.vy * t + 0.5 * p.ay * t * t
+        // Fell past the slab: the DOM version kept paying for these until their
+        // life ran out, because overflow:hidden only stopped them being SEEN.
+        if (y > H + 80) { particles.splice(i, 1); continue }
+        var scale = Math.max(0.2, p.scale - 0.03 * t)
+        var alpha = Math.max(0, Math.min(1, p.alpha - 0.05 * t))
+        var rot = p.rotation + p.rotationSpeed * t
+        // The element rotated about its own centre while `left/top` placed its
+        // corner, so the centre sat half a sprite in from (x, y). Same here.
+        var cos = Math.cos(rot) * scale, sin = Math.sin(rot) * scale
+        ctx.setTransform(cos * dpr, sin * dpr, -sin * dpr, cos * dpr,
+                         (x + SPRITE / 2) * dpr, (y + SPRITE / 2) * dpr)
+        ctx.globalAlpha = alpha
+        ctx.drawImage(p.sprite, -SS / 2, -SS / 2, SS, SS)
       }
       requestAnimationFrame(tick)
     }
@@ -1973,8 +2034,18 @@ if (POPLUR_WEBGL_OK) document.querySelectorAll("canvas[data-account-model]").for
     canvas.closest(".account-3d-icon")?.classList.add("model-error");
     return;
   }
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-  renderer.setSize(84, 84, false);
+  // Rendered at 84px but DISPLAYED at 124px (.introArt), so this was upscaling
+  // before the pixel ratio even applied: 84 x 2 = 168 backing pixels stretched
+  // across 372 device pixels on a 3x phone. That is the blockiness on the
+  // account-type art, and it is resolution, not a compressed texture.
+  //
+  // Take the ratio the panel actually has, and render at the size the element
+  // actually occupies. This is a 124px surface, so its cost is bounded by its
+  // own size rather than the viewport — the same reason the post-login clay
+  // widgets can afford full resolution while the full-screen map cannot.
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 3));
+  var artBox = canvas.clientWidth || 124;
+  renderer.setSize(artBox, artBox, false);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(27, 1, .01, 20);
@@ -2066,7 +2137,11 @@ if (POPLUR_WEBGL_OK) document.querySelectorAll("canvas[data-account-model]").for
       return;
     }
 
-    renderer.setPixelRatio(Math.min(devicePixelRatio, recoveryAttempt === 0 ? 2 : 1.25));
+    // Same correction as the account art above. The recovery pass still steps
+    // down — it exists for devices that just failed to build a context — but
+    // 1.25 was far enough below the panel that a successful recovery looked
+    // broken in its own way.
+    renderer.setPixelRatio(Math.min(devicePixelRatio, recoveryAttempt === 0 ? 3 : 2));
     renderer.setSize(254, 254, false);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     const scene = new THREE.Scene();
@@ -2202,6 +2277,17 @@ if (POPLUR_WEBGL_OK) document.querySelectorAll("canvas[data-account-model]").for
       // orb appeared to do nothing at all.
       var stageEl = document.querySelector('.stage')
       if (stageEl) stageEl.style.setProperty('background', hex, 'important')
+      // .pink is the one that actually shows. It is `position: fixed; inset: 0;
+      // z-index: 0` and paints the brand slab plus the quilted dot press, so it
+      // sits OVER html, body and .stage — every colour rolled above was being
+      // applied correctly and then covered up, which is the whole of "the orb
+      // does nothing when pressed".
+      //
+      // background-COLOR, not the `background` shorthand: the shorthand would
+      // also reset background-image and take the dot texture and the centre
+      // light out with it, turning the slab flat.
+      var pinkEl = document.querySelector('.pink')
+      if (pinkEl) pinkEl.style.setProperty('background-color', hex, 'important')
       // The hub of the wheel IS the current colour, exactly as the map's
       // takeover picker shows the colour it is currently painting with.
       var wheel = document.getElementById('hueWheel')
@@ -2236,6 +2322,8 @@ if (POPLUR_WEBGL_OK) document.querySelectorAll("canvas[data-account-model]").for
         if (document.body) document.body.style.removeProperty('background')
         var st = document.querySelector('.stage')
         if (st) st.style.removeProperty('background')
+        var pk = document.querySelector('.pink')
+        if (pk) pk.style.removeProperty('background-color')
       }
       return !!on
     }
