@@ -128,13 +128,29 @@ async function refundCredits(uid: string, jobId: string): Promise<void> {
   });
 }
 
+/**
+ * A per-uid-per-day counter document, not a range query over meshyJobs.
+ *
+ * The original version queried meshyJobs with an equality filter (uid) plus a
+ * range filter (createdAt > since) — Firestore has no automatic index for
+ * that combination, so it 500'd on the very first real call, with the actual
+ * cause visible only in Cloud Logging (the client response is deliberately
+ * generic). A composite index would fix it too, but takes minutes to build
+ * and is more moving parts than a counter needs: one document read, one
+ * transactional write, never an index, and it counts attempts rather than
+ * scanning history that only grows.
+ */
 async function enforceRateLimit(uid: string): Promise<void> {
-  const since = admin.firestore.Timestamp.fromMillis(Date.now() - 24 * 60 * 60 * 1000);
-  const recent = await admin.firestore().collection("meshyJobs")
-    .where("uid", "==", uid).where("createdAt", ">", since).count().get();
-  if (recent.data().count >= MAX_JOBS_PER_DAY) {
-    throw httpError(429, "Daily generation limit reached. Try again tomorrow.");
-  }
+  const day = new Date().toISOString().slice(0, 10); // UTC calendar day
+  const ref = admin.firestore().collection("meshyRateLimits").doc(`${uid}_${day}`);
+  await admin.firestore().runTransaction(async transaction => {
+    const snap = await transaction.get(ref);
+    const count = Number(snap.data()?.count ?? 0);
+    if (count >= MAX_JOBS_PER_DAY) {
+      throw httpError(429, "Daily generation limit reached. Try again tomorrow.");
+    }
+    transaction.set(ref, { uid, day, count: count + 1, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  });
 }
 
 /** POST /  { image: <data URI>, style?, name?, kind: "landmark" | "business" } */
