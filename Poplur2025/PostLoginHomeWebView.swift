@@ -1868,7 +1868,13 @@ struct PostLoginHomeWebView: UIViewRepresentable {
             user.getIDToken { token, error in
                 guard let token, error == nil else { return }
                 DispatchQueue.main.async { [weak self] in
-                    guard let webView = self?.webView else { return }
+                    // `self?.webView` is ambiguous inside the Coordinator: it
+                    // conforms to WKNavigationDelegate, whose webView(_:…)
+                    // methods are also members, so the compiler cannot tell a
+                    // property reference from a method reference. Every other
+                    // access in this class goes through the bridge — do the
+                    // same here.
+                    guard let webView = self?.bridge.webView else { return }
                     // JSON-encode: a raw interpolation of a token into a script
                     // string is an injection waiting to happen.
                     guard let payload = try? JSONSerialization.data(
