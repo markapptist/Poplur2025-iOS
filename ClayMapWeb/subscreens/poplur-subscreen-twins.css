@@ -18,6 +18,27 @@
 
 * { box-sizing: border-box; }
 
+/* These are app screens, not a web page. A long-press on a price or a product
+   description was raising the OS text-selection bar (Copy / Translate /
+   Share…) over the screen, and a drag across a card left it highlighted —
+   neither belongs on a surface you navigate by holding and turning a cube.
+   Anything you actually type into stays selectable, so editing still works. */
+html,
+body,
+.screen {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+input,
+textarea,
+[contenteditable="true"] {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+
 html,
 body {
   width: 100%;

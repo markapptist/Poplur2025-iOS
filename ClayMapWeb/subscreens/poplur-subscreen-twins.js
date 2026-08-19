@@ -527,9 +527,72 @@ function handleStoreCheckoutResult(data) {
   renderScreen();
 }
 
+// ── The cube is the back button ───────────────────────────────────────────
+// These screens have no ‹ of their own any more. The cube floats above every
+// surface in the app and already backs out of pages and tabs, so a second
+// control that only exists inside an iframe was one more thing to learn and
+// one more thing to keep working. The host cannot see into this document, so
+// the arrangement is: we publish how deep we are on every render, and the host
+// asks us to pop a level when the depth says there is one to pop.
+
+/** How many nested levels the CURRENTLY EMBEDDED screen has open. Scoped to
+    that screen so a detail left open on another one cannot answer for it. */
+function nestedBackDepth() {
+  const id = embeddedScreen || activeScreen;
+  if (id === 'profile-messages') return profileMailThread ? 1 : 0;
+  if (id === 'profile-store') return (profileStoreView === 'bag' || profileStoreProduct) ? 1 : 0;
+  if (id === 'profile-stats') return profileStat ? 1 : 0;
+  if (id === 'profile-settings') return profileSettingsPanel ? 1 : 0;
+  return 0;
+}
+
+/** Pop one nested level. Returns whether there was one to pop. */
+function nestedGoBack() {
+  const id = embeddedScreen || activeScreen;
+  if (id === 'profile-messages' && profileMailThread) {
+    profileMailThread = null;
+    renderScreen();
+    return true;
+  }
+  if (id === 'profile-store' && (profileStoreView === 'bag' || profileStoreProduct)) {
+    if (profileStoreView === 'bag') profileStoreView = 'catalog';
+    else profileStoreProduct = null;
+    profileStoreNotice = '';
+    renderScreen();
+    return true;
+  }
+  if (id === 'profile-stats' && profileStat) {
+    profileStat = null;
+    renderScreen();
+    return true;
+  }
+  if (id === 'profile-settings' && profileSettingsPanel) {
+    profileSettingsPanel = null;
+    profileSettingsNotice = '';
+    renderScreen();
+    return true;
+  }
+  return false;
+}
+
+/** Tell the host how deep we are. It keeps the number so its cube handler can
+    answer synchronously — a tap cannot wait for a round trip. */
+function reportNestedDepth() {
+  if (window.parent === window) return;
+  try {
+    window.parent.postMessage({ type: 'poplurSubscreenDepth', depth: nestedBackDepth() }, '*');
+  } catch { /* cross-origin host — the ‹-less screens simply keep the cube */ }
+}
+
 window.addEventListener('message', event => {
   if (window.parent !== window && event.source !== window.parent) return;
-  handleStoreCheckoutResult(event.data);
+  const data = event.data;
+  if (data && typeof data === 'object' && data.type === 'poplurSubscreenBack') {
+    nestedGoBack();
+    reportNestedDepth();
+    return;
+  }
+  handleStoreCheckoutResult(data);
 });
 
 
@@ -760,6 +823,9 @@ function renderNav() {
 }
 
 function renderScreen() {
+  // Depth is republished after every draw, so the host's cube always knows
+  // whether this screen can still go back on its own.
+  window.setTimeout(reportNestedDepth, 0);
   stopPhoneBoot();
   stopPhoneThemeChange();
   stopStoreCarousel();
@@ -1901,7 +1967,6 @@ function messagesScreen(from) {
     return `
       <div class="ios-screen messages profile-scroll-page">
         <div class="profile-subscreen-toolbar">
-          <button type="button" class="profile-back" data-mail-back aria-label="Back to messages">‹</button>
           <div class="avatar">${esc(selected.initials)}</div>
           <div>
             <h1>${esc(selected.title)}</h1>
@@ -1958,7 +2023,6 @@ function storeScreen() {
     return `
       <div class="ios-screen store-page store-new profile-scroll-page">
         <div class="profile-subscreen-toolbar store-toolbar">
-          <button type="button" class="profile-back" data-store-back aria-label="Back to store">‹</button>
           <div><h1>${esc(selected.title)}</h1><span>${selected.credits.toLocaleString('en-US')} Poplur Credits</span></div>
           <button type="button" class="store-cart-button" data-store-action="bag" aria-label="Open bag with ${bagCount} items">Bag ${bagCount}</button>
         </div>
@@ -2029,7 +2093,6 @@ function storeBagScreen() {
   return `
     <div class="ios-screen store-page store-new profile-scroll-page">
       <div class="profile-subscreen-toolbar store-toolbar">
-        <button type="button" class="profile-back" data-store-back aria-label="Back to store">‹</button>
         <div><h1>Your Bag</h1><span>${storeBagCount()} item${storeBagCount() === 1 ? '' : 's'}</span></div>
       </div>
       <main class="store-bag">
@@ -2337,7 +2400,6 @@ function settingsPanelScreen(panel) {
   return `
     <div class="ios-screen settings-page profile-scroll-page">
       <div class="profile-subscreen-toolbar">
-        <button type="button" class="profile-back" data-setting-back aria-label="Back to settings">‹</button>
         <div>
           <h1>${esc(item.title)}</h1>
           <span>Settings detail</span>
@@ -2370,7 +2432,6 @@ function statsScreen() {
     return `
       <div class="ios-screen stats-page profile-scroll-page">
         <div class="profile-subscreen-toolbar">
-          <button type="button" class="profile-back" data-stat-back aria-label="Back to stats">‹</button>
           <img class="stats-detail-icon" src="${selected.img}" alt="">
           <div>
             <h1>${esc(selected.label)}</h1>
