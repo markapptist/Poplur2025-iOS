@@ -55,11 +55,14 @@ final class CubeMotionPoster {
         let generation = streamGeneration
         lastSampleUptime = ProcessInfo.processInfo.systemUptime
 
-        // The visible navigator renders at 60fps and interpolates between these
-        // samples. Thirty sensor updates keep that interpolation responsive
-        // without turning Core Motion or the native→WebKit bridge into a
-        // display-rate source. Hidden/background owners still stop hardware.
-        manager.deviceMotionUpdateInterval = 1.0 / 30.0
+        // The visible navigator renders at 60fps. Thirty sensor updates left
+        // the interpolation a frame behind the hand, which is invisible on a
+        // clay cube leaning in its case and very visible on the camcorder,
+        // which is aimed — it should point where the handset points, not
+        // where it pointed 33ms ago. Matching the display rate removes that
+        // lag at the source. Hidden/background owners still stop hardware,
+        // which is where this stream's power actually goes.
+        manager.deviceMotionUpdateInterval = 1.0 / 60.0
         // Choose a reference frame; xArbitraryZVertical is generally stable for UI tilts
         manager.startDeviceMotionUpdates(using: .xArbitraryZVertical, to: queue) { [weak self] motion, error in
             guard let self else { return }

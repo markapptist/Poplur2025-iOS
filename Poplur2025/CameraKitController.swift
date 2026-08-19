@@ -181,18 +181,23 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
     private static let recordingMaximumDuration: TimeInterval = 10
     private static let recordingStopAcknowledgementDuration: TimeInterval = 1
     private static let photoAtomicMaximumDuration: TimeInterval = 3
-    // The visible camera is an attended surface: a cool device gets the smooth
-    // 24 FPS 1080p preview. But lifecycle ownership alone did not hold the
-    // enclosure — on device (14 Aug) the viewfinder took ProcessInfo from
-    // nominal to fair in 42s and could reach SERIOUS(throttling), where the
-    // only remaining response was a hard park.
+    // The visible camera is an attended surface and it runs at FULL rate: a
+    // viewfinder that steps is a viewfinder that reads as broken, and 20fps
+    // stepped visibly. Nothing is pre-emptively reduced here any more.
     //
-    // Start at the previously pressure-only 20fps instead of waiting 42s for
-    // the enclosure to warm. Under pressure, 18fps is the lowest small step
-    // that remains usable without the obvious 15fps judder measured on device.
-    // Recording keeps its explicit 24fps budget below; this reduction applies
-    // to the sustained live preview and sampled analysis path.
-    private static let previewFrameRate = 20
+    // The device is still protected, by measurement rather than by a permanent
+    // cap: `capturePressureCapped` drops the preview to the rate below on real
+    // systemPressure, and serious/critical still hard-parks the session (see
+    // requiresEmergencyThermalPark — deliberately not gated on the governor
+    // switch). That ladder is what held the enclosure on device; the 20fps
+    // resting cap was the part the user was seeing and did not want.
+    //
+    // If the enclosure turns out not to hold at 60, this constant is the dial:
+    // 30 is the next honest stop and still full-motion. Recording keeps its
+    // own explicit budget below so a capped preview cannot degrade a clip.
+    private static let previewFrameRate = 60
+    // The measured pressure step: low enough to actually save energy, high
+    // enough to stay usable (15fps judders obviously on device).
     private static let pressurePreviewFrameRate = 18
     private static let recordingFrameRateLimit = 24
     private static let previewAnalysisFrameSampleInterval: TimeInterval = 2.5
@@ -1656,12 +1661,14 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
         guard let input = currentVideoInput else { return false }
         let device = input.device
         let supportedRanges = device.activeFormat.videoSupportedFrameRateRanges
-        // A recording that cannot run at 24 should preserve motion quality at
-        // 30 before considering the preview's lower-energy rates. Preview and
-        // pressure paths intentionally keep their low-first fallback order.
-        let candidates = isRecording
-            ? [requestedFPS, 30, Self.previewFrameRate, Self.pressurePreviewFrameRate]
-            : [requestedFPS, Self.pressurePreviewFrameRate, Self.previewFrameRate, 24, 30]
+        // DESCEND from what was asked for. The preview's list used to be
+        // low-first ([requested, 18, 20, 24, 30]) because "requested" was
+        // itself the low number; now that the preview asks for the full rate,
+        // low-first would drop an unsupported 60 straight to 18 rather than to
+        // the 30 the format almost certainly does support. Recording wanted a
+        // descent all along ("preserve motion quality at 30"), so preview and
+        // recording now share one order instead of disagreeing about it.
+        let candidates = [requestedFPS, 30, 24, Self.pressurePreviewFrameRate]
         guard let selectedFPS = candidates.first(where: { candidate in
             let fps = Double(candidate)
             return supportedRanges.contains(where: {
