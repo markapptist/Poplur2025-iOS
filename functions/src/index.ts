@@ -16,7 +16,7 @@ export { verifyCardPurchase } from "./cardPurchases";
 export { notifyOnEngagement } from "./engagementNotifications";
 export { meshyGenerate, meshyStatus } from "./meshyModels";
 
-admin.initializeApp();
+if (admin.apps.length === 0) admin.initializeApp();
 
 const db = admin.firestore();
 const googleAiApiKey = defineSecret("GOOGLE_AI_API_KEY");

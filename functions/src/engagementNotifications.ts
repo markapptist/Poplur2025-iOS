@@ -13,6 +13,13 @@ import { FieldValue } from "firebase-admin/firestore";
  * read-modify-write race against a device registering at the same moment.
  */
 
+// This module reaches for Firestore and Messaging at import time, and
+// index.ts re-exports it — ES re-exports evaluate BEFORE the importing
+// module's own body, so index's initializeApp() had not run yet and deploy
+// analysis died with app/no-app. Guarded so it is safe wherever it loads
+// first, and safe to call again.
+if (admin.apps.length === 0) admin.initializeApp();
+
 const db = admin.firestore();
 const messaging = admin.messaging();
 
