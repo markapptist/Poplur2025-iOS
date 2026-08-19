@@ -3069,6 +3069,9 @@ private struct RadiusStoreView: View {
     let userID: String?
     @ObservedObject var purchaseVM: RadiusPurchaseViewModel
     @State private var selectedCardID = PoplurCreditCardProduct.catalog[0].id
+    /// Owns the Add-to-Wallet round trip. StateObject, not State: the request is
+    /// async and the view re-renders under it while the card selection changes.
+    @StateObject private var walletPass = PoplurWalletPassService()
     @State private var orderMessage: String?
     @State private var cardPricesByID: [String: String] = [:]
     @State private var isPurchasingCard = false
@@ -3240,6 +3243,28 @@ private struct RadiusStoreView: View {
                 storeBadge("3D collectible")
                 storeBadge("\(selectedCard.credits.formatted()) credits")
                 storeBadge("Server verified")
+            }
+
+            // Wallet carries a FLAT card — a pass is images and fields, so the
+            // turning 3D model cannot come along. The button is hidden outright
+            // where Wallet is unavailable rather than shown and failing.
+            if PoplurWalletPassService.isAvailable {
+                VStack(alignment: .leading, spacing: 8) {
+                    AddPoplurCardToWalletButton {
+                        Task { await walletPass.addToWallet(cardID: selectedCard.id) }
+                    }
+                    .frame(height: 44)
+                    .frame(maxWidth: .infinity)
+                    .opacity(walletPass.state == .working ? 0.5 : 1)
+                    .allowsHitTesting(walletPass.state != .working)
+
+                    if case .failed(let message) = walletPass.state {
+                        Text(message)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(.black.opacity(0.62))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
             }
         }
         .padding(16)
