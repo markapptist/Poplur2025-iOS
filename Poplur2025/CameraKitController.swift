@@ -192,9 +192,25 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
     // switch). That ladder is what held the enclosure on device; the 20fps
     // resting cap was the part the user was seeing and did not want.
     //
-    // If the enclosure turns out not to hold at 60, this constant is the dial:
-    // 30 is the next honest stop and still full-motion. Recording keeps its
-    // own explicit budget below so a capped preview cannot degrade a clip.
+    // MEASURED ON DEVICE 2026-08-19 (iPhone 16, soak run 6): the active capture
+    // format reports `supported=1-30`, so 60 is UNREACHABLE and the descent
+    // below lands on 30. The real change here is 20 -> 30fps, not 20 -> 60.
+    // The `[PoplurCamera] previewFPS applied=` line proves which rate a run
+    // actually got; do not infer it from this constant.
+    //
+    // That 30fps preview cost real headroom: NativeCamera owned a
+    // nominal->fair flip after ~9 min of camera (vs the 14 Aug baseline of
+    // ~25 min at 20fps). The run was CHARGING, which the soak protocol says
+    // contaminates a fair reading, so treat ~9 min as a floor rather than the
+    // number. It never reached serious, and the ladder behaved: fair dropped
+    // the preview to 18fps and REDUCED took the app to fps=8.
+    //
+    // This constant stays the dial. 30 is honest (it is what the format gives);
+    // 24 or 20 buy headroom back if the enclosure proves too warm in real use.
+    // Recording keeps its own explicit budget below so a capped preview cannot
+    // degrade a clip.
+    /// Last rate written to the diag log, so a steady preview logs once.
+    private nonisolated(unsafe) static var lastLoggedCaptureFPS: Int = 0
     private static let previewFrameRate = 60
     // The measured pressure step: low enough to actually save energy, high
     // enough to stay usable (15fps judders obviously on device).
@@ -1675,6 +1691,26 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
                 $0.minFrameRate <= fps && fps <= $0.maxFrameRate
             })
         }) else { return false }
+
+        // The thermal soak reads Documents/poplur-diag.log, and nothing in it
+        // said what rate the preview actually got. `selectedFPS` is chosen from
+        // a descent, so a soak could be measuring 60 or a 30/24 fallback and
+        // the log would look identical either way — an unattributable thermal
+        // number is not worth the twelve minutes it costs to collect. Logged
+        // only when the applied rate CHANGES, so a steady preview writes one
+        // line per session rather than one per reconfiguration.
+        //
+        // Deliberately PoplurDiagLog, not the #if DEBUG prints above: those go
+        // to stdout, which a devicectl pull never sees.
+        if Self.lastLoggedCaptureFPS != selectedFPS {
+            Self.lastLoggedCaptureFPS = selectedFPS
+            PoplurDiagLog.append(
+                "[PoplurCamera] previewFPS applied=\(selectedFPS) requested=\(requestedFPS) "
+                    + "recording=\(isRecording) supported="
+                    + supportedRanges.map { "\(Int($0.minFrameRate))-\(Int($0.maxFrameRate))" }
+                        .joined(separator: ",")
+            )
+        }
 
         let duration = CMTime(value: 1, timescale: CMTimeScale(selectedFPS))
         let currentOverride = input.videoMinFrameDurationOverride
