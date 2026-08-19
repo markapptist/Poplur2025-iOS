@@ -1,7 +1,9 @@
+import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import * as admin from "firebase-admin";
+import { FieldValue } from "firebase-admin/firestore";
 import { logger } from "firebase-functions";
 import { defineSecret, defineString } from "firebase-functions/params";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
@@ -39,6 +41,12 @@ const passTypeIdentifier = defineString("POPLUR_PASS_TYPE_ID", {
   default: "pass.com.apptist.Poplur2025.card",
 });
 const passTeamIdentifier = defineString("POPLUR_PASS_TEAM_ID", { default: "" });
+/**
+ * Where Wallet asks for updates. Empty means "no update service": the pass is
+ * then a snapshot, which is the correct behaviour before the web service is
+ * deployed — advertising a URL that 404s would leave Wallet retrying forever.
+ */
+const passWebServiceURL = defineString("POPLUR_PASS_WEB_SERVICE_URL", { default: "" });
 
 /** The four purchasable cards, keyed exactly as cardPurchases.ts records them. */
 const CARD_NAMES: Record<string, string> = {
@@ -49,7 +57,7 @@ const CARD_NAMES: Record<string, string> = {
 };
 
 /** cardID -> the poster basename in pass-assets. Only these ids are issuable. */
-const CARD_ASSET: Record<string, string> = {
+export const CARD_ASSET: Record<string, string> = {
   inverted: "inverted",
   lens: "lens",
   splitDiamond: "split_diamond",
@@ -80,7 +88,7 @@ function readAsset(name: string): Buffer {
  * is keyed by receipt fingerprint and carries `{userId, cardId}`; one matching
  * document is proof.
  */
-async function ownsCard(uid: string, cardID: string): Promise<boolean> {
+export async function ownsCard(uid: string, cardID: string): Promise<boolean> {
   const snapshot = await admin
     .firestore()
     .collection("verifiedStorePurchases")
@@ -91,9 +99,9 @@ async function ownsCard(uid: string, cardID: string): Promise<boolean> {
   return !snapshot.empty;
 }
 
-type ProfileSummary = { handle: string; displayName: string };
+export type ProfileSummary = { handle: string; displayName: string };
 
-async function profileFor(uid: string): Promise<ProfileSummary> {
+export async function profileFor(uid: string): Promise<ProfileSummary> {
   const snapshot = await admin.firestore().collection("users").doc(uid).get();
   const data = snapshot.data() ?? {};
   const handleRaw = typeof data.username === "string" && data.username.trim()
@@ -107,6 +115,60 @@ async function profileFor(uid: string): Promise<ProfileSummary> {
     : handle;
   return { handle, displayName };
 }
+
+/**
+ * Mint-once, reuse-after. Wallet keeps the token from the pass it holds, so
+ * regenerating it on every add would silently break updates for every copy
+ * already installed. Stored beside the registration state rather than derived
+ * from the uid, because a derived token is only as secret as the derivation.
+ */
+export async function passAuthenticationToken(
+  uid: string,
+  serialNumber: string
+): Promise<string> {
+  const ref = admin.firestore().collection("walletPasses").doc(serialNumber);
+  const snapshot = await ref.get();
+  const existing = snapshot.data()?.authenticationToken;
+  if (typeof existing === "string" && existing.length > 0) {
+    return existing;
+  }
+  const token = randomBytes(24).toString("hex");
+  await ref.set(
+    {
+      userId: uid,
+      authenticationToken: token,
+      updatedAt: FieldValue.serverTimestamp(),
+    },
+    { merge: true }
+  );
+  return token;
+}
+
+/**
+ * Which cards this user actually owns. The client cannot read
+ * `verifiedStorePurchases` (it has no Firestore rule, so it is server-only by
+ * default), and without this the Wallet button had to be offered on every card
+ * and rejected server-side — an button that fails is worse than no button.
+ */
+export const poplurOwnedCards = onCall(async request => {
+  const uid = request.auth?.uid;
+  if (!uid) {
+    throw new HttpsError("unauthenticated", "Sign in to see your cards.");
+  }
+  const snapshot = await admin
+    .firestore()
+    .collection("verifiedStorePurchases")
+    .where("userId", "==", uid)
+    .get();
+  const cardIds = [
+    ...new Set(
+      snapshot.docs
+        .map(doc => doc.data().cardId)
+        .filter((id): id is string => typeof id === "string" && id in CARD_ASSET)
+    ),
+  ];
+  return { cardIds };
+});
 
 export const poplurWalletPass = onCall(
   {
@@ -155,10 +217,14 @@ export const poplurWalletPass = onCall(
 
     // The serial is stable per user+card, so re-adding replaces the existing
     // pass in Wallet instead of stacking duplicates every time the button is
-    // tapped. authenticationToken/webServiceURL are deliberately absent: this
-    // is a snapshot, and advertising an update service we do not run would
-    // leave Wallet retrying against nothing.
+    // tapped.
     const serialNumber = `${uid}.${cardID}`;
+    // Wallet authenticates every update call with this, so it is a per-pass
+    // secret and never the uid: the token travels inside a pass the holder can
+    // hand to anyone, and a guessable one would let a stranger pull someone
+    // else's pass. Minted once and reused so re-adding does not orphan the
+    // registrations Wallet already made against the old token.
+    const authenticationToken = await passAuthenticationToken(uid, serialNumber);
 
     try {
       const pkpass = buildCardPass({
@@ -167,6 +233,8 @@ export const poplurWalletPass = onCall(
         handle,
         displayName,
         serialNumber,
+        authenticationToken,
+        webServiceURL: passWebServiceURL.value() || undefined,
         passTypeIdentifier: passTypeIdentifier.value(),
         teamIdentifier,
         certificates: {
@@ -210,6 +278,9 @@ export type CardPassRequest = {
   passTypeIdentifier: string;
   teamIdentifier: string;
   certificates: CardPassCertificates;
+  /** Both or neither: Wallet rejects a webServiceURL without a token. */
+  authenticationToken?: string;
+  webServiceURL?: string;
 };
 
 /**
@@ -227,6 +298,14 @@ export function buildCardPass(request: CardPassRequest): Buffer {
     serialNumber: request.serialNumber,
     organizationName: "Poplur",
     description: `Poplur card — ${CARD_NAMES[request.cardID] ?? request.cardID}`,
+    // Only advertised together. A pass carrying a webServiceURL but no token
+    // (or vice versa) is rejected by Wallet outright.
+    ...(request.webServiceURL && request.authenticationToken
+      ? {
+          webServiceURL: request.webServiceURL,
+          authenticationToken: request.authenticationToken,
+        }
+      : {}),
     foregroundColor: PASS_INK,
     backgroundColor: PASS_BACKGROUND,
     labelColor: PASS_LABEL_PINK,

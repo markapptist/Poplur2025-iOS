@@ -3248,7 +3248,7 @@ private struct RadiusStoreView: View {
             // Wallet carries a FLAT card — a pass is images and fields, so the
             // turning 3D model cannot come along. The button is hidden outright
             // where Wallet is unavailable rather than shown and failing.
-            if PoplurWalletPassService.isAvailable {
+            if PoplurWalletPassService.isAvailable, walletPass.canOffer(cardID: selectedCard.id) {
                 VStack(alignment: .leading, spacing: 8) {
                     AddPoplurCardToWalletButton {
                         Task { await walletPass.addToWallet(cardID: selectedCard.id) }
@@ -3272,6 +3272,9 @@ private struct RadiusStoreView: View {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .fill(Color.black.opacity(0.045))
         )
+        // Asked once for the whole store, not per card: the answer is the same
+        // list whichever finish happens to be selected.
+        .task { await walletPass.loadOwnedCards() }
     }
 
     private var finishPicker: some View {

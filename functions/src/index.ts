@@ -13,7 +13,8 @@ import {
 } from "./ai/premiumAiFlows";
 
 export { verifyCardPurchase } from "./cardPurchases";
-export { poplurWalletPass } from "./walletPass";
+export { poplurWalletPass, poplurOwnedCards } from "./walletPass";
+export { poplurPassWebService, poplurPassOnProfileChange } from "./walletPassWebService";
 export { notifyOnEngagement } from "./engagementNotifications";
 export { meshyGenerate, meshyStatus } from "./meshyModels";
 export { generateRetroGame } from "./retro/generateRetroGame";

@@ -20,6 +20,9 @@ final class PoplurWalletPassService: ObservableObject {
     }
 
     @Published private(set) var state: State = .idle
+    /// nil until asked. Distinguishes "not loaded yet" from "owns nothing", so
+    /// the button does not flash in and out while the answer is in flight.
+    @Published private(set) var ownedCardIDs: Set<String>?
 
     private lazy var functions = Functions.functions()
 
@@ -27,6 +30,31 @@ final class PoplurWalletPassService: ObservableObject {
     /// sheet cannot be presented where it is absent.
     static var isAvailable: Bool {
         PKAddPassesViewController.canAddPasses()
+    }
+
+    /// The client cannot read `verifiedStorePurchases` — it is server-only — so
+    /// ownership is asked for once and cached. Without it the button had to be
+    /// offered on every card and rejected server-side, and a button that fails
+    /// is worse than no button.
+    func loadOwnedCards() async {
+        guard ownedCardIDs == nil else { return }
+        do {
+            let result = try await functions.httpsCallable("poplurOwnedCards").call()
+            let ids = (result.data as? [String: Any])?["cardIds"] as? [String] ?? []
+            ownedCardIDs = Set(ids)
+        } catch {
+            // A failed lookup must not strand the feature: fall back to showing
+            // the button and letting the server be the gate, which is exactly
+            // the old behaviour rather than a regression.
+            ownedCardIDs = nil
+        }
+    }
+
+    /// Whether to offer Wallet for this card. Unknown ownership means "offer
+    /// it" — the server still refuses if they do not own it.
+    func canOffer(cardID: String) -> Bool {
+        guard let owned = ownedCardIDs else { return true }
+        return owned.contains(cardID)
     }
 
     func addToWallet(cardID: String) async {
