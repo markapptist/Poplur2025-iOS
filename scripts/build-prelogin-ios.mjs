@@ -394,8 +394,30 @@ function cleanSplash(html) {
 }
 
 // ---- run --------------------------------------------------------------------
+// Files that live in PreloginWeb but are NOT built here. loading.html is placed
+// by hand and is loaded by PreloginWebView.loadingURL; the globe it renders is
+// its only asset. The wipe below is recursive, so without this it took both with
+// it on every rebuild and silently removed a screen the app still asks for.
+// Carry them across rather than making the wipe surgical: a rebuild should still
+// be able to guarantee nothing stale survives in the parts it DOES own.
+const PRESERVE = [
+  "loading.html",
+  "poplur-clay-map/public/poplur-globe-lite.glb",
+];
+const carried = [];
+for (const rel of PRESERVE) {
+  const from = join(OUT, rel);
+  if (existsSync(from)) carried.push([rel, readFileSync(from)]);
+}
+
 if (existsSync(OUT)) rmSync(OUT, { recursive: true, force: true });
 mkdirSync(OUT, { recursive: true });
+
+for (const [rel, buf] of carried) {
+  const to = join(OUT, rel);
+  mkdirSync(dirname(to), { recursive: true });
+  writeFileSync(to, buf);
+}
 
 const splash = cleanSplash(readFileSync(SPLASH_SRC, "utf8"));
 writeFileSync(join(OUT, "splash.html"), splash);
