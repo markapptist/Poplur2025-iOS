@@ -2085,6 +2085,16 @@ body.embed .phone {
   -webkit-overflow-scrolling: touch;
 }
 
+/* Home's chrome (channel arrows, radius/stats stack) is fixed at bottom:18px,
+   --cube-size tall, z-index 260 — ABOVE every subscreen. The store screens
+   had no bottom clearance, so Add to Bag, View Bag and Check Out scrolled
+   into that band and inherited its taps instead of receiving their own,
+   same class of bug every other scrollable subscreen already reserves space
+   for (see AvatarScreen, PostComposer, SettingsScreen, etc.). */
+.store-page.profile-scroll-page {
+  padding-bottom: calc(18px + var(--cube-size, 176px) + 14px + env(safe-area-inset-bottom));
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
