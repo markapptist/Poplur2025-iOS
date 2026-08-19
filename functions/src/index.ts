@@ -14,6 +14,7 @@ import {
 
 export { verifyCardPurchase } from "./cardPurchases";
 export { notifyOnEngagement } from "./engagementNotifications";
+export { meshyGenerate, meshyStatus } from "./meshyModels";
 
 admin.initializeApp();
 
