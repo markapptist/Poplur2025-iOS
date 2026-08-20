@@ -1653,6 +1653,9 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                 if type == "requestProfileTracks", let webView = bridge.webView {
                     deliverProfileTracks(into: webView)
                 }
+                if type == "publishTrack" {
+                    WebTrackPublisher.handle(body)
+                }
                 if let onWebEvent {
                     DispatchQueue.main.async { onWebEvent(type, body) }
                 }
