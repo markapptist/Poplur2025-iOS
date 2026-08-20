@@ -1022,6 +1022,37 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     UserDefaults.standard.set(on ? "1" : "0", forKey: "poplur.cameraDetectDefault")
                     return
                 }
+                // The Poplur phone's address book: favourites, people you have
+                // a chat with, and people your radius has actually crossed.
+                if type == "requestPhoneContacts", let webView = bridge.webView {
+                    Task { @MainActor [weak self, weak webView] in
+                        let contacts = await PoplurPhoneContacts.shared.contacts()
+                        guard let self, let webView, self.bridge.webView === webView else { return }
+                        self.pushWalletPassMessage(
+                            ["type": "poplurPhoneContacts", "contacts": contacts],
+                            into: webView
+                        )
+                    }
+                    return
+                }
+                if type == "togglePhoneFavourite", let webView = bridge.webView {
+                    let otherUID = (body["contactId"] as? String) ?? ""
+                    let on = (body["favourite"] as? Bool) ?? false
+                    let name = body["name"] as? String
+                    Task { @MainActor [weak self, weak webView] in
+                        await PoplurPhoneContacts.shared.setFavourite(otherUID, on, name: name)
+                        // Re-read rather than patching the page's copy: the sort
+                        // order changes when a favourite moves to the top, and
+                        // one source of truth is cheaper than two that drift.
+                        let contacts = await PoplurPhoneContacts.shared.contacts()
+                        guard let self, let webView, self.bridge.webView === webView else { return }
+                        self.pushWalletPassMessage(
+                            ["type": "poplurPhoneContacts", "contacts": contacts],
+                            into: webView
+                        )
+                    }
+                    return
+                }
                 // Direct messages. The chat screen is a page inside this
                 // WebView and the bundle has no Firebase, so every read and
                 // write crosses here. Threads and messages arrive as LIVE
