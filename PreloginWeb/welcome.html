@@ -204,10 +204,10 @@
     background:
       linear-gradient(135deg, rgba(255,255,255,0.66) 0%, rgba(255,255,255,0) 58%),
       linear-gradient(105deg, #fff 0%, #fff 28%, #ffeef8 54%, #e2e0e7 100%);
-    border: 1.5px solid rgba(0,0,0,0.10);
+    border: 2.5px solid var(--poplur-bg, #ff2d96);
     color: #000; font-family: "Avenir Next", "AvenirNext-Heavy", system-ui, sans-serif; font-weight: 900; font-size: 22px;
     text-shadow: 0 1px 1px rgba(0,0,0,0.16);
-    cursor: pointer; box-shadow: 0 6px 0 rgba(0,0,0,0.18); transition: transform 0.08s;
+    cursor: pointer; box-shadow: 0 6px 0 rgba(0,0,0,0.18), 0 0 18px color-mix(in srgb, var(--poplur-bg, #ff2d96) 55%, transparent); transition: transform 0.08s;
     animation: btnIn 0.5s ease both 1.3s;
   }
   .cap-btn:active { transform: scale(0.96); }
@@ -245,7 +245,7 @@
      band free the cube can sit where the logo used to, which also opens the
      gap between it and the account image below. */
   .phone.introPane .cubeStage.risen { top: 13%; transform: translate(-50%, -50%) scale(0.4); }
-  .phone.introPane #paneAccountIntro .formStack { top: 29%; justify-content: flex-start; }
+  .phone.introPane #paneAccountIntro .formStack { top: 20%; justify-content: flex-start; }
   /* The button is the end of the page, so it sits at the end of the page.
      `margin-top: auto` claims only space that is genuinely free: on a short
      screen the stack overflows and the button flows normally right after the
@@ -256,7 +256,7 @@
   /* The account art belongs to the copy, not to the cube. It used to collide
      with it — see the inline-top note in computeLayout — so give it a little
      air on both sides now that the two are genuinely separate objects. */
-  .phone.introPane .introArt { margin-top: clamp(2px, 1cqh, 10px); margin-bottom: clamp(4px, 1.4cqh, 12px); }
+  .phone.introPane .introArt { margin-top: clamp(6px, 1.8cqh, 18px); margin-bottom: clamp(8px, 2.2cqh, 20px); }
 
   /* Cream extruded clay type — chunky rounded letterforms, soft top light,
      pressed pink under-shadow */
@@ -498,8 +498,8 @@
      centre, reading as uncentred — with 54px of dead space beneath it that
      pushed the copy 72px away instead of 18px. */
   .introArt .account-3d-icon { flex: 0 0 auto; width: 100%; height: 100%; border-radius: 26px; }
-  .introList { display: flex; flex-direction: column; gap: 9px; width: min(268px, 82cqw);
-    margin: 2px auto 0; text-align: center; }
+  .introList { display: flex; flex-direction: column; gap: 14px; width: min(268px, 82cqw);
+    margin: 6px auto 0; text-align: center; }
   /* No bullets — the copy carries itself. Type matches .stackSub, the body face
      used everywhere else in pre-login: .introItem was the one text class on this
      page that never declared a font-family, so it fell back to the -apple-system
@@ -2284,12 +2284,10 @@ if (POPLUR_WEBGL_OK) document.querySelectorAll("canvas[data-account-model]").for
           return;
         }
         runtime.frame = requestAnimationFrame(draw);
-        group.rotation.y = (window.__poplurCubeYaw || 0) * Math.PI / 180;
+        group.rotation.y = (window.__poplurCubeYaw || 0) * Math.PI / 180 + (window.__poplurCubeTiltY || 0);
         const rollRad = (window.__poplurCubeRoll || 0) * Math.PI / 180;
         rollGroup.rotation.z = rollRad;
-        // Counter the tilt as it rolls, so the cube keeps leaning toward the
-        // viewer instead of appearing to lean away once it is upside down.
-        group.rotation.x = (14 * Math.PI / 180) * Math.cos(rollRad);
+        group.rotation.x = (14 * Math.PI / 180) * Math.cos(rollRad) + (window.__poplurCubeTiltX || 0);
         renderer.render(scene, camera);
       };
       draw();
@@ -2331,6 +2329,38 @@ if (POPLUR_WEBGL_OK) document.querySelectorAll("canvas[data-account-model]").for
   }, 1000);
 
   mountLoginCube();
+
+  // Accelerometer tilt on the login cube — gentle response to device orientation
+  ;(function () {
+    var tiltX = 0, tiltY = 0, smoothX = 0, smoothY = 0, raf = 0
+    var MAX_TILT = 0.28
+    function onOrientation (e) {
+      var beta = e.beta || 0, gamma = e.gamma || 0
+      tiltX = Math.max(-MAX_TILT, Math.min(MAX_TILT, (beta - 45) * Math.PI / 180 * 0.3))
+      tiltY = Math.max(-MAX_TILT, Math.min(MAX_TILT, gamma * Math.PI / 180 * 0.3))
+    }
+    function smooth () {
+      smoothX += (tiltX - smoothX) * 0.08
+      smoothY += (tiltY - smoothY) * 0.08
+      window.__poplurCubeTiltX = smoothX
+      window.__poplurCubeTiltY = smoothY
+      raf = requestAnimationFrame(smooth)
+    }
+    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+      document.addEventListener('click', function ask () {
+        DeviceOrientationEvent.requestPermission().then(function (state) {
+          if (state === 'granted') {
+            window.addEventListener('deviceorientation', onOrientation, { passive: true })
+            smooth()
+          }
+        }).catch(function () {})
+        document.removeEventListener('click', ask)
+      }, { once: true })
+    } else if ('DeviceOrientationEvent' in window) {
+      window.addEventListener('deviceorientation', onOrientation, { passive: true })
+      smooth()
+    }
+  })()
 })();
 </script>
 
@@ -2397,6 +2427,7 @@ if (POPLUR_WEBGL_OK) document.querySelectorAll("canvas[data-account-model]").for
       // still recoverable without printing chrome over the design.
       var swatch = document.getElementById('hueBtn')
       if (swatch) swatch.setAttribute('title', hex)
+      document.documentElement.style.setProperty('--poplur-bg', hex)
       window.__poplurHue = hex
     }
 
