@@ -207,7 +207,7 @@
     border: 2.5px solid var(--poplur-bg, #ff2d96);
     color: #000; font-family: "Avenir Next", "AvenirNext-Heavy", system-ui, sans-serif; font-weight: 900; font-size: 22px;
     text-shadow: 0 1px 1px rgba(0,0,0,0.16);
-    cursor: pointer; box-shadow: 0 6px 0 rgba(0,0,0,0.18), 0 0 18px color-mix(in srgb, var(--poplur-bg, #ff2d96) 55%, transparent); transition: transform 0.08s;
+    cursor: pointer; box-shadow: 0 6px 0 rgba(0,0,0,0.18), 0 0 18px rgba(255,45,150,0.45); transition: transform 0.08s, border-color 0.3s ease, box-shadow 0.3s ease;
     animation: btnIn 0.5s ease both 1.3s;
   }
   .cap-btn:active { transform: scale(0.96); }
@@ -252,7 +252,7 @@
      copy, which is the case `flex-start` above exists for. Measured before
      this: the Next button ended 147px above the bottom of an 852px screen,
      with nothing under it — it read as floating mid-page. */
-  .phone.introPane #introNext { margin-top: auto; margin-bottom: clamp(4px, 1.6cqh, 16px); }
+  .phone.introPane #introNext { margin-top: clamp(12px, 2.5cqh, 24px); margin-bottom: clamp(4px, 1.6cqh, 16px); }
   /* The account art belongs to the copy, not to the cube. It used to collide
      with it — see the inline-top note in computeLayout — so give it a little
      air on both sides now that the two are genuinely separate objects. */
@@ -534,6 +534,14 @@
   }
   /* Personal and business are two pages of one step, so switching account type
      interpolates the stack instead of cutting straight to the other copy. */
+  #paneAccountIntro .stackSub {
+    color: #f8efdc;
+    text-shadow:
+      0 -1px 0 rgba(255, 255, 255, 0.34),
+      0 1px 0 #d8b98e,
+      0 2px 0 rgba(158, 14, 78, 0.45),
+      0 3px 5px rgba(104, 2, 48, 0.45);
+  }
   #paneAccountIntro .formStack { transition: opacity 0.18s ease; }
   #paneAccountIntro .formStack.introSwapping { opacity: 0; }
   .acctCard.on {
@@ -1691,10 +1699,13 @@
       // drives both halves of that — a smaller, higher cube and a stack that
       // comes up with it — so the two move as one.
       document.querySelector('.phone')?.classList.toggle('introPane', index === 8)
-      // Stepping onto (or off) the explainer changes which of the two cube
-      // positions applies, and only computeLayout owns the inline top that
-      // decides it. Without this the class flips but the cube keeps whatever
-      // pixel top the last layout pass wrote.
+      clearInterval(window.__introKeepAwake)
+      if (index === 8 && window.__poplurAmbient) {
+        window.__poplurAmbient.wake()
+        window.__introKeepAwake = setInterval(function () {
+          if (paneIndex === 8 && window.__poplurAmbient) window.__poplurAmbient.wake()
+        }, 12000)
+      }
       if (window.__poplurComputeLayout) window.__poplurComputeLayout()
     }
     // Cube = back button. Each sign-up step goes back one logical page; the
@@ -2428,6 +2439,10 @@ if (POPLUR_WEBGL_OK) document.querySelectorAll("canvas[data-account-model]").for
       var swatch = document.getElementById('hueBtn')
       if (swatch) swatch.setAttribute('title', hex)
       document.documentElement.style.setProperty('--poplur-bg', hex)
+      var btns = document.querySelectorAll('.cap-btn')
+      for (var i = 0; i < btns.length; i++) {
+        btns[i].style.boxShadow = '0 6px 0 rgba(0,0,0,0.18), 0 0 18px ' + hex + '88'
+      }
       window.__poplurHue = hex
     }
 
