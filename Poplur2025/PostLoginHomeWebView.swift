@@ -1022,6 +1022,63 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     UserDefaults.standard.set(on ? "1" : "0", forKey: "poplur.cameraDetectDefault")
                     return
                 }
+                // In-app video calls. The WEB owns the peer connection — the
+                // chat it belongs to is a page in this WebView — and native
+                // owns Firestore, so this carries offers, answers and ICE
+                // between the two sides. No media passes here; that is peer
+                // to peer.
+                if type == "callStart", let webView = bridge.webView {
+                    let otherUID = (body["otherId"] as? String) ?? ""
+                    Task { @MainActor [weak self, weak webView] in
+                        let callID = await PoplurCallSignalling.shared.startCall(to: otherUID)
+                        guard let self, let webView, self.bridge.webView === webView else { return }
+                        self.pushWalletPassMessage(
+                            ["type": "poplurCallStarted", "callId": callID ?? "",
+                             "ok": callID != nil],
+                            into: webView
+                        )
+                    }
+                    return
+                }
+                if type == "callAnswerJoin" {
+                    // The callee accepted: start relaying before their answer
+                    // is produced, so the caller's candidates are not missed.
+                    PoplurCallSignalling.shared.observe((body["callId"] as? String) ?? "")
+                    return
+                }
+                if type == "callDescription" {
+                    Task { @MainActor in
+                        await PoplurCallSignalling.shared.publishDescription(
+                            (body["callId"] as? String) ?? "",
+                            type: (body["sdpType"] as? String) ?? "offer",
+                            sdp: (body["sdp"] as? String) ?? ""
+                        )
+                    }
+                    return
+                }
+                if type == "callCandidate" {
+                    Task { @MainActor in
+                        await PoplurCallSignalling.shared.publishCandidate(
+                            (body["callId"] as? String) ?? "",
+                            candidate: (body["candidate"] as? [String: Any]) ?? [:]
+                        )
+                    }
+                    return
+                }
+                if type == "callEnd" {
+                    Task { @MainActor in
+                        await PoplurCallSignalling.shared.endCall((body["callId"] as? String) ?? "")
+                    }
+                    return
+                }
+                if type == "callWatchIncoming", let webView = bridge.webView {
+                    PoplurCallSignalling.shared.onEvent = { [weak self, weak webView] event in
+                        guard let self, let webView, self.bridge.webView === webView else { return }
+                        self.pushWalletPassMessage(event, into: webView)
+                    }
+                    PoplurCallSignalling.shared.observeIncoming()
+                    return
+                }
                 // The Poplur phone's address book: favourites, people you have
                 // a chat with, and people your radius has actually crossed.
                 if type == "requestPhoneContacts", let webView = bridge.webView {

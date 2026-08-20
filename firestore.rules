@@ -149,6 +149,50 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // ── Calls (WebRTC signalling) ────────────────────────────────────────
+    // A call doc is a rendezvous, not a recording: the offer, the answer and
+    // the ICE candidates the two sides need to find each other. Nothing about
+    // the media itself passes through here — that goes peer to peer.
+    //
+    // Readable and writable ONLY by the two people on the call. Signalling is
+    // exactly what an attacker would want: an offer plus candidates is enough
+    // to attempt a connection to someone's device.
+    function callParticipants(callId) {
+      let path = /databases/$(database)/documents/calls/$(callId);
+      return exists(path) ? get(path).data.participants : [];
+    }
+
+    function inCall(callId) {
+      return signedIn() && request.auth.uid in callParticipants(callId);
+    }
+
+    match /calls/{callId} {
+      allow read: if signedIn() && request.auth.uid in resource.data.participants;
+
+      // Only the caller may open a call, only as themselves, and only to
+      // somebody else — a call doc naming two other people would let a third
+      // party set up a rendezvous between strangers.
+      allow create: if signedIn()
+        && request.resource.data.participants is list
+        && request.resource.data.participants.size() == 2
+        && request.resource.data.callerId == request.auth.uid
+        && request.auth.uid in request.resource.data.participants;
+
+      // Either side may answer or hang up, but the roster is fixed.
+      allow update: if inCall(callId)
+        && request.resource.data.participants == resource.data.participants;
+      allow delete: if inCall(callId);
+
+      // ICE candidates, one doc each. Written by the side that gathered them
+      // and read by the other; nobody edits a candidate after the fact.
+      match /candidates/{candidateId} {
+        allow read: if inCall(callId);
+        allow create: if inCall(callId)
+          && request.resource.data.senderId == request.auth.uid;
+        allow update, delete: if false;
+      }
+    }
+
     // ── Direct messages ──────────────────────────────────────────────────
     // A thread's id is the two uids sorted and joined, so "DM this person" is
     // idempotent — opening a chat twice cannot fork into two threads, and no
