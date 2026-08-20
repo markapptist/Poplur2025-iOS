@@ -1,0 +1,53 @@
+rules_version = '2';
+
+// Poplur Storage — where posted MUSIC actually lives.
+//
+// The iPod streams from a URL; this is the bucket that URL points at. Two
+// things matter here and nothing else does:
+//
+//   1. Only the artist may write their own folder. The path carries the uid,
+//      so ownership is a path check rather than a document lookup — there is
+//      no metadata to forge and no read to pay for.
+//   2. Anyone signed in may READ. Music is meant to be found: the radius is a
+//      product rule about what your reach has earned, not a secrecy boundary,
+//      and every pop location is already on the client. Locking reads to the
+//      owner would mean nobody could ever hear anybody else's track, which is
+//      the entire product.
+//
+// The size and content-type checks are the real guard. Without them this
+// folder is an unmetered file host that happens to require a login.
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // music/{uid}/{trackId}.{ext} — one object per track, named by the same id
+    // the Firestore row carries, so a row and its audio can never drift apart.
+    match /music/{userId}/{trackId} {
+      allow read: if request.auth != null;
+
+      // 25MB is a generous ceiling for a track at streaming bitrates and a
+      // hard stop for anything that is not one. contentType is checked on the
+      // way IN because it is what the player will trust on the way out.
+      allow create, update: if request.auth != null
+        && request.auth.uid == userId
+        && request.resource.size < 25 * 1024 * 1024
+        && request.resource.contentType.matches('audio/.*');
+
+      allow delete: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Cover art for a track. Small, image-only, same ownership rule.
+    match /musicArt/{userId}/{trackId} {
+      allow read: if request.auth != null;
+      allow create, update: if request.auth != null
+        && request.auth.uid == userId
+        && request.resource.size < 3 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+      allow delete: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Nothing else in this bucket is writable from a client.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

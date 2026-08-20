@@ -1562,6 +1562,9 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                 if type == "requestProfilePosts", let webView = bridge.webView {
                     deliverProfilePosts(into: webView)
                 }
+                if type == "requestProfileTracks", let webView = bridge.webView {
+                    deliverProfileTracks(into: webView)
+                }
                 if let onWebEvent {
                     DispatchQueue.main.async { onWebEvent(type, body) }
                 }
@@ -1847,6 +1850,89 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     }
                 } catch {
                     print("[PostLoginHomeWebView] profile posts query failed: \(error.localizedDescription)")
+                }
+            }
+        }
+
+        /// The signed-in user's posted MUSIC, for the iPod's shelf.
+        ///
+        /// Same shape as deliverProfilePosts and for the same reason: the web
+        /// layer holds no Firestore credentials, so the authenticated shell
+        /// does the read and hands back rows. What travels is a POINTER —
+        /// `url` for a file Poplur hosts (a real stream URL the handheld can
+        /// fetch and decode) or `permalink` for a SoundCloud track, which
+        /// plays in their embedded player because their audio is not ours to
+        /// fetch. A row naming neither is dropped here rather than shipped to
+        /// a client that could only fail to play it.
+        private func deliverProfileTracks(into webView: WKWebView) {
+            guard let uid = Auth.auth().currentUser?.uid else { return }
+            Task {
+                do {
+                    let snapshot = try await Firestore.firestore()
+                        .collection("tracks")
+                        .whereField("userID", isEqualTo: uid)
+                        .limit(to: 128)
+                        .getDocuments()
+
+                    func createdMillis(_ data: [String: Any]) -> Double {
+                        if let value = data["createdAtMillis"] as? NSNumber {
+                            return value.doubleValue
+                        }
+                        if let timestamp = data["createdAt"] as? Timestamp {
+                            return timestamp.dateValue().timeIntervalSince1970 * 1000
+                        }
+                        return 0
+                    }
+
+                    func text(_ data: [String: Any], _ key: String) -> String? {
+                        guard let raw = (data[key] as? String)?
+                            .trimmingCharacters(in: .whitespacesAndNewlines),
+                              !raw.isEmpty else { return nil }
+                        return raw
+                    }
+
+                    let rows: [[String: Any]] = snapshot.documents
+                        .sorted { createdMillis($0.data()) > createdMillis($1.data()) }
+                        .compactMap { document in
+                            let data = document.data()
+                            let audioURL = text(data, "audioURL")
+                            let permalink = text(data, "permalink")
+                            // No pointer, no track.
+                            guard audioURL != nil || permalink != nil else { return nil }
+
+                            var row: [String: Any] = [
+                                "id": document.documentID,
+                                "title": text(data, "title") ?? "Untitled",
+                                "postedAt": createdMillis(data)
+                            ]
+                            if let audioURL { row["url"] = audioURL }
+                            if let permalink { row["permalink"] = permalink }
+                            if let artist = text(data, "artist") { row["artist"] = artist }
+                            if let place = text(data, "place") { row["place"] = place }
+                            if let licence = text(data, "licence") { row["licence"] = licence }
+                            if let mood = text(data, "mood") { row["mood"] = mood }
+                            if let lat = data["lat"] as? NSNumber { row["lat"] = lat.doubleValue }
+                            if let lng = data["lng"] as? NSNumber { row["lng"] = lng.doubleValue }
+                            if let bpm = data["bpm"] as? NSNumber { row["bpm"] = bpm.doubleValue }
+                            if let duration = data["duration"] as? NSNumber {
+                                row["duration"] = duration.doubleValue
+                            }
+                            row["postedBy"] = text(data, "postedBy") ?? uid
+                            return row
+                        }
+
+                    let payload: [String: Any] = ["tracks": rows]
+                    guard let encoded = try? JSONSerialization.data(withJSONObject: payload),
+                          let json = String(data: encoded, encoding: .utf8) else { return }
+                    await MainActor.run {
+                        guard self.bridge.webView === webView else { return }
+                        webView.evaluateJavaScript(
+                            "window.dispatchEvent(new CustomEvent('poplur-native-profile-tracks', {detail: \(json)}));true;",
+                            completionHandler: nil
+                        )
+                    }
+                } catch {
+                    print("[PostLoginHomeWebView] profile tracks query failed: \(error.localizedDescription)")
                 }
             }
         }

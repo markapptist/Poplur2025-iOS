@@ -25,6 +25,12 @@ service cloud.firestore {
         : '';
     }
 
+    // Play counts belong to the server. A client that could write them could
+    // also write itself to the top of every listing.
+    function countedTrackFields() {
+      return ['playCount', 'reachCount', 'featured'];
+    }
+
     function protectedPremiumAIFields() {
       return [
         'isPremium',
@@ -57,6 +63,60 @@ service cloud.firestore {
         allow read: if isSelf(userId);
         allow write: if false;
       }
+
+      // The Poplur phone's favourites. Doc id IS the other person's uid, so
+      // favouriting twice is idempotent and un-favouriting is a delete of a
+      // known path — no query, no duplicates. Yours alone: a favourite says
+      // who you intend to call, which is nobody else's business.
+      match /phoneFavourites/{contactId} {
+        allow read: if isSelf(userId);
+        allow write: if isSelf(userId);
+      }
+    }
+
+    // ── Posted music ─────────────────────────────────────────────────────
+    // A track is a POINTER plus the ground it was left on. The audio itself
+    // lives in Storage (see storage.rules); this row is what the iPod reads to
+    // know a track exists, who made it, and where you have to be to hear it.
+    //
+    // Readable by anyone, like posts, and for the same reason: music is meant
+    // to be found. The radius decides what your reach has EARNED — it is a
+    // product rule, not a secrecy boundary, and every pop location is already
+    // on the client. Owner-only reads would mean nobody could ever hear
+    // anybody else's track, which is the whole product gone.
+    match /tracks/{trackId} {
+      allow read: if true;
+
+      // Create as YOURSELF, with something actually playable attached. A row
+      // naming no source is a track that fails to play with no way to say why,
+      // so it is refused here rather than shipped to a client to puzzle over.
+      allow create: if signedIn()
+        && request.resource.data.userID == request.auth.uid
+        && request.resource.data.title is string
+        && request.resource.data.title.size() > 0
+        && request.resource.data.title.size() <= 120
+        && (
+          (request.resource.data.get('audioURL', '') is string
+            && request.resource.data.get('audioURL', '').size() > 0)
+          || (request.resource.data.get('permalink', '') is string
+            && request.resource.data.get('permalink', '').size() > 0)
+        )
+        && request.resource.data.lat is number
+        && request.resource.data.lng is number
+        && request.resource.data.lat >= -90 && request.resource.data.lat <= 90
+        && request.resource.data.lng >= -180 && request.resource.data.lng <= 180
+        // Set by the server clock, so "newest" cannot be bought with a lie.
+        && request.resource.data.createdAt == request.time
+        && !request.resource.data.keys().hasAny(countedTrackFields());
+
+      // Editing your own row, but never the counters and never the owner —
+      // a track that could change hands could also steal its plays.
+      allow update: if signedIn()
+        && resource.data.userID == request.auth.uid
+        && request.resource.data.userID == resource.data.userID
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(countedTrackFields());
+
+      allow delete: if signedIn() && resource.data.userID == request.auth.uid;
     }
 
     match /creatorCreditBalances/{userId} {
