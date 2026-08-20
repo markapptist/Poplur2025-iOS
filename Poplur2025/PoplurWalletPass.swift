@@ -19,6 +19,17 @@ final class PoplurWalletPassService: ObservableObject {
         case failed(String)
     }
 
+    /// One instance, because the caller is now the WEB BRIDGE rather than a
+    /// SwiftUI view that owns its own object. The bridge has no view lifetime
+    /// to hang this on.
+    static let shared = PoplurWalletPassService()
+
+    /// What the bridge reports back to the page.
+    enum Outcome: Equatable {
+        case added
+        case failed(String)
+    }
+
     @Published private(set) var state: State = .idle
     /// nil until asked. Distinguishes "not loaded yet" from "owns nothing", so
     /// the button does not flash in and out while the answer is in flight.
@@ -57,7 +68,28 @@ final class PoplurWalletPassService: ObservableObject {
         return owned.contains(cardID)
     }
 
-    func addToWallet(cardID: String) async {
+    /// Card ids this account owns, asked fresh. The page decides which buttons
+    /// to show from this, and the server still re-checks before it signs.
+    func ownedCardIDs() async -> [String] {
+        do {
+            let result = try await functions.httpsCallable("poplurOwnedCards").call()
+            let ids = (result.data as? [String: Any])?["cardIds"] as? [String] ?? []
+            ownedCardIDs = Set(ids)
+            return ids
+        } catch {
+            return []
+        }
+    }
+
+    /// Bridge entry point: sign, present Apple's sheet, and report what happened.
+    @discardableResult
+    func addToWallet(cardID: String) async -> Outcome {
+        await performAdd(cardID: cardID)
+        if case .failed(let message) = state { return .failed(message) }
+        return .added
+    }
+
+    private func performAdd(cardID: String) async {
         state = .working
         do {
             let result = try await functions.httpsCallable("poplurWalletPass")

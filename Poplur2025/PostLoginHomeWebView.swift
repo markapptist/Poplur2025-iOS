@@ -1022,6 +1022,50 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     UserDefaults.standard.set(on ? "1" : "0", forKey: "poplur.cameraDetectDefault")
                     return
                 }
+                // Add to Apple Wallet. PassKit can only be presented from
+                // native, and this store is a page inside the WebView, so the
+                // page asks and native does the work. The FIRST version of this
+                // was a SwiftUI button in RadiusStoreView — orphaned along with
+                // the rest of HomeView when the home became a web surface, so
+                // it never rendered at all. Same lesson as ML detection and the
+                // AR filters before it: a capability wired only to the old
+                // native path is a capability nobody can reach.
+                if type == "poplurWalletPassAvailability", let webView = bridge.webView {
+                    Task { @MainActor [weak self, weak webView] in
+                        guard let self, let webView, self.bridge.webView === webView else { return }
+                        let owned = await PoplurWalletPassService.shared.ownedCardIDs()
+                        self.pushWalletPassMessage(
+                            ["type": "poplurWalletPassAvailabilityResult", "cardIds": owned],
+                            into: webView
+                        )
+                    }
+                    return
+                }
+                if type == "poplurWalletPassRequested", let webView = bridge.webView {
+                    let cardID = (body["cardId"] as? String) ?? ""
+                    guard !cardID.isEmpty, cardID.count <= 64 else {
+                        pushWalletPassMessage(
+                            ["type": "poplurWalletPassResult", "status": "failure",
+                             "message": "Unknown card."],
+                            into: webView
+                        )
+                        return
+                    }
+                    Task { @MainActor [weak self, weak webView] in
+                        guard let self, let webView, self.bridge.webView === webView else { return }
+                        let outcome = await PoplurWalletPassService.shared.addToWallet(cardID: cardID)
+                        var payload: [String: Any] = ["type": "poplurWalletPassResult"]
+                        switch outcome {
+                        case .added:
+                            payload["status"] = "success"
+                        case .failed(let message):
+                            payload["status"] = "failure"
+                            payload["message"] = message
+                        }
+                        self.pushWalletPassMessage(payload, into: webView)
+                    }
+                    return
+                }
                 // Store checkout remains a web-owned bag, but payment and
                 // fulfillment cross this native boundary. StoreKit authorizes
                 // each consumable; the server verifies its signed JWS and
@@ -1608,6 +1652,14 @@ struct PostLoginHomeWebView: UIViewRepresentable {
             webView.evaluateJavaScript(
                 "window.dispatchEvent(new CustomEvent('poplur-native-app-icon', {detail: \(text)})); true;"
             )
+        }
+
+        /// Same delivery the checkout result uses, so the page receives both
+        /// through one `message` listener.
+        private func pushWalletPassMessage(_ payload: [String: Any], into webView: WKWebView) {
+            guard let json = try? JSONSerialization.data(withJSONObject: payload),
+                  let text = String(data: json, encoding: .utf8) else { return }
+            webView.evaluateJavaScript("window.postMessage(\(text), '*'); true;")
         }
 
         private func pushStoreCheckoutResult(
