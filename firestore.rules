@@ -89,6 +89,56 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // ── Direct messages ──────────────────────────────────────────────────
+    // A thread's id is the two uids sorted and joined, so "DM this person" is
+    // idempotent — opening a chat twice cannot fork into two threads, and no
+    // lookup is needed to find an existing one.
+    //
+    // `participants` is the whole access boundary. It is fixed at create time
+    // and may never change: allowing an update to it would let either side
+    // quietly add a third reader to a conversation that already happened.
+    function dmParticipants(threadId) {
+      let path = /databases/$(database)/documents/dmThreads/$(threadId);
+      return exists(path) ? get(path).data.participants : [];
+    }
+
+    function inThread(threadId) {
+      return signedIn() && request.auth.uid in dmParticipants(threadId);
+    }
+
+    match /dmThreads/{threadId} {
+      allow read: if signedIn() && request.auth.uid in resource.data.participants;
+
+      // Exactly two participants, one of them you, and the id must be the
+      // canonical pair — otherwise a client could create a thread at an id
+      // that a future participant pair would also resolve to.
+      allow create: if signedIn()
+        && request.resource.data.participants is list
+        && request.resource.data.participants.size() == 2
+        && request.auth.uid in request.resource.data.participants
+        && threadId == (request.resource.data.participants[0] < request.resource.data.participants[1]
+          ? request.resource.data.participants[0] + '_' + request.resource.data.participants[1]
+          : request.resource.data.participants[1] + '_' + request.resource.data.participants[0]);
+
+      // Participants keep the preview fresh, but never the roster.
+      allow update: if inThread(threadId)
+        && request.resource.data.participants == resource.data.participants;
+      allow delete: if false;
+
+      match /messages/{messageId} {
+        allow read: if inThread(threadId);
+        // You may only speak as yourself, and only into a thread you are in.
+        allow create: if inThread(threadId)
+          && request.resource.data.senderId == request.auth.uid
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.text.size() <= 2000;
+        // A sent message is a record of what was said. Editing it after the
+        // fact would let either side rewrite the other's history.
+        allow update, delete: if false;
+      }
+    }
+
     match /posts/{postId} {
       allow read: if true;
       allow create: if signedIn()

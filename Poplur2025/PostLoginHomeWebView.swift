@@ -1022,6 +1022,55 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     UserDefaults.standard.set(on ? "1" : "0", forKey: "poplur.cameraDetectDefault")
                     return
                 }
+                // Direct messages. The chat screen is a page inside this
+                // WebView and the bundle has no Firebase, so every read and
+                // write crosses here. Threads and messages arrive as LIVE
+                // snapshots rather than one-shot fetches: a chat that only
+                // updates when you reopen it is not a chat.
+                if type == "requestDMThreads", let webView = bridge.webView {
+                    PoplurDirectMessages.shared.observeThreads { [weak self, weak webView] threads in
+                        guard let self, let webView, self.bridge.webView === webView else { return }
+                        self.pushWalletPassMessage(
+                            ["type": "poplurDMThreads", "threads": threads],
+                            into: webView
+                        )
+                    }
+                    return
+                }
+                if type == "openDMThread", let webView = bridge.webView {
+                    let threadID = (body["threadId"] as? String) ?? ""
+                    guard !threadID.isEmpty, threadID.count <= 200 else { return }
+                    PoplurDirectMessages.shared.observeThread(threadID) { [weak self, weak webView] messages in
+                        guard let self, let webView, self.bridge.webView === webView else { return }
+                        self.pushWalletPassMessage(
+                            ["type": "poplurDMMessages", "threadId": threadID, "messages": messages],
+                            into: webView
+                        )
+                    }
+                    return
+                }
+                if type == "closeDMThread" {
+                    PoplurDirectMessages.shared.closeThread()
+                    return
+                }
+                if type == "sendDM", let webView = bridge.webView {
+                    let otherUID = (body["otherId"] as? String) ?? ""
+                    let text = (body["text"] as? String) ?? ""
+                    Task { @MainActor [weak self, weak webView] in
+                        let ok = await PoplurDirectMessages.shared.send(to: otherUID, text: text)
+                        guard let self, let webView, self.bridge.webView === webView else { return }
+                        // The live listener delivers the message itself; this
+                        // only reports a FAILURE, so the composer can put the
+                        // text back rather than swallowing it.
+                        if !ok {
+                            self.pushWalletPassMessage(
+                                ["type": "poplurDMSendFailed", "text": text],
+                                into: webView
+                            )
+                        }
+                    }
+                    return
+                }
                 // Add to Apple Wallet. PassKit can only be presented from
                 // native, and this store is a page inside the WebView, so the
                 // page asks and native does the work. The FIRST version of this
