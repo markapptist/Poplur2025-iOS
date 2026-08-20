@@ -7,7 +7,6 @@ import { FieldValue } from "firebase-admin/firestore";
 import { logger } from "firebase-functions";
 import { defineSecret, defineString } from "firebase-functions/params";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
-import { PKPass } from "passkit-generator";
 
 /**
  * Issues an Apple Wallet pass for a Poplur card the caller actually owns.
@@ -32,7 +31,15 @@ import { PKPass } from "passkit-generator";
 const passSignerCert = defineSecret("POPLUR_PASS_SIGNER_CERT");
 /** PEM private key for the above. Encrypted keys need the passphrase secret. */
 const passSignerKey = defineSecret("POPLUR_PASS_SIGNER_KEY");
-const passSignerKeyPassphrase = defineSecret("POPLUR_PASS_SIGNER_KEY_PASSPHRASE");
+/**
+ * Only an ENCRYPTED signing key needs this, and ours is not encrypted, so it is
+ * read from the environment rather than declared as a secret: Secret Manager
+ * rejects an empty payload, and requiring a secret that must exist but has
+ * nothing meaningful in it would have meant inventing a sentinel value for
+ * every deploy. If an encrypted key is ever used, add it back as a
+ * defineSecret and list it in the secrets array below.
+ */
+const passSignerKeyPassphrase = process.env.POPLUR_PASS_SIGNER_KEY_PASSPHRASE || undefined;
 /** Apple WWDR intermediate, PEM. Public, but kept beside the rest for one setup path. */
 const passWWDRCert = defineSecret("POPLUR_PASS_WWDR_CERT");
 
@@ -175,7 +182,7 @@ export const poplurOwnedCards = onCall(async request => {
 
 export const poplurWalletPass = onCall(
   {
-    secrets: [passSignerCert, passSignerKey, passSignerKeyPassphrase, passWWDRCert],
+    secrets: [passSignerCert, passSignerKey, passWWDRCert],
     memory: "512MiB",
     timeoutSeconds: 60,
   },
@@ -230,7 +237,7 @@ export const poplurWalletPass = onCall(
     const authenticationToken = await passAuthenticationToken(uid, serialNumber);
 
     try {
-      const pkpass = buildCardPass({
+      const pkpass = await buildCardPass({
         cardID,
         assetKey,
         handle,
@@ -244,7 +251,7 @@ export const poplurWalletPass = onCall(
           wwdr,
           signerCert,
           signerKey,
-          signerKeyPassphrase: passSignerKeyPassphrase.value() || undefined,
+          signerKeyPassphrase: passSignerKeyPassphrase,
         },
       });
       return { pkpass: pkpass.toString("base64"), serialNumber };
@@ -292,7 +299,13 @@ export type CardPassRequest = {
  * barcode, manifest, signature — can be exercised directly in a test with a
  * throwaway certificate instead of only in production.
  */
-export function buildCardPass(request: CardPassRequest): Buffer {
+export async function buildCardPass(request: CardPassRequest): Promise<Buffer> {
+  // Imported HERE, not at module scope. passkit-generator pulls in Joi and cost
+  // 5.2s of cold require — on top of an index that already loads the Anthropic
+  // SDK, genkit and googleapis — which pushed deployment past the 10s backend
+  // discovery timeout and failed the deploy outright. Pass signing is rare;
+  // paying that cost on the calls that actually sign is the right trade.
+  const { PKPass } = await import("passkit-generator");
   const profileURL = `https://poplur.com/u/${request.handle.replace(/^@/, "")}`;
 
   const pass = new PKPass({}, request.certificates, {

@@ -56,7 +56,15 @@ const walletPass_1 = require("./walletPass");
  */
 const passSignerCert = (0, params_1.defineSecret)("POPLUR_PASS_SIGNER_CERT");
 const passSignerKey = (0, params_1.defineSecret)("POPLUR_PASS_SIGNER_KEY");
-const passSignerKeyPassphrase = (0, params_1.defineSecret)("POPLUR_PASS_SIGNER_KEY_PASSPHRASE");
+/**
+ * Only an ENCRYPTED signing key needs this, and ours is not encrypted, so it is
+ * read from the environment rather than declared as a secret: Secret Manager
+ * rejects an empty payload, and requiring a secret that must exist but has
+ * nothing meaningful in it would have meant inventing a sentinel value for
+ * every deploy. If an encrypted key is ever used, add it back as a
+ * defineSecret and list it in the secrets array below.
+ */
+const passSignerKeyPassphrase = process.env.POPLUR_PASS_SIGNER_KEY_PASSPHRASE || undefined;
 const passWWDRCert = (0, params_1.defineSecret)("POPLUR_PASS_WWDR_CERT");
 const passTypeIdentifier = (0, params_1.defineString)("POPLUR_PASS_TYPE_ID", {
     default: "pass.com.apptist.Poplur2025.card",
@@ -66,12 +74,7 @@ const passTypeIdentifier = (0, params_1.defineString)("POPLUR_PASS_TYPE_ID", {
 // default rather than as one more thing to configure before this works.
 const passTeamIdentifier = (0, params_1.defineString)("POPLUR_PASS_TEAM_ID", { default: "VDQS4882Z8" });
 const passWebServiceURL = (0, params_1.defineString)("POPLUR_PASS_WEB_SERVICE_URL", { default: "" });
-const PASS_SECRETS = [
-    passSignerCert,
-    passSignerKey,
-    passSignerKeyPassphrase,
-    passWWDRCert,
-];
+const PASS_SECRETS = [passSignerCert, passSignerKey, passWWDRCert];
 /** `{uid}.{cardId}` — the serial minted in walletPass.ts. */
 function parseSerial(serialNumber) {
     const separator = serialNumber.lastIndexOf(".");
@@ -110,7 +113,7 @@ async function currentPass(uid, cardID, serialNumber) {
     const { handle, displayName } = await (0, walletPass_1.profileFor)(uid);
     const token = (await admin.firestore().collection("walletPasses").doc(serialNumber).get())
         .data()?.authenticationToken;
-    return (0, walletPass_1.buildCardPass)({
+    return await (0, walletPass_1.buildCardPass)({
         cardID,
         assetKey: walletPass_1.CARD_ASSET[cardID],
         handle,
@@ -124,7 +127,7 @@ async function currentPass(uid, cardID, serialNumber) {
             wwdr: passWWDRCert.value(),
             signerCert: passSignerCert.value(),
             signerKey: passSignerKey.value(),
-            signerKeyPassphrase: passSignerKeyPassphrase.value() || undefined,
+            signerKeyPassphrase: passSignerKeyPassphrase,
         },
     });
 }
@@ -277,7 +280,7 @@ async function pushPassUpdate(pushTokens) {
     const client = (0, node_http2_1.connect)("https://api.push.apple.com", {
         cert: passSignerCert.value(),
         key: passSignerKey.value(),
-        passphrase: passSignerKeyPassphrase.value() || undefined,
+        passphrase: passSignerKeyPassphrase,
     });
     try {
         await Promise.all(pushTokens.map(token => new Promise(resolve => {
