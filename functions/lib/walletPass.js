@@ -76,7 +76,10 @@ const passWWDRCert = (0, params_1.defineSecret)("POPLUR_PASS_WWDR_CERT");
 const passTypeIdentifier = (0, params_1.defineString)("POPLUR_PASS_TYPE_ID", {
     default: "pass.com.apptist.Poplur2025.card",
 });
-const passTeamIdentifier = (0, params_1.defineString)("POPLUR_PASS_TEAM_ID", { default: "" });
+// Apptist Inc.'s team, read off the developer portal. Not a secret — it is
+// printed inside every pass and every provisioning profile — so it ships as a
+// default rather than as one more thing to configure before this works.
+const passTeamIdentifier = (0, params_1.defineString)("POPLUR_PASS_TEAM_ID", { default: "VDQS4882Z8" });
 /**
  * Where Wallet asks for updates. Empty means "no update service": the pass is
  * then a snapshot, which is the correct behaviour before the web service is

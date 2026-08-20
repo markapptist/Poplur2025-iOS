@@ -35,7 +35,10 @@ const passWWDRCert = defineSecret("POPLUR_PASS_WWDR_CERT");
 const passTypeIdentifier = defineString("POPLUR_PASS_TYPE_ID", {
   default: "pass.com.apptist.Poplur2025.card",
 });
-const passTeamIdentifier = defineString("POPLUR_PASS_TEAM_ID", { default: "" });
+// Apptist Inc.'s team, read off the developer portal. Not a secret — it is
+// printed inside every pass and every provisioning profile — so it ships as a
+// default rather than as one more thing to configure before this works.
+const passTeamIdentifier = defineString("POPLUR_PASS_TEAM_ID", { default: "VDQS4882Z8" });
 const passWebServiceURL = defineString("POPLUR_PASS_WEB_SERVICE_URL", { default: "" });
 
 const PASS_SECRETS = [
