@@ -310,6 +310,56 @@ final class PoplurNotificationCenter: NSObject, ObservableObject, UNUserNotifica
         persistNotifications()
     }
 
+    /// Schedule a notification that ORIGINATED IN THE WEB LAYER.
+    ///
+    /// The outside-app notification and the in-app list were two unrelated
+    /// systems. This process only ever scheduled `poplur.daily.radius.insight`
+    /// — one recurring daily summary built from Firestore post signals, on a
+    /// single reused identifier that each new one removes — while the list you
+    /// actually see lives in the web bundle and is driven by the engagement
+    /// log. So the push repeated the same line while the screen said something
+    /// else entirely.
+    ///
+    /// `.engagement` was always meant to arrive remotely from the
+    /// notifyOnEngagement Cloud Function. Until that backend is live nothing
+    /// arrives at all, so the web forwards what it just logged and this
+    /// schedules it here.
+    ///
+    /// Deliberately NOT sharing `notificationIdentifier`: that constant belongs
+    /// to the daily insight, where replacing the pending one is correct. These
+    /// carry their own ids so several can stand at once — which is the whole
+    /// point of matching a LIST.
+    func scheduleFromWeb(id: String, title: String, detail: String) async {
+        guard !id.isEmpty, !title.isEmpty else { return }
+        // Same id twice is the same notification: the web re-sends on reconnect
+        // and a resend must not stack a duplicate on the lock screen.
+        guard !notifications.contains(where: { $0.id == id }) else { return }
+
+        let item = PoplurDeviceNotification(
+            id: id,
+            kind: .engagement,
+            title: title,
+            detail: detail,
+            createdAt: Date(),
+            isUnread: true
+        )
+        addInAppNotification(item)
+
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = detail
+        content.sound = .default
+        content.badge = NSNumber(value: max(1, notifications.filter(\.isUnread).count))
+        content.userInfo = [
+            "poplurNotificationID": id,
+            "kind": PoplurDeviceNotification.Kind.engagement.rawValue
+        ]
+        // nil trigger: this already happened. The daily insight's 15s delay is
+        // there to batch a summary; an engagement is news and lands now.
+        let request = UNNotificationRequest(identifier: id, content: content, trigger: nil)
+        try? await UNUserNotificationCenter.current().add(request)
+    }
+
     private func scheduleDeviceNotification(_ item: PoplurDeviceNotification) async {
         let content = UNMutableNotificationContent()
         content.title = item.title

@@ -964,6 +964,22 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                 if type == "requestAuthToken" {
                     pushAuthToken()
                 }
+                // The notifications screen lives in the web bundle; the push
+                // used to be an unrelated daily Firestore summary on a single
+                // reused identifier, which is why the same one arrived over and
+                // over while the screen said something else. The web now
+                // forwards each row it logs, and it is scheduled with that
+                // row's own id so the two finally agree.
+                if type == "notification",
+                   let id = body["id"] as? String,
+                   let title = body["title"] as? String {
+                    let detail = body["detail"] as? String ?? ""
+                    Task { @MainActor in
+                        await PoplurNotificationCenter.shared.scheduleFromWeb(
+                            id: id, title: title, detail: detail
+                        )
+                    }
+                }
                 // The web layer's own heat probe. A WKWebView's console.log never
                 // reaches this process's stdout, so the probe hands its line to
                 // native and native prints it — that is what makes it readable
