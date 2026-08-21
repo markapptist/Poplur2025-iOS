@@ -1,0 +1,106 @@
+<!doctype html>
+<!-- TEMPORARY verification harness — deleted after the landmark check.
+     The Mapbox map does not mount on the dev server (no .mapboxgl-canvas), so
+     the clay layer never builds and __poplurLandmarks never publishes. This
+     renders the same models through the same clay recipe and the same
+     fitToHeight maths, so the models, the tints and the scaling are all
+     provable on web; only the geographic placement still needs a device. -->
+<meta charset="utf-8">
+<style>
+  body { margin: 0; background: #b9d8e8; font: 12px system-ui; }
+  #grid { display: grid; grid-template-columns: repeat(4, 260px); gap: 4px; padding: 8px; }
+  .cell { position: relative; }
+  .cap { position: absolute; left: 6px; bottom: 4px; color: #223; font-weight: 700;
+         text-shadow: 0 1px 0 rgba(255,255,255,.6); }
+</style>
+<div id="grid"></div>
+<script type="module">
+import * as THREE from 'three'
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js'
+
+const LANDMARKS = [
+  ['cn-tower', 553, '#c9c6c2'], ['eiffel', 330, '#8a6f52'],
+  ['big-ben', 96, '#c2a468'], ['giza', 139, '#d8bf8e'],
+  ['christ-redeemer', 38, '#cfcac2'], ['statue-liberty', 93, '#7fb3a0'],
+  ['taj-mahal', 73, '#efe6da'], ['sydney-opera', 65, '#eae5dc'],
+  ['colosseum', 48, '#cbb08a'], ['burj-khalifa', 828, '#b9c2c8'],
+  ['space-needle', 184, '#dcd8d2'], ['golden-gate', 227, '#c1502e'],
+]
+
+const loader = new GLTFLoader()
+const draco = new DRACOLoader()
+draco.setDecoderPath('/draco/')
+loader.setDRACOLoader(draco)
+
+// ClayBuildings3D's material settings, minus the bump/roughness maps (which
+// are procedural canvas textures built there); colour, roughness, clearcoat
+// and sheen are what the tint is being judged on.
+const clayFor = tint => new THREE.MeshPhysicalMaterial({
+  color: new THREE.Color(tint), roughness: 0.62, metalness: 0,
+  clearcoat: 0.3, clearcoatRoughness: 0.34,
+  sheen: 0.35, sheenColor: new THREE.Color('#ffe9c9'),
+})
+
+// clayLandmarks.fitToHeight, verbatim in spirit: scale so real height matches,
+// then re-measure and sit the base on the ground.
+function fitToHeight(object, heightM) {
+  const box = new THREE.Box3().setFromObject(object)
+  const size = box.getSize(new THREE.Vector3())
+  if (!(size.y > 0)) return
+  object.scale.setScalar(heightM / size.y)
+  const scaled = new THREE.Box3().setFromObject(object)
+  object.position.y -= scaled.min.y
+}
+
+const results = []
+const grid = document.getElementById('grid')
+
+for (const [id, heightM, tint] of LANDMARKS) {
+  const cell = document.createElement('div')
+  cell.className = 'cell'
+  const cap = document.createElement('div')
+  cap.className = 'cap'
+  cap.textContent = `${id} · ${heightM}m`
+  cell.appendChild(cap)
+  grid.appendChild(cell)
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false })
+  renderer.setSize(260, 260)
+  renderer.setPixelRatio(1)
+  cell.insertBefore(renderer.domElement, cap)
+
+  const scene = new THREE.Scene()
+  scene.background = new THREE.Color('#b9d8e8')
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x6a5a4a, 1.5))
+  const key = new THREE.DirectionalLight(0xfff2e0, 2.2)
+  key.position.set(3, 5, 4)
+  scene.add(key)
+
+  const gltf = await new Promise((res, rej) =>
+    loader.load(`/landmarks/${id}.glb`, res, undefined, rej))
+  const model = gltf.scene
+  const clay = clayFor(tint)
+  let meshes = 0
+  model.traverse(o => { if (o.isMesh) { meshes++; o.material = clay } })
+  fitToHeight(model, heightM)
+  scene.add(model)
+
+  // Frame the model by its own scaled size, so a 38m statue and an 828m tower
+  // are both fully in shot.
+  const box = new THREE.Box3().setFromObject(model)
+  const size = box.getSize(new THREE.Vector3())
+  const c = box.getCenter(new THREE.Vector3())
+  const span = Math.max(size.x, size.y, size.z)
+  const camera = new THREE.PerspectiveCamera(35, 1, span / 100, span * 12)
+  camera.position.set(c.x + span * 0.95, c.y + span * 0.55, c.z + span * 1.5)
+  camera.lookAt(c)
+  renderer.render(scene, camera)
+
+  results.push({ id, meshes, heightM,
+    scaledY: +size.y.toFixed(1), scaledX: +size.x.toFixed(1), tint })
+}
+
+window.__landmarkCheck = results
+document.title = 'landmark-check-ready'
+</script>
