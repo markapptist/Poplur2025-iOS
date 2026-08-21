@@ -1603,6 +1603,27 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     }
                     return
                 }
+                // The username had NO writer on the live path. The only one
+                // was EditProfileView, which the web home orphaned, so every
+                // handle in the product was per-device: invisible to other
+                // devices and to the server, which is why a server-minted
+                // wallet pass showed a uid prefix instead of a name.
+                if type == "saveProfileUsername" {
+                    guard let raw = Self.sanitizedUsername(body["username"] as? String),
+                          let uid = Auth.auth().currentUser?.uid else { return }
+                    Task {
+                        do {
+                            try await Firestore.firestore().collection("users").document(uid)
+                                .setData(["username": raw], merge: true)
+                            PoplurDiagLog.append("[PoplurProfile] username saved: \(raw)")
+                        } catch {
+                            PoplurDiagLog.append(
+                                "[PoplurProfile] username save FAILED: \(error.localizedDescription)"
+                            )
+                        }
+                    }
+                    return
+                }
                 if type == "requestProfile", let webView = bridge.webView {
                     // The page asking for the profile is the reliable "we are
                     // signed in and the profile matters right now" moment, and
@@ -1639,7 +1660,26 @@ struct PostLoginHomeWebView: UIViewRepresentable {
 
                         let username = (data["username"] as? String)?
                             .trimmingCharacters(in: .whitespacesAndNewlines)
-                        if let username, !username.isEmpty { profile["username"] = username }
+                        if let username, !username.isEmpty {
+                            profile["username"] = username
+                        } else if let derived = Self.sanitizedUsername(localProfile["username"] as? String) {
+                            // The account has never had a username, because
+                            // nothing on the live path could set one: the only
+                            // writer was the orphaned EditProfileView. Every
+                            // device therefore showed a name derived from Auth
+                            // while the DOCUMENT stayed empty — which is why a
+                            // server-minted wallet pass fell back to a uid
+                            // prefix, and why a handle never followed the user
+                            // to a second device.
+                            //
+                            // Auth is the one place a name genuinely exists, so
+                            // settle the account from it once. Written before
+                            // the push so the page and the document agree.
+                            try? await Firestore.firestore().collection("users")
+                                .document(uid).setData(["username": derived], merge: true)
+                            profile["username"] = derived
+                            PoplurDiagLog.append("[PoplurProfile] seeded username: \(derived)")
+                        }
                         if profile["photo"] == nil,
                            let remotePhoto = data["profilePictureURL"] as? String,
                            !remotePhoto.isEmpty {
@@ -1749,6 +1789,19 @@ struct PostLoginHomeWebView: UIViewRepresentable {
             }
             return UIImage(cgImage: image, scale: 1, orientation: .up)
                 .jpegData(compressionQuality: 0.9)
+        }
+
+        /// The only shape the account accepts. Bounded and character-checked
+        /// rather than trusted: this lands in a document that a wallet pass, a
+        /// chat thread and the phone's address book all render.
+        static func sanitizedUsername(_ value: String?) -> String? {
+            let raw = (value ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .replacingOccurrences(of: "@", with: "")
+            let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "_."))
+            let kept = String(raw.unicodeScalars.filter { allowed.contains($0) })
+            guard !kept.isEmpty else { return nil }
+            return String(kept.prefix(30))
         }
 
         private static func authUsername(_ user: FirebaseAuth.User?) -> String? {
