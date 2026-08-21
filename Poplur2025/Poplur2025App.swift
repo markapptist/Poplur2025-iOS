@@ -418,7 +418,15 @@ struct Poplur2025App: App {
                         // PostLoginHomeSurface = the web home PLUS the real native
                         // ML camera mounted behind it on the camera tab (Phase 3.5).
                         PostLoginHomeSurface(onReady: markAuthenticatedHomeReady)
-                            .ignoresSafeArea()
+                            // .container rather than a bare ignoresSafeArea(): the bare form
+                            // ignores EVERY region including .keyboard, which switches off
+                            // SwiftUI's automatic keyboard avoidance. The web surface then keeps
+                            // its full-height frame while the keyboard sits on top of it, burying
+                            // whatever field has focus. Ignoring only the container keeps the
+                            // layout edge-to-edge under the status bar and home indicator, and
+                            // lets the keyboard shrink the frame so the page reflows above it —
+                            // every web screen, without per-screen work.
+                            .ignoresSafeArea(.container, edges: .all)
                             // The approved splash is visually non-interactive, so
                             // block touches at the warmed Home surface too. Without
                             // this guard, a splash tap can pass through and unlock
@@ -481,7 +489,15 @@ struct Poplur2025App: App {
                     // signed-in state, it just marks the handoff point.
                     print("[Poplur2025App] pre-login web flow reported complete — handing off to post-login path (Phase 3 gates real entry via auth state)")
                 })
-                    .ignoresSafeArea()
+                    // .container rather than a bare ignoresSafeArea(): the bare form
+                    // ignores EVERY region including .keyboard, which switches off
+                    // SwiftUI's automatic keyboard avoidance. The web surface then keeps
+                    // its full-height frame while the keyboard sits on top of it, burying
+                    // whatever field has focus. Ignoring only the container keeps the
+                    // layout edge-to-edge under the status bar and home indicator, and
+                    // lets the keyboard shrink the frame so the page reflows above it —
+                    // every web screen, without per-screen work.
+                    .ignoresSafeArea(.container, edges: .all)
                     // Pre-login volume: the web radio changes the system volume, so
                     // suppress the iOS HUD (hidden MPVolumeView) and show the app's
                     // custom PoplurVolumeBars instead — mirroring HomeView. The

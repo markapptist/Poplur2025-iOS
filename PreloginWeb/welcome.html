@@ -984,8 +984,17 @@
       stableViewportHeight = innerHeight
     }
     window.__poplurKeyboardResize = keyboardResize
-    window.__poplurLayoutHeight = stableViewportHeight
-    document.documentElement.style.setProperty('--poplur-layout-height', stableViewportHeight + 'px')
+    // The keyboard lifts the screen rather than burying it. phoneWrap's height
+    // IS this value and every field is placed as a percentage of it, so
+    // following the live viewport carries the whole composition up above the
+    // keyboard instead of leaving the focused field underneath it.
+    //
+    // stableViewportHeight still drives the scale below, so a focused field
+    // lifts the design without also shrinking it — which is what freezing this
+    // was protecting against.
+    const layoutHeight = keyboardResize ? innerHeight : stableViewportHeight
+    window.__poplurLayoutHeight = layoutHeight
+    document.documentElement.style.setProperty('--poplur-layout-height', layoutHeight + 'px')
     const s = Math.min(1, (stableViewportHeight - 76) / 932, (innerWidth - 20) / 430)
     document.querySelector('.phoneWrap').style.transform = 'scale(' + s + ')'
   }
