@@ -11,13 +11,21 @@ import FirebaseFirestore
 ///   1. FAVOURITES — people you chose to keep, so you can call them later.
 ///   2. DMs — anyone you already have a conversation with.
 ///   3. INTERCEPTS — people you and your radius have actually crossed.
+///   4. REACH — people your radius reaches RIGHT NOW.
 ///
 /// "Intercept" is read from `engagements`, because that is the only DURABLE
-/// record that a crossing happened. A live geo query would answer "who is in
-/// range right now", which is a different question and gone the moment either
-/// of you moves; an engagement is the moment a post actually reached someone,
-/// and it persists. Both directions count: people who engaged your posts, and
-/// people whose posts you engaged.
+/// record that a crossing happened. Both directions count: people who engaged
+/// your posts, and people whose posts you engaged.
+///
+/// Reach is the live half, and it was deliberately left out at first — the
+/// argument being that "who is in range right now" is a different question,
+/// gone the moment either of you moves. That was wrong about the product: with
+/// history alone, two people who have never interacted can never find each
+/// other, so a brand new account has an empty phone and no way to fill it. In
+/// an app whose whole premise is that radius is what connects people, the one
+/// thing the address book must answer is "who can I call from here". So reach
+/// is a source now — marked as live, and never confused with the durable
+/// tiers, which still sort above it.
 @MainActor
 final class PoplurPhoneContacts {
     static let shared = PoplurPhoneContacts()
@@ -32,12 +40,16 @@ final class PoplurPhoneContacts {
         var favourite = false
         var hasDM = false
         var intercepted = false
+        /// Inside your radius as of this read. Live, not durable.
+        var inReach = false
+        /// Great-circle km from you, when reach put them here.
+        var distanceKm: Double?
         /// Most recent moment this person showed up, for ordering.
         var lastSeen: Date = .distantPast
     }
 
     /// Everything the phone needs, newest-first within each tier.
-    func contacts() async -> [[String: Any]] {
+    func contacts(radiusKm: Double? = nil, latitude: Double? = nil, longitude: Double? = nil) async -> [[String: Any]] {
         guard let uid else { return [] }
         var byID: [String: Contact] = [:]
 
@@ -106,12 +118,58 @@ final class PoplurPhoneContacts {
             }
         }
 
+        // 4. REACH — whoever has left a post on ground you can stand and touch
+        // from here. Bounded by a lat/lng BOX first because Firestore cannot
+        // do a radius, then filtered to the true circle: a box query alone
+        // hands you the corners, which are up to 41% further out than the
+        // radius you actually have.
+        if let radiusKm, radiusKm > 0, let latitude, let longitude {
+            let latDelta = radiusKm / 111.32
+            // Longitude degrees shrink with latitude; at 60° a degree is half
+            // the distance it is at the equator. Clamped so the cosine cannot
+            // approach zero near the poles and open the box to the whole world.
+            let lngDelta = radiusKm / max(1, 111.32 * cos(latitude * .pi / 180))
+            if let near = try? await db.collection("posts")
+                .whereField("lat", isGreaterThan: latitude - latDelta)
+                .whereField("lat", isLessThan: latitude + latDelta)
+                .limit(to: 200)
+                .getDocuments() {
+                for doc in near.documents {
+                    let data = doc.data()
+                    guard let plat = (data["lat"] as? NSNumber)?.doubleValue,
+                          let plng = (data["lng"] as? NSNumber)?.doubleValue else { continue }
+                    guard abs(plng - longitude) <= lngDelta else { continue }
+                    let km = haversineKm(latitude, longitude, plat, plng)
+                    guard km <= radiusKm else { continue }
+                    let owner = (data["userID"] as? String) ?? (data["userId"] as? String) ?? ""
+                    merge(owner,
+                          data["username"] as? String,
+                          (data["createdAt"] as? Timestamp)?.dateValue()) {
+                        $0.inReach = true
+                        // Nearest post wins: that is how far away they are.
+                        if $0.distanceKm == nil || km < ($0.distanceKm ?? .infinity) { $0.distanceKm = km }
+                    }
+                }
+            }
+        }
+
         await fillMissingNames(&byID)
 
         // Favourites first — that is what favouriting is FOR — then everyone
         // else by how recently they turned up.
+        // Favourites first — that is what favouriting is FOR. Then the people
+        // you have actually met, newest first. Reach-only contacts come last
+        // and are ordered by DISTANCE, because for someone you have never met
+        // the only thing you know is how far away they are; among those,
+        // nearest is the most callable.
         let sorted = byID.values.sorted { a, b in
             if a.favourite != b.favourite { return a.favourite }
+            let aKnown = a.hasDM || a.intercepted
+            let bKnown = b.hasDM || b.intercepted
+            if aKnown != bKnown { return aKnown }
+            if !aKnown && !bKnown {
+                return (a.distanceKm ?? .infinity) < (b.distanceKm ?? .infinity)
+            }
             return a.lastSeen > b.lastSeen
         }
         return sorted.map { c in
@@ -121,12 +179,30 @@ final class PoplurPhoneContacts {
                 "favourite": c.favourite,
                 "hasDM": c.hasDM,
                 // What to say under the name, most specific reason first.
+                "inReach": c.inReach,
+                "distanceKm": c.distanceKm as Any,
+                // What to say under the name, most specific reason first. A
+                // reach-only contact gets the distance, because that IS the
+                // reason they are callable and it is the thing that will stop
+                // being true when either of you moves.
                 "detail": c.favourite ? "favourite"
                     : c.hasDM ? "you have a chat"
                     : c.intercepted ? "crossed your radius"
+                    : c.inReach ? String(format: "%.1f km away · in your radius", c.distanceKm ?? 0)
                     : "on Poplur",
             ]
         }
+    }
+
+    /// Great-circle km. The radius is a circle and the box query is not, so
+    /// this is what turns one into the other.
+    private func haversineKm(_ lat1: Double, _ lng1: Double, _ lat2: Double, _ lng2: Double) -> Double {
+        let radius = 6371.0
+        let dLat = (lat2 - lat1) * .pi / 180
+        let dLng = (lng2 - lng1) * .pi / 180
+        let a = sin(dLat / 2) * sin(dLat / 2)
+            + cos(lat1 * .pi / 180) * cos(lat2 * .pi / 180) * sin(dLng / 2) * sin(dLng / 2)
+        return radius * 2 * atan2(sqrt(a), sqrt(1 - a))
     }
 
     /// One batched pass for anyone still showing a uid-prefix placeholder,

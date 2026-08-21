@@ -1083,8 +1083,15 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                 // The Poplur phone's address book: favourites, people you have
                 // a chat with, and people your radius has actually crossed.
                 if type == "requestPhoneContacts", let webView = bridge.webView {
+                    // The radius and the position ride on the request: the
+                    // ledger is the web's, and a second copy here would drift.
+                    let radiusKm = (body["radiusKm"] as? NSNumber)?.doubleValue
+                    let lat = (body["latitude"] as? NSNumber)?.doubleValue
+                    let lng = (body["longitude"] as? NSNumber)?.doubleValue
                     Task { @MainActor [weak self, weak webView] in
-                        let contacts = await PoplurPhoneContacts.shared.contacts()
+                        let contacts = await PoplurPhoneContacts.shared.contacts(
+                            radiusKm: radiusKm, latitude: lat, longitude: lng
+                        )
                         guard let self, let webView, self.bridge.webView === webView else { return }
                         self.pushWalletPassMessage(
                             ["type": "poplurPhoneContacts", "contacts": contacts],
