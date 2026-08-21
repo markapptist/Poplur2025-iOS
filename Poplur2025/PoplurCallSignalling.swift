@@ -41,6 +41,15 @@ final class PoplurCallSignalling {
                 "calleeId": otherUID,
                 "status": "ringing",
                 "createdAt": FieldValue.serverTimestamp(),
+                // Both this WebRTC signaller and the older Agora-based
+                // CallSessionManager (iOS and Android) watch the same "calls"
+                // collection for calleeId + status:"ringing" with no other
+                // filter, so a call placed here used to also trigger the
+                // Agora listener on the other side — which would then try to
+                // join an Agora channel this call never publishes a token
+                // for. This tag lets both Agora listeners recognize and skip
+                // a call that was never theirs.
+                "provider": "webrtc",
             ])
         } catch {
             print("[PoplurCall] could not open call: \(error.localizedDescription)")

@@ -72,7 +72,12 @@ final class CallSessionManager: ObservableObject {
             .addSnapshotListener { [weak self] snapshot, _ in
                 guard let self else { return }
                 guard case .idle = self.callState else { return }
-                guard let doc = snapshot?.documents.first else { return }
+                // PoplurCallSignalling (WebRTC) writes to this same collection
+                // with the same calleeId/status shape but never joins Agora —
+                // skip anything tagged for that path so this doesn't surface
+                // a call it can't actually connect.
+                guard let doc = snapshot?.documents.first(where: { $0.data()["provider"] as? String != "webrtc" })
+                else { return }
 
                 let data       = doc.data()
                 let callerName = data["callerName"] as? String ?? "Unknown"
