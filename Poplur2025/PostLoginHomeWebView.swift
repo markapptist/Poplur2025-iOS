@@ -974,9 +974,10 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                    let id = body["id"] as? String,
                    let title = body["title"] as? String {
                     let detail = body["detail"] as? String ?? ""
+                    let kind = body["kind"] as? String
                     Task { @MainActor in
                         await PoplurNotificationCenter.shared.scheduleFromWeb(
-                            id: id, title: title, detail: detail
+                            id: id, title: title, detail: detail, kind: kind
                         )
                     }
                 }
@@ -1603,6 +1604,11 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     return
                 }
                 if type == "requestProfile", let webView = bridge.webView {
+                    // The page asking for the profile is the reliable "we are
+                    // signed in and the profile matters right now" moment, and
+                    // it happens once per launch. Fire-and-forget: the backfill
+                    // must never delay the answer the page is waiting for.
+                    PoplurProfileBackfill.run()
                     // Answer immediately from Auth/local disk, then refresh from
                     // Firestore. A single network-dependent callback used to
                     // leave USERNAME on screen whenever auth or Firestore was
