@@ -13,6 +13,8 @@ struct UserProfile: Identifiable, Hashable, Codable {
     var businessProfile: BusinessProfile?
     var followerCount: Int
     var followingCount: Int
+    var verificationTier: PoplurVerificationTier
+    var verificationStatus: PoplurVerificationApplicationStatus
 
     var isBusinessAccount: Bool {
         accountType == .business
@@ -20,6 +22,18 @@ struct UserProfile: Identifiable, Hashable, Codable {
 
     var isVerifiedBusiness: Bool {
         businessProfile?.verificationStatus == .verified
+    }
+
+    var isVerifiedAccount: Bool {
+        verificationTier == .verified
+    }
+
+    var isConfirmedAccount: Bool {
+        verificationTier == .confirmed
+    }
+
+    var hasAnyVerification: Bool {
+        verificationTier != .none || isVerifiedBusiness
     }
 
     var profileDisplayName: String {
@@ -41,7 +55,9 @@ struct UserProfile: Identifiable, Hashable, Codable {
         accountType: PoplurAccountType = .user,
         businessProfile: BusinessProfile? = nil,
         followerCount: Int = 0,
-        followingCount: Int = 0
+        followingCount: Int = 0,
+        verificationTier: PoplurVerificationTier = .none,
+        verificationStatus: PoplurVerificationApplicationStatus = .none
     ) {
         self.id = id
         self.username = username
@@ -52,6 +68,8 @@ struct UserProfile: Identifiable, Hashable, Codable {
         self.businessProfile = businessProfile
         self.followerCount = followerCount
         self.followingCount = followingCount
+        self.verificationTier = verificationTier
+        self.verificationStatus = verificationStatus
     }
 
     // Convenience initializer from Firestore document
@@ -84,6 +102,8 @@ struct UserProfile: Identifiable, Hashable, Codable {
         }
         self.followerCount = data["followerCount"] as? Int ?? 0
         self.followingCount = data["followingCount"] as? Int ?? 0
+        self.verificationTier = (data["verificationTier"] as? String).flatMap(PoplurVerificationTier.init(rawValue:)) ?? .none
+        self.verificationStatus = (data["verificationStatus"] as? String).flatMap(PoplurVerificationApplicationStatus.init(rawValue:)) ?? .none
     }
 
     // Helper to serialize for Firestore writes
@@ -103,6 +123,12 @@ struct UserProfile: Identifiable, Hashable, Codable {
             dict["businessProfile"] = businessProfile.toDictionary()
             dict["isBusinessAccount"] = true
             dict["isVerifiedBusiness"] = businessProfile.verificationStatus == .verified
+        }
+        if verificationTier != .none {
+            dict["verificationTier"] = verificationTier.rawValue
+        }
+        if verificationStatus != .none {
+            dict["verificationStatus"] = verificationStatus.rawValue
         }
         return dict
     }

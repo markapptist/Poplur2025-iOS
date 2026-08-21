@@ -105,9 +105,10 @@ struct PoplurDeviceNotification: Identifiable, Codable, Hashable {
         case radiusDip
         case areaTakeover
         case dailyInsight
-        /// Someone liked or commented on your post. Delivered remotely by the
-        /// notifyOnEngagement Cloud Function, not scheduled locally.
         case engagement
+        case dm
+        case mention
+        case radiusEntry
     }
 
     let id: String
@@ -116,6 +117,23 @@ struct PoplurDeviceNotification: Identifiable, Codable, Hashable {
     let detail: String
     let createdAt: Date
     let isUnread: Bool
+}
+
+enum PoplurNotificationTier {
+    case immediate
+    case batched
+    case digest
+}
+
+enum PoplurEngagementPushPref: String {
+    case everyBatch = "every"
+    case highlightsOnly = "highlights"
+    case off = "off"
+}
+
+enum PoplurRadiusPushPref: String {
+    case daily = "daily"
+    case off = "off"
 }
 
 struct PoplurNotificationPostSignal {
@@ -138,9 +156,49 @@ final class PoplurNotificationCenter: NSObject, ObservableObject, UNUserNotifica
     private let lastRadiusTotalKey = "poplur.notifications.lastRadiusTotal.v1"
     private let notificationIdentifier = "poplur.daily.radius.insight"
 
+    // ── Tier system ─────────────────────────────────────────────────────
+    private let prefMessagesKey = "poplur.notifications.pref.messages"
+    private let prefEngagementKey = "poplur.notifications.pref.engagement"
+    private let prefRadiusKey = "poplur.notifications.pref.radius"
+    private let prefSoundsKey = "poplur.notifications.pref.sounds"
+    private let lastPushAtKey = "poplur.notifications.lastPushAt"
+    private let batchFlushInterval: TimeInterval = 15 * 60   // 15 minutes
+    private let pushCooldown: TimeInterval = 5 * 60          // 5 minutes
+    private var pendingBatch: [(webKind: String, user: String, detail: String)] = []
+    private var flushTimer: Timer?
+
+    var messagesPushEnabled: Bool {
+        get { defaults.object(forKey: prefMessagesKey) as? Bool ?? true }
+        set { defaults.set(newValue, forKey: prefMessagesKey) }
+    }
+    var engagementPushPref: PoplurEngagementPushPref {
+        get {
+            guard let raw = defaults.string(forKey: prefEngagementKey) else { return .everyBatch }
+            return PoplurEngagementPushPref(rawValue: raw) ?? .everyBatch
+        }
+        set { defaults.set(newValue.rawValue, forKey: prefEngagementKey) }
+    }
+    var radiusPushPref: PoplurRadiusPushPref {
+        get {
+            guard let raw = defaults.string(forKey: prefRadiusKey) else { return .daily }
+            return PoplurRadiusPushPref(rawValue: raw) ?? .daily
+        }
+        set { defaults.set(newValue.rawValue, forKey: prefRadiusKey) }
+    }
+    var soundsEnabled: Bool {
+        get { defaults.object(forKey: prefSoundsKey) as? Bool ?? true }
+        set { defaults.set(newValue, forKey: prefSoundsKey) }
+    }
+
+    private var lastPushAt: Date? {
+        get { defaults.object(forKey: lastPushAtKey) as? Date }
+        set { defaults.set(newValue, forKey: lastPushAtKey) }
+    }
+
     private override init() {
         super.init()
         loadPersistedNotifications()
+        startFlushTimer()
     }
 
     func configure() {
@@ -164,7 +222,9 @@ final class PoplurNotificationCenter: NSObject, ObservableObject, UNUserNotifica
         let generated = makeNotification(from: posts)
         if shouldCreateDailyNotification() {
             addInAppNotification(generated)
-            if authorized { await scheduleDeviceNotification(generated) }
+            if authorized && radiusPushPref != .off && !isAppInForeground {
+                await scheduleDeviceNotification(generated)
+            }
             defaults.set(Date(), forKey: lastDailyKey)
         }
 
@@ -229,10 +289,11 @@ final class PoplurNotificationCenter: NSObject, ObservableObject, UNUserNotifica
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
-        // A push arriving while the app is open must still reach the list, or
-        // the banner and the notifications screen disagree about what happened.
         await MainActor.run { Self.shared.recordIfEngagement(notification.request.content) }
-        return [.banner, .sound, .badge]
+        let wantSound = await MainActor.run { Self.shared.soundsEnabled }
+        var opts: UNNotificationPresentationOptions = [.banner, .badge]
+        if wantSound { opts.insert(.sound) }
+        return opts
     }
 
     /// Handles a tap on a delivered notification.
@@ -310,54 +371,156 @@ final class PoplurNotificationCenter: NSObject, ObservableObject, UNUserNotifica
         persistNotifications()
     }
 
-    /// Schedule a notification that ORIGINATED IN THE WEB LAYER.
-    ///
-    /// The outside-app notification and the in-app list were two unrelated
-    /// systems. This process only ever scheduled `poplur.daily.radius.insight`
-    /// — one recurring daily summary built from Firestore post signals, on a
-    /// single reused identifier that each new one removes — while the list you
-    /// actually see lives in the web bundle and is driven by the engagement
-    /// log. So the push repeated the same line while the screen said something
-    /// else entirely.
-    ///
-    /// `.engagement` was always meant to arrive remotely from the
-    /// notifyOnEngagement Cloud Function. Until that backend is live nothing
-    /// arrives at all, so the web forwards what it just logged and this
-    /// schedules it here.
-    ///
-    /// Deliberately NOT sharing `notificationIdentifier`: that constant belongs
-    /// to the daily insight, where replacing the pending one is correct. These
-    /// carry their own ids so several can stand at once — which is the whole
-    /// point of matching a LIST.
-    func scheduleFromWeb(id: String, title: String, detail: String) async {
+    /// Receives a notification from the web layer and routes it through the
+    /// tier system. Every event is immediately visible in the in-app list;
+    /// push delivery depends on the tier, user preferences, and cooldown.
+    func scheduleFromWeb(id: String, title: String, detail: String, kind: String?) async {
         guard !id.isEmpty, !title.isEmpty else { return }
-        // Same id twice is the same notification: the web re-sends on reconnect
-        // and a resend must not stack a duplicate on the lock screen.
         guard !notifications.contains(where: { $0.id == id }) else { return }
 
+        let resolvedKind = resolveKind(kind)
         let item = PoplurDeviceNotification(
             id: id,
-            kind: .engagement,
+            kind: resolvedKind,
             title: title,
             detail: detail,
             createdAt: Date(),
             isUnread: true
         )
         addInAppNotification(item)
+        refreshBadge()
+
+        let tier = classifyTier(resolvedKind)
+        switch tier {
+        case .immediate:
+            if shouldPushKind(resolvedKind) {
+                await schedulePush(id: id, title: title, body: detail, kind: resolvedKind)
+            }
+        case .batched:
+            if engagementPushPref != .off {
+                pendingBatch.append((webKind: kind ?? "like", user: title, detail: detail))
+            }
+        case .digest:
+            break // handled by the existing daily refresh
+        }
+    }
+
+    private func resolveKind(_ raw: String?) -> PoplurDeviceNotification.Kind {
+        guard let raw else { return .engagement }
+        switch raw {
+        case "like", "view", "comment": return .engagement
+        case "dm", "message":           return .dm
+        case "mention":                 return .mention
+        case "radiusEntry":             return .radiusEntry
+        default:                        return .engagement
+        }
+    }
+
+    private func classifyTier(_ kind: PoplurDeviceNotification.Kind) -> PoplurNotificationTier {
+        switch kind {
+        case .dm, .mention, .radiusEntry:
+            return .immediate
+        case .engagement:
+            return .batched
+        case .radiusGrowth, .radiusDip, .areaTakeover, .dailyInsight:
+            return .digest
+        }
+    }
+
+    private func shouldPushKind(_ kind: PoplurDeviceNotification.Kind) -> Bool {
+        switch kind {
+        case .dm, .mention:       return messagesPushEnabled
+        case .radiusEntry:        return true
+        case .engagement:         return engagementPushPref != .off
+        case .radiusGrowth, .radiusDip, .areaTakeover, .dailyInsight:
+            return radiusPushPref != .off
+        }
+    }
+
+    private var isAppInForeground: Bool {
+        UIApplication.shared.applicationState == .active
+    }
+
+    private func schedulePush(id: String, title: String, body: String, kind: PoplurDeviceNotification.Kind) async {
+        // The in-app list already has this event. If the user is looking at
+        // the app right now, a push banner on top is redundant noise.
+        guard !isAppInForeground else { return }
 
         let content = UNMutableNotificationContent()
         content.title = title
-        content.body = detail
-        content.sound = .default
+        content.body = body
+        content.sound = soundsEnabled ? .default : nil
         content.badge = NSNumber(value: max(1, notifications.filter(\.isUnread).count))
         content.userInfo = [
             "poplurNotificationID": id,
-            "kind": PoplurDeviceNotification.Kind.engagement.rawValue
+            "kind": kind.rawValue
         ]
-        // nil trigger: this already happened. The daily insight's 15s delay is
-        // there to batch a summary; an engagement is news and lands now.
         let request = UNNotificationRequest(identifier: id, content: content, trigger: nil)
         try? await UNUserNotificationCenter.current().add(request)
+        lastPushAt = Date()
+    }
+
+    // ── Batch flush ─────────────────────────────────────────────────────
+
+    private func startFlushTimer() {
+        flushTimer = Timer.scheduledTimer(withTimeInterval: batchFlushInterval, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                await self?.flushPendingBatch()
+            }
+        }
+    }
+
+    private func flushPendingBatch() async {
+        guard !pendingBatch.isEmpty else { return }
+        guard engagementPushPref != .off else {
+            pendingBatch.removeAll()
+            return
+        }
+        guard !isAppInForeground else {
+            // Keep the batch — flush next time if the user has left.
+            return
+        }
+
+        // Cooldown: if an immediate-tier push fired recently, defer.
+        if let last = lastPushAt, Date().timeIntervalSince(last) < pushCooldown {
+            return
+        }
+
+        let batch = pendingBatch
+        pendingBatch.removeAll()
+
+        // Highlights-only: skip small batches.
+        if engagementPushPref == .highlightsOnly && batch.count < 5 {
+            return
+        }
+
+        let (title, body) = composeBatchSummary(batch)
+        await schedulePush(
+            id: "batch-\(Int(Date().timeIntervalSince1970))",
+            title: title,
+            body: body,
+            kind: .engagement
+        )
+    }
+
+    private func composeBatchSummary(_ batch: [(webKind: String, user: String, detail: String)]) -> (String, String) {
+        let likes = batch.filter { $0.webKind == "like" }.count
+        let comments = batch.filter { $0.webKind == "comment" }.count
+        let views = batch.filter { $0.webKind == "view" }.count
+
+        var parts: [String] = []
+        if likes > 0 { parts.append("\(likes) like\(likes == 1 ? "" : "s")") }
+        if comments > 0 { parts.append("\(comments) comment\(comments == 1 ? "" : "s")") }
+        if views > 0 { parts.append("\(views) view\(views == 1 ? "" : "s")") }
+
+        let title: String
+        if batch.count == 1, let first = batch.first {
+            title = first.user
+        } else {
+            title = "\(batch.count) people interacted with your posts"
+        }
+        let body = parts.joined(separator: ", ")
+        return (title, body.isEmpty ? "New activity on your posts" : body)
     }
 
     private func scheduleDeviceNotification(_ item: PoplurDeviceNotification) async {

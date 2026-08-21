@@ -63,10 +63,10 @@ private extension ProfileNotificationItem.Kind {
             self = .accumulatedRadius
         case .areaTakeover, .dailyInsight:
             self = .like
-        case .engagement:
-            // A like or comment on your post — the heart is literally what this
-            // row means, where the other three borrow it.
+        case .engagement, .dm, .mention:
             self = .like
+        case .radiusEntry:
+            self = .postRadius
         }
     }
 }
@@ -1900,6 +1900,20 @@ struct ProfileView: View {
                         .padding(.horizontal, 24)
                 }
             }
+        } else if let profile = userProfile, profile.verificationTier != .none {
+            HStack(spacing: 7) {
+                Image(systemName: "checkmark.seal.fill")
+                    .poplurIconShader()
+                    .font(.system(size: 12, weight: .black))
+                    .foregroundStyle(verificationBadgeColor(profile.verificationTier))
+                Text(profile.verificationTier == .verified ? "Verified" : "Confirmed")
+                    .font(.system(size: 11, weight: .black, design: .rounded))
+                    .foregroundStyle(profileForeground)
+            }
+            .padding(.horizontal, 11)
+            .padding(.vertical, 7)
+            .background(Capsule().fill(verificationBadgeColor(profile.verificationTier).opacity(0.16)))
+            .overlay(Capsule().stroke(verificationBadgeColor(profile.verificationTier).opacity(0.48), lineWidth: 1))
         }
     }
 
@@ -1978,6 +1992,14 @@ struct ProfileView: View {
         case .verified: return .green
         case .rejected: return .red
         case .needsMoreInfo: return .blue
+        }
+    }
+
+    private func verificationBadgeColor(_ tier: PoplurVerificationTier) -> Color {
+        switch tier {
+        case .verified: return .blue
+        case .confirmed: return .gray
+        case .none: return .clear
         }
     }
     

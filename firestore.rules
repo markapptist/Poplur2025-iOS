@@ -41,12 +41,18 @@ service cloud.firestore {
       ];
     }
 
+    function protectedVerificationFields() {
+      return ['verificationTier', 'verificationStatus'];
+    }
+
     function doesNotWritePremiumAIFields() {
-      return !request.resource.data.keys().hasAny(protectedPremiumAIFields());
+      return !request.resource.data.keys().hasAny(protectedPremiumAIFields())
+        && !request.resource.data.keys().hasAny(protectedVerificationFields());
     }
 
     function keepsPremiumAIFieldsUnchanged() {
-      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(protectedPremiumAIFields());
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(protectedPremiumAIFields())
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(protectedVerificationFields());
     }
 
     match /users/{userId} {

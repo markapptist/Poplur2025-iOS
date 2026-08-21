@@ -116,11 +116,11 @@ struct SettingsView: View {
                                 .labelsHidden()
                                 .tint(.indigo)
                         }
-                        settingsRowLeft("Notifications") {
-                            Toggle("", isOn: .constant(true))
-                                .labelsHidden()
-                                .tint(.indigo)
-                        }
+
+                        NotificationPreferencesSection()
+
+                        settingsRowRight("Verify your account")
+
                         settingsRowRight("Email Address")
                         settingsRowRight("Password")
 
@@ -184,6 +184,100 @@ struct SettingsView: View {
                 .font(.system(size: 18, weight: .bold))
                 .foregroundColor(.gray)
         }
+    }
+}
+
+struct NotificationPreferencesSection: View {
+    @State private var messagesPush: Bool
+    @State private var engagementPref: PoplurEngagementPushPref
+    @State private var radiusPref: PoplurRadiusPushPref
+    @State private var sounds: Bool
+
+    private let nc = PoplurNotificationCenter.shared
+
+    init() {
+        let nc = PoplurNotificationCenter.shared
+        _messagesPush = State(initialValue: nc.messagesPushEnabled)
+        _engagementPref = State(initialValue: nc.engagementPushPref)
+        _radiusPref = State(initialValue: nc.radiusPushPref)
+        _sounds = State(initialValue: nc.soundsEnabled)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Notifications")
+                .font(.system(size: 18, weight: .heavy, design: .rounded))
+                .foregroundColor(.black.opacity(0.9))
+
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Messages")
+                        .font(.system(size: 16, weight: .heavy, design: .rounded))
+                    Text("DMs and mentions")
+                        .font(.system(size: 13))
+                        .foregroundColor(.secondary)
+                }
+                Spacer()
+                Toggle("", isOn: $messagesPush)
+                    .labelsHidden()
+                    .tint(.indigo)
+                    .onChange(of: messagesPush) { _, val in nc.messagesPushEnabled = val }
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Engagement")
+                    .font(.system(size: 16, weight: .heavy, design: .rounded))
+                Text("Likes, comments, views")
+                    .font(.system(size: 13))
+                    .foregroundColor(.secondary)
+                Picker("", selection: $engagementPref) {
+                    Text("Every batch").tag(PoplurEngagementPushPref.everyBatch)
+                    Text("Highlights").tag(PoplurEngagementPushPref.highlightsOnly)
+                    Text("Off").tag(PoplurEngagementPushPref.off)
+                }
+                .pickerStyle(.segmented)
+                .onChange(of: engagementPref) { _, val in nc.engagementPushPref = val }
+            }
+
+            Divider()
+
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Radius & trends")
+                        .font(.system(size: 16, weight: .heavy, design: .rounded))
+                    Text("Daily digest")
+                        .font(.system(size: 13))
+                        .foregroundColor(.secondary)
+                }
+                Spacer()
+                Picker("", selection: $radiusPref) {
+                    Text("Daily").tag(PoplurRadiusPushPref.daily)
+                    Text("Off").tag(PoplurRadiusPushPref.off)
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 140)
+                .onChange(of: radiusPref) { _, val in nc.radiusPushPref = val }
+            }
+
+            Divider()
+
+            HStack {
+                Text("Sounds")
+                    .font(.system(size: 16, weight: .heavy, design: .rounded))
+                Spacer()
+                Toggle("", isOn: $sounds)
+                    .labelsHidden()
+                    .tint(.indigo)
+                    .onChange(of: sounds) { _, val in nc.soundsEnabled = val }
+            }
+        }
+        .padding()
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color.gray.opacity(0.08))
+        )
     }
 }
 

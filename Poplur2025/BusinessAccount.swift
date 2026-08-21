@@ -13,6 +13,25 @@ enum PoplurAccountType: String, Codable, Hashable {
     }
 }
 
+enum PoplurVerificationTier: String, Codable, Hashable {
+    case none
+    case confirmed
+    case verified
+}
+
+enum PoplurVerificationApplicationStatus: String, Codable, Hashable {
+    case none
+    case pending
+    case approved
+    case rejected
+}
+
+enum PoplurVerificationMethod: String, Codable, Hashable {
+    case id
+    case phone
+    case manual
+}
+
 enum BusinessVerificationStatus: String, Codable, CaseIterable, Hashable {
     case notVerified = "not_verified"
     case pendingReview = "pending_review"
