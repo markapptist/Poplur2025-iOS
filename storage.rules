@@ -45,6 +45,38 @@ service firebase.storage {
       allow delete: if request.auth != null && request.auth.uid == userId;
     }
 
+    // profile_selfies/{uid}.{ext} and profile_pictures/{uid}.{ext} — one object
+    // per person, named by their uid, which is what makes ownership checkable
+    // from the path alone.
+    //
+    // Without these the catch-all below denied every write, so the app's upload
+    // failed silently (it only `print`s) and profilePictureURL /
+    // profileSelfieVideoURL never reached Firestore. The visible symptom was a
+    // profile that looked fine on the device that set it and was simply absent
+    // everywhere else — it had never left that phone.
+    //
+    // Readable by any signed-in user because an avatar and a profile selfie are
+    // shown to the people who find you; that is what they are for. NOT public:
+    // this bucket is the app's default one and read access here is a decision
+    // about user uploads, not about art.
+    match /profile_pictures/{fileName} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+        && fileName.split('\\.')[0] == request.auth.uid
+        && request.resource.size < 8 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    match /profile_selfies/{fileName} {
+      allow read: if request.auth != null;
+      // 40MB: the app exports a ten-second clip, and a short selfie video at
+      // phone bitrates lands far under this while a full library video does not.
+      allow write: if request.auth != null
+        && fileName.split('\\.')[0] == request.auth.uid
+        && request.resource.size < 40 * 1024 * 1024
+        && request.resource.contentType.matches('video/.*');
+    }
+
     // Nothing else in this bucket is writable from a client.
     match /{allPaths=**} {
       allow read, write: if false;
