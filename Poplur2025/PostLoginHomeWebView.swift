@@ -2117,14 +2117,19 @@ struct PostLoginHomeWebView: UIViewRepresentable {
             Task {
                 do {
                     let reference = Storage.storage().reference().child("profile_pictures/\(uid).jpg")
-                    _ = try await reference.putDataAsync(data)
+                    _ = try await reference.putDataAsync(
+                        data,
+                        metadata: PoplurProfileUpload.imageMetadata()
+                    )
                     let downloadURL = try await reference.downloadURL()
                     try await Firestore.firestore().collection("users").document(uid).setData(
                         ["profilePictureURL": downloadURL.absoluteString],
                         merge: true
                     )
                 } catch {
-                    print("[PostLoginHomeWebView] profile photo cloud sync failed: \(error.localizedDescription)")
+                    PoplurDiagLog.append(
+                        "[PoplurProfile] photo cloud sync FAILED: \(error.localizedDescription)"
+                    )
                 }
             }
         }
@@ -2158,14 +2163,19 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                 do {
                     let ext = PoplurProfileSelfieStore.extensionForPersistedVideo() ?? "mp4"
                     let reference = Storage.storage().reference().child("profile_selfies/\(uid).\(ext)")
-                    _ = try await reference.putDataAsync(data)
+                    _ = try await reference.putDataAsync(
+                        data,
+                        metadata: PoplurProfileUpload.videoMetadata(forExtension: ext)
+                    )
                     let downloadURL = try await reference.downloadURL()
                     try await Firestore.firestore().collection("users").document(uid).setData(
                         ["profileSelfieVideoURL": downloadURL.absoluteString],
                         merge: true
                     )
                 } catch {
-                    print("[PostLoginHomeWebView] profile selfie cloud sync failed for \(localURL): \(error.localizedDescription)")
+                    PoplurDiagLog.append(
+                        "[PoplurProfile] selfie cloud sync FAILED: \(error.localizedDescription)"
+                    )
                 }
             }
         }

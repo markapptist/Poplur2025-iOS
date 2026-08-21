@@ -15,6 +15,33 @@ import FirebaseStorage
 /// This closes that gap on every launch: if the device holds a selfie and the
 /// account does not, send it up. Cheap to run, and it self-heals rather than
 /// depending on somebody remembering to re-record.
+/// What an upload must declare about itself.
+///
+/// Storage labels an unlabelled upload `application/octet-stream`, and the
+/// Storage rules gate `profile_pictures` on `image/.*` and `profile_selfies` on
+/// `video/.*`. So an upload with no metadata is refused no matter who is signed
+/// in — which is why opening these paths in the rules did not, on its own, make
+/// a profile picture or selfie reach the account.
+enum PoplurProfileUpload {
+    static func imageMetadata() -> StorageMetadata {
+        let metadata = StorageMetadata()
+        metadata.contentType = "image/jpeg"
+        return metadata
+    }
+
+    static func videoMetadata(forExtension ext: String) -> StorageMetadata {
+        let metadata = StorageMetadata()
+        // Keyed off the extension the store actually persisted, so a .mov is
+        // not mislabelled as mp4 to whoever plays it back.
+        switch ext.lowercased() {
+        case "mov": metadata.contentType = "video/quicktime"
+        case "m4v": metadata.contentType = "video/x-m4v"
+        default: metadata.contentType = "video/mp4"
+        }
+        return metadata
+    }
+}
+
 enum PoplurProfileBackfill {
     /// Guards against a second pass inside one app run — the launch path can
     /// fire more than once, and the upload is not free.
@@ -56,7 +83,7 @@ enum PoplurProfileBackfill {
             let data = try Data(contentsOf: localURL)
             guard !data.isEmpty else { return }
             let reference = Storage.storage().reference().child("profile_pictures/\(uid).jpg")
-            _ = try await reference.putDataAsync(data)
+            _ = try await reference.putDataAsync(data, metadata: PoplurProfileUpload.imageMetadata())
             let downloadURL = try await reference.downloadURL()
             try await users.setData(["profilePictureURL": downloadURL.absoluteString], merge: true)
             PoplurDiagLog.append("[PoplurProfile] backfilled photo for \(uid.prefix(8))")
@@ -78,7 +105,10 @@ enum PoplurProfileBackfill {
             guard !data.isEmpty else { return }
             let reference = Storage.storage().reference()
                 .child("profile_selfies/\(uid).\(ext)")
-            _ = try await reference.putDataAsync(data)
+            _ = try await reference.putDataAsync(
+                data,
+                metadata: PoplurProfileUpload.videoMetadata(forExtension: ext)
+            )
             let downloadURL = try await reference.downloadURL()
             try await users.setData(
                 ["profileSelfieVideoURL": downloadURL.absoluteString],
