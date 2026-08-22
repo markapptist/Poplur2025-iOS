@@ -77,7 +77,47 @@ service firebase.storage {
         && request.resource.contentType.matches('video/.*');
     }
 
+    // posts/{uid}/{fileName} — the media behind a pop: the clip or the photo,
+    // plus the poster frame the feed shows while the clip decodes.
+    //
+    // This was MISSING, and the symptom was the same one the profile comment
+    // above describes: every post upload hit the catch-all and was refused with
+    // "User does not have permission to access
+    // gs://poplur2025.firebasestorage.app/posts/…mp4", so the capture saved
+    // locally and never left the phone. Both platforms already name the folder
+    // by uid — iOS writes posts/{uid}/{UUID}.mp4 and {UUID}-poster.jpg,
+    // Android posts/{uid}/{millis}.mp4 — so ownership is a path check here too,
+    // with nothing to forge and no document read to pay for.
+    //
+    // Reads are open to any signed-in user because a pop is FOR being found;
+    // radius is a product rule about reach, not a secrecy boundary, and the
+    // same reasoning already governs music above.
+    match /posts/{userId}/{fileName} {
+      allow read: if request.auth != null;
+
+      // Split by kind rather than one ceiling for both. The clip is exported
+      // with AVAssetExportPresetHighestQuality and carries no duration cap, so
+      // a legitimate post is genuinely large and a shared limit would either
+      // reject real videos or leave images effectively unbounded. contentType
+      // is checked on the way IN because it is what the feed trusts on the way
+      // out — both platforms set it explicitly (video/mp4, image/jpeg).
+      allow create, update: if request.auth != null
+        && request.auth.uid == userId
+        && (
+          (request.resource.contentType.matches('video/.*')
+            && request.resource.size < 200 * 1024 * 1024)
+          || (request.resource.contentType.matches('image/.*')
+            && request.resource.size < 12 * 1024 * 1024)
+        );
+
+      allow delete: if request.auth != null && request.auth.uid == userId;
+    }
+
     // Nothing else in this bucket is writable from a client.
+    //
+    // NOTE this does not veto the rules above: Storage rules are a permissive
+    // union, so a specific `allow` still grants and this `if false` simply
+    // never does. It is the default for paths nothing above claims.
     match /{allPaths=**} {
       allow read, write: if false;
     }
