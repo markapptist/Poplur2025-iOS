@@ -2412,22 +2412,28 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
             // camera-preview lease. Parking the whole AVCaptureSession here was
             // the frozen live-camera frame seen after a slow face/filter pass.
             self.mlDetectionManager?.isEnabled = false
-            self.setARFilterProcessingWanted(false)
-            self.arFilterManager?.activeFilter = .none
-            self.arFilterManager?.stopARSession()
-            self.displayLayer?.flushAndRemoveImage()
-            NotificationCenter.default.post(
-                name: Notification.Name("ARFiltersStateChanged"),
-                object: nil,
-                userInfo: ["isShown": false]
-            )
-            NotificationCenter.default.post(
-                name: Notification.Name("ARFilterChanged"),
-                object: nil,
-                userInfo: ["filter": "None"]
-            )
-            self.sessionQueue.async { [weak self] in
-                self?.setVideoFrameDeliveryActiveOnQueue(false)
+
+            // THE FILTER IS NOT PART OF THIS LANE ANY MORE, so a timeout in it
+            // must not touch the filter.
+            //
+            // This handler used to reset activeFilter to .none, post the two
+            // "no filter" notifications and switch video-frame delivery off,
+            // whichever family had actually stalled. When the filtered
+            // viewfinder rode the claim lane that was at least the same
+            // subsystem; since the continuous-viewfinder redesign the lane only
+            // ever carries faceRecognition/classification/objectBoxes, and a
+            // stall in any of those silently tore down a filter the user had
+            // just picked — the rail stayed lit on the web while native had
+            // gone back to .none, which is exactly "the filter does nothing".
+            //
+            // Frame delivery stops only when nothing still needs frames. An
+            // active filter needs every one of them.
+            let filterActive = self.isARFilterProcessingWanted()
+            if !filterActive {
+                self.arFilterManager?.stopARSession()
+                self.sessionQueue.async { [weak self] in
+                    self?.setVideoFrameDeliveryActiveOnQueue(false)
+                }
             }
         }
     }
@@ -2641,7 +2647,21 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
                 manager?.onError = downstreamError
                 self.finishAnalysisPipeline(claimID: claim.id)
             }
-            manager.processFrame(sampleBuffer)
+            if !manager.processFrame(sampleBuffer) {
+                // The frame was skipped (detector disabled, a pass still in
+                // flight, or no image buffer), so neither completion above will
+                // ever run. Release the claim here — the same bail-out
+                // `.objectBoxes` below already has. Without it the claim stayed
+                // in flight until the four-second watchdog expired, and that
+                // watchdog used to reset the AR filter.
+                analysisStateLock.lock()
+                let pendingHandler = pendingMLDetectionHandler
+                pendingMLDetectionHandler = nil
+                analysisStateLock.unlock()
+                manager.onDetection = pendingHandler ?? downstreamDetection
+                manager.onError = downstreamError
+                finishAnalysisPipeline(claimID: claim.id)
+            }
         case .objectBoxes:
             guard let detector = visionBoxDetector else {
                 finishAnalysisPipeline(claimID: claim.id)

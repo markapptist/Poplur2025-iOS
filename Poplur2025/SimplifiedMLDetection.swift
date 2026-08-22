@@ -83,23 +83,34 @@ public class SimplifiedMLDetectionManager {
     
     // MARK: - Public Methods
     
-    /// Process a camera frame for object detection
-    public func processFrame(_ sampleBuffer: CMSampleBuffer) {
-        guard isEnabled, !isProcessing else { return }
-        
+    /// Process a camera frame for object detection.
+    ///
+    /// Returns whether the frame was ACCEPTED, i.e. whether `onDetection` or
+    /// `onError` will eventually fire for it. Every `return false` below is a
+    /// silent skip, and the caller has to know: CameraKitController hands this
+    /// an exclusive analysis claim and waits for the completion to release it.
+    /// A skip with no answer left that claim in flight until its four-second
+    /// watchdog expired — the same shape VisionBoxDetector.process() already
+    /// reports, and the reason a stalled claim could reach across and reset a
+    /// perfectly healthy AR filter.
+    @discardableResult
+    public func processFrame(_ sampleBuffer: CMSampleBuffer) -> Bool {
+        guard isEnabled, !isProcessing else { return false }
+
         // Frame skipping for performance
         frameCount += 1
-        guard frameCount % frameSkipInterval == 0 else { return }
-        
+        guard frameCount % frameSkipInterval == 0 else { return false }
+
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
-            return
+            return false
         }
-        
+
         isProcessing = true
-        
+
         detectionQueue.async { [weak self] in
             self?.performDetection(on: pixelBuffer)
         }
+        return true
     }
     
     // MARK: - Private Methods

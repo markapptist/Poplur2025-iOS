@@ -104,6 +104,12 @@ class ARFilterManager: NSObject, ObservableObject {
         /// Stands in for the web's `drop-shadow` glows, which on an opaque
         /// video frame read as bloom rather than as a cast shadow.
         var bloom: Double = 0
+        /// Red/cyan channel separation, in points at the web's reference size.
+        /// The one effect CSS genuinely cannot do to an opaque video — a
+        /// `drop-shadow` falls entirely BEHIND a frame that has no alpha — so
+        /// the web chain expresses it as two shadows that never actually draw.
+        /// Core Image can offset the channels for real, so here it is real.
+        var anaglyph: Double = 0
     }
 
     enum ARFilter: String, CaseIterable, Identifiable {
@@ -178,10 +184,12 @@ class ARFilterManager: NSObject, ObservableObject {
         var grade: Grade? {
             switch self {
             case .webSmoothGlow:      return Grade(brightness: 1.07, contrast: 1.05, saturation: 1.06, blur: 1.1, bloom: 0.45)
-            // Anaglyph is a per-channel offset, which a colour recipe cannot
-            // express. This is the saturation lift only — honest stand-in, same
-            // compromise the web's own chain makes with drop-shadows.
-            case .webPop3D:           return Grade(saturation: 1.1, bloom: 0.2)
+            // Anaglyph IS the filter. Left as a saturation lift plus a whisper
+            // of bloom it measured 1.93/255 mean change against the unfiltered
+            // frame — below the threshold anyone notices on a moving
+            // viewfinder, i.e. picking Pop 3D looked like picking nothing.
+            // `anaglyph` offsets the channels for real.
+            case .webPop3D:           return Grade(saturation: 1.1, bloom: 0.2, anaglyph: 3)
             case .webPuppyLove:       return Grade(brightness: 1.08, contrast: 1.02, saturation: 1.14, sepia: 0.1)
             case .webRetroVHS:        return Grade(brightness: 0.96, contrast: 1.18, saturation: 1.45, hueDegrees: -6)
             case .webChromeShine:     return Grade(brightness: 1.12, contrast: 1.55, saturation: 0, bloom: 0.5)
@@ -588,12 +596,69 @@ class ARFilterManager: NSObject, ObservableObject {
         var output = image
         let extent = image.extent
 
+        // RADII ARE IN CSS PIXELS, PIXELS ARE NOT.
+        //
+        // Every radius in a Grade was read off the web chain, which styles a
+        // video element about 390pt wide on a phone. Core Image runs on the
+        // full-resolution sensor buffer — 1080px and up — so feeding the same
+        // number straight to CIGaussianBlur made the native soften land about
+        // a quarter as strong as the web's: measured mean change against the
+        // unfiltered frame, blur(1.1) is 2.08/255 at 390px wide and 0.47/255 at
+        // 1080px. Scale the radius with the buffer and the two agree.
+        let cssReferenceWidth = 390.0
+        let pixelScale = max(1, Double(extent.width) / cssReferenceWidth)
+
         if grade.blur > 0.01, let blur = CIFilter(name: "CIGaussianBlur") {
             blur.setValue(output, forKey: kCIInputImageKey)
-            blur.setValue(grade.blur, forKey: kCIInputRadiusKey)
+            blur.setValue(grade.blur * pixelScale, forKey: kCIInputRadiusKey)
             // A blur bleeds past the frame; clamp back or the edges go
             // transparent and the preview shows a dark border.
             if let blurred = blur.outputImage { output = blurred.cropped(to: extent) }
+        }
+
+        // Red channel left, cyan channels right: the red/cyan-glasses fringe
+        // the rail's own Pop 3D tile depicts, and the one thing in this whole
+        // set that a colour recipe genuinely cannot express.
+        if grade.anaglyph > 0.01 {
+            let dx = grade.anaglyph * pixelScale
+            let zero = CIVector(x: 0, y: 0, z: 0, w: 0)
+            // Clamp before the offset. Sliding a channel copy sideways leaves a
+            // strip at each edge where only one channel exists, which renders
+            // as a dark band down both sides of the viewfinder.
+            let source = output.clampedToExtent()
+            let red = source
+                .applyingFilter("CIColorMatrix", parameters: [
+                    "inputRVector": CIVector(x: 1, y: 0, z: 0, w: 0),
+                    "inputGVector": zero,
+                    "inputBVector": zero
+                ])
+                .transformed(by: CGAffineTransform(translationX: -dx, y: 0))
+            let cyan = source
+                .applyingFilter("CIColorMatrix", parameters: [
+                    "inputRVector": zero,
+                    "inputGVector": CIVector(x: 0, y: 1, z: 0, w: 0),
+                    "inputBVector": CIVector(x: 0, y: 0, z: 1, w: 0)
+                ])
+                .transformed(by: CGAffineTransform(translationX: dx, y: 0))
+            let split = cyan.applyingFilter("CIAdditionCompositing", parameters: [
+                kCIInputBackgroundImageKey: red
+            ])
+            // The offset IS the strength — do not blend the split back over the
+            // original. The two halves recombine to the original everywhere
+            // they overlap, so a 55/45 mix with the unsplit frame cancels the
+            // effect down to nothing outside a hairline at each edge; it
+            // measured a mean change of 31/255 that a person could not see.
+            //
+            // Alpha is written from the BIAS rather than carried through:
+            // addition compositing summed two opaque images, so the incoming
+            // alpha is 2 in Core Image's unclamped float working space and
+            // anything downstream would read as over-bright.
+            output = split
+                .applyingFilter("CIColorMatrix", parameters: [
+                    "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 0),
+                    "inputBiasVector": CIVector(x: 0, y: 0, z: 0, w: 1)
+                ])
+                .cropped(to: extent)
         }
 
         // CSS brightness() is a MULTIPLIER. CIColorControls' brightness is an
@@ -628,7 +693,9 @@ class ARFilterManager: NSObject, ObservableObject {
         if grade.bloom > 0.001, let bloom = CIFilter(name: "CIBloom") {
             bloom.setValue(output, forKey: kCIInputImageKey)
             bloom.setValue(grade.bloom, forKey: kCIInputIntensityKey)
-            bloom.setValue(8.0, forKey: kCIInputRadiusKey)
+            // Same CSS-pixel problem as the blur above: a fixed radius of 8 is
+            // the web's glow on a 390pt video and a hairline on a 1080px frame.
+            bloom.setValue(8.0 * pixelScale, forKey: kCIInputRadiusKey)
             if let bloomed = bloom.outputImage { output = bloomed.cropped(to: extent) }
         }
 

@@ -25,26 +25,33 @@ final class CameraPreviewViewController: UIViewController {
 
     // Attach an AVCaptureSession to the base preview layer so raw camera shows immediately
     public func setCaptureSession(_ session: AVCaptureSession) {
-        if let base = previewLayer {
-            base.session = session
-        } else {
-            let base = AVCaptureVideoPreviewLayer(session: session)
-            base.videoGravity = .resizeAspectFill
+        // LOAD THE VIEW FIRST. This used to test `previewLayer` before the view
+        // existed, so on the first call it took the else branch, built a
+        // session-ful preview layer, and then touched `view` — which ran
+        // viewDidLoad, which saw `previewLayer` still nil and built a SECOND,
+        // session-less AVCaptureVideoPreviewLayer plus the AR display layer
+        // above it. The session-ful layer was then inserted underneath both,
+        // leaving that empty second preview layer sitting directly ON TOP of
+        // the AR display layer for the life of the screen, and leaving
+        // applyPreviewLayerVisibility() hiding a layer that was not the only
+        // one in front of the filtered output.
+        loadViewIfNeeded()
+        guard let base = previewLayer else { return }
+        base.session = session
+        base.videoGravity = .resizeAspectFill
 
-            // Set preview layer connection to portrait
-            if let connection = base.connection {
-                if connection.isVideoRotationAngleSupported(90) {
-                    connection.videoRotationAngle = 90
-                }
-            }
+        // Set preview layer connection to portrait. viewDidLoad cannot do this
+        // — a preview layer has no connection until it has a session — so it
+        // belongs here, after the session is attached.
+        if let connection = base.connection,
+           connection.isVideoRotationAngleSupported(90) {
+            connection.videoRotationAngle = 90
+        }
 
-            view.layer.insertSublayer(base, at: 0)
-            previewLayer = base
-            // Keep overlay above base if present
-            if let overlay = displayLayer {
-                overlay.removeFromSuperlayer()
-                view.layer.insertSublayer(overlay, above: base)
-            }
+        // Keep the AR overlay above the base preview.
+        if let overlay = displayLayer {
+            overlay.removeFromSuperlayer()
+            view.layer.insertSublayer(overlay, above: base)
         }
         // Ensure frames are laid out
         forcePreviewLayout()
