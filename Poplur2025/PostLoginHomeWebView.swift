@@ -730,6 +730,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         private var lastMotionDeliveryUptime: TimeInterval = 0
         private var lastDeliveredRoll: Double?
         private var lastDeliveredPitch: Double?
+        private var lastDeliveredHeading: Double?
         private var activeStoreCheckoutRequestID: String?
         private var activeStoreCheckoutProductCounts: [String: Int] = [:]
 
@@ -774,7 +775,8 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                       (webView as? PoplurManagedWebView)?.poplurIsForegroundVisible == true,
                       let roll = note.userInfo?["roll"] as? Double,
                       let pitch = note.userInfo?["pitch"] as? Double else { return }
-                self.deliverMotion(roll: roll, pitch: pitch, on: webView)
+                let heading = note.userInfo?["heading"] as? Double
+                self.deliverMotion(roll: roll, pitch: pitch, heading: heading, on: webView)
             })
             notificationObservers.append(NotificationCenter.default.addObserver(
                 forName: AdManager.feedAdVisibilityNotification, object: nil, queue: .main
@@ -802,6 +804,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                 lastMotionDeliveryUptime = 0
                 lastDeliveredRoll = nil
                 lastDeliveredPitch = nil
+                lastDeliveredHeading = nil
             }
             syncMotionLease()
             if active { replayLatestMotion() }
@@ -821,7 +824,20 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                   let webView = bridge.webView,
                   (webView as? PoplurManagedWebView)?.poplurIsForegroundVisible == true,
                   let sample = CubeMotionPoster.shared.latestSample else { return }
-            deliverMotion(roll: sample.roll, pitch: sample.pitch, on: webView)
+            deliverMotion(roll: sample.roll, pitch: sample.pitch, heading: sample.heading, on: webView)
+        }
+
+        /// Shortest angular distance in degrees, so a pan across north
+        /// (359.9° -> 0.1°) reads as 0.2 and not 359.8. 0.5° matches the 0.008
+        /// rad used for roll/pitch closely enough that a resting phone stays
+        /// just as quiet on the bridge as it was before heading existed.
+        private func headingUnchanged(_ heading: Double?) -> Bool {
+            guard let heading else { return true }
+            guard let last = lastDeliveredHeading else { return false }
+            var delta = (heading - last).truncatingRemainder(dividingBy: 360)
+            if delta > 180 { delta -= 360 }
+            if delta < -180 { delta += 360 }
+            return abs(delta) < 0.5
         }
 
         /// This tiny dispatch deliberately has no completion-based lock. WebKit
@@ -830,7 +846,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         /// Core Motion is a fixed 30Hz source and delivery is limited to
         /// the genuinely foreground document, so callback-free dispatch is
         /// bounded without coupling motion to page inactivity policy.
-        private func deliverMotion(roll: Double, pitch: Double, on webView: WKWebView) {
+        private func deliverMotion(roll: Double, pitch: Double, heading: Double?, on webView: WKWebView) {
             guard webForegroundActive,
                   (webView as? PoplurManagedWebView)?.poplurIsForegroundVisible == true else { return }
             let now = ProcessInfo.processInfo.systemUptime
@@ -838,17 +854,27 @@ struct PostLoginHomeWebView: UIViewRepresentable {
             // let the renderer interpolate; that keeps camcorder aim direct
             // without creating a display-rate WebKit bridge.
             guard now - lastMotionDeliveryUptime >= (1.0 / 30.0) else { return }
+            // Heading has to be part of this test, not just part of the payload.
+            // Panning a level phone around the room is almost pure heading: roll
+            // and pitch barely move, so on a roll/pitch-only gate every sample of
+            // the exact gesture the compass facing exists to serve was dropped
+            // before it reached the bridge.
             if let lastRoll = lastDeliveredRoll,
                let lastPitch = lastDeliveredPitch,
                abs(roll - lastRoll) < 0.008,
-               abs(pitch - lastPitch) < 0.008 {
+               abs(pitch - lastPitch) < 0.008,
+               headingUnchanged(heading) {
                 return
             }
             lastMotionDeliveryUptime = now
             lastDeliveredRoll = roll
             lastDeliveredPitch = pitch
+            lastDeliveredHeading = heading
+            // Omitted entirely when the device has no heading, so the web keeps
+            // its existing parallax-only behaviour rather than seeing a bogus one.
+            let headingField = heading.map { ",heading:\($0)" } ?? ""
             webView.evaluateJavaScript(
-                "window.dispatchEvent(new CustomEvent('poplur-native-motion',{detail:{roll:\(roll),pitch:\(pitch)}}));true;",
+                "window.dispatchEvent(new CustomEvent('poplur-native-motion',{detail:{roll:\(roll),pitch:\(pitch)\(headingField)}}));true;",
                 completionHandler: nil
             )
         }
@@ -1540,6 +1566,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     lastMotionDeliveryUptime = 0
                     lastDeliveredRoll = nil
                     lastDeliveredPitch = nil
+                    lastDeliveredHeading = nil
                     replayLatestMotion()
                     updateCameraHole()
                 }
@@ -2270,6 +2297,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
             lastMotionDeliveryUptime = 0
             lastDeliveredRoll = nil
             lastDeliveredPitch = nil
+            lastDeliveredHeading = nil
             replayLatestMotion()
             flushPendingNativeVoiceCommand()
             DispatchQueue.main.async { [onReady] in onReady() }

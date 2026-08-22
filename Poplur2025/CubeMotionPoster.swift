@@ -19,7 +19,7 @@ final class CubeMotionPoster {
     private var lastSampleUptime: TimeInterval = 0
     private var lastRestartUptime: TimeInterval = 0
     private var healthWorkItem: DispatchWorkItem?
-    private(set) var latestSample: (roll: Double, pitch: Double)?
+    private(set) var latestSample: (roll: Double, pitch: Double, heading: Double?)?
 
     /// Tweak sensitivity if needed. This scales the raw attitude values before posting.
     var rollScale: Double = 1.0
@@ -63,8 +63,30 @@ final class CubeMotionPoster {
         // lag at the source. Hidden/background owners still stop hardware,
         // which is where this stream's power actually goes.
         manager.deviceMotionUpdateInterval = 1.0 / 60.0
-        // Choose a reference frame; xArbitraryZVertical is generally stable for UI tilts
-        manager.startDeviceMotionUpdates(using: .xArbitraryZVertical, to: queue) { [weak self] motion, error in
+        // A NORTH-REFERENCED frame, not the arbitrary one this used to take.
+        // `.xArbitraryZVertical` pins X to wherever the handset happened to be
+        // pointing when the stream started, so it can say how the phone is
+        // TILTED but never which way it is AIMED — and `CMDeviceMotion.heading`
+        // is -1 (unavailable) in it. That is why the navigator turned with a
+        // wrist roll but ignored the phone being panned around the room: the
+        // web has had compass facing ready for a while (CubeTab3D's
+        // `applyHeadingTarget`) and this stream simply never carried a heading
+        // for it to read.
+        //
+        // MAGNETIC north deliberately, not true north. The web calibrates on
+        // its first sample and then tracks only the CHANGE in heading, so what
+        // it needs is a STABLE reference, not an accurate one — while
+        // `.xTrueNorthZVertical` would additionally require Location to be
+        // running just to resolve declination, coupling the cube to a
+        // permission it has no other use for. Roll and pitch are identical in
+        // both frames (both are Z-vertical, i.e. gravity-aligned), so the
+        // existing parallax feel is untouched.
+        let availableFrames = CMMotionManager.availableAttitudeReferenceFrames()
+        let referenceFrame: CMAttitudeReferenceFrame =
+            availableFrames.contains(.xMagneticNorthZVertical)
+                ? .xMagneticNorthZVertical
+                : .xArbitraryZVertical
+        manager.startDeviceMotionUpdates(using: referenceFrame, to: queue) { [weak self] motion, error in
             guard let self else { return }
             guard let motion else {
                 if error != nil {
@@ -77,19 +99,29 @@ final class CubeMotionPoster {
             let attitude = motion.attitude
             let roll = attitude.roll * self.rollScale
             let pitch = attitude.pitch * self.pitchScale
+            // Degrees clockwise from the reference north. Core Motion reports a
+            // NEGATIVE heading when it has none to give (no magnetometer, or an
+            // arbitrary reference frame), so carry nil rather than -1: -1 is a
+            // perfectly ordinary bearing and would yaw every cube a degree off
+            // north on hardware that cannot actually supply one.
+            let heading: Double? = motion.heading >= 0 ? motion.heading : nil
             DispatchQueue.main.async { [weak self] in
                 guard let self,
                       self.isRunning,
                       self.streamGeneration == generation else { return }
                 self.lastSampleUptime = ProcessInfo.processInfo.systemUptime
-                self.latestSample = (roll, pitch)
+                self.latestSample = (roll, pitch, heading)
+                var info: [String: Any] = [
+                    "roll": roll,
+                    "pitch": pitch
+                ]
+                // Additive: the native CubeTabView observers read roll/pitch and
+                // are unaffected by the extra key.
+                if let heading { info["heading"] = heading }
                 NotificationCenter.default.post(
                     name: Notification.Name("CubeMotionUpdate"),
                     object: nil,
-                    userInfo: [
-                        "roll": roll,
-                        "pitch": pitch
-                    ]
+                    userInfo: info
                 )
             }
         }
