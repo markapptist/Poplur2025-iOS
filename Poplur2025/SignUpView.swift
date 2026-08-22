@@ -38,6 +38,9 @@ struct SignUpView: View {
     @State private var verificationStatus: BusinessVerificationStatus = .notVerified
     @State private var rejectionReason: String?
 
+    @State private var dateOfBirth = Calendar.current.date(byAdding: .year, value: -18, to: Date()) ?? Date()
+    @State private var acceptedTerms = false
+
     @State private var errorMessage: String?
     @State private var isLoading = false
     @State private var isSignedUp = false
@@ -45,6 +48,7 @@ struct SignUpView: View {
 
     private enum SignupStep: Int, CaseIterable {
         case accountType
+        case dateOfBirth
         case account
         case businessProfile
         case verification
@@ -53,6 +57,7 @@ struct SignUpView: View {
         var title: String {
             switch self {
             case .accountType: return "Choose Account"
+            case .dateOfBirth: return "Your Birthday"
             case .account: return "Create Login"
             case .businessProfile: return "Business Profile"
             case .verification: return "Verify Business"
@@ -63,6 +68,7 @@ struct SignUpView: View {
         var cubeIcon: String {
             switch self {
             case .accountType: return "person.2.fill"
+            case .dateOfBirth: return "birthday.cake.fill"
             case .account: return "lock.fill"
             case .businessProfile: return "storefront.fill"
             case .verification: return "checkmark.seal.fill"
@@ -183,6 +189,8 @@ struct SignUpView: View {
         switch signupStep {
         case .accountType:
             return "Choose a personal user account or a verified business account."
+        case .dateOfBirth:
+            return "You must be at least 13 years old to use Poplur."
         case .account:
             return accountType == .business ? "Create the login for the business admin account." : "Create your login, then continue with normal user onboarding."
         case .businessProfile:
@@ -293,6 +301,8 @@ struct SignUpView: View {
         switch signupStep {
         case .accountType:
             accountTypeSelection
+        case .dateOfBirth:
+            dateOfBirthForm
         case .account:
             accountForm
         case .businessProfile:
@@ -424,7 +434,38 @@ struct SignUpView: View {
         .buttonStyle(.plain)
     }
 
-    @ViewBuilder
+    private var userAge: Int {
+        Calendar.current.dateComponents([.year], from: dateOfBirth, to: Date()).year ?? 0
+    }
+
+    private var dateOfBirthForm: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            sectionPanel(title: "Date of Birth") {
+                DatePicker(
+                    "Birthday",
+                    selection: $dateOfBirth,
+                    in: ...Date(),
+                    displayedComponents: .date
+                )
+                .datePickerStyle(.wheel)
+                .labelsHidden()
+                .frame(maxWidth: .infinity)
+
+                if userAge < 13 {
+                    HStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.red)
+                        Text("You must be at least 13 years old to create a Poplur account.")
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                            .foregroundStyle(.red)
+                    }
+                    .padding(12)
+                    .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.red.opacity(0.08)))
+                }
+            }
+        }
+    }
+
     private var accountForm: some View {
         VStack(alignment: .leading, spacing: 18) {
             Button {
@@ -446,6 +487,20 @@ struct SignUpView: View {
                     .autocorrectionDisabled(true)
                 secureField("Password", text: $password, field: .password)
                 secureField("Confirm password", text: $confirmPassword, field: .confirmPassword)
+            }
+
+            sectionPanel(title: "Legal") {
+                Toggle(isOn: $acceptedTerms) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("I agree to the Terms of Service and Privacy Policy")
+                            .font(.system(size: 14, weight: .bold, design: .rounded))
+                            .foregroundStyle(.black)
+                        Text("You must be 13 or older. By creating an account you agree to Poplur's Terms of Service and Privacy Policy.")
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .foregroundStyle(.black.opacity(0.5))
+                    }
+                }
+                .toggleStyle(SwitchToggleStyle(tint: DS.Color.accent))
             }
         }
     }
@@ -705,7 +760,8 @@ struct SignUpView: View {
                         uid: uid,
                         email: email.trimmedForSignup,
                         accountType: accountType,
-                        businessProfile: accountType == .business ? buildBusinessProfile() : nil
+                        businessProfile: accountType == .business ? buildBusinessProfile() : nil,
+                        dateOfBirth: dateOfBirth
                     )
                     await MainActor.run {
                         isLoading = false
@@ -731,6 +787,12 @@ struct SignUpView: View {
         case .accountType:
             guard accountType != nil else {
                 errorMessage = "Choose User or Business to continue."
+                return
+            }
+            animateCubeAdvance(to: .dateOfBirth)
+        case .dateOfBirth:
+            guard userAge >= 13 else {
+                errorMessage = "You must be at least 13 years old to use Poplur."
                 return
             }
             animateCubeAdvance(to: .account)
@@ -761,8 +823,10 @@ struct SignUpView: View {
 
     private func previousStep(before step: SignupStep) -> SignupStep {
         switch step {
-        case .accountType, .account:
+        case .accountType, .dateOfBirth:
             return .accountType
+        case .account:
+            return .dateOfBirth
         case .businessProfile:
             return .account
         case .verification:
@@ -791,6 +855,10 @@ struct SignUpView: View {
         }
         guard password.count >= 6 else {
             errorMessage = "Password must be at least 6 characters."
+            return false
+        }
+        guard acceptedTerms else {
+            errorMessage = "You must accept the Terms of Service."
             return false
         }
         return true

@@ -219,7 +219,8 @@ enum BusinessAccountService {
         uid: String,
         email: String,
         accountType: PoplurAccountType,
-        businessProfile: BusinessProfile?
+        businessProfile: BusinessProfile?,
+        dateOfBirth: Date? = nil
     ) async throws {
         let db = Firestore.firestore()
         let username = email.usernameFallback
@@ -231,6 +232,10 @@ enum BusinessAccountService {
             "createdAt": FieldValue.serverTimestamp(),
             "updatedAt": FieldValue.serverTimestamp()
         ]
+
+        if let dateOfBirth {
+            userDocument["dateOfBirth"] = Timestamp(date: dateOfBirth)
+        }
 
         if let businessProfile {
             let businessData = businessProfile.toDictionary()
