@@ -222,10 +222,19 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
     // (results are announced, not rendered per-frame). This is where pressure
     // mode should take its saving, so it stretches further than the preview.
     private static let pressureAnalysisFrameSampleInterval: TimeInterval = 5.0
-    private static let activeFilterFrameSampleInterval: TimeInterval = 0.5
-    private static let pressureActiveFilterFrameSampleInterval: TimeInterval = 0.75
-    private static let activeFilterPresentationHoldDuration: TimeInterval = 1.25
-    private static let pressureActiveFilterPresentationHoldDuration: TimeInterval = 1.75
+    /// The filtered viewfinder is CONTINUOUS now: an active filter processes
+    /// every delivered frame (ARFilterManager's render path is a single GPU
+    /// grade with Vision throttled to ~3Hz internally, not the old per-frame
+    /// landmarks-on-main pipeline), so the un-pressured spacing is zero. Under
+    /// the latched pressure cap the processed cadence drops to ~6fps — the
+    /// filter sheds most of its load before the thermal ladder must park
+    /// anything. The old 0.5/0.75s values made a picked filter a 2fps
+    /// slideshow, which read on device as "the filters don't work".
+    private static let activeFilterFrameSampleInterval: TimeInterval = 0
+    private static let pressureActiveFilterFrameSampleInterval: TimeInterval = 0.16
+    /// With a continuous stream the hold only bridges dropped frames.
+    private static let activeFilterPresentationHoldDuration: TimeInterval = 0.5
+    private static let pressureActiveFilterPresentationHoldDuration: TimeInterval = 0.9
     private static let coldBudgetRecordLimit = 16
     private static let coldBudgetDefaultsKey = "CameraKitController.coldBudget.v2"
 
@@ -300,6 +309,14 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
     private var faceRecognitionCompletion: AnyCancellable?
     private let arFilterStateLock = NSLock()
     private var arFilterProcessingWanted = false
+    /// Continuous filtered-viewfinder state. The in-flight flag drops late
+    /// frames instead of queueing them (real-time semantics: a render that
+    /// cannot keep up must skip, never lag); the timestamp enforces the
+    /// pressure-capped minimum spacing. Guarded by its own lock because the
+    /// render completion can land on any queue.
+    private let arFilterRenderLock = NSLock()
+    private var arFilterRenderInFlight = false
+    private var lastFilteredFrameUptime: TimeInterval = 0
     private var arFilterSelectionCancellable: AnyCancellable?
     /// At 0.67 seconds between families and two seconds between uses of the
     /// same family, face/classification/boxes each run no faster than ~0.5 Hz.
@@ -1795,11 +1812,11 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
 
             DispatchQueue.main.async {
                 self.cameraPreviewViewController.setCaptureSession(self.captureSession)
-                if self.currentCameraPosition == .front {
-                    self.displayLayer?.setAffineTransform(CGAffineTransform(scaleX: -1, y: 1))
-                } else {
-                    self.displayLayer?.setAffineTransform(.identity)
-                }
+                // The data-output connection already mirrors the front camera
+                // (configureVideoConnection); mirroring the layer AGAIN
+                // un-mirrored the filtered view relative to the hardware
+                // preview — the on-device "AR filters flip the camera" report.
+                self.displayLayer?.setAffineTransform(.identity)
             }
         } catch {
             print("❌ [CameraKitController] Failed to switch camera: \(error)")
@@ -2152,11 +2169,11 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
             DispatchQueue.main.async {
                 self.displayLayer?.videoGravity = .resizeAspectFill
                 self.displayLayer?.opacity = 0.0
-                if self.currentCameraPosition == .front {
-                    self.displayLayer?.setAffineTransform(CGAffineTransform(scaleX: -1, y: 1))
-                } else {
-                    self.displayLayer?.setAffineTransform(.identity)
-                }
+                // The data-output connection already mirrors the front camera
+                // (configureVideoConnection); mirroring the layer AGAIN
+                // un-mirrored the filtered view relative to the hardware
+                // preview — the on-device "AR filters flip the camera" report.
+                self.displayLayer?.setAffineTransform(.identity)
             }
         }
     }
@@ -2209,6 +2226,32 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
         frameProcessingLock.unlock()
         guard mayProcessFrame else { return }
 
+        // ── Continuous filtered viewfinder ───────────────────────────────
+        // An explicitly selected AR filter no longer rides the serialized
+        // analysis lane. That lane meters ONE frame per interval through a
+        // gate that literally disables the connection between samples — right
+        // for Vision/Core ML snapshots, and exactly wrong for a viewfinder,
+        // where it produced a 2fps slideshow, a per-pass cost big enough to
+        // trip the 4s claim watchdog (whose quarantine silently reset the
+        // filter to .none), and a phone that cooked while looking broken.
+        // The filter path now keeps the tap open and renders every delivered
+        // frame directly; renderFilteredViewfinderFrame drops late frames and
+        // spaces out under the latched pressure cap, and the other analysis
+        // families remain paused exactly as the lane policy already promises
+        // while a filter is active.
+        if isARFilterProcessingWanted() {
+            analysisFrameGateLock.lock()
+            analysisFrameGateOpen = true
+            analysisFrameGateLock.unlock()
+            if let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) {
+                retainedPreviewLock.lock()
+                retainedPreviewPixelBuffer = pixelBuffer
+                retainedPreviewLock.unlock()
+            }
+            renderFilteredViewfinderFrame(sampleBuffer)
+            return
+        }
+
         analysisFrameGateLock.lock()
         let ownsSample = analysisFrameGateOpen
         analysisFrameGateOpen = false
@@ -2236,11 +2279,9 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
         // avoidable spike.
         guard let displayLayer, !isARFilterProcessingWanted() else { return }
         DispatchQueue.main.async {
-            if self.currentCameraPosition == .front {
-                self.displayLayer?.setAffineTransform(CGAffineTransform(scaleX: -1, y: 1))
-            } else {
-                self.displayLayer?.setAffineTransform(.identity)
-            }
+            // Buffers arrive pre-mirrored from the connection; see the note at
+            // the sibling sites. Double-mirroring flipped the filtered view.
+            self.displayLayer?.setAffineTransform(.identity)
             let status = displayLayer.status
             if status == .failed {
                 displayLayer.flushAndRemoveImage()
@@ -2423,6 +2464,56 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
         return duration
     }
 
+    /// One frame of the continuous filtered viewfinder, on the video output
+    /// queue. Real-time semantics: while a render is in flight, later frames
+    /// drop rather than queue, and under the latched pressure cap frames are
+    /// spaced to the pressure interval so the filter sheds load ahead of the
+    /// thermal ladder. This path replaces the claim-based .arFilter lane for
+    /// LIVE preview; captured photos/clips still go through their own paths.
+    private func renderFilteredViewfinderFrame(_ sampleBuffer: CMSampleBuffer) {
+        guard let manager = arFilterManager, let displayLayer else { return }
+
+        analysisStateLock.lock()
+        let minSpacing = activeFilterMinimumDispatchSpacing
+        let presentationHold = activeFilterPresentationHold
+        analysisStateLock.unlock()
+
+        let now = ProcessInfo.processInfo.systemUptime
+        arFilterRenderLock.lock()
+        let tooSoon = minSpacing > 0 && now - lastFilteredFrameUptime < minSpacing
+        let busy = arFilterRenderInFlight
+        if !busy && !tooSoon {
+            arFilterRenderInFlight = true
+            lastFilteredFrameUptime = now
+        }
+        arFilterRenderLock.unlock()
+        guard !busy, !tooSoon else { return }
+
+        // Synchronous on this queue: ARFilterManager's render path no longer
+        // hops anywhere, so the completion runs before this returns and the
+        // in-flight flag really does bound concurrency to one frame.
+        manager.applyFilterToVideoFrame(sampleBuffer) { [weak self, weak displayLayer] filteredBuffer in
+            guard let self else { return }
+            self.arFilterRenderLock.lock()
+            self.arFilterRenderInFlight = false
+            self.arFilterRenderLock.unlock()
+            guard let displayLayer, let bufferToDisplay = filteredBuffer else { return }
+            DispatchQueue.main.async {
+                // Buffers arrive pre-mirrored from the connection; see the
+                // note at the sibling sites.
+                self.displayLayer?.setAffineTransform(.identity)
+                if displayLayer.status == .failed {
+                    displayLayer.flushAndRemoveImage()
+                }
+                if self.safelyEnqueueSampleBuffer(bufferToDisplay, to: displayLayer) {
+                    self.cameraPreviewViewController.markFilteredFrameReady(
+                        holdDuration: presentationHold
+                    )
+                }
+            }
+        }
+    }
+
     private func runARAnalysis(
         manager: ARFilterManager,
         sampleBuffer: CMSampleBuffer,
@@ -2440,11 +2531,11 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
             guard let displayLayer else { return }
             let bufferToDisplay = filteredBuffer ?? sampleBuffer
             DispatchQueue.main.async {
-                if self.currentCameraPosition == .front {
-                    self.displayLayer?.setAffineTransform(CGAffineTransform(scaleX: -1, y: 1))
-                } else {
-                    self.displayLayer?.setAffineTransform(.identity)
-                }
+                // The data-output connection already mirrors the front camera
+                // (configureVideoConnection); mirroring the layer AGAIN
+                // un-mirrored the filtered view relative to the hardware
+                // preview — the on-device "AR filters flip the camera" report.
+                self.displayLayer?.setAffineTransform(.identity)
                 let status = displayLayer.status
                 if status == .failed {
                     displayLayer.flushAndRemoveImage()

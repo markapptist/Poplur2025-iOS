@@ -19,7 +19,17 @@ class ARFilterManager: NSObject, ObservableObject {
     // MARK: - Published Properties
     
     /// Currently active filter
-    @Published var activeFilter: ARFilter = .none
+    @Published var activeFilter: ARFilter = .none {
+        didSet {
+            // The render path runs per-frame on the camera's output queue and
+            // must never hop to the main actor just to learn which filter is
+            // live — that hop per frame is what made the old pipeline
+            // serialize on main. Mirror the value under a lock instead.
+            filterStateLock.lock()
+            filterSnapshot = activeFilter
+            filterStateLock.unlock()
+        }
+    }
     
     /// Whether AR session is running
     @Published var isARActive: Bool = false
@@ -35,14 +45,46 @@ class ARFilterManager: NSObject, ObservableObject {
     private var arSession: ARSession?
     private var sceneView: ARSCNView?
     private var currentFaceNode: SCNNode?
-    private let ciContext = CIContext()
+    /// CIContext is documented thread-safe; the whole render path runs off the
+    /// main actor, so the context lives outside it too.
+    private nonisolated(unsafe) let ciContext = CIContext()
     /// Reuses the Vision pass already required by the native filter pipeline to
     /// anchor the transparent WebGL accessory layer. No second face detector.
     var onFaceTrack: ((CGRect?, Float, CGFloat, CGFloat) -> Void)?
     private var lastFaceTrackPublishTime: TimeInterval = 0
-    
-    // Filter intensity (0.0 - 1.0)
-    private var filterIntensity: Float = 0.7
+
+    // ── Cross-queue state for the per-frame render path ─────────────────────
+    // Everything below is written on the main actor (or the render queue) and
+    // read per-frame on the camera's output queue, guarded by one lock. The
+    // old pipeline instead bounced every frame through DispatchQueue.main and
+    // a MainActor Task, which both janked the UI and capped the filtered
+    // viewfinder at the analysis lane's 2fps.
+    private nonisolated(unsafe) let filterStateLock = NSLock()
+    private nonisolated(unsafe) var filterSnapshot: ARFilter = .none
+    /// The last face Vision gave us, reused between detection passes. A face
+    /// moves slowly relative to 30fps video, so compositing against a reading
+    /// up to a few hundred ms old is invisible — while running landmarks on
+    /// EVERY frame was the single largest cost of the old pipeline.
+    private nonisolated(unsafe) var cachedFaceObservation: VNFaceObservation?
+    private nonisolated(unsafe) var cachedFaceAt: TimeInterval = 0
+    /// One Vision pass at a time; frames that arrive while one runs reuse the
+    /// cache instead of stacking requests on the Neural Engine.
+    private nonisolated(unsafe) var faceDetectInFlight = false
+    /// Output buffers come from a pool sized to the current frame, not from
+    /// CVPixelBufferCreate per frame — allocation churn at display rate is a
+    /// real cost on 4K-capable sensors.
+    private nonisolated(unsafe) var outputBufferPool: CVPixelBufferPool?
+    private nonisolated(unsafe) var outputBufferPoolSize: CGSize = .zero
+
+    /// How stale the cached face may get before the next frame pays for a
+    /// fresh landmarks pass. 0.35s ≈ 3Hz — the accessory overlay publishes at
+    /// 12Hz max (publishFaceTrack) and interpolates on its side.
+    private nonisolated static let faceRefreshInterval: TimeInterval = 0.35
+
+    // Filter intensity (0.0 - 1.0). Written rarely from the main actor, read
+    // per-frame on the render queue; an aligned Float load/store is atomic on
+    // arm64, and a momentarily stale intensity is harmless.
+    private nonisolated(unsafe) var filterIntensity: Float = 0.7
     
     // MARK: - AR Filters
     
@@ -268,8 +310,10 @@ class ARFilterManager: NSObject, ObservableObject {
         currentFaceNode = nil
     }
     
-    /// Apply filter to image
-    func applyFilter(to image: CIImage, faceObservation: VNFaceObservation?) -> CIImage? {
+    /// Apply filter to image. Nonisolated and parameterized by the filter so
+    /// the per-frame render can run entirely on the camera's output queue.
+    nonisolated func applyFilter(_ filter: ARFilter, to image: CIImage, faceObservation: VNFaceObservation?) -> CIImage? {
+        let activeFilter = filter
         guard activeFilter != .none else { return image }
 
         // A GRADE is a whole-frame colour recipe: Retro VHS, Comic Pop and
@@ -349,138 +393,118 @@ class ARFilterManager: NSObject, ObservableObject {
         filterIntensity = max(0.0, min(1.0, value))
     }
     
-    /// Apply filter to a captured video frame (called from camera delegate)
-    /// This method is nonisolated to allow calling from background video processing queue
-    nonisolated func applyFilterToVideoFrame(_ sampleBuffer: CMSampleBuffer, completion: @escaping (CMSampleBuffer?) -> Void) {
-        // Capture weak reference and current filter to avoid blocking
-        weak var weakSelf = self
-        DispatchQueue.main.async {
-            guard let self = weakSelf else {
-                completion(sampleBuffer)
-                return
-            }
-            let currentFilter = self.activeFilter
-            
-            guard currentFilter != .none else {
-                completion(sampleBuffer)
-                return
-            }
-            
-            self.processFrameWithFilter(sampleBuffer, filter: currentFilter, completion: completion)
-        }
+    /// The filter the render path should apply right now, readable from any
+    /// queue. `.none` costs one lock round-trip per frame and nothing else.
+    nonisolated func currentFilterSnapshot() -> ARFilter {
+        filterStateLock.lock()
+        defer { filterStateLock.unlock() }
+        return filterSnapshot
     }
-    
-    /// Internal method to process frame with a specific filter
-    private nonisolated func processFrameWithFilter(_ sampleBuffer: CMSampleBuffer, filter: ARFilter, completion: @escaping (CMSampleBuffer?) -> Void) {
-        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
-            print("❌ [ARFilter] Failed to get pixel buffer from sample buffer")
+
+    /// Apply the active filter to a captured video frame. Runs ENTIRELY on the
+    /// caller's queue (the camera's video output queue) and completes
+    /// synchronously - no main-actor hop, no per-frame Vision.
+    ///
+    /// The old shape hopped to main to read `activeFilter`, ran a
+    /// VNDetectFaceLandmarksRequest on EVERY frame at full sensor resolution,
+    /// then rendered Core Image inside a MainActor Task. That is why an active
+    /// filter dropped the viewfinder to the 2fps analysis cadence, cooked the
+    /// phone, and tripped the 4s analysis watchdog (which silently reset the
+    /// filter to .none - "the filters don't do anything"). All fifteen web
+    /// filters are whole-frame grades that need no face at all; only the
+    /// legacy face-oval nine and the accessory overlay's anchor need Vision,
+    /// and a cached observation refreshed at ~3Hz serves both.
+    nonisolated func applyFilterToVideoFrame(_ sampleBuffer: CMSampleBuffer, completion: @escaping (CMSampleBuffer?) -> Void) {
+        let filter = currentFilterSnapshot()
+        guard filter != .none else {
             completion(sampleBuffer)
             return
         }
-        
-        let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
-        
-        // Detect face in frame for better filter application
-        // Landmarks give the renderer stable eye positions. Bounding-box-only
-        // effects looked like screen stickers and drifted whenever the user
-        // turned their head.
-        let request = VNDetectFaceLandmarksRequest { request, error in
-            if let error = error {
-                print("❌ [ARFilter] Face detection error: \(error.localizedDescription)")
-            }
-            
-            let faceObservation = (request.results as? [VNFaceObservation])?.first
-            
-            // Log face detection status occasionally (every 60 frames ~2 seconds at 30fps)
-            let shouldLog = Int.random(in: 0..<60) == 0
-            if shouldLog {
-                // Get current user info on main thread
-                Task { @MainActor in
-                    #if canImport(FirebaseAuth)
-                    if let user = Auth.auth().currentUser {
-                        let username = user.displayName ?? user.email ?? "Unknown"
-                        let uid = user.uid
-                        
-                        if let face = faceObservation {
-                            print("✅ [ARFilter] Face detected! User: \(username) (UID: \(uid))")
-                            print("   Bounds: \(face.boundingBox), confidence: \(face.confidence)")
-                        } else {
-                            print("⚠️ [ARFilter] No face detected - User: \(username) (UID: \(uid))")
-                            print("   Frame will remain unchanged")
-                        }
-                    } else {
-                        if let face = faceObservation {
-                            print("✅ [ARFilter] Face detected! User: Not authenticated")
-                            print("   Bounds: \(face.boundingBox), confidence: \(face.confidence)")
-                        } else {
-                            print("⚠️ [ARFilter] No face detected - User: Not authenticated")
-                        }
-                    }
-                    #else
-                    if let face = faceObservation {
-                        print("✅ [ARFilter] Face detected! Bounds: \(face.boundingBox), confidence: \(face.confidence)")
-                    } else {
-                        print("⚠️ [ARFilter] No face detected in frame - leaving frame unchanged")
-                    }
-                    #endif
-                }
-            }
-            
-            // Access main actor isolated methods safely
-            Task { @MainActor in
-                self.publishFaceTrack(faceObservation)
-                // Apply filter with face observation
-                guard let filteredImage = self.applyFilter(to: ciImage, faceObservation: faceObservation) else {
-                    print("❌ [ARFilter] Failed to apply filter")
-                    completion(sampleBuffer)
-                    return
-                }
-                
-                // Render filtered image back to pixel buffer
-                if let outputPixelBuffer = self.createPixelBuffer(from: filteredImage) {
-                    var timingInfo = CMSampleTimingInfo()
-                    CMSampleBufferGetSampleTimingInfo(sampleBuffer, at: 0, timingInfoOut: &timingInfo)
-                    
-                    var formatDescription: CMFormatDescription?
-                    CMVideoFormatDescriptionCreateForImageBuffer(
-                        allocator: kCFAllocatorDefault,
-                        imageBuffer: outputPixelBuffer,
-                        formatDescriptionOut: &formatDescription
-                    )
-                    
-                    guard let formatDesc = formatDescription else {
-                        print("❌ [ARFilter] Failed to create format description")
-                        completion(sampleBuffer)
-                        return
-                    }
-                    
-                    var newSampleBuffer: CMSampleBuffer?
-                    CMSampleBufferCreateReadyWithImageBuffer(
-                        allocator: kCFAllocatorDefault,
-                        imageBuffer: outputPixelBuffer,
-                        formatDescription: formatDesc,
-                        sampleTiming: &timingInfo,
-                        sampleBufferOut: &newSampleBuffer
-                    )
-                    
-                    completion(newSampleBuffer)
-                } else {
-                    print("❌ [ARFilter] Failed to create output pixel buffer")
-                    completion(sampleBuffer)
-                }
-            }
+        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
+            completion(sampleBuffer)
+            return
         }
-        
+
+        refreshFaceCacheIfStale(from: pixelBuffer)
+
+        filterStateLock.lock()
+        let face = cachedFaceObservation
+        filterStateLock.unlock()
+
+        let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
+        guard let filteredImage = applyFilter(filter, to: ciImage, faceObservation: face) else {
+            completion(sampleBuffer)
+            return
+        }
+
+        guard let outputPixelBuffer = createPixelBuffer(from: filteredImage) else {
+            completion(sampleBuffer)
+            return
+        }
+
+        var timingInfo = CMSampleTimingInfo()
+        CMSampleBufferGetSampleTimingInfo(sampleBuffer, at: 0, timingInfoOut: &timingInfo)
+
+        var formatDescription: CMFormatDescription?
+        CMVideoFormatDescriptionCreateForImageBuffer(
+            allocator: kCFAllocatorDefault,
+            imageBuffer: outputPixelBuffer,
+            formatDescriptionOut: &formatDescription
+        )
+        guard let formatDesc = formatDescription else {
+            completion(sampleBuffer)
+            return
+        }
+
+        var newSampleBuffer: CMSampleBuffer?
+        CMSampleBufferCreateReadyWithImageBuffer(
+            allocator: kCFAllocatorDefault,
+            imageBuffer: outputPixelBuffer,
+            formatDescription: formatDesc,
+            sampleTiming: &timingInfo,
+            sampleBufferOut: &newSampleBuffer
+        )
+        completion(newSampleBuffer)
+    }
+
+    /// Refresh the cached face observation when it has gone stale, at most one
+    /// Vision pass in flight. Synchronous on the calling (render) queue when it
+    /// runs - landmarks at ~3Hz on a background queue is cheap; landmarks at
+    /// 30Hz was the burner. Frames between refreshes reuse the cache.
+    ///
+    /// Landmarks (not bounding-box-only) on purpose: box-only effects looked
+    /// like screen stickers and drifted whenever the user turned their head.
+    private nonisolated func refreshFaceCacheIfStale(from pixelBuffer: CVPixelBuffer) {
+        let now = ProcessInfo.processInfo.systemUptime
+        filterStateLock.lock()
+        let stale = now - cachedFaceAt >= Self.faceRefreshInterval
+        let busy = faceDetectInFlight
+        if stale && !busy { faceDetectInFlight = true }
+        filterStateLock.unlock()
+        guard stale, !busy else { return }
+
+        let request = VNDetectFaceLandmarksRequest()
         let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, options: [:])
-        DispatchQueue.global(qos: .userInitiated).async {
-            do {
-                try handler.perform([request])
-            } catch {
-                print("❌ [ARFilter] Failed to perform face detection: \(error)")
-                completion(sampleBuffer)
-            }
+        do {
+            try handler.perform([request])
+        } catch {
+            print("[ARFilter] Face detection failed: \(error)")
+        }
+        let observation = request.results?.first
+
+        filterStateLock.lock()
+        cachedFaceObservation = observation
+        cachedFaceAt = now
+        faceDetectInFlight = false
+        filterStateLock.unlock()
+
+        // The accessory overlay's anchor rides the same pass, published from
+        // the main actor as before (its own 12Hz throttle still applies).
+        Task { @MainActor in
+            self.publishFaceTrack(observation)
         }
     }
+
 
     private func publishFaceTrack(_ observation: VNFaceObservation?) {
         let now = ProcessInfo.processInfo.systemUptime
@@ -494,8 +518,10 @@ class ARFilterManager: NSObject, ObservableObject {
         )
     }
     
-    /// Create a pixel buffer from CIImage
-    private func createPixelBuffer(from ciImage: CIImage) -> CVPixelBuffer? {
+    /// Create a pixel buffer from CIImage. Buffers come from a pool sized to
+    /// the current frame — per-frame CVPixelBufferCreate at display rate was
+    /// allocation churn the old 2fps cadence merely hid.
+    private nonisolated func createPixelBuffer(from ciImage: CIImage) -> CVPixelBuffer? {
         let extent = ciImage.extent.integral
         guard extent.width > 0, extent.height > 0 else {
             return nil
@@ -503,26 +529,36 @@ class ARFilterManager: NSObject, ObservableObject {
 
         let width = Int(extent.width)
         let height = Int(extent.height)
-        
+
+        filterStateLock.lock()
+        if outputBufferPool == nil
+            || outputBufferPoolSize != CGSize(width: width, height: height) {
+            let attributes = [
+                kCVPixelBufferCGImageCompatibilityKey: kCFBooleanTrue!,
+                kCVPixelBufferCGBitmapContextCompatibilityKey: kCFBooleanTrue!,
+                kCVPixelBufferIOSurfacePropertiesKey: [:],
+                kCVPixelBufferWidthKey: width,
+                kCVPixelBufferHeightKey: height,
+                kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_32BGRA
+            ] as [CFString: Any]
+            var pool: CVPixelBufferPool?
+            CVPixelBufferPoolCreate(
+                kCFAllocatorDefault,
+                // A shallow pool: the display layer holds a frame or two; three
+                // covers render-ahead without hoarding 4-channel full-res frames.
+                [kCVPixelBufferPoolMinimumBufferCountKey: 3] as CFDictionary,
+                attributes as CFDictionary,
+                &pool
+            )
+            outputBufferPool = pool
+            outputBufferPoolSize = CGSize(width: width, height: height)
+        }
+        let currentPool = outputBufferPool
+        filterStateLock.unlock()
+
+        guard let currentPool else { return nil }
         var pixelBuffer: CVPixelBuffer?
-        let attributes = [
-            kCVPixelBufferCGImageCompatibilityKey: kCFBooleanTrue!,
-            kCVPixelBufferCGBitmapContextCompatibilityKey: kCFBooleanTrue!,
-            kCVPixelBufferIOSurfacePropertiesKey: [:],
-            kCVPixelBufferWidthKey: width,
-            kCVPixelBufferHeightKey: height,
-            kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_32BGRA
-        ] as [CFString: Any]
-        
-        let status = CVPixelBufferCreate(
-            kCFAllocatorDefault,
-            width,
-            height,
-            kCVPixelFormatType_32BGRA,
-            attributes as CFDictionary,
-            &pixelBuffer
-        )
-        
+        let status = CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, currentPool, &pixelBuffer)
         guard status == kCVReturnSuccess, let buffer = pixelBuffer else {
             return nil
         }
@@ -548,7 +584,7 @@ class ARFilterManager: NSObject, ObservableObject {
     ///
     /// Each step is skipped when it is the identity, so a recipe that only
     /// shifts saturation costs one CIFilter rather than six.
-    private func applyGrade(_ grade: Grade, to image: CIImage) -> CIImage {
+    private nonisolated func applyGrade(_ grade: Grade, to image: CIImage) -> CIImage {
         var output = image
         let extent = image.extent
 
@@ -599,7 +635,7 @@ class ARFilterManager: NSObject, ObservableObject {
         return output
     }
 
-    private func applySmoothingFilter(to image: CIImage) -> CIImage {
+    private nonisolated func applySmoothingFilter(to image: CIImage) -> CIImage {
         // Use bilateral filter for edge-preserving smoothing
         guard let smoothingFilter = CIFilter(name: "CIMedianFilter") else {
             return image
@@ -615,7 +651,7 @@ class ARFilterManager: NSObject, ObservableObject {
     }
     
     /// Brightening filter for face
-    private func applyBrighteningFilter(to image: CIImage) -> CIImage {
+    private nonisolated func applyBrighteningFilter(to image: CIImage) -> CIImage {
         guard let filter = CIFilter(name: "CIColorControls") else {
             return image
         }
@@ -628,7 +664,7 @@ class ARFilterManager: NSObject, ObservableObject {
     }
     
     /// Glow filter for radiant skin
-    private func applyGlowFilter(to image: CIImage) -> CIImage {
+    private nonisolated func applyGlowFilter(to image: CIImage) -> CIImage {
         guard let bloomFilter = CIFilter(name: "CIBloom") else {
             return image
         }
@@ -653,7 +689,7 @@ class ARFilterManager: NSObject, ObservableObject {
     }
     
     /// Sharpen filter
-    private func applySharpenFilter(to image: CIImage) -> CIImage {
+    private nonisolated func applySharpenFilter(to image: CIImage) -> CIImage {
         guard let filter = CIFilter(name: "CISharpenLuminance") else {
             return image
         }
@@ -665,7 +701,7 @@ class ARFilterManager: NSObject, ObservableObject {
     }
     
     /// Warmth filter (orange/golden tones)
-    private func applyWarmthFilter(to image: CIImage) -> CIImage {
+    private nonisolated func applyWarmthFilter(to image: CIImage) -> CIImage {
         guard let filter = CIFilter(name: "CITemperatureAndTint") else {
             return image
         }
@@ -678,7 +714,7 @@ class ARFilterManager: NSObject, ObservableObject {
     }
     
     /// Cool filter (blue tones)
-    private func applyCoolFilter(to image: CIImage) -> CIImage {
+    private nonisolated func applyCoolFilter(to image: CIImage) -> CIImage {
         guard let filter = CIFilter(name: "CITemperatureAndTint") else {
             return image
         }
@@ -691,7 +727,7 @@ class ARFilterManager: NSObject, ObservableObject {
     }
     
     /// Vintage filter
-    private func applyVintageFilter(to image: CIImage) -> CIImage {
+    private nonisolated func applyVintageFilter(to image: CIImage) -> CIImage {
         guard let sepiaFilter = CIFilter(name: "CISepiaTone") else {
             return image
         }
@@ -717,7 +753,7 @@ class ARFilterManager: NSObject, ObservableObject {
     
     // MARK: - Helper Methods
     
-    private func compositeFaceEffect(
+    private nonisolated func compositeFaceEffect(
         original: CIImage,
         filtered: CIImage,
         faceObservation: VNFaceObservation
@@ -735,7 +771,7 @@ class ARFilterManager: NSObject, ObservableObject {
     }
 
     /// Create a soft mask around the detected face region.
-    private func createFaceMask(from observation: VNFaceObservation, imageExtent: CGRect) -> CIImage {
+    private nonisolated func createFaceMask(from observation: VNFaceObservation, imageExtent: CGRect) -> CIImage {
         let bounds = observation.boundingBox
         
         // Vision and Core Image both use lower-left image coordinates.
@@ -768,7 +804,7 @@ class ARFilterManager: NSObject, ObservableObject {
 
     // MARK: - Face-anchored AR artwork
 
-    private func applyTrackedFaceArtwork(
+    private nonisolated func applyTrackedFaceArtwork(
         filter: ARFilter,
         to image: CIImage,
         faceObservation: VNFaceObservation
@@ -890,7 +926,7 @@ class ARFilterManager: NSObject, ObservableObject {
         return output.cropped(to: image.extent)
     }
 
-    private func faceRect(for observation: VNFaceObservation, imageExtent: CGRect) -> CGRect {
+    private nonisolated func faceRect(for observation: VNFaceObservation, imageExtent: CGRect) -> CGRect {
         CGRect(
             x: imageExtent.minX + observation.boundingBox.minX * imageExtent.width,
             y: imageExtent.minY + observation.boundingBox.minY * imageExtent.height,
@@ -899,7 +935,7 @@ class ARFilterManager: NSObject, ObservableObject {
         )
     }
 
-    private func trackedEyeLine(for observation: VNFaceObservation, faceRect: CGRect) -> (left: CGPoint, right: CGPoint, x: CGFloat, y: CGFloat) {
+    private nonisolated func trackedEyeLine(for observation: VNFaceObservation, faceRect: CGRect) -> (left: CGPoint, right: CGPoint, x: CGFloat, y: CGFloat) {
         func center(_ region: VNFaceLandmarkRegion2D?) -> CGPoint? {
             guard let region, !region.normalizedPoints.isEmpty else { return nil }
             let average = region.normalizedPoints.reduce(CGPoint.zero) { partial, point in
@@ -919,11 +955,11 @@ class ARFilterManager: NSObject, ObservableObject {
         return (left, right, (left.x + right.x) * 0.5, (left.y + right.y) * 0.5)
     }
 
-    private func sourceOver(_ overlay: CIImage, _ background: CIImage) -> CIImage {
+    private nonisolated func sourceOver(_ overlay: CIImage, _ background: CIImage) -> CIImage {
         overlay.composited(over: background)
     }
 
-    private func roundedRect(_ rect: CGRect, radius: CGFloat, color: CIColor, extent: CGRect) -> CIImage {
+    private nonisolated func roundedRect(_ rect: CGRect, radius: CGFloat, color: CIColor, extent: CGRect) -> CIImage {
         guard let generator = CIFilter(name: "CIRoundedRectangleGenerator") else {
             return CIImage(color: color).cropped(to: rect)
         }
@@ -933,7 +969,7 @@ class ARFilterManager: NSObject, ObservableObject {
         return (generator.outputImage ?? CIImage(color: color).cropped(to: rect)).cropped(to: extent)
     }
 
-    private func addRoundedOutline(rect: CGRect, width: CGFloat, color: CIColor, to image: CIImage) -> CIImage {
+    private nonisolated func addRoundedOutline(rect: CGRect, width: CGFloat, color: CIColor, to image: CIImage) -> CIImage {
         let outer = roundedRect(rect, radius: min(rect.width, rect.height) * 0.48, color: color, extent: image.extent)
         let withOuter = sourceOver(outer, image)
         let innerRect = rect.insetBy(dx: width, dy: width)
@@ -941,7 +977,7 @@ class ARFilterManager: NSObject, ObservableObject {
         return sourceOver(image.cropped(to: innerRect), withOuter)
     }
 
-    private func softDot(center: CGPoint, radius: CGFloat, color: CIColor, extent: CGRect) -> CIImage {
+    private nonisolated func softDot(center: CGPoint, radius: CGFloat, color: CIColor, extent: CGRect) -> CIImage {
         guard let gradient = CIFilter(name: "CIRadialGradient") else {
             return CIImage(color: color).cropped(to: CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2))
         }
@@ -953,7 +989,7 @@ class ARFilterManager: NSObject, ObservableObject {
         return (gradient.outputImage ?? CIImage.empty()).cropped(to: extent)
     }
 
-    private func addSparkles(to image: CIImage, around face: CGRect) -> CIImage {
+    private nonisolated func addSparkles(to image: CIImage, around face: CGRect) -> CIImage {
         let points = [
             CGPoint(x: face.minX - face.width * 0.03, y: face.maxY - face.height * 0.18),
             CGPoint(x: face.maxX + face.width * 0.03, y: face.minY + face.height * 0.58),
