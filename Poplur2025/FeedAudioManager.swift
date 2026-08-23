@@ -47,13 +47,6 @@ final class PoplurEQSync {
     func end(_ lane: Lane) {
         let changed = withLock { $0.activeLanes.remove(lane) != nil }
         if changed {
-            // Voice overlays share the playback session already used by Feed and Map.
-            // Re-applying that category as an overlay restarts the audio I/O path
-            // and is heard as a skip. Wake-word recognition restores its session
-            // explicitly after the microphone is stopped.
-            if lane == .feedBumper && !isActive(.feedVideo) {
-                restorePlaybackSessionAfterRecognition()
-            }
             notifyChanged()
         }
     }
