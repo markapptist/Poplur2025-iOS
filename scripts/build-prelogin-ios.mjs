@@ -77,6 +77,14 @@ const ASSETS = [
   [join(CLAYMAP_PUBLIC, "clay_cube.png"),
    "poplur-clay-map/public/clay_cube.png"],
 
+  // Post-sign-up gender pane (paneGender): the same already-shipping post-login
+  // navigator heads, already small enough to bundle directly — no separate
+  // compression pass needed, unlike zoom_buildings.glb above.
+  [join(CLAYMAP_PUBLIC, "poplur_mark_head_navigator.glb"),
+   "poplur-clay-map/public/poplur_mark_head_navigator.glb"],
+  [join(CLAYMAP_PUBLIC, "poplur_female_head_navigator.glb"),
+   "poplur-clay-map/public/poplur_female_head_navigator.glb"],
+
   // shared ambient radio bed (splash + welcome hand the play position off)
   [join(CLAYMAP_PUBLIC, "radio_bed.wav"),
    "poplur-clay-map/public/radio_bed.wav"],

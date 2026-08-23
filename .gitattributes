@@ -1,2 +1,4 @@
 *.glb filter=lfs diff=lfs merge=lfs -text
 ClayMapWeb/**/*.glb !text !filter !merge !diff
+PreloginWeb/poplur-clay-map/public/poplur_mark_head_navigator.glb !text !filter !merge !diff
+PreloginWeb/poplur-clay-map/public/poplur_female_head_navigator.glb !text !filter !merge !diff

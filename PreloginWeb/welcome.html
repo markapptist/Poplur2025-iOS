@@ -612,6 +612,44 @@
   }
   .stackField::placeholder { color: #b78ca4; }
   .stackField:focus { outline: 3px solid rgba(244, 69, 156, 0.65); }
+  /* Three side-by-side selects for the date of birth, same box as .stackField
+     but narrower and with the OS chrome swapped for a matching clay arrow.
+     !important on the background properties: .stackField's own background
+     is a shorthand (background: rgba(...)), which resets background-image on
+     ANY lower-or-equal-specificity rule regardless of source order. */
+  .stackDob { display: flex; gap: 8px; width: 100%; max-width: 300px; }
+  .stackDobCol { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 0; }
+  .stackDobCol .stackLbl { font-size: clamp(8px, 2.2cqw, 10px); }
+  select.stackField.stackSelect {
+    appearance: none; -webkit-appearance: none; width: 100%; padding: 0 22px 0 10px; text-align: center;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http%3A//www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M6 9l6 6 6-6' fill='none' stroke='%23b78ca4' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/></svg>") !important;
+    background-repeat: no-repeat !important; background-position: right 6px center !important; background-size: 11px !important;
+  }
+  select.stackField.stackSelect:invalid { color: #b78ca4; }
+  /* The gender pane's two head choices — same selected-card language as
+     .acctCard (clay card + pink ✓ badge), under its own class so this pane's
+     selection never gets swept up in the account-type cards' global
+     `.acctCard` query (../acctA//acctB toggle "on" across every match in the
+     document, not just the pane it's in). */
+  .genderCard {
+    position: relative; width: 100%; height: 76px; border: none; border-radius: 20px; cursor: pointer;
+    display: flex; align-items: center; gap: 14px; padding: 0 20px; text-align: left;
+    font-family: "Arial Rounded MT Bold", ui-rounded, "SF Pro Rounded", "Avenir Next", system-ui, sans-serif;
+    background: radial-gradient(circle at 24% 22%, rgba(255, 255, 255, 0.6), transparent 58%), linear-gradient(180deg, #f9efd9 0%, #f0e0c2 58%, #e3cda6 100%);
+    box-shadow: 0 0 0 3px rgba(42, 29, 34, 0.55), 0 6px 0 rgba(20, 8, 14, 0.4), 0 10px 16px rgba(30, 10, 20, 0.35), inset 0 2px 3px rgba(255, 255, 255, 0.9);
+    opacity: 0.68; scale: 0.97; transition: box-shadow 0.2s, opacity 0.2s, scale 0.2s;
+  }
+  .genderCard.on { opacity: 1; scale: 1; box-shadow: 0 0 0 3px #ff62ad, 0 6px 0 rgba(20, 8, 14, 0.4), 0 10px 16px rgba(194, 17, 122, 0.4), inset 0 2px 3px rgba(255, 255, 255, 0.9); }
+  .genderCard::after {
+    content: "✓"; position: absolute; right: 14px; top: 50%; width: 26px; height: 26px; border-radius: 50%;
+    display: grid; place-items: center; font-size: 15px; font-weight: 900; color: #fff;
+    background: linear-gradient(145deg, #ff62ad, #d90f6d); box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.45), 0 2px 5px rgba(194, 17, 122, 0.4);
+    text-shadow: 0 1px 0 rgba(150, 10, 70, 0.5); transform: translateY(-50%) scale(0); transition: transform 0.25s cubic-bezier(0.22, 0.9, 0.3, 1.4);
+  }
+  .genderCard.on::after { transform: translateY(-50%) scale(1); }
+  .genderCard .account-3d-icon { flex: 0 0 56px; width: 56px; height: 56px; border-radius: 16px; }
+  .genderCard .acctName { font-size: clamp(13px, 4cqw, 16px); font-weight: 900; color: #2a1d22; }
+  .genderCard .acctDesc { font-size: clamp(9px, 2.8cqw, 11px); font-weight: 800; color: #6f5867; line-height: 1.3; }
   .stackAgree {
     display: flex; align-items: center; gap: 8px; align-self: center; margin: 4px 0;
     font-family: "Arial Rounded MT Bold", ui-rounded, system-ui, sans-serif;
@@ -797,6 +835,11 @@
       <input class="stackField" type="password" placeholder="&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;" autocomplete="new-password">
       <span class="stackLbl">CONFIRM PASSWORD</span>
       <input class="stackField" type="password" placeholder="&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;" autocomplete="new-password">
+      <div class="stackDob">
+        <div class="stackDobCol"><span class="stackLbl">MONTH</span><select class="stackField stackSelect" id="dobMonth" required><option value="" selected disabled>Month</option><option value="1">Jan</option><option value="2">Feb</option><option value="3">Mar</option><option value="4">Apr</option><option value="5">May</option><option value="6">Jun</option><option value="7">Jul</option><option value="8">Aug</option><option value="9">Sep</option><option value="10">Oct</option><option value="11">Nov</option><option value="12">Dec</option></select></div>
+        <div class="stackDobCol"><span class="stackLbl">DAY</span><select class="stackField stackSelect" id="dobDay" required><option value="" selected disabled>Day</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option>9</option><option>10</option><option>11</option><option>12</option><option>13</option><option>14</option><option>15</option><option>16</option><option>17</option><option>18</option><option>19</option><option>20</option><option>21</option><option>22</option><option>23</option><option>24</option><option>25</option><option>26</option><option>27</option><option>28</option><option>29</option><option>30</option><option>31</option></select></div>
+        <div class="stackDobCol"><span class="stackLbl">YEAR</span><select class="stackField stackSelect" id="dobYear" required><option value="" selected disabled>Year</option></select></div>
+      </div>
       <label class="stackAgree"><input type="checkbox" checked> I agree to the Terms of Service</label>
       <button class="cap-btn stackBtn" type="button" data-signup-next><span class="shader-text">Create account</span></button>
     </div>
@@ -850,6 +893,21 @@
       <span class="photoCircle" id="photoCircle"><span>+</span></span>
       <label class="uploadBtn">Upload photo<input id="photoInput" type="file" accept="image/*" hidden></label>
       <button class="cap-btn stackBtn" type="button" data-photo-continue><span class="shader-text">Continue</span></button>
+    </div>
+  </div>
+  <div class="pane" id="paneGender" aria-label="Choose your cube's gender">
+    <div class="formStack">
+      <p class="clayText paneTitle stackTitle">Is your cube male or female?</p>
+      <p class="stackSub">Pick the clay head your profile cube wears.</p>
+      <button class="genderCard" type="button" data-gender="male" role="radio" aria-checked="false" aria-label="Male cube — the mark head">
+        <span class="account-3d-icon profile" role="img" aria-label="Male head 3D icon"><canvas data-account-model="/poplur-clay-map/public/poplur_mark_head_navigator.glb" data-model-kind="head"></canvas></span>
+        <span><span class="acctName">Male</span><br><span class="acctDesc">The original mark head</span></span>
+      </button>
+      <button class="genderCard" type="button" data-gender="female" role="radio" aria-checked="false" aria-label="Female cube — the female head">
+        <span class="account-3d-icon profile" role="img" aria-label="Female head 3D icon"><canvas data-account-model="/poplur-clay-map/public/poplur_female_head_navigator.glb" data-model-kind="head"></canvas></span>
+        <span><span class="acctName">Female</span><br><span class="acctDesc">The female head</span></span>
+      </button>
+      <p class="stackSub">You can change this any time in Settings &#183; Profile.</p>
     </div>
   </div>
   <audio id="popSfx" preload="auto" src="/Poplur2025-iOS/Poplur2025/pop.mp3"></audio>
@@ -984,17 +1042,8 @@
       stableViewportHeight = innerHeight
     }
     window.__poplurKeyboardResize = keyboardResize
-    // The keyboard lifts the screen rather than burying it. phoneWrap's height
-    // IS this value and every field is placed as a percentage of it, so
-    // following the live viewport carries the whole composition up above the
-    // keyboard instead of leaving the focused field underneath it.
-    //
-    // stableViewportHeight still drives the scale below, so a focused field
-    // lifts the design without also shrinking it — which is what freezing this
-    // was protecting against.
-    const layoutHeight = keyboardResize ? innerHeight : stableViewportHeight
-    window.__poplurLayoutHeight = layoutHeight
-    document.documentElement.style.setProperty('--poplur-layout-height', layoutHeight + 'px')
+    window.__poplurLayoutHeight = stableViewportHeight
+    document.documentElement.style.setProperty('--poplur-layout-height', stableViewportHeight + 'px')
     const s = Math.min(1, (stableViewportHeight - 76) / 932, (innerWidth - 20) / 430)
     document.querySelector('.phoneWrap').style.transform = 'scale(' + s + ')'
   }
@@ -1694,7 +1743,8 @@
       document.getElementById('paneBusinessProfile'),
       document.getElementById('paneVerify'),
       document.getElementById('paneReview'),
-      document.getElementById('paneProfilePhoto'), document.getElementById('paneAccountIntro') ]
+      document.getElementById('paneProfilePhoto'), document.getElementById('paneAccountIntro'),
+      document.getElementById('paneGender') ]
     var paneIndex = 0
     function setPane(index) {
       paneIndex = index
@@ -1762,29 +1812,68 @@
     // Create login. Every step is a native pane matching the initial page. ──
     function isBusiness() { return document.querySelector('.acctB').classList.contains('on') }
     function finishSignup(message) {
-      var acctType = isBusiness() ? 'business' : 'personal'
-      var suEmail = '', suPass = ''
-      try {
-        var __em = document.querySelector('#paneCreateLogin input[type="email"]')
-        var __pw = document.querySelectorAll('#paneCreateLogin input[type="password"]')
-        suEmail = __em ? __em.value.trim() : ''
-        suPass = (__pw && __pw[0]) ? __pw[0].value : ''
-      } catch (e) {}
-      var __posted = window.poplurBridge && poplurBridge.signUp({ email: suEmail, password: suPass, accountType: acctType })
-      if (!__posted) {
-        cubeSuccess()
-        if (window.__poplurShowAlert) window.__poplurShowAlert(message, 'Nice!')
-        setTimeout(function () { setPane(0) }, 1400)
+      cubeSuccess()
+      if (window.__poplurShowAlert) window.__poplurShowAlert(message, 'Nice!')
+      // Ask for the cube's gender before the post-login handoff, same
+      // placement as the reviewed prototype: right after a successful
+      // sign-in/sign-up, before the app itself opens.
+      setTimeout(function () { setPane(9) }, 1400)
+    }
+    // Date of birth — the YEAR list is generated at runtime and spans the
+    // full range rather than being trimmed to 13+-eligible years, so a
+    // too-young birthdate is a choosable, honest input and the block happens
+    // on submit where the person can see why, not by a suspiciously missing
+    // option.
+    ;(function () {
+      var dobYearSelect = document.getElementById('dobYear')
+      if (!dobYearSelect) return
+      var dobThisYear = new Date().getFullYear()
+      for (var dobY = dobThisYear; dobY >= dobThisYear - 100; dobY--) {
+        var dobOpt = document.createElement('option')
+        dobOpt.value = String(dobY); dobOpt.textContent = String(dobY)
+        dobYearSelect.appendChild(dobOpt)
       }
+    })()
+    // Cube gender — MALE keeps the original mark head, FEMALE wears the
+    // supplied female head. Relay contract matches the app's other native
+    // handoffs (poplurWalletPassRequested / poplurStoreCheckoutRequested):
+    // post {type:'poplurGenderSelected', gender:'male'|'female'} so the
+    // native shell can persist the choice and inject it into the POST-LOGIN
+    // clay-map WebView as localStorage 'poplur.profile.gender' — pre-login and
+    // post-login are different WebView origins, so the localStorage write
+    // below only covers the same-origin (browser) case.
+    var genderLocked = false
+    function relayGenderToNativeShell(gender) {
+      var message = { type: 'poplurGenderSelected', gender: gender }
+      try {
+        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.poplur) {
+          window.webkit.messageHandlers.poplur.postMessage(message); return true
+        }
+      } catch (e) {}
+      try {
+        if (window.PoplurNative) {
+          if (typeof window.PoplurNative.onEvent === 'function') { window.PoplurNative.onEvent(JSON.stringify(message)); return true }
+          if (typeof window.PoplurNative.onAction === 'function') { window.PoplurNative.onAction('poplurGenderSelected', JSON.stringify({ gender: gender })); return true }
+        }
+      } catch (e) {}
+      return false
     }
-    // Native -> web auth result: real Firebase sign-in/up outcome.
-    // Success -> brief gesture (the native app is already transitioning);
-    // failure -> the approved error banner + cube shake. In-scope so it can
-    // reach cubeSuccess()/signupError().
-    window.poplurAuthResult = function (res) {
-      if (res && res.ok) { cubeSuccess() }
-      else { signupError((res && res.error) || 'Something went wrong. Please try again.') }
-    }
+    document.querySelectorAll('#paneGender .genderCard').forEach(function (card) {
+      card.addEventListener('click', function () {
+        if (genderLocked) return
+        genderLocked = true
+        var gender = card.dataset.gender === 'female' ? 'female' : 'male'
+        try { localStorage.setItem('poplur.profile.gender', gender) } catch (e) {}
+        relayGenderToNativeShell(gender)
+        document.querySelectorAll('#paneGender .genderCard').forEach(function (other) {
+          var picked = other === card
+          other.classList.toggle('on', picked)
+          other.setAttribute('aria-checked', picked ? 'true' : 'false')
+        })
+        if (window.__poplurShowAlert) window.__poplurShowAlert(gender === 'female' ? 'Female cube selected.' : 'Male cube selected.', 'Nice!')
+        setTimeout(function () { genderLocked = false; setPane(0) }, 900)
+      })
+    })
     // Choose Account → Create login
     document.querySelector('#paneSignUp .paneBtn').addEventListener('click', function () {
       renderAccountIntro()
@@ -1863,9 +1952,16 @@
       var email = document.querySelector('#paneCreateLogin input[type="email"]').value.trim()
       var pws = document.querySelectorAll('#paneCreateLogin input[type="password"]')
       var agree = document.querySelector('#paneCreateLogin input[type="checkbox"]').checked
+      var dobMonth = +(document.getElementById('dobMonth').value || 0)
+      var dobDay = +(document.getElementById('dobDay').value || 0)
+      var dobYear = +(document.getElementById('dobYear').value || 0)
       if (!/.+@.+\..+/.test(email)) return signupError('Enter a valid email address.')
       if (pws[0].value.length < 6) return signupError('Your password needs at least 6 characters.')
       if (pws[0].value !== pws[1].value) return signupError('Those passwords don’t match.')
+      if (!dobMonth || !dobDay || !dobYear) return signupError('Enter your date of birth.')
+      var dobToday = new Date(), dobAge = dobToday.getFullYear() - dobYear
+      if (dobToday.getMonth() + 1 < dobMonth || (dobToday.getMonth() + 1 === dobMonth && dobToday.getDate() < dobDay)) dobAge--
+      if (dobAge < 13) return signupError('You must be 13 or older to use Poplur.')
       if (!agree) return signupError('Please agree to the Terms of Service.')
       if (isBusiness()) setPane(4)
       else setPane(7)  // personal: add a profile photo next
