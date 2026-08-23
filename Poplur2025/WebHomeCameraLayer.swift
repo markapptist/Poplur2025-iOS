@@ -118,7 +118,10 @@ final class WebHomeCameraModel: ObservableObject {
         if filter != .none && controller.arFilterManager == nil {
             let manager = ARFilterManager()
             let layer = (controller.previewViewController as? CameraPreviewViewController)?.getARDisplayLayer()
+            PoplurDiagLog.append("arfilter: first setup id=\(id) resolved=\(filter.rawValue) layerNil=\(layer == nil)")
             controller.setupARFilterSupport(filterManager: manager, displayLayer: layer)
+        } else {
+            PoplurDiagLog.append("arfilter: apply id=\(id) resolved=\(filter.rawValue) managerNil=\(controller.arFilterManager == nil)")
         }
         controller.arFilterManager?.onFaceTrack = { [weak self, weak controller] bounds, confidence, roll, yaw in
             guard let self, controller?.acceptsAnalysisResults == true else { return }

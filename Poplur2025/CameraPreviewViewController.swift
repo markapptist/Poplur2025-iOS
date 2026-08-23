@@ -237,8 +237,13 @@ final class CameraPreviewViewController: UIViewController {
         }
     }
 
+    private var lastLoggedShowFiltered: Bool?
     private func applyPreviewLayerVisibility() {
         let showFiltered = wantsFilteredPreview && hasFilteredFrame
+        if lastLoggedShowFiltered != showFiltered {
+            lastLoggedShowFiltered = showFiltered
+            PoplurDiagLog.append("arfilter: preview showFiltered=\(showFiltered) wants=\(wantsFilteredPreview) hasFrame=\(hasFilteredFrame) trayVisible=\(isARFilterTrayVisible) filter=\(activeARFilterRawValue)")
+        }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         previewLayer?.opacity = showFiltered ? 0.0 : 1.0

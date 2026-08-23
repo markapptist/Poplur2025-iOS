@@ -316,6 +316,14 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
     /// render completion can land on any queue.
     private let arFilterRenderLock = NSLock()
     private var arFilterRenderInFlight = false
+    private var arFilterDiagDropCount = 0
+    private var arFilterDiagFrameCount = 0
+    private var arFilterDiagWantedFrameCount = 0
+    private var arFilterDiagRenderEntryCount = 0
+    private var arFilterDiagNilBufferCount = 0
+    private var arFilterDiagThrottleCount = 0
+    private var arFilterDiagEnqueueCount = 0
+    private var arFilterDiagEnqueueFailCount = 0
     private var lastFilteredFrameUptime: TimeInterval = 0
     private var arFilterSelectionCancellable: AnyCancellable?
     /// At 0.67 seconds between families and two seconds between uses of the
@@ -2012,7 +2020,12 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
     private func setVideoFrameDeliveryActiveOnQueue(_ active: Bool) {
         nextAnalysisSampleWorkItem?.cancel()
         nextAnalysisSampleWorkItem = nil
-        guard let output = videoDataOutput else { return }
+        guard let output = videoDataOutput else {
+            if isARFilterProcessingWanted() {
+                PoplurDiagLog.append("arfilter: DELIVERY BAILED — videoDataOutput is nil (active=\(active))")
+            }
+            return
+        }
         let connection = output.connection(with: .video)
 
         guard active else {
@@ -2033,11 +2046,33 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
         analysisFrameGateOpen = true
         analysisFrameGateLock.unlock()
         connection?.isEnabled = true
+        if isARFilterProcessingWanted() {
+            PoplurDiagLog.append("arfilter: delivery ON — connNil=\(connection == nil) connEnabled=\(connection?.isEnabled ?? false) connActive=\(connection?.isActive ?? false) sessionRunning=\(captureSession.isRunning) outputs=\(captureSession.outputs.count)")
+        }
     }
 
     private func closeSampleGateAndScheduleNextFrame() {
         sessionQueue.async { [weak self] in
             guard let self else { return }
+            // A filter can turn on while an ML frame is still in flight on the
+            // video queue: that frame read `wanted == false`, took the analysis
+            // path, and arrives here to meter the connection down to one sample
+            // per interval — but by now the viewfinder owns it and needs every
+            // frame. Metering it here disabled the connection immediately AFTER
+            // setVideoFrameDeliveryActiveOnQueue had enabled it, and the filter
+            // sat with delivery nominally "on" and no frames at all until an
+            // unrelated session restart revived it (measured on device: 28s of
+            // silence, then the filter worked the instant the session bounced).
+            // The filter owns the tap while it is wanted; leave it open.
+            if self.isARFilterProcessingWanted() {
+                self.nextAnalysisSampleWorkItem?.cancel()
+                self.nextAnalysisSampleWorkItem = nil
+                self.analysisFrameGateLock.lock()
+                self.analysisFrameGateOpen = true
+                self.analysisFrameGateLock.unlock()
+                self.videoDataOutput?.connection(with: .video)?.isEnabled = true
+                return
+            }
             self.videoDataOutput?.connection(with: .video)?.isEnabled = false
             self.nextAnalysisSampleWorkItem?.cancel()
             let work = DispatchWorkItem { [weak self] in
@@ -2136,7 +2171,9 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
             }
             
             // Add new output
-            if self.captureSession.canAddOutput(output) {
+            let canAdd = self.captureSession.canAddOutput(output)
+            PoplurDiagLog.append("arfilter: setup canAddOutput=\(canAdd) existingOutputs=\(self.captureSession.outputs.count) sessionRunning=\(self.captureSession.isRunning)")
+            if canAdd {
                 self.captureSession.addOutput(output)
                 self.videoDataOutput = output
                 
@@ -2224,6 +2261,18 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
         frameProcessingLock.lock()
         let mayProcessFrame = frameProcessingAllowed
         frameProcessingLock.unlock()
+        arFilterDiagFrameCount &+= 1
+        let diagWanted = isARFilterProcessingWanted()
+        if diagWanted {
+            arFilterRenderLock.lock()
+            arFilterDiagWantedFrameCount &+= 1
+            arFilterRenderLock.unlock()
+        }
+        if arFilterDiagFrameCount <= 3
+            || (diagWanted && arFilterDiagWantedFrameCount <= 5)
+            || arFilterDiagFrameCount % 600 == 0 {
+            PoplurDiagLog.append("arfilter: captureOutput frame #\(arFilterDiagFrameCount) wantedFrames=\(arFilterDiagWantedFrameCount) mayProcess=\(mayProcessFrame) wanted=\(diagWanted)")
+        }
         guard mayProcessFrame else { return }
 
         // ── Continuous filtered viewfinder ───────────────────────────────
@@ -2450,7 +2499,11 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
         arFilterProcessingWanted = wanted
         arFilterStateLock.unlock()
         sessionQueue.async { [weak self] in
-            guard let self, self.isCaptureDesired() else { return }
+            guard let self else { return }
+            guard self.isCaptureDesired() else {
+                PoplurDiagLog.append("arfilter: wanted=\(wanted) but capture not desired — delivery untouched")
+                return
+            }
             self.updateAnalysisCadenceOnQueue()
             self.analysisStateLock.lock()
             self.nextAnalysisPipeline = wanted ? .arFilter : .faceRecognition
@@ -2459,7 +2512,39 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
             self.frameProcessingLock.lock()
             let allowed = self.frameProcessingAllowed
             self.frameProcessingLock.unlock()
+            PoplurDiagLog.append("arfilter: wanted=\(wanted) allowed=\(allowed) displayLayerNil=\(self.displayLayer == nil) — setting delivery")
             self.setVideoFrameDeliveryActiveOnQueue(allowed)
+            if wanted && allowed { self.scheduleARFilterDeliveryWatchdogOnQueue(attempt: 0) }
+        }
+    }
+
+    /// Belt-and-braces for the filtered viewfinder: confirm frames actually
+    /// started, and re-open the tap if they did not.
+    ///
+    /// The starvation this recovers from had a known cause (the analysis path
+    /// metering a connection the filter owns, fixed above), but the failure
+    /// mode was invisible and total — a dead filter that looks like a broken
+    /// feature, reported four times before it was measurable. Anything else
+    /// that closes this connection while a filter is up gets caught here
+    /// within a second instead of waiting for the user to leave the screen.
+    private func scheduleARFilterDeliveryWatchdogOnQueue(attempt: Int) {
+        guard attempt < 4 else { return }
+        arFilterRenderLock.lock()
+        let framesBefore = arFilterDiagWantedFrameCount
+        arFilterRenderLock.unlock()
+        sessionQueue.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            guard let self, self.isARFilterProcessingWanted(), self.isCaptureDesired() else { return }
+            self.arFilterRenderLock.lock()
+            let framesNow = self.arFilterDiagWantedFrameCount
+            self.arFilterRenderLock.unlock()
+            guard framesNow == framesBefore else { return }  // frames flowing; done
+            self.frameProcessingLock.lock()
+            let allowed = self.frameProcessingAllowed
+            self.frameProcessingLock.unlock()
+            guard allowed else { return }
+            PoplurDiagLog.append("arfilter: WATCHDOG no frames after 1s (attempt \(attempt + 1)) — reopening tap")
+            self.setVideoFrameDeliveryActiveOnQueue(true)
+            self.scheduleARFilterDeliveryWatchdogOnQueue(attempt: attempt + 1)
         }
     }
 
@@ -2477,13 +2562,23 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
     /// thermal ladder. This path replaces the claim-based .arFilter lane for
     /// LIVE preview; captured photos/clips still go through their own paths.
     private func renderFilteredViewfinderFrame(_ sampleBuffer: CMSampleBuffer) {
-        guard let manager = arFilterManager, let displayLayer else { return }
+        guard let manager = arFilterManager, let displayLayer else {
+            arFilterDiagDropCount &+= 1
+            if arFilterDiagDropCount == 1 || arFilterDiagDropCount % 300 == 0 {
+                PoplurDiagLog.append("arfilter: render SKIPPED x\(arFilterDiagDropCount) managerNil=\(arFilterManager == nil) layerNil=\(self.displayLayer == nil)")
+            }
+            return
+        }
 
         analysisStateLock.lock()
         let minSpacing = activeFilterMinimumDispatchSpacing
         let presentationHold = activeFilterPresentationHold
         analysisStateLock.unlock()
 
+        arFilterDiagRenderEntryCount &+= 1
+        if arFilterDiagRenderEntryCount <= 3 {
+            PoplurDiagLog.append("arfilter: render ENTERED #\(arFilterDiagRenderEntryCount)")
+        }
         let now = ProcessInfo.processInfo.systemUptime
         arFilterRenderLock.lock()
         let tooSoon = minSpacing > 0 && now - lastFilteredFrameUptime < minSpacing
@@ -2493,7 +2588,13 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
             lastFilteredFrameUptime = now
         }
         arFilterRenderLock.unlock()
-        guard !busy, !tooSoon else { return }
+        if busy || tooSoon {
+            arFilterDiagThrottleCount &+= 1
+            if arFilterDiagThrottleCount == 1 || arFilterDiagThrottleCount % 300 == 0 {
+                PoplurDiagLog.append("arfilter: frame throttled x\(arFilterDiagThrottleCount) busy=\(busy) tooSoon=\(tooSoon) minSpacing=\(minSpacing)")
+            }
+            return
+        }
 
         // Synchronous on this queue: ARFilterManager's render path no longer
         // hops anywhere, so the completion runs before this returns and the
@@ -2503,7 +2604,13 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
             self.arFilterRenderLock.lock()
             self.arFilterRenderInFlight = false
             self.arFilterRenderLock.unlock()
-            guard let displayLayer, let bufferToDisplay = filteredBuffer else { return }
+            guard let displayLayer, let bufferToDisplay = filteredBuffer else {
+                self.arFilterDiagNilBufferCount &+= 1
+                if self.arFilterDiagNilBufferCount == 1 || self.arFilterDiagNilBufferCount % 300 == 0 {
+                    PoplurDiagLog.append("arfilter: completion DROPPED x\(self.arFilterDiagNilBufferCount) filteredBufferNil=\(filteredBuffer == nil)")
+                }
+                return
+            }
             DispatchQueue.main.async {
                 // Buffers arrive pre-mirrored from the connection; see the
                 // note at the sibling sites.
@@ -2512,9 +2619,18 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
                     displayLayer.flushAndRemoveImage()
                 }
                 if self.safelyEnqueueSampleBuffer(bufferToDisplay, to: displayLayer) {
+                    self.arFilterDiagEnqueueCount &+= 1
+                    if self.arFilterDiagEnqueueCount == 1 || self.arFilterDiagEnqueueCount % 300 == 0 {
+                        PoplurDiagLog.append("arfilter: enqueued x\(self.arFilterDiagEnqueueCount) layerStatus=\(displayLayer.status.rawValue)")
+                    }
                     self.cameraPreviewViewController.markFilteredFrameReady(
                         holdDuration: presentationHold
                     )
+                } else {
+                    self.arFilterDiagEnqueueFailCount &+= 1
+                    if self.arFilterDiagEnqueueFailCount == 1 || self.arFilterDiagEnqueueFailCount % 300 == 0 {
+                        PoplurDiagLog.append("arfilter: enqueue FAILED x\(self.arFilterDiagEnqueueFailCount) layerStatus=\(displayLayer.status.rawValue) ready=\(displayLayer.isReadyForMoreMediaData)")
+                    }
                 }
             }
         }
@@ -2547,9 +2663,18 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
                     displayLayer.flushAndRemoveImage()
                 }
                 if self.safelyEnqueueSampleBuffer(bufferToDisplay, to: displayLayer) {
+                    self.arFilterDiagEnqueueCount &+= 1
+                    if self.arFilterDiagEnqueueCount == 1 || self.arFilterDiagEnqueueCount % 300 == 0 {
+                        PoplurDiagLog.append("arfilter: enqueued x\(self.arFilterDiagEnqueueCount) layerStatus=\(displayLayer.status.rawValue)")
+                    }
                     self.cameraPreviewViewController.markFilteredFrameReady(
                         holdDuration: presentationHold
                     )
+                } else {
+                    self.arFilterDiagEnqueueFailCount &+= 1
+                    if self.arFilterDiagEnqueueFailCount == 1 || self.arFilterDiagEnqueueFailCount % 300 == 0 {
+                        PoplurDiagLog.append("arfilter: enqueue FAILED x\(self.arFilterDiagEnqueueFailCount) layerStatus=\(displayLayer.status.rawValue) ready=\(displayLayer.isReadyForMoreMediaData)")
+                    }
                 }
             }
         }
