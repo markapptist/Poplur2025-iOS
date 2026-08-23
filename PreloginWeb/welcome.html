@@ -569,8 +569,9 @@
      the sign-up steps after the first, styled to match the initial page:
      same clay title, cream fields, dough button, on the shared background. ── */
   .formStack {
-    position: absolute; left: 0; right: 0; top: var(--form-top, 45%); bottom: 2.5%; z-index: 20;
-    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: clamp(5px, 1.6cqw, 10px);
+    position: absolute; left: 0; right: 0; top: var(--form-top, 45%);
+    bottom: max(2.5%, calc(env(safe-area-inset-bottom, 0px) + 20px + var(--poplur-keyboard-inset, 0px))); z-index: 20;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: clamp(8px, 1.8cqh, 14px);
     /* Every form can be taller than a compact phone once text size, the
        keyboard-safe viewport, or a multi-field step is involved. Keep the
        scroll area inside the visible pane and reserve room for the full clay
@@ -579,12 +580,12 @@
     padding:
       max(10px, env(safe-area-inset-top, 0px))
       7%
-      max(28px, calc(env(safe-area-inset-bottom, 0px) + 20px));
+      max(28px, calc(env(safe-area-inset-bottom, 0px) + 20px + var(--poplur-keyboard-inset, 0px)));
     overflow-x: hidden; overflow-y: auto; -webkit-overflow-scrolling: touch;
     overscroll-behavior-y: contain;
     scroll-padding-block:
       max(10px, env(safe-area-inset-top, 0px))
-      max(28px, calc(env(safe-area-inset-bottom, 0px) + 20px));
+      max(28px, calc(env(safe-area-inset-bottom, 0px) + 20px + var(--poplur-keyboard-inset, 0px)));
   }
   /* Denser form for the 6-field business profile so it fits without scrolling */
   #paneBusinessProfile .formStack { gap: clamp(3px, 1.1cqw, 7px); }
@@ -625,6 +626,16 @@
   }
   .stackField::placeholder { color: #b78ca4; }
   .stackField:focus { outline: 3px solid rgba(244, 69, 156, 0.65); }
+  /* A label and its control are one visual unit. Grouping them lets every
+     field use the same inner gap, while the form stack owns the equal gap
+     between groups. That removes the old positive/negative label margins,
+     which made the Create Login rhythm change from one field to the next. */
+  .stackControl {
+    display: flex; flex: 0 0 auto; flex-direction: column; align-items: stretch;
+    gap: clamp(3px, 0.8cqh, 6px); width: 100%; max-width: 300px;
+  }
+  .stackControl .stackLbl { align-self: center; margin: 0; }
+  .stackControl .stackField { width: 100%; }
   /* Three side-by-side selects for the date of birth, same box as .stackField
      but narrower and with the OS chrome swapped for a matching clay arrow.
      !important on the background properties: .stackField's own background
@@ -675,7 +686,14 @@
      of the form pane. This preserves clearance below the cube while giving
      the stack a reliably scrollable viewport. */
   @media (max-height: 760px) {
-    .formStack { top: min(var(--form-top, 45%), 44cqh); }
+    /* A centred overflowing stack starts above its own viewport, which put
+       the first label and title behind the cube. Compact forms always flow
+       from the safe top edge; later controls remain reachable by scrolling. */
+    .formStack { top: min(var(--form-top, 45%), 44cqh); justify-content: flex-start; }
+    #paneCreateLogin .formStack { gap: clamp(6px, 1.4cqh, 10px); }
+    #paneCreateLogin .stackControl { gap: 2px; }
+    #paneCreateLogin .stackField { height: clamp(40px, 11cqw, 46px); }
+    #paneCreateLogin .stackBtn { margin: 4px auto 0; }
   }
   /* Review rows */
   .reviewRow {
@@ -848,12 +866,18 @@
     <div class="formStack">
       <p class="clayText paneTitle stackTitle">Create login</p>
       <p class="stackSub">Then continue with onboarding.</p>
-      <span class="stackLbl">EMAIL</span>
-      <input class="stackField" type="email" placeholder="you@example.com" autocomplete="email">
-      <span class="stackLbl">PASSWORD</span>
-      <input class="stackField" type="password" placeholder="&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;" autocomplete="new-password">
-      <span class="stackLbl">CONFIRM PASSWORD</span>
-      <input class="stackField" type="password" placeholder="&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;" autocomplete="new-password">
+      <div class="stackControl">
+        <span class="stackLbl">EMAIL</span>
+        <input class="stackField" type="email" placeholder="you@example.com" autocomplete="email">
+      </div>
+      <div class="stackControl">
+        <span class="stackLbl">PASSWORD</span>
+        <input class="stackField" type="password" placeholder="&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;" autocomplete="new-password">
+      </div>
+      <div class="stackControl">
+        <span class="stackLbl">CONFIRM PASSWORD</span>
+        <input class="stackField" type="password" placeholder="&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;" autocomplete="new-password">
+      </div>
       <div class="stackDob">
         <div class="stackDobCol"><span class="stackLbl">MONTH</span><select class="stackField stackSelect" id="dobMonth" required><option value="" selected disabled>Month</option><option value="1">Jan</option><option value="2">Feb</option><option value="3">Mar</option><option value="4">Apr</option><option value="5">May</option><option value="6">Jun</option><option value="7">Jul</option><option value="8">Aug</option><option value="9">Sep</option><option value="10">Oct</option><option value="11">Nov</option><option value="12">Dec</option></select></div>
         <div class="stackDobCol"><span class="stackLbl">DAY</span><select class="stackField stackSelect" id="dobDay" required><option value="" selected disabled>Day</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option>9</option><option>10</option><option>11</option><option>12</option><option>13</option><option>14</option><option>15</option><option>16</option><option>17</option><option>18</option><option>19</option><option>20</option><option>21</option><option>22</option><option>23</option><option>24</option><option>25</option><option>26</option><option>27</option><option>28</option><option>29</option><option>30</option><option>31</option></select></div>
@@ -1069,6 +1093,36 @@
   addEventListener('resize', fit); addEventListener('load', fit)
   addEventListener('focusout', function () { setTimeout(fit, 360) })
   fit(); setTimeout(fit, 60); setTimeout(fit, 400)
+
+  // Keyboard-safe form focus. `interactive-widget=overlays-content` keeps the
+  // hero from jumping when iOS shows its keyboard, but it means the keyboard
+  // covers the lower part of a fixed page. Track visualViewport instead and
+  // turn that covered space into an inset on the active form stack; then place
+  // the focused editor in the upper third of the remaining scroll area.
+  const updateKeyboardSafeForm = () => {
+    const active = document.activeElement
+    const editing = keyboardEditorIsFocused()
+    const visual = window.visualViewport
+    const keyboardInset = editing && visual
+      ? Math.max(0, stableViewportHeight - visual.height - visual.offsetTop)
+      : 0
+    document.documentElement.style.setProperty('--poplur-keyboard-inset', keyboardInset + 'px')
+    if (!editing || !(active instanceof HTMLElement)) return
+    const stack = active.closest('.formStack')
+    if (!stack) return
+    requestAnimationFrame(function () {
+      const fieldBox = active.getBoundingClientRect()
+      const stackBox = stack.getBoundingClientRect()
+      const target = stack.scrollTop + fieldBox.top - stackBox.top - stack.clientHeight * 0.30
+      stack.scrollTo({ top: Math.max(0, target), behavior: 'smooth' })
+    })
+  }
+  addEventListener('focusin', function () {
+    updateKeyboardSafeForm()
+    setTimeout(updateKeyboardSafeForm, 180)
+  })
+  addEventListener('focusout', function () { setTimeout(updateKeyboardSafeForm, 180) })
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', updateKeyboardSafeForm)
 
   ;(() => {
     const canvas = document.getElementById('worldMapMotion')
