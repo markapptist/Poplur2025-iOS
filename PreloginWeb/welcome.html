@@ -100,43 +100,18 @@
   .worldDots { position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 100%; opacity: 0.34; }
   .worldMapMotion { position: absolute; inset: 0; z-index: 2; width: 100%; height: 100%; pointer-events: none; mix-blend-mode: screen; }
   .confetti { position: absolute; inset: 0; z-index: 4; overflow: hidden; pointer-events: none; }
-  /* Mute toggle in the top-left safe area. Its shared round control surface
-     keeps the pair aligned and gives the selected mute state a clear home. */
+  /* Mute toggle: bare glyph in the top-left safe area — no pill, no background */
   /* The insets are why this needs viewport-fit=cover above. On a phone the page
      is full-bleed (.phone is forced to 100%/100% and the WebView ignores the
      safe area), so 12-20px from the top put this glyph under the Dynamic
      Island. In the desktop prototype frame the insets resolve to 0, so the
      composition there is unchanged. */
-  :root {
-    --side-control-size: 44px;
-    --side-control-inset: clamp(12px, 3cqw, 20px);
-  }
-  /* The controls are a matched pair on every pane: identical touch targets,
-     safe-area insets and optical centres. The orb keeps its own coloured
-     surface, while mute gains a selected clay state when audio is off. */
-  .muteBtn,
-  html.poplur-colorlab .hueBtn {
-    position: absolute;
-    top: calc(env(safe-area-inset-top, 0px) + var(--side-control-inset));
-    width: var(--side-control-size); height: var(--side-control-size);
-    display: grid; place-items: center;
-    appearance: none; border: 1px solid rgba(255, 242, 248, 0.5);
-    border-radius: 50%; padding: 9px; cursor: pointer; line-height: 0;
-    background: linear-gradient(145deg, rgba(255, 255, 255, 0.24), rgba(126, 8, 57, 0.28));
-    box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.45), inset 0 -2px 4px rgba(85, 0, 37, 0.22), 0 3px 7px rgba(90, 0, 40, 0.44);
-    transition: transform 0.14s ease, background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
-  }
-  .muteBtn { left: calc(env(safe-area-inset-left, 0px) + var(--side-control-inset)); z-index: 60; }
-  html.poplur-colorlab .hueBtn { right: calc(env(safe-area-inset-right, 0px) + var(--side-control-inset)); z-index: 61; }
-  .muteBtn:active,
-  html.poplur-colorlab .hueBtn:active { transform: scale(0.92); }
-  .muteBtn:focus-visible,
-  html.poplur-colorlab .hueBtn:focus-visible { outline: 3px solid #fff2f8; outline-offset: 3px; }
-  .muteBtn[aria-pressed="true"] {
-    border-color: #ffd5e9;
-    background: linear-gradient(145deg, #ff78bd, #cf0b64);
-    box-shadow: inset 0 2px 3px rgba(255, 255, 255, 0.62), inset 0 -3px 5px rgba(111, 0, 48, 0.44), 0 4px 10px rgba(151, 0, 65, 0.55);
-  }
+  .muteBtn { position: absolute;
+    top: calc(env(safe-area-inset-top, 0px) + clamp(12px, 3cqw, 20px));
+    left: calc(env(safe-area-inset-left, 0px) + clamp(12px, 3cqw, 20px)); z-index: 60;
+    appearance: none; background: none; border: 0; padding: 6px; cursor: pointer; line-height: 0;
+    filter: drop-shadow(0 2px 4px rgba(90, 0, 40, 0.5)); }
+  .muteBtn:active { transform: scale(0.9); }
 
   /* ── Colour orb ──────────────────────────────────────────────────────────
      Ships to customers: pressing it randomises the background within the
@@ -155,7 +130,12 @@
      either way: the two buttons never overlap. .muteBtn still has this. */
   .hueBtn { display: none; }
   html.poplur-colorlab .hueBtn {
-    display: grid; }
+    display: block;
+    position: absolute;
+    top: calc(env(safe-area-inset-top, 0px) + clamp(12px, 3cqw, 20px));
+    right: calc(env(safe-area-inset-right, 0px) + clamp(12px, 3cqw, 20px)); z-index: 61;
+    appearance: none; background: none; border: 0; padding: 6px; cursor: pointer; line-height: 0; }
+  html.poplur-colorlab .hueBtn:active { transform: scale(0.9); }
   /* The map's takeover picker, brought over so the two colour controls in the
      product are recognisably the same object: the full hue circle as a conic
      ring, the CURRENT colour filling the hub, and the clay sheen/rim/shadow
