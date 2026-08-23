@@ -445,7 +445,6 @@ struct PoplurAIBackendEndpoint {
     static let generateGame = "/ai/generate/game"
     static let jobs = "/ai/jobs"
     static let radioHost = "/radio/host"
-    static let assistantChat = "/assistant/chat"
     static let assistantGuestChat = "/assistant/guest-chat"
     static let tvStyle = "/tv/style"
     static let bumperScript = "/bumper/script"
@@ -500,29 +499,6 @@ struct PoplurAIBackendClient: Sendable {
             throw AIStackError.backendError(http.statusCode)
         }
         return response(from: job, fallbackRequest: request)
-    }
-
-    /// Hey Poplur's conversational turn. The Anthropic key lives on the
-    /// backend with the other provider credentials — mobile never calls
-    /// api.anthropic.com directly, same rule as every provider above.
-    func assistantReply(question: String) async throws -> String {
-        guard let baseURL else { throw AIStackError.backendBaseURLMissing }
-        let token = try await firebaseIDToken()
-        var urlRequest = URLRequest(url: apiURL(baseURL: baseURL, endpoint: PoplurAIBackendEndpoint.assistantChat))
-        urlRequest.httpMethod = "POST"
-        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        urlRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        urlRequest.httpBody = try JSONSerialization.data(withJSONObject: ["question": question])
-
-        let (data, response) = try await urlSession.data(for: urlRequest)
-        guard let http = response as? HTTPURLResponse,
-              (200..<300).contains(http.statusCode),
-              let payload = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let reply = payload["reply"] as? String,
-              !reply.isEmpty else {
-            throw AIStackError.backendError((response as? HTTPURLResponse)?.statusCode ?? 0)
-        }
-        return reply
     }
 
     /// Shared POST helper for the small JSON-in/JSON-out Claude endpoints.

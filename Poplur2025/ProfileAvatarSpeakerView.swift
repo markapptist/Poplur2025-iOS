@@ -78,9 +78,6 @@ struct ProfileAvatarSpeakerView: View {
                 .offset(y: 8)
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("PoplurWakeDetected"))) { _ in
-            triggerWake()
-        }
     }
 
     private func triggerWake() {

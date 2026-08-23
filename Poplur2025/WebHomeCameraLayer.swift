@@ -726,7 +726,6 @@ struct PostLoginHomeSurface: View {
     let initialTab: AppTab
     let onReady: () -> Void
     @StateObject private var camera = WebHomeCameraModel()
-    @StateObject private var poplurAI = PoplurAIAssistantController()
     @ObservedObject private var profileThemeStore = ProfileThemeStore.shared
     @Environment(\.scenePhase) private var scenePhase
 
@@ -757,7 +756,7 @@ struct PostLoginHomeSurface: View {
             PostLoginHomeWebView(
                 initialView: initialWebView,
                 onReady: onReady,
-                onWebEvent: { [weak camera, weak poplurAI] type, body in
+                onWebEvent: { [weak camera] type, body in
                     camera?.handleWebEvent(type: type, body: body)
                     if type == "notificationsRead" {
                         // The web notifications panel replaced the native
@@ -767,45 +766,15 @@ struct PostLoginHomeSurface: View {
                         // icon badge lit with nothing unread behind it.
                         Task { @MainActor in PoplurNotificationCenter.shared.markAllRead() }
                     }
-                    if type == "requestVoiceAssistant" {
-                        // This message can only come from the explicit HEY
-                        // POPLUR profile button. It is therefore the permission
-                        // ask point; mounting Home itself never opens a sheet.
-                        poplurAI?.requestPermissionAndStartCommand()
-                    }
-                },
-                nativeVoiceCommandToken: poplurAI.voiceFeedbackToken,
-                nativeVoiceCommandJSON: Self.voiceCommandJSON(
-                    poplurAI.lastCommand,
-                    feedback: poplurAI.voiceFeedback
-                )
+                }
             )
             .ignoresSafeArea()
-
-            PoplurAIAssistantOverlay(
-                controller: poplurAI,
-                accent: Color(red: 1.0, green: 0.31, blue: 0.64)
-            )
-            .allowsHitTesting(false)
         }
         .preferredColorScheme(
             camera.activeTab == "profile"
                 ? profileThemeStore.selectedTheme.preferredColorScheme
                 : nil
         )
-        // NOT started on appear any more. Arming the recognizer just because Home
-        // mounted is what made "Hey Poplur" always-on, and always-on cost a live
-        // AVAudioEngine + a continuous mic tap + a speech recognizer for the
-        // entire session. Measured on device: turning it off took the feed video
-        // from 0.52x real time / ~13fps to 1.0x / 28-38fps and stopped the phone
-        // overheating. It had also parked the audio session in `.measurement`,
-        // silencing all playback.
-        //
-        // The way in is now the PROFILE rail's HEY POPLUR button, which the web
-        // bridges as `requestVoiceAssistant` -> requestPermissionAndStartCommand()
-        // (see onWebEvent above). Stopping is still unconditional: backgrounding or
-        // leaving Home must never leave the microphone open.
-        .onDisappear { poplurAI.stop() }
         .onChange(of: scenePhase) { _, phase in
             // Calls, Control Center and permission sheets may make SwiftUI's
             // scene `.inactive` while Poplur remains fully visible behind the
@@ -815,7 +784,6 @@ struct PostLoginHomeSurface: View {
             // camera or tells the web layer it is hidden.
             if phase == .background {
                 PostLoginHomeWebView.setApplicationActive(false)
-                poplurAI.stop()
                 camera.deactivateCamera()
             } else {
                 PostLoginHomeWebView.setApplicationActive(true)
@@ -828,7 +796,6 @@ struct PostLoginHomeSurface: View {
             (PostLoginHomeWebView.liveWebView as? PoplurManagedWebView)?
                 .setHostOccluded(isPresented)
             if isPresented {
-                poplurAI.stop()
                 camera.deactivateCamera()
             }
         }
@@ -844,34 +811,4 @@ struct PostLoginHomeSurface: View {
         }
     }
 
-    private static func voiceCommandJSON(_ command: PoplurAICommand?, feedback: String) -> String? {
-        var detail: [String: String] = ["feedback": feedback]
-        switch command {
-        case .openTab(let tab):
-            switch tab {
-            case .map: detail["tab"] = "map"
-            case .record: detail["tab"] = "post"
-            case .feed: detail["tab"] = "feed"
-            case .profile: detail["tab"] = "profile"
-            case .settings: break
-            }
-        case .camera:
-            detail["tab"] = "post"
-        case .goToChannel(let channel):
-            detail["tab"] = "feed"
-            detail["channel"] = channel
-        case .postToLocation:
-            detail["tab"] = "post"
-        case .sortPosts, .showAnalytics:
-            detail["tab"] = "profile"
-        case .openPage, .setTourActive, .logout, .unknown:
-            break
-        case nil:
-            break
-        }
-        guard !feedback.isEmpty,
-              let data = try? JSONSerialization.data(withJSONObject: detail),
-              let json = String(data: data, encoding: .utf8) else { return nil }
-        return json
-    }
 }

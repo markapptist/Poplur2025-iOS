@@ -82,7 +82,6 @@ extension Notification.Name {
     static let UserPostCountDidChange = Notification.Name("UserPostCountDidChange")
     static let PoplurAIProfileSortRequested = Notification.Name("PoplurAIProfileSortRequested")
     static let PoplurAIShowAnalytics = Notification.Name("PoplurAIShowAnalytics")
-    static let PoplurAIShowWakeTutorial = Notification.Name("PoplurAIShowWakeTutorial")
     
     // Camera roll
     static let CameraRollImageSelected = Notification.Name("CameraRollImageSelected")

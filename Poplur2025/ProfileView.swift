@@ -71,51 +71,6 @@ private extension ProfileNotificationItem.Kind {
     }
 }
 
-private struct HeyPoplurProfileTutorialView: View {
-    let accent: Color
-    let onDismiss: () -> Void
-
-    var body: some View {
-        VStack {
-            Spacer()
-            VStack(spacing: 12) {
-                Text("Say \"Hey Poplur\"")
-                    .font(.system(size: 25, weight: .black, design: .rounded))
-                    .foregroundStyle(.white)
-                    .multilineTextAlignment(.center)
-
-                Text("The edges light up in your theme color. Then tell Poplur what to do.")
-                    .font(.system(size: 14, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.82))
-                    .multilineTextAlignment(.center)
-
-                Button(action: onDismiss) {
-                    Text("Got it")
-                        .font(.system(size: 15, weight: .black, design: .rounded))
-                        .foregroundStyle(.black)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 10)
-                        .background(accent, in: Capsule())
-                }
-                .buttonStyle(.plain)
-                .padding(.top, 2)
-            }
-            .padding(.horizontal, 22)
-            .padding(.vertical, 18)
-            .frame(maxWidth: 330)
-            .background(Color.black.opacity(0.78), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .stroke(accent.opacity(0.9), lineWidth: 1.5)
-            )
-            .shadow(color: accent.opacity(0.62), radius: 22)
-            .padding(.horizontal, 24)
-            .padding(.bottom, 146)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-}
-
 struct ProfileView: View {
     @Environment(\.layoutPreviewMode) private var layoutPreviewMode
     @EnvironmentObject private var auth: AuthViewModel
@@ -167,8 +122,6 @@ struct ProfileView: View {
 
     @AppStorage("poplur_profileAvatarIs3D") private var profileAvatarIs3D = true
     @AppStorage("poplur_profileAvatarModeInitialized.v1") private var profileAvatarModeInitialized = false
-    @AppStorage("poplur.profile.heyPoplurTutorialSeen.v1") private var hasSeenHeyPoplurProfileTutorial = false
-    @State private var showHeyPoplurProfileTutorial = false
     @State private var myPosts: [Post] = []
     // Preview-only images. Production tiles load lazily through the global,
     // byte-bounded ImageCache instead of retaining every decoded profile image.
@@ -934,14 +887,6 @@ struct ProfileView: View {
 
         profilePhotoOptionsOverlay
 
-        if showHeyPoplurProfileTutorial {
-            HeyPoplurProfileTutorialView(
-                accent: cubeSkinStore.current.appTheme.accent,
-                onDismiss: dismissHeyPoplurProfileTutorial
-            )
-            .transition(.scale(scale: 0.96).combined(with: .opacity))
-            .zIndex(60)
-        }
     }
 
     @ViewBuilder
@@ -1343,7 +1288,6 @@ struct ProfileView: View {
         initializeProfileHeadModeIfNeeded()
         NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
         postMainTabChildRouteVisibility()
-        showHeyPoplurProfileTutorialIfNeeded()
 
         print("📊 [ProfileView] onAppear - setting radius to 0")
         animateRadius(to: 0, duration: 0.3)
@@ -1376,23 +1320,6 @@ struct ProfileView: View {
         }
     }
 
-    private func showHeyPoplurProfileTutorialIfNeeded() {
-        guard !hasSeenHeyPoplurProfileTutorial else { return }
-        hasSeenHeyPoplurProfileTutorial = true
-        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
-            showHeyPoplurProfileTutorial = true
-        }
-        NotificationCenter.default.post(name: .PoplurAIShowWakeTutorial, object: nil)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 7.0) {
-            dismissHeyPoplurProfileTutorial()
-        }
-    }
-
-    private func dismissHeyPoplurProfileTutorial() {
-        withAnimation(.easeOut(duration: 0.2)) {
-            showHeyPoplurProfileTutorial = false
-        }
-    }
 
     private func handleProfileRemovePost(_ notification: Notification) {
         if let id = notification.object as? String {

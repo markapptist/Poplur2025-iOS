@@ -508,7 +508,6 @@ struct HomeView: View {
     @State private var isRecordHolding: Bool = false
     @StateObject private var feedCubeMenuWheel = CubeMenuWheelController()
     @StateObject private var cameraCubeMenuWheel = CubeMenuWheelController()
-    @StateObject private var poplurAI = PoplurAIAssistantController()
     @State private var showFeedCommentComposer = false
     @State private var showLiveLocationPicker = false
 
@@ -1473,70 +1472,6 @@ struct HomeView: View {
     }
 
     @MainActor
-    private func handlePoplurAICommand(_ command: PoplurAICommand?) {
-        guard let command else { return }
-        resetChromeSleepTimer()
-
-        switch command {
-        case .openTab(let tab):
-            selectedTab = tab
-        case .openPage(let page):
-            openPoplurAIPage(page)
-        case .goToChannel(let query):
-            selectedTab = .feed
-            NotificationCenter.default.post(
-                name: .PoplurAIGoToFeedChannel,
-                object: nil,
-                userInfo: ["query": query]
-            )
-        case .postToLocation(let location):
-            selectedTab = .map
-            NotificationCenter.default.post(
-                name: .PoplurAIStartMapPost,
-                object: nil,
-                userInfo: ["location": location ?? ""]
-            )
-        case .camera(let mode):
-            selectedTab = .record
-            ensureCameraRunningIfNeeded()
-            switch mode {
-            case .open:
-                break
-            case .photo:
-                Task { @MainActor in
-                    try? await Task.sleep(nanoseconds: 450_000_000)
-                    triggerCameraPhotoFromCubeMenu()
-                }
-            case .video:
-                Task { @MainActor in
-                    try? await Task.sleep(nanoseconds: 450_000_000)
-                    triggerCameraVideoFromCubeMenu()
-                }
-            }
-        case .setTourActive(let active):
-            selectedTab = .map
-            NotificationCenter.default.post(
-                name: .PoplurAISetTourActive,
-                object: nil,
-                userInfo: ["active": active]
-            )
-        case .logout:
-            auth.signOut()
-        case .sortPosts(let order):
-            selectedTab = .profile
-            NotificationCenter.default.post(
-                name: .PoplurAIProfileSortRequested,
-                object: nil,
-                userInfo: ["order": order.rawValue]
-            )
-        case .showAnalytics:
-            selectedTab = .profile
-            NotificationCenter.default.post(name: .PoplurAIShowAnalytics, object: nil)
-        case .unknown:
-            break
-        }
-    }
-
     @MainActor
     private func openPoplurAIPage(_ page: String) {
         let normalized = page.lowercased()
@@ -2129,11 +2064,6 @@ struct HomeView: View {
                 .allowsHitTesting(true)
             }
 
-            PoplurAIAssistantOverlay(
-                controller: poplurAI,
-                accent: cubeSkinStore.current.appTheme.accent
-            )
-            .zIndex(9500)
 
             // Game overlay — ZStack so cube (zIndex 6000) stays on top; back arrow via isMainTabChildRouteVisible
             if showGames {
@@ -2278,10 +2208,6 @@ struct HomeView: View {
                     routedUserID = uid
                 }
             }
-            .onReceive(NotificationCenter.default.publisher(for: .PoplurAIShowWakeTutorial)) { _ in
-                poplurAI.start()
-                poplurAI.showWakeTutorialPulse()
-            }
             .onReceive(NotificationCenter.default.publisher(for: .MapSuggestedRadius)) { note in
                 if let value = note.userInfo?["radius"] as? Double {
                     let clampedValue = min(value, 3_323_000.0)
@@ -2369,9 +2295,6 @@ struct HomeView: View {
                 }
             }
             .onAppear {
-                if !PreviewEnvHomeView.isPreview && !PreviewEnvHomeView.isVerificationLaunch {
-                    poplurAI.start()
-                }
                 CallSessionManager.shared.startListeningForIncomingCalls()
                 runLaunchSequenceIfNeeded()
                 if selectedTab != .feed {
@@ -2529,9 +2452,6 @@ struct HomeView: View {
             .onChange(of: scenePhase) { _, phase in
                 switch phase {
                 case .active:
-                    if !PreviewEnvHomeView.isPreview && !PreviewEnvHomeView.isVerificationLaunch {
-                        poplurAI.start()
-                    }
                     if selectedTab == .record {
                         ensureCameraRunningIfNeeded()
                     }
@@ -2539,12 +2459,6 @@ struct HomeView: View {
                         NotificationCenter.default.post(name: .ResumeFeedAudio, object: nil)
                     }
                 case .background:
-                    // Background never owns the microphone. The old path kept
-                    // an AVAudioEngine, mic tap and recognizer alive specifically
-                    // because the app has the audio background entitlement.
-                    // That made one HEY POPLUR activation capable of warming the
-                    // phone long after the screen locked.
-                    poplurAI.stop()
                     cameraControllerHolder.stopIfLoaded()
                     NotificationCenter.default.post(name: .PauseFeedAudio, object: nil)
                     NotificationCenter.default.post(name: Notification.Name("PauseGlobalFeedAudio"), object: nil)
@@ -2573,9 +2487,6 @@ struct HomeView: View {
                 if newTab != .profile && routedUserID != nil {
                     routedUserID = nil
                 }
-            }
-            .onChange(of: poplurAI.commandToken) { _, _ in
-                handlePoplurAICommand(poplurAI.lastCommand)
             }
 
         // Step 2: apply notification receivers and remaining tasks

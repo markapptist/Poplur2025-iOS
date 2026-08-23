@@ -8,8 +8,6 @@
 	<string>Poplur uses Face ID to sign you in quickly and securely.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Poplur uses the microphone to listen for Hey Poplur voice commands.</string>
-	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Poplur uses speech recognition so Poplur AI can understand your voice commands.</string>
 	<key>PoplurAdMobInterstitialUnitID</key>
 	<string>ca-app-pub-2086359936541081/6696033455</string>
 	<key>UIBackgroundModes</key>
