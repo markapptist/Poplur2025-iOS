@@ -3,6 +3,7 @@ import FirebaseAuth
 import FirebaseFunctions
 import CoreImage
 import AVFoundation
+import CoreLocation
 import UIKit
 
 // MARK: - Web-home native camera (Phase 3.5 — first real tab bridge)
@@ -26,6 +27,9 @@ import UIKit
 final class WebHomeCameraModel: ObservableObject {
     /// Front-most web tab (map | feed | post | profile | holdmenu).
     @Published var activeTab: String = "map"
+    /// True only after HomeTwin confirms that its Mapbox iframe is absent and
+    /// its native-map transparency/hit-region handshake is current.
+    @Published private(set) var nativeMapVisible = false
     /// The camera tab contains several full-screen pages. Only the actual live
     /// viewfinder may own capture, Vision processing, or ML speech.
     @Published private(set) var liveCameraVisible = false
@@ -446,6 +450,7 @@ final class WebHomeCameraModel: ObservableObject {
         case "tabChanged":
             if let tab = body["tab"] as? String {
                 activeTab = tab
+                if tab != "map" { nativeMapVisible = false }
                 liveCameraVisible = tab == "post" && webReportsLiveCamera
                 if !liveCameraVisible {
                     if tab != "post" { webReportsLiveCamera = false }
@@ -457,6 +462,13 @@ final class WebHomeCameraModel: ObservableObject {
                     // no second onDisappear will arrive to reset entry budget.
                     controllerStorage?.suspendCapture(resetEntryBudget: true)
                 }
+            }
+        case "nativeMapPresentation":
+            nativeMapVisible = PoplurNativeAdaptiveMap.isEnabled
+                && (body["active"] as? Bool) == true
+        case "poplur-map-action":
+            if PoplurNativeAdaptiveMap.isEnabled {
+                handleNativeMapAction(body)
             }
         case "cameraLiveVisibilityChanged":
             let visible = (body["visible"] as? Bool) == true
@@ -591,6 +603,47 @@ final class WebHomeCameraModel: ObservableObject {
         default:
             break
         }
+    }
+
+    private func handleNativeMapAction(_ body: [String: Any]) {
+        guard let action = body["action"] as? String else { return }
+        let map = NativeAdaptiveMapController.shared
+        switch action {
+        case "locate":
+            map.locateUser()
+        case "mapMode":
+            if let requested = body["mode"] as? String {
+                map.setDimensionMode(requested == "2d" ? .flat2D : .threeD)
+            } else {
+                map.setDimensionMode(map.isShowingThreeD ? .flat2D : .threeD)
+            }
+        case "setZoom":
+            if let progress = (body["zoom"] as? NSNumber)?.doubleValue {
+                map.setZoom(progress: progress)
+            }
+        case "dropClaim":
+            guard let coordinate = Self.nativeMapCoordinate(body["center"]),
+                  let radiusKm = (body["radiusKm"] as? NSNumber)?.doubleValue,
+                  radiusKm > 0 else { return }
+            map.showRadius(meters: radiusKm * 1_000, centeredAt: coordinate)
+        case "engagement":
+            guard let coordinate = Self.nativeMapCoordinate(body["coords"]) else { return }
+            let radiusKm = (body["radiusKm"] as? NSNumber)?.doubleValue ?? 1
+            map.focus(on: coordinate, distanceMeters: max(500, radiusKm * 2_600))
+        default:
+            // Search, route playback, tours and pop cycling remain available
+            // through the reversible web fallback; this thermal A/B keeps the
+            // first native surface deliberately scoped to browsing controls.
+            break
+        }
+    }
+
+    private static func nativeMapCoordinate(_ raw: Any?) -> CLLocationCoordinate2D? {
+        guard let pair = raw as? [Any], pair.count >= 2,
+              let longitude = (pair[0] as? NSNumber)?.doubleValue,
+              let latitude = (pair[1] as? NSNumber)?.doubleValue else { return nil }
+        let coordinate = CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+        return CLLocationCoordinate2DIsValid(coordinate) ? coordinate : nil
     }
 
     /// Mirrors HomeView.recordTabContent.onAppear: resume the preview and wire
@@ -779,6 +832,11 @@ struct PostLoginHomeSurface: View {
             // WebView itself can stay transparent for the camera punch-through.
             Color(red: 5/255, green: 4/255, blue: 7/255).ignoresSafeArea()
 
+            if PoplurNativeAdaptiveMap.isEnabled && camera.nativeMapVisible {
+                NativeAdaptiveMapLayer()
+                    .transition(.opacity)
+            }
+
             if camera.isCameraTab {
                 WebHomeCameraLayer(model: camera)
             }
@@ -828,6 +886,9 @@ struct PostLoginHomeSurface: View {
             if isPresented {
                 camera.deactivateCamera()
             }
+        }
+        .onDisappear {
+            PostLoginHomeWebView.setNativeMapRendererActive(false)
         }
         // CREATE in the web hold menu opens the REAL chat — PoplurAIChatView,
         // the one backed by Google AI Studio through poplurAiApi — instead of

@@ -32,6 +32,12 @@ final class PoplurManagedWebView: WKWebView {
     private var latestGrant = false
     private var isLightweightOverlayMode = false
     private var isLightweightOverlayRuntimeSuspended = false
+    /// Valid only after the web Home explicitly reports that native MapKit is
+    /// visible. Outside the reported HUD rectangles, hit-testing yields to the
+    /// sibling MKMapView underneath. The default is deliberately fail-closed:
+    /// a missing/stale handshake leaves the ordinary WebView fully interactive.
+    private var nativeMapHitPassthroughEnabled = false
+    private var nativeMapInteractiveRegions: [CGRect] = []
     private var isHostOccluded = false
     private var keepsVisibleDocumentAlive = false
     var onRuntimeActiveChange: ((Bool) -> Void)?
@@ -123,7 +129,16 @@ final class PoplurManagedWebView: WKWebView {
         didSet { updatePerformanceVisibility() }
     }
 
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        if nativeMapHitPassthroughEnabled,
+           !nativeMapInteractiveRegions.contains(where: { $0.contains(point) }) {
+            return nil
+        }
+        return super.hitTest(point, with: event)
+    }
+
     func poplurTearDown() {
+        clearNativeMapPresentation()
         onRuntimeActiveChange?(false)
         onForegroundVisibilityChange?(false)
         lastReportedRuntimeActive = false
@@ -154,6 +169,49 @@ final class PoplurManagedWebView: WKWebView {
         if window != nil { ensurePerformanceRegistration() }
         updatePerformanceVisibility()
         applyLatestPolicyToDocument()
+    }
+
+    /// Applies CSS-viewport hit regions sent by HomeTwin. CSS pixels are
+    /// converted into this view's points so rotation and any visual-viewport
+    /// scale do not shift the clay controls away from their real hit targets.
+    func setNativeMapPresentation(
+        active: Bool,
+        passthrough: Bool,
+        cssRegions: [CGRect],
+        viewportWidth: CGFloat,
+        viewportHeight: CGFloat,
+        viewportOffset: CGPoint
+    ) {
+        guard active, passthrough,
+              viewportWidth.isFinite, viewportWidth > 0,
+              viewportHeight.isFinite, viewportHeight > 0,
+              bounds.width > 0, bounds.height > 0 else {
+            nativeMapHitPassthroughEnabled = false
+            nativeMapInteractiveRegions = []
+            return
+        }
+
+        let scaleX = bounds.width / viewportWidth
+        let scaleY = bounds.height / viewportHeight
+        let boundsRect = CGRect(origin: .zero, size: bounds.size)
+        nativeMapInteractiveRegions = cssRegions.compactMap { region in
+            guard region.minX.isFinite, region.minY.isFinite,
+                  region.width.isFinite, region.height.isFinite,
+                  region.width > 0, region.height > 0 else { return nil }
+            let converted = CGRect(
+                x: (region.minX - viewportOffset.x) * scaleX,
+                y: (region.minY - viewportOffset.y) * scaleY,
+                width: region.width * scaleX,
+                height: region.height * scaleY
+            ).insetBy(dx: -2, dy: -2).intersection(boundsRect)
+            return converted.isNull || converted.isEmpty ? nil : converted
+        }
+        nativeMapHitPassthroughEnabled = true
+    }
+
+    func clearNativeMapPresentation() {
+        nativeMapHitPassthroughEnabled = false
+        nativeMapInteractiveRegions = []
     }
 
     /// Pauses the transparent Camera HUD's governed rAF/timers/CSS/media while

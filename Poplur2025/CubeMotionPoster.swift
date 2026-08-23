@@ -11,10 +11,22 @@ import UIKit
 final class CubeMotionPoster {
     static let shared = CubeMotionPoster()
 
+    /// Hardware cadence is leased with the owner instead of being a process-wide
+    /// constant. Most navigator objects are small parallax affordances and do
+    /// not benefit from display-rate sensor work; the camcorder is deliberately
+    /// different because it is aimed with the handset.
+    enum SamplingRate: Double {
+        case navigator = 20
+        case cameraAim = 60
+
+        fileprivate var updateInterval: TimeInterval { 1.0 / rawValue }
+    }
+
     private let manager = CMMotionManager()
     private let queue = OperationQueue()
-    private var owners: Set<String> = []
+    private var owners: [String: SamplingRate] = [:]
     private var isRunning = false
+    private var activeSamplingRate: SamplingRate?
     private var streamGeneration: UInt64 = 0
     private var lastSampleUptime: TimeInterval = 0
     private var lastRestartUptime: TimeInterval = 0
@@ -32,13 +44,30 @@ final class CubeMotionPoster {
         NotificationCenter.default.addObserver(self, selector: #selector(appWillResignActive), name: UIApplication.willResignActiveNotification, object: nil)
     }
 
-    func start(owner: String = "legacy") {
+    func start(owner: String = "legacy", samplingRate: SamplingRate = .navigator) {
         guard Thread.isMainThread else {
-            DispatchQueue.main.async { [weak self] in self?.start(owner: owner) }
+            DispatchQueue.main.async { [weak self] in
+                self?.start(owner: owner, samplingRate: samplingRate)
+            }
             return
         }
-        owners.insert(owner)
+        owners[owner] = samplingRate
         startHardwareIfNeeded()
+        applyDesiredSamplingRate()
+    }
+
+    private var desiredSamplingRate: SamplingRate? {
+        owners.values.max { $0.rawValue < $1.rawValue }
+    }
+
+    private func applyDesiredSamplingRate() {
+        guard let desiredSamplingRate else { return }
+        guard activeSamplingRate != desiredSamplingRate else { return }
+        manager.deviceMotionUpdateInterval = desiredSamplingRate.updateInterval
+        activeSamplingRate = desiredSamplingRate
+        PoplurDiagLog.append(
+            "[CubeMotion] rate=\(Int(desiredSamplingRate.rawValue))Hz owners=\(owners.keys.sorted().joined(separator: ","))"
+        )
     }
 
     private func startHardwareIfNeeded() {
@@ -50,19 +79,15 @@ final class CubeMotionPoster {
               UIApplication.shared.applicationState == .active,
               manager.isDeviceMotionAvailable,
               !isRunning else { return }
+        applyDesiredSamplingRate()
         isRunning = true
         streamGeneration &+= 1
         let generation = streamGeneration
         lastSampleUptime = ProcessInfo.processInfo.systemUptime
 
-        // The visible navigator renders at 60fps. Thirty sensor updates left
-        // the interpolation a frame behind the hand, which is invisible on a
-        // clay cube leaning in its case and very visible on the camcorder,
-        // which is aimed — it should point where the handset points, not
-        // where it pointed 33ms ago. Matching the display rate removes that
-        // lag at the source. Hidden/background owners still stop hardware,
-        // which is where this stream's power actually goes.
-        manager.deviceMotionUpdateInterval = 1.0 / 60.0
+        // `applyDesiredSamplingRate()` selects 20 Hz for ordinary parallax and
+        // 60 Hz only while an owner is actively aiming the camcorder. Hidden,
+        // backgrounded, and unowned surfaces stop the hardware entirely.
         // A NORTH-REFERENCED frame, not the arbitrary one this used to take.
         // `.xArbitraryZVertical` pins X to wherever the handset happened to be
         // pointing when the stream started, so it can say how the phone is
@@ -133,14 +158,20 @@ final class CubeMotionPoster {
             DispatchQueue.main.async { [weak self] in self?.stop(owner: owner) }
             return
         }
-        owners.remove(owner)
+        owners.removeValue(forKey: owner)
         if owners.isEmpty { stopHardware() }
+        else { applyDesiredSamplingRate() }
     }
 
     private func stopHardware() {
         healthWorkItem?.cancel()
         healthWorkItem = nil
         streamGeneration &+= 1
+        let wasActive = activeSamplingRate != nil || isRunning || manager.isDeviceMotionActive
+        activeSamplingRate = nil
+        if wasActive {
+            PoplurDiagLog.append("[CubeMotion] rate=off owners=\(owners.keys.sorted().joined(separator: ","))")
+        }
         guard isRunning || manager.isDeviceMotionActive else { return }
         manager.stopDeviceMotionUpdates()
         isRunning = false
@@ -184,7 +215,7 @@ final class CubeMotionPoster {
             return
         }
         lastRestartUptime = now
-        PoplurDiagLog.append("[CubeMotion] restarting reason=\(reason) owners=\(owners.sorted().joined(separator: ","))")
+        PoplurDiagLog.append("[CubeMotion] restarting reason=\(reason) owners=\(owners.keys.sorted().joined(separator: ","))")
         stopHardware()
         startHardwareIfNeeded()
     }

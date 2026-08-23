@@ -280,6 +280,11 @@ enum PoplurWebHome {
             URLQueryItem(name: "tabs", value: "1"),
             URLQueryItem(name: "v", value: PoplurPreloginWeb.buildStamp)
         ]
+        if PoplurNativeAdaptiveMap.isEnabled {
+            // Home keeps drawing the approved clay HUD, but it must not mount
+            // the Mapbox/WebGL iframe while the native renderer owns Map.
+            queryItems.append(URLQueryItem(name: "nativeMap", value: "1"))
+        }
         queryItems.append(contentsOf: PoplurPermissionRouting.homePrimerQueryItems())
         components.queryItems = queryItems
         return components.url
@@ -442,6 +447,20 @@ struct PostLoginHomeWebView: UIViewRepresentable {
     /// must not suspend the HUD after a newer running delivery has already
     /// reopened it, so every state handoff owns a monotonically newer token.
     @MainActor private static var cameraBudgetStateToken: UInt64 = 0
+    /// The native-map experiment can own the Map tab without leaving the web
+    /// navigator's motion pipeline running underneath it. Kept here as well as
+    /// on the live coordinator so a toggle made just before WebKit is created is
+    /// applied when the host comes online.
+    @MainActor private static var nativeMapRendererActive = false
+
+    /// Call from the native map host when its renderer becomes or stops being
+    /// the visible Map-tab implementation. Other tabs keep their own motion
+    /// policy; Camera can still request display-rate aiming.
+    @MainActor
+    static func setNativeMapRendererActive(_ active: Bool) {
+        nativeMapRendererActive = active
+        liveCoordinator?.setNativeMapRendererActive(active)
+    }
 
     /// Hand the web overlay real boxes. JSON matches `Detection` in
     /// poplur-clay-map/src/mlDetect.ts: x/y/w/h normalised 0..1, top-left origin.
@@ -628,6 +647,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         webView.navigationDelegate = context.coordinator
         Self.liveWebView = webView
         Self.liveCoordinator = context.coordinator
+        context.coordinator.setNativeMapRendererActive(Self.nativeMapRendererActive)
 
         if PoplurClayMapView.bundledRootURL() != nil, let url = PoplurWebHome.url(for: initialView) {
             // A cache migration is rare (only when the embedded build stamp
@@ -648,6 +668,8 @@ struct PostLoginHomeWebView: UIViewRepresentable {
     }
 
     static func dismantleUIView(_ uiView: WKWebView, coordinator: Coordinator) {
+        setNativeMapRendererActive(false)
+        (uiView as? PoplurManagedWebView)?.clearNativeMapPresentation()
         (uiView as? PoplurManagedWebView)?.poplurTearDown()
         uiView.configuration.userContentController.removeScriptMessageHandler(forName: "poplur")
         uiView.configuration.userContentController.removeScriptMessageHandler(forName: "homeReady")
@@ -684,9 +706,10 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         })();
         """#
 
-    /// Punch-through only for the camera tab (see the opacity note above).
+    /// Punch-through for a native renderer under the approved web HUD. Camera
+    /// and the adaptive native map are mutually exclusive owners of this hole.
     static func setCameraHole(_ on: Bool, on webView: WKWebView) {
-        // The native camera is the sole heavy renderer on this tab. The web
+        // The native renderer is the sole heavy surface on this tab. The web
         // layer remains alive only as its transparent controls/readout.
         (webView as? PoplurManagedWebView)?.setLightweightOverlayMode(on)
         webView.isOpaque = !on
@@ -706,11 +729,15 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         private var notificationObservers: [NSObjectProtocol] = []
         private var currentWebTab: String
         private var webReportsLiveCamera = false
+        private var nativeMapPresentationActive = false
         private let homeURL: URL?
         private var recoveryWorkItem: DispatchWorkItem?
         private var recoveryAttempt = 0
         private var recoveryPending = false
         private var webForegroundActive = false
+        private var webMotionLeaseActive = false
+        private var nativeMapRendererActive = false
+        private var navigatorReportsAiming = false
         private var lastMotionDeliveryUptime: TimeInterval = 0
         private var lastDeliveredRoll: Double?
         private var lastDeliveredPitch: Double?
@@ -794,17 +821,42 @@ struct PostLoginHomeWebView: UIViewRepresentable {
             if active { replayLatestMotion() }
         }
 
+        func setNativeMapRendererActive(_ active: Bool) {
+            guard nativeMapRendererActive != active else { return }
+            nativeMapRendererActive = active
+            // Reopening the fallback must deliver one retained pose even if it
+            // matches the sample last seen before native took over.
+            if !active {
+                lastMotionDeliveryUptime = 0
+                lastDeliveredRoll = nil
+                lastDeliveredPitch = nil
+                lastDeliveredHeading = nil
+            }
+            syncMotionLease()
+            if !active { replayLatestMotion() }
+        }
+
         private func syncMotionLease() {
-            // The navigator is present on every home tab and subscreen. Keep a
-            // single Core Motion lease for the foreground web home instead of
-            // leaving Map and Camera as non-responsive exceptions.
+            // When native owns Map, do not sample for the hidden web navigator
+            // at all. The fallback web Map and ordinary tab objects need only a
+            // low-rate parallax stream; the visible camcorder is the sole reason
+            // this owner asks Core Motion for display-rate samples.
             let eligible = webForegroundActive
-            if eligible { CubeMotionPoster.shared.start(owner: "web-home") }
-            else { CubeMotionPoster.shared.stop(owner: "web-home") }
+                && !(nativeMapRendererActive && currentWebTab == "map")
+            webMotionLeaseActive = eligible
+            guard eligible else {
+                CubeMotionPoster.shared.stop(owner: "web-home")
+                return
+            }
+            let samplingRate: CubeMotionPoster.SamplingRate =
+                currentWebTab == "post" && navigatorReportsAiming
+                    ? .cameraAim
+                    : .navigator
+            CubeMotionPoster.shared.start(owner: "web-home", samplingRate: samplingRate)
         }
 
         private func replayLatestMotion() {
-            guard webForegroundActive,
+            guard webMotionLeaseActive,
                   let webView = bridge.webView,
                   (webView as? PoplurManagedWebView)?.poplurIsForegroundVisible == true,
                   let sample = CubeMotionPoster.shared.latestSample else { return }
@@ -827,17 +879,20 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         /// This tiny dispatch deliberately has no completion-based lock. WebKit
         /// can omit an evaluateJavaScript completion while its governed timers
         /// are idle; the old lock then permanently stopped live cube motion.
-        /// Core Motion is a fixed 30Hz source and delivery is limited to
-        /// the genuinely foreground document, so callback-free dispatch is
-        /// bounded without coupling motion to page inactivity policy.
+        /// Core Motion is leased at a bounded 20/60 Hz according to visible
+        /// demand and delivery is limited to the genuinely foreground document,
+        /// so callback-free dispatch stays bounded without coupling motion to
+        /// page inactivity policy.
         private func deliverMotion(roll: Double, pitch: Double, heading: Double?, on webView: WKWebView) {
-            guard webForegroundActive,
+            guard webMotionLeaseActive,
                   (webView as? PoplurManagedWebView)?.poplurIsForegroundVisible == true else { return }
             let now = ProcessInfo.processInfo.systemUptime
-            // Core Motion samples at 30 Hz. Forward each changed sample, then
-            // let the renderer interpolate; that keeps camcorder aim direct
-            // without creating a display-rate WebKit bridge.
-            guard now - lastMotionDeliveryUptime >= (1.0 / 30.0) else { return }
+            // Keep the bridge aligned with the hardware lease: ordinary clay
+            // parallax is 20 Hz, while the camcorder retains direct 60 Hz aim.
+            let deliveryRate = currentWebTab == "post" && navigatorReportsAiming
+                ? CubeMotionPoster.SamplingRate.cameraAim.rawValue
+                : CubeMotionPoster.SamplingRate.navigator.rawValue
+            guard now - lastMotionDeliveryUptime >= (1.0 / deliveryRate) else { return }
             // Heading has to be part of this test, not just part of the payload.
             // Panning a level phone around the room is almost pure heading: roll
             // and pitch barely move, so on a roll/pitch-only gate every sample of
@@ -1544,6 +1599,20 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     // authenticated launch does not repeat the primer.
                     PoplurPermissionRouting.markHandled(permission)
                 }
+                if type == "nativeMapPresentation", let webView = bridge.webView {
+                    applyNativeMapPresentation(body, to: webView)
+                }
+                if type == "navigatorMotionDemandChanged",
+                   let aiming = body["aiming"] as? Bool {
+                    // CubeTab3D reports the model that is actually installed,
+                    // not merely the semantic tab requested during a pop. That
+                    // keeps 60 Hz exclusive to a visible camcorder and drops
+                    // back to the ordinary navigator cadence on its subscreens.
+                    if navigatorReportsAiming != aiming {
+                        navigatorReportsAiming = aiming
+                        syncMotionLease()
+                    }
+                }
                 if type == "tabChanged", let tab = body["tab"] as? String {
                     // Record the surface in the diagnostics stream. The thermal
                     // soak reads this log to attribute heat, and until now it
@@ -1558,6 +1627,12 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     }
                     currentWebTab = tab
                     if tab != "post" { webReportsLiveCamera = false }
+                    if tab != "map", nativeMapPresentationActive,
+                       let webView = bridge.webView {
+                        nativeMapPresentationActive = false
+                        (webView as? PoplurManagedWebView)?.clearNativeMapPresentation()
+                        PostLoginHomeWebView.setNativeMapRendererActive(false)
+                    }
                     syncMotionLease()
                     // The lease remains owned across web tabs, so start() has
                     // no edge on which to replay its latest sample. Reset only
@@ -1744,11 +1819,55 @@ struct PostLoginHomeWebView: UIViewRepresentable {
             bridge.userContentController(userContentController, didReceive: message)
         }
 
+        private func applyNativeMapPresentation(
+            _ body: [String: Any],
+            to webView: WKWebView
+        ) {
+            let requestedActive = (body["active"] as? Bool) == true
+            let active = PoplurNativeAdaptiveMap.isEnabled && requestedActive
+            nativeMapPresentationActive = active
+
+            let managed = webView as? PoplurManagedWebView
+            guard active else {
+                managed?.clearNativeMapPresentation()
+                PostLoginHomeWebView.setNativeMapRendererActive(false)
+                updateCameraHole()
+                return
+            }
+
+            let regions = (body["regions"] as? [[String: Any]] ?? []).compactMap { item -> CGRect? in
+                guard let x = (item["x"] as? NSNumber)?.doubleValue,
+                      let y = (item["y"] as? NSNumber)?.doubleValue,
+                      let width = (item["width"] as? NSNumber)?.doubleValue,
+                      let height = (item["height"] as? NSNumber)?.doubleValue else { return nil }
+                return CGRect(x: x, y: y, width: width, height: height)
+            }
+            let viewportWidth = (body["viewportWidth"] as? NSNumber)?.doubleValue ?? 0
+            let viewportHeight = (body["viewportHeight"] as? NSNumber)?.doubleValue ?? 0
+            let viewportOffsetX = (body["viewportOffsetX"] as? NSNumber)?.doubleValue ?? 0
+            let viewportOffsetY = (body["viewportOffsetY"] as? NSNumber)?.doubleValue ?? 0
+            managed?.setNativeMapPresentation(
+                active: true,
+                passthrough: (body["passthrough"] as? Bool) == true,
+                cssRegions: regions,
+                viewportWidth: CGFloat(viewportWidth),
+                viewportHeight: CGFloat(viewportHeight),
+                viewportOffset: CGPoint(x: viewportOffsetX, y: viewportOffsetY)
+            )
+            PostLoginHomeWebView.setNativeMapRendererActive(true)
+            updateCameraHole()
+        }
+
         private func updateCameraHole() {
             guard let webView = bridge.webView else { return }
             let shouldRevealLiveCamera = currentWebTab == "post" && webReportsLiveCamera
+            let shouldRevealNativeMap = PoplurNativeAdaptiveMap.isEnabled
+                && nativeMapPresentationActive
             DispatchQueue.main.async {
-                PostLoginHomeWebView.setCameraHole(shouldRevealLiveCamera, on: webView)
+                PostLoginHomeWebView.setCameraHole(
+                    shouldRevealLiveCamera || shouldRevealNativeMap,
+                    on: webView
+                )
             }
         }
 
