@@ -90,7 +90,7 @@ class ARFilterManager: NSObject, ObservableObject {
     
     /// A whole-frame colour recipe: the Core Image twin of one CSS `filter`
     /// chain. Defaults are the identity, so a recipe names only what it changes.
-    struct Grade {
+    struct Grade: Decodable {
         /// CSS `brightness()` — a multiplier, carried here and converted to an
         /// exposure stop at apply time.
         var brightness: Double = 1
@@ -110,6 +110,32 @@ class ARFilterManager: NSObject, ObservableObject {
         /// the web chain expresses it as two shadows that never actually draw.
         /// Core Image can offset the channels for real, so here it is real.
         var anaglyph: Double = 0
+    }
+
+    /// A grade supplied by the web for the CURRENT pick.
+    ///
+    /// The filter library is streamed (see the clay map's arFilterCatalog),
+    /// so the set can grow between app releases. When the web sends a recipe
+    /// with the pick, that recipe wins; the compiled-in table below is the
+    /// fallback for a pick that arrives without one. This is what lets a
+    /// filter published today work on a binary shipped last month.
+    private nonisolated(unsafe) var streamedGrade: Grade?
+
+    /// Called from the bridge before `activeFilter` is set.
+    nonisolated func setStreamedGrade(_ grade: Grade?) {
+        filterStateLock.lock()
+        streamedGrade = grade
+        filterStateLock.unlock()
+    }
+
+    /// The recipe for this pick: the streamed one when the web sent it, else
+    /// the compiled-in table. Read on the render queue, so it takes the same
+    /// lock as every other piece of cross-queue filter state here.
+    private nonisolated func currentGrade(for filter: ARFilter) -> Grade? {
+        filterStateLock.lock()
+        let streamed = streamedGrade
+        filterStateLock.unlock()
+        return streamed ?? filter.grade
     }
 
     enum ARFilter: String, CaseIterable, Identifiable {
@@ -160,6 +186,20 @@ class ARFilterManager: NSObject, ObservableObject {
         case webDinoHood = "dino-hood"
         case webAngel = "angel"
         case webFlowerCrown = "flower-crown"
+
+        /// A filter that exists only in the STREAMED catalog — published after
+        /// this binary was built, so there is no case for it here.
+        ///
+        /// Without this, streaming was a half-measure that looked complete: an
+        /// unknown id resolved to `.none`, and both render entry points return
+        /// the frame untouched on `.none` BEFORE any grade is consulted, so the
+        /// recipe arrived and was never used. The whole point of the catalog is
+        /// that a filter published today works on a phone built last month; a
+        /// pick with a grade but no matching case lands here instead, and every
+        /// `!= .none` test downstream — including the one that decides whether
+        /// frames are delivered at all — treats it as the real filter it is.
+        /// Its recipe comes from `setStreamedGrade`; `grade` is nil by design.
+        case streamed = "__streamed"
 
         /// "smooth-glow" -> "Smooth Glow". The rail owns the real captions;
         /// this is only for logs and accessibility on the native side.
@@ -330,7 +370,7 @@ class ARFilterManager: NSObject, ObservableObject {
         // missing face — the code below even logs "Frame will remain
         // unchanged" — so the rail did nothing at all unless a face happened to
         // be detected, which is the wrong contract for fourteen of these.
-        if let grade = activeFilter.grade {
+        if let grade = currentGrade(for: activeFilter) {
             return applyGrade(grade, to: image).cropped(to: image.extent)
         }
 

@@ -109,11 +109,34 @@ final class WebHomeCameraModel: ObservableObject {
     /// heat source, and paying for a full-rate filter pass to render "None"
     /// would be paying for nothing. Picking None hands the cheap hardware
     /// preview layer back.
-    private func applyARFilter(id: String) {
+    /// `grade` is the streamed recipe for this pick, straight from the web's
+    /// filter catalog. The library lives in Cloud Storage now so it can grow
+    /// without an app release — which only works if the recipe travels with
+    /// the id, because a filter published after this binary shipped is not in
+    /// the compiled table. A pick with no grade falls back to that table.
+    private func applyARFilter(id: String, grade: [String: Any]? = nil) {
         let controller = resolveController()
-        let filter = ARFilterManager.ARFilter.allCases.first {
+        let known = ARFilterManager.ARFilter.allCases.first {
             $0.rawValue.caseInsensitiveCompare(id) == .orderedSame
-        } ?? .none
+        }
+
+        var streamed: ARFilterManager.Grade?
+        if let grade,
+           let data = try? JSONSerialization.data(withJSONObject: grade),
+           let decoded = try? JSONDecoder().decode(ARFilterManager.Grade.self, from: data) {
+            streamed = decoded
+        } else if grade != nil {
+            PoplurDiagLog.append("arfilter: streamed grade for \(id) failed to decode — using the built-in table")
+        }
+
+        // An id this binary does not know is a filter published since it was
+        // built — real, and renderable, because its recipe came with the pick.
+        // Resolving it to `.none` (as this did) meant the streamed catalog
+        // could only ever serve filters that were already compiled in.
+        let filter = known ?? (streamed != nil ? .streamed : .none)
+        if known == nil && streamed != nil {
+            PoplurDiagLog.append("arfilter: \(id) is not in this build — rendering it from the streamed grade")
+        }
 
         if filter != .none && controller.arFilterManager == nil {
             let manager = ARFilterManager()
@@ -132,6 +155,7 @@ final class WebHomeCameraModel: ObservableObject {
             }
             self.publishCombinedDetections()
         }
+        controller.arFilterManager?.setStreamedGrade(streamed)
         controller.arFilterManager?.activeFilter = filter
         if filter == .none {
             latestARFace = nil
@@ -550,7 +574,10 @@ final class WebHomeCameraModel: ObservableObject {
                 // to receive it: the Core Image pass and the display layer are
                 // installed by setupARFilterSupport(), which only HomeView ever
                 // called. Selecting a filter changed a label and nothing else.
-                applyARFilter(id: (body["id"] as? String) ?? "none")
+                applyARFilter(
+                id: (body["id"] as? String) ?? "none",
+                grade: body["grade"] as? [String: Any],
+            )
             default: break
             }
         case "holdMenuNavigate":
