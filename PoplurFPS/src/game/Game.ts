@@ -1,5 +1,5 @@
 import { SCREEN_W, SCREEN_H, WEAPONS, SPR_BOSS } from './constants.ts';
-import { Level, ENTITY_SPAWNS } from './Level.ts';
+import { Level, LEVELS } from './Level.ts';
 import { Player } from './Player.ts';
 import { Enemy } from './Enemy.ts';
 import { Pickup, isEnemy, isPickup, isProp, spriteAssetKey } from './Pickups.ts';
@@ -10,13 +10,13 @@ import { consumeInteractCommand, consumePauseCommand, getInput } from '../input.
 import { Audio } from '../audio.ts';
 import type { Assets } from '../assets.ts';
 
-export type GameState = 'loading' | 'menu' | 'zoom' | 'playing' | 'paused' | 'dead' | 'win';
+export type GameState = 'loading' | 'menu' | 'zoom' | 'playing' | 'paused' | 'dead' | 'win' | 'levelclear';
 
 const WEAPON_KEYS = ['pistol', 'shotgun', 'plasma', 'rocket', 'railgun'] as const;
 
 export class Game {
   state: GameState = 'loading';
-  level = new Level();
+  level = new Level(0);
   player = new Player();
   enemies: Enemy[] = [];
   pickups: Pickup[] = [];
@@ -25,6 +25,7 @@ export class Game {
   score = 0;
   kills = 0;
   gameTime = 0;
+  currentLevel = 0;
 
   selectedMenu: MenuSelection = 0;
   menuTick = 0;
@@ -45,10 +46,11 @@ export class Game {
   private eliminationBanner = 0;
   private missionBanner = 0;
   private emptyWeaponBanner = 0;
-  private readonly totalEnemies: number;
+  private levelClearTimer = 0;
+  private totalEnemies: number;
 
   constructor(public ctx: CanvasRenderingContext2D, private externalController = false) {
-    this.totalEnemies = ENTITY_SPAWNS.filter(spawn => isEnemy(spawn.type)).length;
+    this.totalEnemies = LEVELS[0].spawns.filter(spawn => isEnemy(spawn.type)).length;
   }
 
   init(assets: Assets): void {
@@ -62,7 +64,8 @@ export class Game {
     this.pickups = [];
     this.props   = [];
 
-    for (const spawn of ENTITY_SPAWNS) {
+    const data = LEVELS[this.currentLevel] ?? LEVELS[0];
+    for (const spawn of data.spawns) {
       if (isEnemy(spawn.type)) {
         this.enemies.push(new Enemy(spawn.type, spawn.x, spawn.y));
       } else if (isPickup(spawn.type)) {
@@ -71,16 +74,36 @@ export class Game {
         this.props.push(new Pickup(spawn.type, spawn.x, spawn.y));
       }
     }
+
+    this.totalEnemies = this.enemies.length;
   }
 
   private resetGame(): void {
-    this.level = new Level();
+    this.currentLevel = 0;
+    this.level = new Level(0);
     this.player = new Player();
     this.score = 0; this.kills = 0; this.gameTime = 0;
     this.hitMarker = 0;
     this.eliminationBanner = 0;
     this.missionBanner = 3.6;
     this.emptyWeaponBanner = 0;
+    this.levelClearTimer = 0;
+    this.spawnEntities();
+  }
+
+  private advanceLevel(): void {
+    this.currentLevel++;
+    const data = LEVELS[this.currentLevel];
+    this.level = new Level(this.currentLevel);
+    this.player.x = data.playerX;
+    this.player.y = data.playerY;
+    this.player.dirX = 0; this.player.dirY = 1;
+    this.player.planeX = 0.66; this.player.planeY = 0;
+    this.hitMarker = 0;
+    this.eliminationBanner = 0;
+    this.missionBanner = 3.6;
+    this.emptyWeaponBanner = 0;
+    this.levelClearTimer = 0;
     this.spawnEntities();
   }
 
@@ -104,7 +127,6 @@ export class Game {
         if (down && !this.menuDownPressed) { this.selectedMenu = 1; }
         if (fire && !this.menuFirePressed) { this.state = 'zoom'; this.zoomT = 0; }
 
-        // Also accept keyboard Enter / Space
         if (input.interact && !this.menuFirePressed) { this.state = 'zoom'; this.zoomT = 0; }
 
         this.menuUpPressed   = up;
@@ -175,11 +197,17 @@ export class Game {
           this.state = 'dead';
         }
 
-        // Check win (boss dead)
+        // Check level clear (boss dead)
         const boss = this.enemies.find(e => e.type === SPR_BOSS);
         if (boss?.dead && boss.deathTimer > 1.5) {
-          Audio.levelWin();
-          this.state = 'win';
+          if (this.currentLevel >= LEVELS.length - 1) {
+            Audio.levelWin();
+            this.state = 'win';
+          } else {
+            Audio.levelWin();
+            this.state = 'levelclear';
+            this.levelClearTimer = 0;
+          }
         }
 
         break;
@@ -199,6 +227,14 @@ export class Game {
         }
         break;
 
+      case 'levelclear':
+        this.levelClearTimer += dt;
+        if (this.levelClearTimer > 3.0 || input.interact) {
+          this.advanceLevel();
+          this.state = 'playing';
+        }
+        break;
+
       case 'win':
         if (input.interact) {
           this.state = 'menu';
@@ -213,11 +249,9 @@ export class Game {
     this.player.consumeAmmo();
     this.muzzleFlash = 1;
 
-    // Play audio
     const audioFns = [Audio.pistol, Audio.shotgun, Audio.plasma, Audio.rocket, Audio.railgun];
     audioFns[this.player.weapon]?.();
 
-    // Raycast for each projectile
     for (let p = 0; p < w.projectiles; p++) {
       const spread = (Math.random() - 0.5) * w.spread * 2;
       const angle = spread;
@@ -230,15 +264,12 @@ export class Game {
 
       for (const e of this.enemies) {
         if (e.dead) continue;
-        // Check if enemy is in roughly the ray direction
         const ex = e.x - this.player.x, ey = e.y - this.player.y;
         const dot = ex * rdx + ey * rdy;
         if (dot <= 0) continue;
         const dist = Math.sqrt(ex * ex + ey * ey);
-        // Perpendicular distance from ray
         const perp = Math.abs(ex * rdy - ey * rdx);
-        if (perp > 0.5) continue; // miss
-        // Wall check
+        if (perp > 0.5) continue;
         let wallHit = false;
         const steps = Math.ceil(dist * 3);
         for (let i = 1; i < steps; i++) {
@@ -289,8 +320,8 @@ export class Game {
       case 'playing':
       case 'paused':
       case 'dead':
-      case 'win': {
-        // Build sprite list
+      case 'win':
+      case 'levelclear': {
         const renderSprites: RenderSprite[] = [];
 
         for (const e of this.enemies) {
@@ -342,26 +373,60 @@ export class Game {
           missionBanner: this.missionBanner,
           emptyWeaponBanner: this.emptyWeaponBanner,
           externalController: this.externalController,
-          bossHealth: boss && !boss.dead && this.player.y > 13
+          bossHealth: boss && !boss.dead && Math.hypot(boss.x - this.player.x, boss.y - this.player.y) < 12
             ? { current: boss.hp, max: boss.maxHp }
             : null,
         });
 
         if (this.state === 'paused') renderPauseScreen(ctx);
         if (this.state === 'dead')   renderDeathScreen(ctx, Math.min(1, this.player.deadTimer / 1.5));
+        if (this.state === 'levelclear') this.renderLevelClear(ctx);
         if (this.state === 'win')    renderWinScreen(ctx, this.score, this.kills);
         break;
       }
     }
   }
 
+  private renderLevelClear(ctx: CanvasRenderingContext2D): void {
+    const W = SCREEN_W, H = SCREEN_H;
+    const alpha = Math.min(1, this.levelClearTimer / 0.5);
+    ctx.fillStyle = `rgba(0,0,0,${alpha * 0.65})`;
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    ctx.font = 'bold 28px monospace';
+    ctx.fillStyle = `rgba(255,100,200,${alpha})`;
+    ctx.fillText(LEVELS[this.currentLevel].missionName, W / 2, H / 2 - 30);
+
+    ctx.font = 'bold 16px monospace';
+    ctx.fillStyle = `rgba(255,255,255,${alpha * 0.9})`;
+    ctx.fillText('LEVEL CLEAR', W / 2, H / 2 + 10);
+
+    const nextAlpha = this.levelClearTimer > 1.5 ? Math.min(1, (this.levelClearTimer - 1.5) / 0.5) : 0;
+    if (nextAlpha > 0) {
+      ctx.font = '14px monospace';
+      ctx.fillStyle = `rgba(255,255,255,${nextAlpha * 0.7})`;
+      ctx.fillText('TAP TO CONTINUE', W / 2, H / 2 + 50);
+    }
+
+    ctx.restore();
+  }
+
   private objectiveText(): string {
+    const data = LEVELS[this.currentLevel];
     const boss = this.enemies.find(enemy => enemy.type === SPR_BOSS);
-    if (this.player.x < 8 && this.player.y < 6) return 'BREACH THE FIRST DOOR';
-    if (!this.player.hasKey['gold']) return 'FIND THE GOLD KEY';
-    if (this.player.y < 14) return 'UNLOCK THE LOWER SECTOR';
-    if (boss && !boss.dead) return 'DEFEAT THE ARCADE OVERLORD';
-    return 'MISSION COMPLETE';
+
+    if (!this.player.hasKey['gold'] && this.pickups.some(p => p.type === 203 && !p.collected)) {
+      return 'FIND THE GOLD KEY';
+    }
+    if (!this.player.hasKey['pink'] && this.pickups.some(p => p.type === 204 && !p.collected)) {
+      return 'FIND THE PINK KEY';
+    }
+    if (boss && !boss.dead) return `DEFEAT THE BOSS`;
+    return data.missionObjective;
   }
 }
 

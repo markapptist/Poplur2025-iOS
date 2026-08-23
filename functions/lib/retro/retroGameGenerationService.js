@@ -38,10 +38,15 @@ exports.PROMPT_MAX_LENGTH = 400;
 class GenerationError extends Error {
     code;
     violations;
-    constructor(code, message, violations = []) {
+    detail;
+    constructor(code, message, violations = [],
+    /** The underlying API error, kept so a failure can actually be diagnosed
+     *  instead of arriving as one indistinguishable sentence. */
+    detail) {
         super(message);
         this.code = code;
         this.violations = violations;
+        this.detail = detail;
         this.name = "GenerationError";
     }
 }
@@ -203,11 +208,28 @@ async function runDesigner(job, userId, apiKey) {
             message = await stream.finalMessage();
         }
         catch (error) {
+            // Most specific first. Collapsing these into one message is what turns a
+            // wrong key or an unavailable model into "try again later" — advice that
+            // will never work, for a caller who can never fix it.
             if (error instanceof sdk_1.default.RateLimitError) {
-                throw new GenerationError("model_unavailable", "The game designer is busy. Try again in a minute.");
+                throw new GenerationError("model_unavailable", "The game designer is busy. Try again in a minute.", [], error.message);
+            }
+            if (error instanceof sdk_1.default.AuthenticationError || error instanceof sdk_1.default.PermissionDeniedError) {
+                throw new GenerationError("designer_misconfigured", "The game designer's credentials are not working.", [], error.message);
+            }
+            if (error instanceof sdk_1.default.NotFoundError) {
+                throw new GenerationError("designer_misconfigured", `The model ${MODEL} is not available to this account.`, [], error.message);
+            }
+            if (error instanceof sdk_1.default.BadRequestError) {
+                // Our request, not the player's idea: a schema or parameter this
+                // account or model does not accept.
+                throw new GenerationError("designer_misconfigured", "The game designer sent a request the API rejected.", [], error.message);
+            }
+            if (error instanceof sdk_1.default.APIConnectionError) {
+                throw new GenerationError("model_unavailable", "Could not reach the game designer.", [], error.message);
             }
             if (error instanceof sdk_1.default.APIError) {
-                throw new GenerationError("model_unavailable", "The game designer is unavailable right now.");
+                throw new GenerationError("model_unavailable", "The game designer is unavailable right now.", [], `${error.status ?? "?"}: ${error.message}`);
             }
             throw error;
         }

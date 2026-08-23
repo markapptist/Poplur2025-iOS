@@ -1472,7 +1472,6 @@ struct HomeView: View {
     }
 
     @MainActor
-    @MainActor
     private func openPoplurAIPage(_ page: String) {
         let normalized = page.lowercased()
         if normalized.contains("tv guide") {

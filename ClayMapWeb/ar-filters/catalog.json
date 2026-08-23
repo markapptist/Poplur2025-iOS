@@ -1,0 +1,191 @@
+{
+  "version": 1,
+  "filters": [
+    {
+      "id": "none",
+      "label": "None",
+      "thumbnail": "ar-filters/none.jpg",
+      "css": "none"
+    },
+    {
+      "id": "smooth-glow",
+      "label": "Smooth Glow",
+      "thumbnail": "ar-filters/smooth-glow.jpg",
+      "css": "blur(1.1px) brightness(1.07) contrast(1.05) saturate(1.06) drop-shadow(0 0 10px rgba(255,214,236,0.45))",
+      "grade": {
+        "brightness": 1.07,
+        "contrast": 1.05,
+        "saturation": 1.06,
+        "blur": 1.1,
+        "bloom": 0.45
+      }
+    },
+    {
+      "id": "pop-3d",
+      "label": "Pop 3D",
+      "thumbnail": "ar-filters/pop-3d.jpg",
+      "css": "saturate(1.1) drop-shadow(-3px 0 0 rgba(255,0,64,0.45)) drop-shadow(3px 0 0 rgba(0,224,255,0.45))",
+      "grade": {
+        "saturation": 1.1,
+        "bloom": 0.2,
+        "anaglyph": 3
+      }
+    },
+    {
+      "id": "puppy-love",
+      "label": "Puppy Love",
+      "thumbnail": "ar-filters/puppy-love.jpg",
+      "css": "brightness(1.08) saturate(1.14) contrast(1.02) sepia(0.1)",
+      "grade": {
+        "brightness": 1.08,
+        "contrast": 1.02,
+        "saturation": 1.14,
+        "sepia": 0.1
+      }
+    },
+    {
+      "id": "retro-vhs",
+      "label": "Retro VHS",
+      "thumbnail": "ar-filters/retro-vhs.jpg",
+      "css": "saturate(1.45) contrast(1.18) hue-rotate(-6deg) brightness(0.96)",
+      "grade": {
+        "brightness": 0.96,
+        "contrast": 1.18,
+        "saturation": 1.45,
+        "hueDegrees": -6
+      }
+    },
+    {
+      "id": "chrome-shine",
+      "label": "Chrome Shine",
+      "thumbnail": "ar-filters/chrome-shine.jpg",
+      "css": "grayscale(1) contrast(1.55) brightness(1.12) drop-shadow(0 0 8px rgba(210,238,255,0.5))",
+      "grade": {
+        "brightness": 1.12,
+        "contrast": 1.55,
+        "saturation": 0,
+        "bloom": 0.5
+      }
+    },
+    {
+      "id": "butterfly-dream",
+      "label": "Butterfly Dream",
+      "thumbnail": "ar-filters/butterfly-dream.jpg",
+      "css": "brightness(1.1) saturate(1.22) contrast(0.98) hue-rotate(6deg)",
+      "grade": {
+        "brightness": 1.1,
+        "contrast": 0.98,
+        "saturation": 1.22,
+        "hueDegrees": 6
+      }
+    },
+    {
+      "id": "comic-pop",
+      "label": "Comic Pop",
+      "thumbnail": "ar-filters/comic-pop.jpg",
+      "css": "contrast(1.85) saturate(1.7) brightness(1.04)",
+      "grade": {
+        "brightness": 1.04,
+        "contrast": 1.85,
+        "saturation": 1.7
+      }
+    },
+    {
+      "id": "inferno-eyes",
+      "label": "Inferno Eyes",
+      "thumbnail": "ar-filters/inferno-eyes.jpg",
+      "css": "brightness(0.82) contrast(1.3) saturate(1.35) sepia(0.25) hue-rotate(-18deg)",
+      "grade": {
+        "brightness": 0.82,
+        "contrast": 1.3,
+        "saturation": 1.35,
+        "hueDegrees": -18,
+        "sepia": 0.25
+      }
+    },
+    {
+      "id": "heart-crown",
+      "label": "Heart Crown",
+      "thumbnail": "ar-filters/heart-crown.jpg",
+      "css": "brightness(1.1) saturate(1.25) contrast(1.02) hue-rotate(-8deg)",
+      "grade": {
+        "brightness": 1.1,
+        "contrast": 1.02,
+        "saturation": 1.25,
+        "hueDegrees": -8
+      }
+    },
+    {
+      "id": "fisheye-fun",
+      "label": "Fisheye Fun",
+      "thumbnail": "ar-filters/fisheye-fun.jpg",
+      "css": "contrast(1.12) saturate(1.15) brightness(1.04)",
+      "grade": {
+        "brightness": 1.04,
+        "contrast": 1.12,
+        "saturation": 1.15
+      }
+    },
+    {
+      "id": "oil-slick",
+      "label": "Oil Slick",
+      "thumbnail": "ar-filters/oil-slick.jpg",
+      "css": "saturate(2.2) contrast(1.25) hue-rotate(150deg) brightness(1.05)",
+      "grade": {
+        "brightness": 1.05,
+        "contrast": 1.25,
+        "saturation": 2.2,
+        "hueDegrees": 150
+      }
+    },
+    {
+      "id": "starry-night",
+      "label": "Starry Night",
+      "thumbnail": "ar-filters/starry-night.jpg",
+      "css": "brightness(0.72) contrast(1.2) saturate(1.3) hue-rotate(205deg)",
+      "grade": {
+        "brightness": 0.72,
+        "contrast": 1.2,
+        "saturation": 1.3,
+        "hueDegrees": 205
+      }
+    },
+    {
+      "id": "dino-hood",
+      "label": "Dino Hood",
+      "thumbnail": "ar-filters/dino-hood.jpg",
+      "css": "saturate(1.2) hue-rotate(-14deg) brightness(1.04) contrast(1.05)",
+      "grade": {
+        "brightness": 1.04,
+        "contrast": 1.05,
+        "saturation": 1.2,
+        "hueDegrees": -14
+      }
+    },
+    {
+      "id": "angel",
+      "label": "Angel",
+      "thumbnail": "ar-filters/angel.jpg",
+      "css": "brightness(1.24) contrast(0.94) saturate(1.05) blur(0.6px) drop-shadow(0 0 16px rgba(255,240,190,0.6))",
+      "grade": {
+        "brightness": 1.24,
+        "contrast": 0.94,
+        "saturation": 1.05,
+        "blur": 0.6,
+        "bloom": 0.6
+      }
+    },
+    {
+      "id": "flower-crown",
+      "label": "Flower Crown",
+      "thumbnail": "ar-filters/flower-crown.jpg",
+      "css": "brightness(1.09) saturate(1.28) sepia(0.12) contrast(1.02)",
+      "grade": {
+        "brightness": 1.09,
+        "contrast": 1.02,
+        "saturation": 1.28,
+        "sepia": 0.12
+      }
+    }
+  ]
+}

@@ -1512,13 +1512,14 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                         : "web_\(channel)"
                     // Feed content needs a cadence guarantee. A small channel
                     // can have only two or three clips, and a stable random
-                    // hash may place every one outside the 30% network band.
-                    // Every third real post keeps the existing 30% intent and
-                    // makes a normal viewing session reach actual inventory.
+                    // hash may place every one outside the network band.
+                    // Every second completed post is still a natural break in
+                    // the stream, while making real Google inventory visible
+                    // in an ordinary viewing session.
                     let shouldPresent: Bool
                     if isContentAdvance {
                         let sequence = (body["sequence"] as? NSNumber)?.intValue ?? 0
-                        shouldPresent = sequence > 0 && sequence % 3 == 0
+                        shouldPresent = sequence > 0 && sequence % 2 == 0
                     } else {
                         shouldPresent = FeedAdProbabilitySettings.shouldShowGoogleMobileAd(
                             for: index, namespace: namespace

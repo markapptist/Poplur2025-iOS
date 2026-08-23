@@ -310,6 +310,10 @@ struct ProfileView: View {
         case saved
         var id: String { rawValue }
     }
+    enum PoplurAIProfileSortOrder: String {
+        case mostRadius
+        case leastRadius
+    }
     @State private var mode: DisplayMode = .media
     @State private var radiusSortOrder: PoplurAIProfileSortOrder?
 

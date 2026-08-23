@@ -31,13 +31,15 @@ final class PoplurCallSignalling {
     // MARK: - Placing and answering
 
     /// Opens a call and starts relaying. The OFFER arrives later, from the page.
-    func startCall(to otherUID: String) async -> String? {
+    func startCall(to otherUID: String, callerName: String? = nil) async -> String? {
         guard let uid, !otherUID.isEmpty, otherUID != uid else { return nil }
         let ref = db.collection("calls").document()
+        let displayName = callerName ?? Auth.auth().currentUser?.displayName ?? "Unknown"
         do {
             try await ref.setData([
                 "participants": [uid, otherUID].sorted(),
                 "callerId": uid,
+                "callerName": displayName,
                 "calleeId": otherUID,
                 "status": "ringing",
                 "createdAt": FieldValue.serverTimestamp(),
@@ -95,6 +97,19 @@ final class PoplurCallSignalling {
         try? await ref.delete()
     }
 
+    func declineCall(_ callID: String) async {
+        guard !callID.isEmpty else { return }
+        try? await db.collection("calls").document(callID)
+            .setData(["status": "declined"], merge: true)
+    }
+
+    func acceptCall(_ callID: String) async {
+        guard !callID.isEmpty else { return }
+        observe(callID)
+        try? await db.collection("calls").document(callID)
+            .setData(["status": "connected"], merge: true)
+    }
+
     // MARK: - Listening
 
     /// Relays the other side's description, their candidates, and the ending.
@@ -113,8 +128,8 @@ final class PoplurCallSignalling {
                 return
             }
             let status = data["status"] as? String ?? ""
-            if status == "ended" {
-                self.onEvent?(["type": "poplurCallEnded", "callId": callID])
+            if status == "ended" || status == "declined" {
+                self.onEvent?(["type": "poplurCallEnded", "callId": callID, "reason": status])
                 self.stopObserving()
                 return
             }
@@ -171,6 +186,7 @@ final class PoplurCallSignalling {
                         "type": "poplurCallIncoming",
                         "callId": change.document.documentID,
                         "callerId": data["callerId"] as? String ?? "",
+                        "callerName": data["callerName"] as? String ?? "Unknown",
                     ])
                 }
             }

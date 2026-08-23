@@ -1,5 +1,8 @@
 {
   "baseUrl": "https://storage.googleapis.com/poplur2025-assets/asset-packs",
+  "localPaths": {
+    "ar-filters": "ar-filters"
+  },
   "packs": [
     {
       "id": "arcade-art",
@@ -187,8 +190,8 @@
     {
       "id": "subscreens",
       "version": 1,
-      "bytes": 69164606,
-      "digest": "2f6c04fef0bb",
+      "bytes": 69168582,
+      "digest": "e3090f86ad6a",
       "files": [
         "assets/HoldMenu_CameraRoll.imageset/HoldMenu_CameraRoll.png",
         "assets/HoldMenu_Chat.imageset/chat_messages.png",
@@ -306,6 +309,91 @@
         "thumbs/rubberPink.jpg",
         "thumbs/toy.jpg",
         "toy.png"
+      ]
+    },
+    {
+      "id": "feed",
+      "version": 1,
+      "bytes": 30501012,
+      "digest": "3b7c21791bed",
+      "files": [
+        "ad-cartoon.mp4",
+        "ad-comedy.mp4",
+        "ad-food.mp4",
+        "ad-french.mp4",
+        "ad-kids.mp4",
+        "ad-music.mp4",
+        "ad-shopping.mp4",
+        "ad-spanish-1.mp4",
+        "ad-spanish-2.mp4",
+        "ad-spanish-3.mp4",
+        "ad-sports.mp4",
+        "posters/ad-cartoon.jpg",
+        "posters/ad-comedy.jpg",
+        "posters/ad-food.jpg",
+        "posters/ad-french.jpg",
+        "posters/ad-kids.jpg",
+        "posters/ad-music.jpg",
+        "posters/ad-shopping.jpg",
+        "posters/ad-spanish-1.jpg",
+        "posters/ad-spanish-2.jpg",
+        "posters/ad-spanish-3.jpg",
+        "posters/ad-sports.jpg"
+      ]
+    },
+    {
+      "id": "channels",
+      "version": 1,
+      "bytes": 13688616,
+      "digest": "596ef4eb06ca",
+      "files": [
+        "poplur_channel_101_food.png",
+        "poplur_channel_103_beauty.png",
+        "poplur_channel_104_sports.png",
+        "poplur_channel_105_modelling.png",
+        "poplur_channel_106_fashion.png",
+        "poplur_channel_107_music.png",
+        "poplur_channel_108_tech.png",
+        "poplur_channel_109_news.png",
+        "poplur_channel_110_french.png",
+        "poplur_channel_111_spanish.png",
+        "poplur_channel_112_shopping.png",
+        "poplur_channel_113_cartoon.png",
+        "poplur_channel_114_kids.png",
+        "poplur_channel_115_comedy.png"
+      ]
+    },
+    {
+      "id": "ar-filters",
+      "version": 1,
+      "bytes": 423800,
+      "digest": "e9b5155c8fc8",
+      "files": [
+        "angel.jpg",
+        "beauty.jpg",
+        "brighten.jpg",
+        "butterfly-dream.jpg",
+        "catalog.json",
+        "chrome-shine.jpg",
+        "comic-pop.jpg",
+        "cool.jpg",
+        "dino-hood.jpg",
+        "fisheye-fun.jpg",
+        "flower-crown.jpg",
+        "glow.jpg",
+        "heart-crown.jpg",
+        "inferno-eyes.jpg",
+        "none.jpg",
+        "oil-slick.jpg",
+        "pop-3d.jpg",
+        "puppy-love.jpg",
+        "retro-vhs.jpg",
+        "sharpen.jpg",
+        "smooth-glow.jpg",
+        "smooth.jpg",
+        "starry-night.jpg",
+        "vintage.jpg",
+        "warm.jpg"
       ]
     },
     {

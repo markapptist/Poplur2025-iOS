@@ -24,26 +24,24 @@ export function renderScene(
 
   // — Ceiling & floor —
   const ceilGrad = ctx.createLinearGradient(0, 0, 0, H / 2);
-  ceilGrad.addColorStop(0, '#120020');
-  ceilGrad.addColorStop(1, '#2a0045');
+  ceilGrad.addColorStop(0, '#1a0832');
+  ceilGrad.addColorStop(1, '#3d1260');
   ctx.fillStyle = ceilGrad;
   ctx.fillRect(0, 0, W, H / 2);
 
   const floorGrad = ctx.createLinearGradient(0, H / 2, 0, H);
-  floorGrad.addColorStop(0, '#0d0018');
-  floorGrad.addColorStop(1, '#050008');
+  floorGrad.addColorStop(0, '#1a0828');
+  floorGrad.addColorStop(1, '#0e0415');
   ctx.fillStyle = floorGrad;
   ctx.fillRect(0, H / 2, W, H / 2);
 
-  // Perspective bands give the tall portrait view depth even before the first
-  // wall fills the frame. They are deliberately sparse and pixel-sharp.
-  ctx.fillStyle = 'rgba(255, 60, 184, 0.09)';
+  ctx.fillStyle = 'rgba(255, 60, 184, 0.12)';
   for (let band = 1; band <= 8; band += 1) {
     const t = band / 8;
     const offset = Math.pow(t, 2.2) * (H / 2);
     ctx.fillRect(0, Math.floor(H / 2 + offset), W, Math.max(1, Math.floor(H / 240)));
   }
-  ctx.fillStyle = 'rgba(96, 88, 255, 0.08)';
+  ctx.fillStyle = 'rgba(96, 88, 255, 0.10)';
   for (let band = 1; band <= 5; band += 1) {
     const y = Math.floor((H / 2) * (band / 6));
     ctx.fillRect(0, y, W, Math.max(1, Math.floor(H / 320)));
@@ -152,9 +150,9 @@ export function renderScene(
     }
 
     // Distance fog + side shadow
-    const fog = Math.min(0.88, perpWallDist / 16);
-    const sideDark = side === 1 ? 0.28 : 0;
-    ctx.fillStyle = `rgba(0,0,0,${Math.min(0.95, fog + sideDark)})`;
+    const fog = Math.min(0.82, perpWallDist / 28);
+    const sideDark = side === 1 ? 0.18 : 0;
+    ctx.fillStyle = `rgba(0,0,0,${Math.min(0.90, fog + sideDark)})`;
     ctx.fillRect(x, drawS, 1, drawH);
   }
 

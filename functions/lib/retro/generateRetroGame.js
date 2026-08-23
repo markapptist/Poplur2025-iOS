@@ -63,6 +63,9 @@ function toHttpsError(error) {
             return new https_1.HttpsError("failed-precondition", error.message);
         case "model_unavailable":
             return new https_1.HttpsError("unavailable", error.message);
+        case "designer_misconfigured":
+            // Ours to fix, not the player's to retry.
+            return new https_1.HttpsError("internal", "The game designer is not set up correctly.");
     }
 }
 exports.generateRetroGame = (0, https_1.onCall)({
@@ -114,7 +117,9 @@ exports.generateRetroGame = (0, https_1.onCall)({
     }
     catch (error) {
         if (error instanceof retroGameGenerationService_1.GenerationError) {
-            firebase_functions_1.logger.warn("retro game generation failed", { uid, code: error.code, violations: error.violations });
+            firebase_functions_1.logger.warn("retro game generation failed", {
+                uid, code: error.code, detail: error.detail, violations: error.violations,
+            });
             throw toHttpsError(error);
         }
         throw error;
