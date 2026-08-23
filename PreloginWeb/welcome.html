@@ -571,7 +571,20 @@
   .formStack {
     position: absolute; left: 0; right: 0; top: var(--form-top, 45%); bottom: 2.5%; z-index: 20;
     display: flex; flex-direction: column; align-items: center; justify-content: center; gap: clamp(5px, 1.6cqw, 10px);
-    padding: 0 7%; overflow-y: auto; -webkit-overflow-scrolling: touch;
+    /* Every form can be taller than a compact phone once text size, the
+       keyboard-safe viewport, or a multi-field step is involved. Keep the
+       scroll area inside the visible pane and reserve room for the full clay
+       button shadow; without the bottom gutter the last action looked cut off
+       even though the element itself was technically scrollable. */
+    padding:
+      max(10px, env(safe-area-inset-top, 0px))
+      7%
+      max(28px, calc(env(safe-area-inset-bottom, 0px) + 20px));
+    overflow-x: hidden; overflow-y: auto; -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: contain;
+    scroll-padding-block:
+      max(10px, env(safe-area-inset-top, 0px))
+      max(28px, calc(env(safe-area-inset-bottom, 0px) + 20px));
   }
   /* Denser form for the 6-field business profile so it fits without scrolling */
   #paneBusinessProfile .formStack { gap: clamp(3px, 1.1cqw, 7px); }
@@ -658,6 +671,12 @@
   }
   .stackAgree input { width: 18px; height: 18px; accent-color: #f4459c; }
   .stackBtn { position: static; transform: none; margin: 8px auto 4px; flex: 0 0 auto; }
+  /* On compact phones the measured hero layout can otherwise claim too much
+     of the form pane. This preserves clearance below the cube while giving
+     the stack a reliably scrollable viewport. */
+  @media (max-height: 760px) {
+    .formStack { top: min(var(--form-top, 45%), 44cqh); }
+  }
   /* Review rows */
   .reviewRow {
     width: 100%; max-width: 300px; display: flex; justify-content: space-between; gap: 10px;
