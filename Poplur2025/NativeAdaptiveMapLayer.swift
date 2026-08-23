@@ -55,9 +55,23 @@ final class NativeAdaptiveMapController: ObservableObject {
         let action: Action
     }
 
+    fileprivate struct CameraSnapshot {
+        let center: CLLocationCoordinate2D
+        let distance: CLLocationDistance
+        let heading: CLLocationDirection
+        let pitch: CGFloat
+    }
+
+    fileprivate struct RadiusState {
+        let center: CLLocationCoordinate2D?
+        let meters: CLLocationDistance
+    }
+
     @Published private(set) var dimensionMode: DimensionMode = .adaptive
     @Published private(set) var isShowingThreeD = false
     @Published fileprivate var cameraCommand: CameraCommand?
+    fileprivate var cameraSnapshot: CameraSnapshot?
+    fileprivate var radiusState: RadiusState?
 
     func setDimensionMode(_ mode: DimensionMode) {
         dimensionMode = mode
@@ -99,18 +113,41 @@ final class NativeAdaptiveMapController: ObservableObject {
     ) {
         guard meters.isFinite, meters > 0 else { return }
         if let coordinate, !CLLocationCoordinate2DIsValid(coordinate) { return }
+        radiusState = RadiusState(center: coordinate, meters: meters)
         cameraCommand = CameraCommand(
             action: .showRadius(center: coordinate, radiusMeters: meters)
         )
     }
 
     func clearRadius() {
+        radiusState = nil
         cameraCommand = CameraCommand(action: .clearRadius)
     }
 
     fileprivate func reportThreeDimensional(_ value: Bool) {
         guard isShowingThreeD != value else { return }
         isShowingThreeD = value
+    }
+
+    fileprivate func rememberCamera(_ camera: MKMapCamera) {
+        cameraSnapshot = CameraSnapshot(
+            center: camera.centerCoordinate,
+            distance: camera.centerCoordinateDistance,
+            heading: camera.heading,
+            pitch: camera.pitch
+        )
+    }
+
+    fileprivate func rememberRadius(
+        center: CLLocationCoordinate2D,
+        meters: CLLocationDistance
+    ) {
+        radiusState = RadiusState(center: center, meters: meters)
+    }
+
+    fileprivate func consumeCommand(_ id: UUID) {
+        guard cameraCommand?.id == id else { return }
+        cameraCommand = nil
     }
 }
 
@@ -218,6 +255,7 @@ private struct NativeAdaptiveMapView: UIViewRepresentable {
             controller: NativeAdaptiveMapController
         ) {
             mapController = controller
+            dimensionMode = controller.dimensionMode
             mapView.delegate = self
             // Light muted cartography provides the cream/grey Poplur base. Pink
             // stays restrained to the user pin, active radius and native tint;
@@ -261,11 +299,25 @@ private struct NativeAdaptiveMapView: UIViewRepresentable {
             mapView.addGestureRecognizer(tap)
 
             let camera = MKMapCamera()
-            camera.centerCoordinate = fallbackCoordinate
-            camera.centerCoordinateDistance = initialDistance
-            camera.heading = 0
-            camera.pitch = 0
+            if let snapshot = controller.cameraSnapshot {
+                camera.centerCoordinate = snapshot.center
+                camera.centerCoordinateDistance = snapshot.distance
+                camera.heading = snapshot.heading
+                camera.pitch = snapshot.pitch
+                hasCenteredOnUser = true
+                isThreeDimensional = snapshot.pitch > 1
+                controller.reportThreeDimensional(isThreeDimensional)
+            } else {
+                camera.centerCoordinate = fallbackCoordinate
+                camera.centerCoordinateDistance = initialDistance
+                camera.heading = 0
+                camera.pitch = 0
+            }
             mapView.setCamera(camera, animated: false)
+            applyDimensionMode(to: mapView, animated: false)
+            if let radius = controller.radiusState, let center = radius.center {
+                installRadius(center: center, meters: radius.meters, on: mapView)
+            }
             publishCameraState(from: mapView, geocode: true)
         }
 
@@ -289,6 +341,11 @@ private struct NativeAdaptiveMapView: UIViewRepresentable {
             guard let command, command.id != lastCommandID else { return }
             lastCommandID = command.id
             apply(command.action, to: mapView)
+            // A camera request is an event, not durable view state. Camera and
+            // radius snapshots above restore the settled result on remount.
+            Task { @MainActor [weak mapController] in
+                mapController?.consumeCommand(command.id)
+            }
         }
 
         func updateUserCoordinate(
@@ -402,11 +459,9 @@ private struct NativeAdaptiveMapView: UIViewRepresentable {
                 moveCamera(on: mapView, center: coordinate, distance: distanceMeters)
 
             case .showRadius(let center, let radiusMeters):
-                if let radiusOverlay { mapView.removeOverlay(radiusOverlay) }
                 let resolvedCenter = center ?? mapView.camera.centerCoordinate
-                let circle = MKCircle(center: resolvedCenter, radius: radiusMeters)
-                radiusOverlay = circle
-                mapView.addOverlay(circle, level: .aboveRoads)
+                installRadius(center: resolvedCenter, meters: radiusMeters, on: mapView)
+                mapController?.rememberRadius(center: resolvedCenter, meters: radiusMeters)
                 moveCamera(
                     on: mapView,
                     center: resolvedCenter,
@@ -417,6 +472,17 @@ private struct NativeAdaptiveMapView: UIViewRepresentable {
                 if let radiusOverlay { mapView.removeOverlay(radiusOverlay) }
                 radiusOverlay = nil
             }
+        }
+
+        private func installRadius(
+            center: CLLocationCoordinate2D,
+            meters: CLLocationDistance,
+            on mapView: MKMapView
+        ) {
+            if let radiusOverlay { mapView.removeOverlay(radiusOverlay) }
+            let circle = MKCircle(center: center, radius: meters)
+            radiusOverlay = circle
+            mapView.addOverlay(circle, level: .aboveRoads)
         }
 
         private func moveCamera(
@@ -492,6 +558,7 @@ private struct NativeAdaptiveMapView: UIViewRepresentable {
 
         private func publishCameraState(from mapView: MKMapView, geocode: Bool) {
             let center = mapView.camera.centerCoordinate
+            mapController?.rememberCamera(mapView.camera)
             publishWebState(
                 mode: isThreeDimensional ? "3d" : "2d",
                 zoom: progress(for: mapView.camera.centerCoordinateDistance),
