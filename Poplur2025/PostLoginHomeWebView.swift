@@ -1790,9 +1790,16 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                             profile["username"] = derived
                             PoplurDiagLog.append("[PoplurProfile] seeded username: \(derived)")
                         }
-                        if profile["photo"] == nil,
-                           let remotePhoto = data["profilePictureURL"] as? String,
-                           !remotePhoto.isEmpty {
+                        // `profilePictureURL` is canonical, while older RN and
+                        // Android builds wrote `photoURL` / `avatarUrl`. Pull to
+                        // refresh must prefer the account record over a stale
+                        // per-device preview and understand every field we have
+                        // shipped, otherwise the same account can have a photo
+                        // on one platform and "not set" on another.
+                        let remotePhoto = ["profilePictureURL", "avatarUrl", "photoURL"]
+                            .compactMap { data[$0] as? String }
+                            .first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+                        if let remotePhoto {
                             profile["photo"] = remotePhoto
                         }
                         if profile["video"] == nil,

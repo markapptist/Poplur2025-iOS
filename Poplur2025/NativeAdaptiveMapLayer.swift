@@ -452,7 +452,13 @@ private struct NativeAdaptiveMapView: UIViewRepresentable {
                 moveCamera(
                     on: mapView,
                     center: mapView.camera.centerCoordinate,
-                    distance: distance(for: progress)
+                    distance: distance(for: progress),
+                    // A range input emits a stream of values. Animating each
+                    // one queues camera flights, makes the HUD thumb lag and
+                    // unnecessarily keeps the renderer busy. The rail itself
+                    // is still immediate; MapKit simply takes each latest
+                    // camera position without replaying the earlier ones.
+                    animated: false
                 )
 
             case .focus(let coordinate, let distanceMeters):
@@ -488,12 +494,13 @@ private struct NativeAdaptiveMapView: UIViewRepresentable {
         private func moveCamera(
             on mapView: MKMapView,
             center: CLLocationCoordinate2D,
-            distance: CLLocationDistance
+            distance: CLLocationDistance,
+            animated: Bool = !UIAccessibility.isReduceMotionEnabled
         ) {
             let camera = mapView.camera.copy() as? MKMapCamera ?? mapView.camera
             camera.centerCoordinate = center
             camera.centerCoordinateDistance = max(minimumDistance, min(maximumDistance, distance))
-            mapView.setCamera(camera, animated: !UIAccessibility.isReduceMotionEnabled)
+            mapView.setCamera(camera, animated: animated)
         }
 
         private func distance(for progress: Double) -> CLLocationDistance {

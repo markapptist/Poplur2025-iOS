@@ -23,6 +23,8 @@ final class PoplurInAppBrowserViewController: UIViewController {
     private let hostLabel = UILabel()
     private let progressView = UIProgressView(progressViewStyle: .bar)
     private var observations: [NSKeyValueObservation] = []
+    private let loadFailurePanel = UIView()
+    private var loadTimeoutWorkItem: DispatchWorkItem?
 
     private enum Palette {
         static let chrome = UIColor(red: 20 / 255, green: 14 / 255, blue: 24 / 255, alpha: 1)
@@ -41,6 +43,7 @@ final class PoplurInAppBrowserViewController: UIViewController {
 
     deinit {
         observations.forEach { $0.invalidate() }
+        loadTimeoutWorkItem?.cancel()
     }
 
     override func viewDidDisappear(_ animated: Bool) {
@@ -96,6 +99,8 @@ final class PoplurInAppBrowserViewController: UIViewController {
             web.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
 
+        installLoadFailurePanel(below: progressView)
+
         observations = [
             web.observe(\.estimatedProgress, options: [.new]) { [weak self] web, _ in
                 guard let self else { return }
@@ -111,6 +116,86 @@ final class PoplurInAppBrowserViewController: UIViewController {
 
         hostLabel.text = Self.displayHost(for: initialURL)
         web.load(URLRequest(url: initialURL))
+    }
+
+    /// Advertiser pages are outside Poplur’s control, but they must never leave
+    /// someone staring at an undismissable black WebKit canvas. Keep the native
+    /// chrome available and offer an explicit retry when navigation fails or
+    /// produces no first response in a bounded window.
+    private func installLoadFailurePanel(below chrome: UIView) {
+        loadFailurePanel.backgroundColor = Palette.chrome
+        loadFailurePanel.isHidden = true
+        loadFailurePanel.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(loadFailurePanel)
+
+        let title = UILabel()
+        title.text = "This page didn’t load"
+        title.font = .systemFont(ofSize: 20, weight: .bold)
+        title.textColor = Palette.text
+        title.textAlignment = .center
+
+        let message = UILabel()
+        message.text = "The destination may be unavailable. You can try again or return to Poplur."
+        message.font = .systemFont(ofSize: 15, weight: .regular)
+        message.textColor = Palette.text.withAlphaComponent(0.78)
+        message.numberOfLines = 0
+        message.textAlignment = .center
+
+        var retryConfiguration = UIButton.Configuration.filled()
+        retryConfiguration.title = "Try again"
+        retryConfiguration.baseBackgroundColor = Palette.accent
+        retryConfiguration.baseForegroundColor = .white
+        retryConfiguration.cornerStyle = .medium
+        let retry = UIButton(configuration: retryConfiguration)
+        retry.addTarget(self, action: #selector(retryTapped), for: .touchUpInside)
+
+        var closeConfiguration = UIButton.Configuration.plain()
+        closeConfiguration.title = "Return to Poplur"
+        closeConfiguration.baseForegroundColor = Palette.text
+        let close = UIButton(configuration: closeConfiguration)
+        close.addTarget(self, action: #selector(closeTapped), for: .touchUpInside)
+
+        let stack = UIStackView(arrangedSubviews: [title, message, retry, close])
+        stack.axis = .vertical
+        stack.spacing = 16
+        stack.alignment = .fill
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        loadFailurePanel.addSubview(stack)
+
+        NSLayoutConstraint.activate([
+            loadFailurePanel.topAnchor.constraint(equalTo: chrome.bottomAnchor),
+            loadFailurePanel.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            loadFailurePanel.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            loadFailurePanel.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            stack.centerXAnchor.constraint(equalTo: loadFailurePanel.centerXAnchor),
+            stack.centerYAnchor.constraint(equalTo: loadFailurePanel.centerYAnchor),
+            stack.leadingAnchor.constraint(equalTo: loadFailurePanel.leadingAnchor, constant: 32),
+            stack.trailingAnchor.constraint(equalTo: loadFailurePanel.trailingAnchor, constant: -32),
+            retry.heightAnchor.constraint(equalToConstant: 48),
+        ])
+    }
+
+    private func armLoadTimeout() {
+        loadTimeoutWorkItem?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.showLoadFailure()
+        }
+        loadTimeoutWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 12, execute: work)
+    }
+
+    private func clearLoadFailure() {
+        loadTimeoutWorkItem?.cancel()
+        loadTimeoutWorkItem = nil
+        loadFailurePanel.isHidden = true
+    }
+
+    private func showLoadFailure() {
+        guard loadFailurePanel.isHidden else { return }
+        loadTimeoutWorkItem?.cancel()
+        loadTimeoutWorkItem = nil
+        webView.stopLoading()
+        loadFailurePanel.isHidden = false
     }
 
     private func buildChromeBar() -> UIView {
@@ -184,6 +269,11 @@ final class PoplurInAppBrowserViewController: UIViewController {
         dismiss(animated: true)
     }
 
+    @objc private func retryTapped() {
+        clearLoadFailure()
+        webView.load(URLRequest(url: initialURL, cachePolicy: .reloadIgnoringLocalCacheData))
+    }
+
     @objc private func backTapped() {
         if webView.canGoBack { webView.goBack() } else { closeTapped() }
     }
@@ -207,6 +297,29 @@ extension PoplurInAppBrowserViewController: WKNavigationDelegate {
         }
         decisionHandler(.cancel)
         if UIApplication.shared.canOpenURL(url) { UIApplication.shared.open(url) }
+    }
+
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        clearLoadFailure()
+        armLoadTimeout()
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        clearLoadFailure()
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        didFailProvisionalNavigation navigation: WKNavigation!,
+        withError error: Error
+    ) {
+        guard (error as NSError).code != NSURLErrorCancelled else { return }
+        showLoadFailure()
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        guard (error as NSError).code != NSURLErrorCancelled else { return }
+        showLoadFailure()
     }
 }
 
