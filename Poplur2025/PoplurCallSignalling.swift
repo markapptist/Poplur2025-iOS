@@ -31,7 +31,9 @@ final class PoplurCallSignalling {
     // MARK: - Placing and answering
 
     /// Opens a call and starts relaying. The OFFER arrives later, from the page.
-    func startCall(to otherUID: String, callerName: String? = nil) async -> String? {
+    /// `video` is only the receiver's UI/media intent; WebRTC media remains
+    /// entirely in the page once the offer is exchanged.
+    func startCall(to otherUID: String, callerName: String? = nil, video: Bool = false) async -> String? {
         guard let uid, !otherUID.isEmpty, otherUID != uid else { return nil }
         let ref = db.collection("calls").document()
         let displayName = callerName ?? Auth.auth().currentUser?.displayName ?? "Unknown"
@@ -42,6 +44,7 @@ final class PoplurCallSignalling {
                 "callerName": displayName,
                 "calleeId": otherUID,
                 "status": "ringing",
+                "video": video,
                 "createdAt": FieldValue.serverTimestamp(),
                 // Both this WebRTC signaller and the older Agora-based
                 // CallSessionManager (iOS and Android) watch the same "calls"
@@ -187,6 +190,7 @@ final class PoplurCallSignalling {
                         "callId": change.document.documentID,
                         "callerId": data["callerId"] as? String ?? "",
                         "callerName": data["callerName"] as? String ?? "Unknown",
+                        "video": data["video"] as? Bool ?? false,
                     ])
                 }
             }

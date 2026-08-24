@@ -6,8 +6,10 @@
 	<string>ca-app-pub-2086359936541081~4441297400</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Poplur uses Face ID to sign you in quickly and securely.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Poplur uses the camera for posts and FaceTime video calls.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Poplur uses the microphone to listen for Hey Poplur voice commands.</string>
+	<string>Poplur uses the microphone for voice commands and Poplur calls.</string>
 	<key>PoplurAdMobInterstitialUnitID</key>
 	<string>ca-app-pub-2086359936541081/6696033455</string>
 	<key>UIBackgroundModes</key>

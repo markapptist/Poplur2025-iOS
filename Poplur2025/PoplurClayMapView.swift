@@ -31,8 +31,8 @@ enum PoplurClayWebMap {
     /// Cache key for the web bundle, and the reason web changes actually ship.
     ///
     /// `index.html` is the ONE stable filename in this bundle (everything else
-    /// is content-hashed by Vite), and it was loaded at a URL whose query items
-    /// are identical on every build — mapMode and fallback2d and nothing else.
+    /// is content-hashed by Vite), and it used to be loaded at the same URL on
+    /// every build.
     /// `devicectl install` replaces the app bundle but KEEPS the data
     /// container, so WKWebView answered that unchanged URL from its cache: the
     /// cached index.html kept naming the OLD hashed js/css, and the whole web
@@ -89,13 +89,7 @@ struct PoplurClayMapView: UIViewRepresentable {
 
         if webRoot != nil, let indexURL = PoplurClayWebMap.indexURL {
             var components = URLComponents(url: indexURL, resolvingAgainstBaseURL: false)
-            let use3D = SettingsStore.shared.use3DMap
             components?.queryItems = [
-                URLQueryItem(name: "mapMode", value: use3D ? "3d" : "2d"),
-                URLQueryItem(
-                    name: "fallback2d",
-                    value: !use3D && SettingsStore.prefers2DMapForThisDevice ? "1" : "0"
-                ),
                 // Varies per build, so a new install can never be answered from
                 // the previous build's cache. See buildStamp above.
                 URLQueryItem(name: "v", value: PoplurClayWebMap.buildStamp),

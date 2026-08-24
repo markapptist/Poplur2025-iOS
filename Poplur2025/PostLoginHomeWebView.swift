@@ -1075,8 +1075,13 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                 if type == "callStart", let webView = bridge.webView {
                     let otherUID = (body["otherId"] as? String) ?? ""
                     let callerName = (body["callerName"] as? String)
+                    let video = (body["video"] as? Bool) ?? false
                     Task { @MainActor [weak self, weak webView] in
-                        let callID = await PoplurCallSignalling.shared.startCall(to: otherUID, callerName: callerName)
+                        let callID = await PoplurCallSignalling.shared.startCall(
+                            to: otherUID,
+                            callerName: callerName,
+                            video: video
+                        )
                         guard let self, let webView, self.bridge.webView === webView else { return }
                         self.pushWalletPassMessage(
                             ["type": "poplurCallStarted", "callId": callID ?? "",

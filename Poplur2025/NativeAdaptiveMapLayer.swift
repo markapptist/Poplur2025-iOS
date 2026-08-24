@@ -30,12 +30,6 @@ enum PoplurNativeAdaptiveMap {
 final class NativeAdaptiveMapController: ObservableObject {
     static let shared = NativeAdaptiveMapController()
 
-    enum DimensionMode: String {
-        case adaptive
-        case flat2D
-        case threeD
-    }
-
     struct CameraCommand: Identifiable {
         enum Action {
             case locateUser
@@ -70,8 +64,6 @@ final class NativeAdaptiveMapController: ObservableObject {
         let meters: CLLocationDistance
     }
 
-    @Published private(set) var dimensionMode: DimensionMode = .adaptive
-    @Published private(set) var isShowingThreeD = false
     /// A human-readable, ephemeral discovery state for the native map's
     /// lightweight art-direction layer. This deliberately carries no map
     /// tiles, models, particles, or timer-driven animation.
@@ -79,10 +71,6 @@ final class NativeAdaptiveMapController: ObservableObject {
     @Published fileprivate var cameraCommand: CameraCommand?
     fileprivate var cameraSnapshot: CameraSnapshot?
     fileprivate var radiusState: RadiusState?
-
-    func setDimensionMode(_ mode: DimensionMode) {
-        dimensionMode = mode
-    }
 
     func locateUser() {
         cameraCommand = CameraCommand(action: .locateUser)
@@ -136,11 +124,6 @@ final class NativeAdaptiveMapController: ObservableObject {
         selectedPlaceName = trimmed.isEmpty ? "New place" : trimmed
     }
 
-    fileprivate func reportThreeDimensional(_ value: Bool) {
-        guard isShowingThreeD != value else { return }
-        isShowingThreeD = value
-    }
-
     fileprivate func rememberCamera(_ camera: MKMapCamera) {
         cameraSnapshot = CameraSnapshot(
             center: camera.centerCoordinate,
@@ -178,7 +161,6 @@ struct NativeAdaptiveMapLayer: View {
         ZStack {
             NativeAdaptiveMapView(
                 userCoordinate: locationProvider.coordinate,
-                dimensionMode: mapController.dimensionMode,
                 cameraCommand: mapController.cameraCommand,
                 mapController: mapController
             )
@@ -270,7 +252,6 @@ private struct NativeMapArtDirectionOverlay: View {
 
 private struct NativeAdaptiveMapView: UIViewRepresentable {
     let userCoordinate: CLLocationCoordinate2D?
-    let dimensionMode: NativeAdaptiveMapController.DimensionMode
     let cameraCommand: NativeAdaptiveMapController.CameraCommand?
     let mapController: NativeAdaptiveMapController
 
@@ -283,7 +264,6 @@ private struct NativeAdaptiveMapView: UIViewRepresentable {
         context.coordinator.configure(mapView, controller: mapController)
         context.coordinator.updateUserCoordinate(userCoordinate, on: mapView)
         context.coordinator.update(
-            dimensionMode: dimensionMode,
             command: cameraCommand,
             on: mapView
         )
@@ -293,7 +273,6 @@ private struct NativeAdaptiveMapView: UIViewRepresentable {
     func updateUIView(_ mapView: MKMapView, context: Context) {
         context.coordinator.updateUserCoordinate(userCoordinate, on: mapView)
         context.coordinator.update(
-            dimensionMode: dimensionMode,
             command: cameraCommand,
             on: mapView
         )
@@ -330,7 +309,6 @@ private struct NativeAdaptiveMapView: UIViewRepresentable {
         private var radiusOverlay: MKCircle?
         private var selectionOverlay: MKCircle?
         private var lastCommandID: UUID?
-        private var dimensionMode: NativeAdaptiveMapController.DimensionMode = .adaptive
         private weak var mapController: NativeAdaptiveMapController?
         private let geocoder = CLGeocoder()
         private var geocodeTask: Task<Void, Never>?
@@ -341,7 +319,6 @@ private struct NativeAdaptiveMapView: UIViewRepresentable {
             controller: NativeAdaptiveMapController
         ) {
             mapController = controller
-            dimensionMode = controller.dimensionMode
             mapView.delegate = self
             // Light muted cartography provides the cream/grey Poplur base. Pink
             // stays restrained to the user pin, active radius and native tint;
@@ -392,7 +369,6 @@ private struct NativeAdaptiveMapView: UIViewRepresentable {
                 camera.pitch = snapshot.pitch
                 hasCenteredOnUser = true
                 isThreeDimensional = snapshot.pitch > 1
-                controller.reportThreeDimensional(isThreeDimensional)
             } else {
                 camera.centerCoordinate = fallbackCoordinate
                 camera.centerCoordinateDistance = initialDistance
@@ -400,7 +376,7 @@ private struct NativeAdaptiveMapView: UIViewRepresentable {
                 camera.pitch = 0
             }
             mapView.setCamera(camera, animated: false)
-            applyDimensionMode(to: mapView, animated: false)
+            applyAdaptiveDimension(to: mapView, animated: false)
             if let radius = controller.radiusState, let center = radius.center {
                 installRadius(center: center, meters: radius.meters, on: mapView)
             }
@@ -414,16 +390,9 @@ private struct NativeAdaptiveMapView: UIViewRepresentable {
         }
 
         func update(
-            dimensionMode newMode: NativeAdaptiveMapController.DimensionMode,
             command: NativeAdaptiveMapController.CameraCommand?,
             on mapView: MKMapView
         ) {
-            if dimensionMode != newMode {
-                dimensionMode = newMode
-                mapView.isPitchEnabled = newMode != .flat2D
-                applyDimensionMode(to: mapView, animated: true)
-            }
-
             guard let command, command.id != lastCommandID else { return }
             lastCommandID = command.id
             apply(command.action, to: mapView)
@@ -468,7 +437,7 @@ private struct NativeAdaptiveMapView: UIViewRepresentable {
                 publishCameraState(from: mapView, geocode: true)
                 return
             }
-            applyDimensionMode(to: mapView, animated: true)
+            applyAdaptiveDimension(to: mapView, animated: true)
             publishCameraState(from: mapView, geocode: true)
         }
 
@@ -631,19 +600,17 @@ private struct NativeAdaptiveMapView: UIViewRepresentable {
             ))
         }
 
-        private func applyDimensionMode(to mapView: MKMapView, animated: Bool) {
-            switch dimensionMode {
-            case .flat2D:
-                applyThreeDimensional(false, to: mapView, animated: animated)
-            case .threeD:
+        private func applyAdaptiveDimension(to mapView: MKMapView, animated: Bool) {
+            let distance = mapView.camera.centerCoordinateDistance
+            if !isThreeDimensional, distance <= enterThreeDDistance {
                 applyThreeDimensional(true, to: mapView, animated: animated)
-            case .adaptive:
-                let distance = mapView.camera.centerCoordinateDistance
-                if !isThreeDimensional, distance <= enterThreeDDistance {
-                    applyThreeDimensional(true, to: mapView, animated: animated)
-                } else if isThreeDimensional, distance >= exitThreeDDistance {
-                    applyThreeDimensional(false, to: mapView, animated: animated)
-                }
+            } else if isThreeDimensional, distance >= exitThreeDDistance {
+                applyThreeDimensional(false, to: mapView, animated: animated)
+            } else if !isThreeDimensional {
+                // Flat overview is a camera policy, not a user-selectable mode.
+                // Disable pitch until the camera crosses the close threshold so
+                // a gesture cannot leave the wide map tilted.
+                mapView.isPitchEnabled = false
             }
         }
 
@@ -654,8 +621,8 @@ private struct NativeAdaptiveMapView: UIViewRepresentable {
         ) {
             guard enabled != isThreeDimensional else { return }
             isThreeDimensional = enabled
-            mapController?.reportThreeDimensional(enabled)
             isApplyingAdaptiveCamera = true
+            mapView.isPitchEnabled = enabled
 
             let camera = mapView.camera.copy() as? MKMapCamera ?? mapView.camera
             camera.pitch = enabled ? closePitch : 0

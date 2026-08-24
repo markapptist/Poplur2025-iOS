@@ -611,12 +611,6 @@ final class WebHomeCameraModel: ObservableObject {
         switch action {
         case "locate":
             map.locateUser()
-        case "mapMode":
-            if let requested = body["mode"] as? String {
-                map.setDimensionMode(requested == "2d" ? .flat2D : .threeD)
-            } else {
-                map.setDimensionMode(map.isShowingThreeD ? .flat2D : .threeD)
-            }
         case "setZoom":
             if let progress = (body["zoom"] as? NSNumber)?.doubleValue {
                 map.setZoom(progress: progress)
