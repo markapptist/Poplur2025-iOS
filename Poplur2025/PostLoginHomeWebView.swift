@@ -593,6 +593,17 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         config.mediaTypesRequiringUserActionForPlayback = []
         config.userContentController.add(context.coordinator, name: "poplur")
         config.userContentController.add(context.coordinator, name: "homeReady")
+        let backgroundAudio = Self.backgroundAudioPreference()
+        config.userContentController.addUserScript(
+            WKUserScript(
+                source: Self.backgroundAudioBootstrapScript(
+                    enabled: backgroundAudio.enabled,
+                    scope: backgroundAudio.scope
+                ),
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: true
+            )
+        )
         config.userContentController.addUserScript(
             WKUserScript(
                 source: Self.readinessScript,
@@ -661,6 +672,30 @@ struct PostLoginHomeWebView: UIViewRepresentable {
             print("[PostLoginHomeWebView] ClayMapWeb bundle missing — run poplur-clay-map/scripts/sync-mobile.sh")
         }
         return webView
+    }
+
+    private static func backgroundAudioPreference() -> (enabled: Bool, scope: String) {
+        let enabled = SettingsStore.shared.backgroundAudioEnabled
+        guard enabled else { return (false, "screen") }
+        let storedScope = UserDefaults.standard.string(forKey: "poplur.radio.scope")
+        let scope = storedScope == "outside" ? "outside" : "app"
+        return (true, scope)
+    }
+
+    private static func backgroundAudioBootstrapScript(enabled: Bool, scope: String) -> String {
+        let enabledValue = enabled ? "true" : "false"
+        return """
+        (() => {
+          const state = { enabled: \(enabledValue), scope: \"\(scope)\" };
+          window.__poplurNativeBackgroundAudio = state;
+          try {
+            localStorage.setItem('poplur.radio.scope', state.scope);
+            localStorage.setItem('poplur.radio.background', state.enabled ? '1' : '0');
+            if (state.enabled) localStorage.setItem('poplur.radio.scope.explicit.v1', '1');
+            else localStorage.removeItem('poplur.radio.scope.explicit.v1');
+          } catch (_) {}
+        })();
+        """
     }
 
     func updateUIView(_ uiView: WKWebView, context: Context) {
@@ -1469,11 +1504,16 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                 if type == "radioScope", let scope = body["scope"] as? String,
                    ["screen", "app", "outside"].contains(scope) {
                     UserDefaults.standard.set(scope, forKey: "poplur.radio.scope")
+                    SettingsStore.shared.backgroundAudioEnabled = scope != "screen"
                     if scope == "outside" {
                         let session = AVAudioSession.sharedInstance()
                         try? session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
                         try? session.setActive(true)
                     }
+                    return
+                }
+                if type == "requestBackgroundAudio", let webView = bridge.webView {
+                    pushBackgroundAudioPreference(into: webView)
                     return
                 }
                 if type == "radioPlayback",
@@ -2022,6 +2062,20 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                   let text = String(data: json, encoding: .utf8) else { return }
             webView.evaluateJavaScript(
                 "window.dispatchEvent(new CustomEvent('poplur-native-app-icon', {detail: \(text)})); true;"
+            )
+        }
+
+        private func pushBackgroundAudioPreference(into webView: WKWebView) {
+            let preference = PostLoginHomeWebView.backgroundAudioPreference()
+            let payload: [String: Any] = [
+                "enabled": preference.enabled,
+                "scope": preference.scope
+            ]
+            guard let json = try? JSONSerialization.data(withJSONObject: payload),
+                  let text = String(data: json, encoding: .utf8) else { return }
+            webView.evaluateJavaScript(
+                "window.__poplurNativeBackgroundAudio = \(text); " +
+                "window.dispatchEvent(new CustomEvent('poplur-native-background-audio', {detail: \(text)})); true;"
             )
         }
 

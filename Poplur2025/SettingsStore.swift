@@ -131,6 +131,9 @@ final class SettingsStore: ObservableObject {
         if defaults.object(forKey: Keys.transitionStylePreference) == nil {
             defaults.set(TransitionStylePreference.twoD.rawValue, forKey: Keys.transitionStylePreference)
         }
+        if defaults.object(forKey: Keys.backgroundAudioEnabled) == nil {
+            defaults.set(false, forKey: Keys.backgroundAudioEnabled)
+        }
     }
 
     private enum Keys {
@@ -146,6 +149,7 @@ final class SettingsStore: ObservableObject {
         static let radiusUnitPreference = "settings.radiusUnitPreference"
         static let tiltControlEnabled = "settings.tiltControlEnabled"
         static let use3DLoadingScreen = "settings.use3DLoadingScreen"
+        static let backgroundAudioEnabled = "settings.backgroundAudioEnabled"
     }
 
     // MARK: - Video duration limit
@@ -187,6 +191,19 @@ final class SettingsStore: ObservableObject {
         set {
             objectWillChange.send()
             defaults.set(newValue, forKey: Keys.hudSleepTimerEnabled)
+        }
+    }
+
+    // MARK: - Shared Radio / iPod playback
+
+    /// False keeps media scoped to its visible screen. The web setting carries
+    /// the richer radio scope separately (app/outside), while this boolean is
+    /// the durable shared contract native hosts can read before WebView starts.
+    var backgroundAudioEnabled: Bool {
+        get { defaults.object(forKey: Keys.backgroundAudioEnabled) as? Bool ?? false }
+        set {
+            objectWillChange.send()
+            defaults.set(newValue, forKey: Keys.backgroundAudioEnabled)
         }
     }
 
