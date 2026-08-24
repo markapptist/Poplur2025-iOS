@@ -205,23 +205,24 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
     // number. It never reached serious, and the ladder behaved: fair dropped
     // the preview to 18fps and REDUCED took the app to fps=8.
     //
-    // This constant stays the dial. 30 is honest (it is what the format gives);
-    // 24 or 20 buy headroom back if the enclosure proves too warm in real use.
-    // Recording keeps its own explicit budget below so a capped preview cannot
-    // degrade a clip.
+    // Keep the ordinary viewfinder at the rate the iPhone can sustain for a
+    // long Camera session. A user can still get the more responsive path when
+    // they are making something (recording or an explicitly selected Lens).
+    // The capture-format descent below remains important: a device that cannot
+    // provide 60 falls back to its best supported rate rather than failing open.
     /// Last rate written to the diag log, so a steady preview logs once.
     private nonisolated(unsafe) static var lastLoggedCaptureFPS: Int = 0
-    private static let previewFrameRate = 60
+    private static let previewFrameRate = 30
+    private static let activeCaptureFrameRate = 60
     // The measured pressure step: low enough to actually save energy, high
     // enough to stay usable (15fps judders obviously on device).
     private static let pressurePreviewFrameRate = 18
-    private static let recordingFrameRateLimit = 24
-    private static let previewAnalysisFrameSampleInterval: TimeInterval = 2.5
-    // Each analysis wake opens the BGRA conversion plus a Vision/Core ML pass —
-    // far more energy per event than a preview frame, and invisible to the user
-    // (results are announced, not rendered per-frame). This is where pressure
-    // mode should take its saving, so it stretches further than the preview.
-    private static let pressureAnalysisFrameSampleInterval: TimeInterval = 5.0
+    /// Scan uses a separate, bounded clock from the camera preview. Twelve
+    /// analyses per second keeps labels/boxes responsive without making ML run
+    /// once for every 30/60fps capture frame.
+    private static let scanAnalysisFrameSampleInterval: TimeInterval = 1.0 / 12.0
+    /// Thermal or camera-pressure states preserve Scan but halve its cadence.
+    private static let pressureScanAnalysisFrameSampleInterval: TimeInterval = 1.0 / 6.0
     /// The filtered viewfinder is CONTINUOUS now: an active filter processes
     /// every delivered frame (ARFilterManager's render path is a single GPU
     /// grade with Vision throttled to ~3Hz internally, not the old per-frame
@@ -326,14 +327,17 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
     private var arFilterDiagEnqueueFailCount = 0
     private var lastFilteredFrameUptime: TimeInterval = 0
     private var arFilterSelectionCancellable: AnyCancellable?
-    /// At 0.67 seconds between families and two seconds between uses of the
-    /// same family, face/classification/boxes each run no faster than ~0.5 Hz.
-    private let minimumAnalysisDispatchSpacing: TimeInterval = 0.67
-    private let minimumPerFamilyAnalysisSpacing: TimeInterval = 2.0
+    /// One shared lane serves face recognition, classification and boxes. The
+    /// total Scan budget is 12 analyses/sec; when all three are enabled they
+    /// round-robin at roughly 4/sec each rather than overlapping on the GPU or
+    /// Neural Engine.
+    private let minimumAnalysisDispatchSpacing: TimeInterval = 1.0 / 12.0
+    private let minimumPerFamilyAnalysisSpacing: TimeInterval = 0.25
     private let maximumAnalysisClaimDuration: TimeInterval = 4.0
     /// Session-queue confined. AI/filters still receive fresh frames, but an
-    /// idle preview does not wake the BGRA + Vision/Core ML path every 1.5s.
-    private var analysisFrameSampleInterval = CameraKitController.previewAnalysisFrameSampleInterval
+    /// This gate opens only after the user enables Scan. Normal preview does
+    /// not own a BGRA/Vision wake-up path at all.
+    private var analysisFrameSampleInterval = CameraKitController.scanAnalysisFrameSampleInterval
 
     // Camera position tracking
     var currentCameraPosition: AVCaptureDevice.Position = .back
@@ -1523,8 +1527,8 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
                 ? Self.pressureActiveFilterFrameSampleInterval
                 : Self.activeFilterFrameSampleInterval)
             : (pressureCapped
-                ? Self.pressureAnalysisFrameSampleInterval
-                : Self.previewAnalysisFrameSampleInterval)
+                ? Self.pressureScanAnalysisFrameSampleInterval
+                : Self.scanAnalysisFrameSampleInterval)
 
         analysisStateLock.lock()
         activeFilterMinimumDispatchSpacing = pressureCapped
@@ -1632,13 +1636,12 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
             && isMLDetectionEnabled
             && policy.mode != .emergency
 
-        // Active Camera owns the capture graph exclusively. A cool device gets
-        // the full preview rate; capture-hardware pressure or the process
-        // thermal tripwire latches the lower pressure cap via the min() below.
-        // Recording keeps its own limit — a capped preview must not degrade a
-        // clip the user is actively making.
-        let requestedFPS = recording
-            ? Self.recordingFrameRateLimit
+        // Normal Camera preview is deliberately economical. Recording and an
+        // explicitly selected Lens earn the active 60fps path; a thermal or
+        // capture-pressure cap can still protect the phone while a Lens is up.
+        let activeLens = isARFilterProcessingWanted()
+        let requestedFPS = (recording || activeLens)
+            ? Self.activeCaptureFrameRate
             : Self.previewFrameRate
         let captureGeneration = setCaptureDesired(shouldRun)
         sessionQueue.async { [weak self] in
@@ -1691,9 +1694,17 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
 
     @discardableResult
     private func currentCaptureFrameRateLimitOnQueue() -> Int {
-        if isRecording { return Self.recordingFrameRateLimit }
-        return capturePressureCappedForCurrentLease
-            ? Self.pressurePreviewFrameRate
+        // A recording owns its requested rate until it completes. A Lens is
+        // reversible, so camera pressure can still step it down to protect the
+        // phone. Plain preview remains at 30fps.
+        if isRecording {
+            return Self.activeCaptureFrameRate
+        }
+        if capturePressureCappedForCurrentLease {
+            return Self.pressurePreviewFrameRate
+        }
+        return isARFilterProcessingWanted()
+            ? Self.activeCaptureFrameRate
             : Self.previewFrameRate
     }
 
@@ -2014,9 +2025,10 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
     }
 
     /// Runs on sessionQueue. The hardware preview remains continuously visible
-    /// at its governed cadence. Default AI opens the costly BGRA path every
-    /// 2.5s (3.5s under pressure); an explicit AR filter temporarily uses its
-    /// separate 0.5s/0.75s lane. Neither owns the full-rate sensor preview.
+    /// at its governed cadence. An explicit Scan opens the costly BGRA path at
+    /// a bounded 12fps (6fps under pressure); an explicit AR filter owns its
+    /// separate continuous/pressure-capped lane. Neither path runs for plain
+    /// camera preview.
     private func setVideoFrameDeliveryActiveOnQueue(_ active: Bool) {
         nextAnalysisSampleWorkItem?.cancel()
         nextAnalysisSampleWorkItem = nil
@@ -2514,6 +2526,12 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
             self.frameProcessingLock.unlock()
             PoplurDiagLog.append("arfilter: wanted=\(wanted) allowed=\(allowed) displayLayerNil=\(self.displayLayer == nil) — setting delivery")
             self.setVideoFrameDeliveryActiveOnQueue(allowed)
+            // Selecting/dismissing a Lens changes the camera's presentation
+            // budget. Apply that transition immediately rather than waiting
+            // for a later lifecycle or performance-policy callback.
+            if self.isCaptureDesired() {
+                _ = self.applyCameraFrameRateOnQueue(self.currentCaptureFrameRateLimitOnQueue())
+            }
             if wanted && allowed { self.scheduleARFilterDeliveryWatchdogOnQueue(attempt: 0) }
         }
     }
@@ -2680,10 +2698,9 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
         }
     }
 
-    /// Default AI families run no faster than once every two seconds. An
-    /// explicitly selected AR filter temporarily owns the serialized lane at
-    /// its bounded 2/1.3 FPS cadence; classification, boxes and recognition
-    /// stay paused until the filter is dismissed.
+    /// Scan families share one serialized 12fps lane. An explicitly selected
+    /// AR filter temporarily owns the viewfinder pipeline, and classification,
+    /// boxes and recognition stay paused until the filter is dismissed.
     private func dispatchNextAnalysisPipeline(
         sampleBuffer: CMSampleBuffer,
         pixelBuffer: CVPixelBuffer
