@@ -17,7 +17,10 @@ enum PoplurNativeAdaptiveMap {
         let arguments = ProcessInfo.processInfo.arguments
         if arguments.contains("-DisableNativeAdaptiveMap") { return false }
         if arguments.contains("-EnableNativeAdaptiveMap") { return true }
-        return UserDefaults.standard.object(forKey: defaultsKey) as? Bool ?? true
+        // The shared WebView map is the production path for iPhone and Android.
+        // Keep this native MapKit experiment opt-in for QA only; an explicit
+        // launch argument above can still enable it for comparison testing.
+        return UserDefaults.standard.object(forKey: defaultsKey) as? Bool ?? false
     }
 }
 
