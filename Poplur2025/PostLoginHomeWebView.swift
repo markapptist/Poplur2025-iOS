@@ -1816,6 +1816,9 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                 if type == "requestProfileTracks", let webView = bridge.webView {
                     deliverProfileTracks(into: webView)
                 }
+                if type == "requestNearbyTracks", let webView = bridge.webView {
+                    deliverNearbyTracks(body, into: webView)
+                }
                 if type == "publishTrack" {
                     WebTrackPublisher.handle(body)
                 }
@@ -2244,6 +2247,98 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     }
                 } catch {
                     print("[PostLoginHomeWebView] profile tracks query failed: \(error.localizedDescription)")
+                }
+            }
+        }
+
+        /// Nearby community music is a different query from the signed-in
+        /// artist's own profile shelf. The WebView supplies the location/ring;
+        /// native performs the authenticated Firestore read and returns only
+        /// Poplur-hosted Studio tracks. Distance is rechecked in the web layer.
+        private func deliverNearbyTracks(_ body: [String: Any], into webView: WKWebView) {
+            guard let lat = (body["latitude"] as? NSNumber)?.doubleValue,
+                  let lng = (body["longitude"] as? NSNumber)?.doubleValue,
+                  abs(lat) <= 90, abs(lng) <= 180 else { return }
+            let radiusKm = min(2_000, max(1, (body["radiusKm"] as? NSNumber)?.doubleValue ?? 120))
+            let requestID = (body["requestId"] as? String) ?? ""
+
+            func distanceKm(_ otherLat: Double, _ otherLng: Double) -> Double {
+                let toRad = { (value: Double) in value * .pi / 180 }
+                let dLat = toRad(otherLat - lat)
+                let dLng = toRad(otherLng - lng)
+                let lat1 = toRad(lat)
+                let lat2 = toRad(otherLat)
+                let h = pow(sin(dLat / 2), 2)
+                    + cos(lat1) * cos(lat2) * pow(sin(dLng / 2), 2)
+                return 6_371 * 2 * asin(min(1, sqrt(h)))
+            }
+
+            func push(_ rows: [[String: Any]]) async {
+                let payload: [String: Any] = ["requestId": requestID, "tracks": rows]
+                guard let encoded = try? JSONSerialization.data(withJSONObject: payload),
+                      let json = String(data: encoded, encoding: .utf8) else { return }
+                await MainActor.run {
+                    guard self.bridge.webView === webView else { return }
+                    webView.evaluateJavaScript(
+                        "window.dispatchEvent(new CustomEvent('poplur-native-nearby-tracks', {detail: \(json)}));true;",
+                        completionHandler: nil
+                    )
+                }
+            }
+
+            Task {
+                do {
+                    let snapshot = try await Firestore.firestore()
+                        .collection("tracks")
+                        .limit(to: 256)
+                        .getDocuments()
+
+                    func text(_ data: [String: Any], _ key: String) -> String? {
+                        guard let raw = (data[key] as? String)?
+                            .trimmingCharacters(in: .whitespacesAndNewlines),
+                              !raw.isEmpty else { return nil }
+                        return raw
+                    }
+                    func createdMillis(_ data: [String: Any]) -> Double {
+                        if let value = data["createdAtMillis"] as? NSNumber { return value.doubleValue }
+                        if let timestamp = data["createdAt"] as? Timestamp {
+                            return timestamp.dateValue().timeIntervalSince1970 * 1_000
+                        }
+                        return 0
+                    }
+
+                    let rows: [[String: Any]] = snapshot.documents.compactMap { document in
+                        let data = document.data()
+                        guard let audioURL = text(data, "audioURL"),
+                              let trackLat = (data["lat"] as? NSNumber)?.doubleValue,
+                              let trackLng = (data["lng"] as? NSNumber)?.doubleValue else { return nil }
+                        let distance = distanceKm(trackLat, trackLng)
+                        guard distance <= radiusKm else { return nil }
+                        var row: [String: Any] = [
+                            "id": document.documentID,
+                            "title": text(data, "title") ?? "Untitled",
+                            "url": audioURL,
+                            "lat": trackLat,
+                            "lng": trackLng,
+                            "place": text(data, "place") ?? String(format: "%.1f km away", distance),
+                            "postedAt": createdMillis(data),
+                            "postedBy": text(data, "postedBy") ?? text(data, "userID") ?? "Poplur artist"
+                        ]
+                        if let artist = text(data, "artist") { row["artist"] = artist }
+                        if let licence = text(data, "licence") { row["licence"] = licence }
+                        if let mood = text(data, "mood") { row["mood"] = mood }
+                        if let bpm = data["bpm"] as? NSNumber { row["bpm"] = bpm.doubleValue }
+                        if let duration = data["duration"] as? NSNumber { row["duration"] = duration.doubleValue }
+                        row["distanceKm"] = distance
+                        return row
+                    }.sorted {
+                        (($0["distanceKm"] as? Double) ?? Double.greatestFiniteMagnitude)
+                            < (($1["distanceKm"] as? Double) ?? Double.greatestFiniteMagnitude)
+                    }
+                    await push(rows)
+                } catch {
+                    print("[PostLoginHomeWebView] nearby tracks query failed: \(error.localizedDescription)")
+                    await push([])
                 }
             }
         }

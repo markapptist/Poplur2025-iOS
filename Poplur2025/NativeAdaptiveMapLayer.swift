@@ -72,6 +72,10 @@ final class NativeAdaptiveMapController: ObservableObject {
 
     @Published private(set) var dimensionMode: DimensionMode = .adaptive
     @Published private(set) var isShowingThreeD = false
+    /// A human-readable, ephemeral discovery state for the native map's
+    /// lightweight art-direction layer. This deliberately carries no map
+    /// tiles, models, particles, or timer-driven animation.
+    @Published private(set) var selectedPlaceName: String?
     @Published fileprivate var cameraCommand: CameraCommand?
     fileprivate var cameraSnapshot: CameraSnapshot?
     fileprivate var radiusState: RadiusState?
@@ -127,6 +131,11 @@ final class NativeAdaptiveMapController: ObservableObject {
         cameraCommand = CameraCommand(action: .clearRadius)
     }
 
+    fileprivate func selectPlace(named name: String?) {
+        let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        selectedPlaceName = trimmed.isEmpty ? "New place" : trimmed
+    }
+
     fileprivate func reportThreeDimensional(_ value: Bool) {
         guard isShowingThreeD != value else { return }
         isShowingThreeD = value
@@ -166,12 +175,22 @@ struct NativeAdaptiveMapLayer: View {
     @ObservedObject private var mapController = NativeAdaptiveMapController.shared
 
     var body: some View {
-        NativeAdaptiveMapView(
-            userCoordinate: locationProvider.coordinate,
-            dimensionMode: mapController.dimensionMode,
-            cameraCommand: mapController.cameraCommand,
-            mapController: mapController
-        )
+        ZStack {
+            NativeAdaptiveMapView(
+                userCoordinate: locationProvider.coordinate,
+                dimensionMode: mapController.dimensionMode,
+                cameraCommand: mapController.cameraCommand,
+                mapController: mapController
+            )
+
+            // This is intentionally a static SwiftUI overlay. It gives the
+            // MapKit base a little of Poplur’s editorial feel without bringing
+            // back a WebGL map, animated atmosphere, or a render loop.
+            NativeMapArtDirectionOverlay(
+                selectedPlaceName: mapController.selectedPlaceName
+            )
+            .allowsHitTesting(false)
+        }
             .ignoresSafeArea()
             .onAppear {
                 // Preserve the clay permission-primer ordering. Merely opening
@@ -183,6 +202,69 @@ struct NativeAdaptiveMapLayer: View {
                 // leaving Map is also a hard radio-off boundary.
                 locationProvider.stop()
             }
+    }
+}
+
+/// Event-driven visual polish for the native renderer. It is computed when
+/// this view is drawn; there is no clock, display link, particle system, or
+/// per-frame map update.
+private struct NativeMapArtDirectionOverlay: View {
+    let selectedPlaceName: String?
+
+    private enum TimePalette {
+        case dawn, day, goldenHour, night
+
+        static var current: TimePalette {
+            switch Calendar.autoupdatingCurrent.component(.hour, from: .now) {
+            case 5..<9: return .dawn
+            case 9..<17: return .day
+            case 17..<21: return .goldenHour
+            default: return .night
+            }
+        }
+
+        var colors: [Color] {
+            switch self {
+            case .dawn:
+                return [.pink.opacity(0.14), .clear, .indigo.opacity(0.06)]
+            case .day:
+                return [.cyan.opacity(0.045), .clear, .orange.opacity(0.035)]
+            case .goldenHour:
+                return [.orange.opacity(0.12), .clear, .pink.opacity(0.065)]
+            case .night:
+                return [.indigo.opacity(0.18), .clear, .black.opacity(0.09)]
+            }
+        }
+    }
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            LinearGradient(
+                colors: TimePalette.current.colors,
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .blendMode(.softLight)
+
+            if let selectedPlaceName {
+                Label(selectedPlaceName.uppercased(), systemImage: "seal.fill")
+                    .font(.system(size: 11, weight: .black, design: .rounded))
+                    .kerning(0.7)
+                    .foregroundStyle(Color(red: 0.56, green: 0.05, blue: 0.30))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 9)
+                    .background(.thinMaterial, in: Capsule())
+                    .overlay {
+                        Capsule().stroke(
+                            Color(red: 0.96, green: 0.16, blue: 0.58).opacity(0.42),
+                            lineWidth: 1
+                        )
+                    }
+                    .padding(.top, 148)
+                    .shadow(color: .black.opacity(0.12), radius: 8, y: 4)
+                    .accessibilityLabel("Discovered \(selectedPlaceName)")
+            }
+        }
     }
 }
 
@@ -246,6 +328,7 @@ private struct NativeAdaptiveMapView: UIViewRepresentable {
         private var latestUserCoordinate: CLLocationCoordinate2D?
         private var userAnnotation: NativeAdaptiveUserAnnotation?
         private var radiusOverlay: MKCircle?
+        private var selectionOverlay: MKCircle?
         private var lastCommandID: UUID?
         private var dimensionMode: NativeAdaptiveMapController.DimensionMode = .adaptive
         private weak var mapController: NativeAdaptiveMapController?
@@ -413,6 +496,24 @@ private struct NativeAdaptiveMapView: UIViewRepresentable {
             _ mapView: MKMapView,
             rendererFor overlay: any MKOverlay
         ) -> MKOverlayRenderer {
+            if overlay === selectionOverlay {
+                let renderer = MKCircleRenderer(overlay: overlay)
+                renderer.fillColor = UIColor(
+                    red: 1,
+                    green: 0.27,
+                    blue: 0.64,
+                    alpha: 0.14
+                )
+                renderer.strokeColor = UIColor(
+                    red: 0.96,
+                    green: 0.16,
+                    blue: 0.58,
+                    alpha: 0.88
+                )
+                renderer.lineWidth = 2
+                return renderer
+            }
+
             guard overlay === radiusOverlay else { return MKOverlayRenderer(overlay: overlay) }
             let renderer = MKCircleRenderer(overlay: overlay)
             renderer.fillColor = UIColor(
@@ -494,6 +595,16 @@ private struct NativeAdaptiveMapView: UIViewRepresentable {
             mapView.addOverlay(circle, level: .aboveRoads)
         }
 
+        private func installSelection(
+            at coordinate: CLLocationCoordinate2D,
+            on mapView: MKMapView
+        ) {
+            if let selectionOverlay { mapView.removeOverlay(selectionOverlay) }
+            let circle = MKCircle(center: coordinate, radius: 52)
+            selectionOverlay = circle
+            mapView.addOverlay(circle, level: .aboveRoads)
+        }
+
         private func moveCamera(
             on mapView: MKMapView,
             center: CLLocationCoordinate2D,
@@ -559,11 +670,42 @@ private struct NativeAdaptiveMapView: UIViewRepresentable {
 
         @objc private func nativeMapTapped(_ recognizer: UITapGestureRecognizer) {
             guard recognizer.state == .ended else { return }
+            guard let mapView = recognizer.view as? MKMapView else { return }
+            let coordinate = mapView.convert(
+                recognizer.location(in: mapView),
+                toCoordinateFrom: mapView
+            )
+            installSelection(at: coordinate, on: mapView)
+            mapController?.selectPlace(named: lastPlaceName)
+            resolveSelectedPlace(at: coordinate, on: mapView)
             PostLoginHomeWebView.liveWebView?.evaluateJavaScript(
                 "window.dispatchEvent(new CustomEvent('poplur-native-map-tap'));"
                 + "window.postMessage({type:'poplur-map-touched'},'*');true;",
                 completionHandler: nil
             )
+        }
+
+        private func resolveSelectedPlace(
+            at coordinate: CLLocationCoordinate2D,
+            on mapView: MKMapView
+        ) {
+            geocodeTask?.cancel()
+            geocoder.cancelGeocode()
+            geocodeTask = Task { @MainActor [weak self, weak mapView] in
+                guard let self, let mapView else { return }
+                let location = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+                guard let placemarks = try? await self.geocoder.reverseGeocodeLocation(location),
+                      !Task.isCancelled,
+                      let placemark = placemarks.first else { return }
+                let place = placemark.areasOfInterest?.first
+                    ?? placemark.subLocality
+                    ?? placemark.locality
+                    ?? placemark.name
+                guard let place, !place.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+                self.lastPlaceName = place
+                self.mapController?.selectPlace(named: place)
+                self.publishCameraState(from: mapView, geocode: false)
+            }
         }
 
         private func publishCameraState(from mapView: MKMapView, geocode: Bool) {
