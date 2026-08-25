@@ -1861,6 +1861,9 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                 if type == "requestProfilePosts", let webView = bridge.webView {
                     deliverProfilePosts(into: webView)
                 }
+                if type == "requestFeedPosts", let webView = bridge.webView {
+                    deliverFeedPosts(into: webView)
+                }
                 if type == "deleteProfilePost", let webView = bridge.webView {
                     deleteProfilePost(body, from: webView)
                 }
@@ -2233,6 +2236,75 @@ struct PostLoginHomeWebView: UIViewRepresentable {
             }
         }
 
+        /// The production Feed consumes the media rows users actually publish.
+        /// Bundled creatives remain a browser-preview fallback, not a substitute
+        /// for authenticated Firestore posts inside the app.
+        private func deliverFeedPosts(into webView: WKWebView) {
+            guard Auth.auth().currentUser != nil else { return }
+            Task {
+                do {
+                    let snapshot = try await Firestore.firestore()
+                        .collection("posts")
+                        .order(by: "createdAt", descending: true)
+                        .limit(to: 96)
+                        .getDocuments()
+
+                    func createdMillis(_ data: [String: Any]) -> Double {
+                        if let value = data["createdAtMillis"] as? NSNumber {
+                            return value.doubleValue
+                        }
+                        if let timestamp = data["createdAt"] as? Timestamp {
+                            return timestamp.dateValue().timeIntervalSince1970 * 1000
+                        }
+                        return 0
+                    }
+
+                    let rows: [[String: Any]] = snapshot.documents
+                        .sorted { createdMillis($0.data()) > createdMillis($1.data()) }
+                        .compactMap { document in
+                            let data = document.data()
+                            guard (data["audience"] as? String ?? "public") == "public",
+                                  (data["status"] as? String ?? "published") == "published",
+                                  let mediaURL = ((data["playbackURL"] as? String)
+                                    ?? (data["mediaURL"] as? String))?
+                                    .trimmingCharacters(in: .whitespacesAndNewlines),
+                                  !mediaURL.isEmpty else { return nil }
+                            var row: [String: Any] = [
+                                "id": document.documentID,
+                                "mediaURL": mediaURL,
+                                "mediaType": (data["mediaType"] as? String) ?? "video",
+                                "createdAtMillis": createdMillis(data),
+                                "username": (data["username"] as? String) ?? "Poplur user",
+                                "channelId": (data["channelId"] as? String) ?? "live"
+                            ]
+                            if let poster = data["posterURL"] as? String, !poster.isEmpty {
+                                row["posterURL"] = poster
+                            }
+                            if let caption = data["caption"] as? String, !caption.isEmpty {
+                                row["caption"] = caption
+                            }
+                            if let radius = data["radius"] as? NSNumber {
+                                row["radiusMeters"] = radius
+                            }
+                            return row
+                        }
+
+                    let payload: [String: Any] = ["posts": rows]
+                    guard let encoded = try? JSONSerialization.data(withJSONObject: payload),
+                          let json = String(data: encoded, encoding: .utf8) else { return }
+                    await MainActor.run {
+                        guard self.bridge.webView === webView else { return }
+                        webView.evaluateJavaScript(
+                            "window.dispatchEvent(new CustomEvent('poplur-native-feed-posts', {detail: \(json)}));true;",
+                            completionHandler: nil
+                        )
+                    }
+                } catch {
+                    print("[PostLoginHomeWebView] feed posts query failed: \(error.localizedDescription)")
+                }
+            }
+        }
+
         /// Deletes only a post owned by the currently authenticated account.
         /// The web bundle is an untrusted caller: both identifiers are bounded
         /// before they reach a Firestore path, and ownership is read from the
@@ -2278,7 +2350,10 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                         }
                         return
                     }
-                    guard snapshot.data()?["userID"] as? String == uid else {
+                    let postData = snapshot.data() ?? [:]
+                    let ownerID = (postData["userID"] as? String)
+                        ?? (postData["userId"] as? String)
+                    guard ownerID == uid else {
                         await MainActor.run {
                             self.deliverProfilePostDeleteResult(
                                 requestID: requestID,
@@ -2291,9 +2366,16 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                         return
                     }
 
-                    // The Firestore row is authoritative. Media storage is not
-                    // removed here because legacy posts can contain arbitrary
-                    // or shared URLs that this bridge cannot safely own.
+                    // New posts record their owned Storage paths. Delete only
+                    // paths inside this account's posts folder; legacy rows
+                    // without those fields remain document-only rather than
+                    // trusting an arbitrary download URL from JavaScript.
+                    for key in ["mediaStoragePath", "posterStoragePath"] {
+                        guard let path = Self.ownedPostStoragePath(postData[key], uid: uid) else {
+                            continue
+                        }
+                        try? await Storage.storage().reference(withPath: path).delete()
+                    }
                     try await reference.delete()
                     await MainActor.run {
                         self.deliverProfilePostDeleteResult(
@@ -2326,6 +2408,17 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                           && scalar != "/" && scalar != "\\"
                   }) else { return nil }
             return value
+        }
+
+        private static func ownedPostStoragePath(_ value: Any?, uid: String) -> String? {
+            guard let path = value as? String,
+                  path.utf8.count <= 240,
+                  path.hasPrefix("posts/\(uid)/"),
+                  !path.contains(".."),
+                  String(path.dropFirst("posts/\(uid)/".count)).contains("/") == false else {
+                return nil
+            }
+            return path
         }
 
         private func deliverProfilePostDeleteResult(
