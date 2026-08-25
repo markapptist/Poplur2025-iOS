@@ -1052,6 +1052,14 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     signalHomeReady()
                     pushAuthToken()
                 }
+                if type == "phoneRingtone" {
+                    let action = body["action"] as? String
+                    if action == "start" {
+                        PoplurWebRingtone.shared.start()
+                    } else if action == "stop" {
+                        PoplurWebRingtone.shared.stop()
+                    }
+                }
                 // The web layer cannot mint a Firebase ID token — this process
                 // owns auth — but Meshy generation is authorized server-side by
                 // role, so it needs one. It asks; we answer.
@@ -3161,5 +3169,48 @@ struct PostLoginHomeWebView: UIViewRepresentable {
             locationPermissionRequestInFlight = false
             print("[PostLoginHomeWebView] current-location request failed: \(error.localizedDescription)")
         }
+    }
+}
+/// The WebView must never create its own Web Audio ringtone: doing so changes
+/// the process-wide iOS audio session and may stop feed or radio playback.
+/// This native ringer uses `.ambient`, so it automatically follows the real
+/// phone's Silent/Ring switch. If media already owns audio, it stays quiet
+/// while the web call UI continues to animate and vibrate.
+private final class PoplurWebRingtone {
+    static let shared = PoplurWebRingtone()
+
+    private var player: AVAudioPlayer?
+    private var cycleTask: Task<Void, Never>?
+
+    private init() {}
+
+    func start() {
+        stop()
+        guard PoplurEQSync.shared.prepareAudioSessionForPhoneRingtone() else { return }
+        playBurst()
+        cycleTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(3))
+                guard !Task.isCancelled else { return }
+                await MainActor.run { self?.playBurst() }
+            }
+        }
+    }
+
+    func stop() {
+        cycleTask?.cancel()
+        cycleTask = nil
+        player?.stop()
+        player = nil
+    }
+
+    private func playBurst() {
+        guard PoplurEQSync.shared.prepareAudioSessionForPhoneRingtone(),
+              let data = DTMFToneGenerator.generateTone(for: "ring", duration: 1.3),
+              let player = try? AVAudioPlayer(data: data) else { return }
+        self.player?.stop()
+        self.player = player
+        player.volume = 0.72
+        player.play()
     }
 }

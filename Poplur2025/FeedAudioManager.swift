@@ -118,6 +118,50 @@ final class PoplurEQSync {
         configureAudioSession(for: .ambientPlayback)
     }
 
+    /// A handset ringtone is UI feedback, never a reason to reconfigure or
+    /// interrupt already-playing media. When the audio floor is free, use
+    /// `.ambient`: it follows the real iPhone Silent/Ring switch. When video,
+    /// radio, speech, or another playback role owns the session, leave that
+    /// session entirely alone and keep the incoming-call visual/haptics only.
+    func prepareAudioSessionForPhoneRingtone() -> Bool {
+        let shouldApply: Bool? = withLock { state in
+            let mediaIsActive = state.activeLanes.contains(.mapRadio)
+                || state.activeLanes.contains(.feedBumper)
+                || state.activeLanes.contains(.feedVideo)
+                || state.activeLanes.contains(.standaloneVideo)
+                || state.activeLanes.contains(.rainAmbient)
+                || state.activeLanes.contains(.cityMusic)
+            guard !mediaIsActive else { return nil }
+
+            switch state.currentAudioSessionRole {
+            case .feedPlayback, .mixedPlayback, .voicePrompt:
+                return nil
+            case .ambientPlayback:
+                return false
+            case nil:
+                state.currentAudioSessionRole = .ambientPlayback
+                return true
+            }
+        }
+        guard let shouldApply else { return false }
+        guard shouldApply else { return true }
+
+        let session = AVAudioSession.sharedInstance()
+        do {
+            try session.setCategory(.ambient, mode: .default, options: [.mixWithOthers])
+            try session.setActive(true, options: [])
+            return true
+        } catch {
+            withLock { state in
+                if state.currentAudioSessionRole == .ambientPlayback {
+                    state.currentAudioSessionRole = nil
+                }
+            }
+            print("[PoplurEQSync] ringtone audio session setup failed: \(error)")
+            return false
+        }
+    }
+
     func configureAudioSession(for role: AudioSessionRole, force: Bool = false) {
         let shouldApply = withLock { state -> Bool in
             guard force || state.currentAudioSessionRole != role else { return false }
