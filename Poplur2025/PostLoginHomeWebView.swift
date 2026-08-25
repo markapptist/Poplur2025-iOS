@@ -781,6 +781,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         private var lastDeliveredHeading: Double?
         private var activeStoreCheckoutRequestID: String?
         private var activeStoreCheckoutProductCounts: [String: Int] = [:]
+        private var pendingDMThreadID: String?
 
         init(
             initialWebTab: String,
@@ -792,6 +793,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
             self.homeURL = homeURL
             self.onReady = onReady
             self.onWebEvent = onWebEvent
+            pendingDMThreadID = UserDefaults.standard.string(forKey: "poplur.pendingDMThreadId")
             super.init()
             locationRequester.delegate = self
             locationRequester.desiredAccuracy = kCLLocationAccuracyHundredMeters
@@ -840,6 +842,16 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                 forName: .poplurCardPurchaseRecovered, object: nil, queue: .main
             ) { [weak self] note in
                 self?.deliverRecoveredStorePurchase(note)
+            })
+            notificationObservers.append(NotificationCenter.default.addObserver(
+                forName: .OpenDMsRequested, object: nil, queue: .main
+            ) { [weak self] note in
+                guard let self,
+                      let threadID = note.userInfo?["threadId"] as? String,
+                      !threadID.isEmpty,
+                      threadID.count <= 200 else { return }
+                self.pendingDMThreadID = threadID
+                self.deliverPendingDMDeepLink()
             })
         }
 
@@ -1264,6 +1276,49 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     guard !threadID.isEmpty, threadID.count <= 200 else { return }
                     Task { @MainActor in
                         await PoplurDirectMessages.shared.setTyping(threadID, typing: typing)
+                    }
+                    return
+                }
+                if type == "deleteDMThread", let webView = bridge.webView {
+                    let threadID = (body["threadId"] as? String) ?? ""
+                    Task { @MainActor [weak self, weak webView] in
+                        let ok = await PoplurDirectMessages.shared.hideThread(threadID)
+                        guard let self, let webView, self.bridge.webView === webView else { return }
+                        self.pushWalletPassMessage([
+                            "type": "poplurDMThreadHidden",
+                            "threadId": threadID,
+                            "ok": ok,
+                        ], into: webView)
+                    }
+                    return
+                }
+                if type == "sendDMAttachment", let webView = bridge.webView {
+                    let otherUID = (body["otherId"] as? String) ?? ""
+                    let threadID = (body["threadId"] as? String) ?? ""
+                    let source = (body["source"] as? String) ?? ""
+                    let kind = (body["kind"] as? String) ?? ""
+                    let clientMessageID = (body["clientMessageId"] as? String) ?? ""
+                    let durationMillis = (body["durationMillis"] as? NSNumber)?.intValue
+                    Task { @MainActor [weak self, weak webView] in
+                        let ok = await PoplurDirectMessages.shared.sendAttachment(
+                            to: otherUID,
+                            threadID: threadID,
+                            source: source,
+                            kind: kind,
+                            clientMessageID: clientMessageID,
+                            durationMillis: durationMillis
+                        )
+                        guard let self, let webView, self.bridge.webView === webView else { return }
+                        self.pushWalletPassMessage(
+                            ok
+                                ? ["type": "poplurDMSent", "clientMessageId": clientMessageID]
+                                : [
+                                    "type": "poplurDMSendFailed",
+                                    "clientMessageId": clientMessageID,
+                                    "text": kind == "audio" ? "Voice message" : kind == "video" ? "Video" : "Photo",
+                                ],
+                            into: webView
+                        )
                     }
                     return
                 }
@@ -2820,7 +2875,22 @@ struct PostLoginHomeWebView: UIViewRepresentable {
             lastDeliveredPitch = nil
             lastDeliveredHeading = nil
             replayLatestMotion()
+            deliverPendingDMDeepLink()
             DispatchQueue.main.async { [onReady] in onReady() }
+        }
+
+        private func deliverPendingDMDeepLink() {
+            guard didSignalReady,
+                  let webView = bridge.webView,
+                  let threadID = pendingDMThreadID,
+                  !threadID.isEmpty,
+                  threadID.count <= 200 else { return }
+            pendingDMThreadID = nil
+            UserDefaults.standard.removeObject(forKey: "poplur.pendingDMThreadId")
+            pushWalletPassMessage(
+                ["type": "poplurOpenDM", "threadId": threadID],
+                into: webView
+            )
         }
 
         /// WebKit can kill its web-content process under memory pressure while

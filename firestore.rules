@@ -227,6 +227,29 @@ service cloud.firestore {
         && request.auth.uid in getAfter(path).data.participants;
     }
 
+    function validDMMessage() {
+      let kind = request.resource.data.get('kind', 'text');
+      return request.resource.data.keys().hasOnly([
+          'senderId', 'text', 'clientMessageId', 'createdAt',
+          'kind', 'mediaURL', 'mimeType', 'durationMillis'
+        ])
+        && kind in ['text', 'image', 'video', 'audio']
+        && (
+          kind == 'text'
+          || (
+            request.resource.data.mediaURL is string
+            && request.resource.data.mediaURL.size() <= 2048
+            && request.resource.data.mediaURL.matches('https://.*')
+            && request.resource.data.mimeType is string
+            && request.resource.data.mimeType.matches(kind + '/.*')
+            && (kind != 'audio'
+              || (request.resource.data.durationMillis is int
+                && request.resource.data.durationMillis >= 0
+                && request.resource.data.durationMillis <= 60000))
+          )
+        );
+    }
+
     match /dmThreads/{threadId} {
       allow read: if signedIn() && request.auth.uid in resource.data.participants;
 
@@ -256,7 +279,8 @@ service cloud.firestore {
           && request.resource.data.text.size() > 0
           && request.resource.data.text.size() <= 2000
           && request.resource.data.createdAt == request.time
-          && request.resource.data.get('clientMessageId', messageId) == messageId;
+          && request.resource.data.get('clientMessageId', messageId) == messageId
+          && validDMMessage();
         // A sent message is a record of what was said. Editing it after the
         // fact would let either side rewrite the other's history.
         allow update, delete: if false;

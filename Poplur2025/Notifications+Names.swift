@@ -288,10 +288,14 @@ final class PoplurNotificationCenter: NSObject, ObservableObject, UNUserNotifica
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
-        await MainActor.run { Self.shared.recordIfEngagement(notification.request.content) }
-        let wantSound = await MainActor.run { Self.shared.soundsEnabled }
+        let content = notification.request.content
+        await MainActor.run { Self.shared.recordRemoteNotification(content) }
+        let preferences = await MainActor.run {
+            (Self.shared.soundsEnabled, Self.shared.messagesPushEnabled)
+        }
+        if content.userInfo["kind"] as? String == "dm" && !preferences.1 { return [] }
         var opts: UNNotificationPresentationOptions = [.banner, .badge]
-        if wantSound { opts.insert(.sound) }
+        if preferences.0 { opts.insert(.sound) }
         return opts
     }
 
@@ -308,7 +312,7 @@ final class PoplurNotificationCenter: NSObject, ObservableObject, UNUserNotifica
     ) async {
         let content = response.notification.request.content
         await MainActor.run {
-            Self.shared.recordIfEngagement(content)
+            Self.shared.recordRemoteNotification(content)
             // Accept BOTH spellings. The Cloud Function's data payload uses
             // `postId`; the older local path and NotificationsCoordinator use
             // `postID`. A silent case mismatch here is a tap that does nothing.
@@ -321,6 +325,17 @@ final class PoplurNotificationCenter: NSObject, ObservableObject, UNUserNotifica
                     userInfo: ["postID": postId]
                 )
             }
+            if let threadId = info["threadId"] as? String, !threadId.isEmpty {
+                // Keep the route through a cold launch. NotificationCenter is
+                // intentionally ephemeral; the post-login WebView may not
+                // have installed its observer when the system delivers the tap.
+                UserDefaults.standard.set(threadId, forKey: "poplur.pendingDMThreadId")
+                NotificationCenter.default.post(
+                    name: .OpenDMsRequested,
+                    object: nil,
+                    userInfo: ["threadId": threadId]
+                )
+            }
         }
     }
 
@@ -329,8 +344,23 @@ final class PoplurNotificationCenter: NSObject, ObservableObject, UNUserNotifica
     /// Keyed on engagementId, so the same push seen first in the foreground and
     /// then again on tap collapses to one row rather than two —
     /// addInAppNotification already replaces by id.
-    private func recordIfEngagement(_ content: UNNotificationContent) {
+    private func recordRemoteNotification(_ content: UNNotificationContent) {
         let info = content.userInfo
+        if info["kind"] as? String == "dm",
+           let messageId = info["messageId"] as? String, !messageId.isEmpty {
+            addInAppNotification(
+                PoplurDeviceNotification(
+                    id: messageId,
+                    kind: .dm,
+                    title: content.title,
+                    detail: content.body,
+                    createdAt: Date(),
+                    isUnread: true
+                )
+            )
+            refreshBadge()
+            return
+        }
         guard let engagementId = info["engagementId"] as? String, !engagementId.isEmpty else { return }
         addInAppNotification(
             PoplurDeviceNotification(

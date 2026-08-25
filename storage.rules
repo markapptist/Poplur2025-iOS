@@ -113,6 +113,32 @@ service firebase.storage {
       allow delete: if request.auth != null && request.auth.uid == userId;
     }
 
+    // Private direct-message media. Unlike posts and music, this is not a
+    // discoverable surface: only the two participants on the canonical thread
+    // may read it. The sender uid remains in the path so writes and cleanup are
+    // independently enforceable without trusting object metadata.
+    match /dmMedia/{threadId}/{userId}/{fileName} {
+      function inThread() {
+        return request.auth != null
+          && request.auth.uid in firestore.get(
+            /databases/(default)/documents/dmThreads/$(threadId)
+          ).data.participants;
+      }
+
+      allow read: if inThread();
+      allow create, update: if inThread()
+        && request.auth.uid == userId
+        && (
+          (request.resource.contentType.matches('image/.*')
+            && request.resource.size < 12 * 1024 * 1024)
+          || (request.resource.contentType.matches('audio/.*')
+            && request.resource.size < 8 * 1024 * 1024)
+          || (request.resource.contentType.matches('video/.*')
+            && request.resource.size < 40 * 1024 * 1024)
+        );
+      allow delete: if inThread() && request.auth.uid == userId;
+    }
+
     // Nothing else in this bucket is writable from a client.
     //
     // NOTE this does not veto the rules above: Storage rules are a permissive
