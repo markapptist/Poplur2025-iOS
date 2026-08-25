@@ -25,6 +25,28 @@ service cloud.firestore {
         : '';
     }
 
+    function storyOwnerOf(storyId) {
+      let path = /databases/$(database)/documents/stories/$(storyId);
+      return exists(path) ? get(path).data.get('ownerID', '') : '';
+    }
+
+    function canViewStory(storyId) {
+      let path = /databases/$(database)/documents/stories/$(storyId);
+      let story = exists(path) ? get(path).data : {};
+      return signedIn() && exists(path) && (
+        story.get('ownerID', '') == request.auth.uid
+        || (
+          (story.expiresAt > request.time
+            || story.get('highlighted', false) == true)
+          && (
+            story.get('audience', '') == 'public'
+            || (story.get('audience', '') == 'favorites'
+              && request.auth.uid in story.get('audienceUserIds', []))
+          )
+        )
+      );
+    }
+
     // Play counts belong to the server. A client that could write them could
     // also write itself to the top of every listing.
     function countedTrackFields() {
@@ -388,6 +410,82 @@ service cloud.firestore {
         allow delete: if signedIn()
           && (request.auth.uid == resource.data.actorUid
             || request.auth.uid == postOwnerOf(postId));
+      }
+    }
+
+    // ── Stories ──────────────────────────────────────────────────────────
+    // Stories are separate from permanent posts so a Favorites-only item can
+    // never become readable through the posts collection's public contract.
+    // `audienceUserIds` is the publisher's bounded Poplur Phone favourites
+    // snapshot; there is no follower graph in Poplur.
+    match /stories/{storyId} {
+      allow read: if signedIn() && (
+        resource.data.ownerID == request.auth.uid
+        || (
+          (resource.data.expiresAt > request.time
+            || resource.data.get('highlighted', false) == true)
+          && (
+            resource.data.audience == 'public'
+            || (resource.data.audience == 'favorites'
+              && request.auth.uid in resource.data.get('audienceUserIds', []))
+          )
+        )
+      );
+
+      allow create: if signedIn()
+        && request.resource.data.ownerID == request.auth.uid
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.expiresAt is timestamp
+        && request.resource.data.expiresAt > request.time
+        && request.resource.data.expiresAt < request.time + duration.value(25, 'h')
+        && request.resource.data.audience in ['public', 'favorites']
+        && request.resource.data.get('audienceUserIds', []) is list
+        && request.resource.data.get('audienceUserIds', []).size() <= 50
+        && (request.resource.data.audience == 'public'
+          || request.resource.data.get('audienceUserIds', []).size() > 0)
+        && request.resource.data.get('repliesAllowed', true) is bool
+        && request.resource.data.get('highlighted', false) == false
+        && request.resource.data.mediaURL is string
+        && request.resource.data.mediaURL.size() > 0
+        && request.resource.data.mediaURL.size() <= 4096
+        && request.resource.data.mediaType in ['photo', 'video']
+        && request.resource.data.get('mentions', []) is list
+        && request.resource.data.get('mentions', []).size() <= 12
+        && request.resource.data.get('caption', '').size() <= 2000
+        && validPostOrigin(request.auth.uid);
+
+      allow update: if signedIn()
+        && resource.data.ownerID == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['highlighted'])
+        && request.resource.data.highlighted is bool;
+
+      allow delete: if signedIn() && resource.data.ownerID == request.auth.uid;
+
+      match /reactions/{actorId} {
+        allow read: if signedIn()
+          && (actorId == request.auth.uid || request.auth.uid == storyOwnerOf(storyId));
+        allow create, update: if isSelf(actorId) && canViewStory(storyId)
+          && request.resource.data.keys().hasOnly(['actorId', 'reaction', 'updatedAt'])
+          && request.resource.data.actorId == request.auth.uid
+          && request.resource.data.reaction in ['♥', '🔥', '😂', '👏']
+          && request.resource.data.updatedAt == request.time;
+        allow delete: if isSelf(actorId);
+      }
+
+      match /votes/{actorId} {
+        allow read: if signedIn()
+          && (actorId == request.auth.uid || request.auth.uid == storyOwnerOf(storyId));
+        allow create, update: if isSelf(actorId) && canViewStory(storyId)
+          && request.resource.data.keys().hasOnly(['actorId', 'optionIndex', 'updatedAt'])
+          && request.resource.data.actorId == request.auth.uid
+          && request.resource.data.optionIndex is int
+          && request.resource.data.optionIndex >= 0
+          && request.resource.data.optionIndex <= 3
+          && request.resource.data.optionIndex
+            < get(/databases/$(database)/documents/stories/$(storyId))
+              .data.get('poll', {}).get('options', []).size()
+          && request.resource.data.updatedAt == request.time;
+        allow delete: if isSelf(actorId);
       }
     }
 

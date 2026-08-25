@@ -21,6 +21,7 @@ enum WebPostPublisher {
     @MainActor
     static func handle(_ body: [String: Any]) {
         let requestID = body["requestId"] as? String
+        let isStory = body["contentType"] as? String == "story"
 
         /// Every failure in here must ANSWER the web composer.
         ///
@@ -144,16 +145,31 @@ enum WebPostPublisher {
         PostUploadService.shared.nextChannelID = body["channelId"] as? String
         PostUploadService.shared.nextRequestID = body["requestId"] as? String
         PostUploadService.shared.nextPostID = postID
-        PostUploadService.shared.nextAudience = body["audience"] as? String
+        PostUploadService.shared.nextAudience = isStory && body["audience"] as? String == "favorites"
+            ? "favorites"
+            : "public"
         PostUploadService.shared.nextLocationVisibility = body["locationVisibility"] as? String
         if body["rightsAttested"] as? Bool == true {
             PostUploadService.shared.nextRightsAttestationVersion =
                 body["rightsAttestationVersion"] as? String
         }
+        if isStory {
+            PostUploadService.shared.nextStoryMetadata = storyMetadata(from: body)
+        }
 
         // A post bound to a map spot carries its coordinate; a plain channel
         // post uploads to wherever the user currently is.
-        if let latitude = body["targetLatitude"] as? Double,
+        if isStory {
+            // Stories are never attached to a point. Use the explicit upload
+            // route with no coordinate so a stale camera/current location can
+            // neither block publishing nor become part of the document.
+            print("[WebPostPublisher] dispatch → UploadPostToCoordinate (Story, no origin)")
+            NotificationCenter.default.post(
+                name: Notification.Name("UploadPostToCoordinate"),
+                object: nil,
+                userInfo: userInfo
+            )
+        } else if let latitude = body["targetLatitude"] as? Double,
            let longitude = body["targetLongitude"] as? Double {
             userInfo["latitude"] = latitude
             userInfo["longitude"] = longitude
@@ -184,6 +200,53 @@ enum WebPostPublisher {
             // dispatching an upload or reporting why it didn't.
             fail("The post had no media to upload.")
         }
+    }
+
+    private static func storyMetadata(from body: [String: Any]) -> [String: Any] {
+        let allowedStickers: Set<String> = ["heart", "here", "live", "hype", "call"]
+        let sticker = body["storySticker"] as? String
+        let mentions = (body["mentions"] as? [Any] ?? []).compactMap { value -> String? in
+            guard let raw = value as? String else { return nil }
+            let handle = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+                .trimmingCharacters(in: CharacterSet(charactersIn: "@"))
+            guard !handle.isEmpty, handle.count <= 39,
+                  handle.unicodeScalars.allSatisfy({ scalar in
+                      (scalar.value >= 48 && scalar.value <= 57)
+                          || (scalar.value >= 97 && scalar.value <= 122)
+                          || scalar == "_" || scalar == "."
+                  }) else { return nil }
+            return "@\(handle)"
+        }
+        var metadata: [String: Any] = [
+            "expiresAtMillis": Int64(Date().timeIntervalSince1970 * 1_000) + 24 * 60 * 60 * 1_000,
+            "repliesAllowed": body["repliesAllowed"] as? Bool ?? true,
+            "mentions": Array(Set(mentions)).sorted().prefix(12).map { $0 }
+        ]
+        if let sticker, allowedStickers.contains(sticker) { metadata["sticker"] = sticker }
+        if let music = body["storyMusic"] as? [String: Any],
+           let title = bounded(music["title"], limit: 100) {
+            var safeMusic: [String: Any] = ["title": title]
+            if let artist = bounded(music["artist"], limit: 80) { safeMusic["artist"] = artist }
+            metadata["music"] = safeMusic
+        }
+        if let poll = body["storyPoll"] as? [String: Any],
+           let question = bounded(poll["question"], limit: 160) {
+            let options = (poll["options"] as? [Any] ?? [])
+                .compactMap { bounded($0, limit: 80) }
+                .prefix(4).map { $0 }
+            if options.count >= 2 {
+                metadata["poll"] = ["question": question, "options": options]
+            }
+        }
+        return metadata
+    }
+
+    private static func bounded(_ value: Any?, limit: Int) -> String? {
+        guard let value = value as? String else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return String(trimmed.prefix(limit))
     }
 
     /// `data:<mime>;base64,<payload>` → raw bytes.

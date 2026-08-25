@@ -17,6 +17,7 @@ export { poplurWalletPass, poplurOwnedCards } from "./walletPass";
 export { poplurPassWebService, poplurPassOnProfileChange } from "./walletPassWebService";
 export { notifyOnEngagement } from "./engagementNotifications";
 export { notifyOnDirectMessage } from "./directMessageNotifications";
+export { tallyStoryPollVote } from "./storyPollVotes";
 export { setAccountLocationPrivacy } from "./accountPrivacy";
 export { meshyGenerate, meshyStatus } from "./meshyModels";
 export { generateRetroGame } from "./retro/generateRetroGame";

@@ -47,7 +47,7 @@ final class PostUploadService {
 
     private struct UploadRequest {
         let payload: UploadPayload
-        let coordinate: CLLocationCoordinate2D
+        let coordinate: CLLocationCoordinate2D?
         let radiusMeters: Int
         let caption: String?
         let channelID: String?
@@ -56,6 +56,7 @@ final class PostUploadService {
         let audience: String
         let locationVisibility: String
         let rightsAttestationVersion: String?
+        let storyMetadata: [String: Any]?
 
         func isDuplicate(of other: UploadRequest) -> Bool {
             if let requestID, let otherRequestID = other.requestID,
@@ -83,6 +84,9 @@ final class PostUploadService {
     var nextAudience: String?
     var nextLocationVisibility: String?
     var nextRightsAttestationVersion: String?
+    /// Present only for a 24-hour Story. Keeping it on the one-shot publish
+    /// contract prevents Story audience/extras from leaking into a later post.
+    var nextStoryMetadata: [String: Any]?
 
     private var pendingCoordinate: CLLocationCoordinate2D?
     private var started = false
@@ -123,7 +127,8 @@ final class PostUploadService {
                 let channelID = self.takeChannelID()
                 let requestID = self.takeRequestID()
                 let publishContract = self.takePublishContract(requestID: requestID)
-                guard let coordinate = self.resolveCoordinate() else {
+                let coordinate = self.resolveCoordinate()
+                guard coordinate != nil || publishContract.storyMetadata != nil else {
                     Self.report(success: false, message: "No location for this post yet.", requestID: requestID)
                     return
                 }
@@ -137,7 +142,8 @@ final class PostUploadService {
                     postID: publishContract.postID,
                     audience: publishContract.audience,
                     locationVisibility: publishContract.locationVisibility,
-                    rightsAttestationVersion: publishContract.rightsAttestationVersion
+                    rightsAttestationVersion: publishContract.rightsAttestationVersion,
+                    storyMetadata: publishContract.storyMetadata
                 ))
             }
         })
@@ -150,7 +156,8 @@ final class PostUploadService {
                 let channelID = self.takeChannelID()
                 let requestID = self.takeRequestID()
                 let publishContract = self.takePublishContract(requestID: requestID)
-                guard let coordinate = self.resolveCoordinate() else {
+                let coordinate = self.resolveCoordinate()
+                guard coordinate != nil || publishContract.storyMetadata != nil else {
                     PoplurTemporaryFileOwnership.deleteIfOwned(url)
                     Self.report(success: false, message: "No location for this post yet.", requestID: requestID)
                     return
@@ -165,7 +172,8 @@ final class PostUploadService {
                     postID: publishContract.postID,
                     audience: publishContract.audience,
                     locationVisibility: publishContract.locationVisibility,
-                    rightsAttestationVersion: publishContract.rightsAttestationVersion
+                    rightsAttestationVersion: publishContract.rightsAttestationVersion,
+                    storyMetadata: publishContract.storyMetadata
                 ))
             }
         })
@@ -181,8 +189,13 @@ final class PostUploadService {
                 let channelID = self.takeChannelID()
                 let requestID = self.takeRequestID()
                 let publishContract = self.takePublishContract(requestID: requestID)
-                guard let latitude = info["latitude"] as? Double,
-                      let longitude = info["longitude"] as? Double else {
+                let coordinate: CLLocationCoordinate2D?
+                if let latitude = info["latitude"] as? Double,
+                   let longitude = info["longitude"] as? Double {
+                    coordinate = CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+                } else if publishContract.storyMetadata != nil {
+                    coordinate = nil
+                } else {
                     if let videoURL = info["videoURL"] as? URL {
                         PoplurTemporaryFileOwnership.deleteIfOwned(videoURL)
                     }
@@ -193,14 +206,14 @@ final class PostUploadService {
                     )
                     return
                 }
-                let coordinate = CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
                 if let image = info["image"] as? UIImage {
                     self.enqueue(UploadRequest(
                         payload: .image(image), coordinate: coordinate, radiusMeters: radius,
                         caption: caption, channelID: channelID, requestID: requestID,
                         postID: publishContract.postID, audience: publishContract.audience,
                         locationVisibility: publishContract.locationVisibility,
-                        rightsAttestationVersion: publishContract.rightsAttestationVersion
+                        rightsAttestationVersion: publishContract.rightsAttestationVersion,
+                        storyMetadata: publishContract.storyMetadata
                     ))
                 } else if let videoURL = info["videoURL"] as? URL {
                     self.enqueue(UploadRequest(
@@ -208,7 +221,8 @@ final class PostUploadService {
                         caption: caption, channelID: channelID, requestID: requestID,
                         postID: publishContract.postID, audience: publishContract.audience,
                         locationVisibility: publishContract.locationVisibility,
-                        rightsAttestationVersion: publishContract.rightsAttestationVersion
+                        rightsAttestationVersion: publishContract.rightsAttestationVersion,
+                        storyMetadata: publishContract.storyMetadata
                     ))
                 } else {
                     Self.report(success: false, message: "That post had no media to upload.", requestID: requestID)
@@ -295,7 +309,8 @@ final class PostUploadService {
                     postID: request.postID,
                     audience: request.audience,
                     locationVisibility: request.locationVisibility,
-                    rightsAttestationVersion: request.rightsAttestationVersion
+                    rightsAttestationVersion: request.rightsAttestationVersion,
+                    storyMetadata: request.storyMetadata
                 )
             case .video(let url):
                 try await upload(
@@ -308,7 +323,8 @@ final class PostUploadService {
                     postID: request.postID,
                     audience: request.audience,
                     locationVisibility: request.locationVisibility,
-                    rightsAttestationVersion: request.rightsAttestationVersion
+                    rightsAttestationVersion: request.rightsAttestationVersion,
+                    storyMetadata: request.storyMetadata
                 )
             }
             try Task.checkCancellation()
@@ -366,21 +382,25 @@ final class PostUploadService {
         postID: String,
         audience: String,
         locationVisibility: String,
-        rightsAttestationVersion: String?
+        rightsAttestationVersion: String?,
+        storyMetadata: [String: Any]?
     ) {
         defer {
             nextPostID = nil
             nextAudience = nil
             nextLocationVisibility = nil
             nextRightsAttestationVersion = nil
+            nextStoryMetadata = nil
         }
         let candidate = nextPostID ?? requestID
         let postID = Self.boundedPostID(candidate) ?? "post-\(UUID().uuidString)"
+        let storyMetadata = nextStoryMetadata
         return (
             postID,
-            "public",
-            nextLocationVisibility == "hidden" ? "hidden" : "approximate",
-            nextRightsAttestationVersion
+            storyMetadata == nil ? "public" : (nextAudience == "favorites" ? "favorites" : "public"),
+            storyMetadata == nil && nextLocationVisibility != "hidden" ? "approximate" : "hidden",
+            nextRightsAttestationVersion,
+            storyMetadata
         )
     }
 
@@ -409,7 +429,7 @@ final class PostUploadService {
 
     private func upload(
         image: UIImage,
-        at coordinate: CLLocationCoordinate2D,
+        at coordinate: CLLocationCoordinate2D?,
         radiusMeters: Int,
         caption: String?,
         channelID: String?,
@@ -417,7 +437,8 @@ final class PostUploadService {
         postID: String,
         audience: String,
         locationVisibility: String,
-        rightsAttestationVersion: String?
+        rightsAttestationVersion: String?,
+        storyMetadata: [String: Any]?
     ) async throws {
         guard let data = image.poplur4KJPEGData() else {
             throw NSError(
@@ -462,7 +483,8 @@ final class PostUploadService {
                 channelID: channelID,
                 audience: audience,
                 locationVisibility: locationVisibility,
-                rightsAttestationVersion: rightsAttestationVersion
+                rightsAttestationVersion: rightsAttestationVersion,
+                storyMetadata: storyMetadata
             )
         } catch {
             try? await reference.delete()
@@ -472,7 +494,7 @@ final class PostUploadService {
 
     private func upload(
         videoURL: URL,
-        at coordinate: CLLocationCoordinate2D,
+        at coordinate: CLLocationCoordinate2D?,
         radiusMeters: Int,
         caption: String?,
         channelID: String?,
@@ -480,7 +502,8 @@ final class PostUploadService {
         postID: String,
         audience: String,
         locationVisibility: String,
-        rightsAttestationVersion: String?
+        rightsAttestationVersion: String?,
+        storyMetadata: [String: Any]?
     ) async throws {
         try Task.checkCancellation()
         guard let uid = Auth.auth().currentUser?.uid else {
@@ -539,7 +562,8 @@ final class PostUploadService {
                 channelID: channelID,
                 audience: audience,
                 locationVisibility: locationVisibility,
-                rightsAttestationVersion: rightsAttestationVersion
+                rightsAttestationVersion: rightsAttestationVersion,
+                storyMetadata: storyMetadata
             )
         } catch {
             try? await reference.delete()
@@ -616,14 +640,45 @@ final class PostUploadService {
         posterURL: String?,
         posterStoragePath: String?,
         mediaType: String,
-        at coordinate: CLLocationCoordinate2D,
+        at coordinate: CLLocationCoordinate2D?,
         radiusMeters: Int,
         caption: String?,
         channelID: String?,
         audience: String,
         locationVisibility: String,
-        rightsAttestationVersion: String?
+        rightsAttestationVersion: String?,
+        storyMetadata: [String: Any]?
     ) async throws {
+        guard let uid = Auth.auth().currentUser?.uid else {
+            throw NSError(
+                domain: "PostUploadService",
+                code: 5,
+                userInfo: [NSLocalizedDescriptionKey: "Your sign-in expired before the post was saved."]
+            )
+        }
+        if let storyMetadata {
+            try await saveStory(
+                storyID: postID,
+                ownerID: uid,
+                mediaURL: mediaURL,
+                mediaStoragePath: mediaStoragePath,
+                posterURL: posterURL,
+                posterStoragePath: posterStoragePath,
+                mediaType: mediaType,
+                caption: caption,
+                audience: audience,
+                rightsAttestationVersion: rightsAttestationVersion,
+                metadata: storyMetadata
+            )
+            return
+        }
+        guard let coordinate else {
+            throw NSError(
+                domain: "PostUploadService",
+                code: 8,
+                userInfo: [NSLocalizedDescriptionKey: "No location for this post yet."]
+            )
+        }
         var post: [String: Any] = [
             "mediaURL": mediaURL,
             "mediaType": mediaType,
@@ -639,13 +694,6 @@ final class PostUploadService {
             "createdAt": FieldValue.serverTimestamp(),
             "createdAtMillis": Int64(Date().timeIntervalSince1970 * 1000)
         ]
-        guard let uid = Auth.auth().currentUser?.uid else {
-            throw NSError(
-                domain: "PostUploadService",
-                code: 5,
-                userInfo: [NSLocalizedDescriptionKey: "Your sign-in expired before the post was saved."]
-            )
-        }
         post["userID"] = uid
         let accountSnapshot = try? await Firestore.firestore()
             .collection("users").document(uid).getDocument()
@@ -687,6 +735,89 @@ final class PostUploadService {
         ], forDocument: database.collection("users").document(uid)
             .collection("postLocations").document(postID), merge: true)
         try await batch.commit()
+    }
+
+    /// A Story is deliberately not a post with a short timer. It lives in its
+    /// own collection so a Favorites snapshot can never leak through the
+    /// permanent posts collection's public read contract. Story documents do
+    /// not store either an exact or an approximate origin.
+    private func saveStory(
+        storyID: String,
+        ownerID: String,
+        mediaURL: String,
+        mediaStoragePath: String,
+        posterURL: String?,
+        posterStoragePath: String?,
+        mediaType: String,
+        caption: String?,
+        audience: String,
+        rightsAttestationVersion: String?,
+        metadata: [String: Any]
+    ) async throws {
+        let database = Firestore.firestore()
+        var audienceUserIDs: [String] = []
+        if audience == "favorites" {
+            let snapshot = try await database.collection("users").document(ownerID)
+                .collection("phoneFavourites").limit(to: 50).getDocuments()
+            audienceUserIDs = snapshot.documents.map(\.documentID)
+            guard !audienceUserIDs.isEmpty else {
+                throw NSError(
+                    domain: "PostUploadService",
+                    code: 9,
+                    userInfo: [NSLocalizedDescriptionKey:
+                        "Add someone to Poplur Phone Favorites before sharing a Favorites Story."]
+                )
+            }
+        }
+
+        let nowMillis = Int64(Date().timeIntervalSince1970 * 1000)
+        let requestedExpiry = metadata["expiresAtMillis"] as? Int64
+            ?? (metadata["expiresAtMillis"] as? NSNumber)?.int64Value
+        let maximumExpiry = nowMillis + 24 * 60 * 60 * 1_000
+        let expiryMillis = min(maximumExpiry, max(nowMillis + 60_000, requestedExpiry ?? maximumExpiry))
+        var story: [String: Any] = [
+            "ownerID": ownerID,
+            "mediaURL": mediaURL,
+            "mediaType": mediaType,
+            "mediaStoragePath": mediaStoragePath,
+            "playbackURL": mediaURL,
+            "processingStatus": "ready",
+            "status": "published",
+            "schemaVersion": 1,
+            "createdAt": FieldValue.serverTimestamp(),
+            "createdAtMillis": nowMillis,
+            "expiresAt": Date(timeIntervalSince1970: Double(expiryMillis) / 1_000),
+            "expiresAtMillis": expiryMillis,
+            "audience": audience,
+            "audienceUserIds": audienceUserIDs,
+            "locationVisibility": "hidden",
+            "repliesAllowed": metadata["repliesAllowed"] as? Bool ?? true,
+            "highlighted": false,
+            "mentions": metadata["mentions"] as? [String] ?? []
+        ]
+        if let displayName = Auth.auth().currentUser?.displayName, !displayName.isEmpty {
+            story["username"] = displayName
+        } else if let emailName = Auth.auth().currentUser?.email?.split(separator: "@").first,
+                  !emailName.isEmpty {
+            story["username"] = String(emailName)
+        }
+        if let posterURL, !posterURL.isEmpty { story["posterURL"] = posterURL }
+        if let posterStoragePath, !posterStoragePath.isEmpty {
+            story["posterStoragePath"] = posterStoragePath
+        }
+        if let caption, !caption.isEmpty { story["caption"] = caption }
+        if let sticker = metadata["sticker"] as? String { story["sticker"] = sticker }
+        if let music = metadata["music"] as? [String: Any] { story["music"] = music }
+        if var poll = metadata["poll"] as? [String: Any],
+           let options = poll["options"] as? [String] {
+            poll["counts"] = Array(repeating: 0, count: options.count)
+            story["poll"] = poll
+        }
+        if let rightsAttestationVersion, !rightsAttestationVersion.isEmpty {
+            story["rightsAttestationVersion"] = rightsAttestationVersion
+            story["rightsAttestedAtMillis"] = nowMillis
+        }
+        try await database.collection("stories").document(storyID).setData(story)
     }
 
     private static func posterJPEG(for videoURL: URL) -> Data? {
