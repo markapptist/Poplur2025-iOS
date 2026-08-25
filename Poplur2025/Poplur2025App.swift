@@ -413,8 +413,9 @@ struct Poplur2025App: App {
                         // Phase 3: the APPROVED web home (poplur-clay-map ViewHarness
                         // home twin, ?view=home) replaces the native HomeView. Native
                         // power (camera/ML, live feed, notifications) is bridged in over
-                        // later phases through the same `poplur` channel. Flag-reversible
-                        // to HomeView via UserDefaults "poplur_web_home".
+                        // later phases through the same `poplur` channel. QA can
+                        // still reach HomeView with -DisableWebHome, while normal
+                        // launches retain one canonical route/control owner.
                         // PostLoginHomeSurface = the web home PLUS the real native
                         // ML camera mounted behind it on the camera tab (Phase 3.5).
                         PostLoginHomeSurface(onReady: markAuthenticatedHomeReady)

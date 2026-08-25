@@ -2150,15 +2150,77 @@
 
     // ── Personal: a profile photo is required before finishing ──
     var photoSet = false
+    var pendingProfilePhotoDataURI = ''
+    var PROFILE_PHOTO_MAX_EDGE = 1024
+    var PROFILE_PHOTO_MAX_BYTES = 900000
+
+    function profilePhotoByteLength(dataURI) {
+      var comma = dataURI.indexOf(',')
+      if (comma < 0) return Infinity
+      var encoded = dataURI.length - comma - 1
+      var padding = dataURI.endsWith('==') ? 2 : (dataURI.endsWith('=') ? 1 : 0)
+      return Math.floor(encoded * 3 / 4) - padding
+    }
+
+    function encodeProfilePhotoJPEG(image) {
+      var sourceWidth = image.naturalWidth || image.width || 0
+      var sourceHeight = image.naturalHeight || image.height || 0
+      if (!sourceWidth || !sourceHeight) return ''
+      var scale = Math.min(1, PROFILE_PHOTO_MAX_EDGE / Math.max(sourceWidth, sourceHeight))
+      var width = Math.max(1, Math.round(sourceWidth * scale))
+      var height = Math.max(1, Math.round(sourceHeight * scale))
+      var quality = 0.84
+      var canvas = document.createElement('canvas')
+
+      for (var attempt = 0; attempt < 14; attempt++) {
+        canvas.width = width
+        canvas.height = height
+        var context = canvas.getContext('2d')
+        if (!context) return ''
+        context.imageSmoothingEnabled = true
+        context.imageSmoothingQuality = 'high'
+        context.fillStyle = '#ffffff'
+        context.fillRect(0, 0, width, height)
+        context.drawImage(image, 0, 0, width, height)
+        var encoded = canvas.toDataURL('image/jpeg', quality)
+        if (encoded.indexOf('data:image/jpeg;base64,') === 0 &&
+            profilePhotoByteLength(encoded) <= PROFILE_PHOTO_MAX_BYTES) return encoded
+
+        if (quality > 0.58) {
+          quality = Math.max(0.58, quality - 0.08)
+        } else {
+          width = Math.max(1, Math.round(width * 0.82))
+          height = Math.max(1, Math.round(height * 0.82))
+          quality = 0.76
+        }
+      }
+      return ''
+    }
+
     document.getElementById('photoInput').addEventListener('change', function (e) {
       var file = e.target.files && e.target.files[0]
       if (!file) return
+      photoSet = false
+      pendingProfilePhotoDataURI = ''
       var reader = new FileReader()
+      reader.onerror = function () { signupError('That photo could not be read. Choose another photo.') }
       reader.onload = function () {
-        var img = new Image(); img.src = reader.result
-        var circle = document.getElementById('photoCircle')
-        circle.textContent = ''; circle.appendChild(img)
-        photoSet = true
+        var source = new Image()
+        source.onerror = function () { signupError('That photo could not be opened. Choose another photo.') }
+        source.onload = function () {
+          var encoded = ''
+          try { encoded = encodeProfilePhotoJPEG(source) } catch (error) {}
+          if (!encoded) {
+            signupError('That photo could not be prepared. Choose another photo.')
+            return
+          }
+          pendingProfilePhotoDataURI = encoded
+          var preview = new Image(); preview.src = encoded
+          var circle = document.getElementById('photoCircle')
+          circle.textContent = ''; circle.appendChild(preview)
+          photoSet = true
+        }
+        source.src = reader.result
       }
       reader.readAsDataURL(file)
     })

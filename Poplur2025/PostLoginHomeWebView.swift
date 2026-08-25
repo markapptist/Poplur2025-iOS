@@ -256,13 +256,15 @@ enum PoplurProfileSelfieStore {
 // haptics/flyTo and the pre-login screens' Firebase auth — the shell lands first,
 // functionality is wired in tab by tab.
 //
-// Reversible: PoplurWebHome.isEnabled (UserDefaults "poplur_web_home", default on)
-// flips back to the native HomeView without a rebuild if the web home regresses.
+// Reversible for QA with the explicit -DisableWebHome launch argument. Normal
+// launches always use one canonical shell so a retained development default
+// cannot switch the map route and its control owner between app installs.
 
 enum PoplurWebHome {
-    /// Feature flag: flip off to fall back to the native HomeView.
+    /// The shared web Home is the production route. Keep the legacy native
+    /// Home reachable only through an intentional QA launch configuration.
     static var isEnabled: Bool {
-        UserDefaults.standard.object(forKey: "poplur_web_home") as? Bool ?? true
+        !ProcessInfo.processInfo.arguments.contains("-DisableWebHome")
     }
 
     /// The approved home twin: the shared clay bundle opened on its home tab.
@@ -1111,6 +1113,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     let otherUID = (body["otherId"] as? String) ?? ""
                     let callerName = (body["callerName"] as? String)
                     let video = (body["video"] as? Bool) ?? false
+                    let requestID = (body["requestId"] as? String) ?? ""
                     Task { @MainActor [weak self, weak webView] in
                         let callID = await PoplurCallSignalling.shared.startCall(
                             to: otherUID,
@@ -1120,7 +1123,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                         guard let self, let webView, self.bridge.webView === webView else { return }
                         self.pushWalletPassMessage(
                             ["type": "poplurCallStarted", "callId": callID ?? "",
-                             "ok": callID != nil],
+                             "ok": callID != nil, "requestId": requestID],
                             into: webView
                         )
                     }
@@ -1858,6 +1861,9 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                 if type == "requestProfilePosts", let webView = bridge.webView {
                     deliverProfilePosts(into: webView)
                 }
+                if type == "deleteProfilePost", let webView = bridge.webView {
+                    deleteProfilePost(body, from: webView)
+                }
                 if type == "requestProfileTracks", let webView = bridge.webView {
                     deliverProfileTracks(into: webView)
                 }
@@ -2225,6 +2231,123 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     print("[PostLoginHomeWebView] profile posts query failed: \(error.localizedDescription)")
                 }
             }
+        }
+
+        /// Deletes only a post owned by the currently authenticated account.
+        /// The web bundle is an untrusted caller: both identifiers are bounded
+        /// before they reach a Firestore path, and ownership is read from the
+        /// authoritative post document rather than accepted from JavaScript.
+        private func deleteProfilePost(_ body: [String: Any], from webView: WKWebView) {
+            let requestID = Self.boundedBridgeID(body["requestId"])
+            let postID = Self.boundedBridgeID(body["postId"])
+            guard let requestID, let postID else {
+                deliverProfilePostDeleteResult(
+                    requestID: requestID ?? "",
+                    postID: postID ?? "",
+                    ok: false,
+                    error: "invalid_request",
+                    into: webView
+                )
+                return
+            }
+            guard let uid = Auth.auth().currentUser?.uid else {
+                deliverProfilePostDeleteResult(
+                    requestID: requestID,
+                    postID: postID,
+                    ok: false,
+                    error: "signed_out",
+                    into: webView
+                )
+                return
+            }
+
+            Task { [weak self, weak webView] in
+                guard let self, let webView else { return }
+                let reference = Firestore.firestore().collection("posts").document(postID)
+                do {
+                    let snapshot = try await reference.getDocument()
+                    guard snapshot.exists else {
+                        await MainActor.run {
+                            self.deliverProfilePostDeleteResult(
+                                requestID: requestID,
+                                postID: postID,
+                                ok: false,
+                                error: "not_found",
+                                into: webView
+                            )
+                        }
+                        return
+                    }
+                    guard snapshot.data()?["userID"] as? String == uid else {
+                        await MainActor.run {
+                            self.deliverProfilePostDeleteResult(
+                                requestID: requestID,
+                                postID: postID,
+                                ok: false,
+                                error: "forbidden",
+                                into: webView
+                            )
+                        }
+                        return
+                    }
+
+                    // The Firestore row is authoritative. Media storage is not
+                    // removed here because legacy posts can contain arbitrary
+                    // or shared URLs that this bridge cannot safely own.
+                    try await reference.delete()
+                    await MainActor.run {
+                        self.deliverProfilePostDeleteResult(
+                            requestID: requestID,
+                            postID: postID,
+                            ok: true,
+                            into: webView
+                        )
+                    }
+                } catch {
+                    await MainActor.run {
+                        self.deliverProfilePostDeleteResult(
+                            requestID: requestID,
+                            postID: postID,
+                            ok: false,
+                            error: "delete_failed",
+                            into: webView
+                        )
+                    }
+                }
+            }
+        }
+
+        private static func boundedBridgeID(_ value: Any?) -> String? {
+            guard let value = value as? String,
+                  !value.isEmpty,
+                  value.utf8.count <= 128,
+                  value.unicodeScalars.allSatisfy({ scalar in
+                      scalar.value >= 0x21 && scalar.value <= 0x7E
+                          && scalar != "/" && scalar != "\\"
+                  }) else { return nil }
+            return value
+        }
+
+        private func deliverProfilePostDeleteResult(
+            requestID: String,
+            postID: String,
+            ok: Bool,
+            error: String? = nil,
+            into webView: WKWebView
+        ) {
+            guard bridge.webView === webView else { return }
+            var payload: [String: Any] = [
+                "requestId": requestID,
+                "postId": postID,
+                "ok": ok
+            ]
+            if let error { payload["error"] = error }
+            guard let data = try? JSONSerialization.data(withJSONObject: payload),
+                  let json = String(data: data, encoding: .utf8) else { return }
+            webView.evaluateJavaScript(
+                "window.dispatchEvent(new CustomEvent('poplur-native-profile-post-delete-result', {detail: \(json)}));true;",
+                completionHandler: nil
+            )
         }
 
         /// The signed-in user's posted MUSIC, for the iPod's shelf.

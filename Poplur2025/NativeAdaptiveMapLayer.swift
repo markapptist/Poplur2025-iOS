@@ -11,16 +11,14 @@ import UIKit
 /// launch argument always wins so QA can compare both renderers without
 /// rebuilding the app.
 enum PoplurNativeAdaptiveMap {
-    static let defaultsKey = "poplur_native_adaptive_map"
-
     static var isEnabled: Bool {
         let arguments = ProcessInfo.processInfo.arguments
         if arguments.contains("-DisableNativeAdaptiveMap") { return false }
-        if arguments.contains("-EnableNativeAdaptiveMap") { return true }
         // The shared WebView map is the production path for iPhone and Android.
-        // Keep this native MapKit experiment opt-in for QA only; an explicit
-        // launch argument above can still enable it for comparison testing.
-        return UserDefaults.standard.object(forKey: defaultsKey) as? Bool ?? false
+        // Keep MapKit launch-argument-only so an old QA UserDefaults value
+        // cannot silently select a different renderer/control set on a later
+        // production launch. The two renderers remain mutually exclusive.
+        return arguments.contains("-EnableNativeAdaptiveMap")
     }
 }
 
@@ -681,7 +679,9 @@ private struct NativeAdaptiveMapView: UIViewRepresentable {
             publishWebState(
                 mode: isThreeDimensional ? "3d" : "2d",
                 zoom: progress(for: mapView.camera.centerCoordinateDistance),
-                place: lastPlaceName
+                place: lastPlaceName,
+                latitude: center.latitude,
+                longitude: center.longitude
             )
             guard geocode else { return }
             geocodeTask?.cancel()
@@ -702,17 +702,32 @@ private struct NativeAdaptiveMapView: UIViewRepresentable {
                 self.publishWebState(
                     mode: self.isThreeDimensional ? "3d" : "2d",
                     zoom: self.progress(for: mapView.camera.centerCoordinateDistance),
-                    place: place
+                    place: place,
+                    latitude: mapView.camera.centerCoordinate.latitude,
+                    longitude: mapView.camera.centerCoordinate.longitude
                 )
             }
         }
 
-        private func publishWebState(mode: String, zoom: Double, place: String) {
-            let payload: [String: Any] = ["mode": mode, "zoom": zoom, "place": place]
+        private func publishWebState(
+            mode: String,
+            zoom: Double,
+            place: String,
+            latitude: CLLocationDegrees,
+            longitude: CLLocationDegrees
+        ) {
+            let payload: [String: Any] = [
+                "mode": mode,
+                "zoom": zoom,
+                "place": place,
+                "latitude": latitude,
+                "longitude": longitude
+            ]
             guard let data = try? JSONSerialization.data(withJSONObject: payload),
                   let json = String(data: data, encoding: .utf8) else { return }
             PostLoginHomeWebView.liveWebView?.evaluateJavaScript(
-                "window.dispatchEvent(new CustomEvent('poplur-native-map-state',{detail:\(json)}));true;",
+                "window.__poplurLatestNativeMapState=\(json);"
+                + "window.dispatchEvent(new CustomEvent('poplur-native-map-state',{detail:window.__poplurLatestNativeMapState}));true;",
                 completionHandler: nil
             )
         }

@@ -614,11 +614,44 @@ struct PreloginWebView: UIViewRepresentable {
                     postAuthResult(ok: false, error: "Enter your email and password to create your account.")
                     return
                 }
-                Auth.auth().createUser(withEmail: email, password: password) { [weak self] _, error in
+                let profilePhotoData: Data?
+                if accountType == "personal" {
+                    do {
+                        profilePhotoData = try Self.decodeProfilePhotoDataURI(
+                            body?["profilePhotoDataURI"] as? String
+                        )
+                    } catch {
+                        print("[PreloginWebView] rejected invalid personal profile photo")
+                        postAuthResult(ok: false, error: "Choose your profile photo again, then create your account.")
+                        return
+                    }
+                } else {
+                    profilePhotoData = nil
+                }
+                Auth.auth().createUser(withEmail: email, password: password) { [weak self] result, error in
                     if let error {
                         print("[PreloginWebView] signUp failed: \(error.localizedDescription)")
                         self?.postAuthResult(ok: false, error: error.localizedDescription)
                     } else {
+                        guard result?.user != nil else {
+                            self?.postAuthResult(ok: false, error: "Your account could not be created. Please try again.")
+                            return
+                        }
+                        // Persist only after Firebase confirms account creation.
+                        // This synchronous atomic write happens before the auth
+                        // transition is requested, so the signed-in profile can
+                        // read the image on its first render. The existing profile
+                        // backfill owns the authenticated Storage/Firestore upload.
+                        if let profilePhotoData {
+                            do {
+                                try Self.persistProfilePhoto(profilePhotoData)
+                                PoplurProfileBackfill.run()
+                            } catch {
+                                PoplurDiagLog.append(
+                                    "[PreloginWebView] profile photo persistence FAILED: \(error.localizedDescription)"
+                                )
+                            }
+                        }
                         print("[PreloginWebView] signUp succeeded (\(accountType)) — auth-state listener will transition")
                         Task { @MainActor in self?.auth.didSignUp = true }
                         self?.postAuthResult(ok: true, error: nil)
@@ -751,6 +784,54 @@ struct PreloginWebView: UIViewRepresentable {
                     "window.__poplurStationsResult && window.__poplurStationsResult('\(safeId)', \(json))"
                 )
             }
+        }
+
+        private static let maxProfilePhotoBytes = 900_000
+        private static let maxProfilePhotoDataURICharacters = 1_250_000
+        private static let maxProfilePhotoPixelEdge: CGFloat = 1_024
+
+        /// Accept only the bounded JPEG produced by the bundled sign-up page.
+        /// Checking the envelope before Base64 decoding prevents an untrusted
+        /// script message from allocating an arbitrary amount of native memory.
+        private static func decodeProfilePhotoDataURI(_ dataURI: String?) throws -> Data {
+            let prefix = "data:image/jpeg;base64,"
+            guard let dataURI,
+                  !dataURI.isEmpty,
+                  dataURI.count <= maxProfilePhotoDataURICharacters,
+                  dataURI.hasPrefix(prefix),
+                  let data = Data(base64Encoded: String(dataURI.dropFirst(prefix.count))),
+                  !data.isEmpty,
+                  data.count <= maxProfilePhotoBytes,
+                  data.starts(with: [0xFF, 0xD8, 0xFF]),
+                  let image = UIImage(data: data)
+            else {
+                throw ProfilePhotoPayloadError.invalid
+            }
+
+            let pixelWidth = image.size.width * image.scale
+            let pixelHeight = image.size.height * image.scale
+            guard pixelWidth > 0,
+                  pixelHeight > 0,
+                  pixelWidth <= maxProfilePhotoPixelEdge,
+                  pixelHeight <= maxProfilePhotoPixelEdge else {
+                throw ProfilePhotoPayloadError.invalid
+            }
+            return data
+        }
+
+        private static func persistProfilePhoto(_ data: Data) throws {
+            let documents = FileManager.default.urls(
+                for: .documentDirectory,
+                in: .userDomainMask
+            )[0]
+            try data.write(
+                to: documents.appendingPathComponent("profile.jpg"),
+                options: .atomic
+            )
+        }
+
+        private enum ProfilePhotoPayloadError: Error {
+            case invalid
         }
 
         /// Native → web auth callback. The web defines `window.poplurAuthResult`

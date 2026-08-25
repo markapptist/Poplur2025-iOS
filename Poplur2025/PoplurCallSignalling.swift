@@ -68,11 +68,14 @@ final class PoplurCallSignalling {
     func publishDescription(_ callID: String, type: String, sdp: String) async {
         guard !callID.isEmpty else { return }
         let key = type == "offer" ? "offer" : "answer"
-        try? await db.collection("calls").document(callID).setData([
-            key: ["type": type, "sdp": sdp],
-            // Answering is what turns ringing into a live call.
-            "status": key == "answer" ? "connected" : "ringing",
-        ], merge: true)
+        var payload: [String: Any] = [key: ["type": type, "sdp": sdp]]
+        // startCall already marks the rendezvous as ringing. A fast callee can
+        // accept before the caller finishes publishing its offer; writing
+        // `ringing` here would then resurrect the incoming query mid-call.
+        // Only an answer advances the status.
+        if key == "answer" { payload["status"] = "connected" }
+        try? await db.collection("calls").document(callID)
+            .setData(payload, merge: true)
     }
 
     /// One doc per candidate — they arrive continuously and independently.
@@ -103,14 +106,14 @@ final class PoplurCallSignalling {
     func declineCall(_ callID: String) async {
         guard !callID.isEmpty else { return }
         try? await db.collection("calls").document(callID)
-            .setData(["status": "declined"], merge: true)
+            .updateData(["status": "declined"])
     }
 
     func acceptCall(_ callID: String) async {
         guard !callID.isEmpty else { return }
         observe(callID)
         try? await db.collection("calls").document(callID)
-            .setData(["status": "connected"], merge: true)
+            .updateData(["status": "connected"])
     }
 
     // MARK: - Listening
@@ -183,8 +186,19 @@ final class PoplurCallSignalling {
             .whereField("status", isEqualTo: "ringing")
             .addSnapshotListener { [weak self] snapshot, _ in
                 guard let self else { return }
-                for change in snapshot?.documentChanges ?? [] where change.type == .added {
+                for change in snapshot?.documentChanges ?? [] {
+                    if change.type == .removed {
+                        self.onEvent?([
+                            "type": "poplurCallIncomingUnavailable",
+                            "callId": change.document.documentID,
+                        ])
+                        continue
+                    }
+                    guard change.type == .added else { continue }
                     let data = change.document.data()
+                    // The legacy Agora caller shares this collection/query. The
+                    // WebView peer connection must answer only WebRTC rendezvous.
+                    guard data["provider"] as? String == "webrtc" else { continue }
                     self.onEvent?([
                         "type": "poplurCallIncoming",
                         "callId": change.document.documentID,
