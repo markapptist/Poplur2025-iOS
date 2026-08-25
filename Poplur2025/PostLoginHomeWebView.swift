@@ -2510,6 +2510,30 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                             if let radius = data["radius"] as? NSNumber {
                                 row["radiusMeters"] = radius
                             }
+                            if let views = data["viewCount"] as? NSNumber {
+                                row["viewCount"] = max(0, views.intValue)
+                            }
+                            if let likes = data["likeCount"] as? NSNumber {
+                                row["likeCount"] = max(0, likes.intValue)
+                            }
+                            if let comments = data["commentCount"] as? NSNumber {
+                                row["commentCount"] = max(0, comments.intValue)
+                            }
+                            if let shares = data["shareCount"] as? NSNumber {
+                                row["shareCount"] = max(0, shares.intValue)
+                            }
+                            let visibility = data["locationVisibility"] as? String
+                            if visibility == "hidden" {
+                                row["locationVisibility"] = "hidden"
+                            } else if visibility == "approximate",
+                                      let latitude = data["latitude"] as? NSNumber,
+                                      let longitude = data["longitude"] as? NSNumber,
+                                      abs(latitude.doubleValue) <= 90,
+                                      abs(longitude.doubleValue) <= 180 {
+                                row["locationVisibility"] = "approximate"
+                                row["originLatitude"] = latitude.doubleValue
+                                row["originLongitude"] = longitude.doubleValue
+                            }
                             return row
                         }
 
