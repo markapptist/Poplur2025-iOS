@@ -22,6 +22,7 @@ final class PoplurDirectMessages {
     /// this a listener would survive every thread switch and the page would
     /// keep receiving messages for conversations it had already closed.
     private var threadListener: ListenerRegistration?
+    private var threadStateListener: ListenerRegistration?
     private var listListener: ListenerRegistration?
     private var openThreadID: String?
 
@@ -54,13 +55,20 @@ final class PoplurDirectMessages {
                 let threads = (snapshot?.documents ?? []).map { doc -> [String: Any] in
                     let data = doc.data()
                     let others = (data["participants"] as? [String] ?? []).filter { $0 != uid }
+                    let updatedAt = (data["updatedAt"] as? Timestamp)?.dateValue()
+                        .timeIntervalSince1970 ?? 0
+                    let readAt = ((data["readAtBy"] as? [String: Timestamp])?[uid])?
+                        .dateValue().timeIntervalSince1970 ?? 0
+                    let unread = (data["lastSenderId"] as? String) != uid && updatedAt > readAt
+                        ? 1 : 0
                     return [
                         "id": doc.documentID,
                         "otherId": others.first ?? "",
                         "title": self.displayName(for: others.first, data: data),
                         "initials": Self.initials(self.displayName(for: others.first, data: data)),
                         "preview": data["lastMessage"] as? String ?? "No messages yet",
-                        "unread": 0,
+                        "unread": unread,
+                        "updatedAtMillis": updatedAt * 1000,
                     ]
                 }
                 onChange(threads)
@@ -68,15 +76,20 @@ final class PoplurDirectMessages {
     }
 
     /// Live messages for one thread, oldest first (the order a chat reads in).
-    func observeThread(_ threadID: String, onChange: @escaping ([[String: Any]]) -> Void) {
+    func observeThread(
+        _ threadID: String,
+        onChange: @escaping ([[String: Any]]) -> Void,
+        onState: @escaping ([String: Any]) -> Void
+    ) {
         guard let uid else { onChange([]); return }
         threadListener?.remove()
+        threadStateListener?.remove()
         openThreadID = threadID
         threadListener = db.collection("dmThreads").document(threadID)
             .collection("messages")
             .order(by: "createdAt")
             .limit(to: 200)
-            .addSnapshotListener { snapshot, error in
+            .addSnapshotListener(includeMetadataChanges: true) { snapshot, error in
                 if let error {
                     print("[PoplurDM] thread failed: \(error.localizedDescription)")
                     onChange([])
@@ -84,20 +97,67 @@ final class PoplurDirectMessages {
                 }
                 let messages = (snapshot?.documents ?? []).map { doc -> [String: Any] in
                     let data = doc.data()
+                    let createdAtMillis = (data["createdAt"] as? Timestamp).map {
+                        $0.dateValue().timeIntervalSince1970 * 1000
+                    } ?? 0
                     return [
                         "id": doc.documentID,
                         // The page only needs to know which side to draw it on.
                         "from": (data["senderId"] as? String) == uid ? "me" : "them",
                         "text": data["text"] as? String ?? "",
+                        "createdAtMillis": createdAtMillis,
+                        "pending": doc.metadata.hasPendingWrites,
                     ]
                 }
                 onChange(messages)
             }
+
+        let threadRef = db.collection("dmThreads").document(threadID)
+        threadStateListener = threadRef.addSnapshotListener { [weak self] snapshot, error in
+            guard let self else { return }
+            if let error {
+                print("[PoplurDM] thread state failed: \(error.localizedDescription)")
+                return
+            }
+            guard let data = snapshot?.data(),
+                  let participants = data["participants"] as? [String],
+                  participants.contains(uid) else { return }
+            let otherUID = participants.first { $0 != uid }
+            let typingAt = otherUID.flatMap {
+                (data["typingBy"] as? [String: Timestamp])?[$0]
+            }.map { $0.dateValue().timeIntervalSince1970 * 1000 }
+            let otherReadAt = otherUID.flatMap {
+                (data["readAtBy"] as? [String: Timestamp])?[$0]
+            }.map { $0.dateValue().timeIntervalSince1970 * 1000 }
+            var state: [String: Any] = ["threadId": threadID]
+            if let typingAt { state["typingAtMillis"] = typingAt }
+            if let otherReadAt { state["otherReadAtMillis"] = otherReadAt }
+            onState(state)
+
+            let updatedAt = (data["updatedAt"] as? Timestamp)?.dateValue()
+                .timeIntervalSince1970 ?? 0
+            let ownReadAt = ((data["readAtBy"] as? [String: Timestamp])?[uid])?
+                .dateValue().timeIntervalSince1970 ?? 0
+            if (data["lastSenderId"] as? String) != uid && updatedAt > ownReadAt {
+                Task { @MainActor [weak self] in await self?.markRead(threadID) }
+            }
+        }
     }
 
     func closeThread() {
+        if let openThreadID, let uid {
+            db.collection("dmThreads").document(openThreadID).updateData([
+                FieldPath(["typingBy", uid]): FieldValue.delete(),
+            ]) { error in
+                if let error {
+                    print("[PoplurDM] typing cleanup failed: \(error.localizedDescription)")
+                }
+            }
+        }
         threadListener?.remove()
         threadListener = nil
+        threadStateListener?.remove()
+        threadStateListener = nil
         openThreadID = nil
     }
 
@@ -116,30 +176,69 @@ final class PoplurDirectMessages {
     /// a thread that does not exist yet is denied, because `inThread()` reads
     /// the parent.
     @discardableResult
-    func send(to otherUID: String, text: String) async -> Bool {
-        guard let uid, !otherUID.isEmpty else { return false }
+    func send(to otherUID: String, text: String, clientMessageID: String) async -> Bool {
+        guard let uid, !otherUID.isEmpty, otherUID != uid else { return false }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, trimmed.count <= 2000 else { return false }
+        guard !trimmed.isEmpty, trimmed.count <= 2000,
+              Self.validMessageID(clientMessageID) else { return false }
 
         let id = Self.threadID(uid, otherUID)
         let threadRef = db.collection("dmThreads").document(id)
+        let messageRef = threadRef.collection("messages").document(clientMessageID)
         do {
-            try await threadRef.setData([
+            if try await messageRef.getDocument().exists { return true }
+            let batch = db.batch()
+            batch.setData([
                 "participants": [uid, otherUID].sorted(),
                 "lastMessage": trimmed,
                 "lastSenderId": uid,
                 "updatedAt": FieldValue.serverTimestamp(),
-            ], merge: true)
-            try await threadRef.collection("messages").addDocument(data: [
+            ], forDocument: threadRef, merge: true)
+            batch.setData([
                 "senderId": uid,
                 "text": trimmed,
+                "clientMessageId": clientMessageID,
                 "createdAt": FieldValue.serverTimestamp(),
-            ])
+            ], forDocument: messageRef)
+            try await batch.commit()
             return true
         } catch {
             print("[PoplurDM] send failed: \(error.localizedDescription)")
             return false
         }
+    }
+
+    func setTyping(_ threadID: String, typing: Bool) async {
+        guard let uid, threadID == openThreadID else { return }
+        let value: Any = typing ? FieldValue.serverTimestamp() : FieldValue.delete()
+        do {
+            try await db.collection("dmThreads").document(threadID)
+                .updateData([FieldPath(["typingBy", uid]): value])
+        } catch {
+            print("[PoplurDM] typing update failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func markRead(_ threadID: String) async {
+        guard let uid, threadID == openThreadID else { return }
+        do {
+            try await db.collection("dmThreads").document(threadID)
+                .updateData([FieldPath(["readAtBy", uid]): FieldValue.serverTimestamp()])
+        } catch {
+            print("[PoplurDM] read receipt failed: \(error.localizedDescription)")
+        }
+    }
+
+    private static func validMessageID(_ value: String) -> Bool {
+        value.hasPrefix("msg-")
+            && value.utf8.count >= 20
+            && value.utf8.count <= 100
+            && value.unicodeScalars.allSatisfy { scalar in
+                (scalar.value >= 48 && scalar.value <= 57)
+                    || (scalar.value >= 65 && scalar.value <= 90)
+                    || (scalar.value >= 97 && scalar.value <= 122)
+                    || scalar == "-"
+            }
     }
 
     // MARK: - Names

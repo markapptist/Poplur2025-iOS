@@ -1236,34 +1236,58 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                 if type == "openDMThread", let webView = bridge.webView {
                     let threadID = (body["threadId"] as? String) ?? ""
                     guard !threadID.isEmpty, threadID.count <= 200 else { return }
-                    PoplurDirectMessages.shared.observeThread(threadID) { [weak self, weak webView] messages in
-                        guard let self, let webView, self.bridge.webView === webView else { return }
-                        self.pushWalletPassMessage(
-                            ["type": "poplurDMMessages", "threadId": threadID, "messages": messages],
-                            into: webView
-                        )
-                    }
+                    PoplurDirectMessages.shared.observeThread(
+                        threadID,
+                        onChange: { [weak self, weak webView] messages in
+                            guard let self, let webView, self.bridge.webView === webView else { return }
+                            self.pushWalletPassMessage(
+                                ["type": "poplurDMMessages", "threadId": threadID, "messages": messages],
+                                into: webView
+                            )
+                        },
+                        onState: { [weak self, weak webView] state in
+                            guard let self, let webView, self.bridge.webView === webView else { return }
+                            var payload = state
+                            payload["type"] = "poplurDMThreadState"
+                            self.pushWalletPassMessage(payload, into: webView)
+                        }
+                    )
                     return
                 }
                 if type == "closeDMThread" {
                     PoplurDirectMessages.shared.closeThread()
                     return
                 }
+                if type == "setDMTyping" {
+                    let threadID = (body["threadId"] as? String) ?? ""
+                    let typing = (body["typing"] as? Bool) ?? false
+                    guard !threadID.isEmpty, threadID.count <= 200 else { return }
+                    Task { @MainActor in
+                        await PoplurDirectMessages.shared.setTyping(threadID, typing: typing)
+                    }
+                    return
+                }
                 if type == "sendDM", let webView = bridge.webView {
                     let otherUID = (body["otherId"] as? String) ?? ""
                     let text = (body["text"] as? String) ?? ""
+                    let clientMessageID = (body["clientMessageId"] as? String) ?? ""
                     Task { @MainActor [weak self, weak webView] in
-                        let ok = await PoplurDirectMessages.shared.send(to: otherUID, text: text)
+                        let ok = await PoplurDirectMessages.shared.send(
+                            to: otherUID,
+                            text: text,
+                            clientMessageID: clientMessageID
+                        )
                         guard let self, let webView, self.bridge.webView === webView else { return }
-                        // The live listener delivers the message itself; this
-                        // only reports a FAILURE, so the composer can put the
-                        // text back rather than swallowing it.
-                        if !ok {
-                            self.pushWalletPassMessage(
-                                ["type": "poplurDMSendFailed", "text": text],
-                                into: webView
-                            )
-                        }
+                        self.pushWalletPassMessage(
+                            ok
+                                ? ["type": "poplurDMSent", "clientMessageId": clientMessageID]
+                                : [
+                                    "type": "poplurDMSendFailed",
+                                    "clientMessageId": clientMessageID,
+                                    "text": text,
+                                ],
+                            into: webView
+                        )
                     }
                     return
                 }
