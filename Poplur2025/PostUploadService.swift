@@ -52,6 +52,10 @@ final class PostUploadService {
         let caption: String?
         let channelID: String?
         let requestID: String?
+        let postID: String
+        let audience: String
+        let locationVisibility: String
+        let rightsAttestationVersion: String?
 
         func isDuplicate(of other: UploadRequest) -> Bool {
             if let requestID, let otherRequestID = other.requestID,
@@ -72,6 +76,13 @@ final class PostUploadService {
     /// Native capture flows do not set this, so their existing notifications
     /// remain unchanged.
     var nextRequestID: String?
+    /// Stable across retries. It becomes both the Firestore document ID and
+    /// Storage basename, so retrying can replace one attempt but never create
+    /// a duplicate post or an unreachable object.
+    var nextPostID: String?
+    var nextAudience: String?
+    var nextLocationVisibility: String?
+    var nextRightsAttestationVersion: String?
 
     private var pendingCoordinate: CLLocationCoordinate2D?
     private var started = false
@@ -111,6 +122,7 @@ final class PostUploadService {
                 let caption = self.takeCaption()
                 let channelID = self.takeChannelID()
                 let requestID = self.takeRequestID()
+                let publishContract = self.takePublishContract(requestID: requestID)
                 guard let coordinate = self.resolveCoordinate() else {
                     Self.report(success: false, message: "No location for this post yet.", requestID: requestID)
                     return
@@ -121,7 +133,11 @@ final class PostUploadService {
                     radiusMeters: radius,
                     caption: caption,
                     channelID: channelID,
-                    requestID: requestID
+                    requestID: requestID,
+                    postID: publishContract.postID,
+                    audience: publishContract.audience,
+                    locationVisibility: publishContract.locationVisibility,
+                    rightsAttestationVersion: publishContract.rightsAttestationVersion
                 ))
             }
         })
@@ -133,6 +149,7 @@ final class PostUploadService {
                 let caption = self.takeCaption()
                 let channelID = self.takeChannelID()
                 let requestID = self.takeRequestID()
+                let publishContract = self.takePublishContract(requestID: requestID)
                 guard let coordinate = self.resolveCoordinate() else {
                     PoplurTemporaryFileOwnership.deleteIfOwned(url)
                     Self.report(success: false, message: "No location for this post yet.", requestID: requestID)
@@ -144,7 +161,11 @@ final class PostUploadService {
                     radiusMeters: radius,
                     caption: caption,
                     channelID: channelID,
-                    requestID: requestID
+                    requestID: requestID,
+                    postID: publishContract.postID,
+                    audience: publishContract.audience,
+                    locationVisibility: publishContract.locationVisibility,
+                    rightsAttestationVersion: publishContract.rightsAttestationVersion
                 ))
             }
         })
@@ -159,6 +180,7 @@ final class PostUploadService {
                 let caption = self.takeCaption()
                 let channelID = self.takeChannelID()
                 let requestID = self.takeRequestID()
+                let publishContract = self.takePublishContract(requestID: requestID)
                 guard let latitude = info["latitude"] as? Double,
                       let longitude = info["longitude"] as? Double else {
                     if let videoURL = info["videoURL"] as? URL {
@@ -175,26 +197,22 @@ final class PostUploadService {
                 if let image = info["image"] as? UIImage {
                     self.enqueue(UploadRequest(
                         payload: .image(image), coordinate: coordinate, radiusMeters: radius,
-                        caption: caption, channelID: channelID, requestID: requestID
+                        caption: caption, channelID: channelID, requestID: requestID,
+                        postID: publishContract.postID, audience: publishContract.audience,
+                        locationVisibility: publishContract.locationVisibility,
+                        rightsAttestationVersion: publishContract.rightsAttestationVersion
                     ))
                 } else if let videoURL = info["videoURL"] as? URL {
                     self.enqueue(UploadRequest(
                         payload: .video(videoURL), coordinate: coordinate, radiusMeters: radius,
-                        caption: caption, channelID: channelID, requestID: requestID
+                        caption: caption, channelID: channelID, requestID: requestID,
+                        postID: publishContract.postID, audience: publishContract.audience,
+                        locationVisibility: publishContract.locationVisibility,
+                        rightsAttestationVersion: publishContract.rightsAttestationVersion
                     ))
                 } else {
                     Self.report(success: false, message: "That post had no media to upload.", requestID: requestID)
                 }
-            }
-        })
-
-        observerTokens.append(center.addObserver(
-            forName: UIApplication.didEnterBackgroundNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.cancelUploads(reason: "Upload paused because Poplur moved to the background.")
             }
         })
 
@@ -273,7 +291,11 @@ final class PostUploadService {
                     radiusMeters: request.radiusMeters,
                     caption: request.caption,
                     channelID: request.channelID,
-                    requestID: request.requestID
+                    requestID: request.requestID,
+                    postID: request.postID,
+                    audience: request.audience,
+                    locationVisibility: request.locationVisibility,
+                    rightsAttestationVersion: request.rightsAttestationVersion
                 )
             case .video(let url):
                 try await upload(
@@ -282,7 +304,11 @@ final class PostUploadService {
                     radiusMeters: request.radiusMeters,
                     caption: request.caption,
                     channelID: request.channelID,
-                    requestID: request.requestID
+                    requestID: request.requestID,
+                    postID: request.postID,
+                    audience: request.audience,
+                    locationVisibility: request.locationVisibility,
+                    rightsAttestationVersion: request.rightsAttestationVersion
                 )
             }
             try Task.checkCancellation()
@@ -336,6 +362,42 @@ final class PostUploadService {
         return nextRequestID
     }
 
+    private func takePublishContract(requestID: String?) -> (
+        postID: String,
+        audience: String,
+        locationVisibility: String,
+        rightsAttestationVersion: String?
+    ) {
+        defer {
+            nextPostID = nil
+            nextAudience = nil
+            nextLocationVisibility = nil
+            nextRightsAttestationVersion = nil
+        }
+        let candidate = nextPostID ?? requestID
+        let postID = Self.boundedPostID(candidate) ?? "post-\(UUID().uuidString)"
+        return (
+            postID,
+            "public",
+            nextLocationVisibility == "hidden" ? "hidden" : "approximate",
+            nextRightsAttestationVersion
+        )
+    }
+
+    private static func boundedPostID(_ value: String?) -> String? {
+        guard let value,
+              value.hasPrefix("post-"),
+              value.utf8.count >= 21,
+              value.utf8.count <= 101,
+              value.unicodeScalars.allSatisfy({ scalar in
+                  (scalar.value >= 48 && scalar.value <= 57)
+                      || (scalar.value >= 65 && scalar.value <= 90)
+                      || (scalar.value >= 97 && scalar.value <= 122)
+                      || scalar == "-"
+              }) else { return nil }
+        return value
+    }
+
     /// The coordinate the flow set, else the device's last known fix. A post
     /// with no location at all is refused rather than filed at (0, 0).
     private func resolveCoordinate() -> CLLocationCoordinate2D? {
@@ -351,7 +413,11 @@ final class PostUploadService {
         radiusMeters: Int,
         caption: String?,
         channelID: String?,
-        requestID: String?
+        requestID: String?,
+        postID: String,
+        audience: String,
+        locationVisibility: String,
+        rightsAttestationVersion: String?
     ) async throws {
         guard let data = image.poplur4KJPEGData() else {
             throw NSError(
@@ -369,7 +435,8 @@ final class PostUploadService {
                 userInfo: [NSLocalizedDescriptionKey: "Please sign in again before uploading."]
             )
         }
-        let reference = Storage.storage().reference().child("posts/\(uid)/\(UUID().uuidString).jpg")
+        let storagePath = "posts/\(uid)/\(postID).jpg"
+        let reference = Storage.storage().reference().child(storagePath)
         try await uploadData(
             data,
             to: reference,
@@ -381,10 +448,26 @@ final class PostUploadService {
         Self.reportProgress(0.88, phase: "FINALIZING", requestID: requestID)
         let mediaURL = try await reference.downloadURL().absoluteString
         Self.reportProgress(0.94, phase: "SAVING POST", requestID: requestID)
-        try await savePost(
-            mediaURL: mediaURL, posterURL: nil, mediaType: "photo",
-            at: coordinate, radiusMeters: radiusMeters, caption: caption, channelID: channelID
-        )
+        do {
+            try await savePost(
+                postID: postID,
+                mediaURL: mediaURL,
+                mediaStoragePath: storagePath,
+                posterURL: nil,
+                posterStoragePath: nil,
+                mediaType: "photo",
+                at: coordinate,
+                radiusMeters: radiusMeters,
+                caption: caption,
+                channelID: channelID,
+                audience: audience,
+                locationVisibility: locationVisibility,
+                rightsAttestationVersion: rightsAttestationVersion
+            )
+        } catch {
+            try? await reference.delete()
+            throw error
+        }
     }
 
     private func upload(
@@ -393,7 +476,11 @@ final class PostUploadService {
         radiusMeters: Int,
         caption: String?,
         channelID: String?,
-        requestID: String?
+        requestID: String?,
+        postID: String,
+        audience: String,
+        locationVisibility: String,
+        rightsAttestationVersion: String?
     ) async throws {
         try Task.checkCancellation()
         guard let uid = Auth.auth().currentUser?.uid else {
@@ -403,7 +490,8 @@ final class PostUploadService {
                 userInfo: [NSLocalizedDescriptionKey: "Please sign in again before uploading."]
             )
         }
-        let reference = Storage.storage().reference().child("posts/\(uid)/\(UUID().uuidString).mp4")
+        let storagePath = "posts/\(uid)/\(postID).mp4"
+        let reference = Storage.storage().reference().child(storagePath)
         try await uploadFile(
             videoURL,
             to: reference,
@@ -418,22 +506,46 @@ final class PostUploadService {
         // A poster frame keeps the feed from showing a black tile before the
         // clip decodes, matching what the picker upload stores.
         var posterURL: String?
+        var posterStoragePath: String?
+        var posterReference: StorageReference?
         if let poster = Self.posterJPEG(for: videoURL) {
             Self.reportProgress(0.88, phase: "MAKING PREVIEW", requestID: requestID)
-            let posterRef = Storage.storage().reference().child("posts/\(uid)/\(UUID().uuidString)-poster.jpg")
+            let posterPath = "posts/\(uid)/\(postID)-poster.jpg"
+            let posterRef = Storage.storage().reference().child(posterPath)
             _ = try? await posterRef.putDataAsync(
                 poster,
                 metadata: Self.storageMetadata(contentType: "image/jpeg")
             )
             posterURL = try? await posterRef.downloadURL().absoluteString
+            if posterURL != nil {
+                posterStoragePath = posterPath
+                posterReference = posterRef
+            }
         }
 
         try Task.checkCancellation()
         Self.reportProgress(0.94, phase: "SAVING POST", requestID: requestID)
-        try await savePost(
-            mediaURL: mediaURL, posterURL: posterURL, mediaType: "video",
-            at: coordinate, radiusMeters: radiusMeters, caption: caption, channelID: channelID
-        )
+        do {
+            try await savePost(
+                postID: postID,
+                mediaURL: mediaURL,
+                mediaStoragePath: storagePath,
+                posterURL: posterURL,
+                posterStoragePath: posterStoragePath,
+                mediaType: "video",
+                at: coordinate,
+                radiusMeters: radiusMeters,
+                caption: caption,
+                channelID: channelID,
+                audience: audience,
+                locationVisibility: locationVisibility,
+                rightsAttestationVersion: rightsAttestationVersion
+            )
+        } catch {
+            try? await reference.delete()
+            if let posterReference { try? await posterReference.delete() }
+            throw error
+        }
     }
 
     /// Firebase exposes byte progress only on the callback upload tasks, not on
@@ -498,21 +610,32 @@ final class PostUploadService {
     /// Same document shape `MediaPickerView.savePostToFirestore` writes, so both
     /// paths produce identical posts.
     private func savePost(
+        postID: String,
         mediaURL: String,
+        mediaStoragePath: String,
         posterURL: String?,
+        posterStoragePath: String?,
         mediaType: String,
         at coordinate: CLLocationCoordinate2D,
         radiusMeters: Int,
         caption: String?,
-        channelID: String?
+        channelID: String?,
+        audience: String,
+        locationVisibility: String,
+        rightsAttestationVersion: String?
     ) async throws {
         var post: [String: Any] = [
-            "latitude": coordinate.latitude,
-            "longitude": coordinate.longitude,
             "mediaURL": mediaURL,
             "mediaType": mediaType,
             "radius": radiusMeters,
             "viewCount": 0,
+            "audience": audience,
+            "locationVisibility": locationVisibility,
+            "mediaStoragePath": mediaStoragePath,
+            "playbackURL": mediaURL,
+            "processingStatus": "ready",
+            "status": "published",
+            "schemaVersion": 2,
             "createdAt": FieldValue.serverTimestamp(),
             "createdAtMillis": Int64(Date().timeIntervalSince1970 * 1000)
         ]
@@ -524,11 +647,46 @@ final class PostUploadService {
             )
         }
         post["userID"] = uid
+        let accountSnapshot = try? await Firestore.firestore()
+            .collection("users").document(uid).getDocument()
+        let account = accountSnapshot?.data()
+        let accountHidesOrigin = account?["privateAccount"] as? Bool == true
+            || account?["ghostMode"] as? Bool == true
+        let effectiveVisibility = accountHidesOrigin ? "hidden" : locationVisibility
+        post["locationVisibility"] = effectiveVisibility
+        if effectiveVisibility == "approximate" {
+            let latitudeCell = Int((coordinate.latitude * 1_000).rounded())
+            let longitudeCell = Int((coordinate.longitude * 1_000).rounded())
+            post["latitude"] = Double(latitudeCell) / 1_000
+            post["longitude"] = Double(longitudeCell) / 1_000
+            post["latitudeCell"] = latitudeCell
+            post["longitudeCell"] = longitudeCell
+        }
+        if let displayName = Auth.auth().currentUser?.displayName, !displayName.isEmpty {
+            post["username"] = displayName
+        }
         if let posterURL, !posterURL.isEmpty { post["posterURL"] = posterURL }
+        if let posterStoragePath, !posterStoragePath.isEmpty {
+            post["posterStoragePath"] = posterStoragePath
+        }
         if let caption, !caption.isEmpty { post["caption"] = caption }
         if let channelID, !channelID.isEmpty { post["channelId"] = channelID }
+        if let rightsAttestationVersion, !rightsAttestationVersion.isEmpty {
+            post["rightsAttestationVersion"] = rightsAttestationVersion
+            post["rightsAttestedAtMillis"] = Int64(Date().timeIntervalSince1970 * 1000)
+        }
 
-        _ = try await Firestore.firestore().collection("posts").addDocument(data: post)
+        let database = Firestore.firestore()
+        let batch = database.batch()
+        batch.setData(post, forDocument: database.collection("posts").document(postID))
+        batch.setData([
+            "latitude": coordinate.latitude,
+            "longitude": coordinate.longitude,
+            "createdAt": FieldValue.serverTimestamp(),
+            "source": "post-upload"
+        ], forDocument: database.collection("users").document(uid)
+            .collection("postLocations").document(postID), merge: true)
+        try await batch.commit()
     }
 
     private static func posterJPEG(for videoURL: URL) -> Data? {

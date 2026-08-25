@@ -130,6 +130,32 @@ exports.notifyOnEngagement = (0, firestore_1.onDocumentCreated)({
     // Never notify someone about their own action on their own post.
     if (engagement.actorUid === ownerUid)
         return;
+    // The inbox is the durable source of truth. Write every engagement first,
+    // including views (which intentionally do not produce a push), so opening
+    // Notifications after a cold launch or on a second device reconstructs the
+    // same history instead of depending on which banners this device saw.
+    const notificationId = `engagement:${postId}:${engagementId}`;
+    const actorHandle = engagement.actorHandle?.trim() || "Someone";
+    const inboxDetail = engagement.kind === "comment"
+        ? (engagement.body?.trim() || "commented on your post")
+        : engagement.kind === "view"
+            ? "viewed your post"
+            : "liked your post";
+    await db.collection("users").doc(ownerUid)
+        .collection("notifications").doc(notificationId)
+        .set({
+        id: notificationId,
+        kind: engagement.kind ?? "like",
+        actorUid: engagement.actorUid ?? "",
+        actorHandle,
+        title: actorHandle,
+        detail: inboxDetail,
+        createdAt: firestore_2.FieldValue.serverTimestamp(),
+        isUnread: true,
+        isDismissed: false,
+        postId,
+        engagementId,
+    }, { merge: true });
     const notification = await resolveNotification(postId, engagement);
     if (!notification)
         return; // a view, or a like inside the coalesce window
@@ -148,6 +174,7 @@ exports.notifyOnEngagement = (0, firestore_1.onDocumentCreated)({
             // and to build the matching in-app row. All values must be strings.
             postId,
             engagementId,
+            notificationId,
             kind: engagement.kind ?? "",
             actorHandle: engagement.actorHandle ?? "",
         },

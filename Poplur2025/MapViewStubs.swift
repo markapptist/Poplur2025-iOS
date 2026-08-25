@@ -308,12 +308,12 @@ struct MapView: View {
         // Update AI message based on current flow
         if let flow = flowManager.currentFlow {
             if flow.isCameraFirst {
-                aiMessage = "📍 \(String(format: "%.4f", centerCoord.latitude))°, \(String(format: "%.4f", centerCoord.longitude))° — Post your capture here?"
+                aiMessage = "📍 Selected map point — Post your capture here?"
             } else {
-                aiMessage = "📍 \(String(format: "%.4f", centerCoord.latitude))°, \(String(format: "%.4f", centerCoord.longitude))° — Want to post here?"
+                aiMessage = "📍 Selected map point — Want to post here?"
             }
         } else {
-            aiMessage = "📍 \(String(format: "%.4f", centerCoord.latitude))°, \(String(format: "%.4f", centerCoord.longitude))° — Want to post here?"
+            aiMessage = "📍 Selected map point — Want to post here?"
         }
     }
     
@@ -703,7 +703,7 @@ struct MapView: View {
             
             // Show marker at this location
             clickedCoordinate = coordinate
-            aiMessage = "📍 \(username ?? "User")'s post at \(String(format: "%.4f", latitude))°, \(String(format: "%.4f", longitude))°"
+            aiMessage = "📍 \(username ?? "User")'s post · approximate map area"
         }
         .onReceive(NotificationCenter.default.publisher(for: .CenterMapOnUser)) { _ in
             stopDominanceTour()
@@ -946,7 +946,7 @@ fileprivate extension MapViewStub {
 
 enum MockAIRecommender {
     static func recommendation(for coord: CLLocationCoordinate2D) -> String {
-        "Explore nearby places at (\(String(format: "%.3f", coord.latitude)), \(String(format: "%.3f", coord.longitude)))"
+        "Explore nearby places in this map area"
     }
 }
 
@@ -955,4 +955,3 @@ enum MockAIRecommender {
     MapViewStub()
 }
 #endif
-

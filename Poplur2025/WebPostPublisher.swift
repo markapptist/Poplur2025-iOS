@@ -41,6 +41,23 @@ enum WebPostPublisher {
             )
         }
 
+        guard body["rightsAttested"] as? Bool == true else {
+            fail("Confirm that you have permission to share this media and music.")
+            return
+        }
+        guard let postID = body["postId"] as? String,
+              postID.hasPrefix("post-"),
+              postID.utf8.count >= 21,
+              postID.utf8.count <= 101,
+              postID.unicodeScalars.allSatisfy({ scalar in
+                  (scalar.value >= 48 && scalar.value <= 57)
+                      || (scalar.value >= 65 && scalar.value <= 90)
+                      || (scalar.value >= 97 && scalar.value <= 122)
+                      || scalar == "-"
+              }) else {
+            fail("That post identity was invalid.")
+            return
+        }
         guard let mediaSource = body["data"] as? String else {
             fail("The capture never reached the app.")
             return
@@ -56,7 +73,7 @@ enum WebPostPublisher {
             ?? storedCapture?.data?.count
             ?? storedCapture?.fileURL.flatMap(fileSize)
             ?? 0
-        print("[WebPostPublisher] publishPost received: kind=\(kind) bytes=\(byteCount) requestId=\(body["requestId"] as? String ?? "-") coord=\(body["latitude"] != nil)")
+        print("[WebPostPublisher] publishPost received: kind=\(kind) bytes=\(byteCount) requestId=\(body["requestId"] as? String ?? "-") coord=\(body["targetLatitude"] != nil)")
 
         var userInfo: [String: Any] = [:]
         if kind == "video" {
@@ -126,11 +143,18 @@ enum WebPostPublisher {
         PostUploadService.shared.nextCaption = body["caption"] as? String
         PostUploadService.shared.nextChannelID = body["channelId"] as? String
         PostUploadService.shared.nextRequestID = body["requestId"] as? String
+        PostUploadService.shared.nextPostID = postID
+        PostUploadService.shared.nextAudience = body["audience"] as? String
+        PostUploadService.shared.nextLocationVisibility = body["locationVisibility"] as? String
+        if body["rightsAttested"] as? Bool == true {
+            PostUploadService.shared.nextRightsAttestationVersion =
+                body["rightsAttestationVersion"] as? String
+        }
 
         // A post bound to a map spot carries its coordinate; a plain channel
         // post uploads to wherever the user currently is.
-        if let latitude = body["latitude"] as? Double,
-           let longitude = body["longitude"] as? Double {
+        if let latitude = body["targetLatitude"] as? Double,
+           let longitude = body["targetLongitude"] as? Double {
             userInfo["latitude"] = latitude
             userInfo["longitude"] = longitude
             print("[WebPostPublisher] dispatch → UploadPostToCoordinate")

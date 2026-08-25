@@ -5514,7 +5514,7 @@ struct MapViewProduction: View {
                 .onTapGesture { location in
                 // Handle map tap based on current flow
                 if let coordinate = proxy.convert(location, from: .local) {
-                    print("🗺️ [MapView] Map tapped at screen: \(location), converted to: \(coordinate.latitude), \(coordinate.longitude)")
+                    print("🗺️ [MapView] Map tap converted to a post location")
 
                     // Placing a user-created game: drop it at the tapped spot.
                     if let pending = savedGamesStore.pendingPlacement {
@@ -5530,10 +5530,8 @@ struct MapViewProduction: View {
                         showPostPrompt = true
                         
                         currentCity = "Location Selected"
-                        aiRecommendation = String(format: "📍 %.4f°, %.4f° — Post your capture here?", 
-                                                 coordinate.latitude, 
-                                                 coordinate.longitude)
-                        print("[MapView] Camera -> Map flow: Selected coordinate \(coordinate.latitude), \(coordinate.longitude)")
+                        aiRecommendation = "📍 Selected map point — Post your capture here?"
+                        print("[MapView] Camera -> Map flow: Selected map point")
                     } else {
                         // Flow 1: Map -> Camera OR normal browsing
                         // Store clicked coordinate and show prompt
@@ -5541,10 +5539,8 @@ struct MapViewProduction: View {
                         showPostPrompt = true
 
                         currentCity = "Location Selected"
-                        aiRecommendation = String(format: "📍 %.4f°, %.4f° — Want to post here?",
-                                                 coordinate.latitude,
-                                                 coordinate.longitude)
-                        print("✅ [MapView] Set clickedCoordinate: \(coordinate.latitude), \(coordinate.longitude)")
+                        aiRecommendation = "📍 Selected map point — Want to post here?"
+                        print("✅ [MapView] Set clickedCoordinate")
                         print("   showPostPrompt: \(showPostPrompt)")
                         noteInteraction()
                     }
@@ -6574,14 +6570,11 @@ struct MapViewProduction: View {
                     mapState.showPostLocation(pendingCoordinate)
                     
                     // Update UI with comprehensive location info
-                    let latStr = String(format: "%.4f", pendingCoordinate.latitude)
-                    let lonStr = String(format: "%.4f", pendingCoordinate.longitude)
-                    
                     var cityComponents: [String] = []
                     if let username = mapState.pendingPostUsername {
                         cityComponents.append(username)
                     }
-                    cityComponents.append("\(latStr), \(lonStr)")
+                    cityComponents.append("Approximate map area")
                     if let flag = mapState.pendingPostCountryFlag, let city = mapState.pendingPostCityName {
                         cityComponents.append("\(flag) \(city)")
                     } else if let city = mapState.pendingPostCityName {
@@ -6806,16 +6799,12 @@ struct MapViewProduction: View {
                 // Enter "showing post location" mode - this prevents auto-centering on user
                 mapState.showPostLocation(coordinate)
 
-                // Format coordinates
-                let latStr = String(format: "%.4f", coordinate.latitude)
-                let lonStr = String(format: "%.4f", coordinate.longitude)
-                
                 // Build currentCity with all available info
                 var cityComponents: [String] = []
                 if let username = postUsername {
                     cityComponents.append(username)
                 }
-                cityComponents.append("\(latStr), \(lonStr)")
+                cityComponents.append("Approximate map area")
                 if let flag = countryFlag, let city = cityName {
                     cityComponents.append("\(flag) \(city)")
                 } else if let city = cityName {
@@ -7386,11 +7375,9 @@ struct MapViewProduction: View {
             hasSetInitialLocation = true
             mapState.showPostLocation(pendingCoordinate)
 
-            let latStr = String(format: "%.4f", pendingCoordinate.latitude)
-            let lonStr = String(format: "%.4f", pendingCoordinate.longitude)
             var cityComponents: [String] = []
             if let username = mapState.pendingPostUsername { cityComponents.append(username) }
-            cityComponents.append("\(latStr), \(lonStr)")
+            cityComponents.append("Approximate map area")
             if let flag = mapState.pendingPostCountryFlag, let city = mapState.pendingPostCityName {
                 cityComponents.append("\(flag) \(city)")
             } else if let city = mapState.pendingPostCityName {

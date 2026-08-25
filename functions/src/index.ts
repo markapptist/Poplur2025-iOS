@@ -16,6 +16,8 @@ export { verifyCardPurchase } from "./cardPurchases";
 export { poplurWalletPass, poplurOwnedCards } from "./walletPass";
 export { poplurPassWebService, poplurPassOnProfileChange } from "./walletPassWebService";
 export { notifyOnEngagement } from "./engagementNotifications";
+export { notifyOnDirectMessage } from "./directMessageNotifications";
+export { setAccountLocationPrivacy } from "./accountPrivacy";
 export { meshyGenerate, meshyStatus } from "./meshyModels";
 export { generateRetroGame } from "./retro/generateRetroGame";
 
@@ -996,7 +998,8 @@ async function handlePublishGeneratedJob(
   const radiusMeters = positiveInt(body.radiusMeters, 5000);
   const caption = optionalStringField(body.caption, 2000);
   const jobRef = db.collection("aiGenerationJobs").doc(jobId);
-  const jobSnapshot = await jobRef.get();
+  const userRef = db.collection("users").doc(uid);
+  const [jobSnapshot, userSnapshot] = await Promise.all([jobRef.get(), userRef.get()]);
   const job = jobSnapshot.data();
 
   if (!jobSnapshot.exists || !job || job.userId !== uid) {
@@ -1010,8 +1013,12 @@ async function handlePublishGeneratedJob(
   const postRef = db.collection("posts").doc();
   const outputAssetIds = Array.isArray(job.outputAssetIds) ? job.outputAssetIds : [];
   const now = FieldValue.serverTimestamp();
+  const account = userSnapshot.data();
+  const hiddenOrigin = account?.privateAccount === true || account?.ghostMode === true;
+  const latitudeCell = Math.round(latitude * 1_000);
+  const longitudeCell = Math.round(longitude * 1_000);
 
-  await postRef.set({
+  const post: Record<string, unknown> = {
     userId: uid,
     userID: uid,
     aiGenerated: true,
@@ -1020,8 +1027,8 @@ async function handlePublishGeneratedJob(
     channelId: chosenChannelId,
     originalChannelId: channelId,
     channelReviewStatus: chosenChannelId === channelId ? "approved" : "rerouted",
-    latitude,
-    longitude,
+    audience: "public",
+    locationVisibility: hiddenOrigin ? "hidden" : "approximate",
     radiusMeters,
     organicRadiusMeters: radiusMeters,
     boostedRadiusMeters: 0,
@@ -1029,16 +1036,28 @@ async function handlePublishGeneratedJob(
     caption: caption ?? job.outputText ?? "",
     createdAt: now,
     updatedAt: now,
-  });
+  };
+  if (!hiddenOrigin) {
+    post.latitude = latitudeCell / 1_000;
+    post.longitude = longitudeCell / 1_000;
+    post.latitudeCell = latitudeCell;
+    post.longitudeCell = longitudeCell;
+  }
 
-  await jobRef.set(
-    {
+  const publishBatch = db.batch();
+  publishBatch.set(postRef, post);
+  publishBatch.set(userRef.collection("postLocations").doc(postRef.id), {
+    latitude,
+    longitude,
+    createdAt: now,
+    source: "ai-generated-post",
+  });
+  publishBatch.set(jobRef, {
       publishedPostId: postRef.id,
       publishedChannelId: chosenChannelId,
       updatedAt: now,
-    },
-    { merge: true }
-  );
+    }, { merge: true });
+  await publishBatch.commit();
 
   res.status(200).json({
     postId: postRef.id,

@@ -135,7 +135,7 @@ struct DeliveryFlowView: View {
             Text(pickupDisplay)
                 .font(.system(size: 20, weight: .black, design: .rounded))
                 .foregroundStyle(.white)
-            Text(String(format: "%.4f, %.4f", post.latitude, post.longitude))
+            Text("Location shared only with delivery")
                 .font(.system(size: 13, weight: .bold, design: .rounded))
                 .foregroundStyle(.white.opacity(0.55))
         }

@@ -116,6 +116,34 @@ struct PoplurDeviceNotification: Identifiable, Codable, Hashable {
     let detail: String
     let createdAt: Date
     let isUnread: Bool
+    let webKind: String?
+    let actorHandle: String?
+    let postId: String?
+    let threadId: String?
+
+    init(
+        id: String,
+        kind: Kind,
+        title: String,
+        detail: String,
+        createdAt: Date,
+        isUnread: Bool,
+        webKind: String? = nil,
+        actorHandle: String? = nil,
+        postId: String? = nil,
+        threadId: String? = nil
+    ) {
+        self.id = id
+        self.kind = kind
+        self.title = title
+        self.detail = detail
+        self.createdAt = createdAt
+        self.isUnread = isUnread
+        self.webKind = webKind
+        self.actorHandle = actorHandle
+        self.postId = postId
+        self.threadId = threadId
+    }
 }
 
 enum PoplurNotificationTier {
@@ -165,6 +193,7 @@ final class PoplurNotificationCenter: NSObject, ObservableObject, UNUserNotifica
     private let pushCooldown: TimeInterval = 5 * 60          // 5 minutes
     private var pendingBatch: [(webKind: String, user: String, detail: String)] = []
     private var flushTimer: Timer?
+    private var serverBackedIds = Set<String>()
 
     var messagesPushEnabled: Bool {
         get { defaults.object(forKey: prefMessagesKey) as? Bool ?? true }
@@ -275,23 +304,128 @@ final class PoplurNotificationCenter: NSObject, ObservableObject, UNUserNotifica
                 title: $0.title,
                 detail: $0.detail,
                 createdAt: $0.createdAt,
-                isUnread: false
+                isUnread: false,
+                webKind: $0.webKind,
+                actorHandle: $0.actorHandle,
+                postId: $0.postId,
+                threadId: $0.threadId
             )
         }
         persistNotifications()
         // Reading the list is what clears the badge — same rule the web bell
         // now follows via markEngagementSeen.
         refreshBadge()
+        let ids = notifications.filter { serverBackedIds.contains($0.id) }.map(\.id)
+        Task { await updateServerNotifications(ids: ids, read: true, dismissed: nil) }
+    }
+
+    /// Pulls the canonical inbox written by Cloud Functions. Local daily radius
+    /// insights remain alongside it, while server rows replace earlier server
+    /// snapshots so a dismissal/read on another device is reflected here.
+    @discardableResult
+    func refreshServerInbox() async -> [PoplurDeviceNotification] {
+        guard FirebaseApp.app() != nil, let uid = Auth.auth().currentUser?.uid else {
+            return notifications
+        }
+        do {
+            let snapshot = try await Firestore.firestore()
+                .collection("users").document(uid)
+                .collection("notifications")
+                .order(by: "createdAt", descending: true)
+                .limit(to: 80)
+                .getDocuments()
+
+            let serverRows = snapshot.documents.compactMap { document -> PoplurDeviceNotification? in
+                let data = document.data()
+                if data["isDismissed"] as? Bool == true { return nil }
+                let id = (data["id"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                    ?? document.documentID
+                let title = (data["title"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                    ?? "Poplur"
+                let detail = (data["detail"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                    ?? "New activity on Poplur"
+                let rawKind = data["kind"] as? String
+                return PoplurDeviceNotification(
+                    id: id,
+                    kind: resolveKind(rawKind),
+                    title: title,
+                    detail: detail,
+                    createdAt: (data["createdAt"] as? Timestamp)?.dateValue() ?? Date(),
+                    isUnread: data["isUnread"] as? Bool ?? true,
+                    webKind: rawKind,
+                    actorHandle: data["actorHandle"] as? String,
+                    postId: data["postId"] as? String,
+                    threadId: data["threadId"] as? String
+                )
+            }
+
+            let fetchedIds = Set(snapshot.documents.map(\.documentID))
+            serverBackedIds = fetchedIds
+            let localRows = notifications.filter {
+                !$0.id.hasPrefix("engagement:") && !$0.id.hasPrefix("dm:")
+                    && $0.kind != .engagement && $0.kind != .dm
+            }
+            var seen = Set<String>()
+            notifications = (serverRows + localRows)
+                .filter { seen.insert($0.id).inserted }
+                .sorted { $0.createdAt > $1.createdAt }
+            if notifications.count > 80 { notifications = Array(notifications.prefix(80)) }
+            persistNotifications()
+            refreshBadge()
+        } catch {
+            PoplurDiagLog.append("[PoplurNotifications] inbox refresh failed: \(error.localizedDescription)")
+        }
+        return notifications
+    }
+
+    func dismissNotifications(ids: [String]) async {
+        let unique = Array(Set(ids.filter { !$0.isEmpty }))
+        guard !unique.isEmpty else { return }
+        notifications.removeAll { unique.contains($0.id) }
+        persistNotifications()
+        refreshBadge()
+        await updateServerNotifications(ids: unique, read: nil, dismissed: true)
+    }
+
+    private func updateServerNotifications(ids: [String], read: Bool?, dismissed: Bool?) async {
+        guard FirebaseApp.app() != nil, let uid = Auth.auth().currentUser?.uid else { return }
+        let persistedIds = ids.filter { serverBackedIds.contains($0) }
+        guard !persistedIds.isEmpty else { return }
+        let firestore = Firestore.firestore()
+        let batch = firestore.batch()
+        for id in persistedIds {
+            let reference = firestore.collection("users").document(uid)
+                .collection("notifications").document(id)
+            var fields: [String: Any] = [:]
+            if let read {
+                fields["isUnread"] = !read
+                fields["readAt"] = FieldValue.serverTimestamp()
+            }
+            if let dismissed {
+                fields["isDismissed"] = dismissed
+                fields["dismissedAt"] = FieldValue.serverTimestamp()
+            }
+            batch.updateData(fields, forDocument: reference)
+        }
+        do {
+            try await batch.commit()
+        } catch {
+            PoplurDiagLog.append("[PoplurNotifications] inbox update failed: \(error.localizedDescription)")
+        }
     }
 
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
-        await MainActor.run { Self.shared.recordIfEngagement(notification.request.content) }
-        let wantSound = await MainActor.run { Self.shared.soundsEnabled }
+        let content = notification.request.content
+        await MainActor.run { Self.shared.recordRemoteNotification(content) }
+        let preferences = await MainActor.run {
+            (Self.shared.soundsEnabled, Self.shared.messagesPushEnabled)
+        }
+        if content.userInfo["kind"] as? String == "dm" && !preferences.1 { return [] }
         var opts: UNNotificationPresentationOptions = [.banner, .badge]
-        if wantSound { opts.insert(.sound) }
+        if preferences.0 { opts.insert(.sound) }
         return opts
     }
 
@@ -308,7 +442,7 @@ final class PoplurNotificationCenter: NSObject, ObservableObject, UNUserNotifica
     ) async {
         let content = response.notification.request.content
         await MainActor.run {
-            Self.shared.recordIfEngagement(content)
+            Self.shared.recordRemoteNotification(content)
             // Accept BOTH spellings. The Cloud Function's data payload uses
             // `postId`; the older local path and NotificationsCoordinator use
             // `postID`. A silent case mismatch here is a tap that does nothing.
@@ -321,6 +455,17 @@ final class PoplurNotificationCenter: NSObject, ObservableObject, UNUserNotifica
                     userInfo: ["postID": postId]
                 )
             }
+            if let threadId = info["threadId"] as? String, !threadId.isEmpty {
+                // Keep the route through a cold launch. NotificationCenter is
+                // intentionally ephemeral; the post-login WebView may not
+                // have installed its observer when the system delivers the tap.
+                UserDefaults.standard.set(threadId, forKey: "poplur.pendingDMThreadId")
+                NotificationCenter.default.post(
+                    name: .OpenDMsRequested,
+                    object: nil,
+                    userInfo: ["threadId": threadId]
+                )
+            }
         }
     }
 
@@ -329,17 +474,41 @@ final class PoplurNotificationCenter: NSObject, ObservableObject, UNUserNotifica
     /// Keyed on engagementId, so the same push seen first in the foreground and
     /// then again on tap collapses to one row rather than two —
     /// addInAppNotification already replaces by id.
-    private func recordIfEngagement(_ content: UNNotificationContent) {
+    private func recordRemoteNotification(_ content: UNNotificationContent) {
         let info = content.userInfo
+        if info["kind"] as? String == "dm",
+           let messageId = info["messageId"] as? String, !messageId.isEmpty {
+            let notificationId = (info["notificationId"] as? String) ?? messageId
+            addInAppNotification(
+                PoplurDeviceNotification(
+                    id: notificationId,
+                    kind: .dm,
+                    title: content.title,
+                    detail: content.body,
+                    createdAt: Date(),
+                    isUnread: true,
+                    webKind: "dm",
+                    actorHandle: content.title,
+                    threadId: info["threadId"] as? String
+                )
+            )
+            refreshBadge()
+            return
+        }
         guard let engagementId = info["engagementId"] as? String, !engagementId.isEmpty else { return }
+        let notificationId = (info["notificationId"] as? String) ?? engagementId
+        let rawKind = info["kind"] as? String
         addInAppNotification(
             PoplurDeviceNotification(
-                id: engagementId,
+                id: notificationId,
                 kind: .engagement,
                 title: content.title,
                 detail: content.body,
                 createdAt: Date(),
-                isUnread: true
+                isUnread: true,
+                webKind: rawKind,
+                actorHandle: info["actorHandle"] as? String,
+                postId: info["postId"] as? String
             )
         )
         refreshBadge()
@@ -384,7 +553,9 @@ final class PoplurNotificationCenter: NSObject, ObservableObject, UNUserNotifica
             title: title,
             detail: detail,
             createdAt: Date(),
-            isUnread: true
+            isUnread: true,
+            webKind: kind,
+            actorHandle: title
         )
         addInAppNotification(item)
         refreshBadge()

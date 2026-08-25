@@ -55,6 +55,40 @@ service cloud.firestore {
         && !request.resource.data.diff(resource.data).affectedKeys().hasAny(protectedVerificationFields());
     }
 
+    function accountHidesPostOrigin(userId) {
+      let path = /databases/$(database)/documents/users/$(userId);
+      return exists(path)
+        && (get(path).data.get('privateAccount', false) == true
+          || get(path).data.get('ghostMode', false) == true);
+    }
+
+    function hiddenPostOrigin() {
+      return request.resource.data.get('locationVisibility', 'hidden') == 'hidden'
+        && !request.resource.data.keys().hasAny([
+          'latitude', 'longitude', 'latitudeCell', 'longitudeCell'
+        ]);
+    }
+
+    function approximatePostOrigin() {
+      return request.resource.data.get('locationVisibility', '') == 'approximate'
+        && request.resource.data.latitude is number
+        && request.resource.data.longitude is number
+        && request.resource.data.latitudeCell is int
+        && request.resource.data.longitudeCell is int
+        && request.resource.data.latitudeCell >= -90000
+        && request.resource.data.latitudeCell <= 90000
+        && request.resource.data.longitudeCell >= -180000
+        && request.resource.data.longitudeCell <= 180000
+        && request.resource.data.latitude == request.resource.data.latitudeCell / 1000.0
+        && request.resource.data.longitude == request.resource.data.longitudeCell / 1000.0;
+    }
+
+    function validPostOrigin(userId) {
+      return accountHidesPostOrigin(userId)
+        ? hiddenPostOrigin()
+        : (hiddenPostOrigin() || approximatePostOrigin());
+    }
+
     match /users/{userId} {
       allow read: if isSelf(userId);
       allow create: if isSelf(userId) && doesNotWritePremiumAIFields();
@@ -77,6 +111,29 @@ service cloud.firestore {
       match /phoneFavourites/{contactId} {
         allow read: if isSelf(userId);
         allow write: if isSelf(userId);
+      }
+
+      // Durable notification inbox. Cloud Functions create rows from trusted
+      // engagement/DM events; the owner may only acknowledge or dismiss them.
+      // Clients cannot invent a row that looks like another person's action,
+      // rewrite its target, or delete notification history out from under a
+      // second signed-in device.
+      match /notifications/{notificationId} {
+        allow read: if isSelf(userId);
+        allow create, delete: if false;
+        allow update: if isSelf(userId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'isUnread', 'readAt', 'isDismissed', 'dismissedAt'
+          ])
+          && request.resource.data.get('isUnread', false) is bool
+          && request.resource.data.get('isDismissed', false) is bool;
+      }
+
+      // The exact point selected on the map is account-private. Public post
+      // documents carry at most a validated 0.001-degree map cell, while this
+      // owner-only record preserves the true target for Poplur mechanics.
+      match /postLocations/{postId} {
+        allow read, create, update, delete: if isSelf(userId);
       }
     }
 
@@ -216,6 +273,40 @@ service cloud.firestore {
       return signedIn() && request.auth.uid in dmParticipants(threadId);
     }
 
+    // Atomic first-message batches create the parent thread and its first
+    // message together. getAfter() sees the parent as it will exist after that
+    // batch, so reliability does not require a visible empty-thread write
+    // followed by a second network round trip.
+    function inThreadAfter(threadId) {
+      let path = /databases/$(database)/documents/dmThreads/$(threadId);
+      return signedIn()
+        && existsAfter(path)
+        && request.auth.uid in getAfter(path).data.participants;
+    }
+
+    function validDMMessage() {
+      let kind = request.resource.data.get('kind', 'text');
+      return request.resource.data.keys().hasOnly([
+          'senderId', 'text', 'clientMessageId', 'createdAt',
+          'kind', 'mediaURL', 'mimeType', 'durationMillis'
+        ])
+        && kind in ['text', 'image', 'video', 'audio']
+        && (
+          kind == 'text'
+          || (
+            request.resource.data.mediaURL is string
+            && request.resource.data.mediaURL.size() <= 2048
+            && request.resource.data.mediaURL.matches('https://.*')
+            && request.resource.data.mimeType is string
+            && request.resource.data.mimeType.matches(kind + '/.*')
+            && (kind != 'audio'
+              || (request.resource.data.durationMillis is int
+                && request.resource.data.durationMillis >= 0
+                && request.resource.data.durationMillis <= 60000))
+          )
+        );
+    }
+
     match /dmThreads/{threadId} {
       allow read: if signedIn() && request.auth.uid in resource.data.participants;
 
@@ -225,6 +316,7 @@ service cloud.firestore {
       allow create: if signedIn()
         && request.resource.data.participants is list
         && request.resource.data.participants.size() == 2
+        && request.resource.data.participants[0] != request.resource.data.participants[1]
         && request.auth.uid in request.resource.data.participants
         && threadId == (request.resource.data.participants[0] < request.resource.data.participants[1]
           ? request.resource.data.participants[0] + '_' + request.resource.data.participants[1]
@@ -238,11 +330,14 @@ service cloud.firestore {
       match /messages/{messageId} {
         allow read: if inThread(threadId);
         // You may only speak as yourself, and only into a thread you are in.
-        allow create: if inThread(threadId)
+        allow create: if (inThread(threadId) || inThreadAfter(threadId))
           && request.resource.data.senderId == request.auth.uid
           && request.resource.data.text is string
           && request.resource.data.text.size() > 0
-          && request.resource.data.text.size() <= 2000;
+          && request.resource.data.text.size() <= 2000
+          && request.resource.data.createdAt == request.time
+          && request.resource.data.get('clientMessageId', messageId) == messageId
+          && validDMMessage();
         // A sent message is a record of what was said. Editing it after the
         // fact would let either side rewrite the other's history.
         allow update, delete: if false;
@@ -253,8 +348,13 @@ service cloud.firestore {
       allow read: if true;
       allow create: if signedIn()
         && (request.resource.data.userID == request.auth.uid
-          || request.resource.data.userId == request.auth.uid);
-      allow update, delete: if signedIn()
+          || request.resource.data.userId == request.auth.uid)
+        && validPostOrigin(request.auth.uid);
+      allow update: if signedIn()
+        && (resource.data.userID == request.auth.uid
+          || resource.data.userId == request.auth.uid)
+        && validPostOrigin(request.auth.uid);
+      allow delete: if signedIn()
         && (resource.data.userID == request.auth.uid
           || resource.data.userId == request.auth.uid);
 

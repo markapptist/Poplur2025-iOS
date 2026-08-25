@@ -6,6 +6,7 @@ import Photos
 import UIKit
 import FirebaseAuth
 import FirebaseFirestore
+import FirebaseFunctions
 import FirebaseStorage
 import UserNotifications
 import ImageIO
@@ -256,13 +257,15 @@ enum PoplurProfileSelfieStore {
 // haptics/flyTo and the pre-login screens' Firebase auth — the shell lands first,
 // functionality is wired in tab by tab.
 //
-// Reversible: PoplurWebHome.isEnabled (UserDefaults "poplur_web_home", default on)
-// flips back to the native HomeView without a rebuild if the web home regresses.
+// Reversible for QA with the explicit -DisableWebHome launch argument. Normal
+// launches always use one canonical shell so a retained development default
+// cannot switch the map route and its control owner between app installs.
 
 enum PoplurWebHome {
-    /// Feature flag: flip off to fall back to the native HomeView.
+    /// The shared web Home is the production route. Keep the legacy native
+    /// Home reachable only through an intentional QA launch configuration.
     static var isEnabled: Bool {
-        UserDefaults.standard.object(forKey: "poplur_web_home") as? Bool ?? true
+        !ProcessInfo.processInfo.arguments.contains("-DisableWebHome")
     }
 
     /// The approved home twin: the shared clay bundle opened on its home tab.
@@ -779,6 +782,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         private var lastDeliveredHeading: Double?
         private var activeStoreCheckoutRequestID: String?
         private var activeStoreCheckoutProductCounts: [String: Int] = [:]
+        private var pendingDMThreadID: String?
 
         init(
             initialWebTab: String,
@@ -790,6 +794,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
             self.homeURL = homeURL
             self.onReady = onReady
             self.onWebEvent = onWebEvent
+            pendingDMThreadID = UserDefaults.standard.string(forKey: "poplur.pendingDMThreadId")
             super.init()
             locationRequester.delegate = self
             locationRequester.desiredAccuracy = kCLLocationAccuracyHundredMeters
@@ -838,6 +843,16 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                 forName: .poplurCardPurchaseRecovered, object: nil, queue: .main
             ) { [weak self] note in
                 self?.deliverRecoveredStorePurchase(note)
+            })
+            notificationObservers.append(NotificationCenter.default.addObserver(
+                forName: .OpenDMsRequested, object: nil, queue: .main
+            ) { [weak self] note in
+                guard let self,
+                      let threadID = note.userInfo?["threadId"] as? String,
+                      !threadID.isEmpty,
+                      threadID.count <= 200 else { return }
+                self.pendingDMThreadID = threadID
+                self.deliverPendingDMDeepLink()
             })
         }
 
@@ -1060,6 +1075,120 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                         )
                     }
                 }
+                if type == "notificationsRequested" {
+                    Task { @MainActor [weak self] in
+                        let rows = await PoplurNotificationCenter.shared.refreshServerInbox()
+                        self?.pushNotificationInbox(rows)
+                    }
+                }
+                if type == "notificationsRead" {
+                    Task { @MainActor [weak self] in
+                        PoplurNotificationCenter.shared.markAllRead()
+                        self?.pushNotificationInbox(PoplurNotificationCenter.shared.notifications)
+                    }
+                }
+                if type == "notificationDismissed", let id = body["id"] as? String {
+                    Task { @MainActor [weak self] in
+                        await PoplurNotificationCenter.shared.dismissNotifications(ids: [id])
+                        self?.pushNotificationInbox(PoplurNotificationCenter.shared.notifications)
+                    }
+                }
+                if type == "notificationsCleared", let ids = body["ids"] as? [String] {
+                    Task { @MainActor [weak self] in
+                        await PoplurNotificationCenter.shared.dismissNotifications(ids: ids)
+                        self?.pushNotificationInbox(PoplurNotificationCenter.shared.notifications)
+                    }
+                }
+                if type == "requestAccountPrivacy", let webView = bridge.webView {
+                    Task { [weak self] in
+                        guard let self else { return }
+                        guard let uid = Auth.auth().currentUser?.uid else {
+                            await MainActor.run {
+                                self.pushAccountPrivacy(
+                                    privateAccount: false,
+                                    ghostMode: false,
+                                    ok: false,
+                                    message: "Sign in to load privacy.",
+                                    into: webView
+                                )
+                            }
+                            return
+                        }
+                        let snapshot = try? await Firestore.firestore()
+                            .collection("users").document(uid).getDocument()
+                        let data = snapshot?.data()
+                        let privateAccount = data?["privateAccount"] as? Bool == true
+                        let ghostMode = data?["ghostMode"] as? Bool == true
+                        do {
+                            let result = try await Functions.functions(region: "us-central1")
+                                .httpsCallable("setAccountLocationPrivacy")
+                                .call([
+                                    "privateAccount": privateAccount,
+                                    "ghostMode": ghostMode
+                                ])
+                            let settled = result.data as? [String: Any]
+                            await MainActor.run {
+                                self.pushAccountPrivacy(
+                                    privateAccount: settled?["privateAccount"] as? Bool ?? privateAccount,
+                                    ghostMode: settled?["ghostMode"] as? Bool ?? ghostMode,
+                                    into: webView
+                                )
+                            }
+                        } catch {
+                            await MainActor.run {
+                                self.pushAccountPrivacy(
+                                    privateAccount: privateAccount,
+                                    ghostMode: ghostMode,
+                                    ok: false,
+                                    message: error.localizedDescription,
+                                    into: webView
+                                )
+                            }
+                        }
+                    }
+                }
+                if type == "accountPrivacyChanged", let webView = bridge.webView {
+                    guard let privateAccount = body["privateAccount"] as? Bool,
+                          let ghostMode = body["ghostMode"] as? Bool else {
+                        pushAccountPrivacy(
+                            privateAccount: false,
+                            ghostMode: false,
+                            ok: false,
+                            message: "Privacy settings were invalid.",
+                            into: webView
+                        )
+                        return
+                    }
+                    Task { [weak self] in
+                        guard let self else { return }
+                        do {
+                            let result = try await Functions.functions(region: "us-central1")
+                                .httpsCallable("setAccountLocationPrivacy")
+                                .call([
+                                    "privateAccount": privateAccount,
+                                    "ghostMode": ghostMode
+                                ])
+                            let settled = result.data as? [String: Any]
+                            await MainActor.run {
+                                self.pushAccountPrivacy(
+                                    privateAccount: settled?["privateAccount"] as? Bool ?? privateAccount,
+                                    ghostMode: settled?["ghostMode"] as? Bool ?? ghostMode,
+                                    into: webView
+                                )
+                            }
+                        } catch {
+                            await MainActor.run {
+                                self.pushAccountPrivacy(
+                                    privateAccount: privateAccount,
+                                    ghostMode: ghostMode,
+                                    ok: false,
+                                    message: error.localizedDescription,
+                                    into: webView
+                                )
+                            }
+                        }
+                    }
+                }
                 // The web layer's own heat probe. A WKWebView's console.log never
                 // reaches this process's stdout, so the probe hands its line to
                 // native and native prints it — that is what makes it readable
@@ -1111,6 +1240,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     let otherUID = (body["otherId"] as? String) ?? ""
                     let callerName = (body["callerName"] as? String)
                     let video = (body["video"] as? Bool) ?? false
+                    let requestID = (body["requestId"] as? String) ?? ""
                     Task { @MainActor [weak self, weak webView] in
                         let callID = await PoplurCallSignalling.shared.startCall(
                             to: otherUID,
@@ -1120,7 +1250,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                         guard let self, let webView, self.bridge.webView === webView else { return }
                         self.pushWalletPassMessage(
                             ["type": "poplurCallStarted", "callId": callID ?? "",
-                             "ok": callID != nil],
+                             "ok": callID != nil, "requestId": requestID],
                             into: webView
                         )
                     }
@@ -1233,34 +1363,101 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                 if type == "openDMThread", let webView = bridge.webView {
                     let threadID = (body["threadId"] as? String) ?? ""
                     guard !threadID.isEmpty, threadID.count <= 200 else { return }
-                    PoplurDirectMessages.shared.observeThread(threadID) { [weak self, weak webView] messages in
-                        guard let self, let webView, self.bridge.webView === webView else { return }
-                        self.pushWalletPassMessage(
-                            ["type": "poplurDMMessages", "threadId": threadID, "messages": messages],
-                            into: webView
-                        )
-                    }
+                    PoplurDirectMessages.shared.observeThread(
+                        threadID,
+                        onChange: { [weak self, weak webView] messages in
+                            guard let self, let webView, self.bridge.webView === webView else { return }
+                            self.pushWalletPassMessage(
+                                ["type": "poplurDMMessages", "threadId": threadID, "messages": messages],
+                                into: webView
+                            )
+                        },
+                        onState: { [weak self, weak webView] state in
+                            guard let self, let webView, self.bridge.webView === webView else { return }
+                            var payload = state
+                            payload["type"] = "poplurDMThreadState"
+                            self.pushWalletPassMessage(payload, into: webView)
+                        }
+                    )
                     return
                 }
                 if type == "closeDMThread" {
                     PoplurDirectMessages.shared.closeThread()
                     return
                 }
+                if type == "setDMTyping" {
+                    let threadID = (body["threadId"] as? String) ?? ""
+                    let typing = (body["typing"] as? Bool) ?? false
+                    guard !threadID.isEmpty, threadID.count <= 200 else { return }
+                    Task { @MainActor in
+                        await PoplurDirectMessages.shared.setTyping(threadID, typing: typing)
+                    }
+                    return
+                }
+                if type == "deleteDMThread", let webView = bridge.webView {
+                    let threadID = (body["threadId"] as? String) ?? ""
+                    Task { @MainActor [weak self, weak webView] in
+                        let ok = await PoplurDirectMessages.shared.hideThread(threadID)
+                        guard let self, let webView, self.bridge.webView === webView else { return }
+                        self.pushWalletPassMessage([
+                            "type": "poplurDMThreadHidden",
+                            "threadId": threadID,
+                            "ok": ok,
+                        ], into: webView)
+                    }
+                    return
+                }
+                if type == "sendDMAttachment", let webView = bridge.webView {
+                    let otherUID = (body["otherId"] as? String) ?? ""
+                    let threadID = (body["threadId"] as? String) ?? ""
+                    let source = (body["source"] as? String) ?? ""
+                    let kind = (body["kind"] as? String) ?? ""
+                    let clientMessageID = (body["clientMessageId"] as? String) ?? ""
+                    let durationMillis = (body["durationMillis"] as? NSNumber)?.intValue
+                    Task { @MainActor [weak self, weak webView] in
+                        let ok = await PoplurDirectMessages.shared.sendAttachment(
+                            to: otherUID,
+                            threadID: threadID,
+                            source: source,
+                            kind: kind,
+                            clientMessageID: clientMessageID,
+                            durationMillis: durationMillis
+                        )
+                        guard let self, let webView, self.bridge.webView === webView else { return }
+                        self.pushWalletPassMessage(
+                            ok
+                                ? ["type": "poplurDMSent", "clientMessageId": clientMessageID]
+                                : [
+                                    "type": "poplurDMSendFailed",
+                                    "clientMessageId": clientMessageID,
+                                    "text": kind == "audio" ? "Voice message" : kind == "video" ? "Video" : "Photo",
+                                ],
+                            into: webView
+                        )
+                    }
+                    return
+                }
                 if type == "sendDM", let webView = bridge.webView {
                     let otherUID = (body["otherId"] as? String) ?? ""
                     let text = (body["text"] as? String) ?? ""
+                    let clientMessageID = (body["clientMessageId"] as? String) ?? ""
                     Task { @MainActor [weak self, weak webView] in
-                        let ok = await PoplurDirectMessages.shared.send(to: otherUID, text: text)
+                        let ok = await PoplurDirectMessages.shared.send(
+                            to: otherUID,
+                            text: text,
+                            clientMessageID: clientMessageID
+                        )
                         guard let self, let webView, self.bridge.webView === webView else { return }
-                        // The live listener delivers the message itself; this
-                        // only reports a FAILURE, so the composer can put the
-                        // text back rather than swallowing it.
-                        if !ok {
-                            self.pushWalletPassMessage(
-                                ["type": "poplurDMSendFailed", "text": text],
-                                into: webView
-                            )
-                        }
+                        self.pushWalletPassMessage(
+                            ok
+                                ? ["type": "poplurDMSent", "clientMessageId": clientMessageID]
+                                : [
+                                    "type": "poplurDMSendFailed",
+                                    "clientMessageId": clientMessageID,
+                                    "text": text,
+                                ],
+                            into: webView
+                        )
                     }
                     return
                 }
@@ -1812,6 +2009,8 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                         var profile = localProfile
                         profile["business"] =
                             (data["accountType"] as? String) == PoplurAccountType.business.rawValue
+                        profile["privateAccount"] = data["privateAccount"] as? Bool == true
+                        profile["ghostMode"] = data["ghostMode"] as? Bool == true
 
                         let username = (data["username"] as? String)?
                             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1857,6 +2056,12 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                 }
                 if type == "requestProfilePosts", let webView = bridge.webView {
                     deliverProfilePosts(into: webView)
+                }
+                if type == "requestFeedPosts", let webView = bridge.webView {
+                    deliverFeedPosts(into: webView)
+                }
+                if type == "deleteProfilePost", let webView = bridge.webView {
+                    deleteProfilePost(body, from: webView)
                 }
                 if type == "requestProfileTracks", let webView = bridge.webView {
                     deliverProfileTracks(into: webView)
@@ -2031,6 +2236,26 @@ struct PostLoginHomeWebView: UIViewRepresentable {
             webView.evaluateJavaScript(
                 "window.poplurProfile && window.poplurProfile(\(text)); " +
                 "window.dispatchEvent(new CustomEvent('poplur-native-profile', {detail: \(text)})); true;"
+            )
+        }
+
+        private func pushAccountPrivacy(
+            privateAccount: Bool,
+            ghostMode: Bool,
+            ok: Bool = true,
+            message: String? = nil,
+            into webView: WKWebView
+        ) {
+            var payload: [String: Any] = [
+                "privateAccount": privateAccount,
+                "ghostMode": ghostMode,
+                "ok": ok
+            ]
+            if let message, !message.isEmpty { payload["message"] = message }
+            guard let data = try? JSONSerialization.data(withJSONObject: payload),
+                  let text = String(data: data, encoding: .utf8) else { return }
+            webView.evaluateJavaScript(
+                "window.dispatchEvent(new CustomEvent('poplur-native-account-privacy', {detail: \(text)})); true;"
             )
         }
 
@@ -2225,6 +2450,213 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     print("[PostLoginHomeWebView] profile posts query failed: \(error.localizedDescription)")
                 }
             }
+        }
+
+        /// The production Feed consumes the media rows users actually publish.
+        /// Bundled creatives remain a browser-preview fallback, not a substitute
+        /// for authenticated Firestore posts inside the app.
+        private func deliverFeedPosts(into webView: WKWebView) {
+            guard Auth.auth().currentUser != nil else { return }
+            Task {
+                do {
+                    let snapshot = try await Firestore.firestore()
+                        .collection("posts")
+                        .order(by: "createdAt", descending: true)
+                        .limit(to: 96)
+                        .getDocuments()
+
+                    func createdMillis(_ data: [String: Any]) -> Double {
+                        if let value = data["createdAtMillis"] as? NSNumber {
+                            return value.doubleValue
+                        }
+                        if let timestamp = data["createdAt"] as? Timestamp {
+                            return timestamp.dateValue().timeIntervalSince1970 * 1000
+                        }
+                        return 0
+                    }
+
+                    let rows: [[String: Any]] = snapshot.documents
+                        .sorted { createdMillis($0.data()) > createdMillis($1.data()) }
+                        .compactMap { document in
+                            let data = document.data()
+                            guard (data["audience"] as? String ?? "public") == "public",
+                                  (data["status"] as? String ?? "published") == "published",
+                                  let mediaURL = ((data["playbackURL"] as? String)
+                                    ?? (data["mediaURL"] as? String))?
+                                    .trimmingCharacters(in: .whitespacesAndNewlines),
+                                  !mediaURL.isEmpty else { return nil }
+                            var row: [String: Any] = [
+                                "id": document.documentID,
+                                "mediaURL": mediaURL,
+                                "mediaType": (data["mediaType"] as? String) ?? "video",
+                                "createdAtMillis": createdMillis(data),
+                                "username": (data["username"] as? String) ?? "Poplur user",
+                                "channelId": (data["channelId"] as? String) ?? "live"
+                            ]
+                            if let poster = data["posterURL"] as? String, !poster.isEmpty {
+                                row["posterURL"] = poster
+                            }
+                            if let caption = data["caption"] as? String, !caption.isEmpty {
+                                row["caption"] = caption
+                            }
+                            if let radius = data["radius"] as? NSNumber {
+                                row["radiusMeters"] = radius
+                            }
+                            return row
+                        }
+
+                    let payload: [String: Any] = ["posts": rows]
+                    guard let encoded = try? JSONSerialization.data(withJSONObject: payload),
+                          let json = String(data: encoded, encoding: .utf8) else { return }
+                    await MainActor.run {
+                        guard self.bridge.webView === webView else { return }
+                        webView.evaluateJavaScript(
+                            "window.dispatchEvent(new CustomEvent('poplur-native-feed-posts', {detail: \(json)}));true;",
+                            completionHandler: nil
+                        )
+                    }
+                } catch {
+                    print("[PostLoginHomeWebView] feed posts query failed: \(error.localizedDescription)")
+                }
+            }
+        }
+
+        /// Deletes only a post owned by the currently authenticated account.
+        /// The web bundle is an untrusted caller: both identifiers are bounded
+        /// before they reach a Firestore path, and ownership is read from the
+        /// authoritative post document rather than accepted from JavaScript.
+        private func deleteProfilePost(_ body: [String: Any], from webView: WKWebView) {
+            let requestID = Self.boundedBridgeID(body["requestId"])
+            let postID = Self.boundedBridgeID(body["postId"])
+            guard let requestID, let postID else {
+                deliverProfilePostDeleteResult(
+                    requestID: requestID ?? "",
+                    postID: postID ?? "",
+                    ok: false,
+                    error: "invalid_request",
+                    into: webView
+                )
+                return
+            }
+            guard let uid = Auth.auth().currentUser?.uid else {
+                deliverProfilePostDeleteResult(
+                    requestID: requestID,
+                    postID: postID,
+                    ok: false,
+                    error: "signed_out",
+                    into: webView
+                )
+                return
+            }
+
+            Task { [weak self, weak webView] in
+                guard let self, let webView else { return }
+                let reference = Firestore.firestore().collection("posts").document(postID)
+                do {
+                    let snapshot = try await reference.getDocument()
+                    guard snapshot.exists else {
+                        await MainActor.run {
+                            self.deliverProfilePostDeleteResult(
+                                requestID: requestID,
+                                postID: postID,
+                                ok: false,
+                                error: "not_found",
+                                into: webView
+                            )
+                        }
+                        return
+                    }
+                    let postData = snapshot.data() ?? [:]
+                    let ownerID = (postData["userID"] as? String)
+                        ?? (postData["userId"] as? String)
+                    guard ownerID == uid else {
+                        await MainActor.run {
+                            self.deliverProfilePostDeleteResult(
+                                requestID: requestID,
+                                postID: postID,
+                                ok: false,
+                                error: "forbidden",
+                                into: webView
+                            )
+                        }
+                        return
+                    }
+
+                    // New posts record their owned Storage paths. Delete only
+                    // paths inside this account's posts folder; legacy rows
+                    // without those fields remain document-only rather than
+                    // trusting an arbitrary download URL from JavaScript.
+                    for key in ["mediaStoragePath", "posterStoragePath"] {
+                        guard let path = Self.ownedPostStoragePath(postData[key], uid: uid) else {
+                            continue
+                        }
+                        try? await Storage.storage().reference(withPath: path).delete()
+                    }
+                    try await reference.delete()
+                    await MainActor.run {
+                        self.deliverProfilePostDeleteResult(
+                            requestID: requestID,
+                            postID: postID,
+                            ok: true,
+                            into: webView
+                        )
+                    }
+                } catch {
+                    await MainActor.run {
+                        self.deliverProfilePostDeleteResult(
+                            requestID: requestID,
+                            postID: postID,
+                            ok: false,
+                            error: "delete_failed",
+                            into: webView
+                        )
+                    }
+                }
+            }
+        }
+
+        private static func boundedBridgeID(_ value: Any?) -> String? {
+            guard let value = value as? String,
+                  !value.isEmpty,
+                  value.utf8.count <= 128,
+                  value.unicodeScalars.allSatisfy({ scalar in
+                      scalar.value >= 0x21 && scalar.value <= 0x7E
+                          && scalar != "/" && scalar != "\\"
+                  }) else { return nil }
+            return value
+        }
+
+        private static func ownedPostStoragePath(_ value: Any?, uid: String) -> String? {
+            guard let path = value as? String,
+                  path.utf8.count <= 240,
+                  path.hasPrefix("posts/\(uid)/"),
+                  !path.contains(".."),
+                  String(path.dropFirst("posts/\(uid)/".count)).contains("/") == false else {
+                return nil
+            }
+            return path
+        }
+
+        private func deliverProfilePostDeleteResult(
+            requestID: String,
+            postID: String,
+            ok: Bool,
+            error: String? = nil,
+            into webView: WKWebView
+        ) {
+            guard bridge.webView === webView else { return }
+            var payload: [String: Any] = [
+                "requestId": requestID,
+                "postId": postID,
+                "ok": ok
+            ]
+            if let error { payload["error"] = error }
+            guard let data = try? JSONSerialization.data(withJSONObject: payload),
+                  let json = String(data: data, encoding: .utf8) else { return }
+            webView.evaluateJavaScript(
+                "window.dispatchEvent(new CustomEvent('poplur-native-profile-post-delete-result', {detail: \(json)}));true;",
+                completionHandler: nil
+            )
         }
 
         /// The signed-in user's posted MUSIC, for the iPod's shelf.
@@ -2566,6 +2998,32 @@ struct PostLoginHomeWebView: UIViewRepresentable {
             }
         }
 
+        @MainActor
+        private func pushNotificationInbox(_ items: [PoplurDeviceNotification]) {
+            guard let webView = bridge.webView else { return }
+            let rows: [[String: Any]] = items.map { item in
+                var row: [String: Any] = [
+                    "id": item.id,
+                    "kind": item.webKind ?? item.kind.rawValue,
+                    "title": item.title,
+                    "detail": item.detail,
+                    "createdAtMillis": item.createdAt.timeIntervalSince1970 * 1_000,
+                    "unread": item.isUnread
+                ]
+                if let actorHandle = item.actorHandle { row["actorHandle"] = actorHandle }
+                if let postId = item.postId { row["postId"] = postId }
+                if let threadId = item.threadId { row["threadId"] = threadId }
+                return row
+            }
+            let payload: [String: Any] = [
+                "type": "poplurNotifications",
+                "notifications": rows
+            ]
+            guard let data = try? JSONSerialization.data(withJSONObject: payload),
+                  let json = String(data: data, encoding: .utf8) else { return }
+            webView.evaluateJavaScript("window.postMessage(\(json), '*'); true;", completionHandler: nil)
+        }
+
         private func signalHomeReady() {
             guard !didSignalReady else { return }
             didSignalReady = true
@@ -2580,7 +3038,22 @@ struct PostLoginHomeWebView: UIViewRepresentable {
             lastDeliveredPitch = nil
             lastDeliveredHeading = nil
             replayLatestMotion()
+            deliverPendingDMDeepLink()
             DispatchQueue.main.async { [onReady] in onReady() }
+        }
+
+        private func deliverPendingDMDeepLink() {
+            guard didSignalReady,
+                  let webView = bridge.webView,
+                  let threadID = pendingDMThreadID,
+                  !threadID.isEmpty,
+                  threadID.count <= 200 else { return }
+            pendingDMThreadID = nil
+            UserDefaults.standard.removeObject(forKey: "poplur.pendingDMThreadId")
+            pushWalletPassMessage(
+                ["type": "poplurOpenDM", "threadId": threadID],
+                into: webView
+            )
         }
 
         /// WebKit can kill its web-content process under memory pressure while

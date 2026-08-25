@@ -3641,7 +3641,7 @@ private struct ProfileListCard: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("\(max(1, post.radius / 1000)) KM")
                     .font(.system(size: 18, weight: .heavy, design: .rounded))
-                Text("Lat \(String(format: "%.2f", post.latitude)), Lon \(String(format: "%.2f", post.longitude))")
+                Text("Approximate map area")
                     .font(.system(size: 14, weight: .heavy, design: .rounded))
             }
             .foregroundColor(.white)
