@@ -42,10 +42,6 @@ struct FeedFullscreenPageView: View {
     @ObservedObject private var settings = SettingsStore.shared
     private var displayAsChannel: Bool { showChannelMode || isTVGuideVisible }
 
-    private var coordinateText: String {
-        String(format: "%.4f, %.4f", post.latitude, post.longitude)
-    }
-
     private var directVideoURL: URL? {
         guard !post.isLiveStream else { return nil }
         guard localAssetName == nil else { return nil }
@@ -929,7 +925,7 @@ struct FeedFullscreenPageView: View {
                 .animation(.spring(response: 0.34, dampingFraction: 0.82), value: displayAsChannel)
 
                 ZStack(alignment: .leading) {
-                    Text(post.isPoplurAd ? (post.adCreativeKind?.uppercased() ?? "AI CREATIVE") : String(format: "%.4f, %.4f", post.latitude, post.longitude))
+                    Text(post.isPoplurAd ? (post.adCreativeKind?.uppercased() ?? "AI CREATIVE") : "APPROXIMATE MAP AREA")
                         .font(.system(size: 16, weight: .regular, design: .default))
                         .foregroundColor(.white.opacity(0.9))
                         .poplurTextShader(intensity: 0.62)

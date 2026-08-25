@@ -39,7 +39,7 @@ class GenerationError extends Error {
     code;
     violations;
     detail;
-    constructor(code, message, violations = [],
+    constructor(code, message, violations = [], 
     /** The underlying API error, kept so a failure can actually be diagnosed
      *  instead of arriving as one indistinguishable sentence. */
     detail) {

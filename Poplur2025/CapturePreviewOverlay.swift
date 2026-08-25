@@ -722,7 +722,7 @@ struct PostCaptureComposerOverlay: View {
                     .font(.system(size: 18, weight: .black, design: .rounded))
                     .foregroundStyle(.white)
                     .poplurTextShader(intensity: 0.9)
-                Text("\(String(format: "%.4f", coordinate.latitude)), \(String(format: "%.4f", coordinate.longitude))")
+                Text("Selected map point")
                     .font(.system(size: 11, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white.opacity(0.72))
                     .poplurTextShader(intensity: 0.58)

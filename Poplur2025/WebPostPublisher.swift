@@ -73,7 +73,7 @@ enum WebPostPublisher {
             ?? storedCapture?.data?.count
             ?? storedCapture?.fileURL.flatMap(fileSize)
             ?? 0
-        print("[WebPostPublisher] publishPost received: kind=\(kind) bytes=\(byteCount) requestId=\(body["requestId"] as? String ?? "-") coord=\(body["latitude"] != nil)")
+        print("[WebPostPublisher] publishPost received: kind=\(kind) bytes=\(byteCount) requestId=\(body["requestId"] as? String ?? "-") coord=\(body["targetLatitude"] != nil)")
 
         var userInfo: [String: Any] = [:]
         if kind == "video" {
@@ -153,8 +153,8 @@ enum WebPostPublisher {
 
         // A post bound to a map spot carries its coordinate; a plain channel
         // post uploads to wherever the user currently is.
-        if let latitude = body["latitude"] as? Double,
-           let longitude = body["longitude"] as? Double {
+        if let latitude = body["targetLatitude"] as? Double,
+           let longitude = body["targetLongitude"] as? Double {
             userInfo["latitude"] = latitude
             userInfo["longitude"] = longitude
             print("[WebPostPublisher] dispatch → UploadPostToCoordinate")

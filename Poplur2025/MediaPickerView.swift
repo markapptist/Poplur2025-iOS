@@ -486,11 +486,10 @@ struct MediaPickerView: View {
     private func savePostToFirestore(mediaURL: String, posterURL: String?) async throws {
         let db = Firestore.firestore()
         var post: [String: Any] = [
-            "latitude": location.latitude,
-            "longitude": location.longitude,
             "mediaURL": mediaURL,
             "radius": 5000, // Initial 5km radius
             "viewCount": 0,
+            "audience": "public",
             "createdAt": FieldValue.serverTimestamp(),
             "createdAtMillis": Int64(Date().timeIntervalSince1970 * 1000)
         ]
@@ -502,19 +501,34 @@ struct MediaPickerView: View {
             )
         }
         post["userID"] = uid
+        let accountSnapshot = try? await db.collection("users").document(uid).getDocument()
+        let account = accountSnapshot?.data()
+        let hidden = account?["privateAccount"] as? Bool == true
+            || account?["ghostMode"] as? Bool == true
+        post["locationVisibility"] = hidden ? "hidden" : "approximate"
+        if !hidden {
+            let latitudeCell = Int((location.latitude * 1_000).rounded())
+            let longitudeCell = Int((location.longitude * 1_000).rounded())
+            post["latitude"] = Double(latitudeCell) / 1_000
+            post["longitude"] = Double(longitudeCell) / 1_000
+            post["latitudeCell"] = latitudeCell
+            post["longitudeCell"] = longitudeCell
+        }
         if let posterURL, !posterURL.isEmpty {
             post["posterURL"] = posterURL
         }
 
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            db.collection("posts").addDocument(data: post) { error in
-                if let error = error {
-                    continuation.resume(throwing: error)
-                } else {
-                    continuation.resume(returning: ())
-                }
-            }
-        }
+        let postRef = db.collection("posts").document()
+        let batch = db.batch()
+        batch.setData(post, forDocument: postRef)
+        batch.setData([
+            "latitude": location.latitude,
+            "longitude": location.longitude,
+            "createdAt": FieldValue.serverTimestamp(),
+            "source": "legacy-media-picker"
+        ], forDocument: db.collection("users").document(uid)
+            .collection("postLocations").document(postRef.documentID))
+        try await batch.commit()
     }
 }
 

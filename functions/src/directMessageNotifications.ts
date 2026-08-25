@@ -61,6 +61,28 @@ export const notifyOnDirectMessage = onDocumentCreated(
       || (typeof sender.displayName === "string" && sender.displayName)
       || "Someone on Poplur";
     const tokenMap = (recipientSnapshot.data()?.fcmTokens ?? {}) as Record<string, TokenEntry>;
+    const notificationId = `dm:${threadId}:${messageId}`;
+    const messagePreview = preview(message);
+
+    // Persist before checking for a device token. A person with notifications
+    // disabled—or no registered phone yet—still owns a complete in-app inbox
+    // when they next sign in.
+    await db.collection("users").doc(recipientId)
+      .collection("notifications").doc(notificationId)
+      .set({
+        id: notificationId,
+        kind: "dm",
+        actorUid: senderId,
+        actorHandle: String(senderName),
+        title: String(senderName),
+        detail: messagePreview,
+        createdAt: FieldValue.serverTimestamp(),
+        isUnread: true,
+        isDismissed: false,
+        threadId,
+        messageId,
+      }, { merge: true });
+
     const tokens = Object.keys(tokenMap);
     if (tokens.length === 0) {
       logger.info("DM recipient has no registered devices", { threadId, messageId, recipientId });
@@ -69,12 +91,13 @@ export const notifyOnDirectMessage = onDocumentCreated(
 
     const response = await messaging.sendEachForMulticast({
       tokens,
-      notification: { title: String(senderName), body: preview(message) },
+      notification: { title: String(senderName), body: messagePreview },
       data: {
         kind: "dm",
         threadId,
         messageId,
         senderId,
+        notificationId,
       },
       apns: {
         payload: {

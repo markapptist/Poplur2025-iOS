@@ -55,6 +55,40 @@ service cloud.firestore {
         && !request.resource.data.diff(resource.data).affectedKeys().hasAny(protectedVerificationFields());
     }
 
+    function accountHidesPostOrigin(userId) {
+      let path = /databases/$(database)/documents/users/$(userId);
+      return exists(path)
+        && (get(path).data.get('privateAccount', false) == true
+          || get(path).data.get('ghostMode', false) == true);
+    }
+
+    function hiddenPostOrigin() {
+      return request.resource.data.get('locationVisibility', 'hidden') == 'hidden'
+        && !request.resource.data.keys().hasAny([
+          'latitude', 'longitude', 'latitudeCell', 'longitudeCell'
+        ]);
+    }
+
+    function approximatePostOrigin() {
+      return request.resource.data.get('locationVisibility', '') == 'approximate'
+        && request.resource.data.latitude is number
+        && request.resource.data.longitude is number
+        && request.resource.data.latitudeCell is int
+        && request.resource.data.longitudeCell is int
+        && request.resource.data.latitudeCell >= -90000
+        && request.resource.data.latitudeCell <= 90000
+        && request.resource.data.longitudeCell >= -180000
+        && request.resource.data.longitudeCell <= 180000
+        && request.resource.data.latitude == request.resource.data.latitudeCell / 1000.0
+        && request.resource.data.longitude == request.resource.data.longitudeCell / 1000.0;
+    }
+
+    function validPostOrigin(userId) {
+      return accountHidesPostOrigin(userId)
+        ? hiddenPostOrigin()
+        : (hiddenPostOrigin() || approximatePostOrigin());
+    }
+
     match /users/{userId} {
       allow read: if isSelf(userId);
       allow create: if isSelf(userId) && doesNotWritePremiumAIFields();
@@ -77,6 +111,29 @@ service cloud.firestore {
       match /phoneFavourites/{contactId} {
         allow read: if isSelf(userId);
         allow write: if isSelf(userId);
+      }
+
+      // Durable notification inbox. Cloud Functions create rows from trusted
+      // engagement/DM events; the owner may only acknowledge or dismiss them.
+      // Clients cannot invent a row that looks like another person's action,
+      // rewrite its target, or delete notification history out from under a
+      // second signed-in device.
+      match /notifications/{notificationId} {
+        allow read: if isSelf(userId);
+        allow create, delete: if false;
+        allow update: if isSelf(userId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'isUnread', 'readAt', 'isDismissed', 'dismissedAt'
+          ])
+          && request.resource.data.get('isUnread', false) is bool
+          && request.resource.data.get('isDismissed', false) is bool;
+      }
+
+      // The exact point selected on the map is account-private. Public post
+      // documents carry at most a validated 0.001-degree map cell, while this
+      // owner-only record preserves the true target for Poplur mechanics.
+      match /postLocations/{postId} {
+        allow read, create, update, delete: if isSelf(userId);
       }
     }
 
@@ -291,8 +348,13 @@ service cloud.firestore {
       allow read: if true;
       allow create: if signedIn()
         && (request.resource.data.userID == request.auth.uid
-          || request.resource.data.userId == request.auth.uid);
-      allow update, delete: if signedIn()
+          || request.resource.data.userId == request.auth.uid)
+        && validPostOrigin(request.auth.uid);
+      allow update: if signedIn()
+        && (resource.data.userID == request.auth.uid
+          || resource.data.userId == request.auth.uid)
+        && validPostOrigin(request.auth.uid);
+      allow delete: if signedIn()
         && (resource.data.userID == request.auth.uid
           || resource.data.userId == request.auth.uid);
 

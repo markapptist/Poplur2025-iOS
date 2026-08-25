@@ -379,7 +379,7 @@ final class PostUploadService {
         return (
             postID,
             "public",
-            nextLocationVisibility == "exact" ? "exact" : "approximate",
+            nextLocationVisibility == "hidden" ? "hidden" : "approximate",
             nextRightsAttestationVersion
         )
     }
@@ -625,8 +625,6 @@ final class PostUploadService {
         rightsAttestationVersion: String?
     ) async throws {
         var post: [String: Any] = [
-            "latitude": coordinate.latitude,
-            "longitude": coordinate.longitude,
             "mediaURL": mediaURL,
             "mediaType": mediaType,
             "radius": radiusMeters,
@@ -649,6 +647,21 @@ final class PostUploadService {
             )
         }
         post["userID"] = uid
+        let accountSnapshot = try? await Firestore.firestore()
+            .collection("users").document(uid).getDocument()
+        let account = accountSnapshot?.data()
+        let accountHidesOrigin = account?["privateAccount"] as? Bool == true
+            || account?["ghostMode"] as? Bool == true
+        let effectiveVisibility = accountHidesOrigin ? "hidden" : locationVisibility
+        post["locationVisibility"] = effectiveVisibility
+        if effectiveVisibility == "approximate" {
+            let latitudeCell = Int((coordinate.latitude * 1_000).rounded())
+            let longitudeCell = Int((coordinate.longitude * 1_000).rounded())
+            post["latitude"] = Double(latitudeCell) / 1_000
+            post["longitude"] = Double(longitudeCell) / 1_000
+            post["latitudeCell"] = latitudeCell
+            post["longitudeCell"] = longitudeCell
+        }
         if let displayName = Auth.auth().currentUser?.displayName, !displayName.isEmpty {
             post["username"] = displayName
         }
@@ -663,7 +676,17 @@ final class PostUploadService {
             post["rightsAttestedAtMillis"] = Int64(Date().timeIntervalSince1970 * 1000)
         }
 
-        try await Firestore.firestore().collection("posts").document(postID).setData(post)
+        let database = Firestore.firestore()
+        let batch = database.batch()
+        batch.setData(post, forDocument: database.collection("posts").document(postID))
+        batch.setData([
+            "latitude": coordinate.latitude,
+            "longitude": coordinate.longitude,
+            "createdAt": FieldValue.serverTimestamp(),
+            "source": "post-upload"
+        ], forDocument: database.collection("users").document(uid)
+            .collection("postLocations").document(postID), merge: true)
+        try await batch.commit()
     }
 
     private static func posterJPEG(for videoURL: URL) -> Data? {

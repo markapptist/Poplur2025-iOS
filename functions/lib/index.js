@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.poplurAiApi = exports.cameraSceneScan = exports.premiumAiAssist = exports.generateRetroGame = exports.meshyStatus = exports.meshyGenerate = exports.notifyOnDirectMessage = exports.notifyOnEngagement = exports.poplurPassOnProfileChange = exports.poplurPassWebService = exports.poplurOwnedCards = exports.poplurWalletPass = exports.verifyCardPurchase = void 0;
+exports.poplurAiApi = exports.cameraSceneScan = exports.premiumAiAssist = exports.generateRetroGame = exports.meshyStatus = exports.meshyGenerate = exports.setAccountLocationPrivacy = exports.notifyOnDirectMessage = exports.notifyOnEngagement = exports.poplurPassOnProfileChange = exports.poplurPassWebService = exports.poplurOwnedCards = exports.poplurWalletPass = exports.verifyCardPurchase = void 0;
 const sdk_1 = __importDefault(require("@anthropic-ai/sdk"));
 const admin = __importStar(require("firebase-admin"));
 const firebase_functions_1 = require("firebase-functions");
@@ -56,6 +56,8 @@ var engagementNotifications_1 = require("./engagementNotifications");
 Object.defineProperty(exports, "notifyOnEngagement", { enumerable: true, get: function () { return engagementNotifications_1.notifyOnEngagement; } });
 var directMessageNotifications_1 = require("./directMessageNotifications");
 Object.defineProperty(exports, "notifyOnDirectMessage", { enumerable: true, get: function () { return directMessageNotifications_1.notifyOnDirectMessage; } });
+var accountPrivacy_1 = require("./accountPrivacy");
+Object.defineProperty(exports, "setAccountLocationPrivacy", { enumerable: true, get: function () { return accountPrivacy_1.setAccountLocationPrivacy; } });
 var meshyModels_1 = require("./meshyModels");
 Object.defineProperty(exports, "meshyGenerate", { enumerable: true, get: function () { return meshyModels_1.meshyGenerate; } });
 Object.defineProperty(exports, "meshyStatus", { enumerable: true, get: function () { return meshyModels_1.meshyStatus; } });
@@ -872,7 +874,8 @@ async function handlePublishGeneratedJob(uid, jobId, req, res) {
     const radiusMeters = positiveInt(body.radiusMeters, 5000);
     const caption = optionalStringField(body.caption, 2000);
     const jobRef = db.collection("aiGenerationJobs").doc(jobId);
-    const jobSnapshot = await jobRef.get();
+    const userRef = db.collection("users").doc(uid);
+    const [jobSnapshot, userSnapshot] = await Promise.all([jobRef.get(), userRef.get()]);
     const job = jobSnapshot.data();
     if (!jobSnapshot.exists || !job || job.userId !== uid) {
         throw httpError(404, "job_not_found", "AI job not found.");
@@ -884,7 +887,11 @@ async function handlePublishGeneratedJob(uid, jobId, req, res) {
     const postRef = db.collection("posts").doc();
     const outputAssetIds = Array.isArray(job.outputAssetIds) ? job.outputAssetIds : [];
     const now = firestore_1.FieldValue.serverTimestamp();
-    await postRef.set({
+    const account = userSnapshot.data();
+    const hiddenOrigin = account?.privateAccount === true || account?.ghostMode === true;
+    const latitudeCell = Math.round(latitude * 1_000);
+    const longitudeCell = Math.round(longitude * 1_000);
+    const post = {
         userId: uid,
         userID: uid,
         aiGenerated: true,
@@ -893,8 +900,8 @@ async function handlePublishGeneratedJob(uid, jobId, req, res) {
         channelId: chosenChannelId,
         originalChannelId: channelId,
         channelReviewStatus: chosenChannelId === channelId ? "approved" : "rerouted",
-        latitude,
-        longitude,
+        audience: "public",
+        locationVisibility: hiddenOrigin ? "hidden" : "approximate",
         radiusMeters,
         organicRadiusMeters: radiusMeters,
         boostedRadiusMeters: 0,
@@ -902,12 +909,27 @@ async function handlePublishGeneratedJob(uid, jobId, req, res) {
         caption: caption ?? job.outputText ?? "",
         createdAt: now,
         updatedAt: now,
+    };
+    if (!hiddenOrigin) {
+        post.latitude = latitudeCell / 1_000;
+        post.longitude = longitudeCell / 1_000;
+        post.latitudeCell = latitudeCell;
+        post.longitudeCell = longitudeCell;
+    }
+    const publishBatch = db.batch();
+    publishBatch.set(postRef, post);
+    publishBatch.set(userRef.collection("postLocations").doc(postRef.id), {
+        latitude,
+        longitude,
+        createdAt: now,
+        source: "ai-generated-post",
     });
-    await jobRef.set({
+    publishBatch.set(jobRef, {
         publishedPostId: postRef.id,
         publishedChannelId: chosenChannelId,
         updatedAt: now,
     }, { merge: true });
+    await publishBatch.commit();
     res.status(200).json({
         postId: postRef.id,
         chosenChannelId,

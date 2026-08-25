@@ -173,7 +173,7 @@ struct FeedStylePostView: View {
                             .foregroundColor(.black.opacity(0.6))
                             .poplurTextShader(intensity: 0.44)
                     } else {
-                        Text(String(format: "%.2f, %.2f", post.latitude, post.longitude))
+                        Text("Approximate map area")
                             .font(.system(size: 11, design: .monospaced))
                             .foregroundColor(.black.opacity(0.5))
                             .poplurTextShader(intensity: 0.42)

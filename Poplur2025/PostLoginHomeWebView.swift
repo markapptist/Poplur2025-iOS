@@ -6,6 +6,7 @@ import Photos
 import UIKit
 import FirebaseAuth
 import FirebaseFirestore
+import FirebaseFunctions
 import FirebaseStorage
 import UserNotifications
 import ImageIO
@@ -1074,6 +1075,120 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                         )
                     }
                 }
+                if type == "notificationsRequested" {
+                    Task { @MainActor [weak self] in
+                        let rows = await PoplurNotificationCenter.shared.refreshServerInbox()
+                        self?.pushNotificationInbox(rows)
+                    }
+                }
+                if type == "notificationsRead" {
+                    Task { @MainActor [weak self] in
+                        PoplurNotificationCenter.shared.markAllRead()
+                        self?.pushNotificationInbox(PoplurNotificationCenter.shared.notifications)
+                    }
+                }
+                if type == "notificationDismissed", let id = body["id"] as? String {
+                    Task { @MainActor [weak self] in
+                        await PoplurNotificationCenter.shared.dismissNotifications(ids: [id])
+                        self?.pushNotificationInbox(PoplurNotificationCenter.shared.notifications)
+                    }
+                }
+                if type == "notificationsCleared", let ids = body["ids"] as? [String] {
+                    Task { @MainActor [weak self] in
+                        await PoplurNotificationCenter.shared.dismissNotifications(ids: ids)
+                        self?.pushNotificationInbox(PoplurNotificationCenter.shared.notifications)
+                    }
+                }
+                if type == "requestAccountPrivacy", let webView = bridge.webView {
+                    Task { [weak self] in
+                        guard let self else { return }
+                        guard let uid = Auth.auth().currentUser?.uid else {
+                            await MainActor.run {
+                                self.pushAccountPrivacy(
+                                    privateAccount: false,
+                                    ghostMode: false,
+                                    ok: false,
+                                    message: "Sign in to load privacy.",
+                                    into: webView
+                                )
+                            }
+                            return
+                        }
+                        let snapshot = try? await Firestore.firestore()
+                            .collection("users").document(uid).getDocument()
+                        let data = snapshot?.data()
+                        let privateAccount = data?["privateAccount"] as? Bool == true
+                        let ghostMode = data?["ghostMode"] as? Bool == true
+                        do {
+                            let result = try await Functions.functions(region: "us-central1")
+                                .httpsCallable("setAccountLocationPrivacy")
+                                .call([
+                                    "privateAccount": privateAccount,
+                                    "ghostMode": ghostMode
+                                ])
+                            let settled = result.data as? [String: Any]
+                            await MainActor.run {
+                                self.pushAccountPrivacy(
+                                    privateAccount: settled?["privateAccount"] as? Bool ?? privateAccount,
+                                    ghostMode: settled?["ghostMode"] as? Bool ?? ghostMode,
+                                    into: webView
+                                )
+                            }
+                        } catch {
+                            await MainActor.run {
+                                self.pushAccountPrivacy(
+                                    privateAccount: privateAccount,
+                                    ghostMode: ghostMode,
+                                    ok: false,
+                                    message: error.localizedDescription,
+                                    into: webView
+                                )
+                            }
+                        }
+                    }
+                }
+                if type == "accountPrivacyChanged", let webView = bridge.webView {
+                    guard let privateAccount = body["privateAccount"] as? Bool,
+                          let ghostMode = body["ghostMode"] as? Bool else {
+                        pushAccountPrivacy(
+                            privateAccount: false,
+                            ghostMode: false,
+                            ok: false,
+                            message: "Privacy settings were invalid.",
+                            into: webView
+                        )
+                        return
+                    }
+                    Task { [weak self] in
+                        guard let self else { return }
+                        do {
+                            let result = try await Functions.functions(region: "us-central1")
+                                .httpsCallable("setAccountLocationPrivacy")
+                                .call([
+                                    "privateAccount": privateAccount,
+                                    "ghostMode": ghostMode
+                                ])
+                            let settled = result.data as? [String: Any]
+                            await MainActor.run {
+                                self.pushAccountPrivacy(
+                                    privateAccount: settled?["privateAccount"] as? Bool ?? privateAccount,
+                                    ghostMode: settled?["ghostMode"] as? Bool ?? ghostMode,
+                                    into: webView
+                                )
+                            }
+                        } catch {
+                            await MainActor.run {
+                                self.pushAccountPrivacy(
+                                    privateAccount: privateAccount,
+                                    ghostMode: ghostMode,
+                                    ok: false,
+                                    message: error.localizedDescription,
+                                    into: webView
+                                )
+                            }
+                        }
+                    }
+                }
                 // The web layer's own heat probe. A WKWebView's console.log never
                 // reaches this process's stdout, so the probe hands its line to
                 // native and native prints it — that is what makes it readable
@@ -1894,6 +2009,8 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                         var profile = localProfile
                         profile["business"] =
                             (data["accountType"] as? String) == PoplurAccountType.business.rawValue
+                        profile["privateAccount"] = data["privateAccount"] as? Bool == true
+                        profile["ghostMode"] = data["ghostMode"] as? Bool == true
 
                         let username = (data["username"] as? String)?
                             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2119,6 +2236,26 @@ struct PostLoginHomeWebView: UIViewRepresentable {
             webView.evaluateJavaScript(
                 "window.poplurProfile && window.poplurProfile(\(text)); " +
                 "window.dispatchEvent(new CustomEvent('poplur-native-profile', {detail: \(text)})); true;"
+            )
+        }
+
+        private func pushAccountPrivacy(
+            privateAccount: Bool,
+            ghostMode: Bool,
+            ok: Bool = true,
+            message: String? = nil,
+            into webView: WKWebView
+        ) {
+            var payload: [String: Any] = [
+                "privateAccount": privateAccount,
+                "ghostMode": ghostMode,
+                "ok": ok
+            ]
+            if let message, !message.isEmpty { payload["message"] = message }
+            guard let data = try? JSONSerialization.data(withJSONObject: payload),
+                  let text = String(data: data, encoding: .utf8) else { return }
+            webView.evaluateJavaScript(
+                "window.dispatchEvent(new CustomEvent('poplur-native-account-privacy', {detail: \(text)})); true;"
             )
         }
 
@@ -2859,6 +2996,32 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     )
                 }
             }
+        }
+
+        @MainActor
+        private func pushNotificationInbox(_ items: [PoplurDeviceNotification]) {
+            guard let webView = bridge.webView else { return }
+            let rows: [[String: Any]] = items.map { item in
+                var row: [String: Any] = [
+                    "id": item.id,
+                    "kind": item.webKind ?? item.kind.rawValue,
+                    "title": item.title,
+                    "detail": item.detail,
+                    "createdAtMillis": item.createdAt.timeIntervalSince1970 * 1_000,
+                    "unread": item.isUnread
+                ]
+                if let actorHandle = item.actorHandle { row["actorHandle"] = actorHandle }
+                if let postId = item.postId { row["postId"] = postId }
+                if let threadId = item.threadId { row["threadId"] = threadId }
+                return row
+            }
+            let payload: [String: Any] = [
+                "type": "poplurNotifications",
+                "notifications": rows
+            ]
+            guard let data = try? JSONSerialization.data(withJSONObject: payload),
+                  let json = String(data: data, encoding: .utf8) else { return }
+            webView.evaluateJavaScript("window.postMessage(\(json), '*'); true;", completionHandler: nil)
         }
 
         private func signalHomeReady() {
