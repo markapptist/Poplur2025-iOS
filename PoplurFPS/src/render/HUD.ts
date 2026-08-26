@@ -2,6 +2,7 @@ import { SCREEN_W, SCREEN_H, WEAPONS, AMMO_TYPES } from '../game/constants.ts';
 import type { Player } from '../game/Player.ts';
 import type { Assets } from '../assets.ts';
 import type { Level } from '../game/Level.ts';
+import type { FpsDirectorSession } from '../game/Game.ts';
 import { MAP_W, MAP_H } from '../game/constants.ts';
 
 const PINK = '#ff4db8';
@@ -10,6 +11,8 @@ const GREEN = '#00ff88';
 const RED   = '#ff3333';
 
 interface HUDStatus {
+  missionName: string;
+  missionObjective: string;
   objective: string;
   remainingEnemies: number;
   totalEnemies: number;
@@ -18,6 +21,7 @@ interface HUDStatus {
   missionBanner: number;
   emptyWeaponBanner: number;
   externalController: boolean;
+  director: FpsDirectorSession | null;
   bossHealth: { current: number; max: number } | null;
 }
 
@@ -170,7 +174,7 @@ export function renderHUD(
 
   // — Top HUD: score / kills / time —
   ctx.fillStyle = 'rgba(10,0,20,0.7)';
-  ctx.fillRect(0, 0, W, 22);
+  ctx.fillRect(0, 0, W, status.director ? 53 : 38);
   ctx.font = 'bold 13px monospace';
 
   ctx.fillStyle = GOLD;
@@ -187,18 +191,31 @@ export function renderHUD(
 
   ctx.font = 'bold 9px monospace';
   ctx.fillStyle = 'rgba(255,255,255,0.78)';
-  ctx.fillText(`MISSION 01  //  ${status.objective}`, 8, 34);
+  drawFittedText(ctx, `${status.missionName}  //  ${status.objective}`, 8, 34, W - 104);
+
+  if (status.director) {
+    ctx.font = 'bold 8px monospace';
+    ctx.fillStyle = status.director.accentColor;
+    const source = status.director.source === 'ai' ? 'AI DIRECTOR' : 'MISSION DIRECTOR';
+    drawFittedText(
+      ctx,
+      `${source}: ${status.director.title} [${status.director.difficulty.toUpperCase()}]  //  ${status.director.specialMechanic}`,
+      8,
+      48,
+      W - 104,
+    );
+  }
 
   if (status.bossHealth) {
     const bossW = Math.min(220, W * 0.48);
     const bossX = W / 2 - bossW / 2;
-    const bossY = 46;
+    const bossY = status.director ? 66 : 50;
     ctx.fillStyle = 'rgba(8,0,18,.82)';
     ctx.fillRect(bossX - 5, bossY - 14, bossW + 10, 27);
     ctx.font = 'bold 9px monospace';
     ctx.fillStyle = '#ffd76c';
     ctx.textAlign = 'center';
-    ctx.fillText('ARCADE OVERLORD', W / 2, bossY - 3);
+    ctx.fillText((status.director?.rival ?? 'ARCADE OVERLORD').toUpperCase(), W / 2, bossY - 3);
     ctx.fillStyle = '#240515';
     ctx.fillRect(bossX, bossY + 2, bossW, 7);
     ctx.fillStyle = '#ff2d86';
@@ -262,20 +279,31 @@ export function renderHUD(
 
   if (status.missionBanner > 0) {
     const alpha = Math.min(1, status.missionBanner, (3.6 - status.missionBanner) * 2.5);
-    const panelW = Math.min(W - 24, 300);
+    const panelW = Math.min(W - 24, status.director ? 420 : 320);
     const panelY = H * 0.2;
+    const panelH = status.director ? 96 : 48;
     ctx.globalAlpha = alpha;
     ctx.fillStyle = 'rgba(8,0,18,.82)';
-    ctx.fillRect(W / 2 - panelW / 2, panelY, panelW, 48);
-    ctx.strokeStyle = PINK;
-    ctx.strokeRect(W / 2 - panelW / 2, panelY, panelW, 48);
+    ctx.fillRect(W / 2 - panelW / 2, panelY, panelW, panelH);
+    ctx.strokeStyle = status.director?.accentColor ?? PINK;
+    ctx.strokeRect(W / 2 - panelW / 2, panelY, panelW, panelH);
     ctx.textAlign = 'center';
     ctx.font = 'bold 11px monospace';
-    ctx.fillStyle = PINK;
-    ctx.fillText('MISSION 01', W / 2, panelY + 17);
+    ctx.fillStyle = status.director?.accentColor ?? PINK;
+    ctx.fillText(status.missionName, W / 2, panelY + 17);
     ctx.font = 'bold 12px monospace';
     ctx.fillStyle = '#fff';
-    ctx.fillText('CLEAR THE ARCADE', W / 2, panelY + 36);
+    drawFittedText(ctx, status.missionObjective, W / 2, panelY + 36, panelW - 18, 'center');
+    if (status.director) {
+      ctx.font = 'bold 9px monospace';
+      ctx.fillStyle = status.director.accentColor;
+      drawFittedText(ctx, `${status.director.title}  //  ${status.director.theme}`, W / 2, panelY + 54, panelW - 18, 'center');
+      ctx.font = '9px monospace';
+      ctx.fillStyle = '#fff';
+      drawFittedText(ctx, `MOD: ${status.director.specialMechanic}`, W / 2, panelY + 71, panelW - 18, 'center');
+      ctx.fillStyle = 'rgba(255,255,255,.72)';
+      drawFittedText(ctx, `BONUS: ${status.director.powerUps.join(' + ')}`, W / 2, panelY + 87, panelW - 18, 'center');
+    }
     ctx.textAlign = 'left';
     ctx.globalAlpha = 1;
   }
@@ -337,7 +365,7 @@ function renderMinimap(
   ctx.stroke();
 }
 
-export function renderDeathScreen(ctx: CanvasRenderingContext2D, alpha: number): void {
+export function renderDeathScreen(ctx: CanvasRenderingContext2D, alpha: number, bestScore: number): void {
   const W = SCREEN_W, H = SCREEN_H;
   ctx.fillStyle = `rgba(150,0,0,${alpha * 0.65})`;
   ctx.fillRect(0, 0, W, H);
@@ -349,6 +377,9 @@ export function renderDeathScreen(ctx: CanvasRenderingContext2D, alpha: number):
   ctx.font = 'bold 20px monospace';
   ctx.fillStyle = '#fff';
   ctx.fillText('PRESS START TO RESTART', W / 2, H / 2 + 30);
+  ctx.font = 'bold 14px monospace';
+  ctx.fillStyle = GOLD;
+  ctx.fillText(`BEST SCORE: ${bestScore}`, W / 2, H / 2 + 58);
   ctx.textAlign = 'left';
 }
 
@@ -366,7 +397,13 @@ export function renderPauseScreen(ctx: CanvasRenderingContext2D): void {
   ctx.textAlign = 'left';
 }
 
-export function renderWinScreen(ctx: CanvasRenderingContext2D, score: number, kills: number): void {
+export function renderWinScreen(
+  ctx: CanvasRenderingContext2D,
+  score: number,
+  kills: number,
+  bestScore: number,
+  wins: number,
+): void {
   const W = SCREEN_W, H = SCREEN_H;
   ctx.fillStyle = 'rgba(0,0,0,0.75)';
   ctx.fillRect(0, 0, W, H);
@@ -378,8 +415,32 @@ export function renderWinScreen(ctx: CanvasRenderingContext2D, score: number, ki
   ctx.fillStyle = PINK;
   ctx.fillText(`SCORE: ${score}`, W / 2, H / 2);
   ctx.fillText(`KILLS: ${kills}`, W / 2, H / 2 + 36);
+  ctx.font = 'bold 14px monospace';
+  ctx.fillStyle = GOLD;
+  ctx.fillText(`BEST: ${bestScore}  //  WINS: ${wins}`, W / 2, H / 2 + 64);
   ctx.font = '16px monospace';
   ctx.fillStyle = '#fff';
-  ctx.fillText('PRESS START TO CONTINUE', W / 2, H / 2 + 80);
+  ctx.fillText('PRESS START TO CONTINUE', W / 2, H / 2 + 96);
   ctx.textAlign = 'left';
+}
+
+function drawFittedText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  maxWidth: number,
+  align: CanvasTextAlign = 'left',
+): void {
+  const previousAlign = ctx.textAlign;
+  const width = Math.max(16, maxWidth);
+  ctx.textAlign = align;
+  if (ctx.measureText(text).width <= width) {
+    ctx.fillText(text, x, y);
+  } else {
+    let fitted = text;
+    while (fitted.length > 1 && ctx.measureText(`${fitted}…`).width > width) fitted = fitted.slice(0, -1);
+    ctx.fillText(`${fitted}…`, x, y);
+  }
+  ctx.textAlign = previousAlign;
 }

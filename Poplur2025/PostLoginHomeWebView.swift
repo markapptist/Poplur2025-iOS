@@ -1248,12 +1248,14 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     let otherUID = (body["otherId"] as? String) ?? ""
                     let callerName = (body["callerName"] as? String)
                     let video = (body["video"] as? Bool) ?? false
+                    let context = (body["context"] as? String) == "house" ? "house" : nil
                     let requestID = (body["requestId"] as? String) ?? ""
                     Task { @MainActor [weak self, weak webView] in
                         let callID = await PoplurCallSignalling.shared.startCall(
                             to: otherUID,
                             callerName: callerName,
-                            video: video
+                            video: video,
+                            context: context
                         )
                         guard let self, let webView, self.bridge.webView === webView else { return }
                         self.pushWalletPassMessage(
@@ -1323,13 +1325,19 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     let radiusKm = (body["radiusKm"] as? NSNumber)?.doubleValue
                     let lat = (body["latitude"] as? NSNumber)?.doubleValue
                     let lng = (body["longitude"] as? NSNumber)?.doubleValue
+                    let requestID = body["requestId"] as? String
                     Task { @MainActor [weak self, weak webView] in
                         let contacts = await PoplurPhoneContacts.shared.contacts(
                             radiusKm: radiusKm, latitude: lat, longitude: lng
                         )
                         guard let self, let webView, self.bridge.webView === webView else { return }
+                        var response: [String: Any] = [
+                            "type": "poplurPhoneContacts",
+                            "contacts": contacts,
+                        ]
+                        if let requestID { response["requestId"] = requestID }
                         self.pushWalletPassMessage(
-                            ["type": "poplurPhoneContacts", "contacts": contacts],
+                            response,
                             into: webView
                         )
                     }
@@ -2493,10 +2501,16 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                                     ?? (data["mediaURL"] as? String))?
                                     .trimmingCharacters(in: .whitespacesAndNewlines),
                                   !mediaURL.isEmpty else { return nil }
+                            let lowerURL = mediaURL.lowercased()
+                            let inferredType = lowerURL.contains(".mp4")
+                                || lowerURL.contains(".mov")
+                                || lowerURL.contains(".m4v")
+                                || lowerURL.contains(".webm")
+                                ? "video" : "photo"
                             var row: [String: Any] = [
                                 "id": document.documentID,
                                 "mediaURL": mediaURL,
-                                "mediaType": (data["mediaType"] as? String) ?? "video",
+                                "mediaType": (data["mediaType"] as? String) ?? inferredType,
                                 "createdAtMillis": createdMillis(data),
                                 "username": (data["username"] as? String) ?? "Poplur user",
                                 "channelId": (data["channelId"] as? String) ?? "live"

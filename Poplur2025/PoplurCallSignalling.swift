@@ -33,12 +33,17 @@ final class PoplurCallSignalling {
     /// Opens a call and starts relaying. The OFFER arrives later, from the page.
     /// `video` is only the receiver's UI/media intent; WebRTC media remains
     /// entirely in the page once the offer is exchanged.
-    func startCall(to otherUID: String, callerName: String? = nil, video: Bool = false) async -> String? {
+    func startCall(
+        to otherUID: String,
+        callerName: String? = nil,
+        video: Bool = false,
+        context: String? = nil
+    ) async -> String? {
         guard let uid, !otherUID.isEmpty, otherUID != uid else { return nil }
         let ref = db.collection("calls").document()
         let displayName = callerName ?? Auth.auth().currentUser?.displayName ?? "Unknown"
         do {
-            try await ref.setData([
+            var payload: [String: Any] = [
                 "participants": [uid, otherUID].sorted(),
                 "callerId": uid,
                 "callerName": displayName,
@@ -55,7 +60,12 @@ final class PoplurCallSignalling {
                 // for. This tag lets both Agora listeners recognize and skip
                 // a call that was never theirs.
                 "provider": "webrtc",
-            ])
+            ]
+            // Optional and backward-compatible: legacy/ordinary calls omit
+            // the field, while House calls let the recipient hand primary
+            // controls to the in-room surface after acceptance.
+            if context == "house" { payload["context"] = "house" }
+            try await ref.setData(payload)
         } catch {
             print("[PoplurCall] could not open call: \(error.localizedDescription)")
             return nil
@@ -205,6 +215,7 @@ final class PoplurCallSignalling {
                         "callerId": data["callerId"] as? String ?? "",
                         "callerName": data["callerName"] as? String ?? "Unknown",
                         "video": data["video"] as? Bool ?? false,
+                        "context": data["context"] as? String ?? "default",
                     ])
                 }
             }

@@ -65,12 +65,13 @@ service cloud.firestore {
     function hiddenPostOrigin() {
       return request.resource.data.get('locationVisibility', 'hidden') == 'hidden'
         && !request.resource.data.keys().hasAny([
-          'latitude', 'longitude', 'latitudeCell', 'longitudeCell'
+          'latitude', 'longitude', 'latitudeCell', 'longitudeCell', 'lat', 'lng'
         ]);
     }
 
     function approximatePostOrigin() {
       return request.resource.data.get('locationVisibility', '') == 'approximate'
+        && !request.resource.data.keys().hasAny(['lat', 'lng'])
         && request.resource.data.latitude is number
         && request.resource.data.longitude is number
         && request.resource.data.latitudeCell is int

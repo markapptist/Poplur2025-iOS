@@ -31,6 +31,7 @@ let locked = false;
 let externalInteractCommands = 0;
 let externalPauseCommands = 0;
 let externalWeaponCommands = 0;
+let externalFireReleaseTimer: number | null = null;
 
 const KEY_MAP: Record<string, keyof InputState> = {
   KeyW: 'w', ArrowUp: 'w',
@@ -71,32 +72,52 @@ export function initInput(canvas: HTMLCanvasElement): void {
         state.axisTurn = clampAxis(message.x);
         break;
       case 'fire':
-        state.fire = message.pressed === true;
+        if (externalFireReleaseTimer !== null) window.clearTimeout(externalFireReleaseTimer);
+        externalFireReleaseTimer = null;
+        if (message.pressed === true) {
+          state.fire = true;
+        } else {
+          // Match the built-in arcade button: even the quickest controller tap
+          // must survive long enough for at least one game frame to consume it.
+          externalFireReleaseTimer = window.setTimeout(() => {
+            state.fire = false;
+            externalFireReleaseTimer = null;
+          }, 80);
+        }
         break;
       case 'interact':
-        if (message.pressed === true) externalInteractCommands++;
+        if (message.pressed === true) queueInteractCommand();
         break;
       case 'pause':
-        if (message.pressed === true) externalPauseCommands++;
+        if (message.pressed === true) externalPauseCommands = boundedQueue(externalPauseCommands);
         break;
       case 'weaponNext':
-        if (message.pressed === true) externalWeaponCommands++;
+        if (message.pressed === true) externalWeaponCommands = boundedQueue(externalWeaponCommands);
         break;
     }
   });
 
-  const releaseExternalControls = () => {
+  const releaseAllControls = () => {
+    if (externalFireReleaseTimer !== null) window.clearTimeout(externalFireReleaseTimer);
+    externalFireReleaseTimer = null;
+    state.w = state.s = state.a = state.d = false;
+    state.left = state.right = false;
+    state.weapon1 = state.weapon2 = state.weapon3 = state.weapon4 = state.weapon5 = false;
     state.axisFwd = 0;
     state.axisStrafe = 0;
     state.axisTurn = 0;
+    state.mouseDX = 0;
     state.fire = false;
     state.interact = false;
     state.escape = false;
     state.weaponNext = false;
+    externalInteractCommands = 0;
+    externalPauseCommands = 0;
+    externalWeaponCommands = 0;
   };
-  window.addEventListener('blur', releaseExternalControls);
+  window.addEventListener('blur', releaseAllControls);
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) releaseExternalControls();
+    if (document.hidden) releaseAllControls();
   });
 
   window.addEventListener('keydown', e => {
@@ -121,6 +142,7 @@ export function initInput(canvas: HTMLCanvasElement): void {
 
   document.addEventListener('pointerlockchange', () => {
     locked = document.pointerLockElement === canvas;
+    if (!locked) state.fire = false;
   });
 
   document.addEventListener('mousemove', e => {
@@ -130,7 +152,7 @@ export function initInput(canvas: HTMLCanvasElement): void {
   canvas.addEventListener('mousedown', e => {
     if (locked && e.button === 0) state.fire = true;
   });
-  canvas.addEventListener('mouseup', e => {
+  document.addEventListener('mouseup', e => {
     if (e.button === 0) state.fire = false;
   });
 
@@ -257,6 +279,11 @@ export function consumeInteractCommand(): boolean {
   return true;
 }
 
+/** Queue one edge-triggered ACT command without synthesizing a held key. */
+export function queueInteractCommand(): void {
+  externalInteractCommands = boundedQueue(externalInteractCommands);
+}
+
 export function consumePauseCommand(): boolean {
   if (externalPauseCommands <= 0) return false;
   externalPauseCommands--;
@@ -274,4 +301,10 @@ export function isPointerLocked(): boolean { return locked; }
 export function showMobileControls(visible = true): void {
   const mc = document.getElementById('mobile-controls');
   if (mc) mc.style.display = visible ? 'flex' : 'none';
+}
+
+function boundedQueue(current: number): number {
+  // A controller or hostile message sender cannot create minutes of phantom
+  // actions; four edges cover every legitimate frame-throttling burst.
+  return Math.min(4, current + 1);
 }

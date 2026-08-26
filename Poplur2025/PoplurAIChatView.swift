@@ -473,10 +473,12 @@ final class PoplurAIChatViewModel: ObservableObject {
 
     private func callImageGeneration(prompt: String, source: UIImage?) async throws -> UIImage {
         guard let uid = Auth.auth().currentUser?.uid else { throw PAIChatError.notAuthenticated }
+        let sourceImage = try inlineSourceImage(source)
         let req = AIGenerationRequest(
-            userId: uid, plan: .creator, contentType: .edit,
+            userId: uid, plan: .creator, contentType: sourceImage == nil ? .image : .edit,
             prompt: prompt, inputAssetIds: [], publishMetadata: nil,
-            campaignAssetTypes: [], metadata: ["client": "ios", "surface": "ai_chat"]
+            campaignAssetTypes: [], metadata: ["client": "ios", "surface": "ai_chat"],
+            sourceImage: sourceImage
         )
         let resp = try await PoplurAIBackendClient().generate(req)
         guard let url = resp.outputUrl else { throw PAIChatError.generationFailed }
@@ -498,6 +500,26 @@ final class PoplurAIChatViewModel: ObservableObject {
         return UIImage(cgImage: cgImage)
     }
 
+    /// Keep a capture local until the user explicitly requests an edit, then
+    /// upload one compressed copy with that request. The raw photo never
+    /// enters the job record or app logs.
+    private func inlineSourceImage(_ image: UIImage?) throws -> AIInlineImage? {
+        guard let image else { return nil }
+        var quality: CGFloat = 0.84
+        guard var data = image.jpegData(compressionQuality: quality) else {
+            throw PAIChatError.sourceEncodingFailed
+        }
+        while data.count > 900_000 && quality > 0.42 {
+            quality -= 0.12
+            guard let next = image.jpegData(compressionQuality: quality) else {
+                throw PAIChatError.sourceEncodingFailed
+            }
+            data = next
+        }
+        guard data.count <= 1_000_000 else { throw PAIChatError.sourceTooLarge }
+        return AIInlineImage(data: data.base64EncodedString(), mimeType: "image/jpeg")
+    }
+
     private func callVideoGeneration(prompt: String) async throws -> URL {
         guard let uid = Auth.auth().currentUser?.uid else { throw PAIChatError.notAuthenticated }
         let req = AIGenerationRequest(
@@ -512,12 +534,14 @@ final class PoplurAIChatViewModel: ObservableObject {
 }
 
 enum PAIChatError: LocalizedError {
-    case notAuthenticated, generationFailed, downloadFailed
+    case notAuthenticated, generationFailed, downloadFailed, sourceEncodingFailed, sourceTooLarge
     var errorDescription: String? {
         switch self {
         case .notAuthenticated: return "You need to be signed in to use Poplur AI."
         case .generationFailed: return "AI generation failed."
         case .downloadFailed:   return "Could not download the result."
+        case .sourceEncodingFailed: return "Could not prepare this image for AI editing."
+        case .sourceTooLarge: return "This image is too large to send to AI."
         }
     }
 }
@@ -580,6 +604,7 @@ struct PoplurAIChatView: View {
                 // Conversation — white card for prelogin
                 PAIConversationScroll(vm: vm, onPost: { img, url in onPost?(img, url); onDismiss() })
                     .paiCard(radius: 18, enabled: theme.isFullCard)
+                    .layoutPriority(1)
 
                 if !theme.isCard {
                     Divider().overlay(pinkAI.opacity(0.14))
@@ -712,6 +737,7 @@ private struct PAIConversationScroll: View {
                 .padding(.horizontal, 16)
                 .padding(.bottom, 16)
             }
+            .scrollDismissesKeyboard(.interactively)
             .onChange(of: vm.messages.count) { _, _ in
                 withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) {
                     proxy.scrollTo("pai_bottom", anchor: .bottom)
@@ -1427,6 +1453,11 @@ private struct PAIInputBar: View {
                             .padding(.horizontal, 10)
                             .padding(.vertical, 4)
                     }
+                    // The shape in this ZStack is intentionally flexible. Without a
+                    // cap it competes with the conversation ScrollView and expands to
+                    // fill most of the screen, leaving the actual text editor stranded
+                    // at the top of a large untappable-looking panel.
+                    .frame(minHeight: 44, idealHeight: 44, maxHeight: 108)
 
                     // Mode pills: Search + Smart
                     HStack(spacing: 8) {

@@ -19,6 +19,8 @@ export { notifyOnEngagement } from "./engagementNotifications";
 export { notifyOnDirectMessage } from "./directMessageNotifications";
 export { setAccountLocationPrivacy } from "./accountPrivacy";
 export { meshyGenerate, meshyStatus } from "./meshyModels";
+export { wardrobeGarmentApi } from "./wardrobeGarments";
+export { liveNewsApi, refreshLiveNews } from "./liveNews";
 export { generateRetroGame } from "./retro/generateRetroGame";
 
 if (admin.apps.length === 0) admin.initializeApp();
@@ -55,6 +57,11 @@ type ReserveJobInput = {
   location?: Record<string, unknown>;
   channelId?: string;
   metadata: Record<string, unknown>;
+};
+
+type SourceImage = {
+  data: string;
+  mimeType: "image/jpeg" | "image/png" | "image/webp";
 };
 
 type UsageReservation = {
@@ -493,6 +500,7 @@ async function handleGenerate(
   const body = objectBody(req);
   const prompt = stringField(body.prompt, "prompt", 4000);
   const sourceAssetIds = stringArrayField(body.sourceAssetIds);
+  const sourceImage = optionalSourceImage(body);
   const location = plainObjectField(body.location);
   const channelId = optionalStringField(body.channelId, 120);
   const metadata = plainObjectField(body.metadata) ?? {};
@@ -515,6 +523,7 @@ async function handleGenerate(
       contentType,
       prompt,
       sourceAssetIds,
+      sourceImage,
       metadata,
     });
     const completed = await completeGenerationJob(uid, jobId, cost, result);
@@ -724,6 +733,31 @@ async function handleGameConfig(uid: string, req: Request, res: Response): Promi
   const userMessage = mode === "maker" && prompt
     ? `Create a game based on this idea: ${prompt}`
     : "Generate a fresh, surprising game config now.";
+
+  // The client caches one session per shipped game/day, but billing protection
+  // must live on the server. A signed-in caller gets enough headroom for all
+  // three games plus retries while button mashing and scripted abuse stay
+  // bounded even if they bypass the web bundle entirely.
+  const today = new Date().toISOString().slice(0, 10);
+  const rateRef = db.collection("gameConfigRate").doc(uid);
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(rateRef);
+    const data = snapshot.data() ?? {};
+    const lastAt = data.lastAt as Timestamp | undefined;
+    const sameDay = data.day === today;
+    const usedToday = sameDay && typeof data.count === "number" ? Math.max(0, Math.floor(data.count)) : 0;
+    if (lastAt && Date.now() - lastAt.toMillis() < 4_000) {
+      throw httpError(429, "rate_limited", "Let the game director finish before asking again.");
+    }
+    if (usedToday >= 12) {
+      throw httpError(429, "daily_limit", "Today's game-director sessions are ready. Come back tomorrow for new ones.");
+    }
+    transaction.set(rateRef, {
+      day: today,
+      count: usedToday + 1,
+      lastAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+  });
 
   const message = await anthropicClient().messages.create({
     model: CLAUDE_ON_DEVICE_MODEL,
@@ -1438,6 +1472,7 @@ async function runGoogleAIProvider(input: {
   contentType: PoplurAIContentType;
   prompt: string;
   sourceAssetIds: string[];
+  sourceImage?: SourceImage;
   metadata: Record<string, unknown>;
 }): Promise<{
   status: AIJobStatus;
@@ -1462,9 +1497,15 @@ async function runGoogleAIProvider(input: {
   }
 
   const model = modelForContentType(input.contentType);
+  const sourceInput = input.sourceImage
+    ? [
+      { type: "text", text: input.prompt },
+      { type: "image", mime_type: input.sourceImage.mimeType, data: input.sourceImage.data },
+    ]
+    : input.prompt;
   const body = {
     model,
-    input: input.prompt,
+    input: sourceInput,
     background: input.contentType === "video",
     generation_config: {
       response_modalities: responseModalitiesForContentType(input.contentType),
@@ -1509,6 +1550,29 @@ async function runGoogleAIProvider(input: {
       providerStatus: extracted.providerStatus,
     },
   };
+}
+
+/**
+ * A single bounded image travels with an edit request; it is not written to a
+ * job document or logged. This keeps an unposted camera capture private while
+ * letting the provider perform genuine image-to-image editing.
+ */
+function optionalSourceImage(body: Record<string, unknown>): SourceImage | undefined {
+  const raw = plainObjectField(body.sourceImage);
+  if (!raw) return undefined;
+  const data = optionalStringField(raw.data, 1_400_000);
+  const mimeType = optionalStringField(raw.mimeType, 40);
+  if (!data || !mimeType || !/^[A-Za-z0-9+/=]+$/.test(data)) {
+    throw httpError(400, "invalid_source_image", "Send one encoded JPEG, PNG, or WebP image.");
+  }
+  if (mimeType !== "image/jpeg" && mimeType !== "image/png" && mimeType !== "image/webp") {
+    throw httpError(400, "invalid_source_image", "Use a JPEG, PNG, or WebP image for AI editing.");
+  }
+  const bytes = Buffer.from(data, "base64");
+  if (!bytes.length || bytes.length > 1_000_000) {
+    throw httpError(400, "invalid_source_image", "The AI edit source image must be 1 MB or smaller.");
+  }
+  return { data, mimeType };
 }
 
 function responseModalitiesForContentType(contentType: PoplurAIContentType): string[] {

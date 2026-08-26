@@ -1,7 +1,9 @@
 import { SCREEN_W, SCREEN_H } from '../game/constants.ts';
 import type { Assets } from '../assets.ts';
 
-export type MenuSelection = 0 | 1;  // 0=1 Player, 1=2 Player (demo)
+// The shipped game is intentionally solo. Keep the type honest so controller
+// navigation cannot select a second mode that does not exist.
+export type MenuSelection = 0;
 
 interface CabinetLayout {
   cx: number; cy: number;  // cabinet center on screen
@@ -196,8 +198,10 @@ export function renderMenuCabinet(
   if (menuImg) {
     // The pre-rendered menu art already contains HI-SCORE / START GAME /
     // 1-2 PLAYER / CREDIT baked in, so draw ONLY the image — no code-drawn
-    // text overlay (that produced a doubled/ghosted look).
+    // duplicate title overlay (that produced a doubled/ghosted look). The small
+    // solo-mode patch below only replaces the obsolete baked option block.
     ctx.drawImage(menuImg, screenX, screenY, screenW, screenH);
+    renderSoloMenuOverlay(ctx, screenX, screenY, screenW, screenH);
 
     // Blink the "insert coin" prompt strip for arcade liveliness.
     const blink = Math.floor(tickTime * 2) % 2 === 0;
@@ -218,16 +222,12 @@ export function renderMenuCabinet(
     ctx.font = `bold ${fz}px monospace`;
     ctx.textAlign = 'center';
 
-    const menuItems = ['1 PLAYER', '2 PLAYER'];
-    for (let i = 0; i < menuItems.length; i++) {
-      const itemY = screenY + screenH * (0.67 + i * 0.155);
-      const sel = i === selectedOption;
-      ctx.fillStyle = sel ? (blink ? '#ffd700' : '#ffaa00') : '#ff8cc8';
-      ctx.shadowColor = sel ? '#ffd700' : '#ff4db8';
-      ctx.shadowBlur = sel ? 6 : 0;
-      ctx.fillText(`${sel ? '▶ ' : '  '}${menuItems[i]}`, cx, itemY);
-      ctx.shadowBlur = 0;
-    }
+    const itemY = screenY + screenH * 0.74;
+    ctx.fillStyle = blink ? '#ffd700' : '#ffaa00';
+    ctx.shadowColor = '#ffd700';
+    ctx.shadowBlur = 6;
+    ctx.fillText(`${selectedOption === 0 ? '▶ ' : ''}1 PLAYER`, cx, itemY);
+    ctx.shadowBlur = 0;
 
     const hf = (screenH * 0.08) | 0;
     ctx.font = `bold ${hf}px monospace`;
@@ -346,6 +346,13 @@ function renderSuppliedCabinet(
   ctx.imageSmoothingEnabled = true;
   ctx.drawImage(cabinet, x, y, iw * scale, ih * scale);
   ctx.imageSmoothingEnabled = false;
+  renderSoloMenuOverlay(
+    ctx,
+    x + iw * bezel.x * scale,
+    y + ih * bezel.y * scale,
+    iw * bezel.w * scale,
+    ih * bezel.h * scale,
+  );
 }
 
 function renderPortraitCabinet(
@@ -437,7 +444,7 @@ function renderPortraitCabinet(
   ctx.shadowBlur = 0;
   ctx.font = `bold ${Math.max(7, W * 0.025)}px monospace`;
   ctx.fillStyle = 'rgba(255,255,255,0.72)';
-  ctx.fillText('POPLUR STRIKE // MISSION 01', W / 2, H * 0.737);
+  ctx.fillText('POPLUR STRIKE // SOLO CAMPAIGN', W / 2, H * 0.737);
   ctx.textAlign = 'left';
   ctx.restore();
 
@@ -453,6 +460,7 @@ function renderPortraitCabinet(
   }
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(mainMenu, sx, sy, sw, sh);
+  renderSoloMenuOverlay(ctx, sx, sy, sw, sh);
   if (ease < 0.2 && Math.floor(tickTime * 3) % 2 === 0) {
     ctx.fillStyle = 'rgba(255,255,255,0.05)';
     ctx.fillRect(sx, sy + sh * 0.54, sw, sh * 0.18);
@@ -472,6 +480,39 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
   ctx.lineTo(x, y + r);
   ctx.quadraticCurveTo(x, y, x + r, y);
   ctx.closePath();
+}
+
+function renderSoloMenuOverlay(
+  ctx: CanvasRenderingContext2D,
+  screenX: number,
+  screenY: number,
+  screenW: number,
+  screenH: number,
+): void {
+  // The approved cabinet art predates the actual solo implementation and has a
+  // baked-in 2 PLAYER line. Cover the option block as one coherent CRT panel,
+  // then redraw the one mode that really exists.
+  const x = screenX + screenW * 0.25;
+  const y = screenY + screenH * 0.61;
+  const w = screenW * 0.5;
+  const h = screenH * 0.27;
+  ctx.save();
+  ctx.fillStyle = 'rgba(5, 5, 61, 0.96)';
+  ctx.fillRect(x, y, w, h);
+  ctx.strokeStyle = 'rgba(62, 95, 201, 0.28)';
+  ctx.lineWidth = Math.max(1, screenH * 0.002);
+  for (let row = 1; row < 4; row++) {
+    const lineY = y + (h * row) / 4;
+    ctx.beginPath(); ctx.moveTo(x, lineY); ctx.lineTo(x + w, lineY); ctx.stroke();
+  }
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = `bold ${Math.max(9, screenH * 0.07)}px monospace`;
+  ctx.fillStyle = '#ffd66b';
+  ctx.shadowColor = '#ff9d32';
+  ctx.shadowBlur = Math.max(2, screenH * 0.012);
+  ctx.fillText('▶ 1 PLAYER', screenX + screenW / 2, y + h / 2);
+  ctx.restore();
 }
 
 export function renderLoadingScreen(ctx: CanvasRenderingContext2D, progress: number): void {

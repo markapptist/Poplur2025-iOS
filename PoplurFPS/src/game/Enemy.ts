@@ -11,6 +11,20 @@ interface EnemyDef {
   sightRange: number;
 }
 
+export interface EnemyTuning {
+  hpMultiplier: number;
+  damageMultiplier: number;
+  fireRateMultiplier: number;
+  scoreMultiplier: number;
+}
+
+const NEUTRAL_TUNING: EnemyTuning = {
+  hpMultiplier: 1,
+  damageMultiplier: 1,
+  fireRateMultiplier: 1,
+  scoreMultiplier: 1,
+};
+
 const DEFS: Record<number, EnemyDef> = {
   [SPR_SOLDIER]: { hp: 40,  speed: 2.0, damage: 8,  fireRate: 1.5, score: 100, sightRange: 12 },
   [SPR_HEAVY]:   { hp: 100, speed: 1.0, damage: 15, fireRate: 2.0, score: 300, sightRange: 10 },
@@ -44,11 +58,21 @@ export class Enemy {
 
   dead = false;
 
-  constructor(type: number, x: number, y: number) {
+  constructor(type: number, x: number, y: number, tuning: EnemyTuning = NEUTRAL_TUNING) {
     this.type = type;
     this.x = x;
     this.y = y;
-    this.def = DEFS[type] ?? DEFS[SPR_SOLDIER];
+    const base = DEFS[type] ?? DEFS[SPR_SOLDIER];
+    // Director input never supplies raw combat values. Game converts its small,
+    // validated contract into these bounded multipliers between runs, and each
+    // enemy receives a private definition so no session can mutate global data.
+    this.def = {
+      ...base,
+      hp: Math.max(1, Math.round(base.hp * clamp(tuning.hpMultiplier, 0.7, 1.35))),
+      damage: Math.max(1, Math.round(base.damage * clamp(tuning.damageMultiplier, 0.65, 1.3))),
+      fireRate: Math.max(0.25, base.fireRate * clamp(tuning.fireRateMultiplier, 0.65, 1.5)),
+      score: Math.max(1, Math.round(base.score * clamp(tuning.scoreMultiplier, 0.7, 1.55))),
+    };
     this.hp = this.def.hp;
     this.maxHp = this.def.hp;
     this.patrolAngle = Math.random() * Math.PI * 2;
@@ -72,6 +96,7 @@ export class Enemy {
   update(dt: number, player: Player, level: Level, onDamage: () => void): void {
     if (this.dead) {
       this.deathTimer += dt;
+      this.hitFlash = Math.max(0, this.hitFlash - dt * 4);
       return;
     }
 
@@ -153,4 +178,8 @@ export class Enemy {
     const dx = this.x - px, dy = this.y - py;
     return dx * dx + dy * dy;
   }
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, Number.isFinite(value) ? value : 1));
 }

@@ -155,15 +155,15 @@ struct PoplurAIStackConfig: Sendable {
     static let productionDefaults = PoplurAIStackConfig(
         providerEnabled: Dictionary(uniqueKeysWithValues: PoplurAIProvider.allCases.map { ($0, true) }),
         creditCostByContentType: [
-            .image: 5,
-            .voice: 10,
-            .music: 25,
-            .threeDModel: 50,
-            .game: 75,
-            .video: 100,
-            .edit: 100,
-            .vfx: 125,
-            .vfxVideo: 125,
+            .image: 12,
+            .voice: 8,
+            .music: 10,
+            .threeDModel: 30,
+            .game: 35,
+            .video: 45,
+            .edit: 18,
+            .vfx: 25,
+            .vfxVideo: 25,
             .coupon: 15,
             .campaign: 0
         ],
@@ -319,6 +319,13 @@ struct AIGenerationRequest: Codable, Sendable {
     var publishMetadata: AIMapPublishMetadata?
     var campaignAssetTypes: [PoplurAIContentType]
     var metadata: [String: String]
+    /** Bounded source pixels for one private image-to-image edit. */
+    var sourceImage: AIInlineImage? = nil
+}
+
+struct AIInlineImage: Codable, Sendable {
+    var data: String
+    var mimeType: String
 }
 
 struct AIProviderResponse: Codable, Sendable {
@@ -659,6 +666,12 @@ struct PoplurAIBackendClient: Sendable {
                 "requestedContentType": request.contentType.rawValue
             ]) { current, _ in current }
         ]
+        if let sourceImage = request.sourceImage {
+            body["sourceImage"] = [
+                "data": sourceImage.data,
+                "mimeType": sourceImage.mimeType,
+            ]
+        }
         if let publishMetadata = request.publishMetadata {
             body["location"] = [
                 "latitude": publishMetadata.latitude,

@@ -1,7 +1,7 @@
 import { SCREEN_W, SCREEN_H, setScreenSize } from './game/constants.ts';
-import { initInput, showMobileControls } from './input.ts';
+import { initInput, queueInteractCommand, showMobileControls } from './input.ts';
 import { loadAssets } from './assets.ts';
-import { Game } from './game/Game.ts';
+import { Game, parseFpsDirectorSession } from './game/Game.ts';
 import { renderLoadingScreen } from './render/Menu.ts';
 
 const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
@@ -45,6 +45,33 @@ initInput(canvas);
 renderLoadingScreen(ctx, 0);
 
 const game = new Game(ctx, externalController);
+
+// The host may supply one already-generated mission. This listener performs no
+// network or model work: it validates the small shared contract, then queues the
+// local director balance for the next run so live combat remains authoritative.
+window.addEventListener('message', event => {
+  const expectedSource = window.parent === window ? window : window.parent;
+  if (event.source !== expectedSource || !event.data || typeof event.data !== 'object') return;
+  const message = event.data as Record<string, unknown>;
+  if (message.type !== 'poplur-fps-director') return;
+  // Prefer the documented envelope, while accepting the same plain fields at
+  // the top level for older native shells that cannot wrap the payload.
+  const session = parseFpsDirectorSession('session' in message ? message.session : message);
+  if (!session) {
+    notifyParent({ type: 'poplur-fps-director-rejected' });
+    return;
+  }
+  if (!game.applyDirector(session)) {
+    notifyParent({ type: 'poplur-fps-director-rejected' });
+    return;
+  }
+  notifyParent({
+    type: 'poplur-fps-director-applied',
+    title: session.title,
+    difficulty: session.difficulty,
+    applies: 'next-run',
+  });
+});
 
 loadAssets(pct => {
   game.loadProgress = pct;
@@ -99,8 +126,7 @@ function startLoop(): void {
 // Allow keyboard navigation on menu / zoom skip
 window.addEventListener('keydown', e => {
   if (e.code === 'Enter' || e.code === 'NumpadEnter') {
-    const inputEvt = new KeyboardEvent('keydown', { code: 'KeyE', key: 'e', bubbles: true });
-    window.dispatchEvent(inputEvt);
+    if (!e.repeat) queueInteractCommand();
   }
   // Space / Enter skips the zoom animation immediately
   if ((e.code === 'Space' || e.code === 'Enter') && game.state === 'zoom') {

@@ -1,14 +1,15 @@
 {
   "baseUrl": "https://storage.googleapis.com/poplur2025-assets/asset-packs",
   "localPaths": {
-    "ar-filters": "ar-filters"
+    "ar-filters": "ar-filters",
+    "arcade-art": "games/arcade/art"
   },
   "packs": [
     {
       "id": "arcade-art",
       "version": 1,
-      "bytes": 1755996,
-      "digest": "a2626d0e5e71",
+      "bytes": 1811013,
+      "digest": "65c0c607e9cd",
       "files": [
         "animations/poplur_ball_open_close/frame_01_closed.png",
         "animations/poplur_ball_open_close/frame_02_opening.png",
@@ -56,6 +57,18 @@
         "characters/protagonist_gold_cap/frame_13.png",
         "characters/protagonist_gold_cap/frame_14.png",
         "characters/protagonist_gold_cap/frame_15.png",
+        "characters/protagonist_gold_cap_v2/down_01.png",
+        "characters/protagonist_gold_cap_v2/down_02.png",
+        "characters/protagonist_gold_cap_v2/down_03.png",
+        "characters/protagonist_gold_cap_v2/left_01.png",
+        "characters/protagonist_gold_cap_v2/left_02.png",
+        "characters/protagonist_gold_cap_v2/left_03.png",
+        "characters/protagonist_gold_cap_v2/right_01.png",
+        "characters/protagonist_gold_cap_v2/right_02.png",
+        "characters/protagonist_gold_cap_v2/right_03.png",
+        "characters/protagonist_gold_cap_v2/up_01.png",
+        "characters/protagonist_gold_cap_v2/up_02.png",
+        "characters/protagonist_gold_cap_v2/up_03.png",
         "characters/protagonist_pink_cap/frame_01.png",
         "characters/protagonist_pink_cap/frame_02.png",
         "characters/protagonist_pink_cap/frame_03.png",
@@ -190,8 +203,8 @@
     {
       "id": "subscreens",
       "version": 1,
-      "bytes": 69168582,
-      "digest": "e3090f86ad6a",
+      "bytes": 69168603,
+      "digest": "1f8ee5bf12a7",
       "files": [
         "assets/HoldMenu_CameraRoll.imageset/HoldMenu_CameraRoll.png",
         "assets/HoldMenu_Chat.imageset/chat_messages.png",

@@ -1,25 +1,129 @@
 {
-  "version": 1,
+  "version": 2,
   "title": "Cinder Isles",
-  "description": "Tame the creatures of a volcanic archipelago.",
-  "rivalName": "Wren", "championName": "Ardo", "partySize": 6,
+  "description": "Cross nine original island routes, earn eight arena badges, and claim the Cinder Crown.",
+  "rivalName": "Wren",
+  "championName": "Ardo",
+  "partySize": 6,
   "starters": ["ashpup", "reedling", "flintbug"],
   "moves": [
-    { "id": "scratch", "displayName": "Scratch", "type": "beast", "power": 40, "accuracy": 100, "effect": "none" },
-    { "id": "ember_spit", "displayName": "Ember Spit", "type": "ember", "power": 60, "accuracy": 90, "effect": "none" },
-    { "id": "tide_slap", "displayName": "Tide Slap", "type": "tide", "power": 55, "accuracy": 95, "effect": "lower_attack" },
-    { "id": "stone_guard", "displayName": "Stone Guard", "type": "stone", "power": 0, "accuracy": 100, "effect": "raise_defense" }
+    { "id": "cinder_snap", "displayName": "Cinder Snap", "type": "ember", "power": 46, "accuracy": 100, "effect": "none" },
+    { "id": "flare_arc", "displayName": "Flare Arc", "type": "ember", "power": 72, "accuracy": 90, "effect": "none" },
+    { "id": "ripple_ram", "displayName": "Ripple Ram", "type": "tide", "power": 48, "accuracy": 100, "effect": "none" },
+    { "id": "undertow", "displayName": "Undertow", "type": "tide", "power": 70, "accuracy": 92, "effect": "none" },
+    { "id": "vine_flick", "displayName": "Vine Flick", "type": "bloom", "power": 48, "accuracy": 100, "effect": "none" },
+    { "id": "canopy_crash", "displayName": "Canopy Crash", "type": "bloom", "power": 74, "accuracy": 88, "effect": "none" },
+    { "id": "static_skip", "displayName": "Static Skip", "type": "spark", "power": 50, "accuracy": 100, "effect": "none" },
+    { "id": "aurora_bolt", "displayName": "Aurora Bolt", "type": "spark", "power": 76, "accuracy": 88, "effect": "none" },
+    { "id": "pebble_pulse", "displayName": "Pebble Pulse", "type": "stone", "power": 50, "accuracy": 100, "effect": "none" },
+    { "id": "fault_line", "displayName": "Fault Line", "type": "stone", "power": 78, "accuracy": 86, "effect": "none" },
+    { "id": "breeze_cut", "displayName": "Breeze Cut", "type": "gale", "power": 48, "accuracy": 100, "effect": "none" },
+    { "id": "sky_spiral", "displayName": "Sky Spiral", "type": "gale", "power": 72, "accuracy": 92, "effect": "none" },
+    { "id": "gloom_glint", "displayName": "Gloom Glint", "type": "shade", "power": 50, "accuracy": 100, "effect": "none" },
+    { "id": "eclipse_claw", "displayName": "Eclipse Claw", "type": "shade", "power": 75, "accuracy": 90, "effect": "none" },
+    { "id": "pounce", "displayName": "Pounce", "type": "beast", "power": 48, "accuracy": 100, "effect": "none" },
+    { "id": "comet_charge", "displayName": "Comet Charge", "type": "beast", "power": 74, "accuracy": 90, "effect": "none" }
   ],
   "creatures": [
-    { "species": "ashpup", "displayName": "Ashpup", "type": "ember", "baseHp": 45, "baseAttack": 50, "baseDefense": 40, "baseSpeed": 60, "moves": ["scratch", "ember_spit"], "rarity": "common", "catchRate": 45, "evolvesInto": "ashhound", "evolveLevel": 16 },
-    { "species": "ashhound", "displayName": "Ashhound", "type": "ember", "baseHp": 70, "baseAttack": 80, "baseDefense": 60, "baseSpeed": 85, "moves": ["ember_spit", "scratch"], "rarity": "rare", "catchRate": 12, "evolvesInto": "", "evolveLevel": 0 },
-    { "species": "reedling", "displayName": "Reedling", "type": "tide", "baseHp": 50, "baseAttack": 45, "baseDefense": 50, "baseSpeed": 45, "moves": ["tide_slap"], "rarity": "common", "catchRate": 50, "evolvesInto": "", "evolveLevel": 0 },
-    { "species": "flintbug", "displayName": "Flintbug", "type": "stone", "baseHp": 40, "baseAttack": 55, "baseDefense": 65, "baseSpeed": 30, "moves": ["scratch", "stone_guard"], "rarity": "common", "catchRate": 55, "evolvesInto": "", "evolveLevel": 0 },
-    { "species": "dune_moth", "displayName": "Dune Moth", "type": "gale", "baseHp": 42, "baseAttack": 48, "baseDefense": 38, "baseSpeed": 70, "moves": ["scratch"], "rarity": "uncommon", "catchRate": 40, "evolvesInto": "", "evolveLevel": 0 },
-    { "species": "cavefish", "displayName": "Cavefish", "type": "tide", "baseHp": 55, "baseAttack": 40, "baseDefense": 55, "baseSpeed": 35, "moves": ["tide_slap"], "rarity": "common", "catchRate": 50, "evolvesInto": "", "evolveLevel": 0 }
+    { "species": "ashpup", "displayName": "Ashpup", "type": "ember", "baseHp": 45, "baseAttack": 50, "baseDefense": 40, "baseSpeed": 60, "moves": ["pounce", "cinder_snap"], "rarity": "common", "catchRate": 52, "evolvesInto": "ashhound", "evolveLevel": 16 },
+    { "species": "ashhound", "displayName": "Ashhound", "type": "ember", "baseHp": 72, "baseAttack": 82, "baseDefense": 62, "baseSpeed": 86, "moves": ["flare_arc", "comet_charge"], "rarity": "rare", "catchRate": 18, "evolvesInto": "", "evolveLevel": 0 },
+    { "species": "reedling", "displayName": "Reedling", "type": "tide", "baseHp": 50, "baseAttack": 45, "baseDefense": 52, "baseSpeed": 45, "moves": ["ripple_ram", "vine_flick"], "rarity": "common", "catchRate": 55, "evolvesInto": "reedcrest", "evolveLevel": 18 },
+    { "species": "reedcrest", "displayName": "Reedcrest", "type": "tide", "baseHp": 78, "baseAttack": 70, "baseDefense": 82, "baseSpeed": 64, "moves": ["undertow", "canopy_crash"], "rarity": "rare", "catchRate": 18, "evolvesInto": "", "evolveLevel": 0 },
+    { "species": "flintbug", "displayName": "Flintbug", "type": "stone", "baseHp": 42, "baseAttack": 55, "baseDefense": 66, "baseSpeed": 32, "moves": ["pebble_pulse", "pounce"], "rarity": "common", "catchRate": 58, "evolvesInto": "slagwing", "evolveLevel": 17 },
+    { "species": "slagwing", "displayName": "Slagwing", "type": "stone", "baseHp": 70, "baseAttack": 80, "baseDefense": 90, "baseSpeed": 50, "moves": ["fault_line", "breeze_cut"], "rarity": "rare", "catchRate": 17, "evolvesInto": "", "evolveLevel": 0 },
+    { "species": "brinebell", "displayName": "Brinebell", "type": "tide", "baseHp": 56, "baseAttack": 48, "baseDefense": 58, "baseSpeed": 40, "moves": ["ripple_ram", "undertow"], "rarity": "common", "catchRate": 52, "evolvesInto": "", "evolveLevel": 0 },
+    { "species": "mosskip", "displayName": "Mosskip", "type": "bloom", "baseHp": 48, "baseAttack": 54, "baseDefense": 46, "baseSpeed": 63, "moves": ["vine_flick", "pounce"], "rarity": "common", "catchRate": 54, "evolvesInto": "groveantler", "evolveLevel": 24 },
+    { "species": "groveantler", "displayName": "Groveantler", "type": "bloom", "baseHp": 82, "baseAttack": 84, "baseDefense": 76, "baseSpeed": 70, "moves": ["canopy_crash", "comet_charge"], "rarity": "rare", "catchRate": 15, "evolvesInto": "", "evolveLevel": 0 },
+    { "species": "voltfin", "displayName": "Voltfin", "type": "spark", "baseHp": 46, "baseAttack": 62, "baseDefense": 42, "baseSpeed": 78, "moves": ["static_skip", "ripple_ram"], "rarity": "uncommon", "catchRate": 43, "evolvesInto": "stormray", "evolveLevel": 26 },
+    { "species": "stormray", "displayName": "Stormray", "type": "spark", "baseHp": 72, "baseAttack": 88, "baseDefense": 64, "baseSpeed": 98, "moves": ["aurora_bolt", "sky_spiral"], "rarity": "rare", "catchRate": 14, "evolvesInto": "", "evolveLevel": 0 },
+    { "species": "gustkit", "displayName": "Gustkit", "type": "gale", "baseHp": 44, "baseAttack": 52, "baseDefense": 40, "baseSpeed": 80, "moves": ["breeze_cut", "pounce"], "rarity": "common", "catchRate": 50, "evolvesInto": "cloudmane", "evolveLevel": 28 },
+    { "species": "cloudmane", "displayName": "Cloudmane", "type": "gale", "baseHp": 74, "baseAttack": 78, "baseDefense": 62, "baseSpeed": 102, "moves": ["sky_spiral", "comet_charge"], "rarity": "rare", "catchRate": 13, "evolvesInto": "", "evolveLevel": 0 },
+    { "species": "murkmite", "displayName": "Murkmite", "type": "shade", "baseHp": 50, "baseAttack": 64, "baseDefense": 48, "baseSpeed": 68, "moves": ["gloom_glint", "pounce"], "rarity": "uncommon", "catchRate": 42, "evolvesInto": "nightweaver", "evolveLevel": 30 },
+    { "species": "nightweaver", "displayName": "Nightweaver", "type": "shade", "baseHp": 76, "baseAttack": 92, "baseDefense": 68, "baseSpeed": 90, "moves": ["eclipse_claw", "sky_spiral"], "rarity": "rare", "catchRate": 12, "evolvesInto": "", "evolveLevel": 0 },
+    { "species": "lumenlynx", "displayName": "Lumenlynx", "type": "beast", "baseHp": 58, "baseAttack": 66, "baseDefense": 55, "baseSpeed": 72, "moves": ["pounce", "static_skip"], "rarity": "uncommon", "catchRate": 40, "evolvesInto": "starpride", "evolveLevel": 32 },
+    { "species": "starpride", "displayName": "Starpride", "type": "beast", "baseHp": 86, "baseAttack": 98, "baseDefense": 78, "baseSpeed": 94, "moves": ["comet_charge", "aurora_bolt"], "rarity": "mythic", "catchRate": 8, "evolvesInto": "", "evolveLevel": 0 },
+    { "species": "craggle", "displayName": "Craggle", "type": "stone", "baseHp": 66, "baseAttack": 68, "baseDefense": 84, "baseSpeed": 36, "moves": ["pebble_pulse", "fault_line"], "rarity": "uncommon", "catchRate": 40, "evolvesInto": "", "evolveLevel": 0 }
   ],
   "zones": [
-    { "id": "ember_shore", "displayName": "Ember Shore", "encounters": ["ashpup", "flintbug"], "levelMin": 3, "levelMax": 7 },
-    { "id": "tide_caves", "displayName": "Tide Caves", "encounters": ["cavefish", "reedling", "dune_moth"], "levelMin": 8, "levelMax": 14 }
-  ]
+    {
+      "id": "ember_shore", "displayName": "Ember Shore", "encounters": ["ashpup", "flintbug", "brinebell"], "levelMin": 4, "levelMax": 8,
+      "trainers": [
+        { "id": "shore_iona", "displayName": "Iona", "title": "Beachcomber", "team": [{ "species": "brinebell", "level": 7 }] },
+        { "id": "shore_tavi", "displayName": "Tavi", "title": "Cinder Scout", "team": [{ "species": "flintbug", "level": 8 }, { "species": "ashpup", "level": 8 }] }
+      ]
+    },
+    {
+      "id": "tideglass_grotto", "displayName": "Tideglass Grotto", "encounters": ["reedling", "brinebell", "voltfin"], "levelMin": 9, "levelMax": 14,
+      "trainers": [
+        { "id": "grotto_nilo", "displayName": "Nilo", "title": "Cave Diver", "team": [{ "species": "reedling", "level": 12 }, { "species": "brinebell", "level": 11 }] },
+        { "id": "grotto_mae", "displayName": "Mae", "title": "Pearl Keeper", "team": [{ "species": "voltfin", "level": 13 }, { "species": "reedling", "level": 13 }] }
+      ]
+    },
+    {
+      "id": "verdant_loom", "displayName": "Verdant Loom", "encounters": ["mosskip", "reedling", "gustkit"], "levelMin": 14, "levelMax": 20,
+      "trainers": [
+        { "id": "loom_perri", "displayName": "Perri", "title": "Moss Tailor", "team": [{ "species": "mosskip", "level": 17 }, { "species": "gustkit", "level": 16 }] },
+        { "id": "loom_aro", "displayName": "Aro", "title": "Canopy Ranger", "team": [{ "species": "reedcrest", "level": 18 }, { "species": "mosskip", "level": 19 }] }
+      ]
+    },
+    {
+      "id": "stormrail_cliffs", "displayName": "Stormrail Cliffs", "encounters": ["voltfin", "gustkit", "slagwing"], "levelMin": 20, "levelMax": 26,
+      "trainers": [
+        { "id": "cliffs_zia", "displayName": "Zia", "title": "Rail Runner", "team": [{ "species": "voltfin", "level": 23 }, { "species": "gustkit", "level": 22 }] },
+        { "id": "cliffs_bram", "displayName": "Bram", "title": "Storm Spotter", "team": [{ "species": "slagwing", "level": 24 }, { "species": "voltfin", "level": 25 }, { "species": "gustkit", "level": 24 }] }
+      ]
+    },
+    {
+      "id": "basalt_crown", "displayName": "Basalt Crown", "encounters": ["craggle", "slagwing", "ashhound"], "levelMin": 26, "levelMax": 32,
+      "trainers": [
+        { "id": "basalt_ves", "displayName": "Ves", "title": "Crag Smith", "team": [{ "species": "craggle", "level": 29 }, { "species": "slagwing", "level": 29 }] },
+        { "id": "basalt_orm", "displayName": "Orm", "title": "Lava Surveyor", "team": [{ "species": "ashhound", "level": 31 }, { "species": "craggle", "level": 30 }, { "species": "slagwing", "level": 31 }] }
+      ]
+    },
+    {
+      "id": "moonveil_marsh", "displayName": "Moonveil Marsh", "encounters": ["murkmite", "brinebell", "lumenlynx"], "levelMin": 32, "levelMax": 38,
+      "trainers": [
+        { "id": "marsh_eira", "displayName": "Eira", "title": "Lantern Guide", "team": [{ "species": "murkmite", "level": 35 }, { "species": "lumenlynx", "level": 34 }] },
+        { "id": "marsh_kel", "displayName": "Kel", "title": "Mist Reader", "team": [{ "species": "nightweaver", "level": 36 }, { "species": "reedcrest", "level": 36 }, { "species": "murkmite", "level": 37 }] }
+      ]
+    },
+    {
+      "id": "sunwind_mesa", "displayName": "Sunwind Mesa", "encounters": ["cloudmane", "lumenlynx", "stormray"], "levelMin": 38, "levelMax": 44,
+      "trainers": [
+        { "id": "mesa_senn", "displayName": "Senn", "title": "Kite Herder", "team": [{ "species": "cloudmane", "level": 40 }, { "species": "lumenlynx", "level": 40 }, { "species": "stormray", "level": 41 }] },
+        { "id": "mesa_yara", "displayName": "Yara", "title": "Sun Cartographer", "team": [{ "species": "starpride", "level": 42 }, { "species": "cloudmane", "level": 43 }, { "species": "stormray", "level": 43 }] }
+      ]
+    },
+    {
+      "id": "starforge_caldera", "displayName": "Starforge Caldera", "encounters": ["ashhound", "nightweaver", "starpride", "craggle"], "levelMin": 44, "levelMax": 50,
+      "trainers": [
+        { "id": "caldera_wren", "displayName": "Wren", "title": "Island Rival", "team": [{ "species": "ashhound", "level": 47 }, { "species": "reedcrest", "level": 47 }, { "species": "slagwing", "level": 47 }, { "species": "starpride", "level": 48 }] },
+        { "id": "caldera_umi", "displayName": "Umi", "title": "Forge Sentinel", "team": [{ "species": "stormray", "level": 48 }, { "species": "nightweaver", "level": 49 }, { "species": "groveantler", "level": 48 }, { "species": "craggle", "level": 49 }] }
+      ]
+    },
+    { "id": "aurora_summit", "displayName": "Aurora Summit", "encounters": ["starpride", "nightweaver", "stormray"], "levelMin": 50, "levelMax": 56, "trainers": [] }
+  ],
+  "arenas": [
+    { "id": "emberlight_arena", "zoneId": "ember_shore", "leaderName": "Sola", "leaderTitle": "Hearth Captain", "badgeName": "Emberlight Badge", "specialty": "ember", "team": [{ "species": "ashpup", "level": 9 }, { "species": "ashhound", "level": 10 }] },
+    { "id": "pearlcurrent_arena", "zoneId": "tideglass_grotto", "leaderName": "Marin", "leaderTitle": "Grotto Conductor", "badgeName": "Pearlcurrent Badge", "specialty": "tide", "team": [{ "species": "brinebell", "level": 14 }, { "species": "reedcrest", "level": 15 }] },
+    { "id": "canopy_arena", "zoneId": "verdant_loom", "leaderName": "Thim", "leaderTitle": "Loom Gardener", "badgeName": "Canopy Badge", "specialty": "bloom", "team": [{ "species": "mosskip", "level": 20 }, { "species": "groveantler", "level": 21 }] },
+    { "id": "thundercoil_arena", "zoneId": "stormrail_cliffs", "leaderName": "Rook", "leaderTitle": "Stormrail Chief", "badgeName": "Thundercoil Badge", "specialty": "spark", "team": [{ "species": "voltfin", "level": 26 }, { "species": "cloudmane", "level": 26 }, { "species": "stormray", "level": 27 }] },
+    { "id": "obsidian_arena", "zoneId": "basalt_crown", "leaderName": "Doro", "leaderTitle": "Crown Mason", "badgeName": "Obsidian Badge", "specialty": "stone", "team": [{ "species": "flintbug", "level": 31 }, { "species": "craggle", "level": 32 }, { "species": "slagwing", "level": 33 }] },
+    { "id": "moonlit_arena", "zoneId": "moonveil_marsh", "leaderName": "Nyra", "leaderTitle": "Veil Warden", "badgeName": "Moonlit Badge", "specialty": "shade", "team": [{ "species": "murkmite", "level": 37 }, { "species": "lumenlynx", "level": 38 }, { "species": "nightweaver", "level": 39 }] },
+    { "id": "skyweave_arena", "zoneId": "sunwind_mesa", "leaderName": "Aven", "leaderTitle": "Mesa Soarer", "badgeName": "Skyweave Badge", "specialty": "gale", "team": [{ "species": "gustkit", "level": 42 }, { "species": "stormray", "level": 43 }, { "species": "cloudmane", "level": 44 }, { "species": "starpride", "level": 44 }] },
+    { "id": "starforge_arena", "zoneId": "starforge_caldera", "leaderName": "Pyra", "leaderTitle": "Forge Keeper", "badgeName": "Starforge Badge", "specialty": "ember", "team": [{ "species": "ashhound", "level": 48 }, { "species": "slagwing", "level": 48 }, { "species": "nightweaver", "level": 49 }, { "species": "starpride", "level": 50 }] }
+  ],
+  "champion": {
+    "id": "cinder_champion_ardo",
+    "displayName": "Ardo",
+    "title": "Cinder Champion",
+    "team": [
+      { "species": "reedcrest", "level": 52 },
+      { "species": "groveantler", "level": 52 },
+      { "species": "stormray", "level": 53 },
+      { "species": "slagwing", "level": 53 },
+      { "species": "nightweaver", "level": 54 },
+      { "species": "starpride", "level": 55 }
+    ]
+  }
 }

@@ -646,6 +646,30 @@ async function handleGameConfig(uid, req, res) {
     const userMessage = mode === "maker" && prompt
         ? `Create a game based on this idea: ${prompt}`
         : "Generate a fresh, surprising game config now.";
+    // The client caches one session per shipped game/day, but billing protection
+    // must live on the server. A signed-in caller gets enough headroom for all
+    // three games plus retries while button mashing and scripted abuse stay
+    // bounded even if they bypass the web bundle entirely.
+    const today = new Date().toISOString().slice(0, 10);
+    const rateRef = db.collection("gameConfigRate").doc(uid);
+    await db.runTransaction(async (transaction) => {
+        const snapshot = await transaction.get(rateRef);
+        const data = snapshot.data() ?? {};
+        const lastAt = data.lastAt;
+        const sameDay = data.day === today;
+        const usedToday = sameDay && typeof data.count === "number" ? Math.max(0, Math.floor(data.count)) : 0;
+        if (lastAt && Date.now() - lastAt.toMillis() < 4_000) {
+            throw httpError(429, "rate_limited", "Let the game director finish before asking again.");
+        }
+        if (usedToday >= 12) {
+            throw httpError(429, "daily_limit", "Today's game-director sessions are ready. Come back tomorrow for new ones.");
+        }
+        transaction.set(rateRef, {
+            day: today,
+            count: usedToday + 1,
+            lastAt: firestore_1.FieldValue.serverTimestamp(),
+        }, { merge: true });
+    });
     const message = await anthropicClient().messages.create({
         model: CLAUDE_ON_DEVICE_MODEL,
         max_tokens: 280,

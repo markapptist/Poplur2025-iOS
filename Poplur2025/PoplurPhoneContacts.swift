@@ -129,15 +129,20 @@ final class PoplurPhoneContacts {
             // the distance it is at the equator. Clamped so the cosine cannot
             // approach zero near the poles and open the box to the whole world.
             let lngDelta = radiusKm / max(1, 111.32 * cos(latitude * .pi / 180))
+            // Only the modern, explicitly-public origin contract participates
+            // in live discovery. The old `lat`/`lng` pair had no trustworthy
+            // privacy marker, so treating it as a fallback could make a private
+            // account discoverable through a pre-migration post.
             if let near = try? await db.collection("posts")
-                .whereField("lat", isGreaterThan: latitude - latDelta)
-                .whereField("lat", isLessThan: latitude + latDelta)
+                .whereField("latitude", isGreaterThan: latitude - latDelta)
+                .whereField("latitude", isLessThan: latitude + latDelta)
                 .limit(to: 200)
                 .getDocuments() {
                 for doc in near.documents {
                     let data = doc.data()
-                    guard let plat = (data["lat"] as? NSNumber)?.doubleValue,
-                          let plng = (data["lng"] as? NSNumber)?.doubleValue else { continue }
+                    guard hasDiscoverableOrigin(data),
+                          let plat = (data["latitude"] as? NSNumber)?.doubleValue,
+                          let plng = (data["longitude"] as? NSNumber)?.doubleValue else { continue }
                     guard abs(plng - longitude) <= lngDelta else { continue }
                     let km = haversineKm(latitude, longitude, plat, plng)
                     guard km <= radiusKm else { continue }
@@ -203,6 +208,22 @@ final class PoplurPhoneContacts {
         let a = sin(dLat / 2) * sin(dLat / 2)
             + cos(lat1 * .pi / 180) * cos(lat2 * .pi / 180) * sin(dLng / 2) * sin(dLng / 2)
         return radius * 2 * atan2(sqrt(a), sqrt(1 - a))
+    }
+
+    /// Reach must fail closed. Current public posts explicitly say
+    /// `approximate`; hidden posts and either privacy flag are never enough to
+    /// put their owner in somebody else's live House/phone discovery.
+    private func hasDiscoverableOrigin(_ data: [String: Any]) -> Bool {
+        guard data["locationVisibility"] as? String == "approximate" else { return false }
+        for key in [
+            "privateAccount", "ghostMode",
+            "originHiddenByPrivateAccount", "originHiddenByGhostMode",
+        ] {
+            guard data[key] != nil else { continue }
+            // A malformed privacy marker is not permission to disclose.
+            guard let flag = data[key] as? Bool, flag == false else { return false }
+        }
+        return true
     }
 
     /// One batched pass for anyone still showing a uid-prefix placeholder,
