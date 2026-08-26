@@ -10,8 +10,8 @@ var Wx=Object.defineProperty;var qx=(r,e,t)=>e in r?Wx(r,e,{enumerable:!0,config
  * @license
  * Copyright 2017 Google LLC
  * SPDX-License-Identifier: BSD-3-Clause
- */const Ua=globalThis,lf=r=>r,Lc=Ua.trustedTypes,hf=Lc?Lc.createPolicy("lit-html",{createHTML:r=>r}):void 0,Ig="$lit$",Hi=`lit$${Math.random().toFixed(9).slice(2)}$`,wg="?"+Hi,ib=`<${wg}>`,Rs=document,Xa=()=>Rs.createComment(""),Ya=r=>r===null||typeof r!="object"&&typeof r!="function",ud=Array.isArray,sb=r=>ud(r)||typeof(r==null?void 0:r[Symbol.iterator])=="function",ml=`[
-\f\r]`,$r=/<(?:(!--|\/[^a-zA-Z])|(\/?[a-zA-Z][^>\s]*)|(\/?$))/g,uf=/-->/g,df=/>/g,ns=RegExp(`>|${ml}(?:([^\\s"'>=/]+)(${ml}*=${ml}*(?:[^
+ */const Ua=globalThis,lf=r=>r,Lc=Ua.trustedTypes,hf=Lc?Lc.createPolicy("lit-html",{createHTML:r=>r}):void 0,Ig="$lit$",Hi=`lit$${Math.random().toFixed(9).slice(2)}$`,wg="?"+Hi,ib=`<${wg}>`,Rs=document,Xa=()=>Rs.createComment(""),Ya=r=>r===null||typeof r!="object"&&typeof r!="function",ud=Array.isArray,sb=r=>ud(r)||typeof(r==null?void 0:r[Symbol.iterator])=="function",ml=`[ 	
+\f\r]`,$r=/<(?:(!--|\/[^a-zA-Z])|(\/?[a-zA-Z][^>\s]*)|(\/?$))/g,uf=/-->/g,df=/>/g,ns=RegExp(`>|${ml}(?:([^\\s"'>=/]+)(${ml}*=${ml}*(?:[^ 	
 \f\r"'\`<>=]|("|')|))|$)`,"g"),ff=/'/g,pf=/"/g,Tg=/^(?:script|style|textarea|title)$/i,rb=r=>(e,...t)=>({_$litType$:r,strings:e,values:t}),il=rb(1),Cr=Symbol.for("lit-noChange"),Xt=Symbol.for("lit-nothing"),Af=new WeakMap,Ss=Rs.createTreeWalker(Rs,129);function Bg(r,e){if(!ud(r)||!r.hasOwnProperty("raw"))throw Error("invalid template strings array");return hf!==void 0?hf.createHTML(e):e}const ab=(r,e)=>{const t=r.length-1,n=[];let i,s=e===2?"<svg>":e===3?"<math>":"",a=$r;for(let o=0;o<t;o++){const c=r[o];let l,h,u=-1,d=0;for(;d<c.length&&(a.lastIndex=d,h=a.exec(c),h!==null);)d=a.lastIndex,a===$r?h[1]==="!--"?a=uf:h[1]!==void 0?a=df:h[2]!==void 0?(Tg.test(h[2])&&(i=RegExp("</"+h[2],"g")),a=ns):h[3]!==void 0&&(a=ns):a===ns?h[0]===">"?(a=i??$r,u=-1):h[1]===void 0?u=-2:(u=a.lastIndex-h[2].length,l=h[1],a=h[3]===void 0?ns:h[3]==='"'?pf:ff):a===pf||a===ff?a=ns:a===uf||a===df?a=$r:(a=ns,i=void 0);const f=a===ns&&r[o+1].startsWith("/>")?" ":"";s+=a===$r?c+ib:u>=0?(n.push(l),c.slice(0,u)+Ig+c.slice(u)+Hi+f):c+Hi+(u===-2?o:f)}return[Bg(r,s+(r[t]||"<?>")+(e===2?"</svg>":e===3?"</math>":"")),n]};class $a{constructor({strings:e,_$litType$:t},n){let i;this.parts=[];let s=0,a=0;const o=e.length-1,c=this.parts,[l,h]=ab(e,t);if(this.el=$a.createElement(l,n),Ss.currentNode=this.el.content,t===2||t===3){const u=this.el.content.firstChild;u.replaceWith(...u.childNodes)}for(;(i=Ss.nextNode())!==null&&c.length<o;){if(i.nodeType===1){if(i.hasAttributes())for(const u of i.getAttributeNames())if(u.endsWith(Ig)){const d=h[a++],f=i.getAttribute(u).split(Hi),p=/([.?@])?(.*)/.exec(d);c.push({type:1,index:s,name:p[2],strings:f,ctor:p[1]==="."?cb:p[1]==="?"?lb:p[1]==="@"?hb:sl}),i.removeAttribute(u)}else u.startsWith(Hi)&&(c.push({type:6,index:s}),i.removeAttribute(u));if(Tg.test(i.tagName)){const u=i.textContent.split(Hi),d=u.length-1;if(d>0){i.textContent=Lc?Lc.emptyScript:"";for(let f=0;f<d;f++)i.append(u[f],Xa()),Ss.nextNode(),c.push({type:2,index:++s});i.append(u[d],Xa())}}}else if(i.nodeType===8)if(i.data===wg)c.push({type:2,index:s});else{let u=-1;for(;(u=i.data.indexOf(Hi,u+1))!==-1;)c.push({type:7,index:s}),u+=Hi.length-1}s++}}static createElement(e,t){const n=Rs.createElement("template");return n.innerHTML=e,n}}function Mr(r,e,t=r,n){var a,o;if(e===Cr)return e;let i=n!==void 0?(a=t._$Co)==null?void 0:a[n]:t._$Cl;const s=Ya(e)?void 0:e._$litDirective$;return(i==null?void 0:i.constructor)!==s&&((o=i==null?void 0:i._$AO)==null||o.call(i,!1),s===void 0?i=void 0:(i=new s(r),i._$AT(r,t,n)),n!==void 0?(t._$Co??(t._$Co=[]))[n]=i:t._$Cl=i),i!==void 0&&(e=Mr(r,i._$AS(r,e.values),i,n)),e}let ob=class{constructor(e,t){this._$AV=[],this._$AN=void 0,this._$AD=e,this._$AM=t}get parentNode(){return this._$AM.parentNode}get _$AU(){return this._$AM._$AU}u(e){const{el:{content:t},parts:n}=this._$AD,i=((e==null?void 0:e.creationScope)??Rs).importNode(t,!0);Ss.currentNode=i;let s=Ss.nextNode(),a=0,o=0,c=n[0];for(;c!==void 0;){if(a===c.index){let l;c.type===2?l=new ao(s,s.nextSibling,this,e):c.type===1?l=new c.ctor(s,c.name,c.strings,this,e):c.type===6&&(l=new ub(s,this,e)),this._$AV.push(l),c=n[++o]}a!==(c==null?void 0:c.index)&&(s=Ss.nextNode(),a++)}return Ss.currentNode=Rs,i}p(e){let t=0;for(const n of this._$AV)n!==void 0&&(n.strings!==void 0?(n._$AI(e,n,t),t+=n.strings.length-2):n._$AI(e[t])),t++}};class ao{get _$AU(){var e;return((e=this._$AM)==null?void 0:e._$AU)??this._$Cv}constructor(e,t,n,i){this.type=2,this._$AH=Xt,this._$AN=void 0,this._$AA=e,this._$AB=t,this._$AM=n,this.options=i,this._$Cv=(i==null?void 0:i.isConnected)??!0}get parentNode(){let e=this._$AA.parentNode;const t=this._$AM;return t!==void 0&&(e==null?void 0:e.nodeType)===11&&(e=t.parentNode),e}get startNode(){return this._$AA}get endNode(){return this._$AB}_$AI(e,t=this){e=Mr(this,e,t),Ya(e)?e===Xt||e==null||e===""?(this._$AH!==Xt&&this._$AR(),this._$AH=Xt):e!==this._$AH&&e!==Cr&&this._(e):e._$litType$!==void 0?this.$(e):e.nodeType!==void 0?this.T(e):sb(e)?this.k(e):this._(e)}O(e){return this._$AA.parentNode.insertBefore(e,this._$AB)}T(e){this._$AH!==e&&(this._$AR(),this._$AH=this.O(e))}_(e){this._$AH!==Xt&&Ya(this._$AH)?this._$AA.nextSibling.data=e:this.T(Rs.createTextNode(e)),this._$AH=e}$(e){var s;const{values:t,_$litType$:n}=e,i=typeof n=="number"?this._$AC(e):(n.el===void 0&&(n.el=$a.createElement(Bg(n.h,n.h[0]),this.options)),n);if(((s=this._$AH)==null?void 0:s._$AD)===i)this._$AH.p(t);else{const a=new ob(i,this),o=a.u(this.options);a.p(t),this.T(o),this._$AH=a}}_$AC(e){let t=Af.get(e.strings);return t===void 0&&Af.set(e.strings,t=new $a(e)),t}k(e){ud(this._$AH)||(this._$AH=[],this._$AR());const t=this._$AH;let n,i=0;for(const s of e)i===t.length?t.push(n=new ao(this.O(Xa()),this.O(Xa()),this,this.options)):n=t[i],n._$AI(s),i++;i<t.length&&(this._$AR(n&&n._$AB.nextSibling,i),t.length=i)}_$AR(e=this._$AA.nextSibling,t){var n;for((n=this._$AP)==null?void 0:n.call(this,!1,!0,t);e!==this._$AB;){const i=lf(e).nextSibling;lf(e).remove(),e=i}}setConnected(e){var t;this._$AM===void 0&&(this._$Cv=e,(t=this._$AP)==null||t.call(this,e))}}class sl{get tagName(){return this.element.tagName}get _$AU(){return this._$AM._$AU}constructor(e,t,n,i,s){this.type=1,this._$AH=Xt,this._$AN=void 0,this.element=e,this.name=t,this._$AM=i,this.options=s,n.length>2||n[0]!==""||n[1]!==""?(this._$AH=Array(n.length-1).fill(new String),this.strings=n):this._$AH=Xt}_$AI(e,t=this,n,i){const s=this.strings;let a=!1;if(s===void 0)e=Mr(this,e,t,0),a=!Ya(e)||e!==this._$AH&&e!==Cr,a&&(this._$AH=e);else{const o=e;let c,l;for(e=s[0],c=0;c<s.length-1;c++)l=Mr(this,o[n+c],t,c),l===Cr&&(l=this._$AH[c]),a||(a=!Ya(l)||l!==this._$AH[c]),l===Xt?e=Xt:e!==Xt&&(e+=(l??"")+s[c+1]),this._$AH[c]=l}a&&!i&&this.j(e)}j(e){e===Xt?this.element.removeAttribute(this.name):this.element.setAttribute(this.name,e??"")}}let cb=class extends sl{constructor(){super(...arguments),this.type=3}j(e){this.element[this.name]=e===Xt?void 0:e}};class lb extends sl{constructor(){super(...arguments),this.type=4}j(e){this.element.toggleAttribute(this.name,!!e&&e!==Xt)}}class hb extends sl{constructor(e,t,n,i,s){super(e,t,n,i,s),this.type=5}_$AI(e,t=this){if((e=Mr(this,e,t,0)??Xt)===Cr)return;const n=this._$AH,i=e===Xt&&n!==Xt||e.capture!==n.capture||e.once!==n.once||e.passive!==n.passive,s=e!==Xt&&(n===Xt||i);i&&this.element.removeEventListener(this.name,this,n),s&&this.element.addEventListener(this.name,this,e),this._$AH=e}handleEvent(e){var t;typeof this._$AH=="function"?this._$AH.call(((t=this.options)==null?void 0:t.host)??this.element,e):this._$AH.handleEvent(e)}}class ub{constructor(e,t,n){this.element=e,this.type=6,this._$AN=void 0,this._$AM=t,this.options=n}get _$AU(){return this._$AM._$AU}_$AI(e){Mr(this,e)}}const gl=Ua.litHtmlPolyfillSupport;gl==null||gl($a,ao),(Ua.litHtmlVersions??(Ua.litHtmlVersions=[])).push("3.3.3");const Rg=(r,e,t)=>{const n=(t==null?void 0:t.renderBefore)??e;let i=n._$litPart$;if(i===void 0){const s=(t==null?void 0:t.renderBefore)??null;n._$litPart$=i=new ao(e.insertBefore(Xa(),s),s,void 0,t??{})}return i._$AI(r),i};/**
  * @license
  * Copyright 2017 Google LLC
@@ -116,10 +116,10 @@ var Wx=Object.defineProperty;var qx=(r,e,t)=>e in r?Wx(r,e,{enumerable:!0,config
 #endif`,X_=`#ifdef USE_AOMAP
 	float ambientOcclusion = ( texture2D( aoMap, vAoMapUv ).r - 1.0 ) * aoMapIntensity + 1.0;
 	reflectedLight.indirectDiffuse *= ambientOcclusion;
-	#if defined( USE_CLEARCOAT )
+	#if defined( USE_CLEARCOAT ) 
 		clearcoatSpecularIndirect *= ambientOcclusion;
 	#endif
-	#if defined( USE_SHEEN )
+	#if defined( USE_SHEEN ) 
 		sheenSpecularIndirect *= ambientOcclusion;
 	#endif
 	#if defined( USE_ENVMAP ) && defined( STANDARD )
@@ -604,7 +604,7 @@ vec4 sRGBTransferOETF( in vec4 value ) {
 	#else
 		uniform sampler2D envMap;
 	#endif
-
+	
 #endif`,EE=`#ifdef USE_ENVMAP
 	uniform float reflectivity;
 	#if defined( USE_BUMPMAP ) || defined( USE_NORMALMAP ) || defined( PHONG ) || defined( LAMBERT )
@@ -621,7 +621,7 @@ vec4 sRGBTransferOETF( in vec4 value ) {
 		#define ENV_WORLDPOS
 	#endif
 	#ifdef ENV_WORLDPOS
-
+		
 		varying vec3 vWorldPosition;
 	#else
 		varying vec3 vReflect;
@@ -1870,7 +1870,7 @@ gl_Position = projectionMatrix * mvPosition;`,xv=`#ifdef DITHERING
 	float getPointShadow( sampler2D shadowMap, vec2 shadowMapSize, float shadowIntensity, float shadowBias, float shadowRadius, vec4 shadowCoord, float shadowCameraNear, float shadowCameraFar ) {
 		float shadow = 1.0;
 		vec3 lightToPosition = shadowCoord.xyz;
-
+		
 		float lightToPositionLength = length( lightToPosition );
 		if ( lightToPositionLength - shadowCameraFar <= 0.0 && lightToPositionLength - shadowCameraNear >= 0.0 ) {
 			float dp = ( lightToPositionLength - shadowCameraNear ) / ( shadowCameraFar - shadowCameraNear );			dp += shadowBias;
@@ -2268,21 +2268,21 @@ vec3 CustomToneMapping( vec3 color ) { return color; }`,Pv=`#ifdef USE_TRANSMISS
 			for ( int i = 0; i < 3; i ++ ) {
 				vec3 transmissionRay = getVolumeTransmissionRay( n, v, thickness, iors[ i ], modelMatrix );
 				vec3 refractedRayExit = position + transmissionRay;
-
+		
 				vec4 ndcPos = projMatrix * viewMatrix * vec4( refractedRayExit, 1.0 );
 				vec2 refractionCoords = ndcPos.xy / ndcPos.w;
 				refractionCoords += 1.0;
 				refractionCoords /= 2.0;
-
+		
 				vec4 transmissionSample = getTransmissionSample( refractionCoords, roughness, iors[ i ] );
 				transmittedLight[ i ] = transmissionSample[ i ];
 				transmittedLight.a += transmissionSample.a;
 				transmittance[ i ] = diffuseColor[ i ] * volumeAttenuation( length( transmissionRay ), attenuationColor, attenuationDistance )[ i ];
 			}
 			transmittedLight.a /= 3.0;
-
+		
 		#else
-
+		
 			vec3 transmissionRay = getVolumeTransmissionRay( n, v, thickness, ior, modelMatrix );
 			vec3 refractedRayExit = position + transmissionRay;
 			vec4 ndcPos = projMatrix * viewMatrix * vec4( refractedRayExit, 1.0 );
@@ -2291,7 +2291,7 @@ vec3 CustomToneMapping( vec3 color ) { return color; }`,Pv=`#ifdef USE_TRANSMISS
 			refractionCoords /= 2.0;
 			transmittedLight = getTransmissionSample( refractionCoords, roughness, ior );
 			transmittance = diffuseColor * volumeAttenuation( length( transmissionRay ), attenuationColor, attenuationDistance );
-
+		
 		#endif
 		vec3 attenuatedColor = transmittance * transmittedLight.rgb;
 		vec3 F = EnvironmentBRDF( n, v, specularColor, specularF90, roughness );
@@ -4397,12 +4397,12 @@ canvas {
 				vUv = uv;
 				gl_Position = vec4(position.xy * 1.0,0.,.999999);
 			}`,fragmentShader:`
-			uniform sampler2D blitTexture;
+			uniform sampler2D blitTexture; 
 			varying vec2 vUv;
 
-			void main(){
+			void main(){ 
 				gl_FragColor = vec4(vUv.xy, 0, 1);
-
+				
 				#ifdef IS_SRGB
 				gl_FragColor = sRGBTransferOETF( texture2D( blitTexture, vUv) );
 				#else
@@ -4666,64 +4666,64 @@ void main() {
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */const n1=.04,ar=20,i1=/\.hdr(\.js)?$/,s1=/\.ktx2(\?|#|$)/;class um{constructor(e){this.threeRenderer=e,this.lottieLoaderUrl="",this._ldrLoader=null,this._imageLoader=null,this._hdrLoader=null,this._lottieLoader=null,this.generatedEnvironmentMap=null,this.generatedEnvironmentMapAlt=null,this.skyboxCache=new Map,this.blurMaterial=null,this.blurScene=null}ldrLoader(e){return this._ldrLoader==null&&(this._ldrLoader=new D0),this._ldrLoader.setWithCredentials(e),this._ldrLoader}imageLoader(e){return this._imageLoader==null&&(this._imageLoader=new JT(this.threeRenderer)),this._imageLoader.setWithCredentials(e),this._imageLoader}hdrLoader(e){return this._hdrLoader==null&&(this._hdrLoader=new ZT,this._hdrLoader.setDataType(Ut)),this._hdrLoader.setWithCredentials(e),this._hdrLoader}async getLottieLoader(e){if(this._lottieLoader==null){const{LottieLoader:t}=await import(this.lottieLoaderUrl);this._lottieLoader=new t}return this._lottieLoader.setWithCredentials(e),this._lottieLoader}async loadImage(e,t,n){if(n==="image/ktx2"||s1.test(e))return this.loadKTX2(e,t);const i=await new Promise((s,a)=>this.ldrLoader(t).load(e,s,()=>{},a));return i.name=e,i.flipY=!1,i}async loadKTX2(e,t){Wa.setWithCredentials(t);const n=await new Promise((i,s)=>Wa.load(e,i,()=>{},s));return n.name=e,n.flipY=!1,n}async loadLottie(e,t,n){const i=await this.getLottieLoader(n);i.setQuality(t);const s=await new Promise((a,o)=>i.load(e,a,()=>{},o));return s.name=e,s}async loadEquirect(e,t=!1,n=()=>{}){try{const i=i1.test(e),s=i?this.hdrLoader(t):this.imageLoader(t),a=await new Promise((o,c)=>s.load(e,l=>{const{renderTarget:h}=l;if(h!=null){let u;try{const d=l.toDataTexture();d.needsUpdate=!0;const f=d.image.data;let p=!1;const g=f.length;for(let m=0;m<g;m++)if(f[m]!==0){p=!0;break}p?(u=d,l.dispose(!0)):(console.warn("Decoded DataTexture is completely black, falling back to render target texture."),u=h.texture,l.dispose(!1))}catch(d){console.warn("Failed to convert gainmap to DataTexture, falling back to render target texture:",d),u=h.texture,l.dispose(!1)}o(u)}else o(l)},l=>{n(l.loaded/l.total*.9)},c));return n(1),a.name=e,a.mapping=Pc,!i&&a.type!==Ut&&(a.colorSpace=mt),a}finally{n&&n(1)}}async generateEnvironmentMapAndSkybox(e=null,t=null,n=()=>{},i=!1){const s=t!=="legacy";(t==="legacy"||t==="neutral")&&(t=null),t=U0(t);let a=Promise.resolve(null),o;e&&(a=this.loadEquirectFromUrl(e,i,n)),t?o=this.loadEquirectFromUrl(t,i,n):e?o=this.loadEquirectFromUrl(e,i,n):o=s?this.loadGeneratedEnvironmentMapAlt():this.loadGeneratedEnvironmentMap();const[c,l]=await Promise.all([o,a]);if(c==null)throw new Error("Failed to load environment map.");return{environmentMap:c,skybox:l}}async loadEquirectFromUrl(e,t,n){if(!this.skyboxCache.has(e)){const i=this.loadEquirect(e,t,n);this.skyboxCache.set(e,i)}return this.skyboxCache.get(e)}async GenerateEnvironmentMap(e,t){await JM();const n=this.threeRenderer,i=new Sd(256,{generateMipmaps:!1,type:Ut,format:St,colorSpace:bt,depthBuffer:!0}),s=new Nu(.1,100,i),a=s.renderTarget.texture;a.name=t;const o=n.outputColorSpace,c=n.toneMapping;return n.toneMapping=ni,n.outputColorSpace=bt,s.update(n,e),this.blurCubemap(i,n1),n.toneMapping=c,n.outputColorSpace=o,a}async loadGeneratedEnvironmentMap(){return this.generatedEnvironmentMap==null&&(this.generatedEnvironmentMap=this.GenerateEnvironmentMap(new hm("legacy"),"legacy")),this.generatedEnvironmentMap}async loadGeneratedEnvironmentMapAlt(){return this.generatedEnvironmentMapAlt==null&&(this.generatedEnvironmentMapAlt=this.GenerateEnvironmentMap(new hm("neutral"),"neutral")),this.generatedEnvironmentMapAlt}blurCubemap(e,t){if(this.blurMaterial==null){this.blurMaterial=this.getBlurShader(ar);const i=new Wn,s=new Ge(i,this.blurMaterial);this.blurScene=new Ti,this.blurScene.add(s)}const n=e.clone();this.halfblur(e,n,t,"latitudinal"),this.halfblur(n,e,t,"longitudinal")}halfblur(e,t,n,i){const a=e.width,o=isFinite(n)?Math.PI/(2*a):2*Math.PI/(2*ar-1),c=n/o,l=isFinite(n)?1+Math.floor(3*c):ar;l>ar&&console.warn(`sigmaRadians, ${n}, is too large and will clip, as it requested ${l} samples when the maximum is set to ${ar}`);const h=[];let u=0;for(let p=0;p<ar;++p){const g=p/c,m=Math.exp(-g*g/2);h.push(m),p==0?u+=m:p<l&&(u+=2*m)}for(let p=0;p<h.length;p++)h[p]=h[p]/u;const d=this.blurMaterial.uniforms;d.envMap.value=e.texture,d.samples.value=l,d.weights.value=h,d.latitudinal.value=i==="latitudinal",d.dTheta.value=o,new Nu(.1,100,t).update(this.threeRenderer,this.blurScene)}getBlurShader(e){const t=new Float32Array(e),n=new B(0,1,0);return new mn({name:"SphericalGaussianBlur",defines:{n:e},uniforms:{envMap:{value:null},samples:{value:1},weights:{value:t},latitudinal:{value:!1},dTheta:{value:0},poleAxis:{value:n}},vertexShader:`
-
+      
       varying vec3 vOutputDirection;
-
+  
       void main() {
-
+  
         vOutputDirection = vec3( position );
         gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
-
+  
       }
     `,fragmentShader:`
         varying vec3 vOutputDirection;
-
+  
         uniform samplerCube envMap;
         uniform int samples;
         uniform float weights[ n ];
         uniform bool latitudinal;
         uniform float dTheta;
         uniform vec3 poleAxis;
-
+  
         vec3 getSample( float theta, vec3 axis ) {
-
+  
           float cosTheta = cos( theta );
           // Rodrigues' axis-angle rotation
           vec3 sampleDirection = vOutputDirection * cosTheta
             + cross( axis, vOutputDirection ) * sin( theta )
             + axis * dot( axis, vOutputDirection ) * ( 1.0 - cosTheta );
-
+  
           return vec3( textureCube( envMap, sampleDirection ) );
-
+  
         }
-
+  
         void main() {
-
+  
           vec3 axis = latitudinal ? poleAxis : cross( poleAxis, vOutputDirection );
-
+  
           if ( all( equal( axis, vec3( 0.0 ) ) ) ) {
-
+  
             axis = vec3( vOutputDirection.z, 0.0, - vOutputDirection.x );
-
+  
           }
-
+  
           axis = normalize( axis );
-
+  
           gl_FragColor = vec4( 0.0, 0.0, 0.0, 1.0 );
           gl_FragColor.rgb += weights[ 0 ] * getSample( 0.0, axis );
-
+  
           for ( int i = 1; i < n; i++ ) {
-
+  
             if ( i >= samples ) {
-
+  
               break;
-
+  
             }
-
+  
             float theta = dTheta * float( i );
             gl_FragColor.rgb += weights[ i ] * getSample( -1.0 * theta, axis );
             gl_FragColor.rgb += weights[ i ] * getSample( theta, axis );
-
+  
           }
         }
       `,blending:ti,depthTest:!1,depthWrite:!1,side:jt})}async dispose(){for(const[,e]of this.skyboxCache)(await e).dispose();this.generatedEnvironmentMap!=null&&((await this.generatedEnvironmentMap).dispose(),this.generatedEnvironmentMap=null),this.generatedEnvironmentMapAlt!=null&&((await this.generatedEnvironmentMapAlt).dispose(),this.generatedEnvironmentMapAlt=null),this.blurMaterial!=null&&this.blurMaterial.dispose()}}/* @license
@@ -5000,7 +5000,7 @@ void main() {
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- */var ul=function(r,e,t,n){var i=arguments.length,s=i<3?e:n===null?n=Object.getOwnPropertyDescriptor(e,t):n,a;if(typeof Reflect=="object"&&typeof Reflect.decorate=="function")s=Reflect.decorate(r,e,t,n);else for(var o=r.length-1;o>=0;o--)(a=r[o])&&(s=(i<3?a(s):i>3?a(e,t,s):a(e,t))||s);return i>3&&s&&Object.defineProperty(e,t,s),s},jm,Km,Jm,Zm,eg,tg,ng,ig,sg,rg,ag,og,cg,lg,hg;const B1=10,R1=50,D1=0,L1=300,P1=150,$i=document.createElement("canvas"),Kh=Symbol("fallbackResizeHandler"),ug=Symbol("defaultAriaLabel"),Ac=Symbol("resizeObserver"),hr=Symbol("clearModelTimeout"),Jh=Symbol("onContextLost"),As=Symbol("loaded"),Zh=Symbol("status"),eu=Symbol("onFocus"),tu=Symbol("onBlur"),nu=Symbol("onSlotChange"),iu=Symbol("onExtraModelChanged"),fr=Symbol("updateSize"),mc=Symbol("intersectionObserver"),ur=Symbol("isElementInViewport"),dg=Symbol("announceModelVisibility"),_r=Symbol("ariaLabel"),fg=Symbol("altDefaulted"),Ea=Symbol("statusElement"),Kc=Symbol("updateStatus"),Pa=Symbol("loadedTime"),va=Symbol("updateSource"),pg=Symbol("markLoaded"),Rc=Symbol("container"),zi=Symbol("input"),td=Symbol("canvas"),Ce=Symbol("scene"),Zn=Symbol("needsRender"),Jc=Symbol("tick"),Qr=Symbol("onModelLoad"),Zc=Symbol("onResize"),Gt=Symbol("renderer"),el=Symbol("progressTracker"),Ag=Symbol("getLoaded"),nd=Symbol("getModelIsVisible"),id=Symbol("shouldAttemptPreload"),F1=r=>({x:r.x,y:r.y,z:r.z,toString(){return`${this.x}m ${this.y}m ${this.z}m`}}),mg=r=>({u:r.x,v:r.y,toString(){return`${this.u} ${this.v}`}});class dl extends Es{static get is(){return"model-viewer"}static set modelCacheSize(e){kr[Gi].evictionThreshold=e}static get modelCacheSize(){return kr[Gi].evictionThreshold}static set minimumRenderScale(e){e>1&&console.warn("<model-viewer> minimumRenderScale has been clamped to a maximum value of 1."),e<=0&&console.warn("<model-viewer> minimumRenderScale has been clamped to a minimum value of 0.25."),Bs.singleton.minScale=e}static get minimumRenderScale(){return Bs.singleton.minScale}get loaded(){return this[Ag]()}get[(jm=ur,Km=As,Jm=Pa,Zm=Zh,eg=hr,tg=nu,ng=iu,ig=Kh,sg=dg,rg=Ac,ag=mc,og=el,Gt)](){return Bs.singleton}get modelIsVisible(){return this[nd]()}constructor(){super(),this.alt=null,this.src=null,this.withCredentials=!1,this.generateSchema=!1,this[jm]=!1,this[Km]=!1,this[Jm]=0,this[Zm]="",this[eg]=null,this[tg]=()=>{if(!this[Ce])return;const i=Array.from(this.querySelectorAll("extra-model")),s=i.map(o=>o.src).filter(o=>o!=null),a=this[Ce].extraUrls||[];(s.join(",")!==a.join(",")||i.length!==a.length)&&this[va]()},this[ng]=i=>{const s=i,a=s.target,c=Array.from(this.querySelectorAll("extra-model")).indexOf(a);if(console.log(`[onExtraModelChanged] childIndex: ${c} srcChanged: ${s.detail.srcChanged} offset: ${s.detail.offset}`),c===-1)return;const l=this.src?c+1:c;s.detail.srcChanged?(this[As]=!1,this[va]()):this[Ce]&&this[Ce].updateModelTransforms(l,s.detail.offset,s.detail.orientation,s.detail.scale)},this[ig]=Hp(()=>{const i=this.getBoundingClientRect();this[fr](i)},R1),this[sg]=Hp(i=>{const s=this.modelIsVisible;s!==i&&this.dispatchEvent(new CustomEvent("model-visibility",{detail:{visible:s}}))},D1),this[rg]=null,this[ag]=null,this[og]=new T1,this[cg]=()=>{this[Ea].textContent=this[Zh]},this[lg]=()=>{this[Ea].textContent=""},this[hg]=i=>{this.dispatchEvent(new CustomEvent("error",{detail:{type:"webglcontextlost",sourceError:i.sourceEvent}}))},this.attachShadow({mode:"open"});const e=this.shadowRoot;oI(e),this[Rc]=e.querySelector(".container"),this[zi]=e.querySelector(".userInput"),this[td]=e.querySelector("canvas"),this[Ea]=e.querySelector("#status"),this[ug]=this[zi].getAttribute("aria-label");let t,n;if(this.isConnected){const i=this.getBoundingClientRect();t=i.width,n=i.height}else t=L1,n=P1;this[Ce]=new w1({canvas:this[td],element:this,width:t,height:n}),Promise.resolve().then(()=>{this[fr](this.getBoundingClientRect())}),th&&(this[Ac]=new ResizeObserver(i=>{if(!this[Gt].isPresenting)for(let s of i)s.target===this&&this[fr](s.contentRect)})),nh?this[mc]=new IntersectionObserver(i=>{for(let s of i)if(s.target===this){const a=this.modelIsVisible;this[ur]=s.isIntersecting,this[dg](a),console.log(`IntersectionObserver fired! isIntersecting: ${s.isIntersecting}`),this[ur]&&!this.loaded&&this[va]()}},{root:null,rootMargin:"0px",threshold:1e-5}):this[ur]=!0}connectedCallback(){super.connectedCallback&&super.connectedCallback(),th?this[Ac].observe(this):self.addEventListener("resize",this[Kh]),nh&&this[mc].observe(this),this.addEventListener("focus",this[eu]),this.addEventListener("blur",this[tu]),this.addEventListener("extra-model-changed",this[iu]);const e=this.shadowRoot.querySelector(".slot.default slot");e&&e.addEventListener("slotchange",this[nu]);const t=this[Gt];t.addEventListener("contextlost",this[Jh]),t.registerScene(this[Ce]),this[hr]!=null&&(self.clearTimeout(this[hr]),this[hr]=null,this.requestUpdate("src",null))}disconnectedCallback(){super.disconnectedCallback&&super.disconnectedCallback(),th?this[Ac].unobserve(this):self.removeEventListener("resize",this[Kh]),nh&&this[mc].unobserve(this),this.removeEventListener("focus",this[eu]),this.removeEventListener("blur",this[tu]),this.removeEventListener("extra-model-changed",this[iu]);const e=this.shadowRoot.querySelector(".slot.default slot");e&&e.removeEventListener("slotchange",this[nu]);const t=this[Gt];t.removeEventListener("contextlost",this[Jh]),t.unregisterScene(this[Ce]),this[hr]=self.setTimeout(()=>{this[Ce].dispose(),this[hr]=null},B1)}updated(e){if(super.updated(e),e.has("src")){const t=Array.from(this.querySelectorAll("extra-model")),i=t.map(s=>s.src).filter(s=>s!=null).join(",")===(this[Ce].extraUrls||[]).join(",");this.src==null&&t.length===0?(this[As]=!1,this[Pa]=0,this[Ce].reset()):(this.src!==this[Ce].url||!i)&&(this[As]=!1,this[Pa]=0,this[va]())}if(e.has("alt")&&this[zi].setAttribute("aria-label",this[_r]),e.has("generateSchema"))if(this.generateSchema){const n=Array.from(this.querySelectorAll("extra-model")).map(s=>s.src).filter(s=>s!=null),i=this.src||n[0]||null;this[Ce].updateSchema(i)}else this[Ce].updateSchema(null)}toDataURL(e,t){return this[Gt].displayCanvas(this[Ce]).toDataURL(e,t)}async toBlob(e){const t=e?e.mimeType:void 0,n=e?e.qualityArgument:void 0,i=e?e.idealAspect:void 0,{width:s,height:a,idealAspect:o,aspect:c}=this[Ce],{dpr:l,scaleFactor:h}=this[Gt];let u=s*h*l,d=a*h*l,f=0,p=0;if(i===!0)if(o>c){const g=d;d=Math.round(u/o),p=(g-d)/2}else{const g=u;u=Math.round(d*o),f=(g-u)/2}$i.width=u,$i.height=d;try{return new Promise(async(g,m)=>{$i.getContext("2d").drawImage(this[Gt].displayCanvas(this[Ce]),f,p,u,d,0,0,u,d),$i.toBlob(A=>{if(!A)return m(new Error("Unable to retrieve canvas blob"));g(A)},t,n)})}finally{this[fr]({width:s,height:a})}}registerEffectComposer(e){e.setRenderer(this[Gt].threeRenderer),e.setMainCamera(this[Ce].getCamera()),e.setMainScene(this[Ce]),this[Ce].effectRenderer=e}unregisterEffectComposer(){this[Ce].effectRenderer=null}registerRenderer(e){this[Ce].externalRenderer=e}unregisterRenderer(){this[Ce].externalRenderer=null}get[_r](){return this[fg]}get[fg](){return this.alt==null||this.alt==="null"?this[ug]:this.alt}[Ag](){return this[As]}[nd](){return this.loaded&&this[ur]}[id](){const e=Array.from(this.querySelectorAll("extra-model"));return!!(this.src||e.length>0)&&this[ur]}[fr]({width:e,height:t}){e===0||t===0||(this[Rc].style.width=`${e}px`,this[Rc].style.height=`${t}px`,this[Zc]({width:e,height:t}))}[Jc](e,t){var n;(n=this[Ce].effectRenderer)===null||n===void 0||n.beforeRender(e,t)}[pg](){this[As]||(this[As]=!0,this[Pa]=performance.now())}[Zn](){this[Ce].queueRender()}[Qr](){}[Kc](e){this[Zh]=e;const t=this.getRootNode();t!=null&&t.activeElement===this&&this[Ea].textContent!=e&&(this[Ea].textContent=e)}[(cg=eu,lg=tu,Zc)](e){this[Ce].setSize(e.width,e.height)}async[(hg=Jh,va)](){const e=this[Ce],n=Array.from(this.querySelectorAll("extra-model")).map(c=>c.src).filter(c=>c!=null),i=n.join(",")===(e.extraUrls||[]).join(",");if(console.log(`[$updateSource] called!
+ */var ul=function(r,e,t,n){var i=arguments.length,s=i<3?e:n===null?n=Object.getOwnPropertyDescriptor(e,t):n,a;if(typeof Reflect=="object"&&typeof Reflect.decorate=="function")s=Reflect.decorate(r,e,t,n);else for(var o=r.length-1;o>=0;o--)(a=r[o])&&(s=(i<3?a(s):i>3?a(e,t,s):a(e,t))||s);return i>3&&s&&Object.defineProperty(e,t,s),s},jm,Km,Jm,Zm,eg,tg,ng,ig,sg,rg,ag,og,cg,lg,hg;const B1=10,R1=50,D1=0,L1=300,P1=150,$i=document.createElement("canvas"),Kh=Symbol("fallbackResizeHandler"),ug=Symbol("defaultAriaLabel"),Ac=Symbol("resizeObserver"),hr=Symbol("clearModelTimeout"),Jh=Symbol("onContextLost"),As=Symbol("loaded"),Zh=Symbol("status"),eu=Symbol("onFocus"),tu=Symbol("onBlur"),nu=Symbol("onSlotChange"),iu=Symbol("onExtraModelChanged"),fr=Symbol("updateSize"),mc=Symbol("intersectionObserver"),ur=Symbol("isElementInViewport"),dg=Symbol("announceModelVisibility"),_r=Symbol("ariaLabel"),fg=Symbol("altDefaulted"),Ea=Symbol("statusElement"),Kc=Symbol("updateStatus"),Pa=Symbol("loadedTime"),va=Symbol("updateSource"),pg=Symbol("markLoaded"),Rc=Symbol("container"),zi=Symbol("input"),td=Symbol("canvas"),Ce=Symbol("scene"),Zn=Symbol("needsRender"),Jc=Symbol("tick"),Qr=Symbol("onModelLoad"),Zc=Symbol("onResize"),Gt=Symbol("renderer"),el=Symbol("progressTracker"),Ag=Symbol("getLoaded"),nd=Symbol("getModelIsVisible"),id=Symbol("shouldAttemptPreload"),F1=r=>({x:r.x,y:r.y,z:r.z,toString(){return`${this.x}m ${this.y}m ${this.z}m`}}),mg=r=>({u:r.x,v:r.y,toString(){return`${this.u} ${this.v}`}});class dl extends Es{static get is(){return"model-viewer"}static set modelCacheSize(e){kr[Gi].evictionThreshold=e}static get modelCacheSize(){return kr[Gi].evictionThreshold}static set minimumRenderScale(e){e>1&&console.warn("<model-viewer> minimumRenderScale has been clamped to a maximum value of 1."),e<=0&&console.warn("<model-viewer> minimumRenderScale has been clamped to a minimum value of 0.25."),Bs.singleton.minScale=e}static get minimumRenderScale(){return Bs.singleton.minScale}get loaded(){return this[Ag]()}get[(jm=ur,Km=As,Jm=Pa,Zm=Zh,eg=hr,tg=nu,ng=iu,ig=Kh,sg=dg,rg=Ac,ag=mc,og=el,Gt)](){return Bs.singleton}get modelIsVisible(){return this[nd]()}constructor(){super(),this.alt=null,this.src=null,this.withCredentials=!1,this.generateSchema=!1,this[jm]=!1,this[Km]=!1,this[Jm]=0,this[Zm]="",this[eg]=null,this[tg]=()=>{if(!this[Ce])return;const i=Array.from(this.querySelectorAll("extra-model")),s=i.map(o=>o.src).filter(o=>o!=null),a=this[Ce].extraUrls||[];(s.join(",")!==a.join(",")||i.length!==a.length)&&this[va]()},this[ng]=i=>{const s=i,a=s.target,c=Array.from(this.querySelectorAll("extra-model")).indexOf(a);if(console.log(`[onExtraModelChanged] childIndex: ${c} srcChanged: ${s.detail.srcChanged} offset: ${s.detail.offset}`),c===-1)return;const l=this.src?c+1:c;s.detail.srcChanged?(this[As]=!1,this[va]()):this[Ce]&&this[Ce].updateModelTransforms(l,s.detail.offset,s.detail.orientation,s.detail.scale)},this[ig]=Hp(()=>{const i=this.getBoundingClientRect();this[fr](i)},R1),this[sg]=Hp(i=>{const s=this.modelIsVisible;s!==i&&this.dispatchEvent(new CustomEvent("model-visibility",{detail:{visible:s}}))},D1),this[rg]=null,this[ag]=null,this[og]=new T1,this[cg]=()=>{this[Ea].textContent=this[Zh]},this[lg]=()=>{this[Ea].textContent=""},this[hg]=i=>{this.dispatchEvent(new CustomEvent("error",{detail:{type:"webglcontextlost",sourceError:i.sourceEvent}}))},this.attachShadow({mode:"open"});const e=this.shadowRoot;oI(e),this[Rc]=e.querySelector(".container"),this[zi]=e.querySelector(".userInput"),this[td]=e.querySelector("canvas"),this[Ea]=e.querySelector("#status"),this[ug]=this[zi].getAttribute("aria-label");let t,n;if(this.isConnected){const i=this.getBoundingClientRect();t=i.width,n=i.height}else t=L1,n=P1;this[Ce]=new w1({canvas:this[td],element:this,width:t,height:n}),Promise.resolve().then(()=>{this[fr](this.getBoundingClientRect())}),th&&(this[Ac]=new ResizeObserver(i=>{if(!this[Gt].isPresenting)for(let s of i)s.target===this&&this[fr](s.contentRect)})),nh?this[mc]=new IntersectionObserver(i=>{for(let s of i)if(s.target===this){const a=this.modelIsVisible;this[ur]=s.isIntersecting,this[dg](a),console.log(`IntersectionObserver fired! isIntersecting: ${s.isIntersecting}`),this[ur]&&!this.loaded&&this[va]()}},{root:null,rootMargin:"0px",threshold:1e-5}):this[ur]=!0}connectedCallback(){super.connectedCallback&&super.connectedCallback(),th?this[Ac].observe(this):self.addEventListener("resize",this[Kh]),nh&&this[mc].observe(this),this.addEventListener("focus",this[eu]),this.addEventListener("blur",this[tu]),this.addEventListener("extra-model-changed",this[iu]);const e=this.shadowRoot.querySelector(".slot.default slot");e&&e.addEventListener("slotchange",this[nu]);const t=this[Gt];t.addEventListener("contextlost",this[Jh]),t.registerScene(this[Ce]),this[hr]!=null&&(self.clearTimeout(this[hr]),this[hr]=null,this.requestUpdate("src",null))}disconnectedCallback(){super.disconnectedCallback&&super.disconnectedCallback(),th?this[Ac].unobserve(this):self.removeEventListener("resize",this[Kh]),nh&&this[mc].unobserve(this),this.removeEventListener("focus",this[eu]),this.removeEventListener("blur",this[tu]),this.removeEventListener("extra-model-changed",this[iu]);const e=this.shadowRoot.querySelector(".slot.default slot");e&&e.removeEventListener("slotchange",this[nu]);const t=this[Gt];t.removeEventListener("contextlost",this[Jh]),t.unregisterScene(this[Ce]),this[hr]=self.setTimeout(()=>{this[Ce].dispose(),this[hr]=null},B1)}updated(e){if(super.updated(e),e.has("src")){const t=Array.from(this.querySelectorAll("extra-model")),i=t.map(s=>s.src).filter(s=>s!=null).join(",")===(this[Ce].extraUrls||[]).join(",");this.src==null&&t.length===0?(this[As]=!1,this[Pa]=0,this[Ce].reset()):(this.src!==this[Ce].url||!i)&&(this[As]=!1,this[Pa]=0,this[va]())}if(e.has("alt")&&this[zi].setAttribute("aria-label",this[_r]),e.has("generateSchema"))if(this.generateSchema){const n=Array.from(this.querySelectorAll("extra-model")).map(s=>s.src).filter(s=>s!=null),i=this.src||n[0]||null;this[Ce].updateSchema(i)}else this[Ce].updateSchema(null)}toDataURL(e,t){return this[Gt].displayCanvas(this[Ce]).toDataURL(e,t)}async toBlob(e){const t=e?e.mimeType:void 0,n=e?e.qualityArgument:void 0,i=e?e.idealAspect:void 0,{width:s,height:a,idealAspect:o,aspect:c}=this[Ce],{dpr:l,scaleFactor:h}=this[Gt];let u=s*h*l,d=a*h*l,f=0,p=0;if(i===!0)if(o>c){const g=d;d=Math.round(u/o),p=(g-d)/2}else{const g=u;u=Math.round(d*o),f=(g-u)/2}$i.width=u,$i.height=d;try{return new Promise(async(g,m)=>{$i.getContext("2d").drawImage(this[Gt].displayCanvas(this[Ce]),f,p,u,d,0,0,u,d),$i.toBlob(A=>{if(!A)return m(new Error("Unable to retrieve canvas blob"));g(A)},t,n)})}finally{this[fr]({width:s,height:a})}}registerEffectComposer(e){e.setRenderer(this[Gt].threeRenderer),e.setMainCamera(this[Ce].getCamera()),e.setMainScene(this[Ce]),this[Ce].effectRenderer=e}unregisterEffectComposer(){this[Ce].effectRenderer=null}registerRenderer(e){this[Ce].externalRenderer=e}unregisterRenderer(){this[Ce].externalRenderer=null}get[_r](){return this[fg]}get[fg](){return this.alt==null||this.alt==="null"?this[ug]:this.alt}[Ag](){return this[As]}[nd](){return this.loaded&&this[ur]}[id](){const e=Array.from(this.querySelectorAll("extra-model"));return!!(this.src||e.length>0)&&this[ur]}[fr]({width:e,height:t}){e===0||t===0||(this[Rc].style.width=`${e}px`,this[Rc].style.height=`${t}px`,this[Zc]({width:e,height:t}))}[Jc](e,t){var n;(n=this[Ce].effectRenderer)===null||n===void 0||n.beforeRender(e,t)}[pg](){this[As]||(this[As]=!0,this[Pa]=performance.now())}[Zn](){this[Ce].queueRender()}[Qr](){}[Kc](e){this[Zh]=e;const t=this.getRootNode();t!=null&&t.activeElement===this&&this[Ea].textContent!=e&&(this[Ea].textContent=e)}[(cg=eu,lg=tu,Zc)](e){this[Ce].setSize(e.width,e.height)}async[(hg=Jh,va)](){const e=this[Ce],n=Array.from(this.querySelectorAll("extra-model")).map(c=>c.src).filter(c=>c!=null),i=n.join(",")===(e.extraUrls||[]).join(",");if(console.log(`[$updateSource] called! 
 src: ${this.src}
 extraUrls: ${n.join(",")}
 loaded: ${this.loaded}`),this.loaded||!this[id]()||this.src===e.url&&i){console.log("[$updateSource] BAILING OUT EARLY!");return}const s=this.src,a=s||n[0]||null;this.generateSchema&&e.updateSchema(a),this[Kc]("Loading"),e.stopAnimation();const o=this[el].beginActivity("model-load");try{const c=e.setSource(s,n,u=>o(Jn(u,0,1)*.95)),l=this[Xc]();await Promise.all([c,l]),Array.from(this.querySelectorAll("extra-model")).forEach((u,d)=>{const f=this.src?d+1:d;this[Ce].updateModelTransforms(f,u.offset,u.orientation,u.scale)}),this[pg](),this[Qr](),this.updateComplete.then(()=>{this.dispatchEvent(new CustomEvent("before-render"))}),await new Promise(u=>{const d=setTimeout(()=>{console.warn("rAF timed out in updateSource"),u()},500);requestAnimationFrame(()=>{requestAnimationFrame(()=>{clearTimeout(d),u()})})}),this.dispatchEvent(new CustomEvent("load",{detail:{url:a}}))}catch(c){this.dispatchEvent(new CustomEvent("error",{detail:{type:"loadfailure",sourceError:c}}))}finally{o(1)}}}ul([tt({type:String})],dl.prototype,"alt",void 0);ul([tt({type:String})],dl.prototype,"src",void 0);ul([tt({type:Boolean,attribute:"with-credentials"})],dl.prototype,"withCredentials",void 0);ul([tt({type:Boolean,attribute:"generate-schema"})],dl.prototype,"generateSchema",void 0);/*!
@@ -5140,7 +5140,7 @@ ${s.join(`
 			float verticalAperture = ${((Math.abs(r.top)+Math.abs(r.bottom))*10).toPrecision(rn)}
 			token projection = "orthographic"
 		}
-
+	
 	`:`def Camera "${e}"
 		{
 			matrix4d xformOp:transform = ${t}
@@ -5153,5 +5153,5 @@ ${s.join(`
 			token projection = "perspective"
 			float verticalAperture = ${r.getFilmHeight().toPrecision(rn)}
 		}
-
+	
 	`}const Ca=new B;function Cn(r,e,t,n,i,s){const a=2*Math.PI*i/4,o=Math.max(s-2*i,0),c=Math.PI/4;Ca.copy(e),Ca[n]=0,Ca.normalize();const l=.5*a/(a+o),h=1-Ca.angleTo(r)/c;return Math.sign(Ca[t])===1?h*l:o/(a+o)+l+l*(1-h)}class YB extends Wn{constructor(e=1,t=1,n=1,i=2,s=.1){if(i=i*2+1,s=Math.min(e/2,t/2,n/2,s),super(1,1,1,i,i,i),i===1)return;const a=this.toNonIndexed();this.index=null,this.attributes.position=a.attributes.position,this.attributes.normal=a.attributes.normal,this.attributes.uv=a.attributes.uv;const o=new B,c=new B,l=new B(e,t,n).divideScalar(2).subScalar(s),h=this.attributes.position.array,u=this.attributes.normal.array,d=this.attributes.uv.array,f=h.length/6,p=new B,g=.5/i;for(let m=0,A=0;m<h.length;m+=3,A+=2)switch(o.fromArray(h,m),c.copy(o),c.x-=Math.sign(c.x)*g,c.y-=Math.sign(c.y)*g,c.z-=Math.sign(c.z)*g,c.normalize(),h[m+0]=l.x*Math.sign(o.x)+c.x*s,h[m+1]=l.y*Math.sign(o.y)+c.y*s,h[m+2]=l.z*Math.sign(o.z)+c.z*s,u[m+0]=c.x,u[m+1]=c.y,u[m+2]=c.z,Math.floor(m/f)){case 0:p.set(1,0,0),d[A+0]=Cn(p,c,"z","y",s,n),d[A+1]=1-Cn(p,c,"y","z",s,t);break;case 1:p.set(-1,0,0),d[A+0]=1-Cn(p,c,"z","y",s,n),d[A+1]=1-Cn(p,c,"y","z",s,t);break;case 2:p.set(0,1,0),d[A+0]=1-Cn(p,c,"x","z",s,e),d[A+1]=Cn(p,c,"z","x",s,n);break;case 3:p.set(0,-1,0),d[A+0]=1-Cn(p,c,"x","z",s,e),d[A+1]=1-Cn(p,c,"z","x",s,n);break;case 4:p.set(0,0,1),d[A+0]=1-Cn(p,c,"x","y",s,e),d[A+1]=1-Cn(p,c,"y","x",s,t);break;case 5:p.set(0,0,-1),d[A+0]=Cn(p,c,"x","y",s,e),d[A+1]=1-Cn(p,c,"y","x",s,t);break}}}class $B extends Ti{constructor(){super();const e=new Wn;e.deleteAttribute("uv");const t=new Fs({side:jt}),n=new Fs,i=new kd(16777215,900,28,2);i.position.set(.418,16.199,.3),this.add(i);const s=new Ge(e,t);s.position.set(-.757,13.219,.717),s.scale.set(31.713,28.305,28.591),this.add(s);const a=new Ge(e,n);a.position.set(-10.906,2.009,1.846),a.rotation.set(0,-.195,0),a.scale.set(2.328,7.905,4.651),this.add(a);const o=new Ge(e,n);o.position.set(-5.607,-.754,-.758),o.rotation.set(0,.994,0),o.scale.set(1.97,1.534,3.955),this.add(o);const c=new Ge(e,n);c.position.set(6.167,.857,7.803),c.rotation.set(0,.561,0),c.scale.set(3.927,6.285,3.687),this.add(c);const l=new Ge(e,n);l.position.set(-2.017,.018,6.124),l.rotation.set(0,.333,0),l.scale.set(2.002,4.566,2.064),this.add(l);const h=new Ge(e,n);h.position.set(2.291,-.756,-2.621),h.rotation.set(0,-.286,0),h.scale.set(1.546,1.552,1.496),this.add(h);const u=new Ge(e,n);u.position.set(-2.193,-.369,-5.547),u.rotation.set(0,.516,0),u.scale.set(3.875,3.487,2.986),this.add(u);const d=new Ge(e,dr(50));d.position.set(-16.116,14.37,8.208),d.scale.set(.1,2.428,2.739),this.add(d);const f=new Ge(e,dr(50));f.position.set(-16.109,18.021,-8.207),f.scale.set(.1,2.425,2.751),this.add(f);const p=new Ge(e,dr(17));p.position.set(14.904,12.198,-1.832),p.scale.set(.15,4.265,6.331),this.add(p);const g=new Ge(e,dr(43));g.position.set(-.462,8.89,14.52),g.scale.set(4.38,5.441,.088),this.add(g);const m=new Ge(e,dr(20));m.position.set(3.235,11.486,-12.541),m.scale.set(2.5,2,.1),this.add(m);const A=new Ge(e,dr(100));A.position.set(0,20,0),A.scale.set(1,.1,1),this.add(A)}dispose(){const e=new Set;this.traverse(t=>{t.isMesh&&(e.add(t.geometry),e.add(t.material))});for(const t of e)t.dispose()}}function dr(r){const e=new Zt;return e.color.setScalar(r),e}export{Ce as $,oc as A,ur as B,kr as C,Wd as D,dn as E,us as F,TB as G,Vm as H,qM as I,zB as J,hI as K,Wg as L,dl as M,cI as N,ut as O,an as P,Fn as Q,Bs as R,qB as S,Ti as T,XB as U,B as V,Id as W,vB as X,L0 as Y,Yt as Z,t0 as _,Zn as a,EB as a0,h0 as a1,zc as a2,Ge as a3,_0 as a4,Zt as a5,mt as a6,Ng as a7,Fs as a8,Fe as a9,ru as aA,Is as aB,Ld as aC,MC as aD,d0 as aE,_B as aF,Ct as aG,Op as aH,u0 as aI,$B as aJ,Xf as aK,WM as aL,ms as aM,E0 as aN,b0 as aO,ve as aa,qi as ab,Fd as ac,C0 as ad,yB as ae,Hu as af,kd as ag,Gr as ah,Pn as ai,Ht as aj,D0 as ak,it as al,te as am,Vp as an,I0 as ao,M0 as ap,Wn as aq,Nd as ar,si as as,qc as at,YB as au,Yc as av,TC as aw,xB as ax,Dt as ay,An as az,Qr as b,Jc as c,nd as d,Gt as e,Pu as f,vc as g,mg as h,ZA as i,CB as j,MB as k,SB as l,jM as m,tt as n,va as o,Yi as p,id as q,el as r,Zs as s,F1 as t,zi as u,dg as v,wB as w,IB as x,Es as y,fg as z};

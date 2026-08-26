@@ -138,7 +138,18 @@ function safeHttpsUrl(value: unknown): string | null {
         || octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31
         || octets[0] === 192 && octets[1] === 168) return null;
     }
-    if (/^\[(?:::1|f[cd][0-9a-f:]*)\]$/i.test(hostname) || /^\[fe[89ab][0-9a-f:]*/i.test(hostname)) return null;
+    const ipv6 = /^\[([0-9a-f:.]+)\]$/i.exec(hostname)?.[1]?.toLowerCase();
+    if (ipv6 && (
+      ipv6 === "::"
+      || ipv6 === "::1"
+      // URL canonicalization turns dotted IPv4-mapped literals into this hex
+      // form. Reject every mapped address rather than accidentally accepting
+      // a loopback/private IPv4 target through its IPv6 spelling.
+      || ipv6.startsWith("::ffff:")
+      || /^(?:fc|fd)/.test(ipv6)
+      || /^fe[89abcdef]/.test(ipv6)
+      || /^ff/.test(ipv6)
+    )) return null;
     return url.toString();
   } catch {
     return null;
