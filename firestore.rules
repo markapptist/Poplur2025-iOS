@@ -330,6 +330,9 @@ service cloud.firestore {
     }
 
     match /dmThreads/{threadId} {
+      // Radius is a discovery/start rule, never a history rule. Once created,
+      // this stable two-person participant list keeps the conversation
+      // readable even after either account moves outside the other's radius.
       allow read: if signedIn() && request.auth.uid in resource.data.participants;
 
       // Exactly two participants, one of them you, and the id must be the

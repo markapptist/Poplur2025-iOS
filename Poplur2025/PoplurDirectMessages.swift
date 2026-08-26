@@ -36,7 +36,9 @@ final class PoplurDirectMessages {
     // MARK: - Reading
 
     /// Live list of this account's threads, newest first. `onChange` fires
-    /// again on every update, so the page never has to poll.
+    /// again on every update, so the page never has to poll. Participation is
+    /// the whole inbox boundary: radius may discover a person, but an existing
+    /// thread remains here after either participant moves away.
     func observeThreads(onChange: @escaping ([[String: Any]]) -> Void) {
         guard let uid else { onChange([]); return }
         listListener?.remove()
