@@ -284,14 +284,16 @@ private struct NativeAdaptiveMapView: UIViewRepresentable {
 
     @MainActor
     final class Coordinator: NSObject, MKMapViewDelegate {
-        /// Close enough for individual buildings to be useful.
-        private let enterThreeDDistance: CLLocationDistance = 2_200
+        /// Close enough for restrained building depth to be useful. Keeping
+        /// the larger neighbourhood views flat avoids MapKit's costly pitched
+        /// building pass during ordinary browsing.
+        private let enterThreeDDistance: CLLocationDistance = 1_200
         /// Hysteresis prevents repeated 2D/3D transitions around one distance.
-        private let exitThreeDDistance: CLLocationDistance = 3_200
+        private let exitThreeDDistance: CLLocationDistance = 1_800
         private let initialDistance: CLLocationDistance = 16_000
         private let minimumDistance: CLLocationDistance = 80
         private let maximumDistance: CLLocationDistance = 2_000_000
-        private let closePitch: CGFloat = 52
+        private let closePitch: CGFloat = 32
 
         /// Used only until an already-authorized location fix arrives.
         private let fallbackCoordinate = CLLocationCoordinate2D(
@@ -341,8 +343,8 @@ private struct NativeAdaptiveMapView: UIViewRepresentable {
             mapView.preferredConfiguration = configuration
             mapView.showsBuildings = true
 
-            mapView.isPitchEnabled = true
-            mapView.isRotateEnabled = true
+            mapView.isPitchEnabled = false
+            mapView.isRotateEnabled = false
             mapView.showsCompass = false
             mapView.showsScale = false
             mapView.showsUserLocation = false
@@ -369,7 +371,9 @@ private struct NativeAdaptiveMapView: UIViewRepresentable {
                 isThreeDimensional = snapshot.pitch > 1
             } else {
                 camera.centerCoordinate = fallbackCoordinate
-                camera.centerCoordinateDistance = initialDistance
+                // A true cold start mirrors the shared web map's world-end
+                // launch. Saved snapshots above keep their exact camera.
+                camera.centerCoordinateDistance = maximumDistance
                 camera.heading = 0
                 camera.pitch = 0
             }
@@ -423,7 +427,9 @@ private struct NativeAdaptiveMapView: UIViewRepresentable {
             hasCenteredOnUser = true
             let camera = MKMapCamera()
             camera.centerCoordinate = coordinate
-            camera.centerCoordinateDistance = initialDistance
+            // Replace only the fallback centre; keep the cold-start world
+            // scale until the person explicitly locates, focuses or zooms.
+            camera.centerCoordinateDistance = maximumDistance
             camera.heading = 0
             camera.pitch = 0
             mapView.setCamera(camera, animated: false)
@@ -624,9 +630,9 @@ private struct NativeAdaptiveMapView: UIViewRepresentable {
 
             let camera = mapView.camera.copy() as? MKMapCamera ?? mapView.camera
             camera.pitch = enabled ? closePitch : 0
-            // A north-up reset on the flat transition keeps the cheap overview
-            // visually stable; close 3D retains whatever heading the user chose.
-            if !enabled { camera.heading = 0 }
+            // The everyday map stays north-up in both dimensions. Street and
+            // authored camera modes live outside this adaptive browse policy.
+            camera.heading = 0
             mapView.setCamera(
                 camera,
                 animated: animated && !UIAccessibility.isReduceMotionEnabled
