@@ -2163,8 +2163,35 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                 // inside it. See PoplurInAppBrowser for why it builds its own
                 // WKWebView configuration rather than reusing the app's.
                 guard !(presenter is PoplurInAppBrowserViewController) else { return }
+                guard let home = self.bridge.webView as? PoplurManagedWebView,
+                      presenter.viewIfLoaded?.window != nil,
+                      !presenter.isBeingDismissed else {
+                    print("[PostLoginHomeWebView] in-app browser presenter is not ready")
+                    return
+                }
 
-                presenter.present(PoplurInAppBrowserViewController(url: url), animated: true)
+                // UIKit leaves a full-screen presenter's view attached. Park
+                // the signed-in Home document explicitly before the external
+                // WKWebView acquires its own heavy-renderer lease.
+                home.setHostOccluded(true)
+                let browser = PoplurInAppBrowserViewController(url: url) { [weak home] in
+                    home?.setHostOccluded(false)
+                }
+                presenter.present(browser, animated: true) {
+                    if browser.presentingViewController == nil {
+                        browser.presentationFailed()
+                    }
+                }
+                // UIKit may decline presentation without running completion
+                // (for example during another controller transition). Check
+                // on the next main-loop turn and release the same one-shot
+                // occlusion lease in that failure path.
+                DispatchQueue.main.async { [weak presenter, weak browser] in
+                    guard let browser,
+                          browser.presentingViewController == nil,
+                          presenter?.presentedViewController !== browser else { return }
+                    browser.presentationFailed()
+                }
             }
         }
 

@@ -19,6 +19,7 @@ import WebKit
 ///    die with the window instead of following the user around the app.
 final class PoplurInAppBrowserViewController: UIViewController {
     private let initialURL: URL
+    private var onDismiss: (() -> Void)?
     private var webView: WKWebView!
     private let hostLabel = UILabel()
     private let progressView = UIProgressView(progressViewStyle: .bar)
@@ -32,8 +33,9 @@ final class PoplurInAppBrowserViewController: UIViewController {
         static let text = UIColor(red: 1, green: 240 / 255, blue: 248 / 255, alpha: 1)
     }
 
-    init(url: URL) {
+    init(url: URL, onDismiss: @escaping () -> Void) {
         self.initialURL = url
+        self.onDismiss = onDismiss
         super.init(nibName: nil, bundle: nil)
         modalPresentationStyle = .fullScreen
     }
@@ -50,6 +52,23 @@ final class PoplurInAppBrowserViewController: UIViewController {
         super.viewDidDisappear(animated)
         guard isBeingDismissed || navigationController?.isBeingDismissed == true else { return }
         (webView as? PoplurManagedWebView)?.poplurTearDown()
+        releaseHostOcclusionOnce()
+    }
+
+    /// UIKit reports presentation refusal only through controller state. The
+    /// caller invokes this when the browser never acquired a presenter so the
+    /// signed-in Home renderer cannot remain parked behind a missing screen.
+    func presentationFailed() {
+        if isViewLoaded {
+            (webView as? PoplurManagedWebView)?.poplurTearDown()
+        }
+        releaseHostOcclusionOnce()
+    }
+
+    private func releaseHostOcclusionOnce() {
+        let release = onDismiss
+        onDismiss = nil
+        release?()
     }
 
     override func viewDidLoad() {
@@ -59,6 +78,14 @@ final class PoplurInAppBrowserViewController: UIViewController {
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .nonPersistent()
         config.allowsInlineMediaPlayback = true
+        // WebKit has no public per-WKWebView geolocation delegate on iOS.
+        // Shadow the API before any page script runs so an advertiser cannot
+        // inherit the location permission Poplur uses for its own map.
+        config.userContentController.addUserScript(WKUserScript(
+            source: Self.locationDenialScript,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: false
+        ))
         let web = PoplurManagedWebView(
             performanceName: "InAppBrowserWeb",
             priority: 200,
@@ -264,6 +291,36 @@ final class PoplurInAppBrowserViewController: UIViewController {
         return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
     }
 
+    private static let locationDenialScript = #"""
+    (() => {
+      const denied = Object.freeze({ code: 1, message: 'Permission denied' });
+      const reject = (_success, failure) => {
+        if (typeof failure === 'function') queueMicrotask(() => failure(denied));
+      };
+      const blocked = Object.freeze({
+        getCurrentPosition: reject,
+        watchPosition: (_success, failure) => { reject(_success, failure); return -1; },
+        clearWatch: () => {}
+      });
+      try {
+        const navigatorPrototype = Object.getPrototypeOf(navigator);
+        Object.defineProperty(navigatorPrototype, 'geolocation', {
+          get: () => blocked,
+          configurable: false,
+          enumerable: true
+        });
+      } catch (_) {}
+      try {
+        Object.defineProperty(navigator, 'geolocation', {
+          value: blocked,
+          configurable: false,
+          enumerable: false,
+          writable: false
+        });
+      } catch (_) {}
+    })();
+    """#
+
     @objc private func closeTapped() {
         webView.stopLoading()
         dismiss(animated: true)
@@ -280,8 +337,9 @@ final class PoplurInAppBrowserViewController: UIViewController {
 }
 
 extension PoplurInAppBrowserViewController: WKNavigationDelegate {
-    /// Only http(s) is ours to show. A tel:/mailto:/itms- link is a system
-    /// action, and anything else is refused rather than guessed at.
+    /// Only credential-free HTTPS is ours to show. A tel:/mailto:/itms- link
+    /// is an intentional system action; an HTTP redirect is simply refused so
+    /// an advertiser can never bounce this Poplur-owned surface into Safari.
     func webView(
         _ webView: WKWebView,
         decidePolicyFor navigationAction: WKNavigationAction,
@@ -291,12 +349,15 @@ extension PoplurInAppBrowserViewController: WKNavigationDelegate {
             decisionHandler(.cancel)
             return
         }
-        if scheme == "http" || scheme == "https" {
+        if scheme == "https", url.user == nil, url.password == nil {
             decisionHandler(.allow)
             return
         }
         decisionHandler(.cancel)
-        if UIApplication.shared.canOpenURL(url) { UIApplication.shared.open(url) }
+        if ["tel", "mailto", "itms-apps"].contains(scheme),
+           UIApplication.shared.canOpenURL(url) {
+            UIApplication.shared.open(url)
+        }
     }
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
@@ -324,6 +385,29 @@ extension PoplurInAppBrowserViewController: WKNavigationDelegate {
 }
 
 extension PoplurInAppBrowserViewController: WKUIDelegate {
+    /// Poplur itself may already hold camera/microphone and motion permission
+    /// for calls and the map. External pages never inherit those grants.
+    @available(iOS 15.0, *)
+    func webView(
+        _ webView: WKWebView,
+        requestMediaCapturePermissionFor origin: WKSecurityOrigin,
+        initiatedByFrame frame: WKFrameInfo,
+        type: WKMediaCaptureType,
+        decisionHandler: @escaping (WKPermissionDecision) -> Void
+    ) {
+        decisionHandler(.deny)
+    }
+
+    @available(iOS 15.0, *)
+    func webView(
+        _ webView: WKWebView,
+        requestDeviceOrientationAndMotionPermissionFor origin: WKSecurityOrigin,
+        initiatedByFrame frame: WKFrameInfo,
+        decisionHandler: @escaping (WKPermissionDecision) -> Void
+    ) {
+        decisionHandler(.deny)
+    }
+
     /// `target="_blank"` has no second window to open here, so it loads in this
     /// one — otherwise those links silently do nothing.
     func webView(
