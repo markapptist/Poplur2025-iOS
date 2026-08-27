@@ -234,6 +234,14 @@ struct Poplur2025App: App {
                         // mounted native HomeView in preview mode, which drew a
                         // complete legacy chrome layer over the current Home.
                         PostLoginHomeSurface(initialTab: verificationTab)
+                            // Keep direct-to-tab device verification behaviorally
+                            // identical to the authenticated web-home route below.
+                            // Without this pair, launching with
+                            // -PoplurVerificationTab silently dropped Poplur's
+                            // custom hardware-volume bars and restored the system
+                            // HUD for the entire verification session.
+                            .overlay(SystemVolumeHUDSuppressor())
+                            .volumeBarsOverlay()
                     } else {
                         HomeView(initialTab: verificationTab)
                             .environmentObject(AuthViewModel(previewAuthenticated: true))
