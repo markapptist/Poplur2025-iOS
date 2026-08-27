@@ -540,6 +540,11 @@ final class PoplurSoundPlayer {
 
     func playPop(minimumInterval: TimeInterval = 0.18) {
         guard PoplurEQSync.shared.shouldPlayTransientSound(minimumInterval: minimumInterval) else { return }
+        // A WebView-driven map pop can be the first sound after launch, when no
+        // media lane has prepared the shared audio session yet.  Preserve any
+        // active playback role, but make the otherwise-idle session ready so
+        // the native bridge is audible as well as haptic.
+        PoplurEQSync.shared.prepareAudioSessionForTransientSound()
         guard let p = popPlayer else { return }
         if p.isPlaying { p.stop(); p.currentTime = 0 }
         p.play()

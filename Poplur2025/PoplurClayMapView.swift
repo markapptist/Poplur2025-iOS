@@ -452,6 +452,7 @@ struct PoplurClayMapView: UIViewRepresentable {
             switch type {
             case "pop":
                 popHaptic.impactOccurred()
+                PoplurSoundPlayer.shared.playPop()
             case "poiTap":
                 // Phase 1.5: route body["id"] to the channel/post flow
                 break
