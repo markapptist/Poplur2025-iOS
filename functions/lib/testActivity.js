@@ -39,6 +39,7 @@ const node_crypto_1 = require("node:crypto");
 const firestore_1 = require("firebase-admin/firestore");
 const https_1 = require("firebase-functions/v2/https");
 const params_1 = require("firebase-functions/params");
+const syntheticBetaCohort_1 = require("./syntheticBetaCohort");
 /**
  * Privacy-safe, opt-in operations telemetry for the September test cohort.
  *
@@ -70,6 +71,7 @@ const ACTIVITY_LIMIT = 100;
 const POST_LIMIT = 120;
 const EVENT_LIMIT = 160;
 const FEEDBACK_LIST_LIMIT = 80;
+const SIMULATION_FEED_LIMIT = 24;
 function db() {
     if (!admin.apps.length)
         admin.initializeApp();
@@ -135,9 +137,31 @@ function labelFor(uid, profile, authName) {
         return name.slice(0, 50);
     return `Tester ${uid.slice(-4)}`;
 }
+function mappedSyntheticEvent(doc) {
+    const event = doc.data();
+    if (event.source !== "synthetic" || event.cohortId !== syntheticBetaCohort_1.SYNTHETIC_BETA_COHORT_ID)
+        return null;
+    const eventAtMs = timestampMs(event.eventAt);
+    if (!eventAtMs)
+        return null;
+    return {
+        eventId: text(event.eventId, 120) || doc.id,
+        actorId: text(event.actorId, 80) || "sim-unknown",
+        actor: text(event.actor, 64) || "SIM · @tester",
+        kind: EVENT_KINDS.has(text(event.kind, 24))
+            ? text(event.kind, 24)
+            : "view",
+        place: text(event.place, 64) || "Private beta region",
+        radiusKm: safeMetric(event.radiusKm, 0, 20_000),
+        screen: enumValue(event.screen, SCREENS, "map"),
+        eventAtMs,
+        source: "synthetic",
+        cohortId: syntheticBetaCohort_1.SYNTHETIC_BETA_COHORT_ID,
+    };
+}
 exports.testActivityControl = (0, https_1.onCall)({ region: REGION, secrets: [BETA_DESK_ACCESS_TOKEN] }, async (request) => {
     const action = request.data?.action;
-    const operatorAction = action === "dashboard" || action === "simulation";
+    const operatorAction = action === "dashboard" || action === "simulation" || action === "simulationStep";
     const hasDeskAccess = hasValidDeskCredential(request.data?.accessCode)
         || (typeof request.auth?.uid === "string" && TEST_ADMIN_UIDS.has(request.auth.uid));
     const uid = request.auth?.uid
@@ -263,6 +287,40 @@ exports.testActivityControl = (0, https_1.onCall)({ region: REGION, secrets: [BE
         const snapshot = await config.get();
         return { enabled: snapshot.data()?.enabled === true };
     }
+    if (action === "simulationStep") {
+        requireAdmin(uid);
+        const config = await db().collection("testControl").doc("simulation").get();
+        if (config.data()?.enabled !== true) {
+            return { accepted: false, enabled: false, event: null };
+        }
+        const event = (0, syntheticBetaCohort_1.syntheticEventForTime)(Date.now());
+        const { eventAtMs, ...storedEvent } = event;
+        await db().collection("testSimulationEvents").doc(event.eventId).set({
+            ...storedEvent,
+            eventAt: admin.firestore.Timestamp.fromMillis(eventAtMs),
+            expiresAt: admin.firestore.Timestamp.fromMillis(eventAtMs + RETENTION_MS),
+        });
+        return { accepted: true, enabled: true, event };
+    }
+    if (action === "simulationFeed") {
+        const config = await db().collection("testControl").doc("simulation").get();
+        if (config.data()?.enabled !== true)
+            return { enabled: false, events: [] };
+        const afterEventAtMs = safeMetric(request.data?.afterEventAtMs, 0, Date.now());
+        const events = db().collection("testSimulationEvents");
+        const query = afterEventAtMs > 0
+            ? events.where("eventAt", ">", admin.firestore.Timestamp.fromMillis(afterEventAtMs)).orderBy("eventAt", "asc")
+            : events.orderBy("eventAt", "desc");
+        const snapshot = await query.limit(SIMULATION_FEED_LIMIT).get();
+        const mapped = snapshot.docs
+            .map(mappedSyntheticEvent)
+            .filter((event) => event !== null);
+        return {
+            enabled: true,
+            events: mapped,
+            latestEventAtMs: mapped.reduce((latest, event) => Math.max(latest, event.eventAtMs), afterEventAtMs),
+        };
+    }
     if (action === "simulationPulse") {
         requireAdmin(uid);
         const config = await db().collection("testControl").doc("simulation").get();
@@ -272,11 +330,17 @@ exports.testActivityControl = (0, https_1.onCall)({ region: REGION, secrets: [BE
         if (!EVENT_KINDS.has(kind))
             throw new https_1.HttpsError("invalid-argument", "Unsupported simulation event.");
         const now = Date.now();
-        await db().collection("testSimulationEvents").add({
+        const ref = db().collection("testSimulationEvents").doc();
+        await ref.set({
+            eventId: ref.id,
+            actorId: "legacy-local-demo",
             actor: text(request.data?.actor, 64) || "@simulator",
             kind,
             place: text(request.data?.place, 64) || "Private beta region",
             radiusKm: safeMetric(request.data?.radiusKm, 0, 20_000),
+            screen: "map",
+            source: "synthetic",
+            cohortId: "legacy-local-demo",
             eventAt: firestore_1.FieldValue.serverTimestamp(),
             expiresAt: admin.firestore.Timestamp.fromMillis(now + RETENTION_MS),
         });
@@ -315,20 +379,38 @@ exports.testActivityControl = (0, https_1.onCall)({ region: REGION, secrets: [BE
             const event = doc.data();
             return {
                 id: doc.id,
+                eventId: text(event.eventId, 120) || doc.id,
+                actorId: text(event.actorId, 80) || "sim-unknown",
                 actor: text(event.actor, 64) || "@simulator",
                 kind: EVENT_KINDS.has(text(event.kind, 24)) ? text(event.kind, 24) : "view",
                 place: text(event.place, 64) || "Private beta region",
                 radiusKm: safeMetric(event.radiusKm, 0, 20_000),
+                screen: enumValue(event.screen, SCREENS, "map"),
+                source: "synthetic",
+                cohortId: text(event.cohortId, 80) || "legacy-local-demo",
                 eventAtMs: timestampMs(event.eventAt),
             };
         });
         const map = new Map();
-        [...posts.map(post => ({ place: post.place, at: post.updatedAtMs, radiusKm: post.radiusKm, velocity: post.viralPerHour })), ...simulation.map(event => ({ place: event.place, at: event.eventAtMs, radiusKm: event.radiusKm, velocity: event.kind === "comment" ? 3 : event.kind === "like" ? 2 : 1 }))]
+        [
+            ...posts.map(post => ({ place: post.place, at: post.updatedAtMs, radiusKm: post.radiusKm, velocity: post.viralPerHour, source: "real" })),
+            ...simulation.map(event => ({ place: event.place, at: event.eventAtMs, radiusKm: event.radiusKm, velocity: event.kind === "comment" ? 3 : event.kind === "like" ? 2 : 1, source: "synthetic" })),
+        ]
             .forEach(event => {
-            const previous = map.get(event.place) ?? { place: event.place, events: 0, latestAtMs: 0, peakRadiusKm: 0, velocity: 0 };
+            const previous = map.get(event.place) ?? {
+                place: event.place,
+                events: 0,
+                realEvents: 0,
+                syntheticEvents: 0,
+                latestAtMs: 0,
+                peakRadiusKm: 0,
+                velocity: 0,
+            };
             map.set(event.place, {
                 place: event.place,
                 events: previous.events + 1,
+                realEvents: previous.realEvents + (event.source === "real" ? 1 : 0),
+                syntheticEvents: previous.syntheticEvents + (event.source === "synthetic" ? 1 : 0),
                 latestAtMs: Math.max(previous.latestAtMs, event.at),
                 peakRadiusKm: Math.max(previous.peakRadiusKm, event.radiusKm),
                 velocity: Math.max(previous.velocity, event.velocity),
@@ -354,6 +436,27 @@ exports.testActivityControl = (0, https_1.onCall)({ region: REGION, secrets: [BE
             map: [...map.values()].sort((a, b) => b.events - a.events || b.latestAtMs - a.latestAtMs).slice(0, 32),
             simulation,
             simulationEnabled: configSnapshot.data()?.enabled === true,
+            syntheticProfiles: syntheticBetaCohort_1.SYNTHETIC_BETA_PROFILES.map(profile => ({
+                id: profile.id,
+                label: profile.label,
+                handle: profile.handle,
+                persona: profile.persona,
+                place: profile.place,
+                screen: profile.screen,
+                status: configSnapshot.data()?.enabled === true ? "live" : "paused",
+                finding: profile.finding,
+                liked: profile.liked,
+                improve: profile.improve,
+                avatarTile: profile.avatarTile,
+                source: profile.source,
+                cohortId: profile.cohortId,
+            })),
+            counts: {
+                realTesters: activitySnapshot.size,
+                realPosts: posts.length,
+                syntheticPersonas: syntheticBetaCohort_1.SYNTHETIC_BETA_PROFILES.length,
+                syntheticEvents: simulation.length,
+            },
             feedback: feedbackSnapshot.docs.map(doc => {
                 const feedback = doc.data();
                 return {
