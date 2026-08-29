@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.poplurAiApi = exports.cameraSceneScan = exports.premiumAiAssist = exports.generateRetroGame = exports.meshyStatus = exports.meshyGenerate = exports.setAccountLocationPrivacy = exports.notifyOnDirectMessage = exports.notifyOnEngagement = exports.poplurPassOnProfileChange = exports.poplurPassWebService = exports.poplurOwnedCards = exports.poplurWalletPass = exports.verifyCardPurchase = void 0;
+exports.poplurAiApi = exports.cameraSceneScan = exports.premiumAiAssist = exports.generateRetroGame = exports.testActivityControl = exports.refreshLiveNews = exports.liveNewsApi = exports.wardrobeGarmentApi = exports.meshyStatus = exports.meshyGenerate = exports.setAccountLocationPrivacy = exports.notifyOnDirectMessage = exports.notifyOnEngagement = exports.poplurPassOnProfileChange = exports.poplurPassWebService = exports.poplurOwnedCards = exports.poplurWalletPass = exports.verifyCardPurchase = void 0;
 const sdk_1 = __importDefault(require("@anthropic-ai/sdk"));
 const admin = __importStar(require("firebase-admin"));
 const firebase_functions_1 = require("firebase-functions");
@@ -61,6 +61,13 @@ Object.defineProperty(exports, "setAccountLocationPrivacy", { enumerable: true, 
 var meshyModels_1 = require("./meshyModels");
 Object.defineProperty(exports, "meshyGenerate", { enumerable: true, get: function () { return meshyModels_1.meshyGenerate; } });
 Object.defineProperty(exports, "meshyStatus", { enumerable: true, get: function () { return meshyModels_1.meshyStatus; } });
+var wardrobeGarments_1 = require("./wardrobeGarments");
+Object.defineProperty(exports, "wardrobeGarmentApi", { enumerable: true, get: function () { return wardrobeGarments_1.wardrobeGarmentApi; } });
+var liveNews_1 = require("./liveNews");
+Object.defineProperty(exports, "liveNewsApi", { enumerable: true, get: function () { return liveNews_1.liveNewsApi; } });
+Object.defineProperty(exports, "refreshLiveNews", { enumerable: true, get: function () { return liveNews_1.refreshLiveNews; } });
+var testActivity_1 = require("./testActivity");
+Object.defineProperty(exports, "testActivityControl", { enumerable: true, get: function () { return testActivity_1.testActivityControl; } });
 var generateRetroGame_1 = require("./retro/generateRetroGame");
 Object.defineProperty(exports, "generateRetroGame", { enumerable: true, get: function () { return generateRetroGame_1.generateRetroGame; } });
 if (admin.apps.length === 0)
@@ -435,6 +442,7 @@ async function handleGenerate(uid, contentType, req, res) {
     const body = objectBody(req);
     const prompt = stringField(body.prompt, "prompt", 4000);
     const sourceAssetIds = stringArrayField(body.sourceAssetIds);
+    const sourceImage = optionalSourceImage(body);
     const location = plainObjectField(body.location);
     const channelId = optionalStringField(body.channelId, 120);
     const metadata = plainObjectField(body.metadata) ?? {};
@@ -456,6 +464,7 @@ async function handleGenerate(uid, contentType, req, res) {
             contentType,
             prompt,
             sourceAssetIds,
+            sourceImage,
             metadata,
         });
         const completed = await completeGenerationJob(uid, jobId, cost, result);
@@ -1246,18 +1255,18 @@ async function runGoogleAIProvider(input) {
         throw httpError(500, "missing_google_ai_key", "GOOGLE_AI_API_KEY is not configured server-side.");
     }
     const model = modelForContentType(input.contentType);
+    const sourceInput = input.sourceImage
+        ? [
+            { type: "text", text: input.prompt },
+            { type: "image", mime_type: input.sourceImage.mimeType, data: input.sourceImage.data },
+        ]
+        : input.prompt;
     const body = {
         model,
-        input: input.prompt,
+        input: sourceInput,
         background: input.contentType === "video",
         generation_config: {
             response_modalities: responseModalitiesForContentType(input.contentType),
-        },
-        metadata: {
-            app: "poplur",
-            uidSuffix: input.uid.slice(-6),
-            jobId: input.jobId,
-            contentType: input.contentType,
         },
     };
     const response = await fetch("https://generativelanguage.googleapis.com/v1beta/interactions", {
@@ -1290,6 +1299,29 @@ async function runGoogleAIProvider(input) {
             providerStatus: extracted.providerStatus,
         },
     };
+}
+/**
+ * A single bounded image travels with an edit request; it is not written to a
+ * job document or logged. This keeps an unposted camera capture private while
+ * letting the provider perform genuine image-to-image editing.
+ */
+function optionalSourceImage(body) {
+    const raw = plainObjectField(body.sourceImage);
+    if (!raw)
+        return undefined;
+    const data = optionalStringField(raw.data, 1_400_000);
+    const mimeType = optionalStringField(raw.mimeType, 40);
+    if (!data || !mimeType || !/^[A-Za-z0-9+/=]+$/.test(data)) {
+        throw httpError(400, "invalid_source_image", "Send one encoded JPEG, PNG, or WebP image.");
+    }
+    if (mimeType !== "image/jpeg" && mimeType !== "image/png" && mimeType !== "image/webp") {
+        throw httpError(400, "invalid_source_image", "Use a JPEG, PNG, or WebP image for AI editing.");
+    }
+    const bytes = Buffer.from(data, "base64");
+    if (!bytes.length || bytes.length > 1_000_000) {
+        throw httpError(400, "invalid_source_image", "The AI edit source image must be 1 MB or smaller.");
+    }
+    return { data, mimeType };
 }
 function responseModalitiesForContentType(contentType) {
     switch (contentType) {

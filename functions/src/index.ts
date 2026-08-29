@@ -21,6 +21,7 @@ export { setAccountLocationPrivacy } from "./accountPrivacy";
 export { meshyGenerate, meshyStatus } from "./meshyModels";
 export { wardrobeGarmentApi } from "./wardrobeGarments";
 export { liveNewsApi, refreshLiveNews } from "./liveNews";
+export { testActivityControl } from "./testActivity";
 export { generateRetroGame } from "./retro/generateRetroGame";
 
 if (admin.apps.length === 0) admin.initializeApp();
@@ -1509,12 +1510,6 @@ async function runGoogleAIProvider(input: {
     background: input.contentType === "video",
     generation_config: {
       response_modalities: responseModalitiesForContentType(input.contentType),
-    },
-    metadata: {
-      app: "poplur",
-      uidSuffix: input.uid.slice(-6),
-      jobId: input.jobId,
-      contentType: input.contentType,
     },
   };
 

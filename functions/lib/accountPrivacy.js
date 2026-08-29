@@ -42,13 +42,21 @@ if (admin.apps.length === 0)
 const db = admin.firestore();
 const region = "us-central1";
 const MIGRATION_CHUNK = 200;
-const PRIVACY_SCHEMA_VERSION = 1;
+// Version 2 retires the legacy public `lat`/`lng` aliases as well as the
+// current latitude/longitude fields. Bumping forces accounts already marked
+// migrated by v1 to receive the stronger cleanup on their next privacy save.
+const PRIVACY_SCHEMA_VERSION = 2;
 function finiteCoordinate(value, limit) {
     const numberValue = typeof value === "number" ? value : Number(value);
     return Number.isFinite(numberValue) && Math.abs(numberValue) <= limit ? numberValue : null;
 }
 function publicCell(value) {
     return Math.round(value * 1_000);
+}
+function coordinatePair(latitudeValue, longitudeValue) {
+    const latitude = finiteCoordinate(latitudeValue, 90);
+    const longitude = finiteCoordinate(longitudeValue, 180);
+    return latitude != null && longitude != null ? { latitude, longitude } : null;
 }
 function chunks(values, size) {
     const result = [];
@@ -102,12 +110,14 @@ exports.setAccountLocationPrivacy = (0, https_1.onCall)({ region, timeoutSeconds
             const batch = db.batch();
             for (const document of group) {
                 const data = document.data();
-                const latitude = finiteCoordinate(data.latitude, 90);
-                const longitude = finiteCoordinate(data.longitude, 180);
-                if (latitude != null && longitude != null) {
+                // Never combine one coordinate from the modern pair with the other
+                // from the legacy pair: only a complete, validated pair is an origin.
+                const origin = coordinatePair(data.latitude, data.longitude)
+                    ?? coordinatePair(data.lat, data.lng);
+                if (origin) {
                     batch.set(userRef.collection("postLocations").doc(document.id), {
-                        latitude,
-                        longitude,
+                        latitude: origin.latitude,
+                        longitude: origin.longitude,
                         updatedAt: firestore_1.FieldValue.serverTimestamp(),
                         source: "legacy-public-migration",
                     }, { merge: true });
@@ -117,6 +127,8 @@ exports.setAccountLocationPrivacy = (0, https_1.onCall)({ region, timeoutSeconds
                     longitude: firestore_1.FieldValue.delete(),
                     latitudeCell: firestore_1.FieldValue.delete(),
                     longitudeCell: firestore_1.FieldValue.delete(),
+                    lat: firestore_1.FieldValue.delete(),
+                    lng: firestore_1.FieldValue.delete(),
                     locationVisibility: "hidden",
                     originHiddenByPrivateAccount: privateAccount,
                     originHiddenByGhostMode: ghostMode,
@@ -134,13 +146,32 @@ exports.setAccountLocationPrivacy = (0, https_1.onCall)({ region, timeoutSeconds
             group.forEach((document, index) => {
                 const location = locations[index]?.data();
                 const post = document.data();
-                const latitude = finiteCoordinate(location?.latitude ?? post.latitude, 90);
-                const longitude = finiteCoordinate(location?.longitude ?? post.longitude, 180);
-                if (latitude == null || longitude == null)
+                const protectedOrigin = coordinatePair(location?.latitude, location?.longitude);
+                const origin = protectedOrigin
+                    ?? coordinatePair(post.latitude, post.longitude)
+                    ?? coordinatePair(post.lat, post.lng);
+                if (!origin) {
+                    // No valid origin can be restored, but v2 still removes deprecated
+                    // aliases and any partial modern pair so no coordinate can linger
+                    // on a post that must remain hidden.
+                    batch.update(document.ref, {
+                        latitude: firestore_1.FieldValue.delete(),
+                        longitude: firestore_1.FieldValue.delete(),
+                        latitudeCell: firestore_1.FieldValue.delete(),
+                        longitudeCell: firestore_1.FieldValue.delete(),
+                        lat: firestore_1.FieldValue.delete(),
+                        lng: firestore_1.FieldValue.delete(),
+                        locationVisibility: "hidden",
+                        originHiddenByPrivateAccount: firestore_1.FieldValue.delete(),
+                        originHiddenByGhostMode: firestore_1.FieldValue.delete(),
+                    });
+                    writes += 1;
                     return;
+                }
+                const { latitude, longitude } = origin;
                 const latitudeCell = publicCell(latitude);
                 const longitudeCell = publicCell(longitude);
-                if (!location) {
+                if (!protectedOrigin) {
                     batch.set(locationRefs[index], {
                         latitude,
                         longitude,
@@ -154,6 +185,8 @@ exports.setAccountLocationPrivacy = (0, https_1.onCall)({ region, timeoutSeconds
                     longitude: longitudeCell / 1_000,
                     latitudeCell,
                     longitudeCell,
+                    lat: firestore_1.FieldValue.delete(),
+                    lng: firestore_1.FieldValue.delete(),
                     locationVisibility: "approximate",
                     originHiddenByPrivateAccount: firestore_1.FieldValue.delete(),
                     originHiddenByGhostMode: firestore_1.FieldValue.delete(),
