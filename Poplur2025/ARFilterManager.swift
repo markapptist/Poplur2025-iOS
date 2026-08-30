@@ -15,6 +15,15 @@ import FirebaseAuth
 /// Manages AR face filters and effects
 @MainActor
 class ARFilterManager: NSObject, ObservableObject {
+
+    /// A compact, frame-normalized landmark payload for the transparent web
+    /// accessory layer. Vision owns the full mesh; the bridge needs only the
+    /// feature centres that materially improve Poplur's filter anchors.
+    struct FaceLandmarkTrack {
+        let leftEye: CGPoint?
+        let rightEye: CGPoint?
+        let nose: CGPoint?
+    }
     
     // MARK: - Published Properties
     
@@ -50,7 +59,7 @@ class ARFilterManager: NSObject, ObservableObject {
     private nonisolated(unsafe) let ciContext = CIContext()
     /// Reuses the Vision pass already required by the native filter pipeline to
     /// anchor the transparent WebGL accessory layer. No second face detector.
-    var onFaceTrack: ((CGRect?, Float, CGFloat, CGFloat) -> Void)?
+    var onFaceTrack: ((CGRect?, Float, CGFloat, CGFloat, FaceLandmarkTrack?) -> Void)?
     private var lastFaceTrackPublishTime: TimeInterval = 0
 
     // ── Cross-queue state for the per-frame render path ─────────────────────
@@ -449,6 +458,17 @@ class ARFilterManager: NSObject, ObservableObject {
         return filterSnapshot
     }
 
+    /// Bakes the active whole-frame grade into an AVCapture still. Accessory
+    /// meshes remain owned by the web capture surface, which composites them
+    /// after the native image arrives using the retained Vision landmarks.
+    nonisolated func applyActiveGrade(to image: CIImage) -> CIImage? {
+        let filter = currentFilterSnapshot()
+        guard filter != .none, let grade = currentGrade(for: filter) else {
+            return nil
+        }
+        return applyGrade(grade, to: image).cropped(to: image.extent)
+    }
+
     /// Apply the active filter to a captured video frame. Runs ENTIRELY on the
     /// caller's queue (the camera's video output queue) and completes
     /// synchronously - no main-actor hop, no per-frame Vision.
@@ -562,7 +582,32 @@ class ARFilterManager: NSObject, ObservableObject {
             observation?.boundingBox,
             observation?.confidence ?? 0,
             CGFloat(observation?.roll?.doubleValue ?? 0),
-            CGFloat(observation?.yaw?.doubleValue ?? 0)
+            CGFloat(observation?.yaw?.doubleValue ?? 0),
+            observation.map(faceLandmarks)
+        )
+    }
+
+    /// Vision regions are normalized inside the face rectangle. Convert their
+    /// centres into full camera-frame coordinates once, while Vision's
+    /// coordinate system is still authoritative.
+    private func faceLandmarks(_ observation: VNFaceObservation) -> FaceLandmarkTrack {
+        func centre(_ region: VNFaceLandmarkRegion2D?) -> CGPoint? {
+            guard let region, !region.normalizedPoints.isEmpty else { return nil }
+            let total = region.normalizedPoints.reduce(CGPoint.zero) { partial, point in
+                CGPoint(x: partial.x + point.x, y: partial.y + point.y)
+            }
+            let count = CGFloat(region.normalizedPoints.count)
+            let bounds = observation.boundingBox
+            return CGPoint(
+                x: bounds.minX + total.x / count * bounds.width,
+                y: bounds.minY + total.y / count * bounds.height
+            )
+        }
+
+        return FaceLandmarkTrack(
+            leftEye: centre(observation.landmarks?.leftEye),
+            rightEye: centre(observation.landmarks?.rightEye),
+            nose: centre(observation.landmarks?.nose)
         )
     }
     

@@ -90,6 +90,25 @@ service cloud.firestore {
         : (hiddenPostOrigin() || approximatePostOrigin());
     }
 
+    // Engagement reach is calculated by recordPostEngagement's authenticated
+    // transaction. Owners may still edit captions/media/audience, but no web or
+    // native client can forge the counters, radius, boost or notification
+    // coalescing state that every realtime surface now trusts.
+    function serverOwnedPostEngagementFields() {
+      return [
+        'radius', 'radiusMeters', 'organicRadiusMeters',
+        'boostedRadiusMeters', 'boostExpiresAt',
+        'viewCount', 'likeCount', 'upvoteCount',
+        'downvoteCount', 'dislikeCount', 'commentCount', 'shareCount',
+        'lastEngagementAt', 'likeNotifyAt', 'likesPendingNotify'
+      ];
+    }
+
+    function keepsPostEngagementFieldsUnchanged() {
+      return !request.resource.data.diff(resource.data).affectedKeys()
+        .hasAny(serverOwnedPostEngagementFields());
+    }
+
     match /users/{userId} {
       allow read: if isSelf(userId);
       allow create: if isSelf(userId) && doesNotWritePremiumAIFields();
@@ -357,6 +376,7 @@ service cloud.firestore {
       allow update: if signedIn()
         && (resource.data.userID == request.auth.uid
           || resource.data.userId == request.auth.uid)
+        && keepsPostEngagementFieldsUnchanged()
         && validPostOrigin(request.auth.uid);
       allow delete: if signedIn()
         && (resource.data.userID == request.auth.uid
@@ -372,16 +392,10 @@ service cloud.firestore {
           && (request.auth.uid == resource.data.actorUid
             || request.auth.uid == postOwnerOf(postId));
 
-        // An actor may only create engagements AS THEMSELVES, and postOwnerUid
-        // must match the real owner of the parent post. postOwnerUid is
-        // denormalised so the notification trigger needs no second read, which
-        // makes it exactly the field worth forging -- hence checking it against
-        // the parent document here rather than trusting the client.
-        allow create: if signedIn()
-          && request.resource.data.actorUid == request.auth.uid
-          && request.resource.data.postOwnerUid == postOwnerOf(postId)
-          && request.resource.data.kind in ['like', 'view', 'comment']
-          && request.resource.data.createdAt == request.time;
+        // Admin-only creation through recordPostEngagement. Direct client
+        // writes would bypass the parent-post counter/radius transaction and
+        // could attach arbitrary fields (including a comment body) to an event.
+        allow create: if false;
 
         // Immutable. Editing an engagement after the fact would let a 'view'
         // become a 'comment' AFTER the trigger decided not to notify for it.

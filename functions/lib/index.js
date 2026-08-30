@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.poplurAiApi = exports.cameraSceneScan = exports.premiumAiAssist = exports.generateRetroGame = exports.testSessionIngest = exports.testActivityControl = exports.refreshLiveNews = exports.liveNewsApi = exports.wardrobeGarmentApi = exports.meshyStatus = exports.meshyGenerate = exports.setAccountLocationPrivacy = exports.notifyOnDirectMessage = exports.notifyOnEngagement = exports.poplurPassOnProfileChange = exports.poplurPassWebService = exports.poplurOwnedCards = exports.poplurWalletPass = exports.verifyCardPurchase = void 0;
+exports.poplurAiApi = exports.cameraSceneScan = exports.premiumAiAssist = exports.generateRetroGame = exports.testSessionIngest = exports.testActivityControl = exports.refreshLiveNews = exports.liveNewsApi = exports.wardrobeGarmentApi = exports.meshyStatus = exports.meshyGenerate = exports.setAccountLocationPrivacy = exports.notifyOnDirectMessage = exports.recordPostEngagement = exports.notifyOnEngagement = exports.poplurPassOnProfileChange = exports.poplurPassWebService = exports.poplurOwnedCards = exports.poplurWalletPass = exports.verifyCardPurchase = void 0;
 const sdk_1 = __importDefault(require("@anthropic-ai/sdk"));
 const admin = __importStar(require("firebase-admin"));
 const firebase_functions_1 = require("firebase-functions");
@@ -54,6 +54,8 @@ Object.defineProperty(exports, "poplurPassWebService", { enumerable: true, get: 
 Object.defineProperty(exports, "poplurPassOnProfileChange", { enumerable: true, get: function () { return walletPassWebService_1.poplurPassOnProfileChange; } });
 var engagementNotifications_1 = require("./engagementNotifications");
 Object.defineProperty(exports, "notifyOnEngagement", { enumerable: true, get: function () { return engagementNotifications_1.notifyOnEngagement; } });
+var postEngagement_1 = require("./postEngagement");
+Object.defineProperty(exports, "recordPostEngagement", { enumerable: true, get: function () { return postEngagement_1.recordPostEngagement; } });
 var directMessageNotifications_1 = require("./directMessageNotifications");
 Object.defineProperty(exports, "notifyOnDirectMessage", { enumerable: true, get: function () { return directMessageNotifications_1.notifyOnDirectMessage; } });
 var accountPrivacy_1 = require("./accountPrivacy");

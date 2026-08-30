@@ -73,7 +73,7 @@ const LIKE_COALESCE_WINDOW_MS = 5 * 60 * 1000;
  */
 async function resolveNotification(postId, engagement) {
     const handle = engagement.actorHandle?.trim() || "Someone";
-    if (engagement.kind === "view")
+    if (engagement.kind === "view" || engagement.kind === "dislike")
         return null;
     if (engagement.kind === "comment") {
         const comment = engagement.body?.trim();
@@ -119,7 +119,7 @@ exports.notifyOnEngagement = (0, firestore_1.onDocumentCreated)({
     region: "us-central1",
 }, async (event) => {
     const engagement = event.data?.data();
-    if (!engagement)
+    if (!engagement || engagement.applied === false)
         return;
     const { postId, engagementId } = event.params;
     const ownerUid = engagement.postOwnerUid;
@@ -140,7 +140,9 @@ exports.notifyOnEngagement = (0, firestore_1.onDocumentCreated)({
         ? (engagement.body?.trim() || "commented on your post")
         : engagement.kind === "view"
             ? "viewed your post"
-            : "liked your post";
+            : engagement.kind === "dislike"
+                ? "disliked your post"
+                : "liked your post";
     await db.collection("users").doc(ownerUid)
         .collection("notifications").doc(notificationId)
         .set({

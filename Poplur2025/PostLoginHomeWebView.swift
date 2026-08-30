@@ -707,6 +707,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
 
     static func dismantleUIView(_ uiView: WKWebView, coordinator: Coordinator) {
         setNativeMapRendererActive(false)
+        PoplurNotificationCenter.shared.stopServerInboxListener(owner: coordinator.notificationInboxOwner)
         (uiView as? PoplurManagedWebView)?.clearNativeMapPresentation()
         (uiView as? PoplurManagedWebView)?.poplurTearDown()
         uiView.configuration.userContentController.removeScriptMessageHandler(forName: "poplur")
@@ -775,6 +776,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         private var webForegroundActive = false
         private var webMotionLeaseActive = false
         private var nativeMapRendererActive = false
+        private var navigatorReportsMotionActive = false
         private var navigatorReportsAiming = false
         private var lastMotionDeliveryUptime: TimeInterval = 0
         private var lastDeliveredRoll: Double?
@@ -783,6 +785,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         private var activeStoreCheckoutRequestID: String?
         private var activeStoreCheckoutProductCounts: [String: Int] = [:]
         private var pendingDMThreadID: String?
+        fileprivate let notificationInboxOwner = UUID()
 
         init(
             initialWebTab: String,
@@ -866,6 +869,11 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                 lastDeliveredRoll = nil
                 lastDeliveredPitch = nil
                 lastDeliveredHeading = nil
+            } else {
+                // Never carry a stale web demand across a native lifecycle
+                // suspension. The governed renderer republishes its current
+                // demand after the matching foreground edge.
+                navigatorReportsMotionActive = false
             }
             syncMotionLease()
             if active { replayLatestMotion() }
@@ -887,11 +895,16 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         }
 
         private func syncMotionLease() {
-            // When native owns Map, do not sample for the hidden web navigator
-            // at all. The fallback web Map and ordinary tab objects need only a
-            // low-rate parallax stream; the visible camcorder is the sole reason
-            // this owner asks Core Motion for display-rate samples.
+            // Motion belongs to the navigator's governed render demand, not to
+            // the foreground WebView. CubeTab3D is mounted on every web tab;
+            // tying this lease only to foreground visibility kept CMMotionManager
+            // and a 20 Hz JavaScript bridge running across Feed, Camera, Profile,
+            // and every subscreen after the WebGL renderer had already parked.
+            // The web now raises `navigatorReportsMotionActive` for finite
+            // interaction/model-animation windows and lowers it at the same
+            // idle edge that releases renderer demand.
             let eligible = webForegroundActive
+                && navigatorReportsMotionActive
                 && !(nativeMapRendererActive && currentWebTab == "map")
             webMotionLeaseActive = eligible
             guard eligible else {
@@ -929,7 +942,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         /// This tiny dispatch deliberately has no completion-based lock. WebKit
         /// can omit an evaluateJavaScript completion while its governed timers
         /// are idle; the old lock then permanently stopped live cube motion.
-        /// Core Motion is leased at a bounded 20/60 Hz according to visible
+        /// Core Motion is leased at a bounded 20/30 Hz according to visible
         /// demand and delivery is limited to the genuinely foreground document,
         /// so callback-free dispatch stays bounded without coupling motion to
         /// page inactivity policy.
@@ -938,7 +951,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                   (webView as? PoplurManagedWebView)?.poplurIsForegroundVisible == true else { return }
             let now = ProcessInfo.processInfo.systemUptime
             // Keep the bridge aligned with the hardware lease: ordinary clay
-            // parallax is 20 Hz, while the camcorder retains direct 60 Hz aim.
+            // parallax is 20 Hz, while the camcorder retains direct 30 Hz aim.
             let deliveryRate = currentWebTab == "post" && navigatorReportsAiming
                 ? CubeMotionPoster.SamplingRate.cameraAim.rawValue
                 : CubeMotionPoster.SamplingRate.navigator.rawValue
@@ -972,6 +985,10 @@ struct PostLoginHomeWebView: UIViewRepresentable {
             recoveryWorkItem?.cancel()
             notificationObservers.forEach(NotificationCenter.default.removeObserver)
             CubeMotionPoster.shared.stop(owner: "web-home")
+            let owner = notificationInboxOwner
+            Task { @MainActor in
+                PoplurNotificationCenter.shared.stopServerInboxListener(owner: owner)
+            }
         }
 
         private func deliverUploadResult(success: Bool, note: Notification) {
@@ -1085,13 +1102,30 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                 }
                 if type == "notificationsRequested" {
                     Task { @MainActor [weak self] in
-                        let rows = await PoplurNotificationCenter.shared.refreshServerInbox()
-                        self?.pushNotificationInbox(rows)
+                        guard let self else { return }
+                        PoplurNotificationCenter.shared.reconnectServerInboxListener(
+                            owner: self.notificationInboxOwner
+                        ) { [weak self] rows in
+                            self?.pushNotificationInbox(rows)
+                        }
+                    }
+                }
+                if type == "notificationsStopped" {
+                    Task { @MainActor [weak self] in
+                        guard let self else { return }
+                        PoplurNotificationCenter.shared.stopServerInboxListener(
+                            owner: self.notificationInboxOwner
+                        )
                     }
                 }
                 if type == "notificationsRead" {
                     Task { @MainActor [weak self] in
-                        PoplurNotificationCenter.shared.markAllRead()
+                        let ids = body["ids"] as? [String] ?? []
+                        if ids.isEmpty {
+                            PoplurNotificationCenter.shared.markAllRead()
+                        } else {
+                            await PoplurNotificationCenter.shared.markNotificationsRead(ids: ids)
+                        }
                         self?.pushNotificationInbox(PoplurNotificationCenter.shared.notifications)
                     }
                 }
@@ -1862,11 +1896,14 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                 }
                 if type == "navigatorMotionDemandChanged",
                    let aiming = body["aiming"] as? Bool {
-                    // CubeTab3D reports the model that is actually installed,
-                    // not merely the semantic tab requested during a pop. That
-                    // keeps 60 Hz exclusive to a visible camcorder and drops
-                    // back to the ordinary navigator cadence on its subscreens.
-                    if navigatorReportsAiming != aiming {
+                    // `active` is omitted by older embedded web bundles. Treat
+                    // those as active for compatibility; current bundles lower
+                    // it whenever the governed navigator loop parks, stopping
+                    // both Core Motion hardware and bridge delivery.
+                    let active = (body["active"] as? Bool) ?? true
+                    if navigatorReportsMotionActive != active
+                        || navigatorReportsAiming != aiming {
+                        navigatorReportsMotionActive = active
                         navigatorReportsAiming = aiming
                         syncMotionLease()
                     }

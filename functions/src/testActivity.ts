@@ -23,9 +23,9 @@ import {
  * analytics. It never accepts message text, media, raw coordinates, contacts,
  * camera or microphone data. Map reporting is deliberately limited to a
  * coarse, user-visible city/region label. Each row carries a 14-day
- * `expiresAt` field so production can apply a Firestore TTL policy without
- * changing this endpoint; the dashboard is further restricted to the two
- * retained production-test administrators.
+ * `expiresAt` field enforced by the production Firestore TTL policy; the
+ * dashboard is further restricted to the two retained production-test
+ * administrators.
  */
 
 const REGION = "us-central1";
@@ -36,11 +36,17 @@ const TEST_ADMIN_UIDS = new Set([
   "LiEG6SNtKEZN6eEGeybf0afZnHm1", // testcall@poplur.com
   "eoP2Z0ElxIa0Eua7xpFxNlr6tur1", // mark@apptist.ca
 ]);
-const SCREENS = new Set([
+export const TEST_ACTIVITY_SCREEN_IDS = Object.freeze([
   "home", "map", "feed", "camera", "camera-roll", "profile", "hold-menu",
   "upload-flows", "arcade", "games", "battle", "map-radio", "feed-news",
-  "profile-wardrobe", "profile-house",
-]);
+  "map-conquer", "map-directions", "map-ipod", "map-show-me",
+  "feed-apps", "feed-browser", "feed-casino", "feed-games", "feed-tvguide",
+  "camera-ai-chat", "camera-studio",
+  "profile-avatar", "profile-house", "profile-messages", "profile-notifications",
+  "profile-phone", "profile-settings", "profile-stats", "profile-store",
+  "profile-trophies", "profile-wallet", "profile-wardrobe",
+] as const);
+const SCREENS = new Set<string>(TEST_ACTIVITY_SCREEN_IDS);
 const STATUSES = new Set(["foreground", "background"]);
 const PLATFORMS = new Set(["native", "browser"]);
 const EVENT_KINDS = new Set(["posted", "like", "view", "comment", "radius-up", "radius-down"]);
@@ -81,6 +87,25 @@ function appVersion(value: unknown): string {
   return typeof value === "string" && /^\d+\.\d+(?:\.\d+)?$/.test(value)
     ? value.slice(0, 24)
     : "0.1.0";
+}
+
+/**
+ * Copy only the bounded presence fields accepted by a heartbeat. Keeping this
+ * as a positive projection means extra request fields (including content,
+ * coordinates, media/input, and mic/camera state) can never reach Firestore.
+ */
+export function privacySafeTestActivityHeartbeat(data: Record<string, unknown>): {
+  screen: string;
+  status: string;
+  platform: string;
+  appVersion: string;
+} {
+  return {
+    screen: enumValue(data.screen, SCREENS, "home"),
+    status: enumValue(data.status, STATUSES, "foreground"),
+    platform: enumValue(data.platform, PLATFORMS, "browser"),
+    appVersion: appVersion(data.appVersion),
+  };
 }
 
 function text(value: unknown, maxLength: number): string {
@@ -265,12 +290,10 @@ export const testActivityControl = onCall({ region: REGION, secrets: [BETA_DESK_
       throw new HttpsError("failed-precondition", "Test activity sharing is turned off.");
     }
     const now = Date.now();
+    const heartbeat = privacySafeTestActivityHeartbeat(request.data ?? {});
     await db().collection("testActivity").doc(uid).set({
       label: labelFor(uid, profile.data(), request.auth?.token.name),
-      screen: enumValue(request.data?.screen, SCREENS, "home"),
-      status: enumValue(request.data?.status, STATUSES, "foreground"),
-      platform: enumValue(request.data?.platform, PLATFORMS, "browser"),
-      appVersion: appVersion(request.data?.appVersion),
+      ...heartbeat,
       lastActivityAt: FieldValue.serverTimestamp(),
       expiresAt: admin.firestore.Timestamp.fromMillis(now + RETENTION_MS),
     }, { merge: true });

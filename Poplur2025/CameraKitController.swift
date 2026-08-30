@@ -1889,6 +1889,25 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
         )
     }
 
+    /// Still capture bypasses the preview's video-frame pipeline, so bake its
+    /// active whole-frame grade before handing it to the WebView composer.
+    /// Landmark-dependent costumes remain in the web layer, which owns their
+    /// live Vision anchors and composites them after this native grade.
+    @MainActor
+    private func applyingActiveARGrade(to image: UIImage) -> UIImage {
+        guard let arFilterManager,
+              let cgImage = image.cgImage,
+              let filtered = arFilterManager.applyActiveGrade(to: CIImage(cgImage: cgImage)) else {
+            return image
+        }
+
+        let context = CIContext(options: [.cacheIntermediates: false])
+        guard let rendered = context.createCGImage(filtered, from: filtered.extent) else {
+            return image
+        }
+        return UIImage(cgImage: rendered, scale: image.scale, orientation: image.imageOrientation)
+    }
+
     @MainActor
     private func completeVideoCapture(_ url: URL) {
         replaceLastVideoURL(with: url)
@@ -1941,7 +1960,7 @@ extension CameraKitController: AVCapturePhotoCaptureDelegate, AVCaptureFileOutpu
                 return
             }
 
-            self.completePhotoCapture(image)
+            self.completePhotoCapture(self.applyingActiveARGrade(to: image))
             self.finishPhotoBudget()
         }
     }

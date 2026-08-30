@@ -8,6 +8,7 @@
   "scripts": {
     "build": "tsc && node scripts/copyAppleRootCertificates.js",
     "lint": "tsc --noEmit",
+    "test:test-activity": "npm run build && node scripts/testTestActivityPrivacy.js",
     "test:synthetic-runner": "npm run build && node scripts/testSyntheticBrowserRunner.js",
     "provision:synthetic-beta": "node scripts/provisionSyntheticBetaAccounts.js",
     "seed:creator-credits": "node scripts/seedCreatorCreditBalances.js",

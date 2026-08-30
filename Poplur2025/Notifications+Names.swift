@@ -182,6 +182,8 @@ final class PoplurNotificationCenter: NSObject, ObservableObject, UNUserNotifica
     private let lastDailyKey = "poplur.notifications.lastDailyDate.v1"
     private let lastRadiusTotalKey = "poplur.notifications.lastRadiusTotal.v1"
     private let notificationIdentifier = "poplur.daily.radius.insight"
+    private let serverInboxUIDKey = "poplur.notifications.serverInbox.uid.v1"
+    private let serverInboxDocumentIDsKey = "poplur.notifications.serverInbox.documentIds.v1"
 
     // ── Tier system ─────────────────────────────────────────────────────
     private let prefMessagesKey = "poplur.notifications.pref.messages"
@@ -193,7 +195,13 @@ final class PoplurNotificationCenter: NSObject, ObservableObject, UNUserNotifica
     private let pushCooldown: TimeInterval = 5 * 60          // 5 minutes
     private var pendingBatch: [(webKind: String, user: String, detail: String)] = []
     private var flushTimer: Timer?
-    private var serverBackedIds = Set<String>()
+    private var serverInboxRegistration: ListenerRegistration?
+    private var serverInboxAuthHandle: AuthStateDidChangeListenerHandle?
+    private var serverInboxOwner: UUID?
+    private var serverInboxObservedUID: String?
+    private var serverInboxAccountUID: String?
+    private var serverInboxDocumentIDs: [String: String] = [:]
+    private var serverInboxOnChange: (([PoplurDeviceNotification]) -> Void)?
 
     var messagesPushEnabled: Bool {
         get { defaults.object(forKey: prefMessagesKey) as? Bool ?? true }
@@ -226,6 +234,8 @@ final class PoplurNotificationCenter: NSObject, ObservableObject, UNUserNotifica
     private override init() {
         super.init()
         loadPersistedNotifications()
+        serverInboxAccountUID = defaults.string(forKey: serverInboxUIDKey)
+        serverInboxDocumentIDs = defaults.dictionary(forKey: serverInboxDocumentIDsKey) as? [String: String] ?? [:]
         startFlushTimer()
     }
 
@@ -315,67 +325,165 @@ final class PoplurNotificationCenter: NSObject, ObservableObject, UNUserNotifica
         // Reading the list is what clears the badge — same rule the web bell
         // now follows via markEngagementSeen.
         refreshBadge()
-        let ids = notifications.filter { serverBackedIds.contains($0.id) }.map(\.id)
+        let ids = notifications.filter { serverInboxDocumentIDs[$0.id] != nil }.map(\.id)
         Task { await updateServerNotifications(ids: ids, read: true, dismissed: nil) }
     }
 
-    /// Pulls the canonical inbox written by Cloud Functions. Local daily radius
-    /// insights remain alongside it, while server rows replace earlier server
-    /// snapshots so a dismissal/read on another device is reflected here.
-    @discardableResult
-    func refreshServerInbox() async -> [PoplurDeviceNotification] {
-        guard FirebaseApp.app() != nil, let uid = Auth.auth().currentUser?.uid else {
-            return notifications
+    func markNotificationsRead(ids: [String]) async {
+        let selected = Set(ids.filter { !$0.isEmpty })
+        guard !selected.isEmpty else { return }
+        notifications = notifications.map { item in
+            guard selected.contains(item.id), item.isUnread else { return item }
+            return PoplurDeviceNotification(
+                id: item.id,
+                kind: item.kind,
+                title: item.title,
+                detail: item.detail,
+                createdAt: item.createdAt,
+                isUnread: false,
+                webKind: item.webKind,
+                actorHandle: item.actorHandle,
+                postId: item.postId,
+                threadId: item.threadId
+            )
         }
-        do {
-            let snapshot = try await Firestore.firestore()
-                .collection("users").document(uid)
-                .collection("notifications")
-                .order(by: "createdAt", descending: true)
-                .limit(to: 80)
-                .getDocuments()
+        persistNotifications()
+        refreshBadge()
+        await updateServerNotifications(ids: Array(selected), read: true, dismissed: nil)
+    }
 
-            let serverRows = snapshot.documents.compactMap { document -> PoplurDeviceNotification? in
-                let data = document.data()
-                if data["isDismissed"] as? Bool == true { return nil }
-                let id = (data["id"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-                    ?? document.documentID
-                let title = (data["title"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-                    ?? "Poplur"
-                let detail = (data["detail"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-                    ?? "New activity on Poplur"
-                let rawKind = data["kind"] as? String
-                return PoplurDeviceNotification(
-                    id: id,
-                    kind: resolveKind(rawKind),
-                    title: title,
-                    detail: detail,
-                    createdAt: (data["createdAt"] as? Timestamp)?.dateValue() ?? Date(),
-                    isUnread: data["isUnread"] as? Bool ?? true,
-                    webKind: rawKind,
-                    actorHandle: data["actorHandle"] as? String,
-                    postId: data["postId"] as? String,
-                    threadId: data["threadId"] as? String
-                )
-            }
-
-            let fetchedIds = Set(snapshot.documents.map(\.documentID))
-            serverBackedIds = fetchedIds
-            let localRows = notifications.filter {
-                !$0.id.hasPrefix("engagement:") && !$0.id.hasPrefix("dm:")
-                    && $0.kind != .engagement && $0.kind != .dm
-            }
-            var seen = Set<String>()
-            notifications = (serverRows + localRows)
-                .filter { seen.insert($0.id).inserted }
-                .sorted { $0.createdAt > $1.createdAt }
-            if notifications.count > 80 { notifications = Array(notifications.prefix(80)) }
-            persistNotifications()
-            refreshBadge()
-        } catch {
-            PoplurDiagLog.append("[PoplurNotifications] inbox refresh failed: \(error.localizedDescription)")
+    /// Owns exactly one canonical Firestore subscription for the web
+    /// Notifications screen. Calling this again is pull-to-refresh: the old
+    /// auth observer and query registration are removed before replacements
+    /// are installed, so refresh can never multiply listeners.
+    func reconnectServerInboxListener(
+        owner: UUID,
+        onChange: @escaping ([PoplurDeviceNotification]) -> Void
+    ) {
+        tearDownServerInboxListener()
+        serverInboxOwner = owner
+        serverInboxOnChange = onChange
+        guard FirebaseApp.app() != nil else {
+            onChange(notifications)
+            return
         }
-        return notifications
+        let auth = Auth.auth()
+        serverInboxAuthHandle = auth.addStateDidChangeListener { [weak self] _, user in
+            Task { @MainActor [weak self] in
+                self?.bindServerInbox(uid: user?.uid, owner: owner)
+            }
+        }
+    }
+
+    func stopServerInboxListener(owner: UUID) {
+        guard serverInboxOwner == owner else { return }
+        tearDownServerInboxListener()
+    }
+
+    private func bindServerInbox(uid: String?, owner: UUID) {
+        guard serverInboxOwner == owner else { return }
+        serverInboxRegistration?.remove()
+        serverInboxRegistration = nil
+
+        if serverInboxAccountUID != uid {
+            removeObservedServerRows()
+            serverInboxAccountUID = uid
+            persistServerInboxOwnership()
+            serverInboxOnChange?(notifications)
+        }
+        serverInboxObservedUID = uid
+        guard let uid else {
+            serverInboxOnChange?(notifications)
+            return
+        }
+
+        serverInboxRegistration = Firestore.firestore()
+            .collection("users").document(uid)
+            .collection("notifications")
+            .order(by: "createdAt", descending: true)
+            .limit(to: 80)
+            .addSnapshotListener { [weak self] snapshot, error in
+                Task { @MainActor [weak self] in
+                    guard let self,
+                          self.serverInboxOwner == owner,
+                          self.serverInboxObservedUID == uid else { return }
+                    if let error {
+                        PoplurDiagLog.append("[PoplurNotifications] inbox listener failed: \(error.localizedDescription)")
+                        return
+                    }
+                    self.applyServerInboxSnapshot(snapshot?.documents ?? [], uid: uid)
+                }
+            }
+    }
+
+    private func applyServerInboxSnapshot(_ documents: [QueryDocumentSnapshot], uid: String) {
+        let priorServerIDs = Set(serverInboxDocumentIDs.keys)
+        var documentIDs: [String: String] = [:]
+        let serverRows = documents.compactMap { document -> PoplurDeviceNotification? in
+            let data = document.data()
+            let id = (data["id"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                .flatMap { $0.isEmpty ? nil : $0 } ?? document.documentID
+            documentIDs[id] = document.documentID
+            if data["isDismissed"] as? Bool == true { return nil }
+            let title = (data["title"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                .flatMap { $0.isEmpty ? nil : $0 } ?? "Poplur"
+            let detail = (data["detail"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                .flatMap { $0.isEmpty ? nil : $0 } ?? "New activity on Poplur"
+            let rawKind = data["kind"] as? String
+            return PoplurDeviceNotification(
+                id: id,
+                kind: resolveKind(rawKind),
+                title: title,
+                detail: detail,
+                createdAt: (data["createdAt"] as? Timestamp)?.dateValue() ?? Date(),
+                isUnread: data["isUnread"] as? Bool ?? true,
+                webKind: rawKind,
+                actorHandle: data["actorHandle"] as? String,
+                postId: data["postId"] as? String,
+                threadId: data["threadId"] as? String
+            )
+        }
+        let localRows = notifications.filter { !priorServerIDs.contains($0.id) }
+        serverInboxAccountUID = uid
+        serverInboxDocumentIDs = documentIDs
+        var seen = Set<String>()
+        notifications = (serverRows + localRows)
+            .filter { seen.insert($0.id).inserted }
+            .sorted { $0.createdAt > $1.createdAt }
+        if notifications.count > 80 { notifications = Array(notifications.prefix(80)) }
+        persistServerInboxOwnership()
+        persistNotifications()
+        refreshBadge()
+        serverInboxOnChange?(notifications)
+    }
+
+    private func removeObservedServerRows() {
+        let ids = Set(serverInboxDocumentIDs.keys)
+        if !ids.isEmpty { notifications.removeAll { ids.contains($0.id) } }
+        serverInboxDocumentIDs = [:]
+        persistNotifications()
+        refreshBadge()
+    }
+
+    private func persistServerInboxOwnership() {
+        if let serverInboxAccountUID {
+            defaults.set(serverInboxAccountUID, forKey: serverInboxUIDKey)
+        } else {
+            defaults.removeObject(forKey: serverInboxUIDKey)
+        }
+        defaults.set(serverInboxDocumentIDs, forKey: serverInboxDocumentIDsKey)
+    }
+
+    private func tearDownServerInboxListener() {
+        serverInboxRegistration?.remove()
+        serverInboxRegistration = nil
+        if let handle = serverInboxAuthHandle, FirebaseApp.app() != nil {
+            Auth.auth().removeStateDidChangeListener(handle)
+        }
+        serverInboxAuthHandle = nil
+        serverInboxObservedUID = nil
+        serverInboxOwner = nil
+        serverInboxOnChange = nil
     }
 
     func dismissNotifications(ids: [String]) async {
@@ -389,13 +497,15 @@ final class PoplurNotificationCenter: NSObject, ObservableObject, UNUserNotifica
 
     private func updateServerNotifications(ids: [String], read: Bool?, dismissed: Bool?) async {
         guard FirebaseApp.app() != nil, let uid = Auth.auth().currentUser?.uid else { return }
-        let persistedIds = ids.filter { serverBackedIds.contains($0) }
+        guard serverInboxAccountUID == uid else { return }
+        let persistedIds = ids.filter { serverInboxDocumentIDs[$0] != nil }
         guard !persistedIds.isEmpty else { return }
         let firestore = Firestore.firestore()
         let batch = firestore.batch()
         for id in persistedIds {
+            guard let documentID = serverInboxDocumentIDs[id] else { continue }
             let reference = firestore.collection("users").document(uid)
-                .collection("notifications").document(id)
+                .collection("notifications").document(documentID)
             var fields: [String: Any] = [:]
             if let read {
                 fields["isUnread"] = !read

@@ -26,7 +26,7 @@ const messaging = admin.messaging();
 /** Likes inside this window collapse into one digest instead of one each. */
 const LIKE_COALESCE_WINDOW_MS = 5 * 60 * 1000;
 
-type EngagementKind = "like" | "view" | "comment";
+type EngagementKind = "like" | "view" | "dislike" | "comment";
 
 interface EngagementDoc {
   actorUid?: string;
@@ -34,6 +34,7 @@ interface EngagementDoc {
   kind?: EngagementKind;
   postOwnerUid?: string;
   body?: string;
+  applied?: boolean;
 }
 
 interface TokenEntry {
@@ -59,7 +60,7 @@ async function resolveNotification(
 ): Promise<{ title: string; body: string } | null> {
   const handle = engagement.actorHandle?.trim() || "Someone";
 
-  if (engagement.kind === "view") return null;
+  if (engagement.kind === "view" || engagement.kind === "dislike") return null;
 
   if (engagement.kind === "comment") {
     const comment = engagement.body?.trim();
@@ -120,7 +121,7 @@ export const notifyOnEngagement = onDocumentCreated(
   },
   async (event) => {
     const engagement = event.data?.data() as EngagementDoc | undefined;
-    if (!engagement) return;
+    if (!engagement || engagement.applied === false) return;
 
     const { postId, engagementId } = event.params;
     const ownerUid = engagement.postOwnerUid;
@@ -142,6 +143,8 @@ export const notifyOnEngagement = onDocumentCreated(
       ? (engagement.body?.trim() || "commented on your post")
       : engagement.kind === "view"
         ? "viewed your post"
+        : engagement.kind === "dislike"
+          ? "disliked your post"
         : "liked your post";
     await db.collection("users").doc(ownerUid)
       .collection("notifications").doc(notificationId)

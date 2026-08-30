@@ -17,7 +17,10 @@ final class CubeMotionPoster {
     /// different because it is aimed with the handset.
     enum SamplingRate: Double {
         case navigator = 20
-        case cameraAim = 60
+        // CubeTab3D deliberately caps camcorder motion rendering at 30 fps.
+        // Sampling faster only creates bridge/main-thread work that WebKit
+        // rejects at its own interval gate.
+        case cameraAim = 30
 
         fileprivate var updateInterval: TimeInterval { 1.0 / rawValue }
     }
@@ -86,7 +89,7 @@ final class CubeMotionPoster {
         lastSampleUptime = ProcessInfo.processInfo.systemUptime
 
         // `applyDesiredSamplingRate()` selects 20 Hz for ordinary parallax and
-        // 60 Hz only while an owner is actively aiming the camcorder. Hidden,
+        // 30 Hz only while an owner is actively aiming the camcorder. Hidden,
         // backgrounded, and unowned surfaces stop the hardware entirely.
         // A NORTH-REFERENCED frame, not the arbitrary one this used to take.
         // `.xArbitraryZVertical` pins X to wherever the handset happened to be

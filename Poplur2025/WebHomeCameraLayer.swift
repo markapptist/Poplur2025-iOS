@@ -47,7 +47,13 @@ final class WebHomeCameraModel: ObservableObject {
     private var latestVisionBoxes: [VisionBoxDetector.Box] = []
     private var latestClassifications: [DetectedObject] = []
     private var latestCloudClassifications: [DetectedObject] = []
-    private var latestARFace: (bounds: CGRect, confidence: Float, roll: CGFloat, yaw: CGFloat)?
+    private var latestARFace: (
+        bounds: CGRect,
+        confidence: Float,
+        roll: CGFloat,
+        yaw: CGFloat,
+        landmarks: ARFilterManager.FaceLandmarkTrack?
+    )?
     private var cloudScanRequested = false
     private var cloudScanInFlight = false
     private var recognitionObserver: NSObjectProtocol?
@@ -150,10 +156,10 @@ final class WebHomeCameraModel: ObservableObject {
         } else {
             PoplurDiagLog.append("arfilter: apply id=\(id) resolved=\(filter.rawValue) managerNil=\(controller.arFilterManager == nil)")
         }
-        controller.arFilterManager?.onFaceTrack = { [weak self, weak controller] bounds, confidence, roll, yaw in
+        controller.arFilterManager?.onFaceTrack = { [weak self, weak controller] bounds, confidence, roll, yaw, landmarks in
             guard let self, controller?.acceptsAnalysisResults == true else { return }
             if let bounds {
-                self.latestARFace = (bounds, confidence, roll, yaw)
+                self.latestARFace = (bounds, confidence, roll, yaw, landmarks)
             } else {
                 self.latestARFace = nil
             }
@@ -281,6 +287,24 @@ final class WebHomeCameraModel: ObservableObject {
                 "roll": Double(face.roll),
                 "yaw": Double(face.yaw)
             ]
+            // Vision is lower-left; browser overlays use top-left source-frame
+            // coordinates. Send only valid feature centres so a missing or
+            // malformed region keeps the existing bounding-box fallback.
+            func webPoint(_ point: CGPoint?) -> [String: Double]? {
+                guard let point,
+                      point.x.isFinite, point.y.isFinite,
+                      (0...1).contains(point.x), (0...1).contains(point.y) else {
+                    return nil
+                }
+                return ["x": Double(point.x), "y": Double(1 - point.y)]
+            }
+            if let landmarks = face.landmarks {
+                var landmarkPayload: [String: [String: Double]] = [:]
+                if let point = webPoint(landmarks.leftEye) { landmarkPayload["leftEye"] = point }
+                if let point = webPoint(landmarks.rightEye) { landmarkPayload["rightEye"] = point }
+                if let point = webPoint(landmarks.nose) { landmarkPayload["nose"] = point }
+                if !landmarkPayload.isEmpty { facePayload["landmarks"] = landmarkPayload }
+            }
             if let recognized, recognized.isRecent {
                 facePayload["user"] = [
                     "handle": "@\(recognized.profile.username)",
@@ -840,14 +864,6 @@ struct PostLoginHomeSurface: View {
                 onReady: onReady,
                 onWebEvent: { [weak camera] type, body in
                     camera?.handleWebEvent(type: type, body: body)
-                    if type == "notificationsRead" {
-                        // The web notifications panel replaced the native
-                        // ProfileView's, and markAllRead() was only ever called
-                        // from that native screen -- so reading your
-                        // notifications cleared the in-app dot and left the app
-                        // icon badge lit with nothing unread behind it.
-                        Task { @MainActor in PoplurNotificationCenter.shared.markAllRead() }
-                    }
                 }
             )
             .ignoresSafeArea()
