@@ -40,6 +40,7 @@ const firestore_1 = require("firebase-admin/firestore");
 const https_1 = require("firebase-functions/v2/https");
 const params_1 = require("firebase-functions/params");
 const syntheticBetaCohort_1 = require("./syntheticBetaCohort");
+const syntheticBrowserRunner_1 = require("./syntheticBrowserRunner");
 /**
  * Privacy-safe, opt-in operations telemetry for the September test cohort.
  *
@@ -61,7 +62,8 @@ const TEST_ADMIN_UIDS = new Set([
 ]);
 const SCREENS = new Set([
     "home", "map", "feed", "camera", "camera-roll", "profile", "hold-menu",
-    "upload-flows", "arcade", "games", "battle",
+    "upload-flows", "arcade", "games", "battle", "map-radio", "feed-news",
+    "profile-wardrobe", "profile-house",
 ]);
 const STATUSES = new Set(["foreground", "background"]);
 const PLATFORMS = new Set(["native", "browser"]);
@@ -69,9 +71,7 @@ const EVENT_KINDS = new Set(["posted", "like", "view", "comment", "radius-up", "
 const FEEDBACK_LIMIT = 1_200;
 const ACTIVITY_LIMIT = 100;
 const POST_LIMIT = 120;
-const EVENT_LIMIT = 160;
 const FEEDBACK_LIST_LIMIT = 80;
-const SIMULATION_FEED_LIMIT = 24;
 function db() {
     if (!admin.apps.length)
         admin.initializeApp();
@@ -137,31 +137,110 @@ function labelFor(uid, profile, authName) {
         return name.slice(0, 50);
     return `Tester ${uid.slice(-4)}`;
 }
-function mappedSyntheticEvent(doc) {
-    const event = doc.data();
-    if (event.source !== "synthetic" || event.cohortId !== syntheticBetaCohort_1.SYNTHETIC_BETA_COHORT_ID)
-        return null;
-    const eventAtMs = timestampMs(event.eventAt);
-    if (!eventAtMs)
-        return null;
-    return {
-        eventId: text(event.eventId, 120) || doc.id,
-        actorId: text(event.actorId, 80) || "sim-unknown",
-        actor: text(event.actor, 64) || "SIM · @tester",
-        kind: EVENT_KINDS.has(text(event.kind, 24))
-            ? text(event.kind, 24)
-            : "view",
-        place: text(event.place, 64) || "Private beta region",
-        radiusKm: safeMetric(event.radiusKm, 0, 20_000),
-        screen: enumValue(event.screen, SCREENS, "map"),
-        eventAtMs,
-        source: "synthetic",
-        cohortId: syntheticBetaCohort_1.SYNTHETIC_BETA_COHORT_ID,
-    };
+function currentRunnerRuntime(data, generation) {
+    if (data?.source !== "synthetic-browser"
+        || data?.cohortId !== syntheticBetaCohort_1.SYNTHETIC_BETA_COHORT_ID
+        || data.generation !== generation
+        || !Array.isArray(data.recentEvents)
+        || !Array.isArray(data.sessions)
+        || !data.analytics)
+        return undefined;
+    return data;
+}
+function runnerGeneration(data) {
+    return Number.isSafeInteger(data?.generation) && data.generation > 0 ? data.generation : 0;
+}
+function publicRunnerActors(data) {
+    if (!Array.isArray(data?.actors))
+        return [];
+    return data.actors
+        .map((actor) => {
+        if (!actor || typeof actor !== "object")
+            return null;
+        const value = actor;
+        const actorId = text(value.actorId, 80);
+        if (!(0, syntheticBetaCohort_1.syntheticProfile)(actorId))
+            return null;
+        return {
+            actorId,
+            active: value.active === true,
+        };
+    })
+        .filter((actor) => actor !== null);
+}
+async function setRunnerEnabled(enabled, updatedBy) {
+    const configRef = db().collection("testControl").doc(syntheticBrowserRunner_1.SYNTHETIC_RUNNER_CONFIG_DOC);
+    return db().runTransaction(async (transaction) => {
+        const snapshot = await transaction.get(configRef);
+        const previousEnabled = snapshot.data()?.enabled === true;
+        const previousGeneration = runnerGeneration(snapshot.data());
+        const generation = enabled && !previousEnabled ? previousGeneration + 1 : previousGeneration;
+        transaction.set(configRef, {
+            enabled,
+            generation,
+            cohortId: syntheticBetaCohort_1.SYNTHETIC_BETA_COHORT_ID,
+            actors: publicRunnerActors(snapshot.data()),
+            updatedAt: firestore_1.FieldValue.serverTimestamp(),
+            updatedBy,
+        }, { merge: true });
+        return { enabled, generation };
+    });
+}
+async function setRunnerActor(actorId, runnerUid, active, updatedBy) {
+    const profile = (0, syntheticBetaCohort_1.syntheticProfile)(actorId);
+    if (!profile)
+        throw new https_1.HttpsError("invalid-argument", "Runner actor is outside the fixed cohort.");
+    if (!/^[A-Za-z0-9_-]{6,128}$/.test(runnerUid)) {
+        throw new https_1.HttpsError("invalid-argument", "Runner Firebase UID is invalid.");
+    }
+    const configRef = db().collection("testControl").doc(syntheticBrowserRunner_1.SYNTHETIC_RUNNER_CONFIG_DOC);
+    const user = await admin.auth().getUser(runnerUid);
+    const claims = { ...(user.customClaims ?? {}) };
+    if (active) {
+        claims.syntheticBeta = true;
+        claims.syntheticActorId = actorId;
+    }
+    else {
+        delete claims.syntheticBeta;
+        delete claims.syntheticActorId;
+    }
+    await admin.auth().setCustomUserClaims(runnerUid, claims);
+    const actorRef = db().collection(syntheticBrowserRunner_1.SYNTHETIC_RUNNER_ACTOR_COLLECTION).doc(actorId);
+    return db().runTransaction(async (transaction) => {
+        const configSnapshot = await transaction.get(configRef);
+        const generation = runnerGeneration(configSnapshot.data());
+        const actors = publicRunnerActors(configSnapshot.data()).filter(actor => actor.actorId !== actorId);
+        actors.push({ actorId, active });
+        transaction.set(actorRef, {
+            actorId,
+            uid: runnerUid,
+            active,
+            source: "synthetic-browser",
+            cohortId: syntheticBetaCohort_1.SYNTHETIC_BETA_COHORT_ID,
+            updatedAt: firestore_1.FieldValue.serverTimestamp(),
+            updatedBy,
+        });
+        transaction.set(configRef, {
+            ...(configSnapshot.exists ? {} : {
+                enabled: false,
+                generation: 0,
+                cohortId: syntheticBetaCohort_1.SYNTHETIC_BETA_COHORT_ID,
+            }),
+            actors,
+            updatedAt: firestore_1.FieldValue.serverTimestamp(),
+            updatedBy,
+        }, { merge: true });
+        return { actorId, active, generation };
+    });
 }
 exports.testActivityControl = (0, https_1.onCall)({ region: REGION, secrets: [BETA_DESK_ACCESS_TOKEN] }, async (request) => {
     const action = request.data?.action;
-    const operatorAction = action === "dashboard" || action === "simulation" || action === "simulationStep";
+    const operatorAction = action === "dashboard"
+        || action === "simulation"
+        || action === "simulationStep"
+        || action === "simulationPulse"
+        || action === "runner"
+        || action === "runnerActor";
     const hasDeskAccess = hasValidDeskCredential(request.data?.accessCode)
         || (typeof request.auth?.uid === "string" && TEST_ADMIN_UIDS.has(request.auth.uid));
     const uid = request.auth?.uid
@@ -289,71 +368,45 @@ exports.testActivityControl = (0, https_1.onCall)({ region: REGION, secrets: [BE
     }
     if (action === "simulationStep") {
         requireAdmin(uid);
-        const config = await db().collection("testControl").doc("simulation").get();
-        if (config.data()?.enabled !== true) {
-            return { accepted: false, enabled: false, event: null };
-        }
-        const event = (0, syntheticBetaCohort_1.syntheticEventForTime)(Date.now());
-        const { eventAtMs, ...storedEvent } = event;
-        await db().collection("testSimulationEvents").doc(event.eventId).set({
-            ...storedEvent,
-            eventAt: admin.firestore.Timestamp.fromMillis(eventAtMs),
-            expiresAt: admin.firestore.Timestamp.fromMillis(eventAtMs + RETENTION_MS),
-        });
-        return { accepted: true, enabled: true, event };
+        return { accepted: false, enabled: false, event: null, reason: "browser-runner-required" };
     }
     if (action === "simulationFeed") {
-        const config = await db().collection("testControl").doc("simulation").get();
-        if (config.data()?.enabled !== true)
-            return { enabled: false, events: [] };
-        const afterEventAtMs = safeMetric(request.data?.afterEventAtMs, 0, Date.now());
-        const events = db().collection("testSimulationEvents");
-        const query = afterEventAtMs > 0
-            ? events.where("eventAt", ">", admin.firestore.Timestamp.fromMillis(afterEventAtMs)).orderBy("eventAt", "asc")
-            : events.orderBy("eventAt", "desc");
-        const snapshot = await query.limit(SIMULATION_FEED_LIMIT).get();
-        const mapped = snapshot.docs
-            .map(mappedSyntheticEvent)
-            .filter((event) => event !== null);
-        return {
-            enabled: true,
-            events: mapped,
-            latestEventAtMs: mapped.reduce((latest, event) => Math.max(latest, event.eventAtMs), afterEventAtMs),
-        };
+        return { enabled: false, events: [], reason: "runner-events-are-private" };
     }
     if (action === "simulationPulse") {
         requireAdmin(uid);
-        const config = await db().collection("testControl").doc("simulation").get();
-        if (config.data()?.enabled !== true)
-            return { accepted: false };
-        const kind = text(request.data?.kind, 24);
-        if (!EVENT_KINDS.has(kind))
-            throw new https_1.HttpsError("invalid-argument", "Unsupported simulation event.");
-        const now = Date.now();
-        const ref = db().collection("testSimulationEvents").doc();
-        await ref.set({
-            eventId: ref.id,
-            actorId: "legacy-local-demo",
-            actor: text(request.data?.actor, 64) || "@simulator",
-            kind,
-            place: text(request.data?.place, 64) || "Private beta region",
-            radiusKm: safeMetric(request.data?.radiusKm, 0, 20_000),
-            screen: "map",
-            source: "synthetic",
-            cohortId: "legacy-local-demo",
-            eventAt: firestore_1.FieldValue.serverTimestamp(),
-            expiresAt: admin.firestore.Timestamp.fromMillis(now + RETENTION_MS),
-        });
-        return { accepted: true };
+        return { accepted: false, enabled: false, event: null, reason: "browser-runner-required" };
+    }
+    if (action === "runner") {
+        requireAdmin(uid);
+        if (typeof request.data?.enabled === "boolean") {
+            await setRunnerEnabled(request.data.enabled, uid);
+        }
+        const snapshot = await db().collection("testControl").doc(syntheticBrowserRunner_1.SYNTHETIC_RUNNER_CONFIG_DOC).get();
+        return {
+            enabled: snapshot.data()?.enabled === true,
+            generation: runnerGeneration(snapshot.data()),
+            actors: publicRunnerActors(snapshot.data()),
+        };
+    }
+    if (action === "runnerActor") {
+        requireAdmin(uid);
+        const actorId = text(request.data?.actorId, 80);
+        const runnerUid = text(request.data?.uid, 128);
+        if (typeof request.data?.active !== "boolean") {
+            throw new https_1.HttpsError("invalid-argument", "Runner actor active state is required.");
+        }
+        return setRunnerActor(actorId, runnerUid, request.data.active, uid);
     }
     if (action === "dashboard") {
         requireAdmin(uid);
         const now = Date.now();
-        const [activitySnapshot, postSnapshot, feedbackSnapshot, simulationSnapshot, configSnapshot] = await Promise.all([
+        const [activitySnapshot, postSnapshot, feedbackSnapshot, runtimeSnapshot, runnerConfigSnapshot, simulationConfigSnapshot] = await Promise.all([
             db().collection("testActivity").orderBy("lastActivityAt", "desc").limit(ACTIVITY_LIMIT).get(),
             db().collection("testBetaPosts").orderBy("updatedAt", "desc").limit(POST_LIMIT).get(),
             db().collection("testFeedback").orderBy("createdAt", "desc").limit(FEEDBACK_LIST_LIMIT).get(),
-            db().collection("testSimulationEvents").orderBy("eventAt", "desc").limit(EVENT_LIMIT).get(),
+            db().collection("testControl").doc(syntheticBrowserRunner_1.SYNTHETIC_RUNNER_RUNTIME_DOC).get(),
+            db().collection("testControl").doc(syntheticBrowserRunner_1.SYNTHETIC_RUNNER_CONFIG_DOC).get(),
             db().collection("testControl").doc("simulation").get(),
         ]);
         const posts = postSnapshot.docs.map(doc => {
@@ -375,26 +428,39 @@ exports.testActivityControl = (0, https_1.onCall)({ region: REGION, secrets: [BE
                 viralPerHour: Math.round((viralScore / elapsedHours) * 10) / 10,
             };
         });
-        const simulation = simulationSnapshot.docs.map(doc => {
-            const event = doc.data();
+        const simulationEnabled = simulationConfigSnapshot.data()?.enabled === true;
+        const runnerEnabled = runnerConfigSnapshot.data()?.enabled === true;
+        const runnerGenerationValue = runnerGeneration(runnerConfigSnapshot.data());
+        const runtime = currentRunnerRuntime(runtimeSnapshot.data(), runnerGenerationValue)
+            ?? (0, syntheticBetaCohort_1.emptySyntheticBrowserRuntime)(runnerGenerationValue, now);
+        const runnerEvents = [...runtime.recentEvents]
+            .sort((a, b) => b.eventAtMs - a.eventAtMs)
+            .map(event => ({ id: event.eventId, ...event }));
+        const actorStates = new Map(publicRunnerActors(runnerConfigSnapshot.data()).map(actor => [actor.actorId, actor]));
+        const sessionStates = new Map(runtime.sessions.map(session => [session.actorId, session]));
+        const runnerActors = syntheticBetaCohort_1.SYNTHETIC_BETA_PROFILES.map(profile => {
+            const allowlist = actorStates.get(profile.id);
+            const session = sessionStates.get(profile.id);
+            const active = allowlist?.active === true;
             return {
-                id: doc.id,
-                eventId: text(event.eventId, 120) || doc.id,
-                actorId: text(event.actorId, 80) || "sim-unknown",
-                actor: text(event.actor, 64) || "@simulator",
-                kind: EVENT_KINDS.has(text(event.kind, 24)) ? text(event.kind, 24) : "view",
-                place: text(event.place, 64) || "Private beta region",
-                radiusKm: safeMetric(event.radiusKm, 0, 20_000),
-                screen: enumValue(event.screen, SCREENS, "map"),
-                source: "synthetic",
-                cohortId: text(event.cohortId, 80) || "legacy-local-demo",
-                eventAtMs: timestampMs(event.eventAt),
+                id: profile.id,
+                actorId: profile.id,
+                label: profile.label,
+                handle: profile.handle,
+                persona: profile.persona,
+                place: profile.place,
+                avatarTile: profile.avatarTile,
+                active,
+                state: !runnerEnabled ? "paused" : session?.status === "live" ? "live" : active ? "ready" : "not-allowlisted",
+                generation: runnerGenerationValue,
+                source: profile.source,
+                cohortId: profile.cohortId,
             };
         });
         const map = new Map();
         [
             ...posts.map(post => ({ place: post.place, at: post.updatedAtMs, radiusKm: post.radiusKm, velocity: post.viralPerHour, source: "real" })),
-            ...simulation.map(event => ({ place: event.place, at: event.eventAtMs, radiusKm: event.radiusKm, velocity: event.kind === "comment" ? 3 : event.kind === "like" ? 2 : 1, source: "synthetic" })),
+            ...runnerEvents.map(event => ({ place: event.place, at: event.eventAtMs, radiusKm: 0, velocity: 1, source: "synthetic" })),
         ]
             .forEach(event => {
             const previous = map.get(event.place) ?? {
@@ -434,28 +500,27 @@ exports.testActivityControl = (0, https_1.onCall)({ region: REGION, secrets: [BE
             }),
             posts,
             map: [...map.values()].sort((a, b) => b.events - a.events || b.latestAtMs - a.latestAtMs).slice(0, 32),
-            simulation,
-            simulationEnabled: configSnapshot.data()?.enabled === true,
-            syntheticProfiles: syntheticBetaCohort_1.SYNTHETIC_BETA_PROFILES.map(profile => ({
-                id: profile.id,
-                label: profile.label,
-                handle: profile.handle,
-                persona: profile.persona,
-                place: profile.place,
-                screen: profile.screen,
-                status: configSnapshot.data()?.enabled === true ? "live" : "paused",
-                finding: profile.finding,
-                liked: profile.liked,
-                improve: profile.improve,
-                avatarTile: profile.avatarTile,
-                source: profile.source,
-                cohortId: profile.cohortId,
-            })),
+            simulation: [],
+            simulationEnabled,
+            syntheticProfiles: runnerActors,
+            syntheticSessions: [],
+            syntheticAnalytics: null,
+            runnerEnabled,
+            runnerGeneration: runnerGenerationValue,
+            runnerActors,
+            runnerEvents,
+            runnerSessions: runtime.sessions
+                .map(session => ({ ...session, status: runnerEnabled ? session.status : "paused" }))
+                .sort((a, b) => syntheticBetaCohort_1.SYNTHETIC_BETA_PROFILES.findIndex(profile => profile.id === a.actorId)
+                - syntheticBetaCohort_1.SYNTHETIC_BETA_PROFILES.findIndex(profile => profile.id === b.actorId)),
+            runnerAnalytics: runtime.analytics,
             counts: {
                 realTesters: activitySnapshot.size,
                 realPosts: posts.length,
                 syntheticPersonas: syntheticBetaCohort_1.SYNTHETIC_BETA_PROFILES.length,
-                syntheticEvents: simulation.length,
+                syntheticEvents: runtime.analytics.eventCount,
+                syntheticRecentEvents: runnerEvents.length,
+                runnerActiveActors: runnerActors.filter(actor => actor.state === "live").length,
             },
             feedback: feedbackSnapshot.docs.map(doc => {
                 const feedback = doc.data();

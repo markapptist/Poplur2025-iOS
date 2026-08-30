@@ -1,123 +1,202 @@
 "use strict";
 /**
- * Fixed, explicitly synthetic closed-beta personas.
+ * Contracts for the isolated browser-runner beta cohort.
  *
- * These are simulation actors, not Firebase Auth users. They never write to
- * `users`, create social content, or impersonate a human tester. Keeping the
- * cohort in code lets the operator dashboard and the app consume the same
- * deterministic identities without another mutable production collection.
+ * These records describe test personas only. They do not generate activity,
+ * create Firebase Auth accounts, or prescribe a journey. Every dashboard event
+ * must come from a real isolated browser session through testSessionIngest.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.SYNTHETIC_BETA_PROFILES = exports.SYNTHETIC_EVENT_INTERVAL_MS = exports.SYNTHETIC_BETA_COHORT_ID = void 0;
-exports.syntheticEventForTime = syntheticEventForTime;
-exports.SYNTHETIC_BETA_COHORT_ID = "beta-sim-v1";
-exports.SYNTHETIC_EVENT_INTERVAL_MS = 15_000;
+exports.SYNTHETIC_RUNNER_EVENT_TYPES = exports.SYNTHETIC_RUNNER_ACTIONS = exports.SYNTHETIC_RUNNER_SCREENS = exports.SYNTHETIC_BETA_PROFILES = exports.SYNTHETIC_RUNNER_RECENT_EVENT_LIMIT = exports.SYNTHETIC_BETA_COHORT_ID = void 0;
+exports.syntheticProfile = syntheticProfile;
+exports.emptySyntheticBrowserRuntime = emptySyntheticBrowserRuntime;
+exports.advanceSyntheticBrowserRuntime = advanceSyntheticBrowserRuntime;
+exports.SYNTHETIC_BETA_COHORT_ID = "beta-browser-v1";
+exports.SYNTHETIC_RUNNER_RECENT_EVENT_LIMIT = 80;
 exports.SYNTHETIC_BETA_PROFILES = [
     {
         id: "sim-food-001",
-        label: "SIM · @sauceboss",
+        label: "RUNNER · @sauceboss",
         handle: "@sauceboss",
         persona: "Food scout",
         place: "Toronto",
-        screen: "camera",
-        finding: "Fast visual posts are easy to understand, but the composer needs clearer progress feedback.",
-        liked: "The camera-to-map flow feels immediate and local.",
-        improve: "Show upload and radius changes without obscuring the post.",
         avatarTile: "food",
-        source: "synthetic",
+        source: "synthetic-browser",
         cohortId: exports.SYNTHETIC_BETA_COHORT_ID,
-        radiusBaseKm: 4.2,
     },
     {
         id: "sim-sports-002",
-        label: "SIM · @pitchside",
+        label: "RUNNER · @pitchside",
         handle: "@pitchside",
         persona: "Live sports fan",
         place: "London",
-        screen: "feed",
-        finding: "Short event bursts can make a post grow much faster than ordinary activity.",
-        liked: "Live reactions feel energetic when the map and feed update together.",
-        improve: "Make burst virality readable without rapidly shifting the entire layout.",
         avatarTile: "sports",
-        source: "synthetic",
+        source: "synthetic-browser",
         cohortId: exports.SYNTHETIC_BETA_COHORT_ID,
-        radiusBaseKm: 7.6,
     },
     {
         id: "sim-music-003",
-        label: "SIM · @basement.set",
+        label: "RUNNER · @basement.set",
         handle: "@basement.set",
         persona: "Music curator",
         place: "Toronto",
-        screen: "feed",
-        finding: "Audio posts spread slowly at first and then hold attention for longer sessions.",
-        liked: "The radio and music identity is distinctive.",
-        improve: "Keep playback state obvious while moving between Feed, Map, and Radio.",
         avatarTile: "music",
-        source: "synthetic",
+        source: "synthetic-browser",
         cohortId: exports.SYNTHETIC_BETA_COHORT_ID,
-        radiusBaseKm: 3.4,
     },
     {
         id: "sim-tech-004",
-        label: "SIM · @shipit",
+        label: "RUNNER · @shipit",
         handle: "@shipit",
         persona: "Performance tester",
         place: "World beta region",
-        screen: "map",
-        finding: "Rapid screen changes reveal loading and lifecycle issues before single-screen use does.",
-        liked: "The side-control language stays recognizable across features.",
-        improve: "Park expensive scenes sooner and preserve the exact return position.",
         avatarTile: "tech",
-        source: "synthetic",
+        source: "synthetic-browser",
         cohortId: exports.SYNTHETIC_BETA_COHORT_ID,
-        radiusBaseKm: 12.5,
     },
     {
         id: "sim-news-005",
-        label: "SIM · @citydesk",
+        label: "RUNNER · @citydesk",
         handle: "@citydesk",
         persona: "News explorer",
         place: "New York",
-        screen: "map",
-        finding: "Worldwide stories are most useful when the map clearly explains why it moved.",
-        liked: "The news tour turns headlines into a spatial experience.",
-        improve: "Keep story source, age, and next destination visible during the tour.",
         avatarTile: "news",
-        source: "synthetic",
+        source: "synthetic-browser",
         cohortId: exports.SYNTHETIC_BETA_COHORT_ID,
-        radiusBaseKm: 9.8,
     },
 ];
-const EVENT_SEQUENCE = [
-    "view",
-    "like",
-    "view",
-    "comment",
-    "radius-up",
-    "view",
-    "like",
-    "radius-down",
-];
-/** Returns one stable event for a wall-clock slot. Repeating the same slot is idempotent. */
-function syntheticEventForTime(nowMs) {
-    const safeNow = Number.isFinite(nowMs) && nowMs >= 0 ? Math.floor(nowMs) : 0;
-    const slot = Math.floor(safeNow / exports.SYNTHETIC_EVENT_INTERVAL_MS);
-    const eventAtMs = slot * exports.SYNTHETIC_EVENT_INTERVAL_MS;
-    const profile = exports.SYNTHETIC_BETA_PROFILES[slot % exports.SYNTHETIC_BETA_PROFILES.length];
-    const kind = EVENT_SEQUENCE[slot % EVENT_SEQUENCE.length];
-    const wave = (slot % 9) - 4;
-    const radiusKm = Math.max(0.5, Math.round((profile.radiusBaseKm + wave * 0.35) * 10) / 10);
+exports.SYNTHETIC_RUNNER_SCREENS = new Set([
+    "home",
+    "map",
+    "feed",
+    "map-radio",
+    "feed-news",
+    "profile",
+    "profile-wardrobe",
+    "profile-house",
+    "hold-menu",
+    "games",
+]);
+exports.SYNTHETIC_RUNNER_ACTIONS = new Set([
+    "app-open",
+    "screen-view",
+    "open-map",
+    "open-feed",
+    "open-profile",
+    "open-hold-menu",
+    "open-radio",
+    "open-news",
+    "open-wardrobe",
+    "open-house",
+    "open-games",
+    "radius-view",
+    "back",
+    "idle",
+    "session-end",
+]);
+exports.SYNTHETIC_RUNNER_EVENT_TYPES = new Set([
+    "session",
+    "navigation",
+    "discovery",
+    "playback",
+    "lifecycle",
+]);
+function syntheticProfile(actorId) {
+    return exports.SYNTHETIC_BETA_PROFILES.find(profile => profile.id === actorId);
+}
+function emptySyntheticBrowserRuntime(generation, nowMs) {
     return {
-        eventId: `${exports.SYNTHETIC_BETA_COHORT_ID}_${profile.id}_${slot}`,
-        actorId: profile.id,
+        generation,
+        lastEventId: "",
+        dwellTotalMs: 0,
+        recentEvents: [],
+        sessions: [],
+        analytics: {
+            eventCount: 0,
+            sessionCount: 0,
+            averageDwellMs: 0,
+            screenCounts: {},
+            actionCounts: {},
+            eventTypeCounts: {},
+            windowStartMs: nowMs,
+            windowEndMs: nowMs,
+        },
+        source: "synthetic-browser",
+        cohortId: exports.SYNTHETIC_BETA_COHORT_ID,
+    };
+}
+/** Pure aggregation helper; storage-level idempotency is enforced by the ingest transaction. */
+function advanceSyntheticBrowserRuntime(current, event) {
+    const runtime = current?.generation === event.generation
+        ? current
+        : emptySyntheticBrowserRuntime(event.generation, event.eventAtMs);
+    if (runtime.lastEventId === event.eventId
+        || runtime.recentEvents.some(candidate => candidate.eventId === event.eventId)) {
+        return runtime;
+    }
+    const profile = syntheticProfile(event.actorId);
+    if (!profile)
+        throw new Error("Runner actor is outside the fixed beta cohort.");
+    const previousSession = runtime.sessions.find(session => session.actorId === event.actorId);
+    const sessionChanged = !previousSession || previousSession.sessionId !== event.sessionId;
+    const session = {
+        id: event.actorId,
+        actorId: event.actorId,
         actor: profile.label,
-        kind,
+        handle: profile.handle,
+        persona: profile.persona,
         place: profile.place,
-        radiusKm,
-        screen: profile.screen,
-        eventAtMs,
-        source: "synthetic",
+        status: "live",
+        sessionId: event.sessionId,
+        generation: event.generation,
+        sequence: event.sequence,
+        priorScreen: event.priorScreen,
+        screen: event.currentScreen,
+        currentScreen: event.currentScreen,
+        action: event.action,
+        eventType: event.eventType,
+        stepIndex: event.stepIndex,
+        journeyLength: event.journeyLength,
+        dwellMs: event.dwellMs,
+        startedAtMs: sessionChanged ? event.eventAtMs : previousSession.startedAtMs,
+        lastEventAtMs: event.eventAtMs,
+        eventId: event.eventId,
+        source: "synthetic-browser",
+        cohortId: exports.SYNTHETIC_BETA_COHORT_ID,
+    };
+    const sessions = previousSession
+        ? runtime.sessions.map(candidate => candidate.actorId === event.actorId ? session : candidate)
+        : [...runtime.sessions, session];
+    const dwellTotalMs = runtime.dwellTotalMs + event.dwellMs;
+    const eventCount = runtime.analytics.eventCount + 1;
+    return {
+        generation: event.generation,
+        lastEventId: event.eventId,
+        dwellTotalMs,
+        recentEvents: [...runtime.recentEvents, event].slice(-exports.SYNTHETIC_RUNNER_RECENT_EVENT_LIMIT),
+        sessions,
+        analytics: {
+            eventCount,
+            sessionCount: runtime.analytics.sessionCount + (sessionChanged ? 1 : 0),
+            averageDwellMs: Math.round(dwellTotalMs / eventCount),
+            screenCounts: {
+                ...runtime.analytics.screenCounts,
+                [event.currentScreen]: (runtime.analytics.screenCounts[event.currentScreen] ?? 0) + 1,
+            },
+            actionCounts: {
+                ...runtime.analytics.actionCounts,
+                [event.action]: (runtime.analytics.actionCounts[event.action] ?? 0) + 1,
+            },
+            eventTypeCounts: {
+                ...runtime.analytics.eventTypeCounts,
+                [event.eventType]: (runtime.analytics.eventTypeCounts[event.eventType] ?? 0) + 1,
+            },
+            windowStartMs: runtime.analytics.eventCount > 0
+                ? Math.min(runtime.analytics.windowStartMs, event.eventAtMs)
+                : event.eventAtMs,
+            windowEndMs: Math.max(runtime.analytics.windowEndMs, event.eventAtMs),
+        },
+        source: "synthetic-browser",
         cohortId: exports.SYNTHETIC_BETA_COHORT_ID,
     };
 }

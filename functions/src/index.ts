@@ -22,6 +22,7 @@ export { meshyGenerate, meshyStatus } from "./meshyModels";
 export { wardrobeGarmentApi } from "./wardrobeGarments";
 export { liveNewsApi, refreshLiveNews } from "./liveNews";
 export { testActivityControl } from "./testActivity";
+export { testSessionIngest } from "./syntheticBrowserRunner";
 export { generateRetroGame } from "./retro/generateRetroGame";
 
 if (admin.apps.length === 0) admin.initializeApp();

@@ -15,3 +15,6 @@
 
 node_modules
 #!include:.gitignore
+
+# Local operator tooling is intentionally not part of the deployed Functions source.
+scripts/wipeTestContent.js

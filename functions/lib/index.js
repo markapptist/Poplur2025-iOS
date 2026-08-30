@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.poplurAiApi = exports.cameraSceneScan = exports.premiumAiAssist = exports.generateRetroGame = exports.testActivityControl = exports.refreshLiveNews = exports.liveNewsApi = exports.wardrobeGarmentApi = exports.meshyStatus = exports.meshyGenerate = exports.setAccountLocationPrivacy = exports.notifyOnDirectMessage = exports.notifyOnEngagement = exports.poplurPassOnProfileChange = exports.poplurPassWebService = exports.poplurOwnedCards = exports.poplurWalletPass = exports.verifyCardPurchase = void 0;
+exports.poplurAiApi = exports.cameraSceneScan = exports.premiumAiAssist = exports.generateRetroGame = exports.testSessionIngest = exports.testActivityControl = exports.refreshLiveNews = exports.liveNewsApi = exports.wardrobeGarmentApi = exports.meshyStatus = exports.meshyGenerate = exports.setAccountLocationPrivacy = exports.notifyOnDirectMessage = exports.notifyOnEngagement = exports.poplurPassOnProfileChange = exports.poplurPassWebService = exports.poplurOwnedCards = exports.poplurWalletPass = exports.verifyCardPurchase = void 0;
 const sdk_1 = __importDefault(require("@anthropic-ai/sdk"));
 const admin = __importStar(require("firebase-admin"));
 const firebase_functions_1 = require("firebase-functions");
@@ -68,6 +68,8 @@ Object.defineProperty(exports, "liveNewsApi", { enumerable: true, get: function 
 Object.defineProperty(exports, "refreshLiveNews", { enumerable: true, get: function () { return liveNews_1.refreshLiveNews; } });
 var testActivity_1 = require("./testActivity");
 Object.defineProperty(exports, "testActivityControl", { enumerable: true, get: function () { return testActivity_1.testActivityControl; } });
+var syntheticBrowserRunner_1 = require("./syntheticBrowserRunner");
+Object.defineProperty(exports, "testSessionIngest", { enumerable: true, get: function () { return syntheticBrowserRunner_1.testSessionIngest; } });
 var generateRetroGame_1 = require("./retro/generateRetroGame");
 Object.defineProperty(exports, "generateRetroGame", { enumerable: true, get: function () { return generateRetroGame_1.generateRetroGame; } });
 if (admin.apps.length === 0)

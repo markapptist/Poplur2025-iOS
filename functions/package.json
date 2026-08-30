@@ -8,6 +8,8 @@
   "scripts": {
     "build": "tsc && node scripts/copyAppleRootCertificates.js",
     "lint": "tsc --noEmit",
+    "test:synthetic-runner": "npm run build && node scripts/testSyntheticBrowserRunner.js",
+    "provision:synthetic-beta": "node scripts/provisionSyntheticBetaAccounts.js",
     "seed:creator-credits": "node scripts/seedCreatorCreditBalances.js",
     "serve": "npm run build && firebase emulators:start --only auth,functions,firestore",
     "deploy": "npm run build && firebase deploy --only functions,firestore:rules"
