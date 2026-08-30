@@ -421,14 +421,14 @@ final class PoplurNotificationCenter: NSObject, ObservableObject, UNUserNotifica
         var documentIDs: [String: String] = [:]
         let serverRows = documents.compactMap { document -> PoplurDeviceNotification? in
             let data = document.data()
-            let id = (data["id"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-                .flatMap { $0.isEmpty ? nil : $0 } ?? document.documentID
+            let trimmedID = (data["id"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let id = trimmedID.flatMap { $0.isEmpty ? nil : $0 } ?? document.documentID
             documentIDs[id] = document.documentID
             if data["isDismissed"] as? Bool == true { return nil }
-            let title = (data["title"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-                .flatMap { $0.isEmpty ? nil : $0 } ?? "Poplur"
-            let detail = (data["detail"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-                .flatMap { $0.isEmpty ? nil : $0 } ?? "New activity on Poplur"
+            let trimmedTitle = (data["title"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let title = trimmedTitle.flatMap { $0.isEmpty ? nil : $0 } ?? "Poplur"
+            let trimmedDetail = (data["detail"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let detail = trimmedDetail.flatMap { $0.isEmpty ? nil : $0 } ?? "New activity on Poplur"
             let rawKind = data["kind"] as? String
             return PoplurDeviceNotification(
                 id: id,
