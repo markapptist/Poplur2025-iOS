@@ -1700,9 +1700,28 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     let user = (body["user"] as? String) ?? ""
                     let line = user.isEmpty ? title : "\(title) — \(user)"
                     var items: [Any] = [line]
+                    let rawLink = ((body["link"] as? String) ?? (body["url"] as? String))?
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    let suppliedURL: URL? = {
+                        guard let rawLink, !rawLink.isEmpty,
+                              let components = URLComponents(string: rawLink),
+                              components.scheme?.lowercased() == "https",
+                              !(components.host?.isEmpty ?? true),
+                              components.user == nil,
+                              components.password == nil
+                        else { return nil }
+                        // Fragment/query are legitimate share links; clearing
+                        // neither keeps signed station/story URLs intact.
+                        return components.url
+                    }()
+                    // postId is the immutable identity. Prefer its canonical
+                    // URL over a generic/channel link supplied by the caller.
+                    // Link-only surfaces such as Radio still use suppliedURL.
                     if let postId = body["postId"] as? String, !postId.isEmpty,
                        let url = URL(string: "https://poplur.com/p/\(postId)") {
                         items.append(url)
+                    } else if let suppliedURL {
+                        items.append(suppliedURL)
                     }
                     DispatchQueue.main.async {
                         guard let scene = UIApplication.shared.connectedScenes
