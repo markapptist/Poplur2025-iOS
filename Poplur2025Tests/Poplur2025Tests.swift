@@ -11,6 +11,16 @@ import Testing
 
 struct Poplur2025Tests {
 
+    @Test @MainActor func aiUploadMetadataMatchesTheCrossPlatformPostSchema() {
+        var aiPost: [String: Any] = [:]
+        PostUploadService.applyAIMetadata(true, to: &aiPost)
+        #expect(aiPost["usedAI"] as? Bool == true)
+
+        var originalPost: [String: Any] = [:]
+        PostUploadService.applyAIMetadata(false, to: &originalPost)
+        #expect(originalPost["usedAI"] == nil)
+    }
+
     @Test func freeUserCannotGenerateWithoutCredits() async throws {
         let service = PoplurAIStackService()
         let request = AIGenerationRequest(

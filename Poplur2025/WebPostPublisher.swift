@@ -146,6 +146,7 @@ enum WebPostPublisher {
         PostUploadService.shared.nextPostID = postID
         PostUploadService.shared.nextAudience = body["audience"] as? String
         PostUploadService.shared.nextLocationVisibility = body["locationVisibility"] as? String
+        PostUploadService.shared.nextUsedAI = body["usedAI"] as? Bool
         if body["rightsAttested"] as? Bool == true {
             PostUploadService.shared.nextRightsAttestationVersion =
                 body["rightsAttestationVersion"] as? String

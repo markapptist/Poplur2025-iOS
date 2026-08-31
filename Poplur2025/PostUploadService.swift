@@ -55,6 +55,7 @@ final class PostUploadService {
         let postID: String
         let audience: String
         let locationVisibility: String
+        let usedAI: Bool
         let rightsAttestationVersion: String?
 
         func isDuplicate(of other: UploadRequest) -> Bool {
@@ -82,6 +83,7 @@ final class PostUploadService {
     var nextPostID: String?
     var nextAudience: String?
     var nextLocationVisibility: String?
+    var nextUsedAI: Bool?
     var nextRightsAttestationVersion: String?
 
     private var pendingCoordinate: CLLocationCoordinate2D?
@@ -137,6 +139,7 @@ final class PostUploadService {
                     postID: publishContract.postID,
                     audience: publishContract.audience,
                     locationVisibility: publishContract.locationVisibility,
+                    usedAI: publishContract.usedAI,
                     rightsAttestationVersion: publishContract.rightsAttestationVersion
                 ))
             }
@@ -165,6 +168,7 @@ final class PostUploadService {
                     postID: publishContract.postID,
                     audience: publishContract.audience,
                     locationVisibility: publishContract.locationVisibility,
+                    usedAI: publishContract.usedAI,
                     rightsAttestationVersion: publishContract.rightsAttestationVersion
                 ))
             }
@@ -200,6 +204,7 @@ final class PostUploadService {
                         caption: caption, channelID: channelID, requestID: requestID,
                         postID: publishContract.postID, audience: publishContract.audience,
                         locationVisibility: publishContract.locationVisibility,
+                        usedAI: publishContract.usedAI,
                         rightsAttestationVersion: publishContract.rightsAttestationVersion
                     ))
                 } else if let videoURL = info["videoURL"] as? URL {
@@ -208,6 +213,7 @@ final class PostUploadService {
                         caption: caption, channelID: channelID, requestID: requestID,
                         postID: publishContract.postID, audience: publishContract.audience,
                         locationVisibility: publishContract.locationVisibility,
+                        usedAI: publishContract.usedAI,
                         rightsAttestationVersion: publishContract.rightsAttestationVersion
                     ))
                 } else {
@@ -295,6 +301,7 @@ final class PostUploadService {
                     postID: request.postID,
                     audience: request.audience,
                     locationVisibility: request.locationVisibility,
+                    usedAI: request.usedAI,
                     rightsAttestationVersion: request.rightsAttestationVersion
                 )
             case .video(let url):
@@ -308,6 +315,7 @@ final class PostUploadService {
                     postID: request.postID,
                     audience: request.audience,
                     locationVisibility: request.locationVisibility,
+                    usedAI: request.usedAI,
                     rightsAttestationVersion: request.rightsAttestationVersion
                 )
             }
@@ -366,12 +374,14 @@ final class PostUploadService {
         postID: String,
         audience: String,
         locationVisibility: String,
+        usedAI: Bool,
         rightsAttestationVersion: String?
     ) {
         defer {
             nextPostID = nil
             nextAudience = nil
             nextLocationVisibility = nil
+            nextUsedAI = nil
             nextRightsAttestationVersion = nil
         }
         let candidate = nextPostID ?? requestID
@@ -380,6 +390,7 @@ final class PostUploadService {
             postID,
             "public",
             nextLocationVisibility == "hidden" ? "hidden" : "approximate",
+            nextUsedAI == true,
             nextRightsAttestationVersion
         )
     }
@@ -417,6 +428,7 @@ final class PostUploadService {
         postID: String,
         audience: String,
         locationVisibility: String,
+        usedAI: Bool,
         rightsAttestationVersion: String?
     ) async throws {
         guard let data = image.poplur4KJPEGData() else {
@@ -462,6 +474,7 @@ final class PostUploadService {
                 channelID: channelID,
                 audience: audience,
                 locationVisibility: locationVisibility,
+                usedAI: usedAI,
                 rightsAttestationVersion: rightsAttestationVersion
             )
         } catch {
@@ -480,6 +493,7 @@ final class PostUploadService {
         postID: String,
         audience: String,
         locationVisibility: String,
+        usedAI: Bool,
         rightsAttestationVersion: String?
     ) async throws {
         try Task.checkCancellation()
@@ -539,6 +553,7 @@ final class PostUploadService {
                 channelID: channelID,
                 audience: audience,
                 locationVisibility: locationVisibility,
+                usedAI: usedAI,
                 rightsAttestationVersion: rightsAttestationVersion
             )
         } catch {
@@ -622,6 +637,7 @@ final class PostUploadService {
         channelID: String?,
         audience: String,
         locationVisibility: String,
+        usedAI: Bool,
         rightsAttestationVersion: String?
     ) async throws {
         var post: [String: Any] = [
@@ -671,6 +687,7 @@ final class PostUploadService {
         }
         if let caption, !caption.isEmpty { post["caption"] = caption }
         if let channelID, !channelID.isEmpty { post["channelId"] = channelID }
+        Self.applyAIMetadata(usedAI, to: &post)
         if let rightsAttestationVersion, !rightsAttestationVersion.isEmpty {
             post["rightsAttestationVersion"] = rightsAttestationVersion
             post["rightsAttestedAtMillis"] = Int64(Date().timeIntervalSince1970 * 1000)
@@ -687,6 +704,10 @@ final class PostUploadService {
         ], forDocument: database.collection("users").document(uid)
             .collection("postLocations").document(postID), merge: true)
         try await batch.commit()
+    }
+
+    static func applyAIMetadata(_ usedAI: Bool, to post: inout [String: Any]) {
+        if usedAI { post["usedAI"] = true }
     }
 
     private static func posterJPEG(for videoURL: URL) -> Data? {

@@ -10,6 +10,7 @@
     "lint": "tsc --noEmit",
     "test:test-activity": "npm run build && node scripts/testTestActivityPrivacy.js",
     "test:synthetic-runner": "npm run build && node scripts/testSyntheticBrowserRunner.js",
+    "test:vertex-image-fallback": "npm run build && node scripts/testVertexImageFallback.js",
     "provision:synthetic-beta": "node scripts/provisionSyntheticBetaAccounts.js",
     "seed:creator-credits": "node scripts/seedCreatorCreditBalances.js",
     "serve": "npm run build && firebase emulators:start --only auth,functions,firestore",
