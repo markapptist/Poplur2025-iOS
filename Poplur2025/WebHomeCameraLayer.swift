@@ -112,6 +112,33 @@ final class WebHomeCameraModel: ObservableObject {
         return controller
     }
 
+    /// Keep the preview controller's visible filtered/raw state synchronized
+    /// with the manager's selected filter.
+    private func publishARFilterState(_ filter: ARFilterManager.ARFilter) {
+        // CameraPreviewViewController cross-fades between the hardware preview
+        // and the filtered display layer off these two notifications; it is the
+        // same pair the native selector posts, so both entry points drive the
+        // preview through one path.
+        NotificationCenter.default.post(
+            name: Notification.Name("ARFiltersStateChanged"), object: nil,
+            userInfo: ["isShown": filter != .none]
+        )
+        NotificationCenter.default.post(
+            name: Notification.Name("ARFilterChanged"), object: nil,
+            userInfo: ["filter": filter.rawValue]
+        )
+    }
+
+    /// Clear a retained native filter without creating a camera controller.
+    /// The controller outlives the web Camera component, so relying only on a
+    /// late bridge message can restore the previous filtered frame next time.
+    private func resetARFilterIfLoaded() {
+        guard let controller = controllerStorage else { return }
+        controller.resetARFilterSelection()
+        latestARFace = nil
+        publishARFilterState(.none)
+    }
+
     /// Point the native filter pipeline at the filter the web rail selected.
     ///
     /// The Core Image pass runs on every frame, so it is installed lazily and
@@ -172,18 +199,7 @@ final class WebHomeCameraModel: ObservableObject {
             publishCombinedDetections()
         }
 
-        // CameraPreviewViewController cross-fades between the hardware preview
-        // and the filtered display layer off these two notifications; it is the
-        // same pair the native selector posts, so both entry points drive the
-        // preview through one path.
-        NotificationCenter.default.post(
-            name: Notification.Name("ARFiltersStateChanged"), object: nil,
-            userInfo: ["isShown": filter != .none]
-        )
-        NotificationCenter.default.post(
-            name: Notification.Name("ARFilterChanged"), object: nil,
-            userInfo: ["filter": filter.rawValue]
-        )
+        publishARFilterState(filter)
     }
 
     /// Keep the native banner/AI callbacks intact while also handing the web
@@ -739,6 +755,9 @@ final class WebHomeCameraModel: ObservableObject {
     func deactivateCamera() {
         cameraActivationGeneration &+= 1
         CameraAIAnnouncer.shared.setLiveCameraActive(false)
+        // A filter is a viewfinder-session choice, not a sticky camera
+        // preference. Reset the retained controller before it can be reused.
+        resetARFilterIfLoaded()
         controllerStorage?.disableMLDetection()
         controllerStorage?.userRecognitionManager = nil
         recognitionManager?.clearRecognition()

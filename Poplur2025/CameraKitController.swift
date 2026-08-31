@@ -738,6 +738,17 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
         )
     }
 
+    /// Forget every AR selection retained by this long-lived controller.
+    /// Recording temporarily parks its filter for restoration; a real camera
+    /// exit must discard that saved value too or the next preview window can
+    /// resurrect a filter after the web surface has reset to None.
+    @MainActor
+    func resetARFilterSelection() {
+        recordingSuspendedARFilter = nil
+        arFilterManager?.setStreamedGrade(nil)
+        arFilterManager?.activeFilter = .none
+    }
+
     @MainActor
     private func suspendExpensiveCameraFeaturesForRecording() {
         frameProcessingLock.lock()
