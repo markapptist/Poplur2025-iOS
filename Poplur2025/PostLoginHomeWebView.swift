@@ -2330,7 +2330,11 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         }
 
         private func pushProfile(_ profile: [String: Any], into webView: WKWebView) {
-            guard let json = try? JSONSerialization.data(withJSONObject: profile),
+            var payload = profile
+            if let uid = Auth.auth().currentUser?.uid {
+                payload["uid"] = uid
+            }
+            guard let json = try? JSONSerialization.data(withJSONObject: payload),
                   let text = String(data: json, encoding: .utf8) else { return }
             webView.evaluateJavaScript(
                 "window.poplurProfile && window.poplurProfile(\(text)); " +
@@ -2598,6 +2602,13 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                                 "username": (data["username"] as? String) ?? "Poplur user",
                                 "channelId": (data["channelId"] as? String) ?? "live"
                             ]
+                            if let ownerID = ((data["userID"] as? String)
+                                ?? (data["userId"] as? String)
+                                ?? (data["ownerId"] as? String))?
+                                .trimmingCharacters(in: .whitespacesAndNewlines),
+                               !ownerID.isEmpty {
+                                row["ownerId"] = ownerID
+                            }
                             if let poster = data["posterURL"] as? String, !poster.isEmpty {
                                 row["posterURL"] = poster
                             }
