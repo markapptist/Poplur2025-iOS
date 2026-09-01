@@ -778,6 +778,9 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         private var nativeMapRendererActive = false
         private var navigatorReportsMotionActive = false
         private var navigatorReportsAiming = false
+        private static let navigatorMotionDemandLeaseTTL: TimeInterval = 6
+        private var navigatorMotionDemandExpiryWorkItem: DispatchWorkItem?
+        private var navigatorMotionDemandLeaseGeneration: UInt = 0
         private var lastMotionDeliveryUptime: TimeInterval = 0
         private var lastDeliveredRoll: Double?
         private var lastDeliveredPitch: Double?
@@ -874,9 +877,38 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                 // suspension. The governed renderer republishes its current
                 // demand after the matching foreground edge.
                 navigatorReportsMotionActive = false
+                navigatorReportsAiming = false
+                cancelNavigatorMotionDemandExpiry()
             }
             syncMotionLease()
             if active { replayLatestMotion() }
+        }
+
+        private func cancelNavigatorMotionDemandExpiry() {
+            navigatorMotionDemandLeaseGeneration &+= 1
+            navigatorMotionDemandExpiryWorkItem?.cancel()
+            navigatorMotionDemandExpiryWorkItem = nil
+        }
+
+        private func renewNavigatorMotionDemandExpiry() {
+            cancelNavigatorMotionDemandExpiry()
+            guard navigatorReportsMotionActive else { return }
+            let generation = navigatorMotionDemandLeaseGeneration
+            let workItem = DispatchWorkItem { [weak self] in
+                guard let self,
+                      self.navigatorMotionDemandLeaseGeneration == generation else { return }
+                self.navigatorMotionDemandExpiryWorkItem = nil
+                self.navigatorMotionDemandLeaseGeneration &+= 1
+                guard self.navigatorReportsMotionActive else { return }
+                self.navigatorReportsMotionActive = false
+                self.navigatorReportsAiming = false
+                self.syncMotionLease()
+            }
+            navigatorMotionDemandExpiryWorkItem = workItem
+            DispatchQueue.main.asyncAfter(
+                deadline: .now() + Self.navigatorMotionDemandLeaseTTL,
+                execute: workItem
+            )
         }
 
         func setNativeMapRendererActive(_ active: Bool) {
@@ -983,6 +1015,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
 
         deinit {
             recoveryWorkItem?.cancel()
+            navigatorMotionDemandExpiryWorkItem?.cancel()
             notificationObservers.forEach(NotificationCenter.default.removeObserver)
             CubeMotionPoster.shared.stop(owner: "web-home")
             let owner = notificationInboxOwner
@@ -1916,15 +1949,24 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                 if type == "navigatorMotionDemandChanged",
                    let aiming = body["aiming"] as? Bool {
                     // `active` is omitted by older embedded web bundles. Treat
-                    // those as active for compatibility; current bundles lower
-                    // it whenever the governed navigator loop parks, stopping
-                    // both Core Motion hardware and bridge delivery.
-                    let active = (body["active"] as? Bool) ?? true
+                    // those as active without a TTL for compatibility. Current
+                    // bundles renew an explicit active lease while the governed
+                    // navigator has work; a frozen/lost bridge can therefore no
+                    // longer leave Core Motion sampling an untouched phone.
+                    let explicitActive = body["active"] as? Bool
+                    let active = explicitActive ?? true
                     if navigatorReportsMotionActive != active
                         || navigatorReportsAiming != aiming {
                         navigatorReportsMotionActive = active
                         navigatorReportsAiming = aiming
                         syncMotionLease()
+                    }
+                    if explicitActive == true {
+                        renewNavigatorMotionDemandExpiry()
+                    } else {
+                        // Explicit false ends the lease now. Legacy messages
+                        // intentionally retain their pre-heartbeat behaviour.
+                        cancelNavigatorMotionDemandExpiry()
                     }
                 }
                 if type == "tabChanged", let tab = body["tab"] as? String {
