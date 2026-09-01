@@ -106,7 +106,8 @@ export const recordPostEngagement = onCall(
 
       const actorStateSnapshot = await transaction.get(actorStateRef);
       const actorSnapshot = await transaction.get(actorRef);
-      const lastViewAt = actorStateSnapshot.data()?.lastViewAt;
+      const actorState = actorStateSnapshot.data() ?? {};
+      const lastViewAt = actorState.lastViewAt;
       const lastViewAtMillis = lastViewAt && typeof lastViewAt.toMillis === "function"
         ? Number(lastViewAt.toMillis())
         : null;
@@ -114,7 +115,15 @@ export const recordPostEngagement = onCall(
         post,
         input.kind,
         nowMillis,
-        Number.isFinite(lastViewAtMillis) ? lastViewAtMillis : null,
+        {
+          lastViewAtMillis: Number.isFinite(lastViewAtMillis) ? lastViewAtMillis : null,
+          liked: actorState.liked === true,
+          disliked: actorState.disliked === true,
+          commentGranted: actorState.commentGranted === true,
+        },
+        // The post's own author. Read from the stored document inside the
+        // transaction, never from anything the caller sent.
+        ownerUid === uid,
       );
       const result: StoredEngagementResult = {
         postId: input.postId,
@@ -132,10 +141,18 @@ export const recordPostEngagement = onCall(
           updatedAt: FieldValue.serverTimestamp(),
         });
       }
-      if (mutation.nextViewAtMillis != null) {
+      const persistViewAt = mutation.nextViewAtMillis != null;
+      const persistGrants = Object.keys(mutation.actorStateUpdate).length > 0;
+      if (persistViewAt || persistGrants) {
         transaction.set(actorStateRef, {
           actorUid: uid,
-          lastViewAt: Timestamp.fromMillis(mutation.nextViewAtMillis),
+          ...(persistViewAt
+            ? { lastViewAt: Timestamp.fromMillis(mutation.nextViewAtMillis as number) }
+            : {}),
+          // What this account has already been paid for on this post. Written
+          // in the same transaction as the counters, so a concurrent double-tap
+          // cannot be granted twice.
+          ...mutation.actorStateUpdate,
           updatedAt: FieldValue.serverTimestamp(),
         }, { merge: true });
       }

@@ -88,30 +88,62 @@ function currentRadius(post, nowMillis) {
         : Math.max(0, total - boost);
     return { organic, boost };
 }
-function radiusDelta(kind, nowMillis, lastViewAtMillis) {
-    if (kind === "like")
-        return { applied: true, meters: 1_000, nextViewAtMillis: null };
-    if (kind === "dislike")
-        return { applied: true, meters: -1_000, nextViewAtMillis: null };
-    if (kind === "comment")
-        return { applied: true, meters: 2_000, nextViewAtMillis: null };
-    if (lastViewAtMillis == null) {
-        return { applied: true, meters: 1_000, nextViewAtMillis: nowMillis };
+const NO_GRANT = {
+    applied: false, meters: 0, nextViewAtMillis: null, actorStateUpdate: {},
+};
+function radiusDelta(kind, nowMillis, actor, isOwner) {
+    // You cannot grow your own reach by engaging with yourself. Radius is what
+    // OTHER people's attention has earned you, so an owner's own view or like
+    // records nothing at all — not the radius, and not the counter that would
+    // otherwise let a post rank on attention it never received.
+    if (isOwner)
+        return NO_GRANT;
+    // A like is a state, not an event: one account either likes this post or it
+    // does not. Paying every repeat tap let one signed-in account add unlimited
+    // radius, which is the whole product bought with a finger.
+    if (kind === "like") {
+        return actor.liked === true
+            ? NO_GRANT
+            : { applied: true, meters: 1_000, nextViewAtMillis: null, actorStateUpdate: { liked: true } };
     }
-    if (nowMillis - lastViewAtMillis >= exports.REPEAT_VIEW_MIN_MS) {
-        return { applied: true, meters: 500, nextViewAtMillis: nowMillis };
+    if (kind === "dislike") {
+        return actor.disliked === true
+            ? NO_GRANT
+            : { applied: true, meters: -1_000, nextViewAtMillis: null, actorStateUpdate: { disliked: true } };
     }
-    return { applied: false, meters: 0, nextViewAtMillis: null };
+    // Commenting twice is ordinary and stays counted; only the radius it pays is
+    // once per account, for the same reason as the like above.
+    if (kind === "comment") {
+        return actor.commentGranted === true
+            ? { applied: true, meters: 0, nextViewAtMillis: null, actorStateUpdate: {} }
+            : { applied: true, meters: 2_000, nextViewAtMillis: null, actorStateUpdate: { commentGranted: true } };
+    }
+    if (actor.lastViewAtMillis == null) {
+        return { applied: true, meters: 1_000, nextViewAtMillis: nowMillis, actorStateUpdate: {} };
+    }
+    if (nowMillis - actor.lastViewAtMillis >= exports.REPEAT_VIEW_MIN_MS) {
+        return { applied: true, meters: 500, nextViewAtMillis: nowMillis, actorStateUpdate: {} };
+    }
+    return NO_GRANT;
+}
+/** Accepts the legacy bare `lastViewAtMillis` so existing callers/tests that
+ *  predate per-actor like state keep their exact meaning. */
+function normalizeActorState(value) {
+    if (value == null)
+        return { lastViewAtMillis: null };
+    if (typeof value === "number")
+        return { lastViewAtMillis: value };
+    return value;
 }
 /** Pure policy used by the transaction and its focused test. All values come
  * from the stored post plus a bounded enum; the caller cannot choose a delta. */
-function calculatePostEngagementMutation(post, kind, nowMillis, lastViewAtMillis) {
+function calculatePostEngagementMutation(post, kind, nowMillis, actorState, isOwner = false) {
     const viewCount = boundedInteger(post.viewCount);
     const likeCount = boundedInteger(post.likeCount ?? post.upvoteCount);
     const downvoteCount = boundedInteger(post.downvoteCount ?? post.dislikeCount);
     const commentCount = boundedInteger(post.commentCount);
     const radius = currentRadius(post, nowMillis);
-    const delta = radiusDelta(kind, nowMillis, lastViewAtMillis);
+    const delta = radiusDelta(kind, nowMillis, normalizeActorState(actorState), isOwner);
     if (!delta.applied) {
         return {
             applied: false,
@@ -126,6 +158,7 @@ function calculatePostEngagementMutation(post, kind, nowMillis, lastViewAtMillis
             },
             postUpdate: {},
             nextViewAtMillis: null,
+            actorStateUpdate: {},
         };
     }
     const maximumOrganic = Math.max(0, exports.MAX_POST_RADIUS_METERS - radius.boost);
@@ -157,5 +190,6 @@ function calculatePostEngagementMutation(post, kind, nowMillis, lastViewAtMillis
             commentCount: counters.commentCount,
         },
         nextViewAtMillis: delta.nextViewAtMillis,
+        actorStateUpdate: delta.actorStateUpdate,
     };
 }

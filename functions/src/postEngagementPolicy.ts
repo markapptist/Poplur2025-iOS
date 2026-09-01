@@ -26,12 +26,28 @@ export interface PostEngagementCounters {
   commentCount: number;
 }
 
+/**
+ * What this actor has already been GRANTED on this post. Reach is earned from
+ * people, not from taps: a like is a boolean an account holds, so holding it
+ * twice must not pay twice.
+ */
+export interface PostEngagementActorState {
+  /** When this actor last had a view granted, for the repeat-view gate. */
+  lastViewAtMillis: number | null;
+  liked?: boolean;
+  disliked?: boolean;
+  /** A second comment still counts as a comment; it just stops paying radius. */
+  commentGranted?: boolean;
+}
+
 export interface PostEngagementMutation {
   applied: boolean;
   radiusDeltaMeters: number;
   counters: PostEngagementCounters;
   postUpdate: Record<string, number>;
   nextViewAtMillis: number | null;
+  /** Fields to merge into this actor's state doc so the grant cannot repeat. */
+  actorStateUpdate: Record<string, boolean>;
 }
 
 export class PostEngagementValidationError extends Error {}
@@ -116,21 +132,66 @@ function currentRadius(
   return { organic, boost };
 }
 
+type DeltaOutcome = {
+  applied: boolean;
+  meters: number;
+  nextViewAtMillis: number | null;
+  actorStateUpdate: Record<string, boolean>;
+};
+
+const NO_GRANT: DeltaOutcome = {
+  applied: false, meters: 0, nextViewAtMillis: null, actorStateUpdate: {},
+};
+
 function radiusDelta(
   kind: PostEngagementKind,
   nowMillis: number,
-  lastViewAtMillis: number | null,
-): { applied: boolean; meters: number; nextViewAtMillis: number | null } {
-  if (kind === "like") return { applied: true, meters: 1_000, nextViewAtMillis: null };
-  if (kind === "dislike") return { applied: true, meters: -1_000, nextViewAtMillis: null };
-  if (kind === "comment") return { applied: true, meters: 2_000, nextViewAtMillis: null };
-  if (lastViewAtMillis == null) {
-    return { applied: true, meters: 1_000, nextViewAtMillis: nowMillis };
+  actor: PostEngagementActorState,
+  isOwner: boolean,
+): DeltaOutcome {
+  // You cannot grow your own reach by engaging with yourself. Radius is what
+  // OTHER people's attention has earned you, so an owner's own view or like
+  // records nothing at all — not the radius, and not the counter that would
+  // otherwise let a post rank on attention it never received.
+  if (isOwner) return NO_GRANT;
+
+  // A like is a state, not an event: one account either likes this post or it
+  // does not. Paying every repeat tap let one signed-in account add unlimited
+  // radius, which is the whole product bought with a finger.
+  if (kind === "like") {
+    return actor.liked === true
+      ? NO_GRANT
+      : { applied: true, meters: 1_000, nextViewAtMillis: null, actorStateUpdate: { liked: true } };
   }
-  if (nowMillis - lastViewAtMillis >= REPEAT_VIEW_MIN_MS) {
-    return { applied: true, meters: 500, nextViewAtMillis: nowMillis };
+  if (kind === "dislike") {
+    return actor.disliked === true
+      ? NO_GRANT
+      : { applied: true, meters: -1_000, nextViewAtMillis: null, actorStateUpdate: { disliked: true } };
   }
-  return { applied: false, meters: 0, nextViewAtMillis: null };
+  // Commenting twice is ordinary and stays counted; only the radius it pays is
+  // once per account, for the same reason as the like above.
+  if (kind === "comment") {
+    return actor.commentGranted === true
+      ? { applied: true, meters: 0, nextViewAtMillis: null, actorStateUpdate: {} }
+      : { applied: true, meters: 2_000, nextViewAtMillis: null, actorStateUpdate: { commentGranted: true } };
+  }
+  if (actor.lastViewAtMillis == null) {
+    return { applied: true, meters: 1_000, nextViewAtMillis: nowMillis, actorStateUpdate: {} };
+  }
+  if (nowMillis - actor.lastViewAtMillis >= REPEAT_VIEW_MIN_MS) {
+    return { applied: true, meters: 500, nextViewAtMillis: nowMillis, actorStateUpdate: {} };
+  }
+  return NO_GRANT;
+}
+
+/** Accepts the legacy bare `lastViewAtMillis` so existing callers/tests that
+ *  predate per-actor like state keep their exact meaning. */
+function normalizeActorState(
+  value: PostEngagementActorState | number | null | undefined,
+): PostEngagementActorState {
+  if (value == null) return { lastViewAtMillis: null };
+  if (typeof value === "number") return { lastViewAtMillis: value };
+  return value;
 }
 
 /** Pure policy used by the transaction and its focused test. All values come
@@ -139,14 +200,15 @@ export function calculatePostEngagementMutation(
   post: Record<string, unknown>,
   kind: PostEngagementKind,
   nowMillis: number,
-  lastViewAtMillis: number | null,
+  actorState: PostEngagementActorState | number | null,
+  isOwner = false,
 ): PostEngagementMutation {
   const viewCount = boundedInteger(post.viewCount);
   const likeCount = boundedInteger(post.likeCount ?? post.upvoteCount);
   const downvoteCount = boundedInteger(post.downvoteCount ?? post.dislikeCount);
   const commentCount = boundedInteger(post.commentCount);
   const radius = currentRadius(post, nowMillis);
-  const delta = radiusDelta(kind, nowMillis, lastViewAtMillis);
+  const delta = radiusDelta(kind, nowMillis, normalizeActorState(actorState), isOwner);
 
   if (!delta.applied) {
     return {
@@ -162,6 +224,7 @@ export function calculatePostEngagementMutation(
       },
       postUpdate: {},
       nextViewAtMillis: null,
+      actorStateUpdate: {},
     };
   }
 
@@ -198,5 +261,6 @@ export function calculatePostEngagementMutation(
       commentCount: counters.commentCount,
     },
     nextViewAtMillis: delta.nextViewAtMillis,
+    actorStateUpdate: delta.actorStateUpdate,
   };
 }
