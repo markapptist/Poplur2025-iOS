@@ -2572,6 +2572,13 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                             if let poster = data["posterURL"] as? String, !poster.isEmpty {
                                 row["posterURL"] = poster
                             }
+                            // The poster's chosen clay pin. The Map stands this
+                            // model up, so a colour that never crosses the bridge
+                            // silently becomes the default pink on device.
+                            if let pinColor = data["pinColor"] as? String,
+                               ["red", "purple", "blue", "green", "orange"].contains(pinColor) {
+                                row["pinColor"] = pinColor
+                            }
                             if let caption = data["caption"] as? String, !caption.isEmpty {
                                 row["caption"] = caption
                             }
@@ -2653,6 +2660,13 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                             }
                             if let poster = data["posterURL"] as? String, !poster.isEmpty {
                                 row["posterURL"] = poster
+                            }
+                            // The poster's chosen clay pin. The Map stands this
+                            // model up, so a colour that never crosses the bridge
+                            // silently becomes the default pink on device.
+                            if let pinColor = data["pinColor"] as? String,
+                               ["red", "purple", "blue", "green", "orange"].contains(pinColor) {
+                                row["pinColor"] = pinColor
                             }
                             if let caption = data["caption"] as? String, !caption.isEmpty {
                                 row["caption"] = caption
