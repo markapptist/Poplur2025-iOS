@@ -712,6 +712,9 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         (uiView as? PoplurManagedWebView)?.poplurTearDown()
         uiView.configuration.userContentController.removeScriptMessageHandler(forName: "poplur")
         uiView.configuration.userContentController.removeScriptMessageHandler(forName: "homeReady")
+        // The feed-posts listener must not outlive the web view it posts into.
+        coordinator.feedPostsRegistration?.remove()
+        coordinator.feedPostsRegistration = nil
         if liveWebView === uiView { liveWebView = nil }
         if liveCoordinator === coordinator { liveCoordinator = nil }
         PoplurWebCaptureStore.purge()
@@ -771,6 +774,11 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         private var nativeMapPresentationActive = false
         private let homeURL: URL?
         private var recoveryWorkItem: DispatchWorkItem?
+        /// The live feed-posts forward. See deliverFeedPosts. fileprivate, like
+        /// notificationInboxOwner: the outer struct's dismantleUIView removes it.
+        fileprivate var feedPostsRegistration: ListenerRegistration?
+        /// Snapshot sequence, so a slow older forward never lands after a newer one.
+        private var feedPostsSequence = 0
         private var recoveryAttempt = 0
         private var recoveryPending = false
         private var webForegroundActive = false
@@ -1014,6 +1022,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         }
 
         deinit {
+            feedPostsRegistration?.remove()
             recoveryWorkItem?.cancel()
             navigatorMotionDemandExpiryWorkItem?.cancel()
             notificationObservers.forEach(NotificationCenter.default.removeObserver)
@@ -2633,14 +2642,29 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         /// for authenticated Firestore posts inside the app.
         private func deliverFeedPosts(into webView: WKWebView) {
             guard Auth.auth().currentUser != nil else { return }
-            Task {
-                do {
-                    let snapshot = try await Firestore.firestore()
-                        .collection("posts")
-                        .order(by: "createdAt", descending: true)
-                        .limit(to: 96)
-                        .getDocuments()
-
+            // Live, not one-shot. Inside the shell the Map is fed ONLY by this
+            // forward — its own Firestore client never runs on device — so a
+            // single getDocuments() meant a post published after launch never
+            // reached the phone's map until the next cold start. A listener
+            // re-forwards on every change; a repeat request simply re-arms it.
+            feedPostsRegistration?.remove()
+            feedPostsRegistration = Firestore.firestore()
+                .collection("posts")
+                .order(by: "createdAt", descending: true)
+                .limit(to: 96)
+                .addSnapshotListener { [weak self, weak webView] snapshot, error in
+                    // Both weak: the registration is owned by self, and a strong
+                    // webView capture here would pin the web view, whose user
+                    // content controller pins this coordinator — a cycle that
+                    // keeps deinit (and this remove) from ever running.
+                    guard let self, let webView else { return }
+                    guard let snapshot else {
+                        print("[PostLoginHomeWebView] feed posts listener failed: \(error?.localizedDescription ?? "unknown")")
+                        return
+                    }
+                    self.feedPostsSequence += 1
+                    let sequence = self.feedPostsSequence
+                    Task {
                     func createdMillis(_ data: [String: Any]) -> Double {
                         if let value = data["createdAtMillis"] as? NSNumber {
                             return value.doubleValue
@@ -2702,7 +2726,12 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                             if let caption = data["caption"] as? String, !caption.isEmpty {
                                 row["caption"] = caption
                             }
-                            if let radius = data["radius"] as? NSNumber {
+                            // radiusMeters is the canonical field; `radius` is its
+                            // legacy twin. A post carrying only radiusMeters used to
+                            // cross the bridge with no radius at all, and every reach
+                            // check downstream fails closed on 0 — the Map ghosted it
+                            // and the Feed dropped it. Same order as nativeFeedPosts.ts.
+                            if let radius = (data["radiusMeters"] ?? data["radius"] ?? data["organicRadiusMeters"]) as? NSNumber {
                                 row["radiusMeters"] = radius
                             }
                             if let views = data["viewCount"] as? NSNumber {
@@ -2736,16 +2765,14 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     guard let encoded = try? JSONSerialization.data(withJSONObject: payload),
                           let json = String(data: encoded, encoding: .utf8) else { return }
                     await MainActor.run {
-                        guard self.bridge.webView === webView else { return }
+                        guard self.bridge.webView === webView, sequence == self.feedPostsSequence else { return }
                         webView.evaluateJavaScript(
                             "window.dispatchEvent(new CustomEvent('poplur-native-feed-posts', {detail: \(json)}));true;",
                             completionHandler: nil
                         )
                     }
-                } catch {
-                    print("[PostLoginHomeWebView] feed posts query failed: \(error.localizedDescription)")
+                    }
                 }
-            }
         }
 
         /// Deletes only a post owned by the currently authenticated account.

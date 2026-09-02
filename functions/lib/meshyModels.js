@@ -56,6 +56,11 @@ const https_1 = require("firebase-functions/v2/https");
 const firestore_1 = require("firebase-admin/firestore");
 const meshyApiKey = (0, params_1.defineSecret)("MESHY_API_KEY");
 const MESHY_API = "https://api.meshy.ai/openapi/v1/image-to-3d";
+/** Text prompts go to the v2 Text to 3D endpoint. One URL for both stages —
+ *  `mode` discriminates: preview builds geometry, refine paints it. A job
+ *  records its own `api` so status polls the right service. Contract verified
+ *  against docs.meshy.ai on 2026-09-02. */
+const MESHY_TEXT_API = "https://api.meshy.ai/openapi/v2/text-to-3d";
 /** Credits per generation. One knob, deliberately — pricing is a product call. */
 const GENERATION_COST = 25;
 /** Per-account ceiling. Generation is slow and paid; a loop is expensive. */
@@ -71,12 +76,12 @@ const MAX_JOBS_PER_DAY = 20;
  */
 async function authorize(uid, kind) {
     const db = admin.firestore();
-    if (kind === "landmark") {
+    if (kind === "landmark" || kind === "ar-filter") {
         const config = await db.collection("poplurConfig").doc("meshy").get();
         const admins = config.data()?.adminUids;
         const allowed = Array.isArray(admins) && admins.includes(uid);
         if (!allowed)
-            throw httpError(403, "Only an admin may generate landmark models.");
+            throw httpError(403, "Only an admin may generate shared models.");
         return;
     }
     const user = await db.collection("users").doc(uid).get();
@@ -186,34 +191,57 @@ async function enforceRateLimit(uid) {
         transaction.set(ref, { uid, day, count: count + 1, updatedAt: firestore_1.FieldValue.serverTimestamp() }, { merge: true });
     });
 }
-/** POST /  { image: <data URI>, style?, name?, kind: "landmark" | "business" } */
+/** POST /  { image: <data URI> | prompt: string, style?, name?, kind: "landmark" | "business" | "ar-filter" } */
 exports.meshyGenerate = (0, https_1.onRequest)({ secrets: [meshyApiKey], cors: false, memory: "512MiB", timeoutSeconds: 120 }, async (req, res) => {
     try {
         if (req.method !== "POST")
             throw httpError(405, "POST only.");
         const uid = await requireUid(req);
-        const kind = req.body?.kind === "landmark" ? "landmark" : "business";
+        const kind = req.body?.kind === "landmark" ? "landmark"
+            : req.body?.kind === "ar-filter" ? "ar-filter" : "business";
         await authorize(uid, kind);
         await enforceRateLimit(uid);
         const image = String(req.body?.image ?? "");
-        if (!image.startsWith("data:image/"))
-            throw httpError(400, "image must be a data URI.");
+        const prompt = String(req.body?.prompt ?? "").trim();
+        const textJob = prompt.length > 0;
+        if (!textJob && !image.startsWith("data:image/"))
+            throw httpError(400, "image must be a data URI, or send a prompt.");
+        if (textJob && prompt.length > 800)
+            throw httpError(400, "Keep the prompt under 800 characters.");
         const jobId = admin.firestore().collection("meshyJobs").doc().id;
         await debitCredits(uid, jobId);
-        const meshy = await fetch(MESHY_API, {
+        const api = textJob ? MESHY_TEXT_API : MESHY_API;
+        const meshy = await fetch(api, {
             method: "POST",
             headers: {
                 Authorization: `Bearer ${meshyApiKey.value()}`,
                 "Content-Type": "application/json",
             },
-            body: JSON.stringify({
-                image_url: image,
-                enable_pbr: true,
-                should_remesh: true,
-                // Named so a Meshy-side audit can be traced back to a Poplur job
-                // without exposing the uid to the vendor.
-                name: String(req.body?.name ?? `poplur_${kind}_${jobId.slice(0, 8)}`),
-            }),
+            body: JSON.stringify(textJob
+                ? {
+                    // Preview first: geometry only. Status hands it to refine for
+                    // textures once it lands, so the caller sees one job end to end.
+                    mode: "preview",
+                    prompt,
+                    ai_model: "latest",
+                    // Required, or topology/target_polycount are ignored and the
+                    // default is an undecimated ~30k-face mesh.
+                    should_remesh: true,
+                    topology: "triangle",
+                    // Phone-weight: a face accessory is small on screen, and polycount
+                    // past this only costs decode time (see meshy.ts on 20MB exports).
+                    target_polycount: 5000,
+                    target_formats: ["glb"],
+                    moderation: true,
+                }
+                : {
+                    image_url: image,
+                    enable_pbr: true,
+                    should_remesh: true,
+                    // Named so a Meshy-side audit can be traced back to a Poplur job
+                    // without exposing the uid to the vendor.
+                    name: String(req.body?.name ?? `poplur_${kind}_${jobId.slice(0, 8)}`),
+                }),
         });
         if (!meshy.ok) {
             await refundCredits(uid, jobId);
@@ -228,6 +256,8 @@ exports.meshyGenerate = (0, https_1.onRequest)({ secrets: [meshyApiKey], cors: f
         }
         await admin.firestore().collection("meshyJobs").doc(jobId).set({
             uid, kind, taskId, status: "PENDING",
+            api,
+            stage: textJob ? "preview" : "single",
             createdAt: firestore_1.FieldValue.serverTimestamp(),
         });
         res.json({ taskId: jobId });
@@ -252,20 +282,53 @@ exports.meshyStatus = (0, https_1.onRequest)({ secrets: [meshyApiKey], cors: fal
             res.json({ status: "SUCCEEDED", progress: 100, modelUrl: data.modelUrl });
             return;
         }
-        const poll = await fetch(`${MESHY_API}/${data.taskId}`, {
+        const api = typeof data.api === "string" ? data.api : MESHY_API;
+        const poll = await fetch(`${api}/${data.taskId}`, {
             headers: { Authorization: `Bearer ${meshyApiKey.value()}` },
         });
         if (!poll.ok)
             throw httpError(502, "Could not read the job status.");
         const task = await poll.json();
-        if (task.status === "FAILED") {
+        if (task.status === "FAILED" || task.status === "CANCELED" || task.status === "EXPIRED") {
             await refundCredits(uid, jobId);
             await jobRef.set({ status: "FAILED" }, { merge: true });
             res.json({ status: "FAILED", progress: task.progress ?? 0 });
             return;
         }
+        // A text job's preview is geometry only. Hand it straight to refine so
+        // the caller gets a painted GLB from one job; the preview counts as the
+        // first half of the progress bar.
+        if (task.status === "SUCCEEDED" && data.stage === "preview") {
+            const refine = await fetch(MESHY_TEXT_API, {
+                method: "POST",
+                headers: {
+                    Authorization: `Bearer ${meshyApiKey.value()}`,
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                    mode: "refine",
+                    preview_task_id: data.taskId,
+                    enable_pbr: true,
+                    ai_model: "latest",
+                    target_formats: ["glb"],
+                }),
+            });
+            if (!refine.ok)
+                throw httpError(502, "The model service refused to paint the model.");
+            const started = await refine.json();
+            if (!started.result)
+                throw httpError(502, "The model service did not return a paint task.");
+            await jobRef.set({ stage: "refine", previewTaskId: data.taskId, taskId: started.result }, { merge: true });
+            res.json({ status: "IN_PROGRESS", progress: 50 });
+            return;
+        }
         if (task.status !== "SUCCEEDED" || !task.model_urls?.glb) {
-            res.json({ status: task.status ?? "PENDING", progress: task.progress ?? 0 });
+            const progress = task.progress ?? 0;
+            res.json({
+                status: task.status ?? "PENDING",
+                progress: data.stage === "preview" ? Math.round(progress / 2)
+                    : data.stage === "refine" ? 50 + Math.round(progress / 2) : progress,
+            });
             return;
         }
         // Take a copy: Meshy's URL expires, and handing it to the client leaks the
@@ -276,7 +339,9 @@ exports.meshyStatus = (0, https_1.onRequest)({ secrets: [meshyApiKey], cors: fal
         const bytes = Buffer.from(await glb.arrayBuffer());
         const path = data.kind === "landmark"
             ? `landmarks/pending/${jobId}.glb` // pending: a human approves before it ships
-            : `businessModels/${uid}/${jobId}.glb`;
+            : data.kind === "ar-filter"
+                ? `ar-filters/pending/${jobId}.glb` // pending: the pack build copies what is approved
+                : `businessModels/${uid}/${jobId}.glb`;
         const file = admin.storage().bucket().file(path);
         await file.save(bytes, { contentType: "model/gltf-binary" });
         const [modelUrl] = await file.getSignedUrl({
