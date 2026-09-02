@@ -1898,6 +1898,30 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     )
                     return
                 }
+                if type == "feedAdProbabilityChanged" {
+                    // The web feed mixer sets the blend now. Settings is
+                    // unreachable behind the web home (AppSettingsView is
+                    // orphaned), so without this the placement split could only
+                    // ever be its stored default on a shipped build.
+                    //
+                    // The shell stays the source of truth: it normalizes and
+                    // persists, and every placement decision below still reads
+                    // FeedAdProbabilitySettings rather than anything the page
+                    // sent. Photos and video creatives are both Poplur creative
+                    // from here, so they arrive collapsed into one share.
+                    guard let poplur = (body["poplurAdPercent"] as? NSNumber)?.doubleValue,
+                          let google = (body["googleMobileAdPercent"] as? NSNumber)?.doubleValue else {
+                        print("[PostLoginHomeWebView] feed ad mix update missing percentages")
+                        return
+                    }
+                    DispatchQueue.main.async {
+                        FeedAdProbabilitySettings.shared.setPercentages(
+                            poplur: poplur,
+                            googleMobile: google
+                        )
+                    }
+                    return
+                }
                 if type == "feedChannelChanged" || type == "feedContentAdvanced" {
                     // Native inventory follows real feed progression. The old
                     // bridge only heard channel-button presses, so an entire
