@@ -250,6 +250,20 @@ struct EditProfileView: View {
         // Get the current user
         guard let userId = Auth.auth().currentUser?.uid else { return }
 
+        // Carry the handle onto the Auth record too. Everything that reads
+        // Auth.displayName — call signalling, and every post this app wrote
+        // before today — saw an empty string, because saving a username only
+        // ever touched Firestore. Keeping the two in step stops the next
+        // feature that trusts displayName from inheriting the same silence.
+        if let user = Auth.auth().currentUser,
+           user.displayName?.trimmingCharacters(in: .whitespacesAndNewlines) != newUsername {
+            let request = user.createProfileChangeRequest()
+            request.displayName = newUsername
+            request.commitChanges { error in
+                if let error { print("[EditProfileView] display name not saved: \(error)") }
+            }
+        }
+
         // Update username and email in Firestore
         var updates: [String: Any] = [
             "username": newUsername,

@@ -678,8 +678,20 @@ final class PostUploadService {
             post["latitudeCell"] = latitudeCell
             post["longitudeCell"] = longitudeCell
         }
-        if let displayName = Auth.auth().currentUser?.displayName, !displayName.isEmpty {
-            post["username"] = displayName
+        // The handle comes from the PROFILE, with the Auth display name only as a
+        // fallback. Nothing on iOS ever calls createProfileChangeRequest, so
+        // displayName is empty for anyone who signed up here — which meant every
+        // post this app has ever written carried no username at all, and the map
+        // showed them all under one anonymous placeholder. The username the
+        // person actually chose has been sitting in users/{uid} the whole time.
+        let authDisplayName = Auth.auth().currentUser?.displayName?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let profileUsername = await UsernameCache.shared.username(for: uid)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let handle = [profileUsername, authDisplayName]
+            .compactMap({ $0 })
+            .first(where: { !$0.isEmpty }) {
+            post["username"] = handle
         }
         if let posterURL, !posterURL.isEmpty { post["posterURL"] = posterURL }
         if let posterStoragePath, !posterStoragePath.isEmpty {

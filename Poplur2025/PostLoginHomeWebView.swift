@@ -2703,9 +2703,13 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                                 "mediaURL": mediaURL,
                                 "mediaType": (data["mediaType"] as? String) ?? inferredType,
                                 "createdAtMillis": createdMillis(data),
-                                "username": (data["username"] as? String) ?? "Poplur user",
                                 "channelId": (data["channelId"] as? String) ?? "live"
                             ]
+                            if let storedName = (data["username"] as? String)?
+                                .trimmingCharacters(in: .whitespacesAndNewlines),
+                               !storedName.isEmpty {
+                                row["username"] = storedName
+                            }
                             if let ownerID = ((data["userID"] as? String)
                                 ?? (data["userId"] as? String)
                                 ?? (data["ownerId"] as? String))?
@@ -2761,7 +2765,15 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                             return row
                         }
 
-                    let payload: [String: Any] = ["posts": rows]
+                    // Every post written by this app before today carries no
+                    // username: iOS read Auth.displayName, which nothing here
+                    // ever sets. The handle the person chose has been in
+                    // users/{uid} the whole time, so resolve it for the rows
+                    // that lack one rather than shipping a placeholder that
+                    // makes every stranger look like the same "Poplur user".
+                    let named = await Self.namedRows(rows)
+
+                    let payload: [String: Any] = ["posts": named]
                     guard let encoded = try? JSONSerialization.data(withJSONObject: payload),
                           let json = String(data: encoded, encoding: .utf8) else { return }
                     await MainActor.run {
@@ -2773,6 +2785,42 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     }
                     }
                 }
+        }
+
+        /// Fills in the handle for rows whose post document has none.
+        ///
+        /// Posts written by this app never carried a username: the upload read
+        /// `Auth.displayName`, and nothing on iOS has ever set it — the handle
+        /// lives in `users/{uid}`. Rather than migrate every historical row, the
+        /// name is resolved on the way to the web, from the same cache the rest
+        /// of the app already uses, so one lookup serves every post an owner has.
+        /// A row whose owner genuinely has no username keeps none, and the web's
+        /// own fallback shows a per-account handle instead of one shared alias.
+        private static func namedRows(_ rows: [[String: Any]]) async -> [[String: Any]] {
+            let missing = rows.compactMap { row -> String? in
+                guard row["username"] == nil else { return nil }
+                return row["ownerId"] as? String
+            }
+            guard !missing.isEmpty else { return rows }
+            let owners = Array(Set(missing))
+            await UsernameCache.shared.prefetch(uids: owners)
+            var resolved: [String: String] = [:]
+            for owner in owners {
+                if let name = await UsernameCache.shared.username(for: owner)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines),
+                   !name.isEmpty {
+                    resolved[owner] = name
+                }
+            }
+            guard !resolved.isEmpty else { return rows }
+            return rows.map { row in
+                guard row["username"] == nil,
+                      let owner = row["ownerId"] as? String,
+                      let name = resolved[owner] else { return row }
+                var named = row
+                named["username"] = name
+                return named
+            }
         }
 
         /// Deletes only a post owned by the currently authenticated account.
