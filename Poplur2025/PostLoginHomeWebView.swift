@@ -2657,10 +2657,15 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                             let data = document.data()
                             guard (data["audience"] as? String ?? "public") == "public",
                                   (data["status"] as? String ?? "published") == "published",
-                                  let mediaURL = ((data["playbackURL"] as? String)
-                                    ?? (data["mediaURL"] as? String))?
-                                    .trimmingCharacters(in: .whitespacesAndNewlines),
-                                  !mediaURL.isEmpty else { return nil }
+                                  // playbackURL first, mediaURL as the fallback — by
+                                  // CONTENT, not by presence. Seeded documents carry
+                                  // playbackURL as the empty string, and `??` only
+                                  // falls through for nil, so "" won, failed the
+                                  // isEmpty check, and the post never left this
+                                  // filter. Same trap, same fix, in nativeFeedPosts.ts.
+                                  let mediaURL = [data["playbackURL"], data["mediaURL"]]
+                                    .compactMap { ($0 as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                                    .first(where: { !$0.isEmpty }) else { return nil }
                             let lowerURL = mediaURL.lowercased()
                             let inferredType = lowerURL.contains(".mp4")
                                 || lowerURL.contains(".mov")
