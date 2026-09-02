@@ -390,8 +390,8 @@
     {
       "id": "channels",
       "version": 1,
-      "bytes": 13688616,
-      "digest": "596ef4eb06ca",
+      "bytes": 3314975,
+      "digest": "66c00f2d76ac",
       "files": [
         "poplur_channel_101_food.png",
         "poplur_channel_103_beauty.png",
@@ -412,8 +412,8 @@
     {
       "id": "ar-filters",
       "version": 2,
-      "bytes": 1561788,
-      "digest": "81288860107d",
+      "bytes": 4212849,
+      "digest": "5123af3d00fb",
       "files": [
         "angel.jpg",
         "beauty.jpg",
@@ -430,7 +430,12 @@
         "heart-crown.jpg",
         "inferno-eyes.jpg",
         "models/angel.glb",
+        "models/butterfly-dream.glb",
+        "models/dino-hood.glb",
+        "models/flower-crown.glb",
+        "models/heart-crown.glb",
         "models/pop-3d.glb",
+        "models/puppy-love.glb",
         "models/vintage.glb",
         "none.jpg",
         "oil-slick.jpg",

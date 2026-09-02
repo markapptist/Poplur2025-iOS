@@ -50,6 +50,15 @@
         "contrast": 1.02,
         "saturation": 1.14,
         "sepia": 0.1
+      },
+      "model": {
+        "file": "models/puppy-love.glb",
+        "scale": 1.15,
+        "offset": [
+          0,
+          0.25,
+          0
+        ]
       }
     },
     {
@@ -86,6 +95,15 @@
         "contrast": 0.98,
         "saturation": 1.22,
         "hueDegrees": 6
+      },
+      "model": {
+        "file": "models/butterfly-dream.glb",
+        "scale": 0.9,
+        "offset": [
+          0.35,
+          0.3,
+          0
+        ]
       }
     },
     {
@@ -122,6 +140,15 @@
         "contrast": 1.02,
         "saturation": 1.25,
         "hueDegrees": -8
+      },
+      "model": {
+        "file": "models/heart-crown.glb",
+        "scale": 1.05,
+        "offset": [
+          0,
+          0.5,
+          0
+        ]
       }
     },
     {
@@ -169,6 +196,15 @@
         "contrast": 1.05,
         "saturation": 1.2,
         "hueDegrees": -14
+      },
+      "model": {
+        "file": "models/dino-hood.glb",
+        "scale": 1.25,
+        "offset": [
+          0,
+          0.35,
+          0
+        ]
       }
     },
     {
@@ -203,6 +239,15 @@
         "contrast": 1.02,
         "saturation": 1.28,
         "sepia": 0.12
+      },
+      "model": {
+        "file": "models/flower-crown.glb",
+        "scale": 1.1,
+        "offset": [
+          0,
+          0.48,
+          0
+        ]
       }
     }
   ]
