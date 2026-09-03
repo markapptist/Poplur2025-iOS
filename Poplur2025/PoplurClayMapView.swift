@@ -464,24 +464,17 @@ struct PoplurClayMapView: UIViewRepresentable {
                 // Without this case the probe is mute on the map tab — the one
                 // surface the thermal work needs it on.
                 if let line = body["line"] as? String { print(line) }
-            case "publishPost":
-                // The web composer finished a post (capture → filter → channel).
-                // The account, Firebase Storage and the posts write all live on
-                // this side, so decode the media and hand it to the SAME upload
-                // path the native capture flow uses.
-                handlePublishPost(body)
+            // NO publishPost CASE HERE. PostLoginHomeWebView.Coordinator
+            // owns publishPost (it calls WebPostPublisher.handle directly), and
+            // this coordinator is instantiated as that class's `bridge`
+            // property — so every home message is re-delivered here. While this
+            // case existed, one tap published TWICE: two Storage objects and
+            // two posts documents, two seconds apart. The second ran with the
+            // publish contract already drained, so it invented a post id and a
+            // 5km radius the account had not earned.
             default:
                 break
             }
-        }
-
-        /// Decode a post finished in the web composer and hand it to the native
-        /// upload path. Extracted to WebPostPublisher so the web HOME's bridge
-        /// (where the camera composer actually lives) uses the same path — this
-        /// coordinator was the only place that could publish, which left the
-        /// home composer waiting on an upload that never started.
-        private func handlePublishPost(_ body: [String: Any]) {
-            WebPostPublisher.handle(body)
         }
 
 

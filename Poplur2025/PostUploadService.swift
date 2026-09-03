@@ -59,10 +59,20 @@ final class PostUploadService {
         let rightsAttestationVersion: String?
 
         func isDuplicate(of other: UploadRequest) -> Bool {
+            // postID FIRST: it is the stable identity of one user intent, it
+            // survives a retry (the composer deliberately resends the same id),
+            // and it is identical across a repeated dispatch. Two posts made in
+            // quick succession always carry DIFFERENT ids — the composer mints
+            // one per mount — so this cannot block legitimate fast posting.
+            if postID == other.postID { return true }
             if let requestID, let otherRequestID = other.requestID,
                requestID == otherRequestID {
                 return true
             }
+            // NOTE: for images this compares ObjectIdentifier(image), a memory
+            // address, so two separate decodes of byte-identical media never
+            // match. It catches a resend of the SAME UIImage instance and
+            // nothing else — which is why it missed the double publish.
             return payload.duplicateKey == other.payload.duplicateKey
         }
     }
@@ -124,7 +134,16 @@ final class PostUploadService {
                 let caption = self.takeCaption()
                 let channelID = self.takeChannelID()
                 let requestID = self.takeRequestID()
-                let publishContract = self.takePublishContract(requestID: requestID)
+                guard let publishContract = self.takePublishContract(requestID: requestID) else {
+                    // No staged id: this dispatch is a repeat of one already
+                    // handled. Refuse it instead of publishing a second post.
+                    Self.report(
+                        success: false,
+                        message: "This post was already sent.",
+                        requestID: requestID
+                    )
+                    return
+                }
                 guard let coordinate = self.resolveCoordinate() else {
                     Self.report(success: false, message: "No location for this post yet.", requestID: requestID)
                     return
@@ -152,7 +171,16 @@ final class PostUploadService {
                 let caption = self.takeCaption()
                 let channelID = self.takeChannelID()
                 let requestID = self.takeRequestID()
-                let publishContract = self.takePublishContract(requestID: requestID)
+                guard let publishContract = self.takePublishContract(requestID: requestID) else {
+                    // No staged id: this dispatch is a repeat of one already
+                    // handled. Refuse it instead of publishing a second post.
+                    Self.report(
+                        success: false,
+                        message: "This post was already sent.",
+                        requestID: requestID
+                    )
+                    return
+                }
                 guard let coordinate = self.resolveCoordinate() else {
                     PoplurTemporaryFileOwnership.deleteIfOwned(url)
                     Self.report(success: false, message: "No location for this post yet.", requestID: requestID)
@@ -184,7 +212,16 @@ final class PostUploadService {
                 let caption = self.takeCaption()
                 let channelID = self.takeChannelID()
                 let requestID = self.takeRequestID()
-                let publishContract = self.takePublishContract(requestID: requestID)
+                guard let publishContract = self.takePublishContract(requestID: requestID) else {
+                    // No staged id: this dispatch is a repeat of one already
+                    // handled. Refuse it instead of publishing a second post.
+                    Self.report(
+                        success: false,
+                        message: "This post was already sent.",
+                        requestID: requestID
+                    )
+                    return
+                }
                 guard let latitude = info["latitude"] as? Double,
                       let longitude = info["longitude"] as? Double else {
                     if let videoURL = info["videoURL"] as? URL {
@@ -352,7 +389,12 @@ final class PostUploadService {
 
     private func takeRadius() -> Int {
         defer { nextRadiusMeters = nil }
-        return nextRadiusMeters ?? 5000
+        // 0, never a fabricated figure. This used to default to 5000, so a
+        // publish that arrived with the contract already drained invented 5km
+        // of reach the account had not earned — and because radiusDecay only
+        // considers posts with radius > 0, that invented reach then GREW on
+        // engagement while the genuine post sat at its real entitlement.
+        return nextRadiusMeters ?? 0
     }
 
     private func takeCaption() -> String? {
@@ -370,13 +412,18 @@ final class PostUploadService {
         return nextRequestID
     }
 
+    /// nil when no post id was staged. A publish with no id is a publish that
+    /// has already been consumed — minting a fresh one here is what turned a
+    /// repeated dispatch into a SECOND post instead of an overwrite of the
+    /// first, since both the document path and posts/<uid>/<postID>.jpg are
+    /// keyed by this id.
     private func takePublishContract(requestID: String?) -> (
         postID: String,
         audience: String,
         locationVisibility: String,
         usedAI: Bool,
         rightsAttestationVersion: String?
-    ) {
+    )? {
         defer {
             nextPostID = nil
             nextAudience = nil
@@ -385,7 +432,7 @@ final class PostUploadService {
             nextRightsAttestationVersion = nil
         }
         let candidate = nextPostID ?? requestID
-        let postID = Self.boundedPostID(candidate) ?? "post-\(UUID().uuidString)"
+        guard let postID = Self.boundedPostID(candidate) else { return nil }
         return (
             postID,
             "public",

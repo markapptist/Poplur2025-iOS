@@ -1100,8 +1100,17 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                 pushAuthToken()
                 return
             }
+            // Every message this coordinator handles is ALSO re-delivered to
+            // `bridge` by the forward at the end of this method, because that
+            // forward is unconditional. The map coordinator acts on exactly
+            // four types, so anything else is already a no-op there — but for
+            // a type BOTH sides handle, the forward runs the work twice. That
+            // is how publishPost came to publish two posts per tap for 24
+            // days. Forward only what the map coordinator uniquely owns.
+            var forwardToBridge = true
             if let body = message.body as? [String: Any],
                let type = body["type"] as? String {
+                forwardToBridge = Self.bridgeOwnedTypes.contains(type)
                 // The shared Home reports its own first painted frame through
                 // the normal Poplur bridge. Prefer that concrete signal over
                 // the document-load fallback installed above: a warm Home can
@@ -2223,8 +2232,18 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     DispatchQueue.main.async { onWebEvent(type, body) }
                 }
             }
-            bridge.userContentController(userContentController, didReceive: message)
+            if forwardToBridge {
+                bridge.userContentController(userContentController, didReceive: message)
+            }
         }
+
+        /// Message types the map bridge coordinator acts on. `pop` and `poiTap`
+        /// exist ONLY there (haptics, sound, POI selection), so they must be
+        /// forwarded. `profile` is deliberately included even though this class
+        /// also handles it: the map side merely prints the web heat probe's
+        /// report line, and that print is the probe's only voice on this tab.
+        /// `publishPost` is deliberately ABSENT — this class owns it.
+        private static let bridgeOwnedTypes: Set<String> = ["pop", "poiTap", "profile"]
 
         private func applyNativeMapPresentation(
             _ body: [String: Any],
