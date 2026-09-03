@@ -86,8 +86,13 @@ class ARFilterManager: NSObject, ObservableObject {
     private nonisolated(unsafe) var outputBufferPoolSize: CGSize = .zero
 
     /// How stale the cached face may get before the next frame pays for a
-    /// fresh landmarks pass. 0.35s ≈ 3Hz — the accessory overlay publishes at
-    /// 12Hz max (publishFaceTrack) and interpolates on its side.
+    /// fresh landmarks pass. 0.35s ≈ 3Hz, and that IS the delivered rate: the
+    /// only call site of publishFaceTrack is inside refreshFaceCacheIfStale,
+    /// so its own 12Hz guard can never bind against arrivals this far apart.
+    /// Reading "12Hz max" off this comment is what hid a visibly stepping
+    /// accessory. The overlay eases between these poses on its side
+    /// (easePose, in the web faceARLandmarks module); without that easing,
+    /// 3Hz reads to a user as the filter being slow.
     private nonisolated static let faceRefreshInterval: TimeInterval = 0.35
 
     // Filter intensity (0.0 - 1.0). Written rarely from the main actor, read
