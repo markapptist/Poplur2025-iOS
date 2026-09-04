@@ -1,6 +1,7 @@
 import AVFoundation
 import SwiftUI
 import WebKit
+import os.log
 import CoreLocation
 import Photos
 import UIKit
@@ -777,6 +778,10 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         /// The live feed-posts forward. See deliverFeedPosts. fileprivate, like
         /// notificationInboxOwner: the outer struct's dismantleUIView removes it.
         fileprivate var feedPostsRegistration: ListenerRegistration?
+        /// The account's own posts, fetched once per arm on their own task and merged into every
+        /// forward without delaying it. See deliverFeedPosts.
+        fileprivate var ownFeedDocuments: [QueryDocumentSnapshot] = []
+        fileprivate var ownFeedDocumentsUid: String?
         /// Snapshot sequence, so a slow older forward never lands after a newer one.
         private var feedPostsSequence = 0
         private var recoveryAttempt = 0
@@ -2683,12 +2688,40 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         /// Bundled creatives remain a browser-preview fallback, not a substitute
         /// for authenticated Firestore posts inside the app.
         private func deliverFeedPosts(into webView: WKWebView) {
-            guard Auth.auth().currentUser != nil else { return }
+            guard Auth.auth().currentUser != nil else {
+                os_log("[feedRelay] no signed-in user; not forwarding", log: .default, type: .error)
+                return
+            }
+            os_log("[feedRelay] arming feed listener", log: .default, type: .error)
             // Live, not one-shot. Inside the shell the Map is fed ONLY by this
             // forward — its own Firestore client never runs on device — so a
             // single getDocuments() meant a post published after launch never
             // reached the phone's map until the next cold start. A listener
             // re-forwards on every change; a repeat request simply re-arms it.
+            // The newest 96 alone lose this account's own posts once the board
+            // outpaces them — and the Profile's map button, the Map's own claims
+            // and the Feed all read this forward. Fetch what this account wrote,
+            // whatever its age, on its own task and cache it; the forward below
+            // merges the cache synchronously, so its timing never changes (an
+            // await in the forward let the sequence guard drop every forward
+            // while the board kept moving — the phone showed an empty map).
+            // When the cache first fills, re-arm once so the next forward carries it.
+            if let uid = Auth.auth().currentUser?.uid, ownFeedDocumentsUid != uid {
+                ownFeedDocumentsUid = uid
+                ownFeedDocuments = []
+                Task { [weak self, weak webView] in
+                    guard let own = try? await Firestore.firestore()
+                        .collection("posts")
+                        .whereField("userID", isEqualTo: uid)
+                        .limit(to: 64)
+                        .getDocuments() else { return }
+                    await MainActor.run {
+                        guard let self, let webView, self.ownFeedDocumentsUid == uid else { return }
+                        self.ownFeedDocuments = own.documents
+                        if !own.documents.isEmpty { self.deliverFeedPosts(into: webView) }
+                    }
+                }
+            }
             feedPostsRegistration?.remove()
             feedPostsRegistration = Firestore.firestore()
                 .collection("posts")
@@ -2701,27 +2734,13 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     // keeps deinit (and this remove) from ever running.
                     guard let self, let webView else { return }
                     guard let snapshot else {
-                        print("[PostLoginHomeWebView] feed posts listener failed: \(error?.localizedDescription ?? "unknown")")
+                        os_log("[feedRelay] listener failed: %{public}@", log: .default, type: .error, error?.localizedDescription ?? "unknown")
                         return
                     }
+                    os_log("[feedRelay] listener fired: %d documents", log: .default, type: .error, snapshot.documents.count)
                     self.feedPostsSequence += 1
                     let sequence = self.feedPostsSequence
                     Task {
-                    // The newest 96 alone lose this account's own posts once the
-                    // board outpaces them — and the Profile's map button, the
-                    // Map's own claims and the Feed all read this forward. Fold
-                    // in what this account wrote, whatever its age. One-shot per
-                    // forward: the window listener already re-arms on change.
-                    var documents = snapshot.documents
-                    if let uid = Auth.auth().currentUser?.uid,
-                       let own = try? await Firestore.firestore()
-                           .collection("posts")
-                           .whereField("userID", isEqualTo: uid)
-                           .limit(to: 64)
-                           .getDocuments() {
-                        let seen = Set(documents.map(\.documentID))
-                        documents += own.documents.filter { !seen.contains($0.documentID) }
-                    }
                     func createdMillis(_ data: [String: Any]) -> Double {
                         if let value = data["createdAtMillis"] as? NSNumber {
                             return value.doubleValue
@@ -2732,6 +2751,8 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                         return 0
                     }
 
+                    let seen = Set(snapshot.documents.map(\.documentID))
+                    let documents = snapshot.documents + self.ownFeedDocuments.filter { !seen.contains($0.documentID) }
                     let rows: [[String: Any]] = documents
                         .sorted { createdMillis($0.data()) > createdMillis($1.data()) }
                         .compactMap { document in
@@ -2787,6 +2808,16 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                             if let caption = data["caption"] as? String, !caption.isEmpty {
                                 row["caption"] = caption
                             }
+                            // Provenance for test mode: the web's reach rule lets the synthetic
+                            // beta cohort's pops reach every viewer while the simulation switch
+                            // is on. Without these two fields the phone could not tell a tester's
+                            // pop from anyone else's.
+                            if let journey = data["syntheticJourney"] as? String, !journey.isEmpty {
+                                row["syntheticJourney"] = journey
+                            }
+                            if data["syntheticBeta"] as? Bool == true {
+                                row["syntheticBeta"] = true
+                            }
                             // radiusMeters is the canonical field; `radius` is its
                             // legacy twin. A post carrying only radiusMeters used to
                             // cross the bridge with no radius at all, and every reach
@@ -2828,13 +2859,18 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     // users/{uid} the whole time, so resolve it for the rows
                     // that lack one rather than shipping a placeholder that
                     // makes every stranger look like the same "Poplur user".
+                    os_log("[feedRelay] built %d rows (seq %d)", log: .default, type: .error, rows.count, sequence)
                     let named = await Self.namedRows(rows)
 
                     let payload: [String: Any] = ["posts": named]
                     guard let encoded = try? JSONSerialization.data(withJSONObject: payload),
                           let json = String(data: encoded, encoding: .utf8) else { return }
                     await MainActor.run {
-                        guard self.bridge.webView === webView, sequence == self.feedPostsSequence else { return }
+                        guard self.bridge.webView === webView, sequence == self.feedPostsSequence else {
+                            os_log("[feedRelay] dropped seq %d (current %d, sameWebView %d)", log: .default, type: .error, sequence, self.feedPostsSequence, self.bridge.webView === webView ? 1 : 0)
+                            return
+                        }
+                        os_log("[feedRelay] dispatching %d posts (seq %d)", log: .default, type: .error, named.count, sequence)
                         webView.evaluateJavaScript(
                             "window.dispatchEvent(new CustomEvent('poplur-native-feed-posts', {detail: \(json)}));true;",
                             completionHandler: nil
