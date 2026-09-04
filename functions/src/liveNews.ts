@@ -23,6 +23,34 @@ const SYSTEM_COLLECTION = "liveNewsSystem";
 const LEASE_DOCUMENT = "ingest";
 const LEASE_MS = 3 * 60_000;
 const PROVIDER_TIMEOUT_MS = 14_000;
+/**
+ * GDELT asks for one request every five seconds, and says so in the body of
+ * its own 429: "Please limit requests to one every 5 seconds".
+ *
+ * This refresh issues eight requests — a geo and a doc query for each of the
+ * four categories — and it used to fire them in overlapping pairs, so the
+ * provider rejected them and every scheduled run died with
+ * live_news_all_provider_queries_failed. The feed has never had real news.
+ *
+ * 5.5s rather than 5s: the limit is enforced on GDELT's clock, not ours, and
+ * a request that lands a few milliseconds early is refused outright.
+ */
+const PROVIDER_MIN_INTERVAL_MS = 5_500;
+/** Serialises every provider request process-wide, whatever calls it. */
+let providerGate: Promise<unknown> = Promise.resolve();
+let lastProviderStartedAt = 0;
+
+function paceProviderRequest(): Promise<void> {
+  const turn = providerGate.then(async () => {
+    const waitMs = PROVIDER_MIN_INTERVAL_MS - (Date.now() - lastProviderStartedAt);
+    if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
+    lastProviderStartedAt = Date.now();
+  });
+  // Swallow rejections on the CHAIN only: one failed turn must not poison
+  // every request behind it. The caller still sees its own rejection.
+  providerGate = turn.catch(() => undefined);
+  return turn;
+}
 const GEO_RESPONSE_LIMIT = 8 * 1024 * 1024;
 const DOC_RESPONSE_LIMIT = 5 * 1024 * 1024;
 const MAX_PUBLIC_EVENTS = 40;
@@ -101,7 +129,9 @@ function providerUrl(endpoint: string, definition: QueryDefinition, kind: "geo" 
     // Excludes country and ADM1-only mentions so their centroids are not
     // presented as the site of a local event. City/landmark points remain.
     url.searchParams.set("geores", "2");
-    url.searchParams.set("sort", "date");
+    // SORTBY, not sort: "sort" is the DOC 2.0 spelling and GEO silently
+    // ignores it, so this request has never actually been date-sorted.
+    url.searchParams.set("sortby", "date");
   } else {
     url.searchParams.set("mode", "artlist");
     url.searchParams.set("format", "json");
@@ -115,6 +145,21 @@ async function fetchProviderJson(url: URL, byteLimit: number): Promise<unknown> 
   if (url.protocol !== "https:" || url.hostname !== "api.gdeltproject.org") {
     throw new Error("live_news_provider_host_rejected");
   }
+  // One retry, and only for 429. Any other failure is the caller's to report:
+  // retrying a 404 or a parse error just spends the pacing budget twice.
+  for (let attempt = 0; ; attempt += 1) {
+    await paceProviderRequest();
+    try {
+      return await requestProviderJson(url, byteLimit);
+    } catch (error) {
+      const rateLimited = error instanceof Error && error.message === "live_news_provider_http_429";
+      if (!rateLimited || attempt >= 1) throw error;
+      logger.warn("live_news_provider_rate_limited", { url: url.pathname });
+    }
+  }
+}
+
+async function requestProviderJson(url: URL, byteLimit: number): Promise<unknown> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), PROVIDER_TIMEOUT_MS);
   try {
@@ -150,11 +195,33 @@ async function fetchProviderJson(url: URL, byteLimit: number): Promise<unknown> 
 }
 
 async function fetchQueryBatch(definition: QueryDefinition): Promise<GdeltQueryBatch> {
-  const [geo, documents] = await Promise.all([
+  // allSettled, NOT all. Joining these with Promise.all meant one endpoint
+  // being down rejected the whole batch, every category failed, and every
+  // scheduled run died at live_news_all_provider_queries_failed — which is
+  // exactly what has been happening since GDELT's GEO 2.0 route started
+  // returning 404 (their /api/v2/geo/ directory still answers 403, so the
+  // directory exists and only the CGI inside it fails to resolve; Wayback
+  // shows this endpoint serving 200 as recently as February). Losing the geo
+  // leg should cost us the PINS, not the news.
+  const [geoResult, docResult] = await Promise.allSettled([
     fetchProviderJson(providerUrl(GDELT_GEO_ENDPOINT, definition, "geo"), GEO_RESPONSE_LIMIT),
     fetchProviderJson(providerUrl(GDELT_DOC_ENDPOINT, definition, "doc"), DOC_RESPONSE_LIMIT),
   ]);
-  return { category: definition.category, liveKind: definition.liveKind, geo, documents };
+  if (geoResult.status === "rejected") {
+    logger.warn("live_news_geo_unavailable", {
+      category: definition.category,
+      reason: errorCode(geoResult.reason),
+    });
+  }
+  // The documents ARE the news. Without them there is nothing to publish for
+  // this category, so this half still throws and the caller logs the miss.
+  if (docResult.status === "rejected") throw docResult.reason;
+  return {
+    category: definition.category,
+    liveKind: definition.liveKind,
+    geo: geoResult.status === "fulfilled" ? geoResult.value : null,
+    documents: docResult.value,
+  };
 }
 
 async function fetchProviderBatches(): Promise<GdeltQueryBatch[]> {
@@ -292,6 +359,20 @@ async function runLiveNewsRefresh(): Promise<void> {
   try {
     const batches = await fetchProviderBatches();
     const events = buildLiveNewsEvents(batches, Date.now());
+    // Never overwrite a good edition with an empty one. Every event is located
+    // from the GEO leg, so while that endpoint is down every batch yields zero
+    // events even though the documents arrived fine — and publishing that
+    // would erase the last real snapshot and keep erasing it every 15 minutes.
+    // Leaving the old one in place lets it go stale honestly, which the client
+    // already renders as "SAVED EDITION".
+    if (events.length === 0) {
+      await releaseFailedLease(token, new Error("live_news_no_locatable_events")).catch(() => undefined);
+      logger.warn("live_news_refresh_produced_nothing", {
+        providerBatchCount: batches.length,
+        elapsedMs: Date.now() - startedAt,
+      });
+      return;
+    }
     const published = await publishSnapshot(token, events, Date.now());
     logger.info("live_news_refresh_completed", {
       changed: published.changed,
@@ -320,7 +401,10 @@ export const refreshLiveNews = onSchedule(
     retryCount: 2,
     minBackoffSeconds: 30,
     maxBackoffSeconds: 180,
-    timeoutSeconds: 120,
+    // Eight provider requests, paced 5.5s apart, each allowed 14s and each
+    // permitted one 429 retry. 120s could not fit that and the run would be
+    // killed mid-sweep, discarding categories it had already fetched.
+    timeoutSeconds: 300,
     memory: "512MiB",
     maxInstances: 1,
   },
