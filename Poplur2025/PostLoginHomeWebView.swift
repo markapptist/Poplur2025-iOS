@@ -2684,6 +2684,21 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     self.feedPostsSequence += 1
                     let sequence = self.feedPostsSequence
                     Task {
+                    // The newest 96 alone lose this account's own posts once the
+                    // board outpaces them — and the Profile's map button, the
+                    // Map's own claims and the Feed all read this forward. Fold
+                    // in what this account wrote, whatever its age. One-shot per
+                    // forward: the window listener already re-arms on change.
+                    var documents = snapshot.documents
+                    if let uid = Auth.auth().currentUser?.uid,
+                       let own = try? await Firestore.firestore()
+                           .collection("posts")
+                           .whereField("userID", isEqualTo: uid)
+                           .limit(to: 64)
+                           .getDocuments() {
+                        let seen = Set(documents.map(\.documentID))
+                        documents += own.documents.filter { !seen.contains($0.documentID) }
+                    }
                     func createdMillis(_ data: [String: Any]) -> Double {
                         if let value = data["createdAtMillis"] as? NSNumber {
                             return value.doubleValue
@@ -2694,7 +2709,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                         return 0
                     }
 
-                    let rows: [[String: Any]] = snapshot.documents
+                    let rows: [[String: Any]] = documents
                         .sorted { createdMillis($0.data()) > createdMillis($1.data()) }
                         .compactMap { document in
                             let data = document.data()
