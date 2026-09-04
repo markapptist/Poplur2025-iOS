@@ -1,0 +1,10 @@
+TWEMOJI ARTWORK ATTRIBUTION
+
+Flag artwork in this pack is based primarily on Twemoji graphics distributed in the Twemoji Mozilla color font.
+
+Twemoji graphics are licensed under Creative Commons Attribution 4.0 International (CC BY 4.0).
+Creator/source attribution: Twitter, Inc. and other contributors to Twemoji.
+Project: https://github.com/twitter/twemoji
+License: https://creativecommons.org/licenses/by/4.0/
+
+The 3D flag meshes, packing, manifests, and preview composition were generated for this asset pack. National flag designs may be subject to country-specific laws governing official symbols and commercial presentation.
