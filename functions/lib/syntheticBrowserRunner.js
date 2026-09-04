@@ -39,6 +39,8 @@ exports.validateSyntheticRunnerAccess = validateSyntheticRunnerAccess;
 exports.syntheticRunnerSessionId = syntheticRunnerSessionId;
 exports.syntheticRunnerEventId = syntheticRunnerEventId;
 exports.syntheticMapPostId = syntheticMapPostId;
+exports.syntheticActorMedia = syntheticActorMedia;
+exports.syntheticMapPostRadiusMeters = syntheticMapPostRadiusMeters;
 exports.syntheticMapPostData = syntheticMapPostData;
 exports.syntheticBetaPostData = syntheticBetaPostData;
 const admin = __importStar(require("firebase-admin"));
@@ -263,13 +265,76 @@ function syntheticMapPostId(actorId, generation) {
     }
     return `synthetic-${actorId}-${generation}`;
 }
-function syntheticMapPostData(actorId, generation, sessionId, sequence) {
+/**
+ * The newest creative this actor actually published through the app.
+ *
+ * A pop is not a pop without media: the app's own delivery path drops a post
+ * with no media URL before it ever reaches the Map, so every synthetic Map
+ * post written here used to exist in Firestore and be invisible on device —
+ * present enough to be wrong, absent enough to look like the Map was broken.
+ *
+ * It is deliberately the ACTOR'S OWN media and nothing else. Borrowing "any
+ * recent post that has media" is how unapproved creative ends up on a post
+ * that is not its author's; these actors publish real photos through the
+ * ordinary Camera → Composer → Post flow, so their own most recent one is
+ * both approved and honestly attributed. No media, no post.
+ */
+async function syntheticActorMedia(actorId) {
+    const snapshot = await db().collection("posts")
+        .where("userID", "==", actorId)
+        .limit(30)
+        .get();
+    let newest = null;
+    for (const doc of snapshot.docs) {
+        const row = doc.data();
+        // Never source from another synthetic Map post: that is how a medialess
+        // document would propagate itself forward once one existed.
+        if (row.source === "synthetic-browser")
+            continue;
+        const playback = typeof row.playbackURL === "string" ? row.playbackURL.trim() : "";
+        const direct = typeof row.mediaURL === "string" ? row.mediaURL.trim() : "";
+        // By CONTENT, not presence: seeded rows carry playbackURL as "".
+        const mediaURL = playback || direct;
+        if (!mediaURL.startsWith("https://"))
+            continue;
+        const mediaType = typeof row.mediaType === "string" && row.mediaType.trim()
+            ? row.mediaType.trim()
+            : /\.(?:mp4|mov|m4v|webm)(?:[?#]|$)/i.test(mediaURL) ? "video" : "photo";
+        const createdAt = row.createdAtMillis ?? row.createdAt?.toMillis?.() ?? 0;
+        const at = Number.isFinite(Number(createdAt)) ? Number(createdAt) : 0;
+        if (newest && at <= newest.at)
+            continue;
+        const poster = typeof row.posterURL === "string" ? row.posterURL.trim() : "";
+        const channel = typeof row.channelId === "string" ? row.channelId.trim() : "";
+        newest = {
+            at,
+            media: {
+                mediaURL,
+                mediaType,
+                ...(poster.startsWith("https://") ? { posterURL: poster } : {}),
+                ...(channel ? { channelId: channel } : {}),
+            },
+        };
+    }
+    return newest?.media ?? null;
+}
+/** The radius this actor's Nth Map post claims. Shared with the beta-desk row
+ *  so the two can never disagree, and so deriving a radius does not require
+ *  building a whole post (which now needs media the desk row has no use for). */
+function syntheticMapPostRadiusMeters(actorId, sequence) {
+    const seed = SYNTHETIC_MAP_POST_SEEDS[actorId];
+    if (!seed || !Number.isSafeInteger(sequence) || sequence < 1) {
+        throw new Error("Synthetic Map post event is invalid.");
+    }
+    return Math.max(1_000, seed.baseRadiusMeters + SYNTHETIC_RADIUS_STEPS[(sequence - 1) % SYNTHETIC_RADIUS_STEPS.length]);
+}
+function syntheticMapPostData(actorId, generation, sessionId, sequence, media) {
     const profile = (0, syntheticBetaCohort_1.syntheticProfile)(actorId);
     const seed = SYNTHETIC_MAP_POST_SEEDS[actorId];
     if (!profile || !seed || !Number.isSafeInteger(sequence) || sequence < 1) {
         throw new Error("Synthetic Map post event is invalid.");
     }
-    const radiusMeters = Math.max(1_000, seed.baseRadiusMeters + SYNTHETIC_RADIUS_STEPS[(sequence - 1) % SYNTHETIC_RADIUS_STEPS.length]);
+    const radiusMeters = syntheticMapPostRadiusMeters(actorId, sequence);
     return {
         userID: actorId,
         userId: actorId,
@@ -290,6 +355,12 @@ function syntheticMapPostData(actorId, generation, sessionId, sequence) {
         likeCount: Math.floor(sequence / 2),
         commentCount: Math.floor(sequence / 5),
         caption: `${profile.persona} closed-beta Map check`,
+        // Carried from the actor's own published post; without it the app's
+        // delivery path drops this document and the Map looks empty.
+        mediaURL: media.mediaURL,
+        mediaType: media.mediaType,
+        ...(media.posterURL ? { posterURL: media.posterURL } : {}),
+        channelId: media.channelId ?? "live",
         source: "synthetic-browser",
         syntheticBeta: true,
         testOnly: true,
@@ -300,10 +371,9 @@ function syntheticMapPostData(actorId, generation, sessionId, sequence) {
 }
 function syntheticBetaPostData(actorId, generation, sessionId, sequence) {
     const profile = (0, syntheticBetaCohort_1.syntheticProfile)(actorId);
-    const mapPost = syntheticMapPostData(actorId, generation, sessionId, sequence);
     if (!profile)
         throw new Error("Synthetic beta post identity is invalid.");
-    const radiusKm = Number(mapPost.radiusMeters) / 1_000;
+    const radiusKm = syntheticMapPostRadiusMeters(actorId, sequence) / 1_000;
     const initialRadiusKm = SYNTHETIC_MAP_POST_SEEDS[actorId].baseRadiusMeters / 1_000;
     return {
         uid: actorId,
@@ -352,6 +422,13 @@ async function ingestRunnerEvent(identity, request, receivedAtMs) {
     const configRef = db().collection("testControl").doc(exports.SYNTHETIC_RUNNER_CONFIG_DOC);
     const actorRef = db().collection(exports.SYNTHETIC_RUNNER_ACTOR_COLLECTION).doc(request.actorId);
     const runtimeRef = db().collection("testControl").doc(exports.SYNTHETIC_RUNNER_RUNTIME_DOC);
+    // Resolved BEFORE the transaction on purpose: Firestore forbids a plain
+    // query inside one, and this needs no atomicity — it reads the actor's
+    // already-published creative, not state this write owns.
+    const wantsMapPost = request.type === "event"
+        && request.screen === "map"
+        && request.action === "open-map";
+    const actorMedia = wantsMapPost ? await syntheticActorMedia(request.actorId) : null;
     const sessionRef = db().collection(exports.SYNTHETIC_RUNNER_SESSION_COLLECTION).doc(request.actorId);
     return db().runTransaction(async (transaction) => {
         const [configSnapshot, actorSnapshot, runtimeSnapshot, sessionSnapshot] = await Promise.all([
@@ -511,10 +588,13 @@ async function ingestRunnerEvent(identity, request, receivedAtMs) {
             ...runtime,
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
-        if (mapPostRef && request.type === "event") {
+        // No media, no post. A Map document the delivery path will drop is worse
+        // than no document: it sits in `posts` looking published while the Map
+        // shows nothing, which reads as the Map being broken.
+        if (mapPostRef && request.type === "event" && actorMedia) {
             const existingCreatedAt = mapPostSnapshot?.data()?.createdAt;
             transaction.set(mapPostRef, {
-                ...syntheticMapPostData(request.actorId, generation, sessionId, request.sequence),
+                ...syntheticMapPostData(request.actorId, generation, sessionId, request.sequence, actorMedia),
                 createdAt: existingCreatedAt ?? admin.firestore.FieldValue.serverTimestamp(),
                 updatedAt: admin.firestore.FieldValue.serverTimestamp(),
             }, { merge: true });
