@@ -582,6 +582,9 @@ final class WebHomeCameraModel: ObservableObject {
                 let wantsOn = (body["on"] as? Bool) ?? (controller.mlDetectionManager == nil)
                 webWantsDetection = wantsOn
                 if wantsOn {
+                    // Scan is what arms the voice. Opening the camera no longer
+                    // implies narration; only tapping SCAN does.
+                    CameraAIAnnouncer.shared.setLiveCameraActive(true)
                     latestClassifications = []
                     latestCloudClassifications = []
                     cloudScanRequested = true
@@ -600,6 +603,14 @@ final class WebHomeCameraModel: ObservableObject {
                         controller.visionBoxDetector = boxes
                     }
                 } else {
+                    // Turning SCAN off must SILENCE it, not just tear down the
+                    // pipeline: this closes the announcer gate AND stops any
+                    // sentence already mid-flight (resetSession → stopSpeaking
+                    // .immediate). Without it, a "…I see a person, your radius
+                    // is…" line kept playing after scan read OFF, and a Vision
+                    // completion already in flight slipped one more line past
+                    // the still-open gate.
+                    CameraAIAnnouncer.shared.setLiveCameraActive(false)
                     controller.disableMLDetection()
                     controller.visionBoxDetector = nil
                     if (controller.arFilterManager?.activeFilter ?? ARFilterManager.ARFilter.none) == ARFilterManager.ARFilter.none {
