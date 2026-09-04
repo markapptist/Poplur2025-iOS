@@ -117,6 +117,24 @@ exports.recordPostEngagement = (0, https_1.onCall)({ region, timeoutSeconds: 15,
         if (!ownerUid || !publishedPost(post)) {
             throw new https_1.HttpsError("failed-precondition", "This post is not available for engagement.");
         }
+        // A block has to reach the engagement path, and only this function can
+        // carry it there. firestore.rules gates dmThreads, messages and calls,
+        // but engagement runs THROUGH this callable with admin credentials, so
+        // rules never see it — without this check a blocked person still lights
+        // up your phone by liking or commenting, and every radius they move is
+        // still theirs to move.
+        //
+        // Symmetric, matching the rules: either direction closes the channel.
+        // Read inside the transaction, never from anything the caller sent.
+        if (ownerUid !== uid) {
+            const [ownerBlocksActor, actorBlocksOwner] = await Promise.all([
+                transaction.get(db.collection("users").doc(ownerUid).collection("blocked").doc(uid)),
+                transaction.get(db.collection("users").doc(uid).collection("blocked").doc(ownerUid)),
+            ]);
+            if (ownerBlocksActor.exists || actorBlocksOwner.exists) {
+                throw new https_1.HttpsError("permission-denied", "This post is not available for engagement.");
+            }
+        }
         const actorStateSnapshot = await transaction.get(actorStateRef);
         const actorSnapshot = await transaction.get(actorRef);
         const actorState = actorStateSnapshot.data() ?? {};
