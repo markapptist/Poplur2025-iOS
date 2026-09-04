@@ -299,6 +299,20 @@ exports.meshyStatus = (0, https_1.onRequest)({ secrets: [meshyApiKey], cors: fal
         // the caller gets a painted GLB from one job; the preview counts as the
         // first half of the progress bar.
         if (task.status === "SUCCEEDED" && data.stage === "preview") {
+            // Claim the hand-off atomically first: two polls in flight would
+            // otherwise both see a finished preview and both start (and pay for)
+            // a refine. The loser reports progress and lets the winner's job run.
+            const claimed = await admin.firestore().runTransaction(async (transaction) => {
+                const fresh = await transaction.get(jobRef);
+                if (fresh.data()?.stage !== "preview")
+                    return false;
+                transaction.set(jobRef, { stage: "refining" }, { merge: true });
+                return true;
+            });
+            if (!claimed) {
+                res.json({ status: "IN_PROGRESS", progress: 50 });
+                return;
+            }
             const refine = await fetch(MESHY_TEXT_API, {
                 method: "POST",
                 headers: {
@@ -313,11 +327,16 @@ exports.meshyStatus = (0, https_1.onRequest)({ secrets: [meshyApiKey], cors: fal
                     target_formats: ["glb"],
                 }),
             });
-            if (!refine.ok)
-                throw httpError(502, "The model service refused to paint the model.");
-            const started = await refine.json();
-            if (!started.result)
-                throw httpError(502, "The model service did not return a paint task.");
+            const started = refine.ok ? await refine.json() : {};
+            if (!refine.ok || !started.result) {
+                // A paid preview with no refine is a dead end: refund and close the
+                // job so the caller stops polling instead of stranding 25 credits.
+                await refundCredits(uid, jobId);
+                await jobRef.set({ status: "FAILED", stage: "preview-orphaned" }, { merge: true });
+                firebase_functions_1.logger.error("meshy_refine_start_failed", { status: refine.status, jobId });
+                res.json({ status: "FAILED", progress: 50 });
+                return;
+            }
             await jobRef.set({ stage: "refine", previewTaskId: data.taskId, taskId: started.result }, { merge: true });
             res.json({ status: "IN_PROGRESS", progress: 50 });
             return;
