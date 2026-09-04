@@ -10,6 +10,31 @@ service cloud.firestore {
       return signedIn() && request.auth.uid == userId;
     }
 
+    // ── Blocking ───────────────────────────────────────────────────────────
+    //
+    // A block lives at users/{blocker}/blocked/{blocked}. The list is private
+    // — only its owner may read it — but a RULE may still exists() a document
+    // the requesting client cannot read, which is the whole reason this shape
+    // works: the boundary is enforceable without telling either party what is
+    // on the other's list.
+    //
+    // Deliberately SYMMETRIC. If A blocks B but A can still write to B, then
+    // "block" is a one-way mute that leaves A talking and B unable to answer —
+    // a harassment vector wearing a safety label. Either direction closes the
+    // channel for both.
+    //
+    // Keyed on uid, never on a handle: handles are not unique here (one
+    // account has published under fourteen of them), so a handle-keyed block
+    // would be defeated without the blocked party even trying.
+    function hasBlocked(blocker, blocked) {
+      return exists(/databases/$(database)/documents/users/$(blocker)/blocked/$(blocked));
+    }
+
+    // True when EITHER side has blocked the other.
+    function blockedBetween(a, b) {
+      return hasBlocked(a, b) || hasBlocked(b, a);
+    }
+
     // The parent post's owner. Posts are written with `userID` by iOS and
     // `userId` by some older paths -- both spellings are already tolerated by
     // the posts rules below, so engagement rules must tolerate them too or a
@@ -145,6 +170,17 @@ service cloud.firestore {
 
       match /favorites/{favoriteId} {
         allow read, write: if isSelf(userId);
+      }
+
+      // Your block list is yours alone to read. The blocked party must never
+      // be able to enumerate it — learning you blocked them is a consequence
+      // of their send failing, not something the database volunteers.
+      match /blocked/{blockedUserId} {
+        allow read: if isSelf(userId);
+        allow create: if isSelf(userId) && userId != blockedUserId;
+        allow delete: if isSelf(userId);
+        // A block is created or removed, never edited into something else.
+        allow update: if false;
       }
 
       match /radiusPurchases/{purchaseId} {
@@ -287,11 +323,15 @@ service cloud.firestore {
         && request.resource.data.participants is list
         && request.resource.data.participants.size() == 2
         && request.resource.data.callerId == request.auth.uid
-        && request.auth.uid in request.resource.data.participants;
+        && request.auth.uid in request.resource.data.participants
+        // A blocked person cannot make your phone ring either.
+        && !blockedBetween(request.resource.data.participants[0],
+                           request.resource.data.participants[1]);
 
       // Either side may answer or hang up, but the roster is fixed.
       allow update: if inCall(callId)
-        && request.resource.data.participants == resource.data.participants;
+        && request.resource.data.participants == resource.data.participants
+        && !blockedBetween(resource.data.participants[0], resource.data.participants[1]);
       allow delete: if inCall(callId);
 
       // ICE candidates, one doc each. Written by the side that gathered them
@@ -319,6 +359,15 @@ service cloud.firestore {
 
     function inThread(threadId) {
       return signedIn() && request.auth.uid in dmParticipants(threadId);
+    }
+
+    // True when a block stands between the two people on an EXISTING thread.
+    // A thread being created has no participants to read yet — that case is
+    // gated on the create rule itself, and an atomic first-message batch fails
+    // whole if either half is denied.
+    function dmBlocked(threadId) {
+      return dmParticipants(threadId).size() == 2
+        && blockedBetween(dmParticipants(threadId)[0], dmParticipants(threadId)[1]);
     }
 
     // Atomic first-message batches create the parent thread and its first
@@ -371,17 +420,22 @@ service cloud.firestore {
         && request.auth.uid in request.resource.data.participants
         && threadId == (request.resource.data.participants[0] < request.resource.data.participants[1]
           ? request.resource.data.participants[0] + '_' + request.resource.data.participants[1]
-          : request.resource.data.participants[1] + '_' + request.resource.data.participants[0]);
+          : request.resource.data.participants[1] + '_' + request.resource.data.participants[0])
+        // Neither side may open a channel the other has closed.
+        && !blockedBetween(request.resource.data.participants[0],
+                           request.resource.data.participants[1]);
 
       // Participants keep the preview fresh, but never the roster.
       allow update: if inThread(threadId)
-        && request.resource.data.participants == resource.data.participants;
+        && request.resource.data.participants == resource.data.participants
+        && !dmBlocked(threadId);
       allow delete: if false;
 
       match /messages/{messageId} {
         allow read: if inThread(threadId);
         // You may only speak as yourself, and only into a thread you are in.
         allow create: if (inThread(threadId) || inThreadAfter(threadId))
+          && !dmBlocked(threadId)
           && request.resource.data.senderId == request.auth.uid
           && request.resource.data.text is string
           && request.resource.data.text.size() > 0
