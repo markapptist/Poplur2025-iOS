@@ -2637,6 +2637,29 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                             if let channel = data["channelId"] as? String, !channel.isEmpty {
                                 row["channelId"] = channel
                             }
+                            // The public origin, same shape and same rules as
+                            // deliverFeedPosts. Without it the profile rail's
+                            // map button never appears on device: the web only
+                            // builds `origin` from locationVisibility ==
+                            // "approximate" plus originLatitude/Longitude, so
+                            // omitting them here left every profile post
+                            // originless and `locatedPost` permanently null —
+                            // the button is conditional, so it simply vanished
+                            // rather than failing visibly. A hidden origin
+                            // stays hidden, which is why "hidden" is forwarded
+                            // as itself and never carries coordinates.
+                            let visibility = data["locationVisibility"] as? String
+                            if visibility == "hidden" {
+                                row["locationVisibility"] = "hidden"
+                            } else if visibility == "approximate",
+                                      let latitude = data["latitude"] as? NSNumber,
+                                      let longitude = data["longitude"] as? NSNumber,
+                                      abs(latitude.doubleValue) <= 90,
+                                      abs(longitude.doubleValue) <= 180 {
+                                row["locationVisibility"] = "approximate"
+                                row["originLatitude"] = latitude.doubleValue
+                                row["originLongitude"] = longitude.doubleValue
+                            }
                             return row
                         }
 
