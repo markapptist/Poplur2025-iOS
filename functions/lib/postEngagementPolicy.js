@@ -1,15 +1,35 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.PostEngagementValidationError = exports.REPEAT_VIEW_MIN_MS = exports.MAX_POST_ENGAGEMENT_COUNT = exports.MAX_POST_RADIUS_METERS = exports.POST_ENGAGEMENT_KINDS = void 0;
+exports.PostEngagementValidationError = exports.RADIUS_DECAY_FLOOR_METERS = exports.RADIUS_DECAY_PER_DAY = exports.REPEAT_VIEW_BASE_METERS = exports.REPEAT_VIEW_MIN_MS = exports.MAX_POST_ENGAGEMENT_COUNT = exports.MAX_POST_SEED_METERS = exports.MAX_POST_RADIUS_METERS = exports.POST_ENGAGEMENT_KINDS = void 0;
 exports.parsePostEngagementInput = parsePostEngagementInput;
 exports.postEngagementDocumentId = postEngagementDocumentId;
 exports.postEngagementActorStateId = postEngagementActorStateId;
+exports.seedRadiusMeters = seedRadiusMeters;
+exports.calculateRadiusDecay = calculateRadiusDecay;
 exports.calculatePostEngagementMutation = calculatePostEngagementMutation;
 const node_crypto_1 = require("node:crypto");
 exports.POST_ENGAGEMENT_KINDS = ["view", "like", "dislike", "comment"];
-exports.MAX_POST_RADIUS_METERS = 40_075_000;
+/** The top of the radius scale is the Earth's own radius (6,371 km / 3,959
+ *  mi), the ceiling every client surface counts "of". A post there has taken
+ *  over the world — the clients treat it as reaching everyone — so no radius
+ *  is ever stored above it. (Was the planet's circumference, 40,075 km, which
+ *  displayed as 24,901 mi over a 3,959 mi ceiling.) */
+exports.MAX_POST_RADIUS_METERS = 6_371_000;
+/** The largest discovery seed a post may be created with. */
+exports.MAX_POST_SEED_METERS = 5_000;
 exports.MAX_POST_ENGAGEMENT_COUNT = 1_000_000_000;
 exports.REPEAT_VIEW_MIN_MS = 30_000;
+/** Each PAID repeat view halves the next one: 500, 250, 125 … ~994 m lifetime.
+ * Measured 2 Sep 2026: uncapped, one account's 30s-cadence script earned
+ * +29 km in 30 minutes — world radius in ~29 days. Halving bounds what time
+ * alone can buy while "more watching still pays" stays true; scaling the farm
+ * now requires accounts, not patience. */
+exports.REPEAT_VIEW_BASE_METERS = 500;
+/** Organic radius is a score you defend: it halves in ~13.5 days untouched.
+ * Boost is paid product with its own expiry and never decays here. */
+exports.RADIUS_DECAY_PER_DAY = 0.05;
+/** Below this, decayed dust snaps to zero instead of shrinking forever. */
+exports.RADIUS_DECAY_FLOOR_METERS = 10;
 const POST_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
 const EVENT_ID_PATTERN = /^[A-Za-z0-9._:-]{16,128}$/;
 const ALLOWED_INPUT_KEYS = new Set(["postId", "eventId", "kind"]);
@@ -79,14 +99,27 @@ function activeBoostMeters(post, nowMillis) {
     const expiresAt = timestampMillis(post.boostExpiresAt);
     return expiresAt == null || expiresAt > nowMillis ? boost : 0;
 }
+/**
+ * The discovery seed a post was created with. It is what lets a first post be
+ * found at all, and it is deliberately NOT earned: it never counts toward what
+ * the author may claim next, so publishing a thousand posts buys a thousand
+ * discovery windows and no entitlement at all.
+ */
+function seedRadiusMeters(post) {
+    return boundedInteger(post.seedRadiusMeters, exports.MAX_POST_SEED_METERS);
+}
 function currentRadius(post, nowMillis) {
     const boost = activeBoostMeters(post, nowMillis);
+    const seed = seedRadiusMeters(post);
     const total = boundedInteger(post.radiusMeters ?? post.radius, exports.MAX_POST_RADIUS_METERS);
     const declaredOrganic = Number(post.organicRadiusMeters);
+    // A post from before seeds existed has no seed, so its total minus boost is
+    // all earned, exactly as before. A seeded post never counts its seed as
+    // earned, which is what keeps post count out of the entitlement pool.
     const organic = Number.isFinite(declaredOrganic)
         ? boundedInteger(declaredOrganic, exports.MAX_POST_RADIUS_METERS)
-        : Math.max(0, total - boost);
-    return { organic, boost };
+        : Math.max(0, total - boost - seed);
+    return { organic, boost, seed };
 }
 const NO_GRANT = {
     applied: false, meters: 0, nextViewAtMillis: null, actorStateUpdate: {},
@@ -122,9 +155,47 @@ function radiusDelta(kind, nowMillis, actor, isOwner) {
         return { applied: true, meters: 1_000, nextViewAtMillis: nowMillis, actorStateUpdate: {} };
     }
     if (nowMillis - actor.lastViewAtMillis >= exports.REPEAT_VIEW_MIN_MS) {
-        return { applied: true, meters: 500, nextViewAtMillis: nowMillis, actorStateUpdate: {} };
+        // Halve every paid repeat. An exhausted repeat still counts as a view and
+        // still advances the 30s clock — only the radius it pays reaches zero.
+        const paidRepeats = boundedInteger(actor.paidRepeatViews, 64);
+        const meters = Math.floor(exports.REPEAT_VIEW_BASE_METERS / 2 ** paidRepeats);
+        return {
+            applied: true,
+            meters,
+            nextViewAtMillis: nowMillis,
+            actorStateUpdate: meters > 0 ? { paidRepeatViews: paidRepeats + 1 } : {},
+        };
     }
     return NO_GRANT;
+}
+/**
+ * Pure decay step used by the scheduled radiusDecay function and its test.
+ * Returns the shrunken counters, or null when nothing should be written:
+ * no organic radius, no decayedAt baseline yet (the scheduler stamps one
+ * without decaying — decay accrues only from a server-written baseline),
+ * less than a minute elapsed, or rounding produced no change. The clock is
+ * post.decayedAt, server-owned; boost never decays and is re-added on top.
+ */
+function calculateRadiusDecay(post, nowMillis, ratePerDay = exports.RADIUS_DECAY_PER_DAY) {
+    const radius = currentRadius(post, nowMillis);
+    if (radius.organic <= 0)
+        return null;
+    const decayedAtMillis = timestampMillis(post.decayedAt);
+    if (decayedAtMillis == null)
+        return null;
+    const elapsedMs = nowMillis - decayedAtMillis;
+    if (elapsedMs < 60_000)
+        return null;
+    const factor = Math.pow(1 - ratePerDay, elapsedMs / 86_400_000);
+    let organic = Math.floor(radius.organic * factor);
+    if (organic < exports.RADIUS_DECAY_FLOOR_METERS)
+        organic = 0;
+    if (organic >= radius.organic)
+        return null;
+    return {
+        organicRadiusMeters: organic,
+        radiusMeters: Math.min(exports.MAX_POST_RADIUS_METERS, organic + radius.boost),
+    };
 }
 /** Accepts the legacy bare `lastViewAtMillis` so existing callers/tests that
  *  predate per-actor like state keep their exact meaning. */
@@ -161,9 +232,11 @@ function calculatePostEngagementMutation(post, kind, nowMillis, actorState, isOw
             actorStateUpdate: {},
         };
     }
-    const maximumOrganic = Math.max(0, exports.MAX_POST_RADIUS_METERS - radius.boost);
+    const maximumOrganic = Math.max(0, exports.MAX_POST_RADIUS_METERS - radius.boost - radius.seed);
     const organicRadiusMeters = Math.max(0, Math.min(maximumOrganic, radius.organic + delta.meters));
-    const radiusMeters = Math.min(exports.MAX_POST_RADIUS_METERS, organicRadiusMeters + radius.boost);
+    // Reach is seed plus earned plus boost; entitlement, computed elsewhere from
+    // organicRadiusMeters alone, never sees the seed.
+    const radiusMeters = Math.min(exports.MAX_POST_RADIUS_METERS, organicRadiusMeters + radius.boost + radius.seed);
     const counters = {
         radiusMeters,
         organicRadiusMeters,

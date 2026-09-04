@@ -146,12 +146,79 @@ const stranger = policy.calculatePostEngagementMutation(post, "like", 100_000, f
 assert.equal(stranger.applied, true);
 assert.equal(stranger.radiusDeltaMeters, 1_000);
 
+// ── Repeat views halve: time alone buys ~1 km, not the world ──────────────
+// Measured 2 Sep 2026: the uncapped +500/30s let one account earn +29 km in
+// 30 minutes. Each PAID repeat now halves the next (500, 250, 125 … 0) and
+// the halving index rides the same actor-state doc as the like grant.
+{
+  let paid = 0;
+  let total = 0;
+  const expected = [500, 250, 125, 62, 31, 15, 7, 3, 1];
+  for (const meters of expected) {
+    const repeat = policy.calculatePostEngagementMutation(
+      post, "view", 200_000 + paid,
+      { lastViewAtMillis: 100_000, paidRepeatViews: paid },
+    );
+    assert.equal(repeat.applied, true);
+    assert.equal(repeat.radiusDeltaMeters, meters, `repeat #${paid + 1} must pay ${meters}`);
+    assert.equal(repeat.actorStateUpdate.paidRepeatViews, paid + 1);
+    total += meters;
+    paid += 1;
+  }
+  assert.equal(total, 994, "lifetime repeat payout stays under 1 km");
+  // Exhausted: the view still counts and still advances the 30s clock, but
+  // pays nothing and stops touching the actor state.
+  const exhausted = policy.calculatePostEngagementMutation(
+    { ...post, viewCount: 9 }, "view", 900_000,
+    { lastViewAtMillis: 100_000, paidRepeatViews: 9 },
+  );
+  assert.equal(exhausted.applied, true, "an exhausted repeat view still counts");
+  assert.equal(exhausted.radiusDeltaMeters, 0);
+  assert.equal(exhausted.counters.viewCount, 10);
+  assert.equal(exhausted.nextViewAtMillis, 900_000);
+  assert.deepEqual(exhausted.actorStateUpdate, {});
+  // The legacy bare-number actor state means "no repeats paid yet".
+  const legacy = policy.calculatePostEngagementMutation(post, "view", 200_000, 100_000);
+  assert.equal(legacy.radiusDeltaMeters, 500);
+}
+
+// ── Decay: a score you defend ─────────────────────────────────────────────
+// 5%/day on organic only, elapsed-time based, floored to zero near dust.
+{
+  const DAY = 86_400_000;
+  const decayed = policy.calculateRadiusDecay(
+    { organicRadiusMeters: 10_000, radiusMeters: 10_000, decayedAt: 0 }, DAY,
+  );
+  assert.deepEqual(decayed, { organicRadiusMeters: 9_500, radiusMeters: 9_500 });
+  // Boost never decays and is re-added on top of the shrunken organic.
+  const boosted = policy.calculateRadiusDecay(
+    { organicRadiusMeters: 4_000, radiusMeters: 6_000, boostedRadiusMeters: 2_000, decayedAt: 0 },
+    DAY,
+  );
+  assert.deepEqual(boosted, { organicRadiusMeters: 3_800, radiusMeters: 5_800 });
+  // Dust snaps to zero instead of shrinking forever.
+  const dust = policy.calculateRadiusDecay(
+    { organicRadiusMeters: 9, radiusMeters: 9, decayedAt: 0 }, DAY,
+  );
+  assert.deepEqual(dust, { organicRadiusMeters: 0, radiusMeters: 0 });
+  // Nothing to write: no baseline stamp yet, nothing organic, or no time.
+  assert.equal(policy.calculateRadiusDecay({ organicRadiusMeters: 10_000 }, DAY), null);
+  assert.equal(policy.calculateRadiusDecay(
+    { organicRadiusMeters: 0, decayedAt: 0 }, DAY), null);
+  assert.equal(policy.calculateRadiusDecay(
+    { organicRadiusMeters: 10_000, decayedAt: 0 }, 30_000), null);
+  // A future-dated clock must freeze nothing INTO GROWTH: never pays upward.
+  assert.equal(policy.calculateRadiusDecay(
+    { organicRadiusMeters: 10_000, decayedAt: 10 * DAY }, DAY), null);
+}
+
 if (rulesPath) {
   const rules = fs.readFileSync(rulesPath, "utf8");
   const requiredProtectedFields = [
     "radius", "radiusMeters", "organicRadiusMeters", "boostedRadiusMeters",
     "viewCount", "likeCount", "downvoteCount", "commentCount",
     "lastEngagementAt", "likeNotifyAt", "likesPendingNotify",
+    "decayedAt",
   ];
   requiredProtectedFields.forEach(field => assert.match(
     rules,
@@ -163,6 +230,49 @@ if (rulesPath) {
     rules,
     /match \/engagements\/\{engagementId\}[\s\S]*?allow create: if false;/,
   );
+  // Creation must be seed-guarded too: without validNewPostEngagementSeed a
+  // modified client mints a post already at world radius and skips the
+  // engagement economy entirely.
+  assert.match(rules, /function validNewPostEngagementSeed\(\)/);
+  assert.match(
+    rules,
+    /match \/posts\/\{postId\}[\s\S]*?allow create:[\s\S]*?validNewPostEngagementSeed\(\)/,
+    "the posts create rule must apply the engagement seed guard",
+  );
 }
 
-console.log("post engagement policy: PASS");
+// A discovery seed is reach, never entitlement. It must stay out of
+// organicRadiusMeters, because the account total that grants a claim is summed
+// from that field alone — otherwise post count mints claim power.
+const seeded = policy.calculatePostEngagementMutation(
+  { radiusMeters: 5_000, seedRadiusMeters: 5_000, viewCount: 0 },
+  'view',
+  100_000,
+  null,
+);
+assert.equal(seeded.applied, true);
+assert.equal(seeded.counters.organicRadiusMeters, 1_000, 'the seed must not be counted as earned');
+assert.equal(seeded.counters.radiusMeters, 6_000, 'reach is seed plus earned');
+
+// An unseeded post from before this rule keeps its old meaning: its whole
+// radius is treated as earned, so no account loses entitlement it had.
+const legacy = policy.calculatePostEngagementMutation(
+  { radiusMeters: 5_000, viewCount: 0 },
+  'view',
+  100_000,
+  null,
+);
+assert.equal(legacy.counters.organicRadiusMeters, 6_000, 'legacy posts keep counting as earned');
+
+// A seed the client inflates buys no extra exclusion from the earned pool.
+const inflated = policy.calculatePostEngagementMutation(
+  { radiusMeters: 50_000, seedRadiusMeters: 50_000, viewCount: 0 },
+  'view',
+  100_000,
+  null,
+);
+// The seed is clamped to its 5 km maximum, so an inflated claim excludes 5 km
+// and no more; anything above that a post already holds was earned.
+assert.equal(inflated.counters.organicRadiusMeters, 46_000, 'an inflated seed claim is clamped, not honoured');
+
+console.log('post engagement policy: PASS');

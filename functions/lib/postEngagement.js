@@ -129,6 +129,9 @@ exports.recordPostEngagement = (0, https_1.onCall)({ region, timeoutSeconds: 15,
             liked: actorState.liked === true,
             disliked: actorState.disliked === true,
             commentGranted: actorState.commentGranted === true,
+            paidRepeatViews: typeof actorState.paidRepeatViews === "number"
+                ? actorState.paidRepeatViews
+                : 0,
         }, 
         // The post's own author. Read from the stored document inside the
         // transaction, never from anything the caller sent.

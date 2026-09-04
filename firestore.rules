@@ -97,11 +97,39 @@ service cloud.firestore {
     function serverOwnedPostEngagementFields() {
       return [
         'radius', 'radiusMeters', 'organicRadiusMeters',
+        'seedRadiusMeters',
         'boostedRadiusMeters', 'boostExpiresAt',
         'viewCount', 'likeCount', 'upvoteCount',
         'downvoteCount', 'dislikeCount', 'commentCount', 'shareCount',
-        'lastEngagementAt', 'likeNotifyAt', 'likesPendingNotify'
+        'lastEngagementAt', 'likeNotifyAt', 'likesPendingNotify',
+        'decayedAt'
       ];
+    }
+
+    // Creation may seed only an honest starting state: the sanctioned starting
+    // radius at most (the composer's default is 5000 m), zeroed counters, and
+    // none of the server-only fields. Without this, a modified client could
+    // mint a post already at world radius and skip the engagement economy
+    // entirely — update was guarded, create was not. decayedAt is the decay
+    // clock: pre-seeding it far in the future would freeze decay forever.
+    function validNewPostEngagementSeed() {
+      let d = request.resource.data;
+      return d.get('radius', 0) >= 0 && d.get('radius', 0) <= 5000
+        && d.get('radiusMeters', 0) >= 0 && d.get('radiusMeters', 0) <= 5000
+        // A discovery seed is reach, never entitlement, so it may be created
+        // up to the sanctioned 5000 m but must be declared as a seed AND leave
+        // the earned pool at zero. The account total that grants a claim is
+        // summed from organicRadiusMeters alone; letting a new post arrive with
+        // earned radius is how post count would buy claim power.
+        && d.get('seedRadiusMeters', 0) >= 0 && d.get('seedRadiusMeters', 0) <= 5000
+        && d.get('seedRadiusMeters', 0) <= d.get('radius', 0)
+        && d.get('organicRadiusMeters', 0) == 0
+        && d.get('viewCount', 0) == 0 && d.get('likeCount', 0) == 0
+        && d.get('upvoteCount', 0) == 0 && d.get('downvoteCount', 0) == 0
+        && d.get('dislikeCount', 0) == 0 && d.get('commentCount', 0) == 0
+        && d.get('shareCount', 0) == 0
+        && !d.keys().hasAny(['boostedRadiusMeters', 'boostExpiresAt',
+          'lastEngagementAt', 'likeNotifyAt', 'likesPendingNotify', 'decayedAt']);
     }
 
     function keepsPostEngagementFieldsUnchanged() {
@@ -372,6 +400,7 @@ service cloud.firestore {
       allow create: if signedIn()
         && (request.resource.data.userID == request.auth.uid
           || request.resource.data.userId == request.auth.uid)
+        && validNewPostEngagementSeed()
         && validPostOrigin(request.auth.uid);
       allow update: if signedIn()
         && (resource.data.userID == request.auth.uid
