@@ -318,7 +318,20 @@ final class PoplurDirectMessages {
         let threadRef = db.collection("dmThreads").document(id)
         let messageRef = threadRef.collection("messages").document(clientMessageID)
         do {
-            if try await messageRef.getDocument().exists { return true }
+            // Idempotency check, and it must never be able to BLOCK the send.
+            //
+            // The messages read rule is `inThread(threadId)`, and dmParticipants
+            // returns [] for a thread that does not exist — so on the FIRST
+            // message to anyone this read is denied, threw, and was caught below
+            // as a send failure. The thread it asks about is the one this very
+            // batch is about to create. Every first message to every person has
+            // been failing on that, which is why dmThreads was empty.
+            //
+            // A failure here means "no duplicate to skip", never "do not send".
+            // The batch stays safe on a real retry because the message is
+            // written at the client-chosen id, so a resend overwrites rather
+            // than duplicates.
+            if let existing = try? await messageRef.getDocument(), existing.exists { return true }
             let batch = db.batch()
             batch.setData([
                 "participants": [uid, otherUID].sorted(),

@@ -192,7 +192,13 @@ final class PoplurCallSignalling {
         guard let uid else { return }
         incomingListener?.remove()
         incomingListener = db.collection("calls")
-            .whereField("calleeId", isEqualTo: uid)
+            // participants, not calleeId. The read rule is
+            // `uid in resource.data.participants`, and Firestore must be able
+            // to prove a query satisfies it STATICALLY — a calleeId filter
+            // cannot, so this listener only worked because a duplicate
+            // `match /calls` further down the rules file allowed any signed-in
+            // read and silently nullified the participant scoping.
+            .whereField("participants", arrayContains: uid)
             .whereField("status", isEqualTo: "ringing")
             .addSnapshotListener { [weak self] snapshot, _ in
                 guard let self else { return }

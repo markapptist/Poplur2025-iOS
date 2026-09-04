@@ -446,10 +446,6 @@ service cloud.firestore {
       allow write: if false;
     }
 
-    match /calls/{callId} {
-      allow read, write: if signedIn();
-    }
-
     match /businesses/{businessId} {
       allow read: if true;
       allow create: if signedIn() && request.resource.data.ownerUserId == request.auth.uid;
