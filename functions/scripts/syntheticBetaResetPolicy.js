@@ -5,14 +5,19 @@ const { createHash } = require("node:crypto");
 const PROJECT_ID = "poplur2025";
 const COHORT_ID = "beta-browser-v1";
 const SOURCE = "synthetic-browser";
-const EXPECTED_AUTH_COUNT = 5;
+const EXPECTED_AUTH_COUNT = 8;
 
 const ACTORS = Object.freeze([
-  Object.freeze({ actorId: "sim-food-001", email: "beta-sim-food-001@poplur.test" }),
-  Object.freeze({ actorId: "sim-sports-002", email: "beta-sim-sports-002@poplur.test" }),
-  Object.freeze({ actorId: "sim-music-003", email: "beta-sim-music-003@poplur.test" }),
-  Object.freeze({ actorId: "sim-tech-004", email: "beta-sim-tech-004@poplur.test" }),
-  Object.freeze({ actorId: "sim-news-005", email: "beta-sim-news-005@poplur.test" }),
+  Object.freeze({ actorId: "sim-food-001", email: "beta-sim-food-001@poplur.test", kind: "person" }),
+  Object.freeze({ actorId: "sim-sports-002", email: "beta-sim-sports-002@poplur.test", kind: "person" }),
+  Object.freeze({ actorId: "sim-music-003", email: "beta-sim-music-003@poplur.test", kind: "person" }),
+  Object.freeze({ actorId: "sim-tech-004", email: "beta-sim-tech-004@poplur.test", kind: "person" }),
+  Object.freeze({ actorId: "sim-news-005", email: "beta-sim-news-005@poplur.test", kind: "person" }),
+  // Business testers own a users/{uid} profile and a public businesses/{uid}
+  // listing, both provisioned; the reset removes exactly those two documents.
+  Object.freeze({ actorId: "sim-biz-food-006", email: "beta-sim-biz-food-006@poplur.test", kind: "business" }),
+  Object.freeze({ actorId: "sim-biz-shop-007", email: "beta-sim-biz-shop-007@poplur.test", kind: "business" }),
+  Object.freeze({ actorId: "sim-biz-fashion-008", email: "beta-sim-biz-fashion-008@poplur.test", kind: "business" }),
 ]);
 
 const ACTOR_BY_ID = new Map(ACTORS.map(actor => [actor.actorId, actor]));
@@ -26,6 +31,7 @@ const COLLECTIONS = Object.freeze({
   posts: "posts",
   users: "users",
   profiles: "profiles",
+  businesses: "businesses",
 });
 
 const CONTROL_PATHS = Object.freeze({
@@ -94,9 +100,9 @@ function validateAuthUsers(users) {
   const nonTargets = users.filter(user => !ACTOR_BY_ID.has(user.uid));
   const ambiguous = nonTargets.find(syntheticIdentitySignal);
   if (ambiguous) {
-    fail("An Auth account outside the fixed five-person allowlist carries a synthetic identity marker.");
+    fail("An Auth account outside the fixed eight-actor allowlist carries a synthetic identity marker.");
   }
-  if (targets.length !== EXPECTED_AUTH_COUNT) fail("Synthetic Auth target count is not exactly five.");
+  if (targets.length !== EXPECTED_AUTH_COUNT) fail(`Synthetic Auth target count is not exactly ${EXPECTED_AUTH_COUNT}.`);
   return { targets, nonTargets };
 }
 
@@ -173,7 +179,7 @@ function classifyActorDocuments(documents) {
   }
   if (targets.length !== EXPECTED_AUTH_COUNT
     || !ACTOR_IDS.every(actorId => targets.some(document => document.id === actorId))) {
-    fail("Runner allowlist does not contain exactly the five locked actor documents.");
+    fail(`Runner allowlist does not contain exactly the ${EXPECTED_AUTH_COUNT} locked actor documents.`);
   }
   return targets;
 }
@@ -251,6 +257,35 @@ function classifyBetaPostDocuments(documents) {
   });
 }
 
+/**
+ * A provisioned BUSINESS tester's own profile: users/{actorId} and
+ * businesses/{actorId}, each carrying the exact cohort tags provisioning
+ * stamps. Those two documents are in scope and are deleted with the account.
+ * Any other synthetic-looking user/profile record still aborts the reset —
+ * a person tester owns no profile document, and nothing else may.
+ */
+function exactCohortProfile(document) {
+  const data = document.data || {};
+  const actor = ACTOR_BY_ID.get(document.id);
+  return Boolean(actor)
+    && actor.kind === "business"
+    && data.syntheticActorId === document.id
+    && data.syntheticBeta === true
+    && exactCommonTags(data)
+    && data.accountType === "business";
+}
+
+function classifyProfileDocuments(collectionName, documents) {
+  const targets = [];
+  for (const document of documents) {
+    if (exactCohortProfile(document)) { targets.push(document); continue; }
+    if (markerCandidate(document, ["uid", "userID", "userId", "ownerUserId", "ownerUserID"])) {
+      fail(`${collectionName}/${document.id} appears synthetic but user/profile records are outside this reset's authorized scope.`);
+    }
+  }
+  return targets;
+}
+
 function assertNoOutOfScopeSyntheticProfiles(collectionName, documents) {
   const conflicting = documents.find(document => markerCandidate(document, ["uid", "userID", "userId"]));
   if (conflicting) {
@@ -262,13 +297,14 @@ function buildDeletionPlan(snapshot) {
   const auth = validateAuthUsers(snapshot.authUsers);
   validateControls(snapshot.controls);
   const documents = snapshot.documents || {};
-  assertNoOutOfScopeSyntheticProfiles(COLLECTIONS.users, documents[COLLECTIONS.users] || []);
   assertNoOutOfScopeSyntheticProfiles(COLLECTIONS.profiles, documents[COLLECTIONS.profiles] || []);
 
   const firestoreTargets = [
     snapshot.controls.runner,
     ...(snapshot.controls.runtime?.exists ? [snapshot.controls.runtime] : []),
     ...classifyActorDocuments(documents[COLLECTIONS.actors] || []),
+    ...classifyProfileDocuments(COLLECTIONS.users, documents[COLLECTIONS.users] || []),
+    ...classifyProfileDocuments(COLLECTIONS.businesses, documents[COLLECTIONS.businesses] || []),
     ...classifyEventDocuments(documents[COLLECTIONS.events] || []),
     ...classifySessionDocuments(documents[COLLECTIONS.sessions] || []),
     ...classifyMapPostDocuments(documents[COLLECTIONS.posts] || []),

@@ -2,14 +2,15 @@
 "use strict";
 
 /**
- * Narrow reset for the five fixed beta-browser-v1 Firebase identities.
+ * Narrow reset for the eight fixed beta-browser-v1 Firebase identities
+ * (five people, three businesses).
  *
  * Dry run (default):
  *   node scripts/resetSyntheticBetaCohort.js
  *
  * Destructive execution requires all three flags in the same invocation:
  *   node scripts/resetSyntheticBetaCohort.js --execute \
- *     --confirm-project=poplur2025 --confirm-synthetic-auth-count=5
+ *     --confirm-project=poplur2025 --confirm-synthetic-auth-count=8
  *
  * This tool never deletes Storage, feedback, human telemetry, ordinary users,
  * ordinary posts, configuration, credits, or purchases. It aborts rather than

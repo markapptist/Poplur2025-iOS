@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Align the five fixed beta-browser-v1 accounts with the local credential file.
+ * Align the eight fixed beta-browser-v1 accounts with the local credential file.
  *
  * provisionSyntheticBetaAccounts.js deliberately never touches an existing
  * account's password, so a cohort whose credential file has drifted can no
@@ -11,20 +11,20 @@
  * than the situation calls for and refuses to run at all while any synthetic
  * post is ambiguous.
  *
- * This sets the password of exactly those five uids to the value already
+ * This sets the password of exactly those eight uids to the value already
  * stored in the mode-0600 credential file. Nothing is deleted, no other
  * account is read or written, and no password or token is printed.
  *
  *   node scripts/alignSyntheticBetaPasswords.js --confirm-align-synthetic-passwords
  *
  * Guards, all of which must hold per actor before a write:
- *   - the credential row's uid equals its actorId and is one of the five
+ *   - the credential row's uid equals its actorId and is one of the eight
  *   - the credential row's email equals the pinned address for that actor
  *   - the live Auth account exists at that uid with that exact email
  *   - the account already carries the syntheticBeta custom claim
  *
  * It finishes by signing in as each actor exactly as the app does, and exits
- * non-zero unless all five succeed.
+ * non-zero unless all eight succeed.
  */
 
 const admin = require("firebase-admin");
@@ -48,6 +48,9 @@ const PINNED = Object.freeze({
   "sim-music-003": "beta-sim-music-003@poplur.test",
   "sim-tech-004": "beta-sim-tech-004@poplur.test",
   "sim-news-005": "beta-sim-news-005@poplur.test",
+  "sim-biz-food-006": "beta-sim-biz-food-006@poplur.test",
+  "sim-biz-shop-007": "beta-sim-biz-shop-007@poplur.test",
+  "sim-biz-fashion-008": "beta-sim-biz-fashion-008@poplur.test",
 });
 
 function fail(message) {

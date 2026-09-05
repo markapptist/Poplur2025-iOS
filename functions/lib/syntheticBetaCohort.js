@@ -64,6 +64,49 @@ exports.SYNTHETIC_BETA_PROFILES = [
         source: "synthetic-browser",
         cohortId: exports.SYNTHETIC_BETA_COHORT_ID,
     },
+    // Business testers. Same cohort, same runner, same approved media — the
+    // difference is the listing: each owns users/{uid} with accountType
+    // "business" and a world-readable businesses/{uid}, which is how every
+    // surface tells a business byline from a person's.
+    {
+        id: "sim-biz-food-006",
+        label: "RUNNER · @nightmarket",
+        handle: "@nightmarket",
+        persona: "Restaurant",
+        place: "Toronto",
+        avatarTile: "food",
+        source: "synthetic-browser",
+        cohortId: exports.SYNTHETIC_BETA_COHORT_ID,
+        kind: "business",
+        businessName: "Night Market Eats",
+        businessCategory: "Restaurant",
+    },
+    {
+        id: "sim-biz-shop-007",
+        label: "RUNNER · @hauls.to",
+        handle: "@hauls.to",
+        persona: "Retail",
+        place: "Toronto",
+        avatarTile: "shopping",
+        source: "synthetic-browser",
+        cohortId: exports.SYNTHETIC_BETA_COHORT_ID,
+        kind: "business",
+        businessName: "Hauls Outlet",
+        businessCategory: "Retail",
+    },
+    {
+        id: "sim-biz-fashion-008",
+        label: "RUNNER · @fitcheck.nyc",
+        handle: "@fitcheck.nyc",
+        persona: "Boutique",
+        place: "New York",
+        avatarTile: "fashion",
+        source: "synthetic-browser",
+        cohortId: exports.SYNTHETIC_BETA_COHORT_ID,
+        kind: "business",
+        businessName: "Fit Check Daily",
+        businessCategory: "Boutique",
+    },
 ];
 exports.SYNTHETIC_RUNNER_SCREENS = new Set([
     "home",

@@ -18,6 +18,13 @@ export type SyntheticBetaProfile = {
   avatarTile: string;
   source: "synthetic-browser";
   cohortId: typeof SYNTHETIC_BETA_COHORT_ID;
+  /** A person tester unless said otherwise. A BUSINESS tester posts as a
+   *  listed business: users/{uid}.accountType "business" and a public
+   *  businesses/{uid} listing, both written by provisioning — never by the
+   *  runner, whose first-run profile write admits only "personal". */
+  kind?: "person" | "business";
+  businessName?: string;
+  businessCategory?: string;
 };
 
 export const SYNTHETIC_BETA_PROFILES: readonly SyntheticBetaProfile[] = [
@@ -70,6 +77,49 @@ export const SYNTHETIC_BETA_PROFILES: readonly SyntheticBetaProfile[] = [
     avatarTile: "news",
     source: "synthetic-browser",
     cohortId: SYNTHETIC_BETA_COHORT_ID,
+  },
+  // Business testers. Same cohort, same runner, same approved media — the
+  // difference is the listing: each owns users/{uid} with accountType
+  // "business" and a world-readable businesses/{uid}, which is how every
+  // surface tells a business byline from a person's.
+  {
+    id: "sim-biz-food-006",
+    label: "RUNNER · @nightmarket",
+    handle: "@nightmarket",
+    persona: "Restaurant",
+    place: "Toronto",
+    avatarTile: "food",
+    source: "synthetic-browser",
+    cohortId: SYNTHETIC_BETA_COHORT_ID,
+    kind: "business",
+    businessName: "Night Market Eats",
+    businessCategory: "Restaurant",
+  },
+  {
+    id: "sim-biz-shop-007",
+    label: "RUNNER · @hauls.to",
+    handle: "@hauls.to",
+    persona: "Retail",
+    place: "Toronto",
+    avatarTile: "shopping",
+    source: "synthetic-browser",
+    cohortId: SYNTHETIC_BETA_COHORT_ID,
+    kind: "business",
+    businessName: "Hauls Outlet",
+    businessCategory: "Retail",
+  },
+  {
+    id: "sim-biz-fashion-008",
+    label: "RUNNER · @fitcheck.nyc",
+    handle: "@fitcheck.nyc",
+    persona: "Boutique",
+    place: "New York",
+    avatarTile: "fashion",
+    source: "synthetic-browser",
+    cohortId: SYNTHETIC_BETA_COHORT_ID,
+    kind: "business",
+    businessName: "Fit Check Daily",
+    businessCategory: "Boutique",
   },
 ] as const;
 

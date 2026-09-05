@@ -68,6 +68,10 @@ const SYNTHETIC_MAP_POST_SEEDS = {
     "sim-music-003": { latitude: 43.646, longitude: -79.395, baseRadiusMeters: 2_100 },
     "sim-tech-004": { latitude: 37.775, longitude: -122.419, baseRadiusMeters: 3_100 },
     "sim-news-005": { latitude: 40.713, longitude: -74.006, baseRadiusMeters: 2_700 },
+    // Business testers stand where they trade.
+    "sim-biz-food-006": { latitude: 43.6545, longitude: -79.4005, baseRadiusMeters: 2_600 },
+    "sim-biz-shop-007": { latitude: 43.6544, longitude: -79.3807, baseRadiusMeters: 2_300 },
+    "sim-biz-fashion-008": { latitude: 40.7233, longitude: -74.003, baseRadiusMeters: 2_800 },
 };
 const SYNTHETIC_RADIUS_STEPS = [0, 600, 1_400, 900, -300];
 const EVENT_STATUSES = new Set(["foreground", "background", "idle", "blocked", "complete"]);

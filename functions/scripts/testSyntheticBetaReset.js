@@ -28,6 +28,18 @@ function actorDocument(actor) {
   });
 }
 
+function businessProfile(actor) {
+  return {
+    syntheticActorId: actor.actorId,
+    syntheticBeta: true,
+    source: SOURCE,
+    cohortId: COHORT_ID,
+    accountType: "business",
+  };
+}
+
+const BUSINESS_ACTORS = ACTORS.filter(actor => actor.kind === "business");
+
 function authUser(actor) {
   return {
     uid: actor.actorId,
@@ -47,6 +59,10 @@ function baseSnapshot() {
   const humanAuth = { uid: "human-1", email: "human@example.com", customClaims: {} };
   const humanPost = document(`${COLLECTIONS.posts}/human-post`, { userID: humanAuth.uid });
   const humanUser = document(`${COLLECTIONS.users}/${humanAuth.uid}`, { username: "human" });
+  const businessUsers = BUSINESS_ACTORS.map(actor =>
+    document(`${COLLECTIONS.users}/${actor.actorId}`, { uid: actor.actorId, ...businessProfile(actor) }));
+  const businessListings = BUSINESS_ACTORS.map(actor =>
+    document(`${COLLECTIONS.businesses}/${actor.actorId}`, { ownerUserId: actor.actorId, ...businessProfile(actor) }));
   return {
     authUsers: [...ACTORS.map(authUser), humanAuth],
     controls: {
@@ -60,18 +76,21 @@ function baseSnapshot() {
       [COLLECTIONS.sessions]: [],
       [COLLECTIONS.betaPosts]: [],
       [COLLECTIONS.posts]: [humanPost],
-      [COLLECTIONS.users]: [humanUser],
+      [COLLECTIONS.users]: [humanUser, ...businessUsers],
       [COLLECTIONS.profiles]: [],
+      [COLLECTIONS.businesses]: businessListings,
     },
     collectionCounts: {
       testControl: 2,
-      [COLLECTIONS.actors]: 5,
+      [COLLECTIONS.actors]: ACTORS.length,
       [COLLECTIONS.posts]: 1,
-      [COLLECTIONS.users]: 1,
+      [COLLECTIONS.users]: 1 + BUSINESS_ACTORS.length,
+      [COLLECTIONS.businesses]: BUSINESS_ACTORS.length,
     },
     storageObjects: ["profiles/human.jpg\u00001"],
     existingPaths: new Set([runner.path, simulation.path, humanPost.path, humanUser.path,
-      ...ACTORS.map(actor => `${COLLECTIONS.actors}/${actor.actorId}`)]),
+      ...ACTORS.map(actor => `${COLLECTIONS.actors}/${actor.actorId}`),
+      ...businessUsers.map(doc => doc.path), ...businessListings.map(doc => doc.path)]),
   };
 }
 
@@ -85,17 +104,26 @@ expectFailure(() => parseArguments(["--execute", `--confirm-project=${PROJECT_ID
 assert.deepEqual(parseArguments([
   "--execute",
   `--confirm-project=${PROJECT_ID}`,
-  "--confirm-synthetic-auth-count=5",
+  "--confirm-synthetic-auth-count=8",
 ]), { execute: true });
 expectFailure(() => parseArguments(["--force"]), /Unsupported/);
 
 const safe = baseSnapshot();
 const safePlan = buildDeletionPlan(safe);
-assert.equal(safePlan.authTargets.length, 5);
+assert.equal(safePlan.authTargets.length, 8);
 assert.equal(safePlan.nonTargetAuthUsers.length, 1);
-assert.equal(safePlan.firestoreTargets.length, 6);
-assert.deepEqual(safePlan.firestoreByCollection, { testControl: 1, testSyntheticRunnerActors: 5 });
+assert.equal(safePlan.firestoreTargets.length, 1 + 8 + 3 + 3);
+assert.deepEqual(safePlan.firestoreByCollection, { testControl: 1, testSyntheticRunnerActors: 8, users: 3, businesses: 3 });
 assert.ok(!safePlan.firestoreTargets.some(target => target.path.includes("human")));
+
+// A person tester owns no profile document; one that looks synthetic aborts.
+const personProfile = baseSnapshot();
+personProfile.documents[COLLECTIONS.users].push(document(`${COLLECTIONS.users}/sim-food-001`, { uid: "sim-food-001", syntheticBeta: true }));
+expectFailure(() => buildDeletionPlan(personProfile), /outside this reset's authorized scope/);
+// A business profile missing its exact cohort tags is not in scope either.
+const untaggedBusiness = baseSnapshot();
+untaggedBusiness.documents[COLLECTIONS.businesses][0].data.source = "camera-upload";
+expectFailure(() => buildDeletionPlan(untaggedBusiness), /outside this reset's authorized scope/);
 
 const ordinarySourcePost = baseSnapshot();
 ordinarySourcePost.documents[COLLECTIONS.posts][0].data.source = "camera-upload";
@@ -108,7 +136,7 @@ expectFailure(() => buildDeletionPlan(wrongClaim), /locked UID\/email\/claim/);
 
 const unknownSynthetic = baseSnapshot();
 unknownSynthetic.authUsers.push({ uid: "sim-other-999", email: "other@poplur.test", customClaims: { syntheticBeta: true } });
-expectFailure(() => buildDeletionPlan(unknownSynthetic), /outside the fixed five-person allowlist/);
+expectFailure(() => buildDeletionPlan(unknownSynthetic), /outside the fixed eight-actor allowlist/);
 
 const enabledRunner = baseSnapshot();
 enabledRunner.controls.runner.data.enabled = true;
