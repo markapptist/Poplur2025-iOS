@@ -597,6 +597,26 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         config.mediaTypesRequiringUserActionForPlayback = []
         config.userContentController.add(context.coordinator, name: "poplur")
         config.userContentController.add(context.coordinator, name: "homeReady")
+        // Capture renderer exceptions in the existing bounded device log.
+        // Install before the bundle executes so a React root failure is visible.
+        config.userContentController.addUserScript(WKUserScript(
+            source: """
+            (() => {
+              let count = 0;
+              const report = (kind, error, fallback) => {
+                if (++count > 20) return;
+                const text = String(error && ((error.message || '') + ' ' + (error.stack || '')) || fallback || 'unknown').slice(0, 3000);
+                window.webkit.messageHandlers.poplur.postMessage({type: 'profile', line: '[WebError] ' + kind + ' ' + text});
+              };
+              window.addEventListener('error', event => {
+                if (event.message) report('error', event.error, event.message + ' ' + event.filename + ':' + event.lineno);
+              });
+              window.addEventListener('unhandledrejection', event => report('rejection', event.reason));
+            })();
+            """,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true
+        ))
         let backgroundAudio = Self.backgroundAudioPreference()
         config.userContentController.addUserScript(
             WKUserScript(
@@ -3559,6 +3579,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         }
 
         func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            PoplurDiagLog.append("[WebError] web-content process terminated")
             scheduleRecovery(of: webView, reason: "web-content process terminated")
         }
 
