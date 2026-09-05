@@ -451,12 +451,15 @@ struct LoginView: View {
         isBiometricLoading = false
         loginErrorMessage = nil
 
-        Auth.auth().signIn(withEmail: email, password: password) { _, error in
+        Auth.auth().signIn(withEmail: email, password: password) { result, error in
             isLoading = false
             if let error = error {
                 print("Login failed: \(error.localizedDescription)")
                 self.loginErrorMessage = error.localizedDescription
             } else {
+                // Native owns `login`: this view is reachable from the shipping
+                // path, the same as the pre-login embed's sign-in.
+                PoplurNativeAnalytics.didLogin(uid: result?.user.uid)
                 // Offer Face ID save if biometrics available and nothing saved yet
                 if self.biometricAvailable && !self.hasSavedCredentials {
                     self.showEnableFaceIDSheet = true

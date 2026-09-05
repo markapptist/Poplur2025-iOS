@@ -1665,6 +1665,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     }
                     return
                 }
+                if PoplurAnalyticsRelay.handles(type) { PoplurAnalyticsRelay.handle(type: type, body: body); return }
                 // Store checkout remains a web-owned bag, but payment and
                 // fulfillment cross this native boundary. StoreKit authorizes
                 // each consumable; the server verifies its signed JWS and

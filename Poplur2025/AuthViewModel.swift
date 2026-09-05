@@ -94,6 +94,7 @@ final class AuthViewModel: ObservableObject {
     func signOut() {
         do {
             try Auth.auth().signOut()
+            PoplurNativeAnalytics.didSignOut()
         } catch {
             print("AuthViewModel: signOut failed -> \(error.localizedDescription)")
         }

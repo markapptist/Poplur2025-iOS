@@ -753,6 +753,8 @@ struct SignUpView: View {
                 errorMessage = "Could not create your account. Please try again."
                 return
             }
+            // Native owns `sign_up`: reachable from the shipping path.
+            PoplurNativeAnalytics.didSignUp(uid: uid)
 
             Task {
                 do {

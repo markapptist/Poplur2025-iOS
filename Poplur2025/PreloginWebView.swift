@@ -593,11 +593,12 @@ struct PreloginWebView: UIViewRepresentable {
                     postAuthResult(ok: false, error: "Enter your email and password.")
                     return
                 }
-                Auth.auth().signIn(withEmail: email, password: password) { [weak self] _, error in
+                Auth.auth().signIn(withEmail: email, password: password) { [weak self] result, error in
                     if let error {
                         print("[PreloginWebView] signIn failed: \(error.localizedDescription)")
                         self?.postAuthResult(ok: false, error: error.localizedDescription)
                     } else {
+                        PoplurNativeAnalytics.didLogin(uid: result?.user.uid)
                         print("[PreloginWebView] signIn succeeded — auth-state listener will transition")
                         self?.postAuthResult(ok: true, error: nil)
                     }
@@ -652,6 +653,7 @@ struct PreloginWebView: UIViewRepresentable {
                                 )
                             }
                         }
+                        PoplurNativeAnalytics.didSignUp(uid: result?.user.uid)
                         print("[PreloginWebView] signUp succeeded (\(accountType)) — auth-state listener will transition")
                         Task { @MainActor in self?.auth.didSignUp = true }
                         self?.postAuthResult(ok: true, error: nil)

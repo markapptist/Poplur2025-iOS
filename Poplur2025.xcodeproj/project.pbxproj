@@ -17,6 +17,7 @@
 		391605FB2E3F4A0B000ACB3E /* FirebaseStorageCombine-Community in Frameworks */ = {isa = PBXBuildFile; productRef = 391605FA2E3F4A0B000ACB3E /* FirebaseStorageCombine-Community */; };
 		391607012E3F4A0B000ACB3E /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = 391607002E3F4A0B000ACB3E /* FirebaseMessaging */; };
 		B4A1F0012F70000100C0DE01 /* FirebaseFunctions in Frameworks */ = {isa = PBXBuildFile; productRef = B4A1F0002F70000100C0DE01 /* FirebaseFunctions */; };
+		B4A1F0032F70000100C0DE01 /* FirebaseAnalyticsCore in Frameworks */ = {isa = PBXBuildFile; productRef = B4A1F0022F70000100C0DE01 /* FirebaseAnalyticsCore */; };
 		B4AU000000000004 /* Poplur2025/auth_transition.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = B4AU000000000002 /* Poplur2025/auth_transition.mp4 */; };
 		B4C1AF002F68000100C0DE10 /* ClayMapWeb in Resources */ = {isa = PBXBuildFile; fileRef = B4C1AF012F68000100C0DE10 /* ClayMapWeb */; };
 		B4C1AF002F68000100C0DE20 /* PreloginWeb in Resources */ = {isa = PBXBuildFile; fileRef = B4C1AF012F68000100C0DE20 /* PreloginWeb */; };
@@ -109,6 +110,7 @@
 				391605ED2E3F4A0B000ACB3E /* FirebaseAppCheck in Frameworks */,
 				391605F12E3F4A0B000ACB3E /* FirebaseCore in Frameworks */,
 				B4A1F0012F70000100C0DE01 /* FirebaseFunctions in Frameworks */,
+				B4A1F0032F70000100C0DE01 /* FirebaseAnalyticsCore in Frameworks */,
 				391605FB2E3F4A0B000ACB3E /* FirebaseStorageCombine-Community in Frameworks */,
 				391605F32E3F4A0B000ACB3E /* FirebaseDatabase in Frameworks */,
 				391605F72E3F4A0B000ACB3E /* FirebaseFirestoreCombine-Community in Frameworks */,
@@ -205,6 +207,7 @@
 				391607002E3F4A0B000ACB3E /* FirebaseMessaging */,
 				391605F02E3F4A0B000ACB3E /* FirebaseCore */,
 				B4A1F0002F70000100C0DE01 /* FirebaseFunctions */,
+				B4A1F0022F70000100C0DE01 /* FirebaseAnalyticsCore */,
 				391605F22E3F4A0B000ACB3E /* FirebaseDatabase */,
 				391605F42E3F4A0B000ACB3E /* FirebaseFirestore */,
 				391605F62E3F4A0B000ACB3E /* FirebaseFirestoreCombine-Community */,
@@ -579,6 +582,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1;
+				OTHER_LDFLAGS = "-ObjC";
 				PRODUCT_BUNDLE_IDENTIFIER = com.apptist.Poplur2025;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_COMPILATION_MODE = incremental;
@@ -622,6 +626,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1;
+				OTHER_LDFLAGS = "-ObjC";
 				PRODUCT_BUNDLE_IDENTIFIER = com.apptist.Poplur2025;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -900,6 +905,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 391605EB2E3F4A0B000ACB3E /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
 			productName = FirebaseFunctions;
+		};
+		B4A1F0022F70000100C0DE01 /* FirebaseAnalyticsCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 391605EB2E3F4A0B000ACB3E /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAnalyticsCore;
 		};
 		F0640B812F3521FC0093A1F4 /* GoogleMaps3D */ = {
 			isa = XCSwiftPackageProductDependency;
