@@ -171,6 +171,23 @@ struct PoplurNotificationPostSignal {
     let viewCount: Int
 }
 
+/// The in-app banner sink.
+///
+/// A push that lands while the app is on screen used to be drawn by the
+/// system as a banner OVER the app — an out-of-app notification inside the
+/// app. The post-login web view registers here; when it is up and in the
+/// foreground `willPresent` hands the push to it and the web document draws
+/// its own tappable banner instead. With no sink (pre-login, background, web
+/// not ready) the system banner is still the right thing, and still shows.
+@MainActor
+enum PoplurInAppBannerRelay {
+    /// Returns true when the banner was drawn in-app.
+    static var deliver: (([String: Any]) -> Bool)?
+    /// Which web view installed `deliver`, so a torn-down one only clears
+    /// its own closure and never a successor's.
+    static var owner: UUID?
+}
+
 @MainActor
 final class PoplurNotificationCenter: NSObject, ObservableObject, UNUserNotificationCenterDelegate {
     static let shared = PoplurNotificationCenter()
@@ -534,9 +551,40 @@ final class PoplurNotificationCenter: NSObject, ObservableObject, UNUserNotifica
             (Self.shared.soundsEnabled, Self.shared.messagesPushEnabled)
         }
         if content.userInfo["kind"] as? String == "dm" && !preferences.1 { return [] }
+        // In-app first. The web layer draws the banner when it can; the
+        // system banner is only for when nothing of ours is on screen.
+        let payload = Self.bannerPayload(for: content)
+        let drawnInApp = await MainActor.run { PoplurInAppBannerRelay.deliver?(payload) ?? false }
+        if drawnInApp { return [.badge] }
         var opts: UNNotificationPresentationOptions = [.banner, .badge]
         if preferences.0 { opts.insert(.sound) }
         return opts
+    }
+
+    /// The push as the web inbox row shape (`poplurNotifications` rows), so
+    /// the banner and the Notifications screen describe one event one way.
+    nonisolated private static func bannerPayload(for content: UNNotificationContent) -> [String: Any] {
+        let info = content.userInfo
+        let postId = (info["postId"] as? String) ?? (info["postID"] as? String)
+        let engagementId = info["engagementId"] as? String
+        let messageId = info["messageId"] as? String
+        let id = (info["notificationId"] as? String)
+            ?? (info["poplurNotificationID"] as? String)
+            ?? engagementId
+            ?? messageId
+            ?? "push-\(Int(Date().timeIntervalSince1970 * 1_000))"
+        var row: [String: Any] = [
+            "id": id,
+            "kind": (info["kind"] as? String) ?? "",
+            "title": content.title,
+            "detail": content.body,
+            "createdAtMillis": Date().timeIntervalSince1970 * 1_000,
+            "unread": true
+        ]
+        if let actorHandle = info["actorHandle"] as? String, !actorHandle.isEmpty { row["actorHandle"] = actorHandle }
+        if let postId, !postId.isEmpty { row["postId"] = postId }
+        if let threadId = info["threadId"] as? String, !threadId.isEmpty { row["threadId"] = threadId }
+        return row
     }
 
     /// Handles a tap on a delivered notification.
@@ -559,10 +607,20 @@ final class PoplurNotificationCenter: NSObject, ObservableObject, UNUserNotifica
             let info = content.userInfo
             let postId = (info["postId"] as? String) ?? (info["postID"] as? String)
             if let postId, !postId.isEmpty {
+                // Same reason as the DM route below: the post-login web view
+                // may not exist yet, so the ask outlives this notification.
+                var pending: [String: String] = ["postId": postId]
+                if let kind = info["kind"] as? String, !kind.isEmpty { pending["kind"] = kind }
+                if let notificationId = info["notificationId"] as? String, !notificationId.isEmpty {
+                    pending["notificationId"] = notificationId
+                }
+                pending["title"] = content.title
+                pending["detail"] = content.body
+                UserDefaults.standard.set(pending, forKey: "poplur.pendingPostFocus")
                 NotificationCenter.default.post(
                     name: .postFocusRequest,
                     object: nil,
-                    userInfo: ["postID": postId]
+                    userInfo: pending
                 )
             }
             if let threadId = info["threadId"] as? String, !threadId.isEmpty {

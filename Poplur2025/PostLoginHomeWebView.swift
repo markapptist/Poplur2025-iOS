@@ -786,6 +786,8 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         var onReady: () -> Void
         let onWebEvent: ((String, [String: Any]) -> Void)?
         private var didSignalReady = false
+        private var pendingPostFocus: [String: String]?
+        private let bannerRelayToken = UUID()
         private let locationRequester = CLLocationManager()
         private var locationPermissionRequestInFlight = false
         private var photoPermissionRequestInFlight = false
@@ -834,7 +836,16 @@ struct PostLoginHomeWebView: UIViewRepresentable {
             self.onReady = onReady
             self.onWebEvent = onWebEvent
             pendingDMThreadID = UserDefaults.standard.string(forKey: "poplur.pendingDMThreadId")
+            pendingPostFocus = UserDefaults.standard.dictionary(forKey: "poplur.pendingPostFocus") as? [String: String]
             super.init()
+            // In-app banners: while this document is up and in front, a push
+            // is drawn by the web layer rather than by the system over it.
+            let relayToken = bannerRelayToken
+            PoplurInAppBannerRelay.owner = relayToken
+            PoplurInAppBannerRelay.deliver = { [weak self] payload in
+                guard let self, self.bannerRelayToken == relayToken else { return false }
+                return self.deliverInAppBanner(payload)
+            }
             locationRequester.delegate = self
             locationRequester.desiredAccuracy = kCLLocationAccuracyHundredMeters
             notificationObservers.append(NotificationCenter.default.addObserver(
@@ -893,6 +904,44 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                 self.pendingDMThreadID = threadID
                 self.deliverPendingDMDeepLink()
             })
+            // A tapped engagement/radius notification. Nothing observed this
+            // before — the tap went nowhere. It now lands on the post's pin.
+            notificationObservers.append(NotificationCenter.default.addObserver(
+                forName: .postFocusRequest, object: nil, queue: .main
+            ) { [weak self] note in
+                guard let self,
+                      let info = note.userInfo as? [String: String],
+                      let postID = info["postId"] ?? info["postID"],
+                      !postID.isEmpty, postID.count <= 180 else { return }
+                self.pendingPostFocus = info
+                self.deliverPendingPostFocus()
+            })
+        }
+
+        /// Draw a foreground push as the web layer's own banner. False when
+        /// this document cannot show it, so the system banner still does.
+        private func deliverInAppBanner(_ payload: [String: Any]) -> Bool {
+            guard didSignalReady, webForegroundActive,
+                  UIApplication.shared.applicationState == .active,
+                  let webView = bridge.webView else { return false }
+            pushWalletPassMessage(["type": "poplurNotificationBanner", "notification": payload], into: webView)
+            return true
+        }
+
+        private func deliverPendingPostFocus() {
+            guard didSignalReady,
+                  let webView = bridge.webView,
+                  let pending = pendingPostFocus,
+                  let postID = pending["postId"] ?? pending["postID"],
+                  !postID.isEmpty, postID.count <= 180 else { return }
+            pendingPostFocus = nil
+            UserDefaults.standard.removeObject(forKey: "poplur.pendingPostFocus")
+            var payload: [String: Any] = ["type": "poplurOpenPost", "postId": postID]
+            if let kind = pending["kind"], !kind.isEmpty { payload["kind"] = kind }
+            if let notificationId = pending["notificationId"], !notificationId.isEmpty { payload["notificationId"] = notificationId }
+            if let title = pending["title"], !title.isEmpty { payload["title"] = title }
+            if let detail = pending["detail"] { payload["detail"] = detail }
+            pushWalletPassMessage(payload, into: webView)
         }
 
         func setWebForegroundActive(_ active: Bool) {
@@ -1047,6 +1096,13 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         }
 
         deinit {
+            let relayToken = bannerRelayToken
+            Task { @MainActor in
+                if PoplurInAppBannerRelay.owner == relayToken {
+                    PoplurInAppBannerRelay.owner = nil
+                    PoplurInAppBannerRelay.deliver = nil
+                }
+            }
             feedPostsRegistration?.remove()
             recoveryWorkItem?.cancel()
             navigatorMotionDemandExpiryWorkItem?.cancel()
@@ -3527,6 +3583,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
             lastDeliveredHeading = nil
             replayLatestMotion()
             deliverPendingDMDeepLink()
+            deliverPendingPostFocus()
             DispatchQueue.main.async { [onReady] in onReady() }
         }
 
