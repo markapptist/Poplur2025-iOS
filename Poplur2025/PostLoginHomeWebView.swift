@@ -1574,14 +1574,26 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                 // and engagement, and it is native's to write because native
                 // owns identity in this shell. A report is a write-once note
                 // to Poplur (reports/{auto}); nothing on the client reads it.
-                if type == "blockUser" || type == "reportUser" {
+                if type == "blockUser" || type == "unblockUser" || type == "reportUser" {
                     let otherUID = ((body["userId"] as? String) ?? "")
                         .trimmingCharacters(in: .whitespacesAndNewlines)
                     let handle = String(((body["username"] as? String) ?? "").prefix(48))
                     guard !otherUID.isEmpty, otherUID.count <= 128,
                           let uid = Auth.auth().currentUser?.uid, uid != otherUID else { return }
                     let firestore = Firestore.firestore()
-                    if type == "blockUser" {
+                    if type == "unblockUser" {
+                        // The mirror of the block below: the durable record
+                        // goes, so the rules' boundary lifts on the next read.
+                        // The web side has already put their pops back locally.
+                        firestore.collection("users").document(uid)
+                            .collection("blocked").document(otherUID)
+                            .delete { error in
+                                if let error {
+                                    os_log("[PostLoginHomeWebView] unblock delete failed: %{public}@",
+                                           log: .default, type: .error, error.localizedDescription)
+                                }
+                            }
+                    } else if type == "blockUser" {
                         firestore.collection("users").document(uid)
                             .collection("blocked").document(otherUID)
                             .setData(["blockedAt": FieldValue.serverTimestamp(), "username": handle]) { error in
