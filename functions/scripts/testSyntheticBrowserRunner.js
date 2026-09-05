@@ -120,7 +120,8 @@ const eventId = syntheticRunnerEventId("event", actorId, generation, sessionId, 
 assert.equal(eventId, syntheticRunnerEventId("event", actorId, generation, sessionId, 1));
 assert.notEqual(eventId, syntheticRunnerEventId("event", actorId, generation + 1, sessionId, 1));
 
-const mapPost = syntheticMapPostData(actorId, generation, sessionId, 1);
+const actorMedia = { mediaURL: "https://example.test/actor-post.jpg", mediaType: "photo", channelId: "food" };
+const mapPost = syntheticMapPostData(actorId, generation, sessionId, 1, actorMedia);
 assert.equal(syntheticMapPostId(actorId, generation), `synthetic-${actorId}-${generation}`);
 assert.deepEqual([mapPost.longitude, mapPost.latitude], [-79.383, 43.653]);
 assert.equal(mapPost.locationVisibility, "approximate");
@@ -128,7 +129,7 @@ assert.equal(mapPost.syntheticBeta, true);
 assert.equal(mapPost.testOnly, true);
 assert.equal(mapPost.userID, actorId);
 assert.equal(mapPost.radiusMeters, 2400);
-assert.equal(syntheticMapPostData(actorId, generation, sessionId, 2).radiusMeters, 3000);
+assert.equal(syntheticMapPostData(actorId, generation, sessionId, 2, actorMedia).radiusMeters, 3000);
 assert.throws(() => syntheticMapPostData("not-an-actor", generation, sessionId, 1));
 const betaMapPost = syntheticBetaPostData(actorId, generation, sessionId, 2);
 assert.equal(betaMapPost.radiusKm, 3);
@@ -191,3 +192,10 @@ Object.keys(runtime.recentEvents[0]).forEach(key => {
 });
 
 console.log("synthetic browser runner privacy/idempotency/generation tests PASS");
+
+assert.equal(SYNTHETIC_BETA_PROFILES.length, 8);
+for (const actor of SYNTHETIC_BETA_PROFILES) {
+  const post = syntheticMapPostData(actor.id, generation, sessionId, 1, actorMedia);
+  assert.equal(post.userID, actor.id);
+  assert.equal(post.mediaURL, actorMedia.mediaURL);
+}
