@@ -140,6 +140,10 @@ enum WebPostPublisher {
         if let radiusKm = body["radiusKm"] as? Double {
             PostUploadService.shared.nextRadiusMeters = Int(radiusKm * 1000)
         }
+        let photoSeconds = (body["photoViewSeconds"] as? NSNumber)?.doubleValue
+        PostUploadService.shared.nextPhotoViewSeconds = photoSeconds.flatMap {
+            $0.isFinite && $0 > 0 ? Int(min(60, max(1, $0.rounded()))) : nil
+        }
         PostUploadService.shared.nextCaption = body["caption"] as? String
         PostUploadService.shared.nextChannelID = body["channelId"] as? String
         PostUploadService.shared.nextRequestID = body["requestId"] as? String

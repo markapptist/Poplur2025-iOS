@@ -57,6 +57,7 @@ final class PostUploadService {
         let locationVisibility: String
         let usedAI: Bool
         let rightsAttestationVersion: String?
+        let photoViewSeconds: Int?
 
         func isDuplicate(of other: UploadRequest) -> Bool {
             // postID FIRST: it is the stable identity of one user intent, it
@@ -95,6 +96,7 @@ final class PostUploadService {
     var nextLocationVisibility: String?
     var nextUsedAI: Bool?
     var nextRightsAttestationVersion: String?
+    var nextPhotoViewSeconds: Int?
 
     private var pendingCoordinate: CLLocationCoordinate2D?
     private var started = false
@@ -159,7 +161,8 @@ final class PostUploadService {
                     audience: publishContract.audience,
                     locationVisibility: publishContract.locationVisibility,
                     usedAI: publishContract.usedAI,
-                    rightsAttestationVersion: publishContract.rightsAttestationVersion
+                    rightsAttestationVersion: publishContract.rightsAttestationVersion,
+                    photoViewSeconds: publishContract.photoViewSeconds
                 ))
             }
         })
@@ -197,7 +200,8 @@ final class PostUploadService {
                     audience: publishContract.audience,
                     locationVisibility: publishContract.locationVisibility,
                     usedAI: publishContract.usedAI,
-                    rightsAttestationVersion: publishContract.rightsAttestationVersion
+                    rightsAttestationVersion: publishContract.rightsAttestationVersion,
+                    photoViewSeconds: publishContract.photoViewSeconds
                 ))
             }
         })
@@ -242,7 +246,8 @@ final class PostUploadService {
                         postID: publishContract.postID, audience: publishContract.audience,
                         locationVisibility: publishContract.locationVisibility,
                         usedAI: publishContract.usedAI,
-                        rightsAttestationVersion: publishContract.rightsAttestationVersion
+                        rightsAttestationVersion: publishContract.rightsAttestationVersion,
+                        photoViewSeconds: publishContract.photoViewSeconds
                     ))
                 } else if let videoURL = info["videoURL"] as? URL {
                     self.enqueue(UploadRequest(
@@ -251,7 +256,8 @@ final class PostUploadService {
                         postID: publishContract.postID, audience: publishContract.audience,
                         locationVisibility: publishContract.locationVisibility,
                         usedAI: publishContract.usedAI,
-                        rightsAttestationVersion: publishContract.rightsAttestationVersion
+                        rightsAttestationVersion: publishContract.rightsAttestationVersion,
+                        photoViewSeconds: publishContract.photoViewSeconds
                     ))
                 } else {
                     Self.report(success: false, message: "That post had no media to upload.", requestID: requestID)
@@ -339,7 +345,8 @@ final class PostUploadService {
                     audience: request.audience,
                     locationVisibility: request.locationVisibility,
                     usedAI: request.usedAI,
-                    rightsAttestationVersion: request.rightsAttestationVersion
+                    rightsAttestationVersion: request.rightsAttestationVersion,
+                    photoViewSeconds: request.photoViewSeconds
                 )
             case .video(let url):
                 try await upload(
@@ -353,7 +360,8 @@ final class PostUploadService {
                     audience: request.audience,
                     locationVisibility: request.locationVisibility,
                     usedAI: request.usedAI,
-                    rightsAttestationVersion: request.rightsAttestationVersion
+                    rightsAttestationVersion: request.rightsAttestationVersion,
+                    photoViewSeconds: request.photoViewSeconds
                 )
             }
             try Task.checkCancellation()
@@ -422,7 +430,8 @@ final class PostUploadService {
         audience: String,
         locationVisibility: String,
         usedAI: Bool,
-        rightsAttestationVersion: String?
+        rightsAttestationVersion: String?,
+        photoViewSeconds: Int?
     )? {
         defer {
             nextPostID = nil
@@ -430,6 +439,7 @@ final class PostUploadService {
             nextLocationVisibility = nil
             nextUsedAI = nil
             nextRightsAttestationVersion = nil
+            nextPhotoViewSeconds = nil
         }
         let candidate = nextPostID ?? requestID
         guard let postID = Self.boundedPostID(candidate) else { return nil }
@@ -438,7 +448,8 @@ final class PostUploadService {
             "public",
             nextLocationVisibility == "hidden" ? "hidden" : "approximate",
             nextUsedAI == true,
-            nextRightsAttestationVersion
+            nextRightsAttestationVersion,
+            nextPhotoViewSeconds
         )
     }
 
@@ -476,7 +487,8 @@ final class PostUploadService {
         audience: String,
         locationVisibility: String,
         usedAI: Bool,
-        rightsAttestationVersion: String?
+        rightsAttestationVersion: String?,
+        photoViewSeconds: Int?
     ) async throws {
         guard let data = image.poplur4KJPEGData() else {
             throw NSError(
@@ -522,7 +534,8 @@ final class PostUploadService {
                 audience: audience,
                 locationVisibility: locationVisibility,
                 usedAI: usedAI,
-                rightsAttestationVersion: rightsAttestationVersion
+                rightsAttestationVersion: rightsAttestationVersion,
+                photoViewSeconds: photoViewSeconds
             )
         } catch {
             try? await reference.delete()
@@ -541,7 +554,8 @@ final class PostUploadService {
         audience: String,
         locationVisibility: String,
         usedAI: Bool,
-        rightsAttestationVersion: String?
+        rightsAttestationVersion: String?,
+        photoViewSeconds: Int?
     ) async throws {
         try Task.checkCancellation()
         guard let uid = Auth.auth().currentUser?.uid else {
@@ -601,7 +615,8 @@ final class PostUploadService {
                 audience: audience,
                 locationVisibility: locationVisibility,
                 usedAI: usedAI,
-                rightsAttestationVersion: rightsAttestationVersion
+                rightsAttestationVersion: rightsAttestationVersion,
+                photoViewSeconds: photoViewSeconds
             )
         } catch {
             try? await reference.delete()
@@ -685,7 +700,8 @@ final class PostUploadService {
         audience: String,
         locationVisibility: String,
         usedAI: Bool,
-        rightsAttestationVersion: String?
+        rightsAttestationVersion: String?,
+        photoViewSeconds: Int?
     ) async throws {
         var post: [String: Any] = [
             "mediaURL": mediaURL,
@@ -710,6 +726,9 @@ final class PostUploadService {
             )
         }
         post["userID"] = uid
+        if mediaType == "photo", let seconds = photoViewSeconds, seconds > 0 {
+            post["photoViewSeconds"] = min(60, seconds)
+        }
         let accountSnapshot = try? await Firestore.firestore()
             .collection("users").document(uid).getDocument()
         let account = accountSnapshot?.data()
