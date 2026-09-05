@@ -707,6 +707,14 @@ final class PostUploadService {
             "mediaURL": mediaURL,
             "mediaType": mediaType,
             "radius": radiusMeters,
+            // Every metre a post is BORN with is a seed — the discovery
+            // default and any ground claimed on top of it from the account's
+            // earned total — so it is spent reach, never earned. Declared
+            // outright, with the earned pool at zero, because a post that
+            // leaves either unsaid is read by the engagement functions as
+            // radius earned from nowhere on its first like.
+            "seedRadiusMeters": radiusMeters,
+            "organicRadiusMeters": 0,
             "viewCount": 0,
             "audience": audience,
             "locationVisibility": locationVisibility,
