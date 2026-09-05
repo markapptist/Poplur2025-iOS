@@ -684,14 +684,15 @@ async function ingestRunnerEvent(
       } else {
         const before = postRadiusParts(previousPost, nowMillis);
         const nextTotal = Number(mapPost.radiusMeters);
-        if (Number.isFinite(nextTotal) && nextTotal !== before.total) {
+        const wasTotal = before.stored ?? before.total;
+        if (Number.isFinite(nextTotal) && nextTotal !== wasTotal) {
           transaction.set(
             radiusHistoryRef(mapPostRef, radiusHistoryEntryId.synthetic(request.sequence)),
             radiusHistoryDocument(buildRadiusHistoryEntry({
               atMillis: nowMillis,
               cause: "synthetic",
               writer: "testSessionIngest",
-              previous: { radiusMeters: before.total, organicRadiusMeters: before.organic },
+              previous: { radiusMeters: wasTotal, organicRadiusMeters: before.organic },
               next: { radiusMeters: nextTotal, organicRadiusMeters: Number(mapPost.organicRadiusMeters) },
               seedRadiusMeters: 0,
               boostedRadiusMeters: 0,

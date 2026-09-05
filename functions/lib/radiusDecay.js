@@ -103,7 +103,7 @@ exports.radiusDecay = (0, scheduler_1.onSchedule)({ schedule: "every 60 minutes"
                 atMillis: nowMillis,
                 cause: "decay",
                 writer: "radiusDecay",
-                previous: { radiusMeters: before.total, organicRadiusMeters: before.organic },
+                previous: { radiusMeters: before.stored ?? before.total, organicRadiusMeters: before.organic },
                 next,
                 seedRadiusMeters: before.seed,
                 boostedRadiusMeters: before.boost,

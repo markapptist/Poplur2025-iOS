@@ -157,11 +157,21 @@ export const radiusHistoryEntryId = {
 export function postRadiusParts(
   post: Record<string, unknown>,
   nowMillis: number,
-): { organic: number; boost: number; seed: number; total: number } {
+): { organic: number; boost: number; seed: number; total: number; stored: number | null } {
   const radius = currentRadius(post, nowMillis);
+  const declared = post.radiusMeters ?? post.radius;
+  const stored = declared == null || !Number.isFinite(Number(declared))
+    ? null
+    : boundedInteger(declared, MAX_POST_RADIUS_METERS);
   return {
     ...radius,
     total: Math.min(MAX_POST_RADIUS_METERS, radius.organic + radius.boost + radius.seed),
+    // What the document SAYS its reach is — the number every pin and feed
+    // card shows. A history entry steps from this, not from what the policy
+    // would compute: the two differ wherever an older writer left the field
+    // behind (the decay that dropped the seed), and the change a person sees
+    // is measured from what they were looking at.
+    stored,
   };
 }
 
@@ -382,8 +392,14 @@ export function calculatePostEngagementMutation(
   const radius = currentRadius(post, nowMillis);
   const delta = radiusDelta(kind, nowMillis, normalizeActorState(actorState), isOwner);
 
+  const declaredTotal = post.radiusMeters ?? post.radius;
+  const storedTotal = declaredTotal == null || !Number.isFinite(Number(declaredTotal))
+    ? null
+    : boundedInteger(declaredTotal, MAX_POST_RADIUS_METERS);
+  // Where this event steps FROM is the reach the document declared — what the
+  // pin showed — with the policy's own sum only when nothing was stored.
   const previous = {
-    radiusMeters: Math.min(MAX_POST_RADIUS_METERS, radius.organic + radius.boost + radius.seed),
+    radiusMeters: storedTotal ?? Math.min(MAX_POST_RADIUS_METERS, radius.organic + radius.boost + radius.seed),
     organicRadiusMeters: radius.organic,
   };
   const parts = { seed: radius.seed, boost: radius.boost };

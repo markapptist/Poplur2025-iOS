@@ -76,7 +76,7 @@ export const radiusDecay = onSchedule(
             atMillis: nowMillis,
             cause: "decay",
             writer: "radiusDecay",
-            previous: { radiusMeters: before.total, organicRadiusMeters: before.organic },
+            previous: { radiusMeters: before.stored ?? before.total, organicRadiusMeters: before.organic },
             next,
             seedRadiusMeters: before.seed,
             boostedRadiusMeters: before.boost,

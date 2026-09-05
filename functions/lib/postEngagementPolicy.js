@@ -75,9 +75,19 @@ exports.radiusHistoryEntryId = {
  *  Exported so every history writer reads the same parts the policy uses. */
 function postRadiusParts(post, nowMillis) {
     const radius = currentRadius(post, nowMillis);
+    const declared = post.radiusMeters ?? post.radius;
+    const stored = declared == null || !Number.isFinite(Number(declared))
+        ? null
+        : boundedInteger(declared, exports.MAX_POST_RADIUS_METERS);
     return {
         ...radius,
         total: Math.min(exports.MAX_POST_RADIUS_METERS, radius.organic + radius.boost + radius.seed),
+        // What the document SAYS its reach is — the number every pin and feed
+        // card shows. A history entry steps from this, not from what the policy
+        // would compute: the two differ wherever an older writer left the field
+        // behind (the decay that dropped the seed), and the change a person sees
+        // is measured from what they were looking at.
+        stored,
     };
 }
 class PostEngagementValidationError extends Error {
@@ -267,8 +277,14 @@ function calculatePostEngagementMutation(post, kind, nowMillis, actorState, isOw
     const commentCount = boundedInteger(post.commentCount);
     const radius = currentRadius(post, nowMillis);
     const delta = radiusDelta(kind, nowMillis, normalizeActorState(actorState), isOwner);
+    const declaredTotal = post.radiusMeters ?? post.radius;
+    const storedTotal = declaredTotal == null || !Number.isFinite(Number(declaredTotal))
+        ? null
+        : boundedInteger(declaredTotal, exports.MAX_POST_RADIUS_METERS);
+    // Where this event steps FROM is the reach the document declared — what the
+    // pin showed — with the policy's own sum only when nothing was stored.
     const previous = {
-        radiusMeters: Math.min(exports.MAX_POST_RADIUS_METERS, radius.organic + radius.boost + radius.seed),
+        radiusMeters: storedTotal ?? Math.min(exports.MAX_POST_RADIUS_METERS, radius.organic + radius.boost + radius.seed),
         organicRadiusMeters: radius.organic,
     };
     const parts = { seed: radius.seed, boost: radius.boost };

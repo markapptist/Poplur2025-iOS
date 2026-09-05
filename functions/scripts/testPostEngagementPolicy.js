@@ -271,6 +271,25 @@ assert.equal(stranger.radiusDeltaMeters, 1_000);
   assert.equal(nothing.applied, false);
   assert.equal(nothing.counters.radiusMeters, 6_000);
   assert.equal(nothing.previous.radiusMeters, 6_000);
+  // An entry steps from what the document DECLARED, not from the policy's
+  // sum: a post the old decay left at 994 m with its 5,000 m seed still on the
+  // doc shows 994 on the pin, so a like that lands it at 5,994+1,000 is a
+  // +6,000 m change to the person watching, not +1,000.
+  const damaged = policy.calculatePostEngagementMutation(
+    { radiusMeters: 994, radius: 994, organicRadiusMeters: 994, seedRadiusMeters: 5_000 },
+    "like", 100_000, null,
+  );
+  assert.equal(damaged.previous.radiusMeters, 994);
+  assert.equal(damaged.counters.radiusMeters, 6_994);
+  assert.equal(policy.buildRadiusHistoryEntry({
+    atMillis: 1, cause: "engagement", writer: "t", previous: damaged.previous, next: damaged.counters,
+    seedRadiusMeters: 5_000, boostedRadiusMeters: 0,
+  }).delta, 6_000);
+  assert.deepEqual(
+    policy.postRadiusParts({ radiusMeters: 994, organicRadiusMeters: 994, seedRadiusMeters: 5_000 }, 0),
+    { organic: 994, boost: 0, seed: 5_000, total: 5_994, stored: 994 },
+  );
+  assert.equal(policy.postRadiusParts({ organicRadiusMeters: 10 }, 0).stored, null);
   // Deterministic ids, so a retried write lands on the same point.
   assert.equal(policy.radiusHistoryEntryId.engagement("e1"), "eng_e1");
   assert.equal(policy.radiusHistoryEntryId.decay(5), "decay_5");
@@ -278,7 +297,7 @@ assert.equal(stranger.radiusDeltaMeters, 1_000);
   // The stored post's parts, read the way the policy reads them.
   assert.deepEqual(
     policy.postRadiusParts({ radiusMeters: 6_750, organicRadiusMeters: 1_750, seedRadiusMeters: 5_000 }, 0),
-    { organic: 1_750, boost: 0, seed: 5_000, total: 6_750 },
+    { organic: 1_750, boost: 0, seed: 5_000, total: 6_750, stored: 6_750 },
   );
 }
 

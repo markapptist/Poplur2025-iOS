@@ -1191,7 +1191,7 @@ async function handleRadiusBoost(
         atMillis: Date.now(),
         cause: "boost",
         writer: "poplurAiApi.radiusBoost",
-        previous: { radiusMeters: before.total, organicRadiusMeters: before.organic },
+        previous: { radiusMeters: before.stored ?? before.total, organicRadiusMeters: before.organic },
         next: { radiusMeters, organicRadiusMeters: before.organic },
         seedRadiusMeters: before.seed,
         boostedRadiusMeters: radiusMetersAdded,
