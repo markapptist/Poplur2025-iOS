@@ -162,6 +162,26 @@ service cloud.firestore {
         .hasAny(serverOwnedPostEngagementFields());
     }
 
+    // ── Reports ────────────────────────────────────────────────────────────
+    //
+    // A report is a signed-in account's write-once note to Poplur about
+    // another account, from the visited profile's Block / Report dialog.
+    // Nothing reads it back but safety tooling on the admin SDK: the reported
+    // party must never learn who reported them, and the reporter has no list
+    // to revisit. Bounded fields, so a client cannot use it as free storage.
+    match /reports/{reportId} {
+      allow read, update, delete: if false;
+      allow create: if signedIn()
+        && request.resource.data.reporterId == request.auth.uid
+        && request.resource.data.userId is string
+        && request.resource.data.userId != request.auth.uid
+        && request.resource.data.userId.size() <= 128
+        && request.resource.data.reason is string
+        && request.resource.data.reason.size() <= 64
+        && request.resource.data.keys().hasOnly(
+          ['reporterId', 'userId', 'username', 'reason', 'source', 'platform', 'createdAt']);
+    }
+
     match /users/{userId} {
       allow read: if isSelf(userId);
       allow create: if isSelf(userId) && doesNotWritePremiumAIFields();

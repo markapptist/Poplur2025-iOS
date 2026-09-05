@@ -1567,6 +1567,48 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                     }
                     return
                 }
+                // Block and Report, from the visited profile's Poplur dialog.
+                // The page keeps its own block list so the feed and map empty
+                // at once; the durable record is users/{me}/blocked/{them},
+                // the symmetric boundary firestore.rules enforces on messages
+                // and engagement, and it is native's to write because native
+                // owns identity in this shell. A report is a write-once note
+                // to Poplur (reports/{auto}); nothing on the client reads it.
+                if type == "blockUser" || type == "reportUser" {
+                    let otherUID = ((body["userId"] as? String) ?? "")
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    let handle = String(((body["username"] as? String) ?? "").prefix(48))
+                    guard !otherUID.isEmpty, otherUID.count <= 128,
+                          let uid = Auth.auth().currentUser?.uid, uid != otherUID else { return }
+                    let firestore = Firestore.firestore()
+                    if type == "blockUser" {
+                        firestore.collection("users").document(uid)
+                            .collection("blocked").document(otherUID)
+                            .setData(["blockedAt": FieldValue.serverTimestamp(), "username": handle]) { error in
+                                if let error {
+                                    os_log("[PostLoginHomeWebView] block write failed: %{public}@",
+                                           log: .default, type: .error, error.localizedDescription)
+                                }
+                            }
+                    } else {
+                        let reason = String(((body["reason"] as? String) ?? "profile").prefix(64))
+                        firestore.collection("reports").addDocument(data: [
+                            "reporterId": uid,
+                            "userId": otherUID,
+                            "username": handle,
+                            "reason": reason,
+                            "source": "profile",
+                            "platform": "ios",
+                            "createdAt": FieldValue.serverTimestamp(),
+                        ]) { error in
+                            if let error {
+                                os_log("[PostLoginHomeWebView] report write failed: %{public}@",
+                                       log: .default, type: .error, error.localizedDescription)
+                            }
+                        }
+                    }
+                    return
+                }
                 // Add to Apple Wallet. PassKit can only be presented from
                 // native, and this store is a page inside the WebView, so the
                 // page asks and native does the work. The FIRST version of this
@@ -2636,6 +2678,14 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                                ["red", "purple", "blue", "green", "orange"].contains(pinColor) {
                                 row["pinColor"] = pinColor
                             }
+                            // The poster's picture, so a visited profile can show a
+                            // real face — or say none is set — instead of a stand-in
+                            // head. Same field order as the web normalisers.
+                            if let photo = ["profilePictureURL", "avatarURL", "avatarUrl", "photoURL"]
+                                .compactMap({ data[$0] as? String })
+                                .first(where: { $0.hasPrefix("https://") }) {
+                                row["profilePictureURL"] = photo
+                            }
                             if let caption = data["caption"] as? String, !caption.isEmpty {
                                 row["caption"] = caption
                             }
@@ -2804,6 +2854,14 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                             if let pinColor = data["pinColor"] as? String,
                                ["red", "purple", "blue", "green", "orange"].contains(pinColor) {
                                 row["pinColor"] = pinColor
+                            }
+                            // The poster's picture, so a visited profile can show a
+                            // real face — or say none is set — instead of a stand-in
+                            // head. Same field order as the web normalisers.
+                            if let photo = ["profilePictureURL", "avatarURL", "avatarUrl", "photoURL"]
+                                .compactMap({ data[$0] as? String })
+                                .first(where: { $0.hasPrefix("https://") }) {
+                                row["profilePictureURL"] = photo
                             }
                             if let caption = data["caption"] as? String, !caption.isEmpty {
                                 row["caption"] = caption
