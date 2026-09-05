@@ -490,6 +490,16 @@ service cloud.firestore {
           && (request.auth.uid == resource.data.actorUid
             || request.auth.uid == postOwnerOf(postId));
       }
+
+      // The pop's history: one entry per change to its reach, from the first
+      // point at creation to now. As public as the post it belongs to (the
+      // radius itself is public, and no entry names an actor), and written
+      // ONLY by the functions that move a radius — in the same transaction
+      // as the move — so the curve can never be edited into a lie.
+      match /radiusHistory/{entryId} {
+        allow read: if true;
+        allow write: if false;
+      }
     }
 
     match /delivery_orders/{orderId} {

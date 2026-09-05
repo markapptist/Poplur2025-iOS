@@ -25,6 +25,14 @@ export { poplurPassWebService, poplurPassOnProfileChange } from "./walletPassWeb
 export { notifyOnEngagement } from "./engagementNotifications";
 export { recordPostEngagement } from "./postEngagement";
 export { radiusDecay } from "./radiusDecay";
+export { radiusHistoryOnPostCreated } from "./radiusHistory";
+import {
+  MAX_POST_RADIUS_METERS,
+  buildRadiusHistoryEntry,
+  postRadiusParts,
+  radiusHistoryEntryId,
+} from "./postEngagementPolicy";
+import { creationHistoryEntry, radiusHistoryDocument, radiusHistoryRef } from "./radiusHistory";
 export { notifyOnDirectMessage } from "./directMessageNotifications";
 export { setAccountLocationPrivacy } from "./accountPrivacy";
 export { meshyGenerate, meshyStatus } from "./meshyModels";
@@ -1098,6 +1106,11 @@ async function handlePublishGeneratedJob(
 
   const publishBatch = db.batch();
   publishBatch.set(postRef, post);
+  // The pop's first history point, in the batch that creates it.
+  publishBatch.set(
+    radiusHistoryRef(postRef, radiusHistoryEntryId.create()),
+    radiusHistoryDocument(creationHistoryEntry(post, Date.now(), "poplurAiApi.publishGeneratedJob")),
+  );
   publishBatch.set(userRef.collection("postLocations").doc(postRef.id), {
     latitude,
     longitude,
@@ -1153,14 +1166,38 @@ async function handleRadiusBoost(
       expiresAt,
       createdAt: FieldValue.serverTimestamp(),
     });
+    // A boost is reach the moment it is paid for — the visible total moves
+    // now, not at the next engagement or decay tick, and the pop's history
+    // records the step with the transaction that bought it.
+    const before = postRadiusParts(post, Date.now());
+    const radiusMeters = Math.min(
+      MAX_POST_RADIUS_METERS,
+      before.organic + radiusMetersAdded + before.seed,
+    );
     transaction.set(
       postRef,
       {
         boostedRadiusMeters: radiusMetersAdded,
         boostExpiresAt: expiresAt,
+        radiusMeters,
+        radius: radiusMeters,
         updatedAt: FieldValue.serverTimestamp(),
       },
       { merge: true }
+    );
+    transaction.create(
+      radiusHistoryRef(postRef, radiusHistoryEntryId.boost(boostRef.id)),
+      radiusHistoryDocument(buildRadiusHistoryEntry({
+        atMillis: Date.now(),
+        cause: "boost",
+        writer: "poplurAiApi.radiusBoost",
+        previous: { radiusMeters: before.total, organicRadiusMeters: before.organic },
+        next: { radiusMeters, organicRadiusMeters: before.organic },
+        seedRadiusMeters: before.seed,
+        boostedRadiusMeters: radiusMetersAdded,
+        boostTransactionId: boostRef.id,
+        boostExpiresAtMillis: expiresAt.toMillis(),
+      })),
     );
   });
 

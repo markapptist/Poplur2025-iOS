@@ -196,6 +196,14 @@ assert.equal(stranger.radiusDeltaMeters, 1_000);
     DAY,
   );
   assert.deepEqual(boosted, { organicRadiusMeters: 3_800, radiusMeters: 5_800 });
+  // The discovery seed never decays either and never drops out of the total:
+  // a seeded post keeps its 5 km window while only the earned part shrinks.
+  // (It used to vanish on the first tick — 6,750 m → 1,726 m in production.)
+  const seeded = policy.calculateRadiusDecay(
+    { organicRadiusMeters: 1_750, radiusMeters: 6_750, seedRadiusMeters: 5_000, decayedAt: 0 },
+    DAY,
+  );
+  assert.deepEqual(seeded, { organicRadiusMeters: 1_662, radiusMeters: 6_662 });
   // Dust snaps to zero instead of shrinking forever.
   const dust = policy.calculateRadiusDecay(
     { organicRadiusMeters: 9, radiusMeters: 9, decayedAt: 0 }, DAY,
@@ -212,6 +220,68 @@ assert.equal(stranger.radiusDeltaMeters, 1_000);
     { organicRadiusMeters: 10_000, decayedAt: 10 * DAY }, DAY), null);
 }
 
+// ── Radius history: a pop's curve, one entry per change ──────────────────
+{
+  const first = policy.calculatePostEngagementMutation(
+    { radiusMeters: 5_000, seedRadiusMeters: 5_000, organicRadiusMeters: 0 },
+    "like", 100_000, null,
+  );
+  // The mutation carries where it stepped FROM, and the parts under the sum.
+  assert.deepEqual(first.previous, { radiusMeters: 5_000, organicRadiusMeters: 0 });
+  assert.deepEqual(first.radius, { seed: 5_000, boost: 0 });
+  assert.equal(first.counters.radiusMeters, 6_000);
+  const entry = policy.buildRadiusHistoryEntry({
+    atMillis: 100_000,
+    cause: "engagement",
+    writer: "recordPostEngagement",
+    previous: first.previous,
+    next: first.counters,
+    seedRadiusMeters: first.radius.seed,
+    boostedRadiusMeters: first.radius.boost,
+    kind: "like",
+    engagementId: "abc",
+  });
+  assert.deepEqual(entry, {
+    atMillis: 100_000,
+    cause: "engagement",
+    radiusMeters: 6_000,
+    organicRadiusMeters: 1_000,
+    seedRadiusMeters: 5_000,
+    boostedRadiusMeters: 0,
+    delta: 1_000,
+    organicDelta: 1_000,
+    writer: "recordPostEngagement",
+    kind: "like",
+    engagementId: "abc",
+  });
+  // The first point of a curve steps from nothing.
+  const born = policy.buildRadiusHistoryEntry({
+    atMillis: 1, cause: "create", writer: "t", previous: null,
+    next: { radiusMeters: 5_000, organicRadiusMeters: 0 }, seedRadiusMeters: 5_000, boostedRadiusMeters: 0,
+  });
+  assert.equal(born.delta, 0);
+  assert.equal(born.organicDelta, 0);
+  assert.equal("kind" in born, false);
+  // A repeat that pays nothing reports the unchanged total INCLUDING the seed
+  // (it used to drop the seed from what it told the client).
+  const nothing = policy.calculatePostEngagementMutation(
+    { radiusMeters: 6_000, seedRadiusMeters: 5_000, organicRadiusMeters: 1_000 },
+    "like", 100_000, { lastViewAtMillis: null, liked: true },
+  );
+  assert.equal(nothing.applied, false);
+  assert.equal(nothing.counters.radiusMeters, 6_000);
+  assert.equal(nothing.previous.radiusMeters, 6_000);
+  // Deterministic ids, so a retried write lands on the same point.
+  assert.equal(policy.radiusHistoryEntryId.engagement("e1"), "eng_e1");
+  assert.equal(policy.radiusHistoryEntryId.decay(5), "decay_5");
+  assert.equal(policy.radiusHistoryEntryId.create(), "create");
+  // The stored post's parts, read the way the policy reads them.
+  assert.deepEqual(
+    policy.postRadiusParts({ radiusMeters: 6_750, organicRadiusMeters: 1_750, seedRadiusMeters: 5_000 }, 0),
+    { organic: 1_750, boost: 0, seed: 5_000, total: 6_750 },
+  );
+}
+
 if (rulesPath) {
   const rules = fs.readFileSync(rulesPath, "utf8");
   const requiredProtectedFields = [
@@ -220,6 +290,8 @@ if (rulesPath) {
     "lastEngagementAt", "likeNotifyAt", "likesPendingNotify",
     "decayedAt",
   ];
+  assert.match(rules, /match \/radiusHistory\/\{entryId\} \{\s*allow read: if true;\s*allow write: if false;/,
+    "posts/{postId}/radiusHistory must be public-read and never client-written");
   requiredProtectedFields.forEach(field => assert.match(
     rules,
     new RegExp(`['\"]${field}['\"]`),

@@ -13,6 +13,8 @@ import {
   SyntheticBrowserRuntime,
   syntheticProfile,
 } from "./syntheticBetaCohort";
+import { buildRadiusHistoryEntry, postRadiusParts, radiusHistoryEntryId } from "./postEngagementPolicy";
+import { creationHistoryEntry, radiusHistoryDocument, radiusHistoryRef } from "./radiusHistory";
 
 const REGION = "us-central1";
 const RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
@@ -664,11 +666,39 @@ async function ingestRunnerEvent(
     // shows nothing, which reads as the Map being broken.
     if (mapPostRef && request.type === "event" && actorMedia) {
       const existingCreatedAt = mapPostSnapshot?.data()?.createdAt;
+      const mapPost = syntheticMapPostData(request.actorId, generation, sessionId, request.sequence, actorMedia);
       transaction.set(mapPostRef, {
-        ...syntheticMapPostData(request.actorId, generation, sessionId, request.sequence, actorMedia),
+        ...mapPost,
         createdAt: existingCreatedAt ?? admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       }, { merge: true });
+      // The synthetic pop's history, like any other pop's: a first point when
+      // the document is born, then one per step that moves its reach.
+      const previousPost = mapPostSnapshot?.exists ? (mapPostSnapshot.data() ?? {}) : null;
+      const nowMillis = receivedAtMs;
+      if (!previousPost) {
+        transaction.set(
+          radiusHistoryRef(mapPostRef, radiusHistoryEntryId.create()),
+          radiusHistoryDocument(creationHistoryEntry({ ...mapPost, createdAtMillis: nowMillis }, nowMillis, "testSessionIngest")),
+        );
+      } else {
+        const before = postRadiusParts(previousPost, nowMillis);
+        const nextTotal = Number(mapPost.radiusMeters);
+        if (Number.isFinite(nextTotal) && nextTotal !== before.total) {
+          transaction.set(
+            radiusHistoryRef(mapPostRef, radiusHistoryEntryId.synthetic(request.sequence)),
+            radiusHistoryDocument(buildRadiusHistoryEntry({
+              atMillis: nowMillis,
+              cause: "synthetic",
+              writer: "testSessionIngest",
+              previous: { radiusMeters: before.total, organicRadiusMeters: before.organic },
+              next: { radiusMeters: nextTotal, organicRadiusMeters: Number(mapPost.organicRadiusMeters) },
+              seedRadiusMeters: 0,
+              boostedRadiusMeters: 0,
+            })),
+          );
+        }
+      }
     }
     if (betaPostRef && request.type === "event") {
       const existingPostedAt = betaPostSnapshot?.data()?.postedAt;

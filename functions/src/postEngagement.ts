@@ -8,7 +8,10 @@ import {
   postEngagementActorStateId,
   postEngagementDocumentId,
   type PostEngagementCounters,
+  buildRadiusHistoryEntry,
+  radiusHistoryEntryId,
 } from "./postEngagementPolicy";
+import { radiusHistoryDocument, radiusHistoryRef } from "./radiusHistory";
 
 if (admin.apps.length === 0) admin.initializeApp();
 
@@ -162,6 +165,25 @@ export const recordPostEngagement = onCall(
           lastEngagementAt: FieldValue.serverTimestamp(),
           updatedAt: FieldValue.serverTimestamp(),
         });
+        // The pop's history, written with the change it records. A comment
+        // after the first pays 0 m and moves nothing: it stays out of the
+        // curve so the history is a line of changes, not a log of taps.
+        if (mutation.counters.radiusMeters !== mutation.previous.radiusMeters) {
+          transaction.create(
+            radiusHistoryRef(postRef, radiusHistoryEntryId.engagement(eventRef.id)),
+            radiusHistoryDocument(buildRadiusHistoryEntry({
+              atMillis: nowMillis,
+              cause: "engagement",
+              writer: "recordPostEngagement",
+              previous: mutation.previous,
+              next: mutation.counters,
+              seedRadiusMeters: mutation.radius.seed,
+              boostedRadiusMeters: mutation.radius.boost,
+              kind: input.kind,
+              engagementId: eventRef.id,
+            })),
+          );
+        }
       }
       const persistViewAt = mutation.nextViewAtMillis != null;
       const persistGrants = Object.keys(mutation.actorStateUpdate).length > 0;

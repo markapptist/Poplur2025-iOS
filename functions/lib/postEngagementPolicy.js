@@ -1,6 +1,8 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.PostEngagementValidationError = exports.RADIUS_DECAY_FLOOR_METERS = exports.RADIUS_DECAY_PER_DAY = exports.REPEAT_VIEW_BASE_METERS = exports.REPEAT_VIEW_MIN_MS = exports.MAX_POST_ENGAGEMENT_COUNT = exports.MAX_POST_SEED_METERS = exports.MAX_POST_RADIUS_METERS = exports.POST_ENGAGEMENT_KINDS = void 0;
+exports.PostEngagementValidationError = exports.radiusHistoryEntryId = exports.RADIUS_HISTORY_COLLECTION = exports.RADIUS_DECAY_FLOOR_METERS = exports.RADIUS_DECAY_PER_DAY = exports.REPEAT_VIEW_BASE_METERS = exports.REPEAT_VIEW_MIN_MS = exports.MAX_POST_ENGAGEMENT_COUNT = exports.MAX_POST_SEED_METERS = exports.MAX_POST_RADIUS_METERS = exports.POST_ENGAGEMENT_KINDS = void 0;
+exports.buildRadiusHistoryEntry = buildRadiusHistoryEntry;
+exports.postRadiusParts = postRadiusParts;
 exports.parsePostEngagementInput = parsePostEngagementInput;
 exports.postEngagementDocumentId = postEngagementDocumentId;
 exports.postEngagementActorStateId = postEngagementActorStateId;
@@ -33,6 +35,51 @@ exports.RADIUS_DECAY_FLOOR_METERS = 10;
 const POST_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
 const EVENT_ID_PATTERN = /^[A-Za-z0-9._:-]{16,128}$/;
 const ALLOWED_INPUT_KEYS = new Set(["postId", "eventId", "kind"]);
+exports.RADIUS_HISTORY_COLLECTION = "radiusHistory";
+/** Pure: one history entry from the reach before and after a change. */
+function buildRadiusHistoryEntry(input) {
+    const previous = input.previous;
+    const entry = {
+        atMillis: input.atMillis,
+        cause: input.cause,
+        radiusMeters: input.next.radiusMeters,
+        organicRadiusMeters: input.next.organicRadiusMeters,
+        seedRadiusMeters: input.seedRadiusMeters,
+        boostedRadiusMeters: input.boostedRadiusMeters,
+        delta: previous ? input.next.radiusMeters - previous.radiusMeters : 0,
+        organicDelta: previous ? input.next.organicRadiusMeters - previous.organicRadiusMeters : 0,
+        writer: input.writer,
+    };
+    if (input.kind)
+        entry.kind = input.kind;
+    if (input.engagementId)
+        entry.engagementId = input.engagementId;
+    if (input.boostTransactionId)
+        entry.boostTransactionId = input.boostTransactionId;
+    if (input.boostExpiresAtMillis !== undefined)
+        entry.boostExpiresAtMillis = input.boostExpiresAtMillis;
+    return entry;
+}
+/** Deterministic entry ids, so a retried transaction or a redelivered
+ *  trigger writes the same document instead of a duplicate point. */
+exports.radiusHistoryEntryId = {
+    create: () => "create",
+    engagement: (engagementDocId) => `eng_${engagementDocId}`,
+    decay: (atMillis) => `decay_${atMillis}`,
+    boost: (boostTransactionId) => `boost_${boostTransactionId}`,
+    synthetic: (sequence) => `syn_${sequence}`,
+    lab: (atMillis) => `lab_${atMillis}`,
+    backfill: (atMillis, tag) => `backfill_${tag}_${atMillis}`,
+};
+/** The reach a stored post document declares right now, as its three parts.
+ *  Exported so every history writer reads the same parts the policy uses. */
+function postRadiusParts(post, nowMillis) {
+    const radius = currentRadius(post, nowMillis);
+    return {
+        ...radius,
+        total: Math.min(exports.MAX_POST_RADIUS_METERS, radius.organic + radius.boost + radius.seed),
+    };
+}
 class PostEngagementValidationError extends Error {
 }
 exports.PostEngagementValidationError = PostEngagementValidationError;
@@ -192,9 +239,14 @@ function calculateRadiusDecay(post, nowMillis, ratePerDay = exports.RADIUS_DECAY
         organic = 0;
     if (organic >= radius.organic)
         return null;
+    // Reach is seed + earned + boost everywhere else (see the engagement
+    // mutation below). Decay shrinks ONLY the earned part; the seed and the
+    // boost ride on top unchanged. This used to drop the seed, so a seeded
+    // post lost its 5 km discovery window on its first decay tick — production
+    // showed 6,750 m → 1,726 m with seedRadiusMeters still 5,000 on the doc.
     return {
         organicRadiusMeters: organic,
-        radiusMeters: Math.min(exports.MAX_POST_RADIUS_METERS, organic + radius.boost),
+        radiusMeters: Math.min(exports.MAX_POST_RADIUS_METERS, organic + radius.boost + radius.seed),
     };
 }
 /** Accepts the legacy bare `lastViewAtMillis` so existing callers/tests that
@@ -215,12 +267,17 @@ function calculatePostEngagementMutation(post, kind, nowMillis, actorState, isOw
     const commentCount = boundedInteger(post.commentCount);
     const radius = currentRadius(post, nowMillis);
     const delta = radiusDelta(kind, nowMillis, normalizeActorState(actorState), isOwner);
+    const previous = {
+        radiusMeters: Math.min(exports.MAX_POST_RADIUS_METERS, radius.organic + radius.boost + radius.seed),
+        organicRadiusMeters: radius.organic,
+    };
+    const parts = { seed: radius.seed, boost: radius.boost };
     if (!delta.applied) {
         return {
             applied: false,
             radiusDeltaMeters: 0,
             counters: {
-                radiusMeters: Math.min(exports.MAX_POST_RADIUS_METERS, radius.organic + radius.boost),
+                radiusMeters: previous.radiusMeters,
                 organicRadiusMeters: radius.organic,
                 viewCount,
                 likeCount,
@@ -230,6 +287,8 @@ function calculatePostEngagementMutation(post, kind, nowMillis, actorState, isOw
             postUpdate: {},
             nextViewAtMillis: null,
             actorStateUpdate: {},
+            previous,
+            radius: parts,
         };
     }
     const maximumOrganic = Math.max(0, exports.MAX_POST_RADIUS_METERS - radius.boost - radius.seed);
@@ -264,5 +323,7 @@ function calculatePostEngagementMutation(post, kind, nowMillis, actorState, isOw
         },
         nextViewAtMillis: delta.nextViewAtMillis,
         actorStateUpdate: delta.actorStateUpdate,
+        previous,
+        radius: parts,
     };
 }

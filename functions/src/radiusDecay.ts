@@ -1,7 +1,13 @@
 import * as admin from "firebase-admin";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { onSchedule } from "firebase-functions/v2/scheduler";
-import { calculateRadiusDecay } from "./postEngagementPolicy";
+import {
+  buildRadiusHistoryEntry,
+  calculateRadiusDecay,
+  postRadiusParts,
+  radiusHistoryEntryId,
+} from "./postEngagementPolicy";
+import { radiusHistoryDocument, radiusHistoryRef } from "./radiusHistory";
 
 if (admin.apps.length === 0) admin.initializeApp();
 
@@ -54,6 +60,7 @@ export const radiusDecay = onSchedule(
         }
         const next = calculateRadiusDecay(post, nowMillis);
         if (!next) return;
+        const before = postRadiusParts(post, nowMillis);
         transaction.update(ref, {
           organicRadiusMeters: next.organicRadiusMeters,
           radiusMeters: next.radiusMeters,
@@ -61,6 +68,20 @@ export const radiusDecay = onSchedule(
           decayedAt: nowTimestamp,
           updatedAt: FieldValue.serverTimestamp(),
         });
+        // The pop's history: decay is a change like any other and is recorded
+        // with it, in the same transaction.
+        transaction.create(
+          radiusHistoryRef(ref, radiusHistoryEntryId.decay(nowMillis)),
+          radiusHistoryDocument(buildRadiusHistoryEntry({
+            atMillis: nowMillis,
+            cause: "decay",
+            writer: "radiusDecay",
+            previous: { radiusMeters: before.total, organicRadiusMeters: before.organic },
+            next,
+            seedRadiusMeters: before.seed,
+            boostedRadiusMeters: before.boost,
+          })),
+        );
         decayed += 1;
       });
     }

@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.poplurAiApi = exports.cameraSceneScan = exports.premiumAiAssist = exports.generateRetroGame = exports.testSessionIngest = exports.testActivityControl = exports.refreshLiveNews = exports.liveNewsApi = exports.wardrobeGarmentApi = exports.meshyStatus = exports.meshyGenerate = exports.setAccountLocationPrivacy = exports.notifyOnDirectMessage = exports.radiusDecay = exports.recordPostEngagement = exports.notifyOnEngagement = exports.poplurPassOnProfileChange = exports.poplurPassWebService = exports.poplurOwnedCards = exports.poplurWalletPass = exports.verifyCardPurchase = void 0;
+exports.poplurAiApi = exports.cameraSceneScan = exports.premiumAiAssist = exports.generateRetroGame = exports.testSessionIngest = exports.testActivityControl = exports.refreshLiveNews = exports.liveNewsApi = exports.wardrobeGarmentApi = exports.meshyStatus = exports.meshyGenerate = exports.setAccountLocationPrivacy = exports.notifyOnDirectMessage = exports.radiusHistoryOnPostCreated = exports.radiusDecay = exports.recordPostEngagement = exports.notifyOnEngagement = exports.poplurPassOnProfileChange = exports.poplurPassWebService = exports.poplurOwnedCards = exports.poplurWalletPass = exports.verifyCardPurchase = void 0;
 const sdk_1 = __importDefault(require("@anthropic-ai/sdk"));
 const admin = __importStar(require("firebase-admin"));
 const firebase_functions_1 = require("firebase-functions");
@@ -59,6 +59,10 @@ var postEngagement_1 = require("./postEngagement");
 Object.defineProperty(exports, "recordPostEngagement", { enumerable: true, get: function () { return postEngagement_1.recordPostEngagement; } });
 var radiusDecay_1 = require("./radiusDecay");
 Object.defineProperty(exports, "radiusDecay", { enumerable: true, get: function () { return radiusDecay_1.radiusDecay; } });
+var radiusHistory_1 = require("./radiusHistory");
+Object.defineProperty(exports, "radiusHistoryOnPostCreated", { enumerable: true, get: function () { return radiusHistory_1.radiusHistoryOnPostCreated; } });
+const postEngagementPolicy_1 = require("./postEngagementPolicy");
+const radiusHistory_2 = require("./radiusHistory");
 var directMessageNotifications_1 = require("./directMessageNotifications");
 Object.defineProperty(exports, "notifyOnDirectMessage", { enumerable: true, get: function () { return directMessageNotifications_1.notifyOnDirectMessage; } });
 var accountPrivacy_1 = require("./accountPrivacy");
@@ -965,6 +969,8 @@ async function handlePublishGeneratedJob(uid, jobId, req, res) {
     }
     const publishBatch = db.batch();
     publishBatch.set(postRef, post);
+    // The pop's first history point, in the batch that creates it.
+    publishBatch.set((0, radiusHistory_2.radiusHistoryRef)(postRef, postEngagementPolicy_1.radiusHistoryEntryId.create()), (0, radiusHistory_2.radiusHistoryDocument)((0, radiusHistory_2.creationHistoryEntry)(post, Date.now(), "poplurAiApi.publishGeneratedJob")));
     publishBatch.set(userRef.collection("postLocations").doc(postRef.id), {
         latitude,
         longitude,
@@ -1012,11 +1018,29 @@ async function handleRadiusBoost(uid, postId, req, res) {
             expiresAt,
             createdAt: firestore_1.FieldValue.serverTimestamp(),
         });
+        // A boost is reach the moment it is paid for — the visible total moves
+        // now, not at the next engagement or decay tick, and the pop's history
+        // records the step with the transaction that bought it.
+        const before = (0, postEngagementPolicy_1.postRadiusParts)(post, Date.now());
+        const radiusMeters = Math.min(postEngagementPolicy_1.MAX_POST_RADIUS_METERS, before.organic + radiusMetersAdded + before.seed);
         transaction.set(postRef, {
             boostedRadiusMeters: radiusMetersAdded,
             boostExpiresAt: expiresAt,
+            radiusMeters,
+            radius: radiusMeters,
             updatedAt: firestore_1.FieldValue.serverTimestamp(),
         }, { merge: true });
+        transaction.create((0, radiusHistory_2.radiusHistoryRef)(postRef, postEngagementPolicy_1.radiusHistoryEntryId.boost(boostRef.id)), (0, radiusHistory_2.radiusHistoryDocument)((0, postEngagementPolicy_1.buildRadiusHistoryEntry)({
+            atMillis: Date.now(),
+            cause: "boost",
+            writer: "poplurAiApi.radiusBoost",
+            previous: { radiusMeters: before.total, organicRadiusMeters: before.organic },
+            next: { radiusMeters, organicRadiusMeters: before.organic },
+            seedRadiusMeters: before.seed,
+            boostedRadiusMeters: radiusMetersAdded,
+            boostTransactionId: boostRef.id,
+            boostExpiresAtMillis: expiresAt.toMillis(),
+        })));
     });
     res.status(200).json({
         postId,

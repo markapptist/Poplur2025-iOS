@@ -38,6 +38,7 @@ const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-admin/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const postEngagementPolicy_1 = require("./postEngagementPolicy");
+const radiusHistory_1 = require("./radiusHistory");
 if (admin.apps.length === 0)
     admin.initializeApp();
 const db = admin.firestore();
@@ -88,6 +89,7 @@ exports.radiusDecay = (0, scheduler_1.onSchedule)({ schedule: "every 60 minutes"
             const next = (0, postEngagementPolicy_1.calculateRadiusDecay)(post, nowMillis);
             if (!next)
                 return;
+            const before = (0, postEngagementPolicy_1.postRadiusParts)(post, nowMillis);
             transaction.update(ref, {
                 organicRadiusMeters: next.organicRadiusMeters,
                 radiusMeters: next.radiusMeters,
@@ -95,6 +97,17 @@ exports.radiusDecay = (0, scheduler_1.onSchedule)({ schedule: "every 60 minutes"
                 decayedAt: nowTimestamp,
                 updatedAt: firestore_1.FieldValue.serverTimestamp(),
             });
+            // The pop's history: decay is a change like any other and is recorded
+            // with it, in the same transaction.
+            transaction.create((0, radiusHistory_1.radiusHistoryRef)(ref, postEngagementPolicy_1.radiusHistoryEntryId.decay(nowMillis)), (0, radiusHistory_1.radiusHistoryDocument)((0, postEngagementPolicy_1.buildRadiusHistoryEntry)({
+                atMillis: nowMillis,
+                cause: "decay",
+                writer: "radiusDecay",
+                previous: { radiusMeters: before.total, organicRadiusMeters: before.organic },
+                next,
+                seedRadiusMeters: before.seed,
+                boostedRadiusMeters: before.boost,
+            })));
             decayed += 1;
         });
     }

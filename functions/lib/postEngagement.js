@@ -38,6 +38,7 @@ const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-admin/firestore");
 const https_1 = require("firebase-functions/v2/https");
 const postEngagementPolicy_1 = require("./postEngagementPolicy");
+const radiusHistory_1 = require("./radiusHistory");
 if (admin.apps.length === 0)
     admin.initializeApp();
 const db = admin.firestore();
@@ -168,6 +169,22 @@ exports.recordPostEngagement = (0, https_1.onCall)({ region, timeoutSeconds: 15,
                 lastEngagementAt: firestore_1.FieldValue.serverTimestamp(),
                 updatedAt: firestore_1.FieldValue.serverTimestamp(),
             });
+            // The pop's history, written with the change it records. A comment
+            // after the first pays 0 m and moves nothing: it stays out of the
+            // curve so the history is a line of changes, not a log of taps.
+            if (mutation.counters.radiusMeters !== mutation.previous.radiusMeters) {
+                transaction.create((0, radiusHistory_1.radiusHistoryRef)(postRef, postEngagementPolicy_1.radiusHistoryEntryId.engagement(eventRef.id)), (0, radiusHistory_1.radiusHistoryDocument)((0, postEngagementPolicy_1.buildRadiusHistoryEntry)({
+                    atMillis: nowMillis,
+                    cause: "engagement",
+                    writer: "recordPostEngagement",
+                    previous: mutation.previous,
+                    next: mutation.counters,
+                    seedRadiusMeters: mutation.radius.seed,
+                    boostedRadiusMeters: mutation.radius.boost,
+                    kind: input.kind,
+                    engagementId: eventRef.id,
+                })));
+            }
         }
         const persistViewAt = mutation.nextViewAtMillis != null;
         const persistGrants = Object.keys(mutation.actorStateUpdate).length > 0;

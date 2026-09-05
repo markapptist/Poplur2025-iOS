@@ -68,6 +68,101 @@ export interface PostEngagementMutation {
   nextViewAtMillis: number | null;
   /** Fields to merge into this actor's state doc so the grant cannot repeat. */
   actorStateUpdate: Record<string, boolean | number>;
+  /** The reach as it stood BEFORE this event — what a history entry steps from. */
+  previous: { radiusMeters: number; organicRadiusMeters: number };
+  /** The seed and active boost that sat under the total, so a history entry
+   *  can carry the parts and not just the sum. */
+  radius: { seed: number; boost: number };
+}
+
+// ── Radius history ───────────────────────────────────────────────────────────
+//
+// A pop has a history: every change to its reach is one entry in
+// posts/{postId}/radiusHistory, written in the SAME transaction or batch as the
+// change itself, by the writer that made it. Nothing here is reconstructed by
+// guessing — an entry exists because a write happened, with its cause.
+// Entries carry no actor identity (the engagements documents are deliberately
+// private); an engagement entry names its engagement doc id, which only the
+// actor and the owner can open.
+
+export type RadiusHistoryCause =
+  | "create" | "engagement" | "decay" | "boost" | "synthetic" | "lab" | "backfill";
+
+export interface RadiusHistoryEntry {
+  atMillis: number;
+  cause: RadiusHistoryCause;
+  radiusMeters: number;
+  organicRadiusMeters: number;
+  seedRadiusMeters: number;
+  boostedRadiusMeters: number;
+  /** radiusMeters − the previous entry's radiusMeters (0 for the first). */
+  delta: number;
+  organicDelta: number;
+  writer: string;
+  kind?: PostEngagementKind;
+  engagementId?: string;
+  boostTransactionId?: string;
+  boostExpiresAtMillis?: number | null;
+}
+
+export const RADIUS_HISTORY_COLLECTION = "radiusHistory";
+
+/** Pure: one history entry from the reach before and after a change. */
+export function buildRadiusHistoryEntry(input: {
+  atMillis: number;
+  cause: RadiusHistoryCause;
+  writer: string;
+  previous: { radiusMeters: number; organicRadiusMeters: number } | null;
+  next: { radiusMeters: number; organicRadiusMeters: number };
+  seedRadiusMeters: number;
+  boostedRadiusMeters: number;
+  kind?: PostEngagementKind;
+  engagementId?: string;
+  boostTransactionId?: string;
+  boostExpiresAtMillis?: number | null;
+}): RadiusHistoryEntry {
+  const previous = input.previous;
+  const entry: RadiusHistoryEntry = {
+    atMillis: input.atMillis,
+    cause: input.cause,
+    radiusMeters: input.next.radiusMeters,
+    organicRadiusMeters: input.next.organicRadiusMeters,
+    seedRadiusMeters: input.seedRadiusMeters,
+    boostedRadiusMeters: input.boostedRadiusMeters,
+    delta: previous ? input.next.radiusMeters - previous.radiusMeters : 0,
+    organicDelta: previous ? input.next.organicRadiusMeters - previous.organicRadiusMeters : 0,
+    writer: input.writer,
+  };
+  if (input.kind) entry.kind = input.kind;
+  if (input.engagementId) entry.engagementId = input.engagementId;
+  if (input.boostTransactionId) entry.boostTransactionId = input.boostTransactionId;
+  if (input.boostExpiresAtMillis !== undefined) entry.boostExpiresAtMillis = input.boostExpiresAtMillis;
+  return entry;
+}
+
+/** Deterministic entry ids, so a retried transaction or a redelivered
+ *  trigger writes the same document instead of a duplicate point. */
+export const radiusHistoryEntryId = {
+  create: () => "create",
+  engagement: (engagementDocId: string) => `eng_${engagementDocId}`,
+  decay: (atMillis: number) => `decay_${atMillis}`,
+  boost: (boostTransactionId: string) => `boost_${boostTransactionId}`,
+  synthetic: (sequence: number) => `syn_${sequence}`,
+  lab: (atMillis: number) => `lab_${atMillis}`,
+  backfill: (atMillis: number, tag: string) => `backfill_${tag}_${atMillis}`,
+};
+
+/** The reach a stored post document declares right now, as its three parts.
+ *  Exported so every history writer reads the same parts the policy uses. */
+export function postRadiusParts(
+  post: Record<string, unknown>,
+  nowMillis: number,
+): { organic: number; boost: number; seed: number; total: number } {
+  const radius = currentRadius(post, nowMillis);
+  return {
+    ...radius,
+    total: Math.min(MAX_POST_RADIUS_METERS, radius.organic + radius.boost + radius.seed),
+  };
 }
 
 export class PostEngagementValidationError extends Error {}
@@ -250,9 +345,14 @@ export function calculateRadiusDecay(
   let organic = Math.floor(radius.organic * factor);
   if (organic < RADIUS_DECAY_FLOOR_METERS) organic = 0;
   if (organic >= radius.organic) return null;
+  // Reach is seed + earned + boost everywhere else (see the engagement
+  // mutation below). Decay shrinks ONLY the earned part; the seed and the
+  // boost ride on top unchanged. This used to drop the seed, so a seeded
+  // post lost its 5 km discovery window on its first decay tick — production
+  // showed 6,750 m → 1,726 m with seedRadiusMeters still 5,000 on the doc.
   return {
     organicRadiusMeters: organic,
-    radiusMeters: Math.min(MAX_POST_RADIUS_METERS, organic + radius.boost),
+    radiusMeters: Math.min(MAX_POST_RADIUS_METERS, organic + radius.boost + radius.seed),
   };
 }
 
@@ -282,12 +382,18 @@ export function calculatePostEngagementMutation(
   const radius = currentRadius(post, nowMillis);
   const delta = radiusDelta(kind, nowMillis, normalizeActorState(actorState), isOwner);
 
+  const previous = {
+    radiusMeters: Math.min(MAX_POST_RADIUS_METERS, radius.organic + radius.boost + radius.seed),
+    organicRadiusMeters: radius.organic,
+  };
+  const parts = { seed: radius.seed, boost: radius.boost };
+
   if (!delta.applied) {
     return {
       applied: false,
       radiusDeltaMeters: 0,
       counters: {
-        radiusMeters: Math.min(MAX_POST_RADIUS_METERS, radius.organic + radius.boost),
+        radiusMeters: previous.radiusMeters,
         organicRadiusMeters: radius.organic,
         viewCount,
         likeCount,
@@ -297,6 +403,8 @@ export function calculatePostEngagementMutation(
       postUpdate: {},
       nextViewAtMillis: null,
       actorStateUpdate: {},
+      previous,
+      radius: parts,
     };
   }
 
@@ -339,5 +447,7 @@ export function calculatePostEngagementMutation(
     },
     nextViewAtMillis: delta.nextViewAtMillis,
     actorStateUpdate: delta.actorStateUpdate,
+    previous,
+    radius: parts,
   };
 }
