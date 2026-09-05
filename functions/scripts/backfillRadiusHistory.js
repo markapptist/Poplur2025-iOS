@@ -179,7 +179,10 @@ async function main() {
     let batch = db.batch();
     let inBatch = 0;
     const flush = async () => { if (inBatch) { await batch.commit(); batch = db.batch(); inBatch = 0; } };
+    // Deletes commit BEFORE the writes: a rewrite removes 'create' and writes
+    // 'create' again, and one batch may not touch the same document twice.
     for (const ref of plan.deletes) { batch.delete(ref); inBatch += 1; if (inBatch === 400) await flush(); }
+    await flush();
     for (const write of plan.writes) {
       batch.set(snapshot.ref.collection(policy.RADIUS_HISTORY_COLLECTION).doc(write.id), document(write.entry));
       inBatch += 1;
