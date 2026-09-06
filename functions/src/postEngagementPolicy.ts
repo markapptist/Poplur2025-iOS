@@ -10,11 +10,13 @@ export type PostEngagementKind = typeof POST_ENGAGEMENT_KINDS[number];
  *  displayed as 24,901 mi over a 3,959 mi ceiling.) */
 export const MAX_POST_RADIUS_METERS = 6_371_000;
 /** The largest discovery seed a post may be created with. */
-// The most ground one drop can be created with: the 5 km discovery seed
-// plus whatever the composer let the account claim on top, capped at the
-// product's 25 km per post (claimRadius.ts CLAIM_RADIUS_HARD_MAX_KM). Every
-// metre of it is spent reach, never earned — see seedRadiusMeters below.
-export const MAX_POST_SEED_METERS = 25_000;
+// The most ground one drop can be created with: the 5 km discovery seed plus
+// whatever the composer let the account claim on top. Since 6 Sep 2026 that
+// is the account's whole earned total rather than a flat 25 km, so the bound
+// here is the planet — clipping a seed below what the client legitimately
+// claimed would silently shrink the post on its first like. Every metre of it
+// is spent reach, never earned; see seedRadiusMeters below.
+export const MAX_POST_SEED_METERS = MAX_POST_RADIUS_METERS;
 export const MAX_POST_ENGAGEMENT_COUNT = 1_000_000_000;
 export const REPEAT_VIEW_MIN_MS = 30_000;
 /** Each PAID repeat view halves the next one: 500, 250, 125 … ~994 m lifetime.

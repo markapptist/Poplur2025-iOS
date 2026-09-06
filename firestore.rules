@@ -131,10 +131,20 @@ service cloud.firestore {
       ];
     }
 
-    // Creation may seed only an honest starting state: at most the ground
-    // the composer can put on one drop (25 km — claimRadius.ts's hard cap;
-    // the discovery default is 5 km), zeroed counters, and none of the
-    // server-only fields. Without this, a modified client could mint a post
+    // Creation may seed only an honest starting state: at most the ground the
+    // composer can put on one drop, zeroed counters, and none of the
+    // server-only fields.
+    //
+    // That per-drop ceiling was 25 km until 6 Sep 2026, when it became the
+    // account's own earned total (claimRadius.ts): an owner holding 72.8 km
+    // was being offered 25. Rules cannot sum a collection, so they cannot
+    // check that total — the bound here is therefore the planet, and the
+    // entitlement itself is enforced by the client. A modified client can
+    // consequently mint a post with more discovery reach than it earned. It
+    // still buys nothing: a seed is spent reach that never counts toward what
+    // the account may claim next (organicRadiusMeters stays 0). Closing it
+    // properly needs a server-maintained `users/{uid}` radius aggregate for
+    // this rule to read; that is filed, not done. Without this, a modified client could mint a post
     // already at world radius and skip the engagement economy entirely —
     // update was guarded, create was not. decayedAt is the decay clock:
     // pre-seeding it far in the future would freeze decay forever.
@@ -150,14 +160,14 @@ service cloud.firestore {
     // either way.
     function validNewPostEngagementSeed() {
       let d = request.resource.data;
-      return d.get('radius', 0) >= 0 && d.get('radius', 0) <= 25000
-        && d.get('radiusMeters', 0) >= 0 && d.get('radiusMeters', 0) <= 25000
+      return d.get('radius', 0) >= 0 && d.get('radius', 0) <= 6371000
+        && d.get('radiusMeters', 0) >= 0 && d.get('radiusMeters', 0) <= 6371000
         // A seed is reach, never entitlement, so it may be created up to the
         // drop cap but must be declared as a seed AND leave the earned pool
         // at zero. The account total that grants a claim is summed from
         // organicRadiusMeters alone; letting a new post arrive with earned
         // radius is how post count would buy claim power.
-        && d.get('seedRadiusMeters', 0) >= 0 && d.get('seedRadiusMeters', 0) <= 25000
+        && d.get('seedRadiusMeters', 0) >= 0 && d.get('seedRadiusMeters', 0) <= 6371000
         && d.get('seedRadiusMeters', 0) <= d.get('radius', 0)
         && d.get('organicRadiusMeters', 0) == 0
         && d.get('viewCount', 0) == 0 && d.get('likeCount', 0) == 0
