@@ -78,6 +78,17 @@ final class PostUploadService {
         }
     }
 
+    /// The ground every drop is born discoverable on, earned or not.
+    ///
+    /// The same number by the same name in every shell that publishes a post:
+    /// POST_DISCOVERY_SEED_METERS in the React Native shell's services/posts.ts
+    /// and in the functions' accountRadius.ts, CLAIM_RADIUS_SEED_KM in
+    /// poplur-clay-map's claimRadius.ts, and the 5.0 default Android's
+    /// PostLoginWebActivity reads radiusKm with. The Firestore create rule
+    /// allows a seed of the account's earned total plus this, so a post
+    /// published at exactly the seed is accepted by every account.
+    static let postDiscoverySeedMeters = 5_000
+
     /// Radius and caption arrive with the composer's post but cannot ride on the
     /// image-only notifications, so the sender stages them here immediately
     /// before posting. They apply to the next upload only.
@@ -397,12 +408,27 @@ final class PostUploadService {
 
     private func takeRadius() -> Int {
         defer { nextRadiusMeters = nil }
-        // 0, never a fabricated figure. This used to default to 5000, so a
-        // publish that arrived with the contract already drained invented 5km
-        // of reach the account had not earned — and because radiusDecay only
-        // considers posts with radius > 0, that invented reach then GREW on
-        // engagement while the genuine post sat at its real entitlement.
-        return nextRadiusMeters ?? 0
+        // The discovery seed, never less. This defaulted to 0 because 5000
+        // used to be a fabricated figure: a publish arriving with the contract
+        // already drained invented 5 km of reach the account had not earned,
+        // and since radiusDecay only considers posts with radius > 0, that
+        // invented reach then GREW on engagement.
+        //
+        // The seed is not invented any more (user-ordered 6 Sep). Every drop
+        // is born discoverable at 5 km, and every metre of it is declared as
+        // seedRadiusMeters with organicRadiusMeters at 0 — spent reach that
+        // never counts toward what the account may claim next, and that decay
+        // never touches because decay shrinks the earned pool alone. Defaulting
+        // to 0 was the worse failure of the two: a post at 0 m is intercepted
+        // by nobody, so it cannot be seen, cannot be engaged with, and cannot
+        // earn its way out of being invisible.
+        //
+        // A staged value BELOW the seed is floored for the same reason — a
+        // shell running an older web bundle can still stage 2 km, and the
+        // account holds the seed unconditionally either way. The React Native
+        // shell already floors both cases this way (services/posts.ts); iOS
+        // was the one publisher that still defaulted to nothing.
+        return max(Self.postDiscoverySeedMeters, nextRadiusMeters ?? 0)
     }
 
     private func takeCaption() -> String? {
