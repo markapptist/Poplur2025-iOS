@@ -2975,6 +2975,19 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                             if let radius = (data["radiusMeters"] ?? data["radius"] ?? data["organicRadiusMeters"]) as? NSNumber {
                                 row["radiusMeters"] = radius
                             }
+                            // The EARNED pool, forwarded on its own rather than
+                            // collapsed into radiusMeters above. A post's reach is
+                            // its discovery seed plus what engagement earned, and
+                            // only the earned half is claim entitlement — the
+                            // create rule sums organicRadiusMeters alone, so post
+                            // count cannot buy claim power. Without this field the
+                            // device summed whole radii, offered a picker ~5km per
+                            // post above what the rules accept, and every claim
+                            // over the real ceiling came back "Missing or
+                            // insufficient permissions" on Retry upload.
+                            if let organic = data["organicRadiusMeters"] as? NSNumber {
+                                row["organicRadiusMeters"] = max(0, organic.doubleValue)
+                            }
                             if let views = data["viewCount"] as? NSNumber {
                                 row["viewCount"] = max(0, views.intValue)
                             }
