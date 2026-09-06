@@ -26,6 +26,8 @@ export { notifyOnEngagement } from "./engagementNotifications";
 export { recordPostEngagement } from "./postEngagement";
 export { radiusDecay } from "./radiusDecay";
 export { radiusHistoryOnPostCreated } from "./radiusHistory";
+export { accountRadiusOnPostDeleted } from "./accountRadiusOnPostDeleted";
+import { addAccountClaimRadius, claimRadiusDeltaMeters } from "./accountRadius";
 import {
   MAX_POST_RADIUS_METERS,
   buildRadiusHistoryEntry,
@@ -1106,6 +1108,12 @@ async function handlePublishGeneratedJob(
 
   const publishBatch = db.batch();
   publishBatch.set(postRef, post);
+  // An AI publish is the one path that creates a post already holding earned
+  // radius, so the account's entitlement aggregate moves with it, in the batch
+  // that creates it. The web picker already counts this post's earned pool
+  // (accountRadiusPosts.ts); an aggregate that skipped it would sit BELOW the
+  // posts it summarises and refuse a claim the account really holds.
+  addAccountClaimRadius(publishBatch, userRef, claimRadiusDeltaMeters(0, radiusMeters));
   // The pop's first history point, in the batch that creates it.
   publishBatch.set(
     radiusHistoryRef(postRef, radiusHistoryEntryId.create()),

@@ -70,14 +70,27 @@ service cloud.firestore {
       return ['verificationTier', 'verificationStatus'];
     }
 
+    // The account's earned total, and the clock that says when it last moved.
+    // This is the number the create rule below trusts to decide how much
+    // ground a drop may claim, and it lives on a document its own owner may
+    // write — so it has to be fenced here or the check is decorative. It is
+    // maintained only by the server writers that move a post's earned radius
+    // (recordPostEngagement, radiusDecay, the AI publish batch, the synthetic
+    // runner) and by scripts/backfillAccountClaimRadius.js.
+    function serverOwnedAccountRadiusFields() {
+      return ['claimRadiusMeters', 'claimRadiusUpdatedAt'];
+    }
+
     function doesNotWritePremiumAIFields() {
       return !request.resource.data.keys().hasAny(protectedPremiumAIFields())
-        && !request.resource.data.keys().hasAny(protectedVerificationFields());
+        && !request.resource.data.keys().hasAny(protectedVerificationFields())
+        && !request.resource.data.keys().hasAny(serverOwnedAccountRadiusFields());
     }
 
     function keepsPremiumAIFieldsUnchanged() {
       return !request.resource.data.diff(resource.data).affectedKeys().hasAny(protectedPremiumAIFields())
-        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(protectedVerificationFields());
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(protectedVerificationFields())
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(serverOwnedAccountRadiusFields());
     }
 
     function accountHidesPostOrigin(userId) {
@@ -131,43 +144,79 @@ service cloud.firestore {
       ];
     }
 
-    // Creation may seed only an honest starting state: at most the ground the
-    // composer can put on one drop, zeroed counters, and none of the
-    // server-only fields.
+    // What one drop may be born claiming: the account's own earned total,
+    // plus the 5 km discovery seed every post gets so a first post can be
+    // found at all.
     //
-    // That per-drop ceiling was 25 km until 6 Sep 2026, when it became the
-    // account's own earned total (claimRadius.ts): an owner holding 72.8 km
-    // was being offered 25. Rules cannot sum a collection, so they cannot
-    // check that total — the bound here is therefore the planet, and the
-    // entitlement itself is enforced by the client. A modified client can
-    // consequently mint a post with more discovery reach than it earned. It
-    // still buys nothing: a seed is spent reach that never counts toward what
-    // the account may claim next (organicRadiusMeters stays 0). Closing it
-    // properly needs a server-maintained `users/{uid}` radius aggregate for
-    // this rule to read; that is filed, not done. Without this, a modified client could mint a post
-    // already at world radius and skip the engagement economy entirely —
+    // Entitlement is the sum of organicRadiusMeters over everything the
+    // account has published, and rules cannot sum a collection — which is why
+    // this check did not exist between 6 Sep 2026 and now, and the bound was
+    // simply the planet. `users/{uid}.claimRadiusMeters` is that sum, written
+    // by the server in the SAME transaction as every post radius it moves
+    // (functions/src/accountRadius.ts), so one get() answers the question a
+    // query could not. It is fenced from its own owner above; without that
+    // fence an account would simply write itself the entitlement.
+    //
+    // A missing or negative total reads as zero — the aggregate is maintained
+    // with FieldValue.increment, which cannot clamp, so the reader clamps.
+    function accountClaimRadiusMeters(userId) {
+      let path = /databases/$(database)/documents/users/$(userId);
+      let declared = exists(path) ? get(path).data.get('claimRadiusMeters', 0) : 0;
+      return declared is number && declared > 0 ? declared : 0;
+    }
+
+    // Flipped by scripts/backfillAccountClaimRadius.js once every account has
+    // an authoritative total. Nothing may read or write config/ — a rule's own
+    // get() is not subject to rules, and the catch-all denies clients.
+    function claimRadiusBackfillComplete() {
+      let path = /databases/$(database)/documents/config/claimRadius;
+      return exists(path) && get(path).data.get('backfilled', false) == true;
+    }
+
+    // Until the backfill is marked complete an existing account has no sum
+    // yet, and must not be told it has earned nothing mid-migration: it keeps
+    // the flat 25 km per-drop ceiling it had before 6 Sep 2026. Once the
+    // marker is set, absent means zero, which is the honest answer for an
+    // account that has published nothing.
+    //
+    // The world radius stays the outer bound: an account whose posts sum past
+    // the planet still cannot put more than the planet on one drop, and every
+    // radius reader clamps there anyway (poplur-clay-map worldRadius.ts).
+    function maxSeedRadiusMeters(userId) {
+      let earned = accountClaimRadiusMeters(userId);
+      let entitled = (claimRadiusBackfillComplete() || earned > 25000)
+        ? earned
+        : 25000;
+      let ceiling = entitled + 5000;
+      return ceiling > 6371000 ? 6371000 : ceiling;
+    }
+
+    // Creation may seed only an honest starting state: at most the ground the
+    // account has earned plus the discovery seed, zeroed counters, and none of
+    // the server-only fields. Without this, a modified client could mint a
+    // post already at world radius and skip the engagement economy entirely —
     // update was guarded, create was not. decayedAt is the decay clock:
     // pre-seeding it far in the future would freeze decay forever.
     //
-    // The whole creation radius — the 5 km discovery seed and any ground
-    // claimed on top of it from the account's earned total — is declared as
-    // seedRadiusMeters, i.e. reach that is spent, never earned. The cap
-    // used to be 5000 on all three fields, which refused every claim the map
-    // picker offered above 5 km ("Missing or insufficient permissions" on
-    // Retry upload) on iOS, Android and React Native alike. That the account
-    // really holds the claimed total is the client's check (claimRadius.ts);
-    // rules cannot sum a collection, and the seed is fenced from entitlement
-    // either way.
-    function validNewPostEngagementSeed() {
+    // The whole creation radius — the discovery seed and any ground claimed on
+    // top of it from the account's earned total — is declared as
+    // seedRadiusMeters, i.e. reach that is spent, never earned. The cap used
+    // to be 5000 on all three fields, which refused every claim the map picker
+    // offered above 5 km ("Missing or insufficient permissions" on Retry
+    // upload) on iOS, Android and React Native alike. It then became the
+    // planet, because the entitlement was only checkable on the client. It is
+    // now the entitlement itself, checked here.
+    function validNewPostEngagementSeed(userId) {
       let d = request.resource.data;
-      return d.get('radius', 0) >= 0 && d.get('radius', 0) <= 6371000
-        && d.get('radiusMeters', 0) >= 0 && d.get('radiusMeters', 0) <= 6371000
+      let ceiling = maxSeedRadiusMeters(userId);
+      return d.get('radius', 0) >= 0 && d.get('radius', 0) <= ceiling
+        && d.get('radiusMeters', 0) >= 0 && d.get('radiusMeters', 0) <= ceiling
         // A seed is reach, never entitlement, so it may be created up to the
-        // drop cap but must be declared as a seed AND leave the earned pool
-        // at zero. The account total that grants a claim is summed from
-        // organicRadiusMeters alone; letting a new post arrive with earned
-        // radius is how post count would buy claim power.
-        && d.get('seedRadiusMeters', 0) >= 0 && d.get('seedRadiusMeters', 0) <= 6371000
+        // account's earned ceiling but must be declared as a seed AND leave
+        // the earned pool at zero. The account total that grants a claim is
+        // summed from organicRadiusMeters alone; letting a new post arrive
+        // with earned radius is how post count would buy claim power.
+        && d.get('seedRadiusMeters', 0) >= 0 && d.get('seedRadiusMeters', 0) <= ceiling
         && d.get('seedRadiusMeters', 0) <= d.get('radius', 0)
         && d.get('organicRadiusMeters', 0) == 0
         && d.get('viewCount', 0) == 0 && d.get('likeCount', 0) == 0
@@ -495,7 +544,7 @@ service cloud.firestore {
       allow create: if signedIn()
         && (request.resource.data.userID == request.auth.uid
           || request.resource.data.userId == request.auth.uid)
-        && validNewPostEngagementSeed()
+        && validNewPostEngagementSeed(request.auth.uid)
         && validPostOrigin(request.auth.uid);
       allow update: if signedIn()
         && (resource.data.userID == request.auth.uid

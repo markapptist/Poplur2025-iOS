@@ -12,6 +12,7 @@ import {
   radiusHistoryEntryId,
 } from "./postEngagementPolicy";
 import { radiusHistoryDocument, radiusHistoryRef } from "./radiusHistory";
+import { addAccountClaimRadius, claimRadiusDeltaMeters } from "./accountRadius";
 
 if (admin.apps.length === 0) admin.initializeApp();
 
@@ -165,6 +166,19 @@ export const recordPostEngagement = onCall(
           lastEngagementAt: FieldValue.serverTimestamp(),
           updatedAt: FieldValue.serverTimestamp(),
         });
+        // The owner's entitlement moves with the post that earned it, in the
+        // transaction that earned it. firestore.rules cannot sum a collection,
+        // so the create rule reads this aggregate instead — and an aggregate
+        // written anywhere but here would be a second source of truth free to
+        // drift away from the posts it claims to summarise.
+        addAccountClaimRadius(
+          transaction,
+          db.collection("users").doc(ownerUid),
+          claimRadiusDeltaMeters(
+            mutation.previous.organicRadiusMeters,
+            mutation.counters.organicRadiusMeters,
+          ),
+        );
         // The pop's history, written with the change it records. A comment
         // after the first pays 0 m and moves nothing: it stays out of the
         // curve so the history is a line of changes, not a log of taps.

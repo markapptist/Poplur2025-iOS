@@ -8,6 +8,7 @@ import {
   radiusHistoryEntryId,
 } from "./postEngagementPolicy";
 import { radiusHistoryDocument, radiusHistoryRef } from "./radiusHistory";
+import { addAccountClaimRadius, claimRadiusDeltaMeters, postOwnerUid } from "./accountRadius";
 
 if (admin.apps.length === 0) admin.initializeApp();
 
@@ -68,6 +69,19 @@ export const radiusDecay = onSchedule(
           decayedAt: nowTimestamp,
           updatedAt: FieldValue.serverTimestamp(),
         });
+        // Entitlement is the sum of what an account's posts have earned, so
+        // decay takes it back on the same principle it was granted: the same
+        // delta, in the same transaction as the post it belongs to. An
+        // aggregate that only ever grew would let an account keep claiming
+        // ground its posts no longer hold.
+        const ownerUid = postOwnerUid(post);
+        if (ownerUid) {
+          addAccountClaimRadius(
+            transaction,
+            db.collection("users").doc(ownerUid),
+            claimRadiusDeltaMeters(before.organic, next.organicRadiusMeters),
+          );
+        }
         // The pop's history: decay is a change like any other and is recorded
         // with it, in the same transaction.
         transaction.create(

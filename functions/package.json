@@ -12,6 +12,10 @@
     "test:synthetic-runner": "npm run build && node scripts/testSyntheticBrowserRunner.js",
     "test:synthetic-reset": "node scripts/testSyntheticBetaReset.js",
     "test:vertex-image-fallback": "npm run build && node scripts/testVertexImageFallback.js",
+    "test:account-claim-radius": "npm run build && node scripts/testAccountClaimRadius.js",
+    "test:claim-radius-rules": "npm run build && firebase emulators:exec --only firestore \"node scripts/testClaimRadiusRules.mjs\"",
+    "test:claim-radius-aggregate": "npm run build && firebase emulators:exec --only firestore \"node scripts/testEngagementAggregate.mjs && node scripts/testBackfillAccountClaimRadius.mjs\"",
+    "backfill:account-claim-radius": "npm run build && node scripts/backfillAccountClaimRadius.js",
     "provision:synthetic-beta": "node scripts/provisionSyntheticBetaAccounts.js",
     "reset:synthetic-beta": "node scripts/resetSyntheticBetaCohort.js",
     "seed:creator-credits": "node scripts/seedCreatorCreditBalances.js",
@@ -29,6 +33,7 @@
     "passkit-generator": "^3.5.7"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^4.0.1",
     "typescript": "^5.8.3"
   }
 }

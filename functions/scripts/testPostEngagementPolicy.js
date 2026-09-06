@@ -355,15 +355,21 @@ const legacy = policy.calculatePostEngagementMutation(
 );
 assert.equal(legacy.counters.organicRadiusMeters, 6_000, 'legacy posts keep counting as earned');
 
-// A seed the client inflates buys no extra exclusion from the earned pool.
-const inflated = policy.calculatePostEngagementMutation(
+// A big seed is honoured as a seed, and buys nothing.
+const claimed = policy.calculatePostEngagementMutation(
   { radiusMeters: 50_000, seedRadiusMeters: 50_000, viewCount: 0 },
   'view',
   100_000,
   null,
 );
-// The seed is clamped to its 5 km maximum, so an inflated claim excludes 5 km
-// and no more; anything above that a post already holds was earned.
-assert.equal(inflated.counters.organicRadiusMeters, 46_000, 'an inflated seed claim is clamped, not honoured');
+// MAX_POST_SEED_METERS stopped being 5 km on 6 Sep 2026 (2c780362): a drop may
+// claim every metre the account earned, so clipping the seed here would have
+// re-counted the claimed part as EARNED on the post's first view — the account
+// would then have been paid entitlement for ground it had merely spent. What
+// stops an inflated claim is the create rule reading the account's own total
+// (firestore.rules maxSeedRadiusMeters), not a clamp after the fact.
+assert.equal(claimed.counters.organicRadiusMeters, 1_000,
+  'a claimed seed stays spent reach; only the view is earned');
+assert.equal(claimed.counters.radiusMeters, 51_000, 'and reach is seed plus what it earned');
 
 console.log('post engagement policy: PASS');

@@ -39,6 +39,7 @@ const firestore_1 = require("firebase-admin/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const postEngagementPolicy_1 = require("./postEngagementPolicy");
 const radiusHistory_1 = require("./radiusHistory");
+const accountRadius_1 = require("./accountRadius");
 if (admin.apps.length === 0)
     admin.initializeApp();
 const db = admin.firestore();
@@ -97,6 +98,15 @@ exports.radiusDecay = (0, scheduler_1.onSchedule)({ schedule: "every 60 minutes"
                 decayedAt: nowTimestamp,
                 updatedAt: firestore_1.FieldValue.serverTimestamp(),
             });
+            // Entitlement is the sum of what an account's posts have earned, so
+            // decay takes it back on the same principle it was granted: the same
+            // delta, in the same transaction as the post it belongs to. An
+            // aggregate that only ever grew would let an account keep claiming
+            // ground its posts no longer hold.
+            const ownerUid = (0, accountRadius_1.postOwnerUid)(post);
+            if (ownerUid) {
+                (0, accountRadius_1.addAccountClaimRadius)(transaction, db.collection("users").doc(ownerUid), (0, accountRadius_1.claimRadiusDeltaMeters)(before.organic, next.organicRadiusMeters));
+            }
             // The pop's history: decay is a change like any other and is recorded
             // with it, in the same transaction.
             transaction.create((0, radiusHistory_1.radiusHistoryRef)(ref, postEngagementPolicy_1.radiusHistoryEntryId.decay(nowMillis)), (0, radiusHistory_1.radiusHistoryDocument)((0, postEngagementPolicy_1.buildRadiusHistoryEntry)({

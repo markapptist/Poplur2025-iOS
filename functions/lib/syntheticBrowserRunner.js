@@ -50,6 +50,7 @@ const https_1 = require("firebase-functions/v2/https");
 const syntheticBetaCohort_1 = require("./syntheticBetaCohort");
 const postEngagementPolicy_1 = require("./postEngagementPolicy");
 const radiusHistory_1 = require("./radiusHistory");
+const accountRadius_1 = require("./accountRadius");
 const REGION = "us-central1";
 const RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
 const MAX_EVENT_AGE_MS = 10 * 60 * 1000;
@@ -609,6 +610,11 @@ async function ingestRunnerEvent(identity, request, receivedAtMs) {
             // the document is born, then one per step that moves its reach.
             const previousPost = mapPostSnapshot?.exists ? (mapPostSnapshot.data() ?? {}) : null;
             const nowMillis = receivedAtMs;
+            // A synthetic actor claims ground through the same rule as anybody else,
+            // so its entitlement aggregate is maintained the same way — otherwise the
+            // cohort that exists to exercise the claim flow is the one cohort whose
+            // account total drifts away from its posts.
+            (0, accountRadius_1.addAccountClaimRadius)(transaction, db().collection("users").doc(request.actorId), (0, accountRadius_1.claimRadiusDeltaMeters)(previousPost ? (0, postEngagementPolicy_1.postRadiusParts)(previousPost, nowMillis).organic : 0, Number(mapPost.organicRadiusMeters)));
             if (!previousPost) {
                 transaction.set((0, radiusHistory_1.radiusHistoryRef)(mapPostRef, postEngagementPolicy_1.radiusHistoryEntryId.create()), (0, radiusHistory_1.radiusHistoryDocument)((0, radiusHistory_1.creationHistoryEntry)({ ...mapPost, createdAtMillis: nowMillis }, nowMillis, "testSessionIngest")));
             }

@@ -15,6 +15,7 @@ import {
 } from "./syntheticBetaCohort";
 import { buildRadiusHistoryEntry, postRadiusParts, radiusHistoryEntryId } from "./postEngagementPolicy";
 import { creationHistoryEntry, radiusHistoryDocument, radiusHistoryRef } from "./radiusHistory";
+import { addAccountClaimRadius, claimRadiusDeltaMeters } from "./accountRadius";
 
 const REGION = "us-central1";
 const RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
@@ -676,6 +677,18 @@ async function ingestRunnerEvent(
       // the document is born, then one per step that moves its reach.
       const previousPost = mapPostSnapshot?.exists ? (mapPostSnapshot.data() ?? {}) : null;
       const nowMillis = receivedAtMs;
+      // A synthetic actor claims ground through the same rule as anybody else,
+      // so its entitlement aggregate is maintained the same way — otherwise the
+      // cohort that exists to exercise the claim flow is the one cohort whose
+      // account total drifts away from its posts.
+      addAccountClaimRadius(
+        transaction,
+        db().collection("users").doc(request.actorId),
+        claimRadiusDeltaMeters(
+          previousPost ? postRadiusParts(previousPost, nowMillis).organic : 0,
+          Number(mapPost.organicRadiusMeters),
+        ),
+      );
       if (!previousPost) {
         transaction.set(
           radiusHistoryRef(mapPostRef, radiusHistoryEntryId.create()),
