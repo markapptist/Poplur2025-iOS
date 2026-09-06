@@ -100,7 +100,26 @@ final class PoplurManagedWebView: WKWebView {
         )
         super.init(frame: frame, configuration: configuration)
         policyBridge.owner = self
+        poplurEnableWebInspectorInDebugBuilds()
     }
+
+    /// Let Safari's Web Inspector attach — DEBUG builds only.
+    ///
+    /// Every web surface in the app is one of these, and none of them was
+    /// inspectable, so a failure inside the web layer reached us on device as
+    /// a bare `[WebError] Script error. :0` — no file, no line, no stack,
+    /// because a cross-origin script cannot report more and the console was
+    /// unreachable. That is the state a black map left us in on 6 Sep 2026:
+    /// the error was logged and told us nothing.
+    ///
+    /// Never in Release. An inspectable WebView exposes the shipped app's
+    /// internals to anyone with a cable.
+    private func poplurEnableWebInspectorInDebugBuilds() {
+        #if DEBUG
+        isInspectable = true
+        #endif
+    }
+
 
     required init?(coder: NSCoder) {
         let policyBridge = PoplurWebPolicyBridge()
@@ -109,6 +128,7 @@ final class PoplurManagedWebView: WKWebView {
         self.policyBridge = policyBridge
         super.init(coder: coder)
         policyBridge.owner = self
+        poplurEnableWebInspectorInDebugBuilds()
         PoplurWebPerformance.installBootstrap(
             into: configuration,
             messageHandler: policyBridge
