@@ -342,6 +342,19 @@ final class PostUploadService {
                     userInfo: [NSLocalizedDescriptionKey: "Please sign in again before uploading."]
                 )
             }
+            // A retry after a lost success acknowledgement must not replace
+            // an already-published Storage object (or its download token).
+            let existingPost = try await Firestore.firestore().collection("posts")
+                .document(request.postID).getDocument(source: .server)
+            if existingPost.exists {
+                guard existingPost.data()?["userID"] as? String == Auth.auth().currentUser?.uid else {
+                    throw NSError(domain: "PostUploadService", code: 6,
+                        userInfo: [NSLocalizedDescriptionKey: "This post ID is already in use. Please start a new post."])
+                }
+                Self.reportProgress(1, phase: "POSTED", requestID: request.requestID)
+                Self.report(success: true, message: nil, requestID: request.requestID)
+                return
+            }
             Self.reportProgress(0.06, phase: "PREPARING", requestID: request.requestID)
             switch request.payload {
             case .image(let image):
@@ -564,7 +577,12 @@ final class PostUploadService {
                 photoViewSeconds: photoViewSeconds
             )
         } catch {
-            try? await reference.delete()
+            // A timeout can lose the acknowledgement after a successful save.
+            // Delete media only when the server confirms no post references it.
+            if let saved = try? await Firestore.firestore().collection("posts")
+                .document(postID).getDocument(source: .server), !saved.exists {
+                try? await reference.delete()
+            }
             throw error
         }
     }
@@ -645,8 +663,11 @@ final class PostUploadService {
                 photoViewSeconds: photoViewSeconds
             )
         } catch {
-            try? await reference.delete()
-            if let posterReference { try? await posterReference.delete() }
+            if let saved = try? await Firestore.firestore().collection("posts")
+                .document(postID).getDocument(source: .server), !saved.exists {
+                try? await reference.delete()
+                if let posterReference { try? await posterReference.delete() }
+            }
             throw error
         }
     }
@@ -806,16 +827,48 @@ final class PostUploadService {
         }
 
         let database = Firestore.firestore()
-        let batch = database.batch()
-        batch.setData(post, forDocument: database.collection("posts").document(postID))
-        batch.setData([
-            "latitude": coordinate.latitude,
-            "longitude": coordinate.longitude,
-            "createdAt": FieldValue.serverTimestamp(),
-            "source": "post-upload"
-        ], forDocument: database.collection("users").document(uid)
-            .collection("postLocations").document(postID), merge: true)
-        try await batch.commit()
+        let postRef = database.collection("posts").document(postID)
+        let accountRef = database.collection("users").document(uid)
+        let proposedPost = post
+        // Read the allowance inside the same transaction as publication: decay
+        // can lower it while a draft is open, even after the picker was correct.
+        try await database.runTransaction { transaction, errorPointer in
+            do {
+                let existing = try transaction.getDocument(postRef)
+                if existing.exists {
+                    guard existing.data()?["userID"] as? String == uid,
+                          existing.data()?["mediaStoragePath"] as? String == mediaStoragePath else {
+                        throw NSError(domain: "PostUploadService", code: 6,
+                            userInfo: [NSLocalizedDescriptionKey: "This post ID is already in use. Please start a new post."])
+                    }
+                    // A lost acknowledgement is a successful retry, never an
+                    // overwrite of a published post's server-owned engagement.
+                    return nil
+                }
+                let freshAccount = try transaction.getDocument(accountRef).data() ?? [:]
+                let earned = max(0, (freshAccount["claimRadiusMeters"] as? NSNumber)?.intValue ?? 0)
+                let allowed = min(6_371_000, earned + 5_000)
+                let seed = min(max(0, radiusMeters), allowed)
+                var finalPost = proposedPost
+                finalPost["radius"] = seed
+                finalPost["seedRadiusMeters"] = seed
+                if freshAccount["privateAccount"] as? Bool == true || freshAccount["ghostMode"] as? Bool == true {
+                    finalPost["locationVisibility"] = "hidden"
+                    for key in ["latitude", "longitude", "latitudeCell", "longitudeCell"] { finalPost.removeValue(forKey: key) }
+                }
+                transaction.setData(finalPost, forDocument: postRef)
+                transaction.setData([
+                    "latitude": coordinate.latitude,
+                    "longitude": coordinate.longitude,
+                    "createdAt": FieldValue.serverTimestamp(),
+                    "source": "post-upload"
+                ], forDocument: accountRef.collection("postLocations").document(postID), merge: true)
+                return nil
+            } catch {
+                errorPointer?.pointee = error as NSError
+                return nil
+            }
+        }
     }
 
     static func applyAIMetadata(_ usedAI: Bool, to post: inout [String: Any]) {

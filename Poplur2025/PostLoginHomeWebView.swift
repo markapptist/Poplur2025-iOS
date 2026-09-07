@@ -736,6 +736,8 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         // The feed-posts listener must not outlive the web view it posts into.
         coordinator.feedPostsRegistration?.remove()
         coordinator.feedPostsRegistration = nil
+        coordinator.ownFeedRegistration?.remove()
+        coordinator.ownFeedRegistration = nil
         if liveWebView === uiView { liveWebView = nil }
         if liveCoordinator === coordinator { liveCoordinator = nil }
         PoplurWebCaptureStore.purge()
@@ -800,6 +802,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
         /// The live feed-posts forward. See deliverFeedPosts. fileprivate, like
         /// notificationInboxOwner: the outer struct's dismantleUIView removes it.
         fileprivate var feedPostsRegistration: ListenerRegistration?
+        fileprivate var ownFeedRegistration: ListenerRegistration?
         /// The account's own posts, fetched once per arm on their own task and merged into every
         /// forward without delaying it. See deliverFeedPosts.
         fileprivate var ownFeedDocuments: [QueryDocumentSnapshot] = []
@@ -1104,6 +1107,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                 }
             }
             feedPostsRegistration?.remove()
+            ownFeedRegistration?.remove()
             recoveryWorkItem?.cancel()
             navigatorMotionDemandExpiryWorkItem?.cancel()
             notificationObservers.forEach(NotificationCenter.default.removeObserver)
@@ -2849,18 +2853,29 @@ struct PostLoginHomeWebView: UIViewRepresentable {
             if let uid = Auth.auth().currentUser?.uid, ownFeedDocumentsUid != uid {
                 ownFeedDocumentsUid = uid
                 ownFeedDocuments = []
-                Task { [weak self, weak webView] in
-                    guard let own = try? await Firestore.firestore()
-                        .collection("posts")
-                        .whereField("userID", isEqualTo: uid)
-                        .limit(to: 64)
-                        .getDocuments() else { return }
-                    await MainActor.run {
-                        guard let self, let webView, self.ownFeedDocumentsUid == uid else { return }
-                        self.ownFeedDocuments = own.documents
-                        if !own.documents.isEmpty { self.deliverFeedPosts(into: webView) }
+                ownFeedRegistration?.remove()
+                ownFeedRegistration = Firestore.firestore()
+                    .collection("posts").whereField("userID", isEqualTo: uid)
+                    .addSnapshotListener { [weak self, weak webView] snapshot, _ in
+                        guard let self, let webView, let snapshot,
+                              self.ownFeedDocumentsUid == uid else { return }
+                        self.ownFeedDocuments = snapshot.documents
+                        let totals = snapshot.documents.reduce(into: (earned: 0.0, reach: 0.0)) { totals, document in
+                            let data = document.data()
+                            let reach = max(0, (data["radiusMeters"] as? NSNumber ?? data["radius"] as? NSNumber)?.doubleValue ?? 0)
+                            let seed = max(0, (data["seedRadiusMeters"] as? NSNumber)?.doubleValue ?? 0)
+                            let earned = max(0, (data["organicRadiusMeters"] as? NSNumber)?.doubleValue ?? (reach - seed))
+                            totals.earned += min(6_371_000, earned)
+                            totals.reach += min(6_371_000, reach)
+                        }
+                        let payload: [String: Any] = ["uid": uid, "radiusKm": totals.earned / 1000,
+                            "totalReachKm": totals.reach / 1000, "postCount": snapshot.documents.count]
+                        if let encoded = try? JSONSerialization.data(withJSONObject: payload),
+                           let json = String(data: encoded, encoding: .utf8) {
+                            webView.evaluateJavaScript("window.dispatchEvent(new CustomEvent('poplur-native-account-radius', {detail: \(json)}));true;", completionHandler: nil)
+                        }
+                        self.deliverFeedPosts(into: webView)
                     }
-                }
             }
             feedPostsRegistration?.remove()
             feedPostsRegistration = Firestore.firestore()

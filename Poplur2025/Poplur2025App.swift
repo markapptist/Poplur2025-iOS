@@ -82,9 +82,6 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         // Defer ad SDK init to after first frame — MobileAds.shared.start() is synchronous
         // and can block the main thread for 100–300 ms, delaying first render.
         DispatchQueue.main.async {
-            #if !DEBUG && !targetEnvironment(simulator) && canImport(GoogleMobileAds)
-            MobileAds.shared.start(completionHandler: nil)
-            #endif
             #if !targetEnvironment(simulator)
             AdManager.shared.start()
             #endif

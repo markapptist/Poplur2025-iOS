@@ -6,10 +6,18 @@ final class AdManager: NSObject, FullScreenContentDelegate {
     static let feedAdVisibilityNotification = Notification.Name("PoplurFeedAdVisibility")
     
     private var interstitial: InterstitialAd?
-    private weak var pendingRootViewController: UIViewController?
-    private var presentationPending = false
     private var isLoading = false
+    private var retryWorkItem: DispatchWorkItem?
+    private var retryAttempt = 0
+    private var loadedAt: Date?
+    private var sdkReady = false
     private var interstitialUnitID: String? {
+        #if DEBUG
+        // Opt-in integration proof only; normal device launches keep production inventory.
+        if ProcessInfo.processInfo.arguments.contains("-PoplurAdMobUseTestAds") {
+            return "ca-app-pub-3940256099942544/4411468910"
+        }
+        #endif
         guard let value = Bundle.main.object(
             forInfoDictionaryKey: "PoplurAdMobInterstitialUnitID"
         ) as? String else { return nil }
@@ -34,13 +42,19 @@ final class AdManager: NSObject, FullScreenContentDelegate {
             print("[Ads] Production interstitial unit is missing or invalid; ads disabled")
             return
         }
-        MobileAds.shared.start(completionHandler: nil)
         hasStarted = true
-        loadInterstitial()
+        MobileAds.shared.start { [weak self] _ in
+            DispatchQueue.main.async {
+                self?.sdkReady = true
+                self?.loadInterstitial()
+            }
+        }
     }
     
     func loadInterstitial() {
-        guard !isLoading, let interstitialUnitID else { return }
+        guard sdkReady, !isLoading, interstitial == nil, let interstitialUnitID else { return }
+        retryWorkItem?.cancel()
+        retryWorkItem = nil
         isLoading = true
         let request = Request()
         InterstitialAd.load(with: interstitialUnitID, request: request) { [weak self] ad, error in
@@ -48,29 +62,40 @@ final class AdManager: NSObject, FullScreenContentDelegate {
             self.isLoading = false
             if error != nil {
                 self.interstitial = nil
-                print("[Ads] Interstitial failed to load: \(error!.localizedDescription)")
+                let failure = error! as NSError
+                NSLog("[Ads] load failed domain=%@ code=%ld: %@", failure.domain, failure.code, failure.localizedDescription)
+                self.scheduleRetry()
                 return
             }
             self.interstitial = ad
             self.interstitial?.fullScreenContentDelegate = self
-            self.presentPendingInterstitialIfPossible()
+            self.loadedAt = Date()
+            self.retryAttempt = 0
+            NSLog("[Ads] interstitial ready")
+            // Wait for the next feed transition; never interrupt a new post
+            // just because a slow network response arrived.
         }
     }
     
     func presentInterstitial(from root: UIViewController) {
+        if !hasStarted { start() }
+        if let loadedAt, Date().timeIntervalSince(loadedAt) >= 3_500 { interstitial = nil }
         if let ad = interstitial {
-            presentationPending = false
-            pendingRootViewController = nil
+            var presenter = root
+            while let presented = presenter.presentedViewController, !presented.isBeingDismissed { presenter = presented }
+            guard presenter.viewIfLoaded?.window != nil, !(presenter is UIAlertController) else { return }
+            do { try ad.canPresent(from: presenter) } catch {
+                NSLog("[Ads] cannot present: %@", error.localizedDescription)
+                interstitial = nil
+                loadInterstitial()
+                return
+            }
             interstitial = nil
             ad.fullScreenContentDelegate = self
             publishFeedAdVisibility(true)
-            ad.present(from: root)
+            ad.present(from: presenter)
         } else {
-            // Feed changes are often faster than the first network response.
-            // Keep one eligible presentation and fulfil it when AdMob returns
-            // instead of dropping the only real-ad opportunity in the session.
-            presentationPending = true
-            pendingRootViewController = root
+            // Preload for the next natural feed transition.
             loadInterstitial()
         }
     }
@@ -83,13 +108,20 @@ final class AdManager: NSObject, FullScreenContentDelegate {
         )
     }
 
-    private func presentPendingInterstitialIfPossible() {
-        guard presentationPending,
-              let root = pendingRootViewController,
-              root.viewIfLoaded?.window != nil else {
-            return
+    private func scheduleRetry() {
+        guard retryAttempt < 4 else { return }
+        let delay = min(120.0, 15.0 * pow(2.0, Double(retryAttempt)))
+        retryAttempt += 1
+        let work = DispatchWorkItem { [weak self] in
+            guard UIApplication.shared.applicationState == .active else { return }
+            self?.loadInterstitial()
         }
-        presentInterstitial(from: root)
+        retryWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    func adDidRecordImpression(_ ad: FullScreenPresentingAd) {
+        NSLog("[Ads] interstitial impression recorded")
     }
 
     /// The web home has no view controller of its own to present from — find
@@ -116,6 +148,7 @@ final class AdManager: NSObject, FullScreenContentDelegate {
     }
     
     func ad(_ ad: FullScreenPresentingAd, didFailToPresentFullScreenContentWithError error: Error) {
+        NSLog("[Ads] presentation failed: %@", error.localizedDescription)
         publishFeedAdVisibility(false)
         interstitial = nil
         loadInterstitial()
