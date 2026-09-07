@@ -43,3 +43,40 @@ refreshes remains visible with zero runtime errors and zero canvases. That
 Chrome fixture also passes on the old build; the failure evidence is the
 iPhone diagnostic stack, and physical-device confirmation is still required.
 The guarded thermal gate passes with no budget changes or skips.
+
+## Feed content stability correction
+
+Shared web source `cffde7d93cee5a5fb349c509acc94c0ca1dab885` keeps tester mode
+under the server configuration instead of allowing the private event endpoint's
+disabled response to clear it. Native Feed subscriptions also retain the already
+delivered posts when another screen subscribes or an explicit refresh starts.
+
+The two behavioral regressions are covered by three tests that fail before the
+fix and pass after. All 43 focused tests and TypeScript pass. The shared DOM/CSS
+layout and renderer policy are unchanged. Profile has been confirmed working
+on the previous installed correction by the iPhone user and Android screenshot.
+
+Build/install evidence: parent workspace
+`.codex/install-reports/feed-channel-loading-20260907/`. The latest two-minute
+recording was stopped because Feed content was unreliable; it does not count as
+an endurance pass. The user subsequently reported much less warmth from the
+rendering changes already installed on iPhone; objective sustained-use thermal
+verification remains separate.
+
+## Plain Camera processing follow-up
+
+The user reported warmth during plain live preview. A retained video-data output
+could be reopened by a policy update after Scan was disabled, and installing a
+Lens output also left generic processing demand enabled. Every output reopening
+now requires current Scan or Lens demand and an active capture lease. Turning
+Scan off releases its demand even while a Lens owns the output; dismissing that
+Lens then closes the data branch. The separate native preview remains at its
+existing resolution and rate.
+
+`scripts/test-camera-frame-demand.py` executes the controller's actual delivery
+methods with connection/delegate doubles. Five lifecycle assertions fail before
+the correction and all scenarios pass afterward. Nine web camera controls and
+availability tests pass. This proves the processing lifecycle defect, not that
+it caused all reported warmth. The one-minute device sample happened on Map
+after the user left Camera, so it is not a Camera endurance result. New capture
+and frame-delivery transition logs support the next physical test.

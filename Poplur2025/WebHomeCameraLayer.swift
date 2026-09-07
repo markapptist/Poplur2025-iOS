@@ -613,9 +613,9 @@ final class WebHomeCameraModel: ObservableObject {
                     CameraAIAnnouncer.shared.setLiveCameraActive(false)
                     controller.disableMLDetection()
                     controller.visionBoxDetector = nil
-                    if (controller.arFilterManager?.activeFilter ?? ARFilterManager.ARFilter.none) == ARFilterManager.ARFilter.none {
-                        controller.stopVideoFrameDelivery()
-                    }
+                    // Release Scan demand even when a Lens still owns frames.
+                    // The controller keeps delivery open for that Lens only.
+                    controller.stopVideoFrameDelivery()
                     cloudScanRequested = false
                     latestClassifications = []
                     latestCloudClassifications = []

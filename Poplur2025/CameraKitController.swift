@@ -114,8 +114,8 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
 
     // Video output and connection
     var videoDataOutput: AVCaptureVideoDataOutput?
-    /// Capability survives a hard park so an explicit resume can rebuild the
-    /// frame-output path without relying on the web layer to mount again.
+    /// Explicit Scan demand survives a hard park. Lens demand is tracked
+    /// separately; creating its output must not make frame processing sticky.
     private var wantsVideoFrameDelivery = false
     private var isVideoFrameDelegateAttached = false
     /// Real bounding boxes from Vision's built-in detectors. Optional because
@@ -1678,7 +1678,8 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
                 let effectiveFPS = pressureCapped
                     ? min(requestedFPS, Self.pressurePreviewFrameRate)
                     : requestedFPS
-                if self.wantsVideoFrameDelivery && self.videoDataOutput == nil {
+                if (self.wantsVideoFrameDelivery || self.isARFilterProcessingWanted())
+                    && self.videoDataOutput == nil {
                     self.attachVideoDataOutputOnQueue()
                 }
                 self.setVideoFrameDeliveryActiveOnQueue(dataProcessingAllowed)
@@ -1692,7 +1693,14 @@ final class CameraKitController: NSObject, ObservableObject, RecordPreviewViewCo
                     generation: captureGeneration,
                     desired: true
                 ) else { return }
-                if !self.captureSession.isRunning { self.captureSession.startRunning() }
+                if !self.captureSession.isRunning {
+                    self.captureSession.startRunning()
+                    PoplurDiagLog.append(
+                        "[PoplurCamera] captureStarted scan=\(self.wantsVideoFrameDelivery) "
+                            + "lens=\(self.isARFilterProcessingWanted()) "
+                            + "frameDelivery=\(self.isVideoFrameDelegateAttached)"
+                    )
+                }
             } else if self.movieOutput.isRecording {
                 self.setVideoFrameDeliveryActiveOnQueue(false)
                 self.movieOutput.stopRecording()
@@ -2061,7 +2069,11 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
         sessionQueue.async { [weak self] in
             guard let self else { return }
             self.wantsVideoFrameDelivery = false
-            self.setVideoFrameDeliveryActiveOnQueue(false)
+            self.frameProcessingLock.lock()
+            let allowed = self.frameProcessingAllowed
+            self.frameProcessingLock.unlock()
+            // Scan can stop while a Lens still owns the same output.
+            self.setVideoFrameDeliveryActiveOnQueue(allowed)
         }
     }
 
@@ -2081,7 +2093,18 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
         }
         let connection = output.connection(with: .video)
 
-        guard active else {
+        // A retained output is only a capability. Lifecycle/policy callbacks
+        // may grant processing again after Scan or a Lens was dismissed, so
+        // every reopening must also have current user demand and capture.
+        let wanted = wantsVideoFrameDelivery || isARFilterProcessingWanted()
+        let shouldDeliver = active && wanted && isCaptureDesired()
+        if shouldDeliver != isVideoFrameDelegateAttached {
+            PoplurDiagLog.append(
+                "[PoplurCamera] frameDelivery=\(shouldDeliver) scan=\(wantsVideoFrameDelivery) "
+                    + "lens=\(isARFilterProcessingWanted()) capture=\(isCaptureDesired())"
+            )
+        }
+        guard shouldDeliver else {
             analysisFrameGateLock.lock()
             analysisFrameGateOpen = false
             analysisFrameGateLock.unlock()
@@ -2194,8 +2217,7 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
         
         // Mirror the selected filter into a tiny lock-protected flag read by
         // the video queue. The hardware preview stays smooth at its governed
-        // frame rate while both `.none` and active filters sample BGRA frames
-        // without violating ARFilterManager's main-actor isolation.
+        // frame rate. Only an active filter or explicit Scan needs BGRA frames.
         Task { @MainActor [weak self, weak filterManager] in
             guard let self, let filterManager else { return }
             self.arFilterSelectionCancellable = filterManager.$activeFilter
@@ -2207,8 +2229,6 @@ extension CameraKitController: AVCaptureVideoDataOutputSampleBufferDelegate {
         
         sessionQueue.async { [weak self] in
             guard let self = self else { return }
-            self.wantsVideoFrameDelivery = true
-            
             // Create video data output
             let output = AVCaptureVideoDataOutput()
             output.videoSettings = [
