@@ -80,4 +80,4 @@ async function reconcileAccountPostRadius(db, postId) {
 }
 if (admin.apps.length === 0)
     admin.initializeApp();
-exports.accountTotalRadiusOnPostWritten = (0, firestore_2.onDocumentWritten)({ document: "posts/{postId}", region: "us-central1" }, async (event) => reconcileAccountPostRadius(admin.firestore(), event.params.postId));
+exports.accountTotalRadiusOnPostWritten = (0, firestore_2.onDocumentWritten)({ document: "posts/{postId}", region: "us-central1", retry: true }, async (event) => reconcileAccountPostRadius(admin.firestore(), event.params.postId));
