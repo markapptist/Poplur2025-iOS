@@ -59,11 +59,10 @@ const db = admin.firestore();
  * are locked out of decayedAt in firestore.rules — a client-written clock
  * would let an owner freeze their own decay.
  *
- * Scale note: this pages the whole radius-bearing post set hourly, which is
- * fine at beta scale (hundreds). Past ~50k such posts, shard by decayedAt
- * cursor instead of re-reading everything.
+ * Production uses the sharded due-work queue. The full scan remains available
+ * only as a migration/rollback path while dueDecayEnabled is false.
  */
-async function runRadiusDecay(nowMillis = Date.now()) {
+async function runRadiusDecay(nowMillis = Date.now(), dueReferences) {
     const [simulation, master] = await Promise.all([
         db.doc("testControl/syntheticDailySimulation").get(), db.doc("testControl/syntheticBrowserRunner").get(),
     ]);
@@ -75,7 +74,9 @@ async function runRadiusDecay(nowMillis = Date.now()) {
     // with no organicRadiusMeters field; the per-post transaction re-reads, so
     // overlap between the result sets is harmless.
     const references = new Map();
-    for (const field of ["organicRadiusMeters", "radiusMeters", "radius"]) {
+    for (const ref of dueReferences || [])
+        references.set(ref.path, ref);
+    for (const field of dueReferences ? [] : ["organicRadiusMeters", "radiusMeters", "radius"]) {
         let cursor;
         for (;;) {
             const query = db.collection("posts").where(field, ">", 0).orderBy(field).limit(500);
@@ -90,9 +91,26 @@ async function runRadiusDecay(nowMillis = Date.now()) {
     for (const ref of references.values()) {
         await db.runTransaction(async (transaction) => {
             const snapshot = await transaction.get(ref);
-            if (!snapshot.exists)
+            const queueRef = db.doc(`radiusDecayQueue/${ref.id}`);
+            const queue = dueReferences ? await transaction.get(queueRef) : null;
+            if (dueReferences && (!queue?.exists || (queue.data()?.dueAt?.toMillis?.() ?? 0) > nowMillis))
                 return;
+            if (!snapshot.exists) {
+                if (queue?.exists)
+                    transaction.delete(queueRef);
+                return;
+            }
             const post = snapshot.data() ?? {};
+            // Queue advancement is atomic with the decay/history/account delta.
+            // Retries see a future deadline and cannot debit the same hour twice.
+            if (dueReferences) {
+                const parts = (0, postEngagementPolicy_1.postRadiusParts)(post, nowMillis);
+                if (parts.organic <= 0 && !(post.syntheticBeta === true && post.simulationRetentionVersion === 1 && parts.seed > 0)) {
+                    transaction.delete(queueRef);
+                    return;
+                }
+                transaction.update(queueRef, { dueAt: firestore_1.Timestamp.fromMillis(nowMillis + 3600_000) });
+            }
             if (post.decayedAt == null) {
                 transaction.update(ref, { decayedAt: nowTimestamp });
                 stamped += 1;
@@ -143,4 +161,9 @@ async function runRadiusDecay(nowMillis = Date.now()) {
     console.log(`[radiusDecay] ${decayed} decayed, ${stamped} baseline-stamped, ${references.size} candidates`);
     return { decayed, stamped, candidates: references.size };
 }
-exports.radiusDecay = (0, scheduler_1.onSchedule)({ schedule: "every 60 minutes", region: "us-central1", timeoutSeconds: 300, memory: "256MiB" }, async () => { await runRadiusDecay(); });
+exports.radiusDecay = (0, scheduler_1.onSchedule)({ schedule: "every 60 minutes", region: "us-central1", timeoutSeconds: 300, memory: "256MiB" }, async () => {
+    // The old hourly sweep is only the rollback path during migration.
+    if ((await db.doc('mapDiscovery/config').get()).data()?.dueDecayEnabled === true)
+        return;
+    await runRadiusDecay();
+});

@@ -111,6 +111,128 @@
           "order": "ASCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "mapPostIndex",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "cohort",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "cellId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "rankKey",
+          "order": "DESCENDING"
+        },
+        {
+          "fieldPath": "expiresAtMillis",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "mapPostIndex",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "cohort",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "cellId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAtMillis",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "mapPostIndex",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "cellId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAtMillis",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "mapCellSummaries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "cohort",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "leaf",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "mapDiscoveryJobs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "shard",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "dueAt",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "radiusDecayQueue",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "shard",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "dueAt",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "mapPostIndex",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "cohort",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "cellId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "rankBucket",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "rankEligible",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "rankKey",
+          "order": "DESCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": [
@@ -208,6 +330,42 @@
           "queryScope": "COLLECTION"
         }
       ]
+    },
+    {
+      "collectionGroup": "mapRankReceipts",
+      "fieldPath": "expiresAt",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "mapRankActors",
+      "fieldPath": "expiresAt",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "engagements",
+      "fieldPath": "createdAt",
+      "indexes": [
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION"
+        },
+        {
+          "order": "DESCENDING",
+          "queryScope": "COLLECTION"
+        },
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION_GROUP"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "mapDiscoveryRate",
+      "fieldPath": "expiresAt",
+      "ttl": true,
+      "indexes": []
     }
   ]
 }

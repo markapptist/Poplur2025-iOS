@@ -24,6 +24,8 @@ export { poplurWalletPass, poplurOwnedCards } from "./walletPass";
 export { poplurPassWebService, poplurPassOnProfileChange } from "./walletPassWebService";
 export { notifyOnEngagement } from "./engagementNotifications";
 export { recordPostEngagement } from "./postEngagement";
+export { queryMapDiscovery, mapDiscoveryPostChanged, mapDiscoveryEngagement, mapDiscoveryOwnerChanged, mapDiscoveryEnqueue, mapDiscoveryWorker, repairMapDiscovery } from './mapDiscovery';
+export { radiusDecayIndexChanged, radiusDecayDispatch, radiusDecayWorker } from './radiusDecayQueue';
 export { radiusDecay } from "./radiusDecay";
 export { radiusHistoryOnPostCreated } from "./radiusHistory";
 export { accountTotalRadiusOnPostWritten } from "./accountTotalRadius";
