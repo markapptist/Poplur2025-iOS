@@ -31,7 +31,7 @@ export interface LiveNewsEvent {
   status: LiveNewsStatus;
   place: string;
   country?: string;
-  coords: [number, number];
+  coords: [number, number] | null;
   scope: LiveNewsScope;
   category: string;
   publishedAt: string;
@@ -262,7 +262,8 @@ function titleSimilarity(left: string, right: string): number {
   return intersection / Math.max(1, Math.min(a.size, b.size));
 }
 
-function sameLocation(left: [number, number], right: [number, number]): boolean {
+function sameLocation(left: [number, number] | null, right: [number, number] | null): boolean {
+  if (!left || !right) return false;
   return Math.abs(left[0] - right[0]) <= 0.01 && Math.abs(left[1] - right[1]) <= 0.01;
 }
 

@@ -1,3 +1,4 @@
+import { fetchRssNews } from "./liveNewsRss";
 import * as admin from "firebase-admin";
 import { randomUUID } from "crypto";
 import { logger } from "firebase-functions";
@@ -91,13 +92,13 @@ const QUERY_DEFINITIONS: QueryDefinition[] = [
 
 type PublicSnapshot = {
   schemaVersion: 1;
-  provider: "gdelt-geo-2.0";
+  provider: "publisher-rss+gdelt";
   generatedAt: string;
   checkedAt: string;
   contentHash: string;
   events: LiveNewsEvent[];
   policy: {
-    coordinates: "gdelt-geo-point-only";
+    coordinates: "gdelt-geo-point-or-null";
     summaries: "deterministic-source-derived";
     media: "omit-without-explicit-reuse-rights";
     geoDocumentation: string;
@@ -254,9 +255,9 @@ function storedEvents(value: unknown): LiveNewsEvent[] {
       && typeof event.category === "string"
       && typeof event.place === "string"
       && typeof event.updatedAt === "string"
-      && Array.isArray(event.coords)
+      && (event.coords === null || (Array.isArray(event.coords)
       && event.coords.length === 2
-      && event.coords.every(Number.isFinite)
+      && event.coords.every(Number.isFinite)))
       && Array.isArray(event.sources)
       && event.sources.every(source => source && typeof source.url === "string" && typeof source.publisher === "string")
       && Array.isArray(event.media);
@@ -297,13 +298,13 @@ async function releaseFailedLease(token: string, error: unknown): Promise<void> 
 function makePublicSnapshot(events: LiveNewsEvent[], generatedAt: string, checkedAt: string): PublicSnapshot {
   return {
     schemaVersion: 1,
-    provider: "gdelt-geo-2.0",
+    provider: "publisher-rss+gdelt",
     generatedAt,
     checkedAt,
     contentHash: liveNewsContentHash(events),
     events,
     policy: {
-      coordinates: "gdelt-geo-point-only",
+      coordinates: "gdelt-geo-point-or-null",
       summaries: "deterministic-source-derived",
       media: "omit-without-explicit-reuse-rights",
       geoDocumentation: GDELT_GEO_DOCUMENTATION,
@@ -357,14 +358,13 @@ async function runLiveNewsRefresh(): Promise<void> {
     return;
   }
   try {
-    const batches = await fetchProviderBatches();
-    const events = buildLiveNewsEvents(batches, Date.now());
-    // Never overwrite a good edition with an empty one. Every event is located
-    // from the GEO leg, so while that endpoint is down every batch yields zero
-    // events even though the documents arrived fine — and publishing that
-    // would erase the last real snapshot and keep erasing it every 15 minutes.
-    // Leaving the old one in place lets it go stale honestly, which the client
-    // already renders as "SAVED EDITION".
+    const [rss, provider] = await Promise.allSettled([fetchRssNews(), fetchProviderBatches()]);
+    const batches = provider.status === "fulfilled" ? provider.value : [];
+    const located = buildLiveNewsEvents(batches, Date.now());
+    const rssEvents = rss.status === "fulfilled" ? rss.value : [];
+    const seen = new Set(located.flatMap(event => event.sources.map(source => source.url)));
+    const events = [...located, ...rssEvents.filter(event => !seen.has(event.sources[0].url))].slice(0, MAX_PUBLIC_EVENTS);
+    // Preserve the previous edition if every source is temporarily unavailable.
     if (events.length === 0) {
       await releaseFailedLease(token, new Error("live_news_no_locatable_events")).catch(() => undefined);
       logger.warn("live_news_refresh_produced_nothing", {
@@ -476,7 +476,7 @@ export const liveNewsApi = onRequest(
       generatedAt,
       checkedAt,
       stale,
-      provider: "GDELT GEO 2.0 + DOC 2.0",
+      provider: "BBC News RSS + GDELT GEO 2.0 / DOC 2.0",
       policy: data?.policy ?? makePublicSnapshot([], new Date(0).toISOString(), new Date(0).toISOString()).policy,
     };
     if (request.method === "HEAD") response.status(200).send("");

@@ -1,0 +1,15 @@
+const assert = require('node:assert/strict');
+const { parseNewsRss } = require('../lib/liveNewsRss');
+const now = Date.parse('2026-09-07T15:00:00Z');
+const item = (link = 'https://www.bbc.com/news/articles/example', date = 'Mon, 07 Sep 2026 14:00:00 GMT') => `<item><title><![CDATA[Science &amp; discovery]]></title><description><![CDATA[<p>A publisher description.</p>]]></description><link>${link}</link><pubDate>${date}</pubDate></item>`;
+const feed = rows => `<rss><channel>${rows}</channel></rss>`;
+const stories = parseNewsRss(feed(item() + item()), 'science', now);
+assert.equal(stories.length, 1);
+assert.equal(stories[0].coords, null);
+assert.equal(stories[0].sources[0].publisher, 'BBC News');
+assert.equal(stories[0].summary, 'A publisher description.');
+assert.equal(stories[0].status, 'top');
+assert.deepEqual(parseNewsRss(feed(item('https://evil.example/x')), 'world', now), []);
+assert.deepEqual(parseNewsRss(feed(item('https://www.bbc.com/x', 'Mon, 01 Sep 2025 14:00:00 GMT')), 'world', now), []);
+assert.deepEqual(parseNewsRss('<!DOCTYPE rss [<!ENTITY x SYSTEM "file:///etc/passwd">]>' + feed(item()), 'world', now), []);
+console.log('RSS parsing, attribution, deduplication, freshness and unsafe input checks passed.');

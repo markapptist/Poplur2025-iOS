@@ -198,6 +198,8 @@ function titleSimilarity(left, right) {
     return intersection / Math.max(1, Math.min(a.size, b.size));
 }
 function sameLocation(left, right) {
+    if (!left || !right)
+        return false;
     return Math.abs(left[0] - right[0]) <= 0.01 && Math.abs(left[1] - right[1]) <= 0.01;
 }
 function extractLocatedArticles(batch, nowMs) {
