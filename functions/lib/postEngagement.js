@@ -225,6 +225,7 @@ async function applyPostEngagement(uid, data) {
             actorHandle: actorHandle(actorSnapshot.data() ?? {}),
             postOwnerUid: ownerUid,
             clientEventId: input.eventId,
+            ...(input.kind === "comment" && input.text ? { body: input.text } : {}),
             kind: input.kind,
             applied: mutation.applied,
             radiusDeltaMeters: mutation.radiusDeltaMeters,

@@ -23,95 +23,37 @@ if (admin.apps.length === 0) admin.initializeApp();
 const db = admin.firestore();
 const messaging = admin.messaging();
 
-/** Likes inside this window collapse into one digest instead of one each. */
-const LIKE_COALESCE_WINDOW_MS = 5 * 60 * 1000;
+export type EngagementKind = "like" | "view" | "dislike" | "comment";
 
-type EngagementKind = "like" | "view" | "dislike" | "comment";
-
-interface EngagementDoc {
+export interface EngagementDoc {
   actorUid?: string;
   actorHandle?: string;
   kind?: EngagementKind;
   postOwnerUid?: string;
   body?: string;
   applied?: boolean;
+  radiusDeltaMeters?: number;
 }
 
-interface TokenEntry {
-  platform?: string;
-}
+interface TokenEntry { platform?: string; }
 
-/**
- * Decides whether this engagement notifies, and with what copy.
- *
- * Views never notify. Instagram does not notify per view, and radius is the
- * product here -- a post reaching thousands of people is the GOAL, so per-view
- * notifications would scale exactly with success and turn the feature into a
- * pager. Views are still recorded and still appear in the in-app list; they
- * just do not light up the phone.
- *
- * Likes coalesce; comments never do. A comment is a conversation and a delayed
- * one reads as broken, whereas a like is an applause count and reads fine
- * summarised.
- */
-async function resolveNotification(
-  postId: string,
-  engagement: EngagementDoc,
-): Promise<{ title: string; body: string } | null> {
+/** Only server-applied activity notifies. View/like deduplication already lives
+ * in recordPostEngagement; do not silently drop its accepted events here. */
+export function engagementNotification(engagement: EngagementDoc): { title: string; body: string; detail: string } | null {
+  if (engagement.applied !== true || !engagement.kind) return null;
   const handle = engagement.actorHandle?.trim() || "Someone";
-
-  if (engagement.kind === "view" || engagement.kind === "dislike") return null;
-
-  if (engagement.kind === "comment") {
-    const comment = engagement.body?.trim();
-    return {
-      title: `${handle} commented`,
-      body: comment && comment.length > 0 ? comment : "commented on your post",
-    };
-  }
-
-  if (engagement.kind !== "like") return null;
-
-  // Coalescing state lives on the post so the trigger needs one document, and
-  // the transaction makes concurrent likes safe: two arriving at once cannot
-  // both decide they are the first in the window.
-  const postRef = db.collection("posts").doc(postId);
-  const decision = await db.runTransaction(async (tx) => {
-    const snapshot = await tx.get(postRef);
-    const data = snapshot.data() ?? {};
-    const lastNotifyAt: number = data.likeNotifyAt ?? 0;
-    const pending: number = data.likesPendingNotify ?? 0;
-    const now = Date.now();
-
-    if (now - lastNotifyAt >= LIKE_COALESCE_WINDOW_MS) {
-      // Window is open. Send now, and carry any likes that accumulated while it
-      // was closed -- this is also what flushes them, so no scheduled function
-      // is needed to drain the backlog.
-      tx.set(
-        postRef,
-        { likeNotifyAt: now, likesPendingNotify: 0 },
-        { merge: true },
-      );
-      return { send: true, alsoPending: pending };
-    }
-
-    tx.set(
-      postRef,
-      { likesPendingNotify: FieldValue.increment(1) },
-      { merge: true },
-    );
-    return { send: false, alsoPending: 0 };
-  });
-
-  if (!decision.send) return null;
-
-  if (decision.alsoPending > 0) {
-    return {
-      title: "Your post is popping",
-      body: `${handle} and ${decision.alsoPending} other${decision.alsoPending === 1 ? "" : "s"} liked your post`,
-    };
-  }
-  return { title: `${handle} liked your post`, body: "Tap to see it" };
+  const verb = { like: "liked your post", view: "viewed your post", dislike: "disliked your post", comment: "commented on your post" }[engagement.kind ?? "like"];
+  if (!verb) return null;
+  const meters = engagement.radiusDeltaMeters;
+  const radius = typeof meters === "number" && Number.isFinite(meters) && meters !== 0
+    ? `Radius ${meters > 0 ? "grew" : "decreased"} ${Number((Math.abs(meters) / 1000).toFixed(3))} km.`
+    : "";
+  const comment = engagement.kind === "comment" ? engagement.body?.trim() : "";
+  return {
+    title: `${handle} ${verb}`,
+    body: [comment, radius].filter(Boolean).join(" ") || "Tap to see your post",
+    detail: [verb, comment, radius].filter(Boolean).join(" · "),
+  };
 }
 
 export const notifyOnEngagement = onDocumentCreated(
@@ -121,7 +63,9 @@ export const notifyOnEngagement = onDocumentCreated(
   },
   async (event) => {
     const engagement = event.data?.data() as EngagementDoc | undefined;
-    if (!engagement || engagement.applied === false) return;
+    if (!engagement) return;
+    const notification = engagementNotification(engagement);
+    if (!notification) return;
 
     const { postId, engagementId } = event.params;
     const ownerUid = engagement.postOwnerUid;
@@ -133,37 +77,30 @@ export const notifyOnEngagement = onDocumentCreated(
     // Never notify someone about their own action on their own post.
     if (engagement.actorUid === ownerUid) return;
 
-    // The inbox is the durable source of truth. Write every engagement first,
-    // including views (which intentionally do not produce a push), so opening
-    // Notifications after a cold launch or on a second device reconstructs the
-    // same history instead of depending on which banners this device saw.
+    // Stable event identity makes redelivery preserve read/dismiss state.
     const notificationId = `engagement:${postId}:${engagementId}`;
     const actorHandle = engagement.actorHandle?.trim() || "Someone";
-    const inboxDetail = engagement.kind === "comment"
-      ? (engagement.body?.trim() || "commented on your post")
-      : engagement.kind === "view"
-        ? "viewed your post"
-        : engagement.kind === "dislike"
-          ? "disliked your post"
-        : "liked your post";
-    await db.collection("users").doc(ownerUid)
+    const created = await db.collection("users").doc(ownerUid)
       .collection("notifications").doc(notificationId)
-      .set({
+      .create({
         id: notificationId,
         kind: engagement.kind ?? "like",
         actorUid: engagement.actorUid ?? "",
         actorHandle,
         title: actorHandle,
-        detail: inboxDetail,
+        detail: notification.detail,
+        radiusDeltaMeters: engagement.radiusDeltaMeters ?? 0,
         createdAt: FieldValue.serverTimestamp(),
         isUnread: true,
         isDismissed: false,
         postId,
         engagementId,
-      }, { merge: true });
+      }).then(() => true).catch((error: { code?: number }) => {
+        if (error.code !== 6) throw error; // ALREADY_EXISTS: keep the original row.
+        return false;
+      });
 
-    const notification = await resolveNotification(postId, engagement);
-    if (!notification) return; // a view, or a like inside the coalesce window
+    if (!created) return;
 
     const userSnapshot = await db.collection("users").doc(ownerUid).get();
     const tokenMap = (userSnapshot.data()?.fcmTokens ?? {}) as Record<string, TokenEntry>;
