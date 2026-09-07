@@ -12,12 +12,6 @@ final class AdManager: NSObject, FullScreenContentDelegate {
     private var loadedAt: Date?
     private var sdkReady = false
     private var interstitialUnitID: String? {
-        #if DEBUG
-        // Opt-in integration proof only; normal device launches keep production inventory.
-        if ProcessInfo.processInfo.arguments.contains("-PoplurAdMobUseTestAds") {
-            return "ca-app-pub-3940256099942544/4411468910"
-        }
-        #endif
         guard let value = Bundle.main.object(
             forInfoDictionaryKey: "PoplurAdMobInterstitialUnitID"
         ) as? String else { return nil }

@@ -847,7 +847,8 @@ final class PostUploadService {
                 }
                 let freshAccount = try transaction.getDocument(accountRef).data() ?? [:]
                 let earned = max(0, (freshAccount["claimRadiusMeters"] as? NSNumber)?.intValue ?? 0)
-                let allowed = min(6_371_000, earned + 5_000)
+                let total = (freshAccount["totalPostRadiusMeters"] as? NSNumber)?.intValue
+                let allowed = min(6_371_000, total.map { max(5_000, $0) } ?? (earned + 5_000))
                 let seed = min(max(0, radiusMeters), allowed)
                 var finalPost = proposedPost
                 finalPost["radius"] = seed

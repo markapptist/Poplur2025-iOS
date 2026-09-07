@@ -26,6 +26,7 @@ export { notifyOnEngagement } from "./engagementNotifications";
 export { recordPostEngagement } from "./postEngagement";
 export { radiusDecay } from "./radiusDecay";
 export { radiusHistoryOnPostCreated } from "./radiusHistory";
+export { accountTotalRadiusOnPostWritten } from "./accountTotalRadius";
 export { accountRadiusOnPostDeleted } from "./accountRadiusOnPostDeleted";
 import { addAccountClaimRadius, claimRadiusDeltaMeters } from "./accountRadius";
 import {

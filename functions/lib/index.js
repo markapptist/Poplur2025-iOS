@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.syntheticDailySimulation = exports.poplurAiApi = exports.cameraSceneScan = exports.premiumAiAssist = exports.generateRetroGame = exports.testSessionIngest = exports.testActivityControl = exports.refreshLiveNews = exports.liveNewsApi = exports.wardrobeGarmentApi = exports.meshyStatus = exports.meshyGenerate = exports.setAccountLocationPrivacy = exports.notifyOnDirectMessage = exports.accountRadiusOnPostDeleted = exports.radiusHistoryOnPostCreated = exports.radiusDecay = exports.recordPostEngagement = exports.notifyOnEngagement = exports.poplurPassOnProfileChange = exports.poplurPassWebService = exports.poplurOwnedCards = exports.poplurWalletPass = exports.verifyCardPurchase = void 0;
+exports.syntheticDailySimulation = exports.poplurAiApi = exports.cameraSceneScan = exports.premiumAiAssist = exports.generateRetroGame = exports.testSessionIngest = exports.testActivityControl = exports.refreshLiveNews = exports.liveNewsApi = exports.wardrobeGarmentApi = exports.meshyStatus = exports.meshyGenerate = exports.setAccountLocationPrivacy = exports.notifyOnDirectMessage = exports.accountRadiusOnPostDeleted = exports.accountTotalRadiusOnPostWritten = exports.radiusHistoryOnPostCreated = exports.radiusDecay = exports.recordPostEngagement = exports.notifyOnEngagement = exports.poplurPassOnProfileChange = exports.poplurPassWebService = exports.poplurOwnedCards = exports.poplurWalletPass = exports.verifyCardPurchase = void 0;
 const sdk_1 = __importDefault(require("@anthropic-ai/sdk"));
 const admin = __importStar(require("firebase-admin"));
 const firebase_functions_1 = require("firebase-functions");
@@ -61,6 +61,8 @@ var radiusDecay_1 = require("./radiusDecay");
 Object.defineProperty(exports, "radiusDecay", { enumerable: true, get: function () { return radiusDecay_1.radiusDecay; } });
 var radiusHistory_1 = require("./radiusHistory");
 Object.defineProperty(exports, "radiusHistoryOnPostCreated", { enumerable: true, get: function () { return radiusHistory_1.radiusHistoryOnPostCreated; } });
+var accountTotalRadius_1 = require("./accountTotalRadius");
+Object.defineProperty(exports, "accountTotalRadiusOnPostWritten", { enumerable: true, get: function () { return accountTotalRadius_1.accountTotalRadiusOnPostWritten; } });
 var accountRadiusOnPostDeleted_1 = require("./accountRadiusOnPostDeleted");
 Object.defineProperty(exports, "accountRadiusOnPostDeleted", { enumerable: true, get: function () { return accountRadiusOnPostDeleted_1.accountRadiusOnPostDeleted; } });
 const accountRadius_1 = require("./accountRadius");
