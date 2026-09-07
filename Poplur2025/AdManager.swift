@@ -11,6 +11,9 @@ final class AdManager: NSObject, FullScreenContentDelegate {
     private var retryAttempt = 0
     private var loadedAt: Date?
     private var sdkReady = false
+    private weak var pendingPresenter: UIViewController?
+    private var pendingExpiry: DispatchWorkItem?
+    private var isPresenting = false
     private var interstitialUnitID: String? {
         guard let value = Bundle.main.object(
             forInfoDictionaryKey: "PoplurAdMobInterstitialUnitID"
@@ -25,6 +28,10 @@ final class AdManager: NSObject, FullScreenContentDelegate {
     
     private override init() {
         super.init()
+        NotificationCenter.default.addObserver(self, selector: #selector(resumePreload),
+            name: UIApplication.didBecomeActiveNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(cancelPendingPresentation),
+            name: UIApplication.willResignActiveNotification, object: nil)
         // loadInterstitial() is intentionally NOT called here — the singleton is accessed
         // at app launch, so any network request in init() fires before the first frame.
         // start() is called after the first frame and triggers the ad preload there.
@@ -56,6 +63,7 @@ final class AdManager: NSObject, FullScreenContentDelegate {
             self.isLoading = false
             if error != nil {
                 self.interstitial = nil
+                self.cancelPendingPresentation()
                 let failure = error! as NSError
                 NSLog("[Ads] load failed domain=%@ code=%ld: %@", failure.domain, failure.code, failure.localizedDescription)
                 self.scheduleRetry()
@@ -66,32 +74,68 @@ final class AdManager: NSObject, FullScreenContentDelegate {
             self.loadedAt = Date()
             self.retryAttempt = 0
             NSLog("[Ads] interstitial ready")
-            // Wait for the next feed transition; never interrupt a new post
-            // just because a slow network response arrived.
+            // The feed is paused for at most two seconds at an eligible break.
+            // After that lease, retain the ad for the NEXT natural transition.
+            if let presenter = self.pendingPresenter {
+                self.presentInterstitial(from: presenter)
+            }
         }
     }
     
     func presentInterstitial(from root: UIViewController) {
+        guard UIApplication.shared.applicationState == .active, !isPresenting else {
+            cancelPendingPresentation()
+            return
+        }
         if !hasStarted { start() }
+        guard interstitialUnitID != nil else { return }
         if let loadedAt, Date().timeIntervalSince(loadedAt) >= 3_500 { interstitial = nil }
         if let ad = interstitial {
             var presenter = root
             while let presented = presenter.presentedViewController, !presented.isBeingDismissed { presenter = presented }
-            guard presenter.viewIfLoaded?.window != nil, !(presenter is UIAlertController) else { return }
+            guard presenter.viewIfLoaded?.window != nil, !(presenter is UIAlertController) else {
+                cancelPendingPresentation()
+                return
+            }
             do { try ad.canPresent(from: presenter) } catch {
                 NSLog("[Ads] cannot present: %@", error.localizedDescription)
                 interstitial = nil
+                cancelPendingPresentation()
                 loadInterstitial()
                 return
             }
             interstitial = nil
+            pendingExpiry?.cancel()
+            pendingExpiry = nil
+            pendingPresenter = nil
+            isPresenting = true
             ad.fullScreenContentDelegate = self
             publishFeedAdVisibility(true)
             ad.present(from: presenter)
         } else {
-            // Preload for the next natural feed transition.
+            if pendingPresenter == nil {
+                pendingPresenter = root
+                publishFeedAdVisibility(true)
+                let expiry = DispatchWorkItem { [weak self] in self?.cancelPendingPresentation() }
+                pendingExpiry = expiry
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: expiry)
+                NSLog("[Ads] feed break waiting for preload (maximum 2 seconds)")
+            }
             loadInterstitial()
         }
+    }
+
+    @objc func cancelPendingPresentation() {
+        let wasPending = pendingPresenter != nil || pendingExpiry != nil
+        pendingExpiry?.cancel()
+        pendingExpiry = nil
+        pendingPresenter = nil
+        if wasPending && !isPresenting { publishFeedAdVisibility(false) }
+    }
+
+    @objc private func resumePreload() {
+        guard hasStarted, !isPresenting else { return }
+        if interstitial == nil { retryAttempt = 0; loadInterstitial() }
     }
 
     private func publishFeedAdVisibility(_ visible: Bool) {
@@ -136,12 +180,14 @@ final class AdManager: NSObject, FullScreenContentDelegate {
     // MARK: - GADFullScreenContentDelegate
     
     func adDidDismissFullScreenContent(_ ad: FullScreenPresentingAd) {
+        isPresenting = false
         publishFeedAdVisibility(false)
         interstitial = nil
         loadInterstitial()
     }
     
     func ad(_ ad: FullScreenPresentingAd, didFailToPresentFullScreenContentWithError error: Error) {
+        isPresenting = false
         NSLog("[Ads] presentation failed: %@", error.localizedDescription)
         publishFeedAdVisibility(false)
         interstitial = nil

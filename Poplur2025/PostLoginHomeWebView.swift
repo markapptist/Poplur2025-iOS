@@ -2106,7 +2106,7 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                             for: index, namespace: namespace
                         )
                     }
-                    if shouldPresent {
+                    if shouldPresent && currentWebTab == "feed" {
                         DispatchQueue.main.async {
                             AdManager.shared.presentInterstitialOverKeyWindow()
                         }
@@ -2164,6 +2164,9 @@ struct PostLoginHomeWebView: UIViewRepresentable {
                         PoplurDiagLog.append("[WebTab] committed=\(tab) previous=\(currentWebTab)")
                     }
                     currentWebTab = tab
+                    if tab != "feed" {
+                        DispatchQueue.main.async { AdManager.shared.cancelPendingPresentation() }
+                    }
                     if tab != "post" { webReportsLiveCamera = false }
                     if tab != "map", nativeMapPresentationActive,
                        let webView = bridge.webView {
