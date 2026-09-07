@@ -1,6 +1,9 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.SIMULATION_CITIES = exports.DAILY_SOURCE = exports.DAILY_POSTS_PER_TESTER = exports.DAILY_NEW_TESTERS = void 0;
+exports.SIMULATION_CITIES = exports.DAILY_SOURCE = exports.SIMULATION_ACTIVE_ACTOR_LIMIT = exports.SIMULATION_POSTS_PER_SLOT = exports.SIMULATION_SLOT_MS = exports.DAILY_POSTS_PER_TESTER = exports.DAILY_NEW_TESTERS = void 0;
+exports.simulationSlot = simulationSlot;
+exports.simulationSlotPostId = simulationSlotPostId;
+exports.simulationEngagementKinds = simulationEngagementKinds;
 exports.simulationDay = simulationDay;
 exports.simulationHash = simulationHash;
 exports.dailyTesterIds = dailyTesterIds;
@@ -9,8 +12,26 @@ exports.dailyPostLocation = dailyPostLocation;
 exports.simulationReaction = simulationReaction;
 const node_crypto_1 = require("node:crypto");
 exports.DAILY_NEW_TESTERS = 2;
-exports.DAILY_POSTS_PER_TESTER = 2;
+exports.DAILY_POSTS_PER_TESTER = 24;
+exports.SIMULATION_SLOT_MS = 60 * 60_000;
+exports.SIMULATION_POSTS_PER_SLOT = 1;
+exports.SIMULATION_ACTIVE_ACTOR_LIMIT = 64;
 exports.DAILY_SOURCE = "scheduled-test-simulation";
+function simulationSlot(now) {
+    return new Date(Math.floor(now / exports.SIMULATION_SLOT_MS) * exports.SIMULATION_SLOT_MS).toISOString().slice(0, 13);
+}
+function simulationSlotPostId(now, uid, slot = 0) {
+    return `post-sim-hourly-${simulationSlot(now)}-${simulationHash(uid).toString(16)}-${slot}`;
+}
+function simulationEngagementKinds(uid, postId, synthetic) {
+    if (!synthetic)
+        return ["view", "like", "comment"];
+    // Mixed reactions plus an accelerated decay clock exercise actual losses.
+    // A dislike is independent of the optional paid-view event, otherwise its
+    // -1 km was always cancelled by the immediately preceding +1 km view.
+    const bucket = simulationHash(`${uid}:${postId}`) % 8;
+    return bucket < 4 ? ["dislike"] : bucket === 4 ? ["view", "comment"] : ["view", "like"];
+}
 exports.SIMULATION_CITIES = [
     ["Toronto", 43.653, -79.383], ["Vancouver", 49.283, -123.121],
     ["New York", 40.713, -74.006], ["Los Angeles", 34.052, -118.244],
@@ -41,7 +62,7 @@ function dailyPostId(day, uid, slot) {
 }
 function dailyPostLocation(day, actorIndex, slot) {
     // Adjacent actors/slots visit different cities; daily rotation prevents a fixed cluster.
-    const index = (simulationHash(day) + actorIndex * exports.DAILY_POSTS_PER_TESTER + slot) % exports.SIMULATION_CITIES.length;
+    const index = (simulationHash(day) + actorIndex * 7 + slot) % exports.SIMULATION_CITIES.length;
     const [place, lat, lng] = exports.SIMULATION_CITIES[index];
     const jitter = (simulationHash(`${day}:${actorIndex}:${slot}`) % 101 - 50) / 1000;
     const latitudeCell = Math.round((lat + jitter) * 1000);

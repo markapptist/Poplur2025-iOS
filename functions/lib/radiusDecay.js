@@ -34,12 +34,15 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.radiusDecay = void 0;
+exports.runRadiusDecay = runRadiusDecay;
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-admin/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const postEngagementPolicy_1 = require("./postEngagementPolicy");
 const radiusHistory_1 = require("./radiusHistory");
 const accountRadius_1 = require("./accountRadius");
+const syntheticRetentionPolicy_1 = require("./syntheticRetentionPolicy");
+const syntheticDailyPolicy_1 = require("./syntheticDailyPolicy");
 if (admin.apps.length === 0)
     admin.initializeApp();
 const db = admin.firestore();
@@ -60,8 +63,11 @@ const db = admin.firestore();
  * fine at beta scale (hundreds). Past ~50k such posts, shard by decayedAt
  * cursor instead of re-reading everything.
  */
-exports.radiusDecay = (0, scheduler_1.onSchedule)({ schedule: "every 60 minutes", region: "us-central1", timeoutSeconds: 300, memory: "256MiB" }, async () => {
-    const nowMillis = Date.now();
+async function runRadiusDecay(nowMillis = Date.now()) {
+    const [simulation, master] = await Promise.all([
+        db.doc("testControl/syntheticDailySimulation").get(), db.doc("testControl/syntheticBrowserRunner").get(),
+    ]);
+    const stressEnabled = simulation.data()?.enabled === true && master.data()?.enabled === true;
     const nowTimestamp = firestore_1.Timestamp.fromMillis(nowMillis);
     let decayed = 0;
     let stamped = 0;
@@ -92,12 +98,14 @@ exports.radiusDecay = (0, scheduler_1.onSchedule)({ schedule: "every 60 minutes"
                 stamped += 1;
                 return;
             }
-            const next = (0, postEngagementPolicy_1.calculateRadiusDecay)(post, nowMillis);
+            const stressDecay = stressEnabled ? (0, syntheticRetentionPolicy_1.calculateSyntheticRetentionDecay)(post, nowMillis) : null;
+            const next = stressDecay ?? (0, postEngagementPolicy_1.calculateRadiusDecay)(post, nowMillis);
             if (!next)
                 return;
             const before = (0, postEngagementPolicy_1.postRadiusParts)(post, nowMillis);
             transaction.update(ref, {
                 organicRadiusMeters: next.organicRadiusMeters,
+                ...(stressDecay ? { seedRadiusMeters: stressDecay.seedRadiusMeters } : {}),
                 radiusMeters: next.radiusMeters,
                 radius: next.radiusMeters,
                 decayedAt: nowTimestamp,
@@ -120,11 +128,19 @@ exports.radiusDecay = (0, scheduler_1.onSchedule)({ schedule: "every 60 minutes"
                 writer: "radiusDecay",
                 previous: { radiusMeters: before.stored ?? before.total, organicRadiusMeters: before.organic },
                 next,
-                seedRadiusMeters: before.seed,
+                seedRadiusMeters: stressDecay?.seedRadiusMeters ?? before.seed,
                 boostedRadiusMeters: before.boost,
             })));
+            if (stressDecay) {
+                transaction.set(db.collection("testRetentionDecaySlots").doc((0, syntheticDailyPolicy_1.simulationSlot)(nowMillis)), {
+                    lostMeters: firestore_1.FieldValue.increment(Math.max(0, before.total - next.radiusMeters)),
+                    postsDecayed: firestore_1.FieldValue.increment(1), updatedAt: nowTimestamp,
+                }, { merge: true });
+            }
             decayed += 1;
         });
     }
     console.log(`[radiusDecay] ${decayed} decayed, ${stamped} baseline-stamped, ${references.size} candidates`);
-});
+    return { decayed, stamped, candidates: references.size };
+}
+exports.radiusDecay = (0, scheduler_1.onSchedule)({ schedule: "every 60 minutes", region: "us-central1", timeoutSeconds: 300, memory: "256MiB" }, async () => { await runRadiusDecay(); });

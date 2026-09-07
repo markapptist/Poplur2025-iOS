@@ -49,14 +49,15 @@ if (!admin.apps.length)
 const db = admin.firestore();
 const CONFIG = "testControl/syntheticDailySimulation";
 const ACTORS = "testDailySimulationActors";
-/** Persistent daily quotas; retries/restarts reuse account, post and engagement IDs. */
+/** Hourly quotas: retries reuse IDs, while new hours add content all day. */
 async function runSyntheticDailySimulation(nowMillis = Date.now()) {
     const config = (await db.doc(CONFIG).get()).data();
     const master = (await db.doc("testControl/syntheticBrowserRunner").get()).data();
     if (config?.enabled !== true || master?.enabled !== true)
         return { status: "paused" };
     const day = (0, syntheticDailyPolicy_1.simulationDay)(nowMillis);
-    const runRef = db.collection("testDailySimulationRuns").doc(day);
+    const slotKey = (0, syntheticDailyPolicy_1.simulationSlot)(nowMillis);
+    const runRef = db.collection("testDailySimulationRuns").doc(slotKey);
     const acquired = await db.runTransaction(async (tx) => {
         const row = (await tx.get(runRef)).data();
         if (row?.status === "complete" || Number(row?.leaseUntilMillis) > nowMillis)
@@ -88,18 +89,19 @@ async function runSyntheticDailySimulation(nowMillis = Date.now()) {
                 tx.set(db.collection(ACTORS).doc(uid), { uid, joinedDay: day, syntheticSource: syntheticDailyPolicy_1.DAILY_SOURCE }, { merge: true });
             });
         }
-        const growing = await db.collection(ACTORS).get();
+        const growing = await db.collection(ACTORS).orderBy("joinedDay", "desc")
+            .limit(syntheticDailyPolicy_1.SIMULATION_ACTIVE_ACTOR_LIMIT - syntheticBetaCohort_1.SYNTHETIC_BETA_PROFILES.length).get();
         const ids = [...new Set([...syntheticBetaCohort_1.SYNTHETIC_BETA_PROFILES.map(p => p.id), ...growing.docs.map(d => d.id)])].sort();
         let created = 0;
         for (const [actorIndex, uid] of ids.entries()) {
             // Fixed cohort accounts must actually exist; never impersonate a UID missing from Auth.
             await admin.auth().getUser(uid);
-            for (let slot = 0; slot < syntheticDailyPolicy_1.DAILY_POSTS_PER_TESTER; slot++) {
-                const postId = (0, syntheticDailyPolicy_1.dailyPostId)(day, uid, slot);
+            for (let slot = 0; slot < syntheticDailyPolicy_1.SIMULATION_POSTS_PER_SLOT; slot++) {
+                const postId = (0, syntheticDailyPolicy_1.simulationSlotPostId)(nowMillis, uid, slot);
                 const ref = db.collection("posts").doc(postId);
                 const source = pool[(0, syntheticDailyPolicy_1.simulationHash)(postId) % pool.length];
                 const creative = source.data();
-                const location = (0, syntheticDailyPolicy_1.dailyPostLocation)(day, actorIndex, slot);
+                const location = (0, syntheticDailyPolicy_1.dailyPostLocation)(day, actorIndex, new Date(nowMillis).getUTCHours() + slot);
                 const post = {
                     userID: uid, username: uid, mediaURL: creative.mediaURL, playbackURL: creative.mediaURL,
                     mediaType: creative.mediaType === "video" ? "video" : "photo",
@@ -110,6 +112,7 @@ async function runSyntheticDailySimulation(nowMillis = Date.now()) {
                     viewCount: 0, likeCount: 0, downvoteCount: 0, commentCount: 0,
                     audience: "public", status: "published", processingStatus: "ready", locationVisibility: "approximate",
                     syntheticBeta: true, syntheticCohort: true, syntheticActorId: uid, syntheticSource: syntheticDailyPolicy_1.DAILY_SOURCE,
+                    simulationRetentionVersion: 1, simulationSlot: slotKey,
                     approvedMediaPostId: source.id, simulationDay: day, schemaVersion: 2,
                     createdAt: firestore_1.Timestamp.fromMillis(nowMillis), createdAtMillis: nowMillis, decayedAt: firestore_1.Timestamp.fromMillis(nowMillis),
                 };
@@ -128,27 +131,32 @@ async function runSyntheticDailySimulation(nowMillis = Date.now()) {
         const ownerUid = typeof config.ownerUid === "string" ? config.ownerUid : "";
         const ownerPosts = ownerUid ? await db.collection("posts").where("userID", "==", ownerUid).limit(40).get() : null;
         let engagements = 0;
+        let gainedMeters = created * accountRadius_1.POST_DISCOVERY_SEED_METERS;
+        let lostMeters = 0;
         for (const uid of ids) {
             const available = posts.docs.filter(d => (0, accountRadius_1.postOwnerUid)(d.data()) !== uid && d.data().status !== "deleted"
                 && d.data().audience !== "private" && d.data().officialContent !== true);
             const owner = (ownerPosts?.docs ?? []).filter(d => d.data().officialContent !== true && d.data().audience !== "private" && d.data().status !== "deleted");
-            const others = available.filter(d => (0, accountRadius_1.postOwnerUid)(d.data()) !== ownerUid);
-            const offset = (0, syntheticDailyPolicy_1.simulationHash)(`${day}:${uid}`);
+            const others = available.filter(d => (0, accountRadius_1.postOwnerUid)(d.data()) !== ownerUid
+                && (d.data().syntheticBeta === true || d.data().syntheticCohort === true));
+            const offset = (0, syntheticDailyPolicy_1.simulationHash)(`${slotKey}:${uid}`);
             const targets = [...(owner.length ? [owner[offset % owner.length]] : []), ...[0, 1, 2].flatMap(n => others.length ? [others[(offset + n) % others.length]] : [])];
             for (const target of new Map(targets.map(d => [d.id, d])).values()) {
                 const row = target.data();
-                const reaction = (0, syntheticDailyPolicy_1.simulationReaction)(uid, target.id, row.syntheticBeta === true || row.syntheticCohort === true);
                 // Declared test traffic uses the production transaction, including blocks,
                 // duplicate grants, account totals, comments and per-post radius history.
-                const kinds = ["view", reaction, ...(reaction === "like" ? ["comment"] : [])];
+                const kinds = (0, syntheticDailyPolicy_1.simulationEngagementKinds)(uid, target.id, row.syntheticBeta === true || row.syntheticCohort === true);
                 for (const kind of kinds) {
                     try {
                         const result = await (0, postEngagement_1.applyPostEngagement)(uid, {
-                            postId: target.id, eventId: `sim-${day}-${kind}-${(0, syntheticDailyPolicy_1.simulationHash)(target.id).toString(16)}`, kind,
+                            postId: target.id, eventId: `sim-${slotKey}-${kind}-${(0, syntheticDailyPolicy_1.simulationHash)(target.id).toString(16)}`, kind,
                             ...(kind === "comment" ? { text: "Simulation tester: checking this post's comments and feed playback." } : {}),
                         });
-                        if (!result.duplicate)
+                        if (!result.duplicate) {
                             engagements++;
+                            gainedMeters += Math.max(0, result.radiusDeltaMeters);
+                            lostMeters += Math.max(0, -result.radiusDeltaMeters);
+                        }
                     }
                     catch (error) {
                         const code = error.code;
@@ -160,7 +168,7 @@ async function runSyntheticDailySimulation(nowMillis = Date.now()) {
                 }
             }
         }
-        const result = { status: "complete", day, testers: ids.length, newTesterIds: (0, syntheticDailyPolicy_1.dailyTesterIds)(day), postsCreatedThisAttempt: created, dailyPostTarget: ids.length * syntheticDailyPolicy_1.DAILY_POSTS_PER_TESTER, engagementsThisAttempt: engagements };
+        const result = { status: "complete", day, slot: slotKey, testers: ids.length, newTesterIds: (0, syntheticDailyPolicy_1.dailyTesterIds)(day), postsCreatedThisAttempt: created, dailyPostTarget: ids.length * syntheticDailyPolicy_1.DAILY_POSTS_PER_TESTER, hourlyPostTarget: ids.length * syntheticDailyPolicy_1.SIMULATION_POSTS_PER_SLOT, engagementsThisAttempt: engagements, gainedMetersThisAttempt: gainedMeters, lostMetersThisAttempt: lostMeters };
         await runRef.set({ ...result, leaseUntilMillis: 0, completedAt: firestore_1.FieldValue.serverTimestamp() }, { merge: true });
         return result;
     }

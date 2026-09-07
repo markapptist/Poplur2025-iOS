@@ -1,8 +1,25 @@
 import { createHash } from "node:crypto";
 
 export const DAILY_NEW_TESTERS = 2;
-export const DAILY_POSTS_PER_TESTER = 2;
+export const DAILY_POSTS_PER_TESTER = 24;
+export const SIMULATION_SLOT_MS = 60 * 60_000;
+export const SIMULATION_POSTS_PER_SLOT = 1;
+export const SIMULATION_ACTIVE_ACTOR_LIMIT = 64;
 export const DAILY_SOURCE = "scheduled-test-simulation";
+export function simulationSlot(now: number): string {
+  return new Date(Math.floor(now / SIMULATION_SLOT_MS) * SIMULATION_SLOT_MS).toISOString().slice(0, 13);
+}
+export function simulationSlotPostId(now: number, uid: string, slot = 0): string {
+  return `post-sim-hourly-${simulationSlot(now)}-${simulationHash(uid).toString(16)}-${slot}`;
+}
+export function simulationEngagementKinds(uid: string, postId: string, synthetic: boolean): Array<"view" | "like" | "dislike" | "comment"> {
+  if (!synthetic) return ["view", "like", "comment"];
+  // Mixed reactions plus an accelerated decay clock exercise actual losses.
+  // A dislike is independent of the optional paid-view event, otherwise its
+  // -1 km was always cancelled by the immediately preceding +1 km view.
+  const bucket = simulationHash(`${uid}:${postId}`) % 8;
+  return bucket < 4 ? ["dislike"] : bucket === 4 ? ["view", "comment"] : ["view", "like"];
+}
 export const SIMULATION_CITIES = [
   ["Toronto", 43.653, -79.383], ["Vancouver", 49.283, -123.121],
   ["New York", 40.713, -74.006], ["Los Angeles", 34.052, -118.244],
@@ -33,7 +50,7 @@ export function dailyPostId(day: string, uid: string, slot: number): string {
 }
 export function dailyPostLocation(day: string, actorIndex: number, slot: number) {
   // Adjacent actors/slots visit different cities; daily rotation prevents a fixed cluster.
-  const index = (simulationHash(day) + actorIndex * DAILY_POSTS_PER_TESTER + slot) % SIMULATION_CITIES.length;
+  const index = (simulationHash(day) + actorIndex * 7 + slot) % SIMULATION_CITIES.length;
   const [place, lat, lng] = SIMULATION_CITIES[index];
   const jitter = (simulationHash(`${day}:${actorIndex}:${slot}`) % 101 - 50) / 1000;
   const latitudeCell = Math.round((lat + jitter) * 1000);
